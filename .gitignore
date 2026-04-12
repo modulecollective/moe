@@ -1,0 +1,15 @@
+# Binaries
+/moe
+/cmd/moe/moe
+*.exe
+
+# Test / coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp

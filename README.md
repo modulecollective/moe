@@ -1151,31 +1151,46 @@ The `moe` CLI is Go stdlib plus `git` and `claude` on PATH. Estimated ~2000-2500
 
 ### Subcommand Routing
 
-`os.Args` switch + `flag.FlagSet` per subcommand. ~30 lines of routing replaces a framework.
+Table-driven dispatch + `flag.FlagSet` per subcommand. Each command file registers itself into a map in `init()`; `main` is a thin entrypoint that hands `os.Args[1:]` and the standard streams to `cli.Run`. ~30 lines of routing replaces a framework, `help` derives from the live table, and the dispatcher is testable with in-memory `io.Writer`s.
 
 ```go
+// cmd/moe/main.go
 func main() {
-    if len(os.Args) < 2 {
-        usage(); os.Exit(1)
+    os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// internal/cli/cli.go
+type Command struct {
+    Name    string
+    Summary string
+    Run     func(args []string, stdout, stderr io.Writer) int
+}
+
+var commands = map[string]*Command{}
+
+func Register(c *Command) { /* panics on duplicate */ commands[c.Name] = c }
+
+func Run(args []string, stdout, stderr io.Writer) int {
+    if len(args) == 0 {
+        PrintUsage(stderr); fmt.Fprintln(stderr, "try 'moe dash'")
+        return 1
     }
-    switch os.Args[1] {
-    case "init":         cmdInit(os.Args[2:])
-    case "add-project":  cmdAddProject(os.Args[2:])
-    case "new":          cmdNew(os.Args[2:])
-    case "work":         cmdWork(os.Args[2:])
-    case "ok":           cmdOk(os.Args[2:])
-    case "unok":         cmdUnok(os.Args[2:])
-    case "status":       cmdStatus(os.Args[2:])
-    case "review":       cmdReview(os.Args[2:])
-    case "approve":      cmdApprove(os.Args[2:])
-    case "scrap":        cmdScrap(os.Args[2:])
-    case "history":      cmdHistory(os.Args[2:])
-    case "list-projects":cmdListProjects(os.Args[2:])
-    case "reindex":      cmdReindex(os.Args[2:])
-    default:             usage(); os.Exit(1)
+    cmd, ok := commands[args[0]]
+    if !ok {
+        fmt.Fprintf(stderr, "moe: unknown command %q\n", args[0])
+        PrintUsage(stderr); return 1
     }
+    return cmd.Run(args[1:], stdout, stderr)
+}
+
+// internal/cli/version.go
+func init() {
+    Register(&Command{Name: "version", Summary: "print moe version", Run: runVersion})
+    Register(&Command{Name: "help",    Summary: "print usage",       Run: runHelp})
 }
 ```
+
+New subcommands drop a file in `internal/cli/` with an `init()` that calls `Register` — no central switch to edit.
 
 ### Configuration Files — Three Audiences, Three Formats
 
