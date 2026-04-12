@@ -19,22 +19,20 @@ The Ministry is designed for a single operator managing multiple products with a
 ### Design Principles
 
 1. **The human is the workflow engine.** No orchestrator, no DAG executor, no scheduler. The operator looks at the request, decides what to work on next, and tells `moe` to do it. A small CLI assembles prompts, invokes Claude Code, and tracks state in git. The harness gets out of the way.
-2. **The repo is the source of truth.** All state — documents, decisions, conversations, progress — lives in git. Nothing lives in Slack, Google Docs, or people's heads. The MoE repo is the "back office" (workflows, handbooks, run history). Target project repos stay clean.
+2. **The repo is the source of truth.** All state — documents, decisions, conversations, progress — lives in git. Nothing lives in Slack, Google Docs, or people's heads. The bureaucracy repo is the "back office" (workflows, handbooks, run history). Target project repos stay clean. The `moe` CLI lives in its own repo — tool and state are separate so the CLI can be open-sourced without leaking private bureaucracy contents.
 3. **Agents are participants, not tools.** Agents join conversations, contribute to documents, and have defined roles — organized into departments with handbooks.
 4. **Requests terminate, products persist.** Units of work (requests) have a lifecycle and end. Products are the long-lived entities that accumulate completed work.
 5. **Loose recipes, deterministic mechanics.** The document graph defines known document types and typical relationships as guidance. The operator assembles whatever subset fits the situation. Within a request, staleness propagation and upstream-context assembly are deterministic — given the graph and the events, the state is always derivable.
 6. **Model-agnostic.** The harness works with Claude Code, Ollama/Qwen, Codex, or any LLM backend. A simple department → model config routes each department to the right model. The harness is the moat, not the model.
 7. **Minimize entropy.** Every agent mistake becomes a handbook update. The system improves every time you use it.
-8. **One repo, one history.** All request state and run metadata live in the MoE repo. Branches (`moe/<project>/<request>`) accumulate as the operational audit trail. Queryable with `git log` and, later, SQL tools over exported JSON if needed.
+8. **One repo, one history.** All request state and run metadata live in the bureaucracy repo. Branches (`moe/<project>/<request>`) accumulate as the operational audit trail. Queryable with `git log` and, later, SQL tools over exported JSON if needed.
 9. **Target repos are independent.** No MoE coupling in target repos. Works with any repo — open source forks, client projects, personal code. Target projects are registered as git submodules under `projects/`, but only one is checked out at a time during a session.
 10. **Many projects registered, a handful actively worked.** Submodules are cheap to register, so the ceiling on *registered* projects is high. The ceiling on *concurrently active* projects is the operator's review bandwidth — practically ~10-30 — because every request ultimately cashes out in a human reading a diff. MoE helps manage the fan-out, it does not remove it.
 11. **Stdlib only, where practical.** The `moe` CLI uses Go stdlib plus `git` and `claude` on PATH. No YAML parser, no CLI framework, no DAG engine, no graph library, no web server dependencies. Three stdlib-native config formats match three audiences: JSON for machine state, INI for flat human config, `text/scanner` blocks for nested human config. Markdown for guidance. Humans never see JSON.
 
 ### Direction
 
-MoE is a thin CLI wrapper around `claude -p` plus conventional git plumbing. Earlier design iterations considered building on a workflow engine (Fabro) with automated DAG execution, CSS-like model stylesheets, and a web UI. That direction was dropped: every feature either maps directly to a Claude Code flag, a git operation, or something the human decides in the moment. The bureaucracy metaphor and department structure survive intact; the orchestration layer collapses into the operator's judgment.
-
-Automation can grow back later — parallel runs, derived-artifact hooks on merge, a thin web layer reading git state — but it grows out of a minimal, working CLI, not the other way around.
+MoE is a thin CLI wrapper around `claude -p` plus conventional git plumbing. Every feature maps directly to a Claude Code flag, a git operation, or something the human decides in the moment. Automation can grow back later — parallel runs, derived-artifact hooks on merge, a thin web layer reading git state — but it grows out of a minimal, working CLI, not the other way around.
 
 ---
 
@@ -43,7 +41,7 @@ Automation can grow back later — parallel runs, derived-artifact hooks on merg
 ### Hierarchy
 
 ```
-Ministry (MoE repo)
+bureaucracy/                       # private state repo, cloned alongside the moe CLI repo
 ├── soul.md                        # Global agent guidance
 ├── departments/                   # Markdown handbooks (ideator, architect, coder, …)
 ├── departments.conf               # Department → model + allowedTools (INI)
@@ -65,15 +63,24 @@ Ministry (MoE repo)
 └── Request branches (moe/<project>/<request>) — the operational audit trail
 ```
 
-### The MoE Repo
+### Two Repos: CLI and Bureaucracy
 
-The MoE repo holds handbooks, the document graph definition, request state, and run history across all projects. There is one unified history — one set of request IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
+MoE is split across two independent git repos, cloned side-by-side, in the same relationship as `git` ↔ a repository or `hugo` ↔ a site:
+
+- **`moe/`** — the CLI repo. Go source for the `moe` binary. No private data, no pointer to the bureaucracy. Open-source-eligible. Installed to `$PATH` like any other tool.
+- **`bureaucracy/`** — the private state repo, cloned at the same level as `moe/`. Holds handbooks, department config, the document graph definition, `requests/`, run history, and `projects/*` submodules pointing at target repos. The `moe` binary operates on whichever bureaucracy directory it's invoked from (discovered via `$PWD` walk or `$MOE_HOME`).
+
+Upgrading `moe` is a `go install`; the bureaucracy is untouched. Matches principle 11 — the CLI is just a tool on `$PATH`.
+
+### The Bureaucracy Repo
+
+The bureaucracy repo holds handbooks, the document graph definition, request state, and run history across all projects. There is one unified history — one set of request IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
 
 ### Project (Target Repo)
 
 A long-lived entity representing a software product or project. Registered as a git submodule under `projects/`. Born from `moe add-project <repo-url>`, persists as long as the project is managed.
 
-**Target project repos are registered as git submodules under `projects/`.** The MoE repo stores all orchestration metadata — handbooks, request state, run history. The target repo stores only its own code. This separation means:
+**Target project repos are registered as git submodules under `projects/`.** The bureaucracy repo stores all orchestration metadata — handbooks, request state, run history. The target repo stores only its own code. This separation means:
 
 - Projects can pre-exist MoE. Fork an interesting open source project, `moe add-project` it, and start managing requests against it.
 - Target repos stay clean — no MoE files, no framework artifacts. Someone looking at the target repo sees normal, well-crafted commits.
@@ -95,7 +102,7 @@ A long-lived entity representing a software product or project. Registered as a 
 }
 ```
 
-During a session, `moe work` runs `git submodule update --init projects/$target` so agents can read code and (for the coder department) edit it. Code changes result in submodule pointer updates committed to the MoE request branch. At approval time, the changes inside the submodule are committed, pushed to the target remote, and optionally opened as a PR — the submodule pointer update in MoE records which target commit was produced.
+During a session, `moe work` runs `git submodule update --init projects/$target` so agents can read code and (for the coder department) edit it. Code changes result in submodule pointer updates committed to the bureaucracy request branch. At approval time, the changes inside the submodule are committed, pushed to the target remote, and optionally opened as a PR — the submodule pointer update in the bureaucracy records which target commit was produced.
 
 ```json
 // In request.json after completion
@@ -111,7 +118,7 @@ During a session, `moe work` runs `git submodule update --init projects/$target`
 }
 ```
 
-**Project-level concerns (stored in MoE repo under `requests/<project>/`):**
+**Project-level concerns (stored in the bureaucracy repo under `requests/<project>/`):**
 
 Most project-level artifacts are **persistent documents** in the document graph — they're updated when requests merge. See **The Document Graph** section for the full definition.
 
@@ -687,7 +694,7 @@ All roles in the Ministry at a glance:
 
 - **HR** (Dept. of Human Resources): Model selection and routing lives in `departments.conf`. A future evolution reviews historical agent performance and proposes config updates — itself a request with its own workflow.
 - **Finance** (Dept. of Finance): Cost tracking is per-invocation. Each `moe work` run records the session's cost (from Claude Code's output) in the commit trailer or a sidecar file. `moe history` aggregates.
-- **QA** (Dept. of Quality Assurance): Cross-request quality monitoring. Tracks patterns in review feedback and rework. Feeds back into department handbooks. Runs as its own request against the MoE repo itself.
+- **QA** (Dept. of Quality Assurance): Cross-request quality monitoring. Tracks patterns in review feedback and rework. Feeds back into department handbooks. Runs as its own request against the bureaucracy repo itself.
 
 ### Agent Context Assembly
 
@@ -798,7 +805,7 @@ claude -p \
 
 Each department gets exactly the permissions it needs, enforced natively by Claude Code's `--allowedTools` flag. Document agents get a tight, safe sandbox. Only the implementation department gets the scary permissions.
 
-| Department | Read MoE repo | Web search | Edit own content.md | Read target project | Write target project | Shell exec |
+| Department | Read bureaucracy | Web search | Edit own content.md | Read target project | Write target project | Shell exec |
 |-----------|---------------|------------|---------------------|--------------------|--------------------|------------|
 | Ideas/Spec | ✓ | ✓ | ✓ | | | |
 | Architecture | ✓ | ✓ | ✓ | | | |
@@ -909,7 +916,7 @@ The operator reads the output, decides what to do:
 
 ### Multi-Turn Continuity
 
-`--session-id "moe/<project>/<request>/<document>"` gives multi-turn continuity for free. Each `moe work` invocation on the same document resumes the conversation. The operator posts a message, the agent responds, the document evolves. This is the "conversation is the document" model — using Claude Code's native session management instead of building a custom thread system.
+`--session-id "moe/<project>/<request>/<document>"` gives multi-turn continuity for free. Each `moe work` invocation on the same document resumes the conversation. The operator posts a message, the agent responds, the document evolves. This is the "conversation is the document" model — using Claude Code's native session management.
 
 ### Per-Department Permissions
 
@@ -946,7 +953,7 @@ main (approved state)
 
 **Concurrent work on the same project:**
 
-Two requests against the same project contend for two resources: the MoE repo's working tree (only one request branch checked out at a time) and the submodule checkout under `projects/<project>/` (only one target-repo branch checked out at a time). Two layers handle this, from light to heavy:
+Two requests against the same project contend for two resources: the bureaucracy repo's working tree (only one request branch checked out at a time) and the submodule checkout under `projects/<project>/` (only one target-repo branch checked out at a time). Two layers handle this, from light to heavy:
 
 1. **Default: flock.** `moe work` takes a filesystem lock at `.moe/locks/<project>.lock` for the duration of the Claude Code invocation. A second `moe work` on the same project blocks briefly, or exits with "telomere is busy on request `req-a`; wait, or use `--worktree`." Handles the common case where the operator drives one session at a time and just wants protection against foot-guns.
 2. **Opt-in: git worktrees.** `moe work --worktree <project> <request> <doc>` materializes a parallel workspace via:
@@ -956,13 +963,13 @@ Two requests against the same project contend for two resources: the MoE repo's 
    ```
    Each worktree has its own MoE-repo working tree and its own submodule checkout. The Claude Code subprocess runs with `cwd` set to the worktree; the coder agent's `Bash` and `Edit` tools are scoped to that directory. `moe approve` and `moe scrap` run `git worktree remove` as a cleanup step.
 
-Document-only sessions (ideator, architect, reviewer, deployer) only edit one markdown file in the MoE repo and don't touch the submodule. They rarely need `--worktree` — the flock + "only one coder at a time per project" constraint is usually enough. `--worktree` earns its complexity when two coder sessions genuinely need to run in parallel on the same target.
+Document-only sessions (ideator, architect, reviewer, deployer) only edit one markdown file in the bureaucracy repo and don't touch the submodule. They rarely need `--worktree` — the flock + "only one coder at a time per project" constraint is usually enough. `--worktree` earns its complexity when two coder sessions genuinely need to run in parallel on the same target.
 
 **Submodule handling:**
 
 - `moe work` runs `git submodule update --init projects/$target` before invoking Claude Code.
 - Code changes inside `projects/$target/` result in submodule pointer updates.
-- `moe approve` does: commit inside submodule → push to target remote → update pointer in MoE repo → merge MoE request branch to main → generate derived/persistent docs → optionally open a PR on the target repo.
+- `moe approve` does: commit inside submodule → push to target remote → update pointer in bureaucracy repo → merge bureaucracy request branch to main → generate derived/persistent docs → optionally open a PR on the target repo.
 
 **`moe approve` is resumable.** The cascade can invoke the archivist 5-10+ times (once per derived doc, once per affected persistent product doc). Each step writes its output as a separate commit with a `MoE-Approve-Step: <node-id>` trailer. If a step fails (network blip, archivist error, push rejected), `moe approve` exits with a clear error. `moe approve --resume` reads the trailers on the request branch, skips nodes already produced, and continues from the first missing step. The merge to main happens last, after all derived/persistent nodes succeed — so partial-approve state is always "request branch has some extra archivist commits; main is untouched." Safe to re-run, safe to abandon.
 
@@ -1366,7 +1373,7 @@ CLI: Go stdlib. Persistence: git + committed JSON/JSONL + INI + block-format con
 
 ### Git Model
 
-**One repo, two audiences.** The MoE repo (back office) contains handbooks, request state, run history. Target project repos (front office) are git submodules — clean code, no MoE artifacts. Request branches (`moe/<project>/<request>`) accumulate on the MoE repo; `main` reflects settled state. See the **Hierarchy** and **Git Model** subsections for the full picture.
+**Two repos, two audiences.** The bureaucracy repo (back office) contains handbooks, request state, run history. Target project repos (front office) are git submodules — clean code, no MoE artifacts. Request branches (`moe/<project>/<request>`) accumulate on the bureaucracy repo; `main` reflects settled state. The `moe` CLI itself lives in its own repo — tool and state are separate. See the **Hierarchy** and **Git Model** subsections for the full picture.
 
 ---
 
@@ -1441,7 +1448,7 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 ## What's Deferred
 
-Features from earlier design iterations that aren't part of v1. Not rejected — just sequenced after the minimum works.
+Features not in v1. Not rejected — just sequenced after the minimum works.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
