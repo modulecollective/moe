@@ -210,10 +210,10 @@ func TestRegisterRejectsBadDerivedID(t *testing.T) {
 
 func TestDeriveID(t *testing.T) {
 	cases := map[string]string{
-		"https://github.com/foo/bar.git":   "bar",
-		"https://github.com/foo/bar":       "bar",
-		"git@github.com:foo/Baz.git":       "baz",
-		"/tmp/some/path/remote.git":        "remote",
+		"https://github.com/foo/bar.git":    "bar",
+		"https://github.com/foo/bar":        "bar",
+		"git@github.com:foo/Baz.git":        "baz",
+		"/tmp/some/path/remote.git":         "remote",
 		"https://example.com/x/y/repo.git/": "repo",
 	}
 	for in, want := range cases {
