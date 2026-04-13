@@ -146,18 +146,18 @@ A unit of work against a project. Has a defined lifecycle and terminates.
   "origin": "ops_alert",
   "priority": "high",
   "documents": {
-    "spec":           { "agent": "ideator",  "status": "ok",      "session": "9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0" },
+    "spec":           { "agent": "ideator",  "status": "signed",      "session": "9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0" },
     "architecture":   { "agent": "architect","status": "draft",   "session": "1c8e2b9f-3441-4d5a-8e23-9d0f7c2b3a14" },
     "implementation": { "agent": "coder",    "status": "pending", "session": "7d2a5e1c-90b3-4c11-a4d2-2e5b1c0a9f33" }
   }
 }
 ```
 
-Statuses: `in_progress | review | approved | denied | deployed | scrapped`. Document statuses: `pending | draft | in_review | ok | stale`.
+Statuses: `in_progress | review | approved | denied | deployed | scrapped`. Document statuses: `pending | draft | in_review | signed | stale`.
 
-**Document-level status is a soft gate set by the operator.** After a `moe work` turn the operator runs `moe ok <project> <request> <document>` to flip a document from `draft`/`in_review` to `ok` — signaling "I'm happy with this; downstream agents can treat it as settled context." `moe ok` is the per-document counterpart to `moe approve` (the request-level hard gate). No agent invocation, no merge — just a status update committed to main with the request's trailers. `moe unok` reverses it. Downstream agents consume upstream documents that are `ok`; documents that are still `draft` flow as "current content, not settled" with a warning in the assembled prompt.
+**Document-level status is a soft gate set by the operator.** After a `moe work` turn the operator runs `moe sign <project> <request> <document>` to flip a document from `draft`/`in_review` to `signed` — signaling "I'm happy with this; downstream agents can treat it as settled context." `moe sign` is the per-document counterpart to `moe approve` (the request-level hard gate). No agent invocation, no merge — just a status update committed to main with the request's trailers. `moe unsign` reverses it. Downstream agents consume upstream documents that are `signed`; documents that are still `draft` flow as "current content, not settled" with a warning in the assembled prompt.
 
-**Request progress is determined by its documents, not a rigid phase sequence.** A request is "in progress" as long as any document is in draft or review. It's ready for final review when all required documents are `ok`. Small bug fixes might only have an implementation document. Large features might have spec, architecture, implementation, test plan, deploy plan, and ancillary documents.
+**Request progress is determined by its documents, not a rigid phase sequence.** A request is "in progress" as long as any document is in draft or review. It's ready for final review when all required documents are `signed`. Small bug fixes might only have an implementation document. Large features might have spec, architecture, implementation, test plan, deploy plan, and ancillary documents.
 
 The document graph within a request defines the natural ordering:
 
@@ -170,7 +170,7 @@ The document graph within a request defines the natural ordering:
 | Deploy Plan | Deployer | Implementation |
 | (Ancillary) | (varies) | (configurable) |
 
-Phase transitions are **implicit** — they happen when the operator marks documents `ok` and starts drafting their downstream. `moe ok` is the soft gate; `moe approve` at the request level is the hard gate.
+Phase transitions are **implicit** — they happen when the operator marks documents `signed` and starts drafting their downstream. `moe sign` is the soft gate; `moe approve` at the request level is the hard gate.
 
 **Request rollup on completion:**
 
@@ -234,12 +234,12 @@ main (the only branch)
   └── commit: "approve: telomere/add-batch-support → 1.4.0"
 ```
 
-Document statuses (draft, `ok`, stale) are the soft coordination signals; they live in `request.json` and get flipped by `moe ok` / `moe unok`. `moe approve` is the hard gate that triggers the submodule push and derived-artifact generation.
+Document statuses (draft, `signed`, stale) are the soft coordination signals; they live in `request.json` and get flipped by `moe sign` / `moe unsign`. `moe approve` is the hard gate that triggers the submodule push and derived-artifact generation.
 
 **The ripple is operator-driven, not background.** Agents only act when `moe work` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
 
 - **In progress**: The operator is invoking `moe work …`. Each turn appends a trailer-tagged commit to main.
-- **Ready for review**: All required documents are `ok`. `moe review` is the per-request synthesized view.
+- **Ready for review**: All required documents are `signed`. `moe review` is the per-request synthesized view.
 - **Approved**: `moe approve` pushes the submodule changes, generates derived artifacts, and flips the request status — all as further commits on main.
 
 Human review is required by default before `moe approve`. A future "yolo mode" can auto-approve for well-understood request types where the agents consistently produce good output.
@@ -269,7 +269,7 @@ Recovery and rewriting are also branchless. Rollback is `git revert <sha>`. Per-
   "type": "spec",
   "title": "Batch Operations Spec",
   "agent": "ideator",
-  "status": "ok",
+  "status": "signed",
   "version": 3,
   "upstream": [],
   "downstream": ["architecture", "test-plan"],
@@ -302,7 +302,7 @@ This turns the document graph into a genuine collaborative workspace rather than
 
 - The request's commits in order, grouped by document (spec changes, architecture changes, implementation changes, etc.)
 - Current `content.md` of each document at HEAD
-- Unresolved staleness: "architecture has been touched since the test plan was ok'd"
+- Unresolved staleness: "architecture has been touched since the test plan was signed"
 
 This is the primary review surface. One synthesized view, organized so you can see the coherent picture across all documents. When it looks good, `moe approve`.
 
@@ -613,7 +613,7 @@ Ideator agent receives:
 
 Architect agent receives:
   - Guidance: soul.md + departments/architect.md + project overrides
-  - Upstream Spec document (current content at HEAD; marked "settled" if ok, "draft" otherwise)
+  - Upstream Spec document (current content at HEAD; marked "settled" if signed, "draft" otherwise)
   - Product-level context
   - Existing codebase structure from product repo
 
@@ -630,7 +630,7 @@ Reviewer agent receives:
   - Test results
 ```
 
-Each agent gets guidance files plus dense, current documents rather than raw conversation history. Upstream content is always the document at HEAD, tagged with its soft status (`ok` or `draft`) so the agent knows whether the operator has blessed it. This keeps context windows focused and signal-rich. Thread logs are available for human review but are not fed to downstream agents unless explicitly requested.
+Each agent gets guidance files plus dense, current documents rather than raw conversation history. Upstream content is always the document at HEAD, tagged with its soft status (`signed` or `draft`) so the agent knows whether the operator has blessed it. This keeps context windows focused and signal-rich. Thread logs are available for human review but are not fed to downstream agents unless explicitly requested.
 
 **Session-expiry fallback.** Multi-turn continuity relies on Claude Code's server-side session (keyed by `--session-id`). If a resume returns an empty or missing session (rotation, expiry, or a different machine), `moe work` falls back to injecting the last N turns from `thread.jsonl` as a compact recap in the user message, then continues. The audit log is the durable record; the server session is an optimization.
 
@@ -704,7 +704,7 @@ Agent context = soul.md
               + department handbook (e.g., departments/architect.md)
               + project overrides (if any)
               + request overrides (if any)
-              + upstream documents (current content, tagged ok/draft)
+              + upstream documents (current content, tagged signed/draft)
               + current document content (what it's working on)
               + progress.json (multi-session state)
 ```
@@ -797,7 +797,7 @@ claude -p \
 **Key mechanics:**
 
 - **Multi-turn sessions via `--session-id`**: Each document maps to a Claude Code session keyed by a per-document UUID stored in `request.json` (Claude Code requires UUIDs as session ids; MoE generates one on first use). Context is preserved server-side across turns. The operator posts a new turn via `moe work`, the agent responds, the CLI appends the response to the thread log and commits any document changes on `main`.
-- **Context injection via `--append-system-prompt`**: `moe work` assembles guidance (soul.md + department handbook + project/request overrides) and upstream documents (tagged with ok/draft status), then injects them as the system prompt.
+- **Context injection via `--append-system-prompt`**: `moe work` assembles guidance (soul.md + department handbook + project/request overrides) and upstream documents (tagged with signed/draft status), then injects them as the system prompt.
 - **Streaming JSON output**: Responses stream back as newline-delimited JSON, which `moe` parses with `json.NewDecoder` over stdout and displays to the operator in real time.
 
 **Permission model — principle of least privilege per department:**
@@ -835,8 +835,8 @@ moe request new <project> "title" [--id slug]      # open a new request, scaffol
 moe status <project> <request>              # per-request view: document graph, staleness, last turns
 moe work <project> <request> <document>     # the main command — work on a document
 moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
-moe ok <project> <request> <document>       # mark a document as settled (soft gate)
-moe unok <project> <request> <document>     # reverse moe ok
+moe sign <project> <request> <document>     # sign off on a document (soft gate)
+moe unsign <project> <request> <document>   # reverse moe sign
 moe review <project> <request>              # synthesize per-request view (filtered log + doc snapshots)
 moe approve <project> <request> [--resume]  # push submodule, generate derived/persistent docs, flip status
 moe scrap <project> <request> "reason"      # close without merging, record rationale
@@ -847,7 +847,7 @@ moe project list                            # registered submodules
 moe reindex                                 # rebuild index.json files from request.json glob
 ```
 
-~18 commands. The ones you live in are `moe dash`, `moe next`, and `moe work`, with `moe ok` sprinkled between turns.
+~18 commands. The ones you live in are `moe dash`, `moe next`, and `moe work`, with `moe sign` sprinkled between turns.
 
 ### `moe work` — The Core Loop
 
@@ -864,7 +864,7 @@ This does:
    # Your turn. Save and close to send. Empty file cancels.
    #
    # Document: spec (ideator)
-   # Upstream: pitch (ok)
+   # Upstream: pitch (signed)
    # Last agent turn (2026-04-12 09:42):
    #   > I've drafted the batch endpoint spec. A few open questions…
    ```
@@ -874,7 +874,7 @@ This does:
    - `departments/<agent>.md` (role — `spec` maps to `ideator` via `document-graph.conf`)
    - `requests/telomere/overrides/<agent>.md` (project-level, if exists)
    - `requests/telomere/runs/add-batch-support/overrides/<agent>.md` (request-level, if exists)
-   - Upstream documents (e.g., if working on architecture, include the spec — tagged ok or draft)
+   - Upstream documents (e.g., if working on architecture, include the spec — tagged signed or draft)
    - Current document content (if resuming)
    - Request context (`request.json`)
    - The operator's scratch turn (as the user message)
@@ -1008,7 +1008,7 @@ NEEDS ATTENTION (3)
   photo-arc   exif-import                coder: tests failing, 2 turns ago
 
 ACTIVE (4)
-  telomere    add-batch-operations       ●●●○○  spec ok, architect in_review
+  telomere    add-batch-operations       ●●●○○  spec signed, architect in_review
   telomere    fix-timeout-bug            ●●●●○  review
   photo-arc   exif-import                ●●●○○  implementation
   punchcard   oauth-flow                 ●○○○○  pitch, last touched 6d ago
@@ -1027,8 +1027,8 @@ Implementation: `tabwriter` + ANSI color. Reads the workspace and per-project `i
 A request lands in **NEEDS ATTENTION** when any of the following are true:
 
 1. **Pending turn** — an agent posed a direct question (detected by the last blip's type + content) and hasn't been answered.
-2. **Settled-upstream stale** — a document is stale *and* all of its upstream docs are `ok`. The clean reconciliation case: no ambiguity about what to do next.
-3. **Review-ready** — all documents are `in_review` or `ok`, no stale markers, never merged. `moe review` and `moe approve` are the obvious next moves.
+2. **Settled-upstream stale** — a document is stale *and* all of its upstream docs are `signed`. The clean reconciliation case: no ambiguity about what to do next.
+3. **Review-ready** — all documents are `in_review` or `signed`, no stale markers, never merged. `moe review` and `moe approve` are the obvious next moves.
 4. **Explicit flag** — the operator ran `moe flag <project> <request> "note"`. The note shows in the dashboard. Self-left breadcrumbs.
 5. **Failed run** — the last `moe work` crashed, hit a coder test failure, or had a submodule conflict. Exit status and last error are recorded in `request.json`.
 
@@ -1077,8 +1077,8 @@ telomere / add-batch-operations                     opened 2026-04-08
 in_progress · created 2026-04-10 · 14 turns · $2.83
 
 DOCUMENTS
-  pitch           ok           (v1, 2d ago)
-  spec            ok           (v3, 2h ago)
+  pitch           signed       (v1, 2d ago)
+  spec            signed       (v3, 2h ago)
   architecture    stale        spec changed after last architect turn (2h ago)
   implementation  pending      waiting on architecture
   test-plan       stale        spec + implementation unsettled
@@ -1092,7 +1092,7 @@ LAST ACTIVITY
 NEXT  moe work telomere add-batch-operations architecture
 ```
 
-The "NEXT" hint comes from the graph: earliest stale document whose upstream deps are all settled, or earliest `pending` document whose deps are all `ok`. Advisory only — the operator can ignore it.
+The "NEXT" hint comes from the graph: earliest stale document whose upstream deps are all settled, or earliest `pending` document whose deps are all `signed`. Advisory only — the operator can ignore it.
 
 ### Reading without invoking (`moe show`)
 
@@ -1273,7 +1273,7 @@ cmd.Wait()
 
 ### Prompt Assembly
 
-`os.ReadFile` + `strings.Builder`. Concatenate soul.md + department handbook + overrides (most-specific-first) + upstream documents (tagged ok/draft) + current content + request context. ~50 lines.
+`os.ReadFile` + `strings.Builder`. Concatenate soul.md + department handbook + overrides (most-specific-first) + upstream documents (tagged signed/draft) + current content + request context. ~50 lines.
 
 ### File Discovery
 
@@ -1293,7 +1293,7 @@ type DocNode struct {
     Agent     string
     Type      string // conversational | derived | persistent
     DependsOn []string
-    Status    string // pending | draft | in_review | ok | stale
+    Status    string // pending | draft | in_review | signed | stale
 }
 
 func (g *DocGraph) Downstream(id string) []string { … }     // invert edges
@@ -1425,7 +1425,7 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 - [ ] `internal/graph/` module: adjacency maps, staleness propagation, upstream collection, topological sort
 - [ ] `moe status` shows stale documents with reasons
-- [ ] `moe work` auto-collects upstream documents (tagged ok/draft) as context
+- [ ] `moe work` auto-collects upstream documents (tagged signed/draft) as context
 - [ ] Ripple summary in `moe review`
 
 ### Phase 4: Derived & Persistent Documents

@@ -19,7 +19,7 @@ func init() {
 	})
 }
 
-// runApprove is the v1 hard gate: refuses unless every document is `ok`,
+// runApprove is the v1 hard gate: refuses unless every document is `signed`,
 // then flips the request status to "approved" and commits. The submodule
 // push, derived-artifact generation, and persistent-doc updates described
 // in the README are deferred until later phases — this command exists now
@@ -64,16 +64,16 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	var notOK []string
+	var unsigned []string
 	for id, doc := range md.Documents {
-		if doc.Status != "ok" {
-			notOK = append(notOK, fmt.Sprintf("%s (%s)", id, doc.Status))
+		if doc.Status != "signed" {
+			unsigned = append(unsigned, fmt.Sprintf("%s (%s)", id, doc.Status))
 		}
 	}
-	sort.Strings(notOK)
-	if len(notOK) > 0 {
-		moePrintf(stderr, "cannot approve — %d document(s) not ok: %v\n", len(notOK), notOK)
-		moePrintln(stderr, "run `moe ok <project> <request> <document>` on each first")
+	sort.Strings(unsigned)
+	if len(unsigned) > 0 {
+		moePrintf(stderr, "cannot approve — %d document(s) not signed: %v\n", len(unsigned), unsigned)
+		moePrintln(stderr, "run `moe sign <project> <request> <document>` on each first")
 		return 1
 	}
 

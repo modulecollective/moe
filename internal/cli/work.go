@@ -134,7 +134,7 @@ Your canvas for this document is the single file:
 Treat the conversation as exploratory, and the file as the compressed
 artifact. When the operator asks for edits, write them directly to that
 file (create it if it doesn't exist). Keep the file tidy — it becomes
-upstream context for downstream agents once the operator marks it "ok".
+upstream context for downstream agents once the operator signs it.
 
 Request title: %s
 `, docID, md.ID, md.Project, content, md.Title)

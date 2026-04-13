@@ -12,31 +12,31 @@ import (
 
 func init() {
 	Register(&Command{
-		Name:    "ok",
-		Summary: "mark a document as settled (soft gate)",
-		Run:     runOk,
+		Name:    "sign",
+		Summary: "sign off on a document (soft gate)",
+		Run:     runSign,
 	})
 	Register(&Command{
-		Name:    "unok",
-		Summary: "reverse a previous moe ok",
-		Run:     runUnok,
+		Name:    "unsign",
+		Summary: "reverse a previous moe sign",
+		Run:     runUnsign,
 	})
 }
 
-func runOk(args []string, stdout, stderr io.Writer) int {
-	return flipDocStatus(args, stdout, stderr, "ok", "ok")
+func runSign(args []string, stdout, stderr io.Writer) int {
+	return flipDocStatus(args, stdout, stderr, "signed", "sign")
 }
 
-func runUnok(args []string, stdout, stderr io.Writer) int {
-	return flipDocStatus(args, stdout, stderr, "draft", "unok")
+func runUnsign(args []string, stdout, stderr io.Writer) int {
+	return flipDocStatus(args, stdout, stderr, "draft", "unsign")
 }
 
-// flipDocStatus is the shared implementation behind `moe ok` and `moe unok`.
+// flipDocStatus is the shared implementation behind `moe sign` and `moe unsign`.
 // It flips Documents[doc].Status to newStatus, persists request.json, and
 // commits with trailers scoped to the request and document.
 //
-// verb names the operation in user output and the commit subject — "ok" or
-// "unok" today; tomorrow could host "review" or other status verbs.
+// verb names the operation in user output and the commit subject — "sign" or
+// "unsign" today; tomorrow could host "review" or other status verbs.
 func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb string) int {
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
