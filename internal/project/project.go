@@ -143,12 +143,17 @@ func detectDefaultBranch(url string) (string, error) {
 	return "", fmt.Errorf("project: no symbolic HEAD in ls-remote output for %s", url)
 }
 
+// runGit invokes git with stdio wired to the user's terminal so credential
+// helpers and SSH prompts can complete. Capturing stderr would hide those
+// prompts and make the command appear to hang.
 func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }
