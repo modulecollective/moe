@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -26,7 +25,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	remote := fs.String("remote", "", "git URL to set as origin (optional)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: moe init [--remote <url>] [dir]")
+		moePrintln(stderr, "usage: moe init [--remote <url>] [dir]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -50,27 +49,27 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err := bureaucracy.Init(dir, *remote); err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	abs, _ := filepath.Abs(dir)
-	fmt.Fprintf(stdout, "initialized bureaucracy at %s\n", abs)
-	fmt.Fprintln(stdout, "staged: bureaucracy.conf, projects/.gitkeep, requests/.gitkeep")
+	moePrintf(stdout, "initialized bureaucracy at %s\n", abs)
+	moePrintln(stdout, "staged: bureaucracy.conf, projects/.gitkeep, requests/.gitkeep")
 
 	if !stdinIsTerminal() {
-		fmt.Fprintln(stdout, "not a terminal — leaving staged; commit when ready.")
+		moePrintln(stdout, "not a terminal — leaving staged; commit when ready.")
 		return 0
 	}
-	fmt.Fprint(stdout, "commit now? [Y/n] ")
+	moePrint(stdout, "commit now? [Y/n] ")
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
-		fmt.Fprintf(stderr, "moe: read stdin: %v\n", err)
+		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	if answer != "" && !strings.HasPrefix(answer, "y") {
-		fmt.Fprintln(stdout, "left staged; commit when ready.")
+		moePrintln(stdout, "left staged; commit when ready.")
 		return 0
 	}
 	cmd := exec.Command("git", "commit", "-m", "Initialize bureaucracy")
@@ -78,7 +77,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(stderr, "moe: git commit: %v\n", err)
+		moePrintf(stderr, "git commit: %v\n", err)
 		return 1
 	}
 	return 0

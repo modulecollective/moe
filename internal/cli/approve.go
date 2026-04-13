@@ -28,7 +28,7 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("approve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: moe approve <project> <request>")
+		moePrintln(stderr, "usage: moe approve <project> <request>")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -41,26 +41,26 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	md, err := request.Load(root, projectID, reqID)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
 	if md.Status == "approved" {
-		fmt.Fprintf(stdout, "%s/%s already approved\n", projectID, reqID)
+		moePrintf(stdout, "%s/%s already approved\n", projectID, reqID)
 		return 0
 	}
 	if len(md.Documents) == 0 {
-		fmt.Fprintf(stderr, "moe: request %s/%s has no documents to approve\n", projectID, reqID)
+		moePrintf(stderr, "request %s/%s has no documents to approve\n", projectID, reqID)
 		return 1
 	}
 
@@ -72,14 +72,14 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 	}
 	sort.Strings(notOK)
 	if len(notOK) > 0 {
-		fmt.Fprintf(stderr, "moe: cannot approve — %d document(s) not ok: %v\n", len(notOK), notOK)
-		fmt.Fprintln(stderr, "run `moe ok <project> <request> <document>` on each first")
+		moePrintf(stderr, "cannot approve — %d document(s) not ok: %v\n", len(notOK), notOK)
+		moePrintln(stderr, "run `moe ok <project> <request> <document>` on each first")
 		return 1
 	}
 
 	md.Status = "approved"
 	if err := request.Save(root, md); err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
@@ -90,9 +90,9 @@ MoE-Project: %s
 `, projectID, reqID, reqID, projectID)
 	reqJSON := request.RunDir(projectID, reqID) + "/request.json"
 	if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "approved %s/%s\n", projectID, reqID)
+	moePrintf(stdout, "approved %s/%s\n", projectID, reqID)
 	return 0
 }

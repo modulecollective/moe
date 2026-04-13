@@ -2,7 +2,6 @@ package cli
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -21,15 +20,15 @@ func init() {
 
 func runRequest(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: moe request <subcommand> [args...]")
-		fmt.Fprintln(stderr, "subcommands: new")
-		return 2
+		moePrintln(stdout, "usage: moe request <subcommand> [args...]")
+		moePrintln(stdout, "subcommands: new")
+		return 0
 	}
 	switch args[0] {
 	case "new":
 		return runRequestNew(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "moe: unknown request subcommand %q\n", args[0])
+		moePrintf(stderr, "unknown request subcommand %q\n", args[0])
 		return 2
 	}
 }
@@ -39,7 +38,7 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `usage: moe request new [--id <slug>] <project> "title"`)
+		moePrintln(stderr, `usage: moe request new [--id <slug>] <project> "title"`)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -55,19 +54,19 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	md, err := request.New(root, project, title, request.Options{ID: *idOverride})
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "opened request %s/%s\n", md.Project, md.ID)
+	moePrintf(stdout, "opened request %s/%s\n", md.Project, md.ID)
 	return 0
 }

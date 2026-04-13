@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -20,17 +19,17 @@ func init() {
 
 func runPush(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
-		fmt.Fprintln(stderr, "usage: moe push")
+		moePrintln(stderr, "usage: moe push")
 		return 2
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 

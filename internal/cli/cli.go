@@ -7,7 +7,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 	"sort"
 )
@@ -34,13 +33,13 @@ func Register(c *Command) {
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		PrintUsage(stdout)
-		fmt.Fprintln(stdout, "try 'moe dash'")
+		moePrintln(stdout, "try 'moe dash'")
 		return 0
 	}
 	name := args[0]
 	cmd, ok := commands[name]
 	if !ok {
-		fmt.Fprintf(stderr, "moe: unknown command %q\n", name)
+		moePrintf(stderr, "unknown command %q\n", name)
 		PrintUsage(stderr)
 		return 1
 	}
@@ -49,15 +48,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 // PrintUsage writes the top-level help message.
 func PrintUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: moe <command> [args...]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "commands:")
+	moePrintln(w, "usage: moe <command> [args...]")
+	moePrintln(w, "")
+	moePrintln(w, "commands:")
 	names := make([]string, 0, len(commands))
 	for n := range commands {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		fmt.Fprintf(w, "  %-14s  %s\n", n, commands[n].Summary)
+		moePrintf(w, "  %-14s  %s\n", n, commands[n].Summary)
 	}
 }

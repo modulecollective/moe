@@ -27,11 +27,11 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("work", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: moe work <project> <request> <document-name>")
-		fmt.Fprintln(stderr)
-		fmt.Fprintln(stderr, "<document-name> is a slug like 'spec', 'architecture', or 'implementation'.")
-		fmt.Fprintln(stderr, "First use on a name creates the document; re-runs resume the same Claude session.")
-		fmt.Fprintln(stderr, "Example: moe work loveletter395 fix-timeout spec")
+		moePrintln(stderr, "usage: moe work <project> <request> <document-name>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "<document-name> is a slug like 'spec', 'architecture', or 'implementation'.")
+		moePrintln(stderr, "First use on a name creates the document; re-runs resume the same Claude session.")
+		moePrintln(stderr, "Example: moe work loveletter395 fix-timeout spec")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -44,37 +44,37 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
 	md, err := request.Load(root, projectID, reqID)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
 	doc, mutated, err := request.EnsureDocument(root, md, docID)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	if mutated {
 		if err := request.Save(root, md); err != nil {
-			fmt.Fprintf(stderr, "moe: %v\n", err)
+			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stderr, "moe: document %q ready (session %s)\n", docID, doc.Session)
+		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
 	claude, err := exec.LookPath("claude")
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: claude CLI not found on PATH: %v\n", err)
+		moePrintf(stderr, "claude CLI not found on PATH: %v\n", err)
 		return 1
 	}
 
@@ -102,17 +102,17 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	commitErr := commitTurn(root, md, docID)
 
 	if runErr != nil {
-		fmt.Fprintf(stderr, "moe: claude exited: %v\n", runErr)
+		moePrintf(stderr, "claude exited: %v\n", runErr)
 		// Fall through to report commit result and exit non-zero.
 	}
 	switch {
 	case errors.Is(commitErr, request.ErrNothingToCommit):
-		fmt.Fprintln(stdout, "no document changes; nothing committed")
+		moePrintln(stdout, "no document changes; nothing committed")
 	case commitErr != nil:
-		fmt.Fprintf(stderr, "moe: commit turn: %v\n", commitErr)
+		moePrintf(stderr, "commit turn: %v\n", commitErr)
 		return 1
 	default:
-		fmt.Fprintf(stdout, "committed turn for %s/%s/%s\n", md.Project, md.ID, docID)
+		moePrintf(stdout, "committed turn for %s/%s/%s\n", md.Project, md.ID, docID)
 	}
 	if runErr != nil {
 		return 1

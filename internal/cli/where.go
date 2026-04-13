@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 	"os"
 
@@ -19,14 +18,14 @@ func init() {
 func runWhere(args []string, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	path, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, path)
+	moePrintln(stdout, path)
 	return 0
 }

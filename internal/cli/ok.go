@@ -41,7 +41,7 @@ func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb stri
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: moe %s <project> <request> <document>\n", verb)
+		moePrintf(stderr, "usage: moe %s <project> <request> <document>\n", verb)
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -54,32 +54,32 @@ func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb stri
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	md, err := request.Load(root, projectID, reqID)
 	if err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
 	doc, exists := md.Documents[docID]
 	if !exists {
-		fmt.Fprintf(stderr, "moe: document %q not found in request %s/%s\n", docID, projectID, reqID)
+		moePrintf(stderr, "document %q not found in request %s/%s\n", docID, projectID, reqID)
 		return 1
 	}
 	if doc.Status == newStatus {
-		fmt.Fprintf(stdout, "%s/%s/%s already %s; no change\n", projectID, reqID, docID, newStatus)
+		moePrintf(stdout, "%s/%s/%s already %s; no change\n", projectID, reqID, docID, newStatus)
 		return 0
 	}
 	doc.Status = newStatus
 	if err := request.Save(root, md); err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
@@ -91,9 +91,9 @@ MoE-Document: %s
 `, verb, docID, reqID, projectID, docID)
 	reqJSON := request.RunDir(projectID, reqID) + "/request.json"
 	if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
-		fmt.Fprintf(stderr, "moe: %v\n", err)
+		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s %s/%s/%s\n", verb, projectID, reqID, docID)
+	moePrintf(stdout, "%s %s/%s/%s\n", verb, projectID, reqID, docID)
 	return 0
 }

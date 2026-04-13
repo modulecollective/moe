@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 	"runtime"
 )
@@ -23,7 +22,7 @@ func init() {
 }
 
 func runVersion(args []string, stdout, stderr io.Writer) int {
-	fmt.Fprintf(stdout, "moe %s %s/%s %s\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+	moePrintf(stdout, "moe %s %s/%s %s\n", Version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 	return 0
 }
 
