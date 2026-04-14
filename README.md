@@ -896,12 +896,14 @@ The branch model belongs *inside* each target submodule — that's where actual 
 
 **Concurrent work on the same project:**
 
-Without per-request branches, the bureaucracy working tree is no longer the contention point — different requests' files don't overlap. The remaining contention is the submodule checkout under `projects/<project>/`, which can only be on one target-repo branch at a time. Two layers handle this:
+Without per-request branches, the bureaucracy working tree is no longer the contention point — different requests' files don't overlap. The remaining contention would be the submodule checkout under `projects/<project>/`, which can only be on one target-repo branch at a time. MoE removes that contention by giving every request its own private, copy-on-write clone of the submodule — no opt-in, no flag:
 
-1. **Default: flock.** `moe work` takes a filesystem lock at `.moe/locks/<project>.lock` for the duration of the Claude Code invocation when the session needs the submodule (i.e. implementation turns). A second submodule-touching `moe work` on the same project blocks briefly, or exits with "telomere is busy on request `req-a`; wait, or use `--worktree`."
-2. **Opt-in: git worktrees** — for the submodule, not the bureaucracy. `moe work --worktree <project> <request> <doc>` materializes a parallel checkout of the target repo at `.moe/worktrees/<project>-<request>/` so two implementation sessions can run on the same target in parallel. The Claude Code subprocess runs with `cwd` set to the worktree; the invocation's `Bash` and `Edit` tools are scoped to that directory. `moe sign pr` and `moe scrap` clean up the worktree.
+- On first `moe work` against a request, the submodule at `projects/<project>/` is cloned to `.moe/clones/<project>/<request>/`. Later turns on the same request reuse it, so branch state and uncommitted edits persist across invocations.
+- On macOS the clone is an APFS `clonefile(2)` call — O(metadata), no data copied, blocks shared with the source until either side writes. On other platforms a recursive copy is the fallback. Either way, `moe` code is pure-stdlib Go; no container runtime, daemon, or third-party dep.
+- Submodules store their `.git` as a gitfile pointer into `.git/modules/projects/<project>/`. MoE clones that gitdir alongside the worktree (to `.moe/clones/<project>/.git-modules/<request>/`) and rewrites the clone's gitfile and `core.worktree` so the clone is a fully independent git repo. Two activities on the same project never touch each other's index, refs, or objects.
+- `moe sign pr` tears down the clone after the status flip. `moe scrap` (future) will do the same. The canonical `projects/<project>/` checkout is passive — MoE only reads from it to seed clones.
 
-Document-only sessions (spec, architecture, test-plan, deploy-plan) only edit one markdown file in the bureaucracy repo and don't touch the submodule, so they have no contention at all and run freely in parallel.
+Document-only sessions (spec, architecture, test-plan, deploy-plan) don't touch the submodule and never needed isolation in the first place; they continue to write one markdown file under the bureaucracy and run freely in parallel.
 
 **Submodule handling:**
 
@@ -1321,13 +1323,13 @@ The thread log accumulates across invocations. The "chat with agents" experience
 
 **The human is the scheduler.** One agent at a time under the operator's attention. Multiple terminal sessions work in parallel across different requests — they don't touch each other on the bureaucracy side because all commits land on `main` with distinct trailers.
 
-The contention point is the submodule checkout under `projects/<project>/`. Concurrent implementation sessions on the same project are a `moe work --worktree` opt-in; the default flock at `.moe/locks/<project>.lock` keeps two implementation turns from stepping on each other's submodule state. Document-only sessions don't touch the submodule and run freely in parallel. See the **Git Model** section for the concrete mechanism. Docker or SSH wrappers remain a Phase-5 option for implementation isolation but aren't the concurrency mechanism.
+Concurrent implementation sessions on the same project don't contend, because every `moe work` automatically gets a private copy-on-write clone of the submodule under `.moe/clones/<project>/<request>/` — APFS `clonefile(2)` on macOS, a recursive copy fallback elsewhere. Two requests against the same project get two independent working trees and two independent gitdirs; neither touches the canonical `projects/<project>/` checkout. Document-only sessions don't touch the submodule at all and run freely in parallel. See the **Git Model** section for the concrete mechanism. Docker or SSH wrappers remain a Phase-5 option layered *on top of* the clone, for kernel-enforced isolation rather than concurrency.
 
 **Cross-document negotiation is operator-mediated.** When the architecture session pushes back on the spec ("batch size 10,000 needs different storage"), the operator carries that pushback into the spec conversation. No automated inter-agent messaging. A future evolution could add a `for` loop in `moe work --negotiate` to iterate across documents until settled or max iterations — it's a `for` loop, not a DAG engine.
 
 ### Technology
 
-CLI: Go stdlib. Persistence: git + committed JSON/JSONL + INI + block-format config. Agent backend: Claude Code headless (`claude -p`). Sandbox for implementation work: `os/exec` shells out to `docker`/`ssh`/`daytona` when needed. Everything else runs in the operator's local shell.
+CLI: Go stdlib. Persistence: git + committed JSON/JSONL + INI + block-format config. Agent backend: Claude Code headless (`claude -p`). Per-request workspace isolation: pure-Go APFS `clonefile(2)` on macOS (recursive-copy fallback elsewhere) — no container runtime, no daemon, no dep. Stronger kernel-enforced sandbox for implementation work remains a Phase-5 option via `os/exec` into `docker`/`ssh`/`daytona`, layered on top of the clone.
 
 ### Git Model
 
@@ -1383,9 +1385,9 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 - [ ] `docs/implementation.md` with initializer/continuation pattern guidance
 - [ ] `features.json` session continuity
-- [ ] `moe work <project> <request> implementation` with expanded `--allowedTools` scoped to `projects/$target`
-- [ ] Submodule commit/push/PR flow at `moe sign pr`
-- [ ] Optional: Docker/SSH wrapper around `claude -p` for isolation
+- [ ] `moe work <project> <request> implementation` with expanded `--allowedTools` scoped to the per-request sandbox clone
+- [ ] Submodule commit/push/PR flow at `moe sign pr` (push from the clone, bump the canonical submodule pointer)
+- [ ] Optional: Docker/SSH wrapper around `claude -p` for stronger (kernel-enforced) isolation on top of the clone
 
 **Self-hosting checkpoint**: MoE can plan *and* execute its own development.
 

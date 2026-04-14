@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 func init() {
@@ -78,7 +80,22 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	prompt := buildSystemPrompt(md, docID)
+	// Every `moe work` gets a private copy-on-write clone of the project's
+	// submodule. First turn creates it; later turns reuse the same clone so
+	// session state in the target repo (branches, uncommitted edits) persists
+	// across invocations. Document-only projects (no projects/<id>/ on disk)
+	// silently skip this — the feature only applies where there's code to
+	// isolate.
+	clonePath := ""
+	if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err == nil {
+		clonePath, err = sandbox.Ensure(root, md.Project, md.ID)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+	}
+
+	prompt := buildSystemPrompt(md, docID, clonePath)
 	// Claude Code uses --session-id to *create* a session and --resume to
 	// continue one. EnsureDocument set mutated=true exactly when the UUID
 	// was freshly minted (new doc, or healed from an invalid session id),
@@ -121,11 +138,13 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 }
 
 // buildSystemPrompt is the v1 context injection — just enough for Claude to
-// know which file to treat as the document. Upstream-document assembly,
-// stage/doc guidance fragments, and soul.md layering come later.
-func buildSystemPrompt(md *request.Metadata, docID string) string {
+// know which file to treat as the document, and (when the project has a
+// submodule) which clone to treat as the target-code workspace. Upstream-
+// document assembly, stage/doc guidance fragments, and soul.md layering come
+// later.
+func buildSystemPrompt(md *request.Metadata, docID, clonePath string) string {
 	content := request.ContentPath(md.Project, md.ID, docID)
-	return fmt.Sprintf(`You are collaborating with the operator on the %q document
+	prompt := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for request %q (project %q) in a Ministry of Everything bureaucracy repo.
 
 Your canvas for this document is the single file:
@@ -138,6 +157,18 @@ upstream context for downstream agents once the operator signs it.
 
 Request title: %s
 `, docID, md.ID, md.Project, content, md.Title)
+
+	if clonePath != "" {
+		prompt += fmt.Sprintf(`
+For any work that touches the target project's code, the workspace is a
+private copy-on-write clone of the submodule at:
+  %s
+Read and edit files there, not under projects/%s/. The clone is yours for
+the lifetime of this request — your edits are isolated from other concurrent
+activities and from the canonical submodule until the request is signed off.
+`, clonePath, md.Project)
+	}
+	return prompt
 }
 
 // commitTurn stages the document dir and request.json, then commits with
