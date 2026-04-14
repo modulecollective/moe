@@ -51,6 +51,24 @@ func Names() []string {
 	return out
 }
 
+// Dependents returns the stages that list name in their Requires, in stable
+// order. Used to cascade unsign: if the operator reopens design, any stage
+// that required design must also come unsigned, since its precondition is
+// no longer met.
+func Dependents(name string) []string {
+	var out []string
+	for n, s := range all {
+		for _, dep := range s.Requires {
+			if dep == name {
+				out = append(out, n)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // IsSigned reports whether the named stage is currently signed for requestID
 // in the bureaucracy repo rooted at root. A stage is signed iff its most
 // recent MoE-Stage-Signed commit is newer than its most recent

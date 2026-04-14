@@ -20,24 +20,25 @@ func init() {
 	})
 	Register(&Command{
 		Name:    "unsign",
-		Summary: "reverse a previous moe sign",
+		Summary: "reverse a previous moe sign (cascades to dependent stages)",
 		Run:     runUnsign,
 	})
 }
 
 func runSign(args []string, stdout, stderr io.Writer) int {
-	return flipStage(args, stdout, stderr, true)
+	return runSignUnsign(args, stdout, stderr, true)
 }
 
 func runUnsign(args []string, stdout, stderr io.Writer) int {
-	return flipStage(args, stdout, stderr, false)
+	return runSignUnsign(args, stdout, stderr, false)
 }
 
-// flipStage is the shared implementation behind `moe sign` and `moe unsign`.
-// It records a MoE-Stage-Signed (or -Unsigned) commit trailer on main and,
-// for stages with a side-effect (today: only `pr`), applies that side-effect
-// in the same commit so the trailer and its consequences are atomic.
-func flipStage(args []string, stdout, stderr io.Writer, signing bool) int {
+// runSignUnsign dispatches the top-level `moe sign` / `moe unsign`. Each
+// stage flip lands as its own commit on main so the journal stays faithful
+// to operator intent — on unsign that includes a cascade flip for every
+// dependent stage that was still signed (reopening a prerequisite must
+// invalidate stages that assumed it).
+func runSignUnsign(args []string, stdout, stderr io.Writer, signing bool) int {
 	verb := "sign"
 	if !signing {
 		verb = "unsign"
@@ -115,8 +116,56 @@ func flipStage(args []string, stdout, stderr io.Writer, signing bool) int {
 		}
 	}
 
-	// Side-effect: signing `pr` flips the request status to approved;
-	// unsigning reverts to in_progress. Other stages are trailer-only.
+	if err := flipOneStage(root, md, projectID, reqID, stageName, signing, stdout); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	// Cascade: reopening a stage invalidates anything that required it. We
+	// only do this on unsign — signing is already gated by preconditions, so
+	// there's no downstream to flip. Run breadth-first so each cascade
+	// commit is recorded individually in the journal.
+	if !signing {
+		queue := stage.Dependents(stageName)
+		visited := map[string]bool{stageName: true}
+		for len(queue) > 0 {
+			next := queue[0]
+			queue = queue[1:]
+			if visited[next] {
+				continue
+			}
+			visited[next] = true
+			dependentSigned, err := stage.IsSigned(root, reqID, next)
+			if err != nil {
+				moePrintf(stderr, "%v\n", err)
+				return 1
+			}
+			if !dependentSigned {
+				continue
+			}
+			moePrintf(stdout, "cascading unsign: %q depended on %q\n", next, stageName)
+			if err := flipOneStage(root, md, projectID, reqID, next, false, stdout); err != nil {
+				moePrintf(stderr, "%v\n", err)
+				return 1
+			}
+			queue = append(queue, stage.Dependents(next)...)
+		}
+	}
+	return 0
+}
+
+// flipOneStage records a single MoE-Stage-Signed or -Unsigned commit for
+// stageName, applying the stage's side-effect (today: only `pr` flips the
+// request status) inside the same commit. Used both for the explicitly
+// requested stage and, during unsign, for each cascaded dependent.
+func flipOneStage(root string, md *request.Metadata, projectID, reqID, stageName string, signing bool, stdout io.Writer) error {
+	verb := "sign"
+	trailer := "MoE-Stage-Signed"
+	if !signing {
+		verb = "unsign"
+		trailer = "MoE-Stage-Unsigned"
+	}
+
 	var pathspecs []string
 	if stageName == "pr" {
 		if signing {
@@ -125,16 +174,11 @@ func flipStage(args []string, stdout, stderr io.Writer, signing bool) int {
 			md.Status = "in_progress"
 		}
 		if err := request.Save(root, md); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
+			return err
 		}
 		pathspecs = []string{request.RunDir(projectID, reqID) + "/request.json"}
 	}
 
-	trailer := "MoE-Stage-Signed"
-	if !signing {
-		trailer = "MoE-Stage-Unsigned"
-	}
 	msg := fmt.Sprintf(`%s: %s
 
 MoE-Request: %s
@@ -143,12 +187,11 @@ MoE-Project: %s
 `, verb, stageName, reqID, projectID, trailer, stageName)
 
 	if err := request.CommitAllowEmpty(root, msg, pathspecs...); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return err
 	}
 	moePrintf(stdout, "%s %s/%s stage %q\n", verb, projectID, reqID, stageName)
 	if stageName == "pr" && signing {
 		moePrintln(stdout, "  (target-repo PR open is not yet implemented; status flipped only)")
 	}
-	return 0
+	return nil
 }

@@ -122,7 +122,7 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 
 // buildSystemPrompt is the v1 context injection — just enough for Claude to
 // know which file to treat as the document. Upstream-document assembly,
-// department handbooks, and soul.md layering come later.
+// stage/doc guidance fragments, and soul.md layering come later.
 func buildSystemPrompt(md *request.Metadata, docID string) string {
 	content := request.ContentPath(md.Project, md.ID, docID)
 	return fmt.Sprintf(`You are collaborating with the operator on the %q document
