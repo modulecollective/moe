@@ -251,7 +251,9 @@ Stage sign-offs (`design`, `pr`, `review`, `test`, `retro`, `deploy`) are the co
 - **Design signed**: `moe sign <proj> <req> design` records the checkpoint. Implementation work can start in earnest. `moe review` is the per-request synthesized view.
 - **Approved**: `moe sign <proj> <req> pr` flips the request status and (eventually) pushes the submodule, generates derived artifacts — all as further commits on main.
 
-Human review is required by default before `moe sign pr`. A future "yolo mode" can auto-sign for well-understood request types where the agents consistently produce good output.
+Human review is required by default at every `moe work` turn and before each `moe sign` gate. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the request needs, then crossing each stage gate up to `<stage>` without pausing for input. The operator picks the stage; `--through pr` is the common case, but `--through deploy` is valid too if you actually want to try it. No stage is special-cased — the control is the `--through` argument, not a hardcoded ceiling. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `moe unsign` and `git revert` unwind cleanly.
+
+Note on vocabulary: this MoE-level "yolo" (multi-stage autonomy above the document line) is orthogonal to Claude Code's own `--dangerously-skip-permissions` (tool-call autonomy below the document line, *inside* a single `claude -p` session). Yolo mode generally wants both: skip permissions inside each session, and skip the operator-in-the-loop between sessions.
 
 **Ripple flow in practice:**
 
@@ -710,14 +712,14 @@ Swap a model per document type by editing `agents.conf`. The `model` field is pa
 
 ### Claude Code Headless as the Primary Backend
 
-**Claude Code in headless mode (`claude -p`)** is MoE's primary agent backend. It is invoked by `moe work` as a subprocess for **interactive, operator-driven runs only** — a human at a keyboard kicking off `moe work` under their own Claude Code install.
+**Claude Code in headless mode (`claude -p`)** is MoE's primary agent backend. It is invoked by `moe work` as a subprocess for **operator-initiated, ordinary-individual-usage runs** — a human at a keyboard kicking off `moe work` under their own Claude Code install.
 
-**Compliance boundary (read this before changing the backend logic).** Anthropic's Consumer Terms (clarified February 2026, enforced April 4, 2026) draw a bright line around Claude Code + Pro/Max subscriptions:
+**Compliance boundary (read this before changing the backend logic).** Anthropic's [Claude Code Legal and Compliance page](https://code.claude.com/docs/en/legal-and-compliance) (clarified Feb 19, 2026, server-side enforcement fully live April 4, 2026 at 12:00 PT) draws a bright line around Claude Code + Pro/Max subscriptions. The good news sits right at the top of the page: *"Claude Code CLI on your own computer works as it always has — it's Anthropic's official product built for scripted and automated use, and the Consumer ToS exempts it from the prohibition on automated access."* The binding limit is the phrase *"advertised usage limits for Pro and Max plans assume ordinary, individual usage of Claude Code and the Agent SDK."*
 
-- ✅ **Allowed:** Spawning the real `claude` CLI as a subprocess from your own script, with OAuth flowing through Claude Code normally, as part of an interactive developer session on a local machine.
-- ❌ **Banned:** Extracting OAuth tokens from Claude Code and replaying them against `api.anthropic.com`. Using Pro/Max OAuth tokens with the Agent SDK. Driving Claude Code under a subscription from scheduled jobs, always-on services, multi-tenant deployments, or anything that looks like production automation. Third-party "harnesses" that wrap or impersonate Claude Code under a subscription (the OpenClaw pattern Anthropic actively blocked).
+- ✅ **Allowed:** Spawning the real `claude` CLI as a subprocess from your own script, with OAuth flowing through Claude Code normally, on your own machine, at a volume consistent with one human working. Autonomous behavior *within* a session (including `--dangerously-skip-permissions` and long-running loops that the operator kicked off and is watching) is inside the exemption — the TOS line is about who's running it, not whether Claude presses its own buttons.
+- ❌ **Banned:** Extracting OAuth tokens from Claude Code and replaying them against `api.anthropic.com`. Using Pro/Max OAuth tokens with the Agent SDK (the Agent SDK requires API key authentication as of Feb 2026). Driving Claude Code under a subscription from scheduled jobs, always-on services, multi-tenant deployments, or anything that looks like production automation rather than "ordinary, individual usage." Third-party "harnesses" that wrap or impersonate Claude Code under a subscription (the OpenClaw / OpenCode / Roo Code / Goose pattern Anthropic actively blocked).
 
-MoE's position: `moe work` spawning `claude -p` from an operator-initiated command is in the allowed bucket — real CLI, real OAuth, no token extraction, single human driver. **Any future workflow that runs without a human at the other end must route to the Claude API backend under Commercial Terms instead, regardless of cost.** See Review Notes for the routing rules.
+MoE's position: `moe work` spawning `claude -p` from an operator-initiated command is in the allowed bucket — real CLI, real OAuth, no token extraction, single human driver, individual-scale traffic. **Any future workflow that runs without a human at the other end — scheduled triggers, shared services, multi-tenant hosting — must route to the Claude API backend under Commercial Terms instead, regardless of cost.** See Review Notes for the routing rules.
 
 > ⚠️ **Never** read `~/.claude` auth material from `moe`, re-use Claude Code's OAuth tokens against the API, or pipe Pro/Max credentials through the Anthropic SDK. These are the patterns Anthropic detects and blocks — do not cross this line to "optimize" anything.
 
@@ -1420,7 +1422,7 @@ Features not in v1. Not rejected — just sequenced after the minimum works.
 | Clerk as LLM agent | Deferred | Human operator is the Clerk in v1. |
 | Cross-project knowledge queries | Deferred | Emerges naturally once persistent documents accumulate. |
 | Explicit knowledge graph files | Deferred | Plain text JSON in `knowledge/` when the pattern stabilizes. |
-| "Yolo mode" auto-merge | Deferred | Every request passes a human review gate in v1. |
+| Yolo mode (`moe yolo <req> --through <stage>` — autonomously drafts every document and crosses every gate up to `<stage>`, including `deploy` if the operator asks for it; distinct from Claude Code's in-session `--dangerously-skip-permissions`, though yolo generally wants both) | Deferred | Every request passes human review at every turn and gate in v1. |
 | Interactive TUI | Deferred | One-shot `moe dash` covers the prioritization/resumption problem. Revisit if navigation friction justifies a Bubble Tea or raw-termios TUI — but that would breach the stdlib-only stance, so only if the one-shot dashboard is demonstrably insufficient. |
 
 ---
