@@ -25,12 +25,10 @@ import (
 )
 
 // Document is the machine-readable slice of a single document's state.
-// The verbose form is the content file plus the Claude Code session; this
-// struct is the index entry that tells `moe status` and `moe work` how to
-// find them.
+// Documents themselves are just files on disk (content.md); this struct
+// carries only the data that can't be derived from them — the Claude Code
+// session id so `moe work` can resume the same conversation.
 type Document struct {
-	Agent   string `json:"agent,omitempty"`
-	Status  string `json:"status"`
 	Session string `json:"session"`
 }
 
@@ -231,7 +229,7 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 	doc, existed := md.Documents[docID]
 	mutated := false
 	if !existed {
-		doc = &Document{Status: "pending"}
+		doc = &Document{}
 		md.Documents[docID] = doc
 		mutated = true
 	}
@@ -266,6 +264,20 @@ func StageAndCommit(root, msg string, pathspecs ...string) error {
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
 // changes — signals "turn produced no document edits" to the caller.
 var ErrNothingToCommit = fmt.Errorf("request: nothing to commit")
+
+// CommitAllowEmpty stages pathspecs (if any) and commits with msg, passing
+// --allow-empty so the commit lands even when nothing is staged. Used for
+// stage sign-offs: the trailer in the commit message is itself the payload,
+// so an empty tree is a legitimate commit.
+func CommitAllowEmpty(root, msg string, pathspecs ...string) error {
+	if len(pathspecs) > 0 {
+		addArgs := append([]string{"add", "--"}, pathspecs...)
+		if err := runGit(root, addArgs...); err != nil {
+			return err
+		}
+	}
+	return runGit(root, "commit", "--allow-empty", "-m", msg)
+}
 
 func hasStagedChanges(root string) bool {
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")

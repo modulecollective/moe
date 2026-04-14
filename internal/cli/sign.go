@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/stage"
 )
 
 func init() {
 	Register(&Command{
 		Name:    "sign",
-		Summary: "sign off on a document (soft gate)",
+		Summary: "sign off on a request stage (design, pr, review, test, retro, deploy)",
 		Run:     runSign,
 	})
 	Register(&Command{
@@ -24,24 +26,32 @@ func init() {
 }
 
 func runSign(args []string, stdout, stderr io.Writer) int {
-	return flipDocStatus(args, stdout, stderr, "signed", "sign")
+	return flipStage(args, stdout, stderr, true)
 }
 
 func runUnsign(args []string, stdout, stderr io.Writer) int {
-	return flipDocStatus(args, stdout, stderr, "draft", "unsign")
+	return flipStage(args, stdout, stderr, false)
 }
 
-// flipDocStatus is the shared implementation behind `moe sign` and `moe unsign`.
-// It flips Documents[doc].Status to newStatus, persists request.json, and
-// commits with trailers scoped to the request and document.
-//
-// verb names the operation in user output and the commit subject — "sign" or
-// "unsign" today; tomorrow could host "review" or other status verbs.
-func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb string) int {
+// flipStage is the shared implementation behind `moe sign` and `moe unsign`.
+// It records a MoE-Stage-Signed (or -Unsigned) commit trailer on main and,
+// for stages with a side-effect (today: only `pr`), applies that side-effect
+// in the same commit so the trailer and its consequences are atomic.
+func flipStage(args []string, stdout, stderr io.Writer, signing bool) int {
+	verb := "sign"
+	if !signing {
+		verb = "unsign"
+	}
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s <project> <request> <document>\n", verb)
+		moePrintf(stderr, "usage: moe %s <project> <request> <stage>\n", verb)
+		moePrintln(stderr, "")
+		moePrintln(stderr, "stages:")
+		for _, name := range stage.Names() {
+			s, _ := stage.Lookup(name)
+			moePrintf(stderr, "  %-7s  %s\n", name, s.Help)
+		}
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -50,7 +60,13 @@ func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb stri
 		fs.Usage()
 		return 2
 	}
-	projectID, reqID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
+	projectID, reqID, stageName := fs.Arg(0), fs.Arg(1), fs.Arg(2)
+
+	st, ok := stage.Lookup(stageName)
+	if !ok {
+		moePrintf(stderr, "unknown stage %q; known: %s\n", stageName, strings.Join(stage.Names(), ", "))
+		return 1
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -68,32 +84,71 @@ func flipDocStatus(args []string, stdout, stderr io.Writer, newStatus, verb stri
 		return 1
 	}
 
-	doc, exists := md.Documents[docID]
-	if !exists {
-		moePrintf(stderr, "document %q not found in request %s/%s\n", docID, projectID, reqID)
-		return 1
-	}
-	if doc.Status == newStatus {
-		moePrintf(stdout, "%s/%s/%s already %s; no change\n", projectID, reqID, docID, newStatus)
-		return 0
-	}
-	doc.Status = newStatus
-	if err := request.Save(root, md); err != nil {
+	currentlySigned, err := stage.IsSigned(root, reqID, stageName)
+	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	if signing && currentlySigned {
+		moePrintf(stdout, "%s/%s stage %q already signed; no change\n", projectID, reqID, stageName)
+		return 0
+	}
+	if !signing && !currentlySigned {
+		moePrintf(stdout, "%s/%s stage %q not signed; no change\n", projectID, reqID, stageName)
+		return 0
+	}
 
+	// Preconditions apply on sign only — unsigning is always allowed, since
+	// the operator is walking things back.
+	if signing {
+		for _, dep := range st.Requires {
+			ok, err := stage.IsSigned(root, reqID, dep)
+			if err != nil {
+				moePrintf(stderr, "%v\n", err)
+				return 1
+			}
+			if !ok {
+				moePrintf(stderr, "cannot sign %q — prerequisite stage %q is not signed\n", stageName, dep)
+				moePrintf(stderr, "run `moe sign %s %s %s` first\n", projectID, reqID, dep)
+				return 1
+			}
+		}
+	}
+
+	// Side-effect: signing `pr` flips the request status to approved;
+	// unsigning reverts to in_progress. Other stages are trailer-only.
+	var pathspecs []string
+	if stageName == "pr" {
+		if signing {
+			md.Status = "approved"
+		} else {
+			md.Status = "in_progress"
+		}
+		if err := request.Save(root, md); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		pathspecs = []string{request.RunDir(projectID, reqID) + "/request.json"}
+	}
+
+	trailer := "MoE-Stage-Signed"
+	if !signing {
+		trailer = "MoE-Stage-Unsigned"
+	}
 	msg := fmt.Sprintf(`%s: %s
 
 MoE-Request: %s
 MoE-Project: %s
-MoE-Document: %s
-`, verb, docID, reqID, projectID, docID)
-	reqJSON := request.RunDir(projectID, reqID) + "/request.json"
-	if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
+%s: %s
+`, verb, stageName, reqID, projectID, trailer, stageName)
+
+	if err := request.CommitAllowEmpty(root, msg, pathspecs...); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "%s %s/%s/%s\n", verb, projectID, reqID, docID)
+	moePrintf(stdout, "%s %s/%s stage %q\n", verb, projectID, reqID, stageName)
+	if stageName == "pr" && signing {
+		moePrintln(stdout, "  (target-repo PR open is not yet implemented; status flipped only)")
+	}
 	return 0
 }
