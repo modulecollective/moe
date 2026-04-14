@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/stage"
 )
 
@@ -192,6 +193,17 @@ MoE-Project: %s
 	moePrintf(stdout, "%s %s/%s stage %q\n", verb, projectID, reqID, stageName)
 	if stageName == "pr" && signing {
 		moePrintln(stdout, "  (target-repo PR open is not yet implemented; status flipped only)")
+		// A signed `pr` stage terminates the request's active work against
+		// the target code, so the sandbox clone is no longer needed. Fire
+		// and forget: a leftover clone is a disk nuisance, not a correctness
+		// bug, so we don't fail the sign over it.
+		if sandbox.Exists(root, projectID, reqID) {
+			if err := sandbox.Remove(root, projectID, reqID); err != nil {
+				moePrintf(stdout, "  (warning: failed to remove sandbox clone: %v)\n", err)
+			} else {
+				moePrintln(stdout, "  removed sandbox clone")
+			}
+		}
 	}
 	return nil
 }
