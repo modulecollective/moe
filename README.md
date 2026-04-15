@@ -42,6 +42,7 @@ MoE is a thin CLI wrapper around `claude -p` plus conventional git plumbing. Eve
 
 ```
 bureaucracy/                       # private state repo, cloned alongside the moe CLI repo
+├── bureaucracy.conf               # Sentinel marker — presence identifies this dir as a bureaucracy root
 ├── soul.md                        # Global agent guidance
 ├── stages/                        # Per-stage markdown guidance (design.md, pr.md, …)
 ├── docs/                          # Per-document markdown guidance (spec.md, architecture.md, …)
@@ -60,6 +61,7 @@ bureaucracy/                       # private state repo, cloned alongside the mo
 │   │       └── websocket-eval/    # scrapped
 │   └── next-idea/
 │       └── …
+├── .moe/                          # Per-request sandbox clones + other transient state (gitignored)
 └── (single branch: main — per-request scoping via commit trailers)
 ```
 
@@ -70,7 +72,7 @@ bureaucracy/                       # private state repo, cloned alongside the mo
 MoE is split across two independent git repos, cloned side-by-side, in the same relationship as `git` ↔ a repository or `hugo` ↔ a site:
 
 - **`moe/`** — the CLI repo. Go source for the `moe` binary. No private data, no pointer to the bureaucracy. Open-source-eligible. Installed to `$PATH` like any other tool.
-- **`bureaucracy/`** — the private state repo, cloned at the same level as `moe/`. Holds `soul.md`, per-stage and per-doc guidance, the document graph definition, `requests/`, run history, and `projects/*` submodules pointing at target repos. The `moe` binary operates on whichever bureaucracy directory it's invoked from (discovered via `$PWD` walk or `$MOE_HOME`).
+- **`bureaucracy/`** — the private state repo, cloned at the same level as `moe/`. Holds `soul.md`, per-stage and per-doc guidance, the document graph definition, `requests/`, run history, and `projects/*` submodules pointing at target repos. The `moe` binary operates on whichever bureaucracy directory it's invoked from (discovered via `$PWD` walk or `$MOE_HOME`). The root is identified by a sentinel marker file, `bureaucracy.conf` — its presence is the whole signal; keys inside are reserved for future config. `moe where` prints the resolved root so scripts and the operator can confirm which bureaucracy is in scope.
 
 Upgrading `moe` is a `go install`; the bureaucracy is untouched. Matches principle 11 — the CLI is just a tool on `$PATH`.
 
@@ -93,16 +95,16 @@ A long-lived entity representing a software product or project. Registered as a 
 // requests/telomere/project.json
 {
   "id": "telomere",
-  "name": "Telomere",
-  "status": "live",
-  "description": "Timeouts as a service",
+  "status": "incubating",
   "submodule": "projects/telomere",
-  "remote": "github.com/modulecollective/telomere",
+  "remote": "git@github.com:modulecollective/telomere.git",
   "default_branch": "main",
   "deploy_url": "https://telomere.modulecollective.dev",
   "created": "2025-03-15"
 }
 ```
+
+The `id` is derived from the repo URL's last path component and doubles as the project's display name — no separate name/description fields. Fresh registrations land in `"incubating"`; the operator bumps status as the project matures (`"live"`, `"archived"`, etc.). `default_branch` is detected from `git ls-remote --symref HEAD` at registration time. `deploy_url` is optional and omitted when unset.
 
 During a session, `moe work` runs `git submodule update --init projects/$target` so agents can read code and (for code-editing work) edit it. Code changes result in submodule pointer updates committed on `main` with the request's trailers. At approval time, the changes inside the submodule are committed, pushed to the target remote, and optionally opened as a PR — the submodule pointer update in the bureaucracy records which target commit was produced.
 
@@ -771,24 +773,29 @@ For additional isolation of code-editing sessions (Docker, Daytona, SSH hosts), 
 moe                                         # print usage + a hint: "try 'moe dash'"
 moe dash                                    # dashboard — the home screen
 moe next                                    # triage mode — do the top attention item, then the next
-moe init                                    # scaffold a new MoE workspace
+moe init [--remote <url>] [dir]             # scaffold a new MoE workspace (stages but does not commit; prompts interactively)
+moe where                                   # print the resolved bureaucracy root ($MOE_HOME or $PWD walk)
 moe project add <repo-url>                  # register a target repo as submodule
+moe project remove <id>                     # unregister a project (refuses if the request dir has other content)
+moe project list                            # registered submodules
 moe request new <project> "title" [--id slug]      # open a new request, scaffold its dir
 moe status <project> <request>              # per-request view: document graph, staleness, last turns
 moe work <project> <request> <document>     # the main command — work on a document
 moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
 moe sign <project> <request> <stage>        # sign a lifecycle stage (design, pr, review, test, retro, deploy)
-moe unsign <project> <request> <stage>      # reverse moe sign
+moe unsign <project> <request> <stage>      # reverse moe sign (cascades to dependent stages)
 moe review <project> <request>              # synthesize per-request view (filtered log + doc snapshots)
 moe scrap <project> <request> "reason"      # close without merging, record rationale
 moe flag <project> <request> ["note"]       # mark as needing attention on the dashboard
 moe unflag <project> <request>              # clear the flag
 moe history [project]                       # past requests (git log + cost aggregates)
-moe project list                            # registered submodules
+moe push                                    # git push the bureaucracy repo (sets upstream on first push)
 moe reindex                                 # rebuild index.json files from request.json glob
+moe version                                 # print moe version / OS / arch / Go runtime
+moe help                                    # print usage
 ```
 
-~18 commands. The ones you live in are `moe dash`, `moe next`, and `moe work`, with `moe sign` sprinkled between turns.
+The ones you live in are `moe dash`, `moe next`, and `moe work`, with `moe sign` sprinkled between turns. `moe where`, `moe push`, `moe version`, and `moe help` are housekeeping — they don't move request state, just report or publish it.
 
 ### `moe work` — The Core Loop
 
@@ -1345,23 +1352,29 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 ### Phase 0: Workspace Scaffolding
 
-- [ ] `moe init` scaffolds the directory structure (`stages/`, `docs/`, `projects/`, `requests/`, `soul.md`, `agents.conf`, `document-graph.conf`)
+- [x] `moe init` scaffolds the marker file (`bureaucracy.conf`) plus `projects/` and `requests/` (with `.gitkeep`), initializes git on `main`, optionally sets an origin remote, stages the scaffolding, and prompts the operator to commit
+- [x] `moe where` resolves the bureaucracy root via `$MOE_HOME` or a `$PWD` walk to the marker file
+- [x] `moe project add <repo-url>` adds a submodule under `projects/`, detects the default branch via `git ls-remote --symref`, writes `requests/<project>/project.json`, and commits
+- [x] `moe project remove <id>` is the symmetrical inverse (refuses if the request dir has anything beyond `project.json`)
+- [ ] Extend `moe init` to also lay down `stages/`, `docs/`, `soul.md`, `agents.conf`, and a seeded `document-graph.conf`
 - [ ] Write initial `soul.md` and one or two fragments (`stages/design.md`, `docs/spec.md`)
 - [ ] Seed `document-graph.conf` with pitch, spec, architecture, implementation, test-plan, deploy-plan
 - [ ] Seed `agents.conf` with the minimal per-doc model + tools entries
-- [ ] `moe project add` adds a submodule under `projects/` and scaffolds `requests/<project>/project.json`
 
 ### Phase 1: Single-Document End-to-End
 
-- [ ] `moe request new <project> "title" [--id slug]` scaffolds `request.json` and commits it on main with the request's trailers
-- [ ] `moe work <project> <request> spec` — prompt assembly, `claude -p` invocation, streaming, commit with trailers
+- [x] `moe request new <project> "title" [--id slug]` scaffolds `request.json` and commits it on main with `MoE-Request` / `MoE-Project` trailers (slugs auto-suffix on collision; explicit `--id` is strict)
+- [x] `moe work <project> <request> <document>` mints a UUID session id per document (stored in `request.json`), runs `claude` with `--session-id` (first turn) or `--resume` (subsequent turns), injects a minimal system prompt, and commits any document changes with the full trailer block. Per-request sandbox clones under `.moe/clones/` are provisioned for projects with a submodule.
+- [ ] Flesh out `moe work` to match the full README description: `-p`/`--output-format stream-json` headless flow, `--allowedTools` per document, `--model` from `agents.conf`, guidance-fragment assembly, upstream-document context injection, editor-based turn composition, streaming display, desktop notification on long runs, `thread.jsonl` audit log
 - [ ] `moe status` reads `request.json` glob, renders with `tabwriter`
 - [ ] `moe review` filters `git log --grep="MoE-Request: <id>"` and renders each document's current content
 - [ ] Run the loop manually against a real request. Iterate on the guidance fragments.
 
 ### Phase 2: Full Request Lifecycle
 
-- [ ] `moe sign pr` — commit+push target submodule, generate derived artifacts, flip request status (all on main)
+- [x] `moe sign <project> <request> <stage>` / `moe unsign` record `MoE-Stage-Signed` / `MoE-Stage-Unsigned` commit trailers, enforce `design` as a prerequisite of `pr`, cascade unsigns to dependent stages, flip request status on `pr`, and tear down the sandbox clone on `sign pr`
+- [x] `moe push` publishes the bureaucracy (auto `-u origin HEAD` on first push)
+- [ ] Finish `moe sign pr`: commit+push the target submodule, generate derived artifacts, open a PR on the target remote
 - [ ] `moe scrap` — record rationale, flip request status (all on main)
 - [ ] `moe history` — `git log` aggregation with cost totals from commit trailers
 - [ ] Additional per-doc fragments (implementation, test-plan, deploy-plan)
