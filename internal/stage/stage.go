@@ -108,8 +108,8 @@ func LatestSign(root, requestID, name string) (sha string, when time.Time, err e
 //
 // Resolution is deterministic: iterate Names() (alphabetical) and pick the
 // first ready+unsigned candidate. Today the graph is
-// design (no prereqs) → code (requires design), so this collapses to the
-// same answer as the hand-rolled walk in cli.stageFragment. New stages
+// design (no prereqs) → code (requires design), so this collapses to
+// "design until signed, then code until signed, then nothing." New stages
 // inherit the same logic for free as long as their Requires are accurate.
 func Active(root, requestID string) (Stage, bool, error) {
 	signed := make(map[string]bool, len(all))

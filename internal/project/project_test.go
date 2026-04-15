@@ -18,6 +18,7 @@ func fixedTime() time.Time { return time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)
 // add. Using a local bare repo keeps tests hermetic — no network.
 func makeRemote(t *testing.T) string {
 	t.Helper()
+	isolateGitConfig(t)
 	work := t.TempDir()
 	run(t, work, "git", "init", "-b", "main")
 	run(t, work, "git", "config", "user.email", "test@example.com")
@@ -37,9 +38,13 @@ func makeBureaucracy(t *testing.T) string {
 	t.Helper()
 	// Submodule add spawns a child `git clone`, which only sees this via the
 	// process's global config — local repo config isn't inherited. Point
-	// GIT_CONFIG_GLOBAL at a tempfile that allows file:// clones.
+	// GIT_CONFIG_GLOBAL at a tempfile that allows file:// clones and also
+	// disables signing/hooks the host may have enabled.
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[protocol \"file\"]\n\tallow = always\n"), 0o644); err != nil {
+	body := "[protocol \"file\"]\n\tallow = always\n" +
+		"[commit]\n\tgpgsign = false\n" +
+		"[tag]\n\tgpgsign = false\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
@@ -55,6 +60,23 @@ func makeBureaucracy(t *testing.T) string {
 	run(t, root, "git", "add", ".")
 	run(t, root, "git", "commit", "-m", "init")
 	return root
+}
+
+// isolateGitConfig points git at a scratch global/system config for the
+// duration of the test so host settings (commit signing, templates, hooks)
+// don't bleed into fixture commits.
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	body := "[user]\n\temail = test@example.com\n\tname = Test\n" +
+		"[init]\n\tdefaultBranch = main\n" +
+		"[commit]\n\tgpgsign = false\n" +
+		"[tag]\n\tgpgsign = false\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 }
 
 func run(t *testing.T, dir, name string, args ...string) {

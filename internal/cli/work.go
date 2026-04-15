@@ -167,10 +167,11 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 //	soul.md                → global philosophy / quality bar
 //	stages/<stage>.md      → lifecycle-phase lens (earliest unsigned)
 //	operational core       → what specifically this invocation is doing
+//	upstream-change banner → prereq stages that moved since last turn
 //
-// Per-document fragments, overrides, and upstream-document assembly land
-// in later passes; adding one is a new `appendOptional(...)` call slotted
-// between the existing sections.
+// Per-document fragments, overrides, and upstream-document assembly are
+// expected later passes; each new source of guidance slots in as another
+// (string, error)-returning block below.
 func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
 	var sections []string
 
@@ -319,29 +320,15 @@ request is signed off.
 }
 
 // stageFragment returns the markdown guidance for the lifecycle stage the
-// request is currently in, or "" if there's nothing to inject.
-//
-// The walk is deliberately a chain of explicit checks rather than a table,
-// so each stage's applicability rule stays readable: latest-first wins,
-// and each stage occupies the window between its prerequisite signing and
-// its own signing. Stages past `code` aren't wired up yet — when one lands,
-// add a check at the top.
+// request is currently in, or "" if there's nothing to inject (all stages
+// signed, or no candidate is ready). The "which stage is active" walk
+// lives in stage.Active; this function is only the file-lookup side.
 func stageFragment(root, requestID string) (string, error) {
-	codeSigned, err := stage.IsSigned(root, requestID, "code")
-	if err != nil {
+	active, ok, err := stage.Active(root, requestID)
+	if err != nil || !ok {
 		return "", err
 	}
-	if codeSigned {
-		return "", nil
-	}
-	designSigned, err := stage.IsSigned(root, requestID, "design")
-	if err != nil {
-		return "", err
-	}
-	if designSigned {
-		return readBureaucracyFile(root, filepath.Join("stages", "code.md"))
-	}
-	return readBureaucracyFile(root, filepath.Join("stages", "design.md"))
+	return readBureaucracyFile(root, filepath.Join("stages", active.Name+".md"))
 }
 
 // readBureaucracyFile reads <root>/<relPath> and returns its contents, or
