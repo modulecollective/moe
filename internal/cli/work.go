@@ -227,10 +227,11 @@ request is signed off.
 // stageFragment returns the markdown guidance for the lifecycle stage the
 // request is currently in, or "" if there's nothing to inject.
 //
-// Only the design stage is wired up today: it applies from request open
-// until `pr` is signed. When a pr-stage (or later) fragment lands, add a
-// branch here — the mechanic is deliberately a chain of explicit checks
-// rather than a table, so each stage's applicability rule stays readable.
+// The walk is deliberately a chain of explicit checks rather than a table,
+// so each stage's applicability rule stays readable: latest-first wins,
+// and each stage occupies the window between its prerequisite signing and
+// its own signing. Stages past `pr` aren't wired up yet — when one lands,
+// add a check at the top.
 func stageFragment(root, requestID string) (string, error) {
 	prSigned, err := stage.IsSigned(root, requestID, "pr")
 	if err != nil {
@@ -238,6 +239,13 @@ func stageFragment(root, requestID string) (string, error) {
 	}
 	if prSigned {
 		return "", nil
+	}
+	designSigned, err := stage.IsSigned(root, requestID, "design")
+	if err != nil {
+		return "", err
+	}
+	if designSigned {
+		return readBureaucracyFile(root, filepath.Join("stages", "pr.md"))
 	}
 	return readBureaucracyFile(root, filepath.Join("stages", "design.md"))
 }
