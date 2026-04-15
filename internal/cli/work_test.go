@@ -147,6 +147,12 @@ func TestBuildSystemPromptSwitchesToCodeFragmentAfterDesignSigned(t *testing.T) 
 func TestBuildSystemPromptOmitsFragmentAfterCodeSigned(t *testing.T) {
 	root := newTestBureaucracy(t)
 	writeStageDesign(t, root, "design guidance body")
+	writeStageFile(t, root, "code.md", "code guidance body")
+	// Realistic terminal state: every stage signed in order. `moe sign`
+	// refuses to sign `code` without `design` first (sign.go preconditions),
+	// so exercising "code-signed-in-isolation" would test a journal state
+	// the CLI cannot produce.
+	signStage(t, root, "fix-it", "design")
 	signStage(t, root, "fix-it", "code")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
@@ -156,6 +162,9 @@ func TestBuildSystemPromptOmitsFragmentAfterCodeSigned(t *testing.T) {
 	}
 	if strings.Contains(got, "design guidance body") {
 		t.Fatalf("design fragment should drop out once code is signed:\n%s", got)
+	}
+	if strings.Contains(got, "code guidance body") {
+		t.Fatalf("code fragment should drop out once code is signed:\n%s", got)
 	}
 }
 
