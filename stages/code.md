@@ -1,8 +1,9 @@
-# Stage: pr
+# Stage: code
 
-You are at the PR stage. Design is signed; the shape is settled. The goal
-is to land a diff a maintainer would happily merge — focused, defensible,
-ready to read.
+You are at the code stage. Design is signed; the shape is settled. The
+goal is to land a diff a maintainer would happily merge — focused,
+defensible, ready to read. Signing this stage is the gate that will
+eventually push the submodule and open the PR on the target repo.
 
 ## What the diff should do
 
@@ -52,13 +53,13 @@ ready to read.
 
 ## When you're done
 
-The PR stage is ready to sign when:
+The code stage is ready to sign when:
 
 1. The diff implements the signed design with no unexplained extras.
 2. Tests pass locally and the PR body says how they were run.
 3. A draft PR title and body exist, including anything reviewers need to
    know that isn't obvious from the diff.
-4. The operator has what they need to sign `pr` — or to say
+4. The operator has what they need to sign `code` — or to say
    "not yet, because X."
 
 If you're polishing prose in the PR body past the point of clarity, you're

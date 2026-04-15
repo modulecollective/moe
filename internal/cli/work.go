@@ -230,14 +230,14 @@ request is signed off.
 // The walk is deliberately a chain of explicit checks rather than a table,
 // so each stage's applicability rule stays readable: latest-first wins,
 // and each stage occupies the window between its prerequisite signing and
-// its own signing. Stages past `pr` aren't wired up yet — when one lands,
+// its own signing. Stages past `code` aren't wired up yet — when one lands,
 // add a check at the top.
 func stageFragment(root, requestID string) (string, error) {
-	prSigned, err := stage.IsSigned(root, requestID, "pr")
+	codeSigned, err := stage.IsSigned(root, requestID, "code")
 	if err != nil {
 		return "", err
 	}
-	if prSigned {
+	if codeSigned {
 		return "", nil
 	}
 	designSigned, err := stage.IsSigned(root, requestID, "design")
@@ -245,7 +245,7 @@ func stageFragment(root, requestID string) (string, error) {
 		return "", err
 	}
 	if designSigned {
-		return readBureaucracyFile(root, filepath.Join("stages", "pr.md"))
+		return readBureaucracyFile(root, filepath.Join("stages", "code.md"))
 	}
 	return readBureaucracyFile(root, filepath.Join("stages", "design.md"))
 }
