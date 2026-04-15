@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
@@ -152,17 +153,50 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// buildSystemPrompt is the v1 context injection — just enough for Claude to
-// know which file to treat as the document, which clone to treat as the
-// target-code workspace (when the project has a submodule), and which
-// lifecycle-stage guidance applies. Upstream-document assembly, per-document
-// fragments, and soul.md layering come later.
+// buildSystemPrompt assembles the `--append-system-prompt` payload in the
+// order described in README §"Agent Context Assembly":
+//
+//	soul.md                → global philosophy / quality bar
+//	stages/<stage>.md      → lifecycle-phase lens (earliest unsigned)
+//	operational core       → what specifically this invocation is doing
+//
+// Per-document fragments, overrides, and upstream-document assembly land
+// in later passes; adding one is a new `appendOptional(...)` call slotted
+// between the existing sections.
 func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
+	var sections []string
+
+	soul, err := readBureaucracyFile(root, "soul.md")
+	if err != nil {
+		return "", err
+	}
+	if soul != "" {
+		sections = append(sections, soul)
+	}
+
+	frag, err := stageFragment(root, md.ID)
+	if err != nil {
+		return "", err
+	}
+	if frag != "" {
+		sections = append(sections, frag)
+	}
+
+	sections = append(sections, operationalCore(root, md, docID, clonePath))
+
+	return strings.Join(sections, "\n---\n\n"), nil
+}
+
+// operationalCore is the "what are you doing right now" framing: canvas
+// file, clone workspace (if any), request title. It's the one section
+// that's always present — everything else in the prompt is optional
+// guidance layered on top.
+func operationalCore(root string, md *request.Metadata, docID, clonePath string) string {
 	// Absolute path so it resolves regardless of where Claude Code's cwd
 	// lands — document-only runs sit at the bureaucracy root, code-editing
 	// runs sit inside the sandbox clone.
 	content := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
-	prompt := fmt.Sprintf(`You are collaborating with the operator on the %q document
+	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for request %q (project %q) in a Ministry of Everything bureaucracy repo.
 
 Your canvas for this document is the single file:
@@ -177,7 +211,7 @@ Request title: %s
 `, docID, md.ID, md.Project, content, md.Title)
 
 	if clonePath != "" {
-		prompt += fmt.Sprintf(`
+		out += fmt.Sprintf(`
 Your working directory is a private copy-on-write clone of the target
 project's submodule:
   %s
@@ -187,15 +221,7 @@ other concurrent activities and from the canonical submodule until the
 request is signed off.
 `, clonePath)
 	}
-
-	frag, err := stageFragment(root, md.ID)
-	if err != nil {
-		return "", err
-	}
-	if frag != "" {
-		prompt += "\n---\n\n" + frag
-	}
-	return prompt, nil
+	return out
 }
 
 // stageFragment returns the markdown guidance for the lifecycle stage the
@@ -205,9 +231,6 @@ request is signed off.
 // until `pr` is signed. When a pr-stage (or later) fragment lands, add a
 // branch here — the mechanic is deliberately a chain of explicit checks
 // rather than a table, so each stage's applicability rule stays readable.
-//
-// A missing fragment file is not an error. Guidance fragments are optional;
-// bureaucracies that haven't written one just get no fragment.
 func stageFragment(root, requestID string) (string, error) {
 	prSigned, err := stage.IsSigned(root, requestID, "pr")
 	if err != nil {
@@ -216,12 +239,20 @@ func stageFragment(root, requestID string) (string, error) {
 	if prSigned {
 		return "", nil
 	}
-	b, err := os.ReadFile(filepath.Join(root, "stages", "design.md"))
+	return readBureaucracyFile(root, filepath.Join("stages", "design.md"))
+}
+
+// readBureaucracyFile reads <root>/<relPath> and returns its contents, or
+// "" if the file doesn't exist. Used for optional guidance fragments —
+// bureaucracies that haven't written one just get no injection. Other I/O
+// errors (permissions, unreadable, etc.) are surfaced.
+func readBureaucracyFile(root, relPath string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(root, relPath))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
-		return "", fmt.Errorf("read stages/design.md: %w", err)
+		return "", fmt.Errorf("read %s: %w", relPath, err)
 	}
 	return string(b), nil
 }

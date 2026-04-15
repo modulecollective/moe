@@ -49,6 +49,13 @@ func writeStageDesign(t *testing.T, root, body string) {
 	}
 }
 
+func writeSoul(t *testing.T, root, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "soul.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // signStage records a MoE-Stage-Signed: <name> trailer for requestID, the same
 // way `moe sign` does. Used to move the request past the design stage in tests.
 func signStage(t *testing.T, root, requestID, name string) {
@@ -95,7 +102,7 @@ func TestBuildSystemPromptOmitsFragmentAfterPRSigned(t *testing.T) {
 
 func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
-	// no stages/design.md written
+	// no soul.md, no stages/design.md written
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
 	got, err := buildSystemPrompt(root, md, "spec", "")
 	if err != nil {
@@ -106,5 +113,40 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	}
 	if strings.Contains(got, "\n---\n") {
 		t.Fatalf("no fragment, no separator expected:\n%s", got)
+	}
+}
+
+func TestBuildSystemPromptInjectsSoul(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writeSoul(t, root, "# Soul\n\ndo the thing that's asked.\n")
+
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+	got, err := buildSystemPrompt(root, md, "spec", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "do the thing that's asked.") {
+		t.Fatalf("prompt missing soul content:\n%s", got)
+	}
+}
+
+func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writeSoul(t, root, "SOUL-MARKER")
+	writeStageDesign(t, root, "STAGE-MARKER")
+
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+	got, err := buildSystemPrompt(root, md, "spec", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	soulIdx := strings.Index(got, "SOUL-MARKER")
+	stageIdx := strings.Index(got, "STAGE-MARKER")
+	opIdx := strings.Index(got, "You are collaborating")
+	if soulIdx < 0 || stageIdx < 0 || opIdx < 0 {
+		t.Fatalf("missing section(s) soul=%d stage=%d op=%d in:\n%s", soulIdx, stageIdx, opIdx, got)
+	}
+	if !(soulIdx < stageIdx && stageIdx < opIdx) {
+		t.Fatalf("expected soul < stage < operational, got soul=%d stage=%d op=%d", soulIdx, stageIdx, opIdx)
 	}
 }
