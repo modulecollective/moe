@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
@@ -111,9 +112,16 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	if mutated {
 		sessionFlag = "--session-id"
 	}
+	// --add-dir <root> grants the agent native filesystem access to the
+	// bureaucracy repo even when cwd is the sandbox clone. The canvas (and,
+	// at code stage, upstream documents the banner may point at) live under
+	// root, and we want `git -C <root> diff` to work without per-call
+	// permission prompts. For document-only projects this is redundant
+	// (cwd == root) but harmless.
 	cmd := exec.Command(claude,
 		sessionFlag, doc.Session,
 		"--append-system-prompt", prompt,
+		"--add-dir", root,
 	)
 	// Run Claude from inside the sandbox clone when there is one — that's
 	// the same posture a human operator would take (cd into the target repo,
@@ -184,7 +192,93 @@ func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath strin
 
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
 
+	banner, err := upstreamChangeBanner(root, md, docID)
+	if err != nil {
+		return "", err
+	}
+	if banner != "" {
+		sections = append(sections, banner)
+	}
+
 	return strings.Join(sections, "\n---\n\n"), nil
+}
+
+// upstreamChangeBanner returns a system-prompt section listing prerequisite
+// stages that were (re-)signed after this document's most recent work turn,
+// or "" if there is nothing to surface. The banner names each prerequisite,
+// the absolute path to its content.md, and the SHA the agent last ran on,
+// so the agent can `git -C <root> diff <sha>..HEAD -- <relpath>` to see what
+// changed.
+//
+// Conditions for firing:
+//   - The request has an active stage (one whose prerequisites are all
+//     signed and whose own sign is pending). If every stage is signed, work
+//     is done; nothing to surface.
+//   - The active stage has prerequisites. design has none, so this is a
+//     no-op there.
+//   - There has been at least one prior work turn for docID. First-turn
+//     sessions get no banner — the agent will read prerequisites fresh on
+//     its own; there is no "since" to compute against.
+//   - At least one prerequisite was MoE-Stage-Signed *after* the last work
+//     turn's commit time.
+//
+// The banner is advisory. Per stages/code.md "Match the design" the
+// contract is still social — we're just making the social cue legible
+// instead of trusting the agent to notice on its own.
+func upstreamChangeBanner(root string, md *request.Metadata, docID string) (string, error) {
+	active, ok, err := stage.Active(root, md.ID)
+	if err != nil {
+		return "", err
+	}
+	if !ok || len(active.Requires) == 0 {
+		return "", nil
+	}
+
+	lastSHA, lastWhen, err := request.LatestWorkTurnSHA(root, md.ID, docID)
+	if err != nil {
+		return "", err
+	}
+	if lastSHA == "" {
+		return "", nil
+	}
+
+	type move struct {
+		stage   string
+		when    time.Time
+		relPath string
+	}
+	var moved []move
+	for _, dep := range active.Requires {
+		_, signedWhen, err := stage.LatestSign(root, md.ID, dep)
+		if err != nil {
+			return "", err
+		}
+		if signedWhen.IsZero() || !signedWhen.After(lastWhen) {
+			continue
+		}
+		moved = append(moved, move{
+			stage:   dep,
+			when:    signedWhen,
+			relPath: request.ContentPath(md.Project, md.ID, dep),
+		})
+	}
+	if len(moved) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Since your last turn on %q (bureaucracy commit %s),\n", docID, lastSHA)
+	fmt.Fprintf(&b, "the following prerequisite stage(s) for %q were re-signed and may have\n", active.Name)
+	b.WriteString("changed under you:\n\n")
+	for _, m := range moved {
+		fmt.Fprintf(&b, "- %s (signed %s)\n", m.stage, m.when.Format(time.RFC3339))
+		fmt.Fprintf(&b, "  document: %s\n", filepath.Join(root, m.relPath))
+		fmt.Fprintf(&b, "  diff:     git -C %s diff %s..HEAD -- %s\n", root, lastSHA, m.relPath)
+	}
+	b.WriteString("\nRe-read the prerequisite document(s) and reconcile your in-progress work\n")
+	b.WriteString("before continuing. If the change invalidates the approach, surface it to\n")
+	b.WriteString("the operator rather than smuggling a deviation in.\n")
+	return b.String(), nil
 }
 
 // operationalCore is the "what are you doing right now" framing: canvas

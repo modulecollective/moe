@@ -17,7 +17,9 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Stage describes one named checkpoint in a request's lifecycle.
@@ -71,35 +73,101 @@ func Dependents(name string) []string {
 // recent MoE-Stage-Signed commit is newer than its most recent
 // MoE-Stage-Unsigned commit (or no unsign exists).
 func IsSigned(root, requestID, name string) (bool, error) {
-	signedAt, err := latestTrailerTime(root, requestID, "MoE-Stage-Signed", name)
+	_, signedAt, err := latestTrailerCommit(root, requestID, "MoE-Stage-Signed", name)
 	if err != nil {
 		return false, err
 	}
-	if signedAt == "" {
+	if signedAt.IsZero() {
 		return false, nil
 	}
-	unsignedAt, err := latestTrailerTime(root, requestID, "MoE-Stage-Unsigned", name)
+	_, unsignedAt, err := latestTrailerCommit(root, requestID, "MoE-Stage-Unsigned", name)
 	if err != nil {
 		return false, err
 	}
-	return unsignedAt == "" || signedAt > unsignedAt, nil
+	return unsignedAt.IsZero() || signedAt.After(unsignedAt), nil
 }
 
-// latestTrailerTime returns the committer epoch (%ct) of the most recent
+// LatestSign returns the commit SHA and committer time of the most recent
+// MoE-Stage-Signed: <name> commit for requestID, or ("", time.Time{}, nil)
+// if no such commit exists. Used by upstream-change detection so a
+// downstream agent can diff from the last-known SHA against HEAD.
+//
+// Note: this is "latest sign" not "currently signed" — a later
+// MoE-Stage-Unsigned commit doesn't suppress this result. Callers that need
+// "currently signed" should compose with IsSigned.
+func LatestSign(root, requestID, name string) (sha string, when time.Time, err error) {
+	return latestTrailerCommit(root, requestID, "MoE-Stage-Signed", name)
+}
+
+// Active returns the stage the request is currently working in: the
+// stage that is unsigned and whose prerequisites are all signed. Returns
+// (Stage{}, false, nil) when every defined stage is signed (work is
+// finished) or when no stage is yet ready (shouldn't happen with the
+// current stage graph, but the no-progress case is reported rather than
+// guessed).
+//
+// Resolution is deterministic: iterate Names() (alphabetical) and pick the
+// first ready+unsigned candidate. Today the graph is
+// design (no prereqs) → code (requires design), so this collapses to the
+// same answer as the hand-rolled walk in cli.stageFragment. New stages
+// inherit the same logic for free as long as their Requires are accurate.
+func Active(root, requestID string) (Stage, bool, error) {
+	signed := make(map[string]bool, len(all))
+	for _, n := range Names() {
+		ok, err := IsSigned(root, requestID, n)
+		if err != nil {
+			return Stage{}, false, err
+		}
+		signed[n] = ok
+	}
+	for _, n := range Names() {
+		s := all[n]
+		if signed[n] {
+			continue
+		}
+		ready := true
+		for _, dep := range s.Requires {
+			if !signed[dep] {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			return s, true, nil
+		}
+	}
+	return Stage{}, false, nil
+}
+
+// latestTrailerCommit returns the SHA and committer time of the most recent
 // commit mentioning both MoE-Request: <requestID> and <trailer>: <value>,
-// or "" if no such commit exists.
-func latestTrailerTime(root, requestID, trailer, value string) (string, error) {
+// or ("", time.Time{}, nil) if no such commit exists. Times come from %ct
+// (unix epoch seconds); zero-time signals "not found" so callers can stay
+// in time.Time-land for comparisons.
+func latestTrailerCommit(root, requestID, trailer, value string) (sha string, when time.Time, err error) {
 	cmd := exec.Command("git",
 		"log", "-1",
 		"--all-match",
 		"--grep", fmt.Sprintf("%s: %s", trailer, value),
 		"--grep", fmt.Sprintf("MoE-Request: %s", requestID),
-		"--format=%ct",
+		"--format=%H %ct",
 	)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("stage: git log: %w", err)
+		return "", time.Time{}, fmt.Errorf("stage: git log: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", time.Time{}, nil
+	}
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) != 2 {
+		return "", time.Time{}, fmt.Errorf("stage: unexpected git log output %q", line)
+	}
+	epoch, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("stage: parse %%ct %q: %w", parts[1], err)
+	}
+	return parts[0], time.Unix(epoch, 0).UTC(), nil
 }
