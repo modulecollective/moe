@@ -167,7 +167,8 @@ Known stages:
 
 - `design` — design is settled; implementation can start
 - `code` — code is done; signing it flips request status to `approved` (requires `design`; future side-effects: push the submodule, open a PR on the target repo)
-- `review`, `test`, `retro`, `deploy` — reserved names; signable today (trailer only), behavior to be wired in later
+
+Additional stages (review, test, deploy, retro, …) will be added when a real use case forces the question. Stage names live forever in commit trailers, so reserving labels before their semantics are settled is a cost, not a hedge.
 
 **Request progress is driven by the operator, not a rigid phase sequence.** Small bug fixes might sign nothing but `code`. Larger work signs `design` first. The stage vocabulary is a closed set so history stays comparable across requests; additions are a deliberate change, not a config knob.
 
@@ -245,7 +246,7 @@ main (the only branch)
   └── commit: "sign: code"                        (MoE-Stage-Signed: code, status→approved)
 ```
 
-Stage sign-offs (`design`, `code`, `review`, `test`, `retro`, `deploy`) are the coordination signals; they live only in the git log as `MoE-Stage-Signed` / `MoE-Stage-Unsigned` trailers, flipped by `moe sign` / `moe unsign`. `moe sign code` is the hard gate that will eventually trigger the submodule push and derived-artifact generation.
+Stage sign-offs (`design`, `code`) are the coordination signals; they live only in the git log as `MoE-Stage-Signed` / `MoE-Stage-Unsigned` trailers, flipped by `moe sign` / `moe unsign`. `moe sign code` is the hard gate that will eventually trigger the submodule push and derived-artifact generation.
 
 **The ripple is operator-driven, not background.** Agents only act when `moe work` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
 
@@ -782,7 +783,7 @@ moe request new <project> "title" [--id slug]      # open a new request, scaffol
 moe status <project> <request>              # per-request view: document graph, staleness, last turns
 moe work <project> <request> <document>     # the main command — work on a document
 moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
-moe sign <project> <request> <stage>        # sign a lifecycle stage (design, code, review, test, retro, deploy)
+moe sign <project> <request> <stage>        # sign a lifecycle stage (design, code)
 moe unsign <project> <request> <stage>      # reverse moe sign (cascades to dependent stages)
 moe review <project> <request>              # synthesize per-request view (filtered log + doc snapshots)
 moe scrap <project> <request> "reason"      # close without merging, record rationale
