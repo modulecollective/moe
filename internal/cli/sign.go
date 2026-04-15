@@ -16,7 +16,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "sign",
-		Summary: "sign off on a request stage (design, code, review, test, retro, deploy)",
+		Summary: "sign off on a request stage (design, code)",
 		Run:     runSign,
 	})
 	Register(&Command{
