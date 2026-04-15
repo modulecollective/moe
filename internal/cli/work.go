@@ -114,7 +114,16 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		sessionFlag, doc.Session,
 		"--append-system-prompt", prompt,
 	)
-	cmd.Dir = root
+	// Run Claude from inside the sandbox clone when there is one — that's
+	// the same posture a human operator would take (cd into the target repo,
+	// open Claude Code there), and it lets Claude Code's own CLAUDE.md
+	// discovery pick up whatever guidance the target repo ships. For
+	// document-only projects, fall back to the bureaucracy root.
+	if clonePath != "" {
+		cmd.Dir = clonePath
+	} else {
+		cmd.Dir = root
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -149,7 +158,10 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 // lifecycle-stage guidance applies. Upstream-document assembly, per-document
 // fragments, and soul.md layering come later.
 func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
-	content := request.ContentPath(md.Project, md.ID, docID)
+	// Absolute path so it resolves regardless of where Claude Code's cwd
+	// lands — document-only runs sit at the bureaucracy root, code-editing
+	// runs sit inside the sandbox clone.
+	content := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
 	prompt := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for request %q (project %q) in a Ministry of Everything bureaucracy repo.
 
@@ -166,13 +178,14 @@ Request title: %s
 
 	if clonePath != "" {
 		prompt += fmt.Sprintf(`
-For any work that touches the target project's code, the workspace is a
-private copy-on-write clone of the submodule at:
+Your working directory is a private copy-on-write clone of the target
+project's submodule:
   %s
-Read and edit files there, not under projects/%s/. The clone is yours for
-the lifetime of this request — your edits are isolated from other concurrent
-activities and from the canonical submodule until the request is signed off.
-`, clonePath, md.Project)
+That's your code workspace — read and edit files there. The clone is
+yours for the lifetime of this request; your edits are isolated from
+other concurrent activities and from the canonical submodule until the
+request is signed off.
+`, clonePath)
 	}
 
 	frag, err := stageFragment(root, md.ID)
