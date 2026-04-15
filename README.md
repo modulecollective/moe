@@ -8,7 +8,7 @@ Module Collective LLC · April 2026
 
 ## Vision
 
-The Ministry of Everything is a CLI-first agent harness where a human operator collaborates with AI agents through threaded conversations attached to living documents. It manages the full lifecycle of products and projects — from ideation through design, implementation, deployment, and operations — through a document graph that ripples changes between interconnected artifacts.
+The Ministry of Everything is a CLI-first agent harness where a human operator collaborates with AI agents through threaded conversations attached to living documents. It manages the full lifecycle of products and projects — from ideation through design, implementation, deployment, and operations — with a small fixed set of lifecycle stages that ripple signed-upstream changes to the agents working downstream.
 
 The core insight: **the document and the conversation about the document are the same thing.** The spec *is* the conversation about the spec. The architecture *is* the threaded discussion that produced it. Documents compress conversations into clean artifacts that become context for downstream work.
 
@@ -22,13 +22,13 @@ The Ministry is designed for a single operator managing multiple products with a
 2. **The repo is the source of truth.** All state — documents, decisions, conversations, progress — lives in git. Nothing lives in Slack, Google Docs, or people's heads. The bureaucracy repo is the "back office" (workflows, guidance fragments, run history). Target project repos stay clean. The `moe` CLI lives in its own repo — tool and state are separate so the CLI can be open-sourced without leaking private bureaucracy contents.
 3. **Agents are participants, not tools.** Agents join conversations and contribute to documents. Guidance for how they behave lives as plain markdown in the bureaucracy repo (global `soul.md` plus per-stage and per-document fragments assembled at invocation time) — no role taxonomy, no handbook hierarchy.
 4. **Requests terminate, products persist.** Units of work (requests) have a lifecycle and end. Products are the long-lived entities that accumulate completed work.
-5. **Loose recipes, deterministic mechanics.** The document graph defines known document types and typical relationships as guidance. The operator assembles whatever subset fits the situation. Within a request, staleness propagation and upstream-context assembly are deterministic — given the graph and the events, the state is always derivable.
+5. **Loose recipes, deterministic mechanics.** Stages are a small fixed DAG (`design` → `code` today); documents are whatever slugs the operator decides a request needs. Within a request, upstream-change detection is deterministic — given the signed-stage events and the per-document work turns, what moved since a downstream agent last looked is always derivable from the log.
 6. **Model-agnostic.** The harness works with Claude Code, Ollama/Qwen, Codex, or any LLM backend. A small config routes invocations to the right model, keyed by document type or stage. The harness is the moat, not the model.
 7. **Minimize entropy.** Every agent mistake becomes a guidance-fragment update. The system improves every time you use it.
 8. **One repo, one history, one branch.** All request state and run metadata live on the bureaucracy repo's `main`. There are no per-request branches — the bureaucracy is a journal, not a code repo. Per-request scoping and lifecycle state come from commit trailers (`MoE-Request`, `MoE-Document`, `MoE-Session`, `MoE-Stage-Signed`, `MoE-Stage-Unsigned`); a request's history is `git log --grep="MoE-Request: <id>"` and its stage state is derived from that log. Code branches live where they belong: inside each target submodule.
 9. **Target repos are independent.** No MoE coupling in target repos. Works with any repo — open source forks, client projects, personal code. Target projects are registered as git submodules under `projects/`, but only one is checked out at a time during a session.
 10. **Many projects registered, a handful actively worked.** Submodules are cheap to register, so the ceiling on *registered* projects is high. The ceiling on *concurrently active* projects is the operator's review bandwidth — practically ~10-30 — because every request ultimately cashes out in a human reading a diff. MoE helps manage the fan-out, it does not remove it.
-11. **Stdlib only, where practical.** The `moe` CLI uses Go stdlib plus `git` and `claude` on PATH. No YAML parser, no CLI framework, no DAG engine, no graph library, no web server dependencies. Three stdlib-native config formats match three audiences: JSON for machine state, INI for flat human config, `text/scanner` blocks for nested human config. Markdown for guidance. Humans never see JSON.
+11. **Stdlib only, where practical.** The `moe` CLI uses Go stdlib plus `git` and `claude` on PATH. No YAML parser, no CLI framework, no DAG engine, no graph library, no web server dependencies. Two stdlib-native config formats match two audiences: JSON for machine state, INI for flat human config. Markdown for guidance. Humans never see JSON.
 
 ### Direction
 
@@ -46,11 +46,10 @@ bureaucracy/                       # private state repo, cloned alongside the mo
 ├── soul.md                        # Global agent guidance
 ├── stages/                        # Per-stage markdown guidance (design.md, code.md, …)
 ├── docs/                          # Per-document markdown guidance (spec.md, architecture.md, …)
-├── document-graph.conf            # Document type library (block format)
 ├── projects/                      # Git submodules pointing at target repos
 │   ├── telomere/                  # → github.com/modulecollective/telomere
 │   └── next-idea/                 # → github.com/modulecollective/next-idea
-├── requests/                      # Request state, document graph artifacts
+├── requests/                      # Request state, per-project documents, run history
 │   ├── telomere/
 │   │   ├── project.json           # Project metadata
 │   │   ├── overrides/             # Project-level guidance overrides (optional)
@@ -78,7 +77,7 @@ Upgrading `moe` is a `go install`; the bureaucracy is untouched. Matches princip
 
 ### The Bureaucracy Repo
 
-The bureaucracy repo holds guidance fragments, the document graph definition, request state, and run history across all projects. There is one unified history — one set of request IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
+The bureaucracy repo holds guidance fragments, request state, and run history across all projects. There is one unified history — one set of request IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
 
 ### Project (Target Repo)
 
@@ -124,16 +123,7 @@ During a session, `moe work` runs `git submodule update --init projects/$target`
 
 **Project-level concerns (stored in the bureaucracy repo under `requests/<project>/`):**
 
-Most project-level artifacts are **persistent documents** in the document graph — they're updated when requests merge. See **The Document Graph** section for the full definition.
-
-- **Changelog**: Persistent document, accumulated from request release notes.
-- **Decision Log**: Persistent document, accumulated from all requests including scrapped ones.
-- **API Reference**: Persistent document, updated as API surface changes.
-- **User Guide**: Persistent document, updated as features ship.
-- **Architecture Overview**: Persistent document, kept in sync as design evolves.
-- **Dependency Manifest**: Persistent structured data (JSON), queryable across products.
-- **Ops Runbook**: Persistent document, updated as infrastructure changes.
-- **Backlog**: The one manually maintained product-level artifact. Lightweight request ideas — a title and a paragraph, not a full spec.
+For v1 the only project-level file is `project.json`. A human-maintained `backlog` doc (request ideas, title + paragraph each) is a natural next addition. Longer-lived artifacts — changelog, decision log, architecture overview, API reference, ops runbook — are deferred; they'd accumulate from completed requests once `moe sign code` grows side-effects beyond the status flip.
 
 ### Request
 
@@ -172,16 +162,7 @@ Additional stages (review, test, deploy, retro, …) will be added when a real u
 
 **Request progress is driven by the operator, not a rigid phase sequence.** Small bug fixes might sign nothing but `code`. Larger work signs `design` first. The stage vocabulary is a closed set so history stays comparable across requests; additions are a deliberate change, not a config knob.
 
-The document graph within a request defines the natural ordering:
-
-| Document | Upstream Dependencies |
-|----------|----------------------|
-| Spec | (none — origin) |
-| Architecture | Spec |
-| Implementation | Architecture, Spec |
-| Test Plan | Spec, Implementation |
-| Deploy Plan | Implementation |
-| (Ancillary) | (configurable) |
+Within a request, documents often have a natural ordering — a spec before an architecture before an implementation plan — but that's operator judgment, not a typed graph. Document slugs are free-form strings passed to `moe work`; the only structure MoE enforces is the stage DAG (`design` → `code`).
 
 Phase transitions are **explicit but lightweight** — they happen when the operator runs `moe sign <stage>`. Stages are checkpoints, not a state machine layered over every document.
 
@@ -190,16 +171,16 @@ Phase transitions are **explicit but lightweight** — they happen when the oper
 When `moe sign <project> <request> code` runs:
 - Precondition: `design` must already be signed. The command refuses otherwise.
 - The request's status flips to `approved` in `request.json` and the change is committed on main with `MoE-Stage-Signed: code` in the trailers; history stays browsable via `git log --grep="MoE-Request: <id>"`
-- Future behavior (not yet implemented): push the target submodule, open a PR, generate derived artifacts, update product-level persistent documents. Those will become side-effects of `moe sign code` — a single atomic gate the operator crosses once per request.
+- Future behavior (not yet implemented): push the target submodule, open a PR on the target remote. These will become side-effects of `moe sign code` — a single atomic gate the operator crosses once per request.
 
-When `moe scrap <request> "reason"` runs:
-- Decision rationale is recorded as a derived artifact
+When `moe scrap <request> "reason"` runs (future):
+- The reason is recorded in a `MoE-Scrapped` commit trailer on main
 - Request remains in the product's history as institutional memory
 - No code or config changes are applied
 
 ### Derived Artifacts
 
-When a request is approved (via `moe sign code`), downstream nodes in the document graph will be triggered — both request-level derived documents and product-level persistent documents. See **The Document Graph** section under Document for the full picture. Derivation is explicit: the sign-code side-effect will walk the graph, identify which derived/persistent nodes have their dependencies satisfied, and generate each in turn (using the guidance in `docs/<derived-doc>.md`). Nothing runs automatically in the background. (Not yet implemented — `moe sign code` today only flips request status and records the trailer.)
+Deferred. `moe sign code` today only flips the request status and records the trailer. Generating release notes, decision summaries, or updating long-lived project docs from completed requests is a future phase — when it arrives, it'll run as additional commits on main from inside the `sign code` command, not as a background worker.
 
 ### Document
 
@@ -252,7 +233,7 @@ Stage sign-offs (`design`, `code`) are the coordination signals; they live only 
 
 - **In progress**: The operator is invoking `moe work …`. Each turn appends a trailer-tagged commit to main.
 - **Design signed**: `moe sign <proj> <req> design` records the checkpoint. Implementation work can start in earnest. `moe review` is the per-request synthesized view.
-- **Approved**: `moe sign <proj> <req> code` flips the request status and (eventually) pushes the submodule, generates derived artifacts — all as further commits on main.
+- **Approved**: `moe sign <proj> <req> code` flips the request status and (eventually) pushes the submodule, opens a PR — all as further commits on main.
 
 Human review is required by default at every `moe work` turn and before each `moe sign` gate. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the request needs, then crossing each stage gate up to `<stage>` without pausing for input. The operator picks the stage; `--through code` is the common case, but `--through deploy` is valid too if you actually want to try it. No stage is special-cased — the control is the `--through` argument, not a hardcoded ceiling. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `moe unsign` and `git revert` unwind cleanly.
 
@@ -267,289 +248,50 @@ Note on vocabulary: this MoE-level "yolo" (multi-stage autonomy above the docume
 5. The implementation session flags a concern about the architecture — you carry it back into `moe work … architecture` with "the implementation session says the interface needs pagination, reconsider". Two more turns, two more trailer-tagged commits.
 6. Everything settles. `moe review telomere add-batch-support` — you read the request's commits and current document state.
 7. `moe sign telomere add-batch-support design` — you cross the design gate.
-8. `moe sign telomere add-batch-support code` — request status flips; (future) submodule code is pushed, derived artifacts generate. Done.
+8. `moe sign telomere add-batch-support code` — request status flips; (future) submodule code is pushed, a PR is opened. Done.
 
 For well-scoped requests with good guidance files, this converges quickly. You start a conversation, the agents ripple through the documents you drive them through, and you come back to a complete package. One conversation, one review, one sign-code.
 
 Recovery and rewriting are also branchless. Rollback is `git revert <sha>`. Per-request history is `git log --grep`. Rewinding a stuck conversation is `git reset --soft` — the same regardless of which request you're working on.
 
-**Document types** are defined in the **document graph** (see below) — a workspace-level library of known document types, their typical relationships, and their agents. This is a parts bin, not a rigid structure. The operator assembles whatever subset and wiring fits each request.
-
-**Ancillary documents** can be added to any request for cross-cutting concerns. They participate in the request's ripple graph like any other document.
+**Document slugs are free-form.** `spec`, `architecture`, `implementation`, `security-review`, `migration-plan` — whatever fits. MoE doesn't maintain a typed library; the operator picks a slug, `moe work` creates the directory on first use, and per-doc guidance in `docs/<slug>.md` (if present) gets concatenated into the prompt. Conventionally each **stage** has a canonical document sharing its name — `design`'s work lives in a `design` document, `code`'s in a `code` document — because that's what `upstreamChangeBanner` uses to point downstream agents at what moved.
 
 Each document is just a directory on disk — `documents/<name>/content.md` — and an entry in the parent `request.json` carrying the Claude Code session id. The document's "state" is its content and its commit history; there is no sidecar status file.
 
 **Ripple mechanism:**
 
-When a document is updated, `moe status` reports all transitive downstream documents as `stale`. Staleness is derived from the graph + the request's filtered commit log (`git log --grep="MoE-Request: <id>"`) — nothing is mutated in the background. The operator decides when to reconcile:
+Ripple is stage-scoped, not document-scoped. When a prerequisite **stage** is re-signed after a downstream document's last work turn, the next `moe work` on that document gets an upstream-change banner in its system prompt: the prereq stage name, the path to its canonical document, the bureaucracy SHA the agent last ran on, and the exact `git diff` command to see what moved. The banner is advisory — the contract with the agent is still social, but the social cue is legible instead of implicit.
 
-```
-Spec updated (v3: added batch ops)
-  → Architecture [STALE: spec changed, revise next]
-      → Implementation Plan [implicitly stale, waiting on architecture]
-      → Test Plan [STALE: spec added acceptance criteria]
-```
+Mechanics:
 
-The operator controls the pace. You can reconcile downstream docs immediately (`moe work …`), let them sit stale while you focus on something else, or decide a particular downstream doesn't need to be touched.
+- Detection is deterministic: compare each prereq stage's most recent `MoE-Stage-Signed` commit time against the last `work:` commit for this document (both filtered by `MoE-Request: <id>`). Nothing is mutated in the background.
+- First-turn sessions get no banner — there's no "since" to compute against.
+- If every stage is signed, work is done; nothing to surface.
+- `design` has no prerequisites, so design-stage documents never see a banner. Downstream stages (just `code` today) see it when `design` has been re-signed since their last turn.
+
+The operator controls the pace. A re-signed `design` doesn't force the `code` document to pick it up immediately; the banner just fires on the next turn, whenever that happens.
 
 **Cross-document agent collaboration:**
 
 A downstream agent reviewing an upstream change can flag concerns, which the operator carries back into the upstream document's conversation. For example: while working on the architecture, Claude reads a spec change and says "A batch size of 10,000 will require a completely different storage architecture — can we cap at 1,000?" — you copy that pushback into the spec thread (`moe work telomere add-batch spec`) with "the architecture session flagged …", Claude responds on the spec, and you review the result. The operator is the messenger; the sessions don't talk to each other directly.
 
-This turns the document graph into a genuine collaborative workspace rather than a one-way waterfall. Upstream docs get better because downstream agents pressure-test them — the same way a good implementation engineer pushes back on a design that won't hold up. Your role as operator is to arbitrate and mediate, which you'd do anyway.
+This turns the stages into a genuine collaborative workspace rather than a one-way waterfall. Upstream docs get better because downstream agents pressure-test them — the same way a good implementation engineer pushes back on a design that won't hold up. Your role as operator is to arbitrate and mediate, which you'd do anyway.
 
 **Ripple summary view:**
 
-`moe review` synthesizes the per-request view by filtering the main-branch log on the request's trailer:
+`moe review` (planned) synthesizes the per-request view by filtering the main-branch log on the request's trailer:
 
-- The request's commits in order, grouped by document (spec changes, architecture changes, implementation changes, etc.)
-- Current `content.md` of each document at HEAD
-- Unresolved staleness: "architecture has been touched since the test plan was signed"
+- The request's commits in order, grouped by document.
+- Current `content.md` of each document at HEAD.
+- Any stages where the most recent `MoE-Stage-Signed` commit post-dates a downstream document's last turn — i.e., work the banner will fire on next time that document is opened.
 
-This is the primary review surface. One synthesized view, organized so you can see the coherent picture across all documents. When it looks good, `moe sign code`.
+This is the intended primary review surface. One synthesized view, organized so you can see the coherent picture across all documents. When it looks good, `moe sign code`.
 
-**The Document Graph:**
+**What isn't here:**
 
-The workspace defines a **document graph** — a library of known document types, their typical relationships, and their behavior. This is **guidance, not a rulebook**. It represents institutional knowledge about what good process looks like — the forms the Ministry knows how to handle.
+MoE does not maintain a typed document graph — no `document-graph.conf`, no node-type taxonomy (`conversational`/`derived`/`persistent`), no `depends_on` edges between documents. The only typed graph in the system is the stage DAG in `internal/stage/stage.go` (`design` → `code`). Everything else — which documents a request should have, how they relate, which ones imply others — is operator judgment at request-open time, guided by conventions in `soul.md` and `docs/<slug>.md` fragments rather than by a parsed schema.
 
-It spans three scopes:
-
-1. **Request documents** (conversational): You chat with agents to produce them. Spec, Architecture, Implementation, etc. They live on `main` like everything else; the request's trailers scope them to the request.
-2. **Request-level derived documents** (auto-generated at approval): Structured data and summaries extracted from the request's work. Generated by `moe sign code`, committed to the request.
-3. **Product-level persistent documents** (long-lived): API docs, user guides, architecture overview, changelog. These live at the product level and get incrementally updated when requests are approved. They outlive any individual request.
-
-All three types are nodes in the same graph with the same dependency mechanics. The only differences are scope, lifecycle, and whether they're conversational or derived.
-
-The graph is stored in `document-graph.conf` — a block format parsed by Go's `text/scanner`:
-
-```
-# document-graph.conf — the parts bin
-#
-# Node types:
-#   conversational - human chats with agent to produce content
-#   derived        - auto-generated at approval from upstream nodes
-#   persistent     - lives at product level, incrementally updated across requests
-#
-# For conversational docs, depends_on is GUIDANCE for the operator — the
-# operator assembles whatever graph fits the situation. For derived/persistent
-# docs, depends_on is mechanical — these trigger at approval based on what
-# the request produced.
-
-# === Request documents (conversational) ===
-
-pitch {
-    type          conversational
-    scope         request
-    description   "One-pager. What is this, why does it matter, who is it for."
-}
-
-spec {
-    type          conversational
-    scope         request
-    depends_on    pitch
-    description   "Requirements, acceptance criteria, constraints."
-}
-
-architecture {
-    type          conversational
-    scope         request
-    depends_on    spec
-    description   "System design, interfaces, tradeoffs, ADRs."
-}
-
-implementation {
-    type          conversational
-    scope         request
-    depends_on    architecture, spec
-    description   "Task breakdown, code, tests, CI config."
-}
-
-test-plan {
-    type          conversational
-    scope         request
-    depends_on    spec, implementation
-    description   "Test strategy, cases, coverage."
-}
-
-deploy-plan {
-    type          conversational
-    scope         request
-    depends_on    implementation
-    description   "Deploy steps, migrations, rollback."
-}
-
-security-review {
-    type          conversational
-    scope         request
-    depends_on    architecture, spec
-    description   "Threat model, attack surface, mitigations."
-}
-
-migration-plan {
-    type          conversational
-    scope         request
-    depends_on    architecture
-    description   "Migration steps, data strategy, rollback."
-}
-
-cost-analysis {
-    type          conversational
-    scope         request
-    depends_on    spec
-    description   "Infrastructure costs, API costs, ROI."
-}
-
-# === Request-level derived documents (generated at moe sign code) ===
-# Triggered when ANY dependency is present. Generation handles partial context gracefully.
-
-release-notes {
-    type          derived
-    depends_on    spec, implementation
-    format        markdown
-}
-
-decisions {
-    type          derived
-    depends_on    spec, architecture, implementation
-    format        json
-}
-
-references {
-    type          derived
-    depends_on    spec, architecture
-    format        json
-}
-
-dependencies {
-    type          derived
-    depends_on    implementation
-    format        json
-}
-
-api-changes {
-    type          derived
-    depends_on    implementation, spec
-    format        json
-}
-
-# === Product-level persistent documents (updated at moe sign code) ===
-
-product-changelog {
-    type          persistent
-    depends_on    release-notes
-    format        markdown
-}
-
-product-decision-log {
-    type          persistent
-    depends_on    decisions
-    format        json
-}
-
-product-api-docs {
-    type          persistent
-    depends_on    api-changes, spec
-    format        markdown
-}
-
-product-user-guide {
-    type          persistent
-    depends_on    spec, release-notes
-    format        markdown
-}
-
-product-architecture-overview {
-    type          persistent
-    depends_on    architecture
-    format        markdown
-}
-
-product-dependency-manifest {
-    type          persistent
-    depends_on    dependencies
-    format        json
-}
-
-ops-runbook {
-    type          persistent
-    depends_on    deploy-plan
-    format        markdown
-}
-```
-
-This is the parts bin plus the mechanical layer. For each request, the operator selects conversational nodes and wires them. When `moe sign code` runs, derived nodes generate and persistent product-level nodes are incrementally updated. The mechanical parts (derived, persistent) trigger deterministically. The creative parts (conversational) are assembled by judgment.
-
-**Entry points — a request can start from anything:** A pitch, a bug report, a customer request, a screenshot, a code snippet, or nothing at all. The operator looks at the input and picks the right set of documents.
-
-**The Clerk (operator role):**
-
-The Clerk is the role that decides what a request needs. **Initially, this is the human operator.** When you start a request with `moe request new <project> "title" [--id slug]`, you read `document-graph.conf` for guidance, look at your input, and make an engineering judgment call about what documents this request needs. Common shapes:
-
-- "Add batch support to the timeout API" → Pitch → Spec → Architecture → Implementation → Test Plan → Deploy Plan
-- "Fix the health check timeout bug" → Implementation → Test Plan (no spec or architecture needed)
-- "I just want to think through a storage architecture" → Architecture (single doc, no dependencies)
-- "Explore three competing approaches to caching" → three Architecture docs, no dependencies between them
-- "I have an idea for a new caching layer" → Pitch (just capture it)
-
-Templates can be saved as named presets for common shapes, but they're just `moe new` flags that pre-populate the documents list — not a separate system. A future evolution automates the Clerk as an LLM agent that reads the input and proposes the document set. For v1, the human is the Clerk.
-
-Derived and persistent documents are triggered based on which conversational documents the request produced. If the request has an implementation document, the dependency manifest gets generated. If the request has a spec and implementation, the API docs get updated. All of this runs at `moe sign code` time.
-
-**Two layers — flexible planning, deterministic mechanics.** The operator decides what documents a request needs (flexible, informed by the graph but not bound by it). Once the documents exist, staleness propagation and upstream-context assembly are deterministic.
-
-**`depends_on` wears two hats, and the boundary matters.** On conversational nodes in `document-graph.conf`, `depends_on` is *guidance for the Clerk* selecting a doc set for a new request — "if you pick a spec, you probably want an architecture downstream." Once the operator commits to a doc set, those same edges become *mechanical* within the request: staleness BFS and upstream-context DFS both walk them. On derived/persistent nodes, `depends_on` is always mechanical — it determines which derivation runs fire at `moe sign code`. Rule of thumb: graph-level edges are guidance for *future* requests; within a live request the graph is concrete.
-
-**Structured data:** Derived documents can be prose (markdown) or structured (JSON). Over time, product-level persistent documents accumulate structured data across all requests — "which products depend on this library?" becomes a query across `product-dependency-manifest` files. The knowledge graph emerges from shipping requests.
-
-**Index files:**
-
-Agents and tools need to understand workspace state without parsing every file in the tree. Index files are committed JSON files that provide a pre-computed view of the workspace — the "table of contents" — an agent or CLI reads one file to know what exists, what's active, and where to look deeper.
-
-Two levels:
-
-1. **`index.json`** (workspace root) — all projects, their statuses, and counts of in-progress/approved/scrapped requests per project. This is what `moe status` reads to summarize the landscape.
-
-2. **`requests/<project>/index.json`** (per-project) — all requests for this project with their current status, documents in each request's graph, and which persistent documents have been updated recently.
-
-```json
-// requests/telomere/index.json
-{
-  "project": "telomere",
-  "status": "live",
-  "active_requests": [
-    {
-      "id": "add-batch-support",
-      "status": "in_progress",
-      "documents": ["spec", "architecture", "implementation", "security-review"],
-      "current_document": "implementation"
-    },
-    {
-      "id": "fix-timeout-bug",
-      "status": "in_progress",
-      "documents": ["implementation"],
-      "current_document": "implementation"
-    }
-  ],
-  "approved_requests": 12,
-  "scrapped_requests": 1,
-  "persistent_docs": {
-    "changelog": { "updated": "2026-03-01" },
-    "api_reference": { "updated": "2026-02-28" },
-    "architecture_overview": { "updated": "2026-02-15" },
-    "dependency_manifest": { "updated": "2026-03-01" }
-  }
-}
-```
-
-Index files are maintained by `moe` — updated on every request state change (creation, approval, scrap). They are deterministically derivable by globbing `requests/*/runs/*/request.json`, so `moe reindex` rebuilds them from scratch if they drift. Because `moe` is the only writer under normal operation, they stay in sync.
-
-The key constraint: **no binary databases, no SQLite, no caches that live outside git.** Index files are plain text, committed, diffable, and version-controlled like everything else. An agent or human can `cat index.json` and know the state of the world. Git blame shows who changed what and when. This is consistent with the "repo is the source of truth" principle — if it's not in git, it doesn't exist.
-
-**Future: knowledge graph as text files.** A future evolution adds explicit knowledge graph files (`knowledge/entities.json`, `knowledge/relationships.json`) — committed JSON tracking semantic relationships across documents and products. Enables content lineage tracing and cross-product queries. Same rules as index files: plain text, committed, diffable, rebuildable.
-
-**Growth:**
-
-The document graph evolves. You start simple and grow it as your practice matures. Add "Performance Analysis" as a conversational node when you find yourself needing it. Add "License Audit" as a derived node when you want automated compliance checks. Products can have graph overrides that add domain-specific document types. The graph is versioned in git like everything else.
+This is a deliberate shrink. Earlier drafts speculated a parts bin of 15+ node types with dependency edges, derived artifacts generated at approval, and product-level persistent documents updated on every sign. None of it was built, and every instance I could imagine was better served by the operator writing whatever slug they wanted and the agent reading whatever upstream document they named. When a real need for typed dependencies between documents shows up, it can come back; until then it's speculative generality the `soul.md` warns against.
 
 ### Thread
 
@@ -780,7 +522,7 @@ moe project add <repo-url>                  # register a target repo as submodul
 moe project remove <id>                     # unregister a project (refuses if the request dir has other content)
 moe project list                            # registered submodules
 moe request new <project> "title" [--id slug]      # open a new request, scaffold its dir
-moe status <project> <request>              # per-request view: document graph, staleness, last turns
+moe status <project> <request>              # per-request view: stages, documents, last turns
 moe work <project> <request> <document>     # the main command — work on a document
 moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
 moe sign <project> <request> <stage>        # sign a lifecycle stage (design, code)
@@ -791,7 +533,6 @@ moe flag <project> <request> ["note"]       # mark as needing attention on the d
 moe unflag <project> <request>              # clear the flag
 moe history [project]                       # past requests (git log + cost aggregates)
 moe push                                    # git push the bureaucracy repo (sets upstream on first push)
-moe reindex                                 # rebuild index.json files from request.json glob
 moe version                                 # print moe version / OS / arch / Go runtime
 moe help                                    # print usage
 ```
@@ -897,7 +638,7 @@ main (the only branch — bureaucracy is a journal, not a code repo)
 ```
 
 - One branch (`main`). Per-request scoping comes from commit trailers, not branches.
-- `moe sign code` runs the submodule push, generates derived artifacts, and flips the request status — all as further commits on main. `moe scrap` records rationale on main.
+- `moe sign code` runs the submodule push and flips the request status — all as further commits on main. `moe scrap` records rationale on main.
 - `moe review` is `git log --grep="MoE-Request: <id>"` plus a render of each document's current state.
 - Rewinding is `git reset --soft`; reverting is `git revert <sha>`.
 - No custom checkpoint format. Git is the checkpoint.
@@ -919,9 +660,9 @@ Document-only sessions (spec, architecture, test-plan, deploy-plan) don't touch 
 
 - `moe work` runs `git submodule update --init projects/$target` before invoking Claude Code (only when the session will touch code).
 - Code changes inside `projects/$target/` result in submodule pointer updates committed to main with the request's trailers.
-- `moe sign code` does: commit inside submodule → push to target remote → update pointer in bureaucracy repo → generate derived/persistent docs → flip request status → optionally open a PR on the target repo. All bureaucracy-side commits land on main.
+- `moe sign code` does: commit inside submodule → push to target remote → update pointer in bureaucracy repo → flip request status → optionally open a PR on the target repo. All bureaucracy-side commits land on main. (Today only the status flip is implemented; the rest is Phase 5.)
 
-**`moe sign code` is resumable.** The cascade can invoke 5-10+ derivation steps (once per derived doc, once per affected persistent product doc). Each step writes its output as a separate commit with a `MoE-Approve-Step: <node-id>` trailer alongside the request's normal trailers. If a step fails (network blip, generation error, push rejected), `moe sign code` exits with a clear error. `moe sign code --resume` filters main's log for the request's approve steps, skips ones already produced, and continues from the first missing step. The status flip happens last so partial-approve state is always "request still in_progress; some derived commits on main." Safe to re-run, safe to abandon.
+**`moe sign code` is resumable.** Once the submodule push and PR step exist, each substep (commit-in-submodule, push, bureaucracy pointer update, PR open, status flip) writes a separate commit with a `MoE-Approve-Step: <substep>` trailer. If a step fails (network blip, push rejected), `moe sign code` exits with a clear error; `moe sign code --resume` filters main's log for the request's approve steps, skips ones already produced, and continues from the first missing step. The status flip happens last so partial-approve state is always "request still in_progress; some side-effects landed." Safe to re-run, safe to abandon.
 
 ### Request State
 
@@ -939,11 +680,11 @@ Nothing runs in the background in v1 — agents act only when `moe work` is invo
 
 ```
 $ moe dash                            # what needs me today
-$ moe status telomere add-batch       # drill in: per-request graph + last turns
+$ moe status telomere add-batch       # drill in: per-request stages, docs, last turns
 $ moe work telomere add-batch spec    # compose a turn in $EDITOR, stream response
 $ moe show telomere add-batch spec    # re-read current state without invoking an agent
 $ moe review telomere add-batch       # full request diff before approve
-$ moe sign code telomere add-batch      # merge, derive, push
+$ moe sign code telomere add-batch      # flip status (future: push submodule, open PR)
 ```
 
 Most sessions are: `moe dash` → pick one → `moe work …` → read → repeat or move on. For a focused triage pass through everything demanding attention, skip the browsing step and use `moe next`.
@@ -973,7 +714,7 @@ RECENT (last 7 days)
 47 projects registered · 4 active · [moe project list] to browse
 ```
 
-Implementation: `tabwriter` + ANSI color. Reads the workspace and per-project `index.json`, applies the attention filter, sorts. ~150 lines.
+Implementation: `tabwriter` + ANSI color. Globs `requests/*/runs/*/request.json`, applies the attention filter, sorts. ~150 lines.
 
 ### The attention filter
 
@@ -1023,33 +764,29 @@ The skip list is in-memory only — it resets when you quit. Quitting mid-sessio
 
 ### Per-request view (`moe status <project> <request>`)
 
-Graph-aware, not a flat list:
+Stage-aware, not a flat list:
 
 ```
 telomere / add-batch-operations                     opened 2026-04-08
 in_progress · created 2026-04-10 · 14 turns · $2.83
 
 STAGES
-  design          unsigned
+  design          signed 3h ago
   code            unsigned
 
 DOCUMENTS
-  pitch           5 turns, last 2d ago
-  spec            6 turns, last 2h ago
-  architecture    3 turns, last 3h ago  (spec changed since — consider revising)
-  implementation  (not started — consider after architecture settles)
-  test-plan       (not started)
-  deploy-plan     (not started)
+  design          6 turns, last 3h ago
+  code            2 turns, last 2h ago  (design re-signed since last turn — banner will fire)
 
 LAST ACTIVITY
-  2h ago  work: update spec
-  4h ago  work: update architecture
-  6h ago  work: update spec
+  2h ago  work: update code
+  3h ago  sign: design
+  4h ago  work: update design
 
-NEXT  moe work telomere add-batch-operations architecture
+NEXT  moe work telomere add-batch-operations code
 ```
 
-The "NEXT" hint is advisory — the operator can ignore it. Staleness ("spec changed since …") is derived from the request's filtered commit log relative to the document graph.
+The "NEXT" hint is advisory — the operator can ignore it. The "banner will fire" annotation is derived from the request's filtered commit log: a `MoE-Stage-Signed` commit for an upstream stage that post-dates the downstream document's last `work:` commit. Same data the `upstreamChangeBanner` uses at `moe work` time.
 
 ### Reading without invoking (`moe show`)
 
@@ -1101,7 +838,7 @@ Adds or removes a note attached to the request in `request.json`. Flagged reques
 
 ## Implementation
 
-The `moe` CLI is Go stdlib plus `git` and `claude` on PATH. Estimated ~2000-2500 lines once all phases ship, including a modest document-graph module, stream-JSON parsing, three config parsers, the attention-filter dashboard, and the `moe next` dispatcher. Phase 1 (single-document end-to-end) is ~600-800 of that. No external dependencies.
+The `moe` CLI is Go stdlib plus `git` and `claude` on PATH. Estimated ~2000-2500 lines once all phases ship, including stream-JSON parsing, config parsers, the attention-filter dashboard, and the `moe next` dispatcher. Phase 1 (single-document end-to-end) is ~600-800 of that. No external dependencies.
 
 ### Subcommand Routing
 
@@ -1152,9 +889,8 @@ No YAML dependency. The files a human edits regularly are never JSON. The files 
 
 | File | Writer | Reader | Format | Parser |
 |------|--------|--------|--------|--------|
-| `request.json`, `index.json`, `features.json`, `project.json` | `moe` CLI | `moe status`, agents | JSON | `encoding/json` |
+| `request.json`, `features.json`, `project.json` | `moe` CLI | `moe status`, agents | JSON | `encoding/json` |
 | `agents.conf` | Human (rare) | `moe work` | INI | `bufio.Scanner` + `strings.Cut`, ~20 lines |
-| `document-graph.conf` | Human (evolves over time) | `moe work`, `moe status`, `moe sign code` | Block | `text/scanner`, ~40 lines |
 | `soul.md`, `stages/*.md`, `docs/*.md`, overrides | Human (frequent) | Agents | Markdown | No parsing — concatenated |
 | `thread.jsonl` | `moe work` | Human audit | JSONL | `bufio.Scanner` + `json.Unmarshal` |
 
@@ -1178,8 +914,6 @@ func ParseINI(r io.Reader) (map[string]map[string]string, error) {
     return sections, scanner.Err()
 }
 ```
-
-Block parser uses `text/scanner` with a small state machine — identifiers, strings, punctuation, ~40 lines. Gives humans comments, no-quoting for single words, quoted strings when needed, comma-separated lists, clean block structure. Reads like a config file, not a data serialization format.
 
 ### Git Operations
 
@@ -1236,30 +970,24 @@ cmd.Wait()
 
 `filepath.Glob("requests/*/runs/*/request.json")` for aggregation. One line.
 
-### Document Graph Operations
+### Stage Operations
 
-~100-150 lines. The graph is small (3-10 nodes per request); textbook BFS/DFS over adjacency maps:
+The only typed graph is the stage DAG, and it's hand-rolled in `internal/stage/stage.go`:
 
 ```go
-type DocGraph struct {
-    Nodes map[string]*DocNode
+type Stage struct {
+    Name     string
+    Requires []string // stages that must be signed before this one
+    Help     string
 }
 
-type DocNode struct {
-    ID        string
-    Agent     string
-    Type      string // conversational | derived | persistent
-    DependsOn []string
+var all = map[string]Stage{
+    "design": {Name: "design", Help: "…"},
+    "code":   {Name: "code", Requires: []string{"design"}, Help: "…"},
 }
-
-func (g *DocGraph) Downstream(id string) []string { … }     // invert edges
-func (g *DocGraph) UpstreamDocs(id string) []string { … }   // DFS up DependsOn
-func (g *DocGraph) MarkStale(updatedID string) { … }        // BFS downstream
-func (g *DocGraph) TopoSort() ([]string, error) { … }       // Kahn's, detects cycles
-func (g *DocGraph) ReadyDerivedNodes(present []string) []string { … } // for moe sign code
 ```
 
-Staleness propagation is BFS downstream from the updated node. Upstream collection for `moe work` context assembly is DFS up the `DependsOn` edges. Topological sort falls out of Kahn's algorithm and detects cycles for free.
+`stage.Active` finds the earliest unsigned stage whose prerequisites are all signed; `stage.Dependents` inverts for unsign cascade; `stage.LatestSign` + the request's filtered commit log drive the upstream-change banner. Two stages, ~170 lines, no adjacency-map abstractions.
 
 ### Terminal Display
 
@@ -1274,8 +1002,8 @@ moe/
 ├── internal/guidance/           # prompt assembly (~100 lines)
 ├── internal/git/                # branch/submodule/commit helpers (~200 lines)
 ├── internal/claude/             # assemble and exec claude -p, stream parse (~150 lines)
-├── internal/state/              # request.json, index.json, thread.jsonl I/O (~150 lines)
-├── internal/graph/              # document graph, staleness, topo (~150 lines)
+├── internal/state/              # request.json, thread.jsonl I/O (~150 lines)
+├── internal/stage/              # stage DAG, sign/unsign, upstream-change detection (~170 lines)
 ├── internal/config/             # INI + block parsers (~100 lines)
 └── internal/display/            # tabwriter status, ANSI, diffs (~100 lines)
 ```
@@ -1298,7 +1026,7 @@ Planned views (deferred):
 
 - **Ministry Home**: Bureau list with status chips, active request counts, alert badges.
 - **Bureau Dashboard**: Project-level view — changelog, ops health, active requests, backlog, decision log.
-- **Request View**: Google Wave-inspired document workspace. Document graph visualization, document selector, split view of document content + thread log, stale indicators.
+- **Request View**: Google Wave-inspired document workspace. Document selector, split view of document content + thread log, upstream-change banner indicators.
 - **Context Panel**: Side panel showing upstream docs, code, test results relevant to the active document.
 - **Request Review**: Per-request synthesized view — filtered commit log + current document content + staleness indicators.
 
@@ -1357,9 +1085,8 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 - [x] `moe where` resolves the bureaucracy root via `$MOE_HOME` or a `$PWD` walk to the marker file
 - [x] `moe project add <repo-url>` adds a submodule under `projects/`, detects the default branch via `git ls-remote --symref`, writes `requests/<project>/project.json`, and commits
 - [x] `moe project remove <id>` is the symmetrical inverse (refuses if the request dir has anything beyond `project.json`)
-- [ ] Extend `moe init` to also lay down `stages/`, `docs/`, `soul.md`, `agents.conf`, and a seeded `document-graph.conf`
+- [ ] Extend `moe init` to also lay down `stages/`, `docs/`, `soul.md`, `agents.conf`
 - [ ] Write initial `soul.md` and one or two fragments (`stages/design.md`, `docs/spec.md`)
-- [ ] Seed `document-graph.conf` with pitch, spec, architecture, implementation, test-plan, deploy-plan
 - [ ] Seed `agents.conf` with the minimal per-doc model + tools entries
 
 ### Phase 1: Single-Document End-to-End
@@ -1375,7 +1102,7 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 - [x] `moe sign <project> <request> <stage>` / `moe unsign` record `MoE-Stage-Signed` / `MoE-Stage-Unsigned` commit trailers, enforce `design` as a prerequisite of `code`, cascade unsigns to dependent stages, flip request status on `code`, and tear down the sandbox clone on `sign code`
 - [x] `moe push` publishes the bureaucracy (auto `-u origin HEAD` on first push)
-- [ ] Finish `moe sign code`: commit+push the target submodule, generate derived artifacts, open a PR on the target remote
+- [ ] Finish `moe sign code`: commit+push the target submodule, open a PR on the target remote (deferred side-effects like release notes live in Phase 4)
 - [ ] `moe scrap` — record rationale, flip request status (all on main)
 - [ ] `moe history` — `git log` aggregation with cost totals from commit trailers
 - [ ] Additional per-doc fragments (implementation, test-plan, deploy-plan)
@@ -1383,19 +1110,16 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 **Self-hosting checkpoint**: MoE manages its own development via `moe work`.
 
-### Phase 3: Document Graph Mechanics
+### Phase 3: Ripple & Review Surfaces
 
-- [ ] `internal/graph/` module: adjacency maps, staleness propagation, upstream collection, topological sort
-- [ ] `moe status` shows stale documents with reasons
-- [ ] `moe work` auto-collects upstream documents (tagged with stage-signed state) as context
-- [ ] Ripple summary in `moe review`
+- [x] `upstreamChangeBanner` in `moe work` surfaces re-signed prerequisite stages since the doc's last turn, with file path and diff command
+- [ ] `moe status` shows which downstream documents have pending upstream-change banners, plus per-doc last-turn timestamps
+- [ ] `moe review` renders the per-request synthesized view (filtered log + current doc contents + pending banners)
+- [ ] `moe work` optionally inlines current upstream-document content into the prompt, not just the banner pointer
 
-### Phase 4: Derived & Persistent Documents
+### Phase 4: Derived Artifacts (Revisit)
 
-- [ ] `docs/derived.md` guidance for generating release notes, decision logs, etc.
-- [ ] `moe sign code` walks the graph and generates each derived node with satisfied deps
-- [ ] Persistent product-level documents (changelog, decision log, API docs, etc.) updated incrementally at approve
-- [ ] Index file maintenance (`moe reindex` rebuilds from scratch; normal operation keeps them in sync)
+- [ ] Revisit what, if anything, should be derived from a completed request — release notes, decision summaries, backlog updates. Deferred from v1; design first, build only what earns its place against real requests.
 
 ### Phase 5: Code Editing
 
@@ -1428,16 +1152,15 @@ Features not in v1. Not rejected — just sequenced after the minimum works.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Automated DAG execution across documents | Deferred | Human sequences work. A `for` loop in `moe work --negotiate` handles cross-doc iteration if needed. |
+| Typed document graph with derived/persistent nodes | Rejected for v1 | Earlier design proposed `document-graph.conf`; pruned as speculative generality. Revisit only if a real need for cross-document dependency mechanics shows up. |
+| Automated iteration across documents | Deferred | Human sequences work. A `for` loop in `moe work --negotiate` handles cross-doc iteration if needed. |
 | Web UI with real-time streaming | Deferred | Read-only layer over git state, `net/http` + SSE. Post-CLI-stabilization. |
 | Scheduled runs / ops alert triggers | Deferred to Phase 6+ | Must route to Claude API backend, not Claude Code headless (compliance). |
 | Parallel agent execution | Deferred | Multiple terminal sessions cover current needs. Goroutines + `sync.WaitGroup` when automated. |
 | DuckDB / SQL-queryable run history | Deferred | `git log` + commit trailers cover v1. Shell out to `sqlite3` or DuckDB later if needed. |
 | Anthropic Managed Agents backend | Rejected for core, narrow-yes for implementation work | See Review Notes. |
 | Managed sandbox providers (Docker, Daytona) | Deferred | `os/exec` wrapper around `claude -p` is sufficient when needed. |
-| Clerk as LLM agent | Deferred | Human operator is the Clerk in v1. |
-| Cross-project knowledge queries | Deferred | Emerges naturally once persistent documents accumulate. |
-| Explicit knowledge graph files | Deferred | Plain text JSON in `knowledge/` when the pattern stabilizes. |
+| Cross-project knowledge queries | Deferred | Revisit once enough requests exist to ask questions against `git log` + trailers. |
 | Yolo mode (`moe yolo <req> --through <stage>` — autonomously drafts every document and crosses every gate up to `<stage>`, including `deploy` if the operator asks for it; distinct from Claude Code's in-session `--dangerously-skip-permissions`, though yolo generally wants both) | Deferred | Every request passes human review at every turn and gate in v1. |
 | Interactive TUI | Deferred | One-shot `moe dash` covers the prioritization/resumption problem. Revisit if navigation friction justifies a Bubble Tea or raw-termios TUI — but that would breach the stdlib-only stance, so only if the one-shot dashboard is demonstrably insufficient. |
 
@@ -1446,8 +1169,6 @@ Features not in v1. Not rejected — just sequenced after the minimum works.
 ## Review Notes
 
 _Open items from spec review — April 2026._
-
-**[Q] Cascading partial-context degradation.** Disjunctive triggers at `moe sign code` mean a bug fix with only an implementation doc can cascade thin derived artifacts through to persistent product docs. Not blocking — graceful degradation is the right default — but worth monitoring. If persistent doc quality drifts, consider adding a minimum-context threshold or human review gate for derived docs generated from a single weak input.
 
 **[Q] Anthropic Managed Agents — evaluated, rejected for core, narrow-yes for implementation.** [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) (launched April 2026) provisions a per-session container as the agent's workspace, with Anthropic running the agent loop on its orchestration layer. Evaluated against MoE and rejected for the document-centric core because it conflicts with four design principles: (1) it's per-token API billing — the opposite of the Claude Code headless cost model; (2) it's Claude-only and first-party-only, violating model-agnosticism; (3) it keeps session state server-side via SSE, violating "repo is the source of truth"; (4) it duplicates sandbox functionality already covered by `os/exec` wrappers. Beyond principles, the vast majority of MoE's workload is document-editing sessions that only read the repo and write one markdown file — none of which benefit from a server-hosted container with bash/code execution. **Narrow-yes case:** Phase 5 implementation work could treat Managed Agents as one sandbox option alongside a Docker/SSH wrapper, selected per invocation. Not a priority; revisit only if hosted-for-clients scenarios emerge where Max/Pro subscriptions don't transfer.
 
@@ -1460,8 +1181,6 @@ _Open items from spec review — April 2026._
 1. **Multi-user future**: The initial design is single-operator. If consulting clients want visibility, do they get read-only access via the eventual web UI? Worth modeling in the data layer even if not built yet.
 
 2. **Request dependencies**: Requests can spawn other requests. How are cross-request dependencies tracked? Likely lightweight — a `spawned_from` field in `request.json` with a reference to the source request. Blocking dependencies (request B can't start until request A merges) can be enforced by `moe work` refusing to advance B's documents until A is approved.
-
-3. **When does the Clerk become an agent?** Document the heuristic for promoting the human Clerk to an LLM agent (e.g., "after N requests of the same shape, propose a template; after M successful template uses, propose automating the template selection"). Avoids premature automation and makes the path visible.
 
 ---
 
