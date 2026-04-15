@@ -5,13 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/stage"
 )
 
 func init() {
@@ -95,7 +98,11 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	prompt := buildSystemPrompt(md, docID, clonePath)
+	prompt, err := buildSystemPrompt(root, md, docID, clonePath)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	// Claude Code uses --session-id to *create* a session and --resume to
 	// continue one. EnsureDocument set mutated=true exactly when the UUID
 	// was freshly minted (new doc, or healed from an invalid session id),
@@ -108,7 +115,16 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		sessionFlag, doc.Session,
 		"--append-system-prompt", prompt,
 	)
-	cmd.Dir = root
+	// Run Claude from inside the sandbox clone when there is one — that's
+	// the same posture a human operator would take (cd into the target repo,
+	// open Claude Code there), and it lets Claude Code's own CLAUDE.md
+	// discovery pick up whatever guidance the target repo ships. For
+	// document-only projects, fall back to the bureaucracy root.
+	if clonePath != "" {
+		cmd.Dir = clonePath
+	} else {
+		cmd.Dir = root
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -137,14 +153,50 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// buildSystemPrompt is the v1 context injection — just enough for Claude to
-// know which file to treat as the document, and (when the project has a
-// submodule) which clone to treat as the target-code workspace. Upstream-
-// document assembly, stage/doc guidance fragments, and soul.md layering come
-// later.
-func buildSystemPrompt(md *request.Metadata, docID, clonePath string) string {
-	content := request.ContentPath(md.Project, md.ID, docID)
-	prompt := fmt.Sprintf(`You are collaborating with the operator on the %q document
+// buildSystemPrompt assembles the `--append-system-prompt` payload in the
+// order described in README §"Agent Context Assembly":
+//
+//	soul.md                → global philosophy / quality bar
+//	stages/<stage>.md      → lifecycle-phase lens (earliest unsigned)
+//	operational core       → what specifically this invocation is doing
+//
+// Per-document fragments, overrides, and upstream-document assembly land
+// in later passes; adding one is a new `appendOptional(...)` call slotted
+// between the existing sections.
+func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
+	var sections []string
+
+	soul, err := readBureaucracyFile(root, "soul.md")
+	if err != nil {
+		return "", err
+	}
+	if soul != "" {
+		sections = append(sections, soul)
+	}
+
+	frag, err := stageFragment(root, md.ID)
+	if err != nil {
+		return "", err
+	}
+	if frag != "" {
+		sections = append(sections, frag)
+	}
+
+	sections = append(sections, operationalCore(root, md, docID, clonePath))
+
+	return strings.Join(sections, "\n---\n\n"), nil
+}
+
+// operationalCore is the "what are you doing right now" framing: canvas
+// file, clone workspace (if any), request title. It's the one section
+// that's always present — everything else in the prompt is optional
+// guidance layered on top.
+func operationalCore(root string, md *request.Metadata, docID, clonePath string) string {
+	// Absolute path so it resolves regardless of where Claude Code's cwd
+	// lands — document-only runs sit at the bureaucracy root, code-editing
+	// runs sit inside the sandbox clone.
+	content := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
+	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for request %q (project %q) in a Ministry of Everything bureaucracy repo.
 
 Your canvas for this document is the single file:
@@ -159,16 +211,50 @@ Request title: %s
 `, docID, md.ID, md.Project, content, md.Title)
 
 	if clonePath != "" {
-		prompt += fmt.Sprintf(`
-For any work that touches the target project's code, the workspace is a
-private copy-on-write clone of the submodule at:
+		out += fmt.Sprintf(`
+Your working directory is a private copy-on-write clone of the target
+project's submodule:
   %s
-Read and edit files there, not under projects/%s/. The clone is yours for
-the lifetime of this request — your edits are isolated from other concurrent
-activities and from the canonical submodule until the request is signed off.
-`, clonePath, md.Project)
+That's your code workspace — read and edit files there. The clone is
+yours for the lifetime of this request; your edits are isolated from
+other concurrent activities and from the canonical submodule until the
+request is signed off.
+`, clonePath)
 	}
-	return prompt
+	return out
+}
+
+// stageFragment returns the markdown guidance for the lifecycle stage the
+// request is currently in, or "" if there's nothing to inject.
+//
+// Only the design stage is wired up today: it applies from request open
+// until `pr` is signed. When a pr-stage (or later) fragment lands, add a
+// branch here — the mechanic is deliberately a chain of explicit checks
+// rather than a table, so each stage's applicability rule stays readable.
+func stageFragment(root, requestID string) (string, error) {
+	prSigned, err := stage.IsSigned(root, requestID, "pr")
+	if err != nil {
+		return "", err
+	}
+	if prSigned {
+		return "", nil
+	}
+	return readBureaucracyFile(root, filepath.Join("stages", "design.md"))
+}
+
+// readBureaucracyFile reads <root>/<relPath> and returns its contents, or
+// "" if the file doesn't exist. Used for optional guidance fragments —
+// bureaucracies that haven't written one just get no injection. Other I/O
+// errors (permissions, unreadable, etc.) are surfaced.
+func readBureaucracyFile(root, relPath string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(root, relPath))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", relPath, err)
+	}
+	return string(b), nil
 }
 
 // commitTurn stages the document dir and request.json, then commits with
