@@ -40,11 +40,16 @@ func newTestBureaucracy(t *testing.T) string {
 
 func writeStageDesign(t *testing.T, root, body string) {
 	t.Helper()
+	writeStageFile(t, root, "design.md", body)
+}
+
+func writeStageFile(t *testing.T, root, name, body string) {
+	t.Helper()
 	dir := filepath.Join(root, "stages")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "design.md"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -82,6 +87,25 @@ func TestBuildSystemPromptInjectsDesignFragment(t *testing.T) {
 	}
 	if !strings.Contains(got, "\n---\n") {
 		t.Fatalf("prompt missing fragment separator:\n%s", got)
+	}
+}
+
+func TestBuildSystemPromptSwitchesToPRFragmentAfterDesignSigned(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writeStageDesign(t, root, "DESIGN-BODY")
+	writeStageFile(t, root, "pr.md", "PR-BODY")
+	signStage(t, root, "fix-it", "design")
+
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+	got, err := buildSystemPrompt(root, md, "spec", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "PR-BODY") {
+		t.Fatalf("expected pr fragment after design signed:\n%s", got)
+	}
+	if strings.Contains(got, "DESIGN-BODY") {
+		t.Fatalf("design fragment should drop out once design is signed:\n%s", got)
 	}
 }
 
