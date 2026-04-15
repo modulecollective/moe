@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/stage"
 )
 
 func init() {
@@ -95,7 +97,11 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	prompt := buildSystemPrompt(md, docID, clonePath)
+	prompt, err := buildSystemPrompt(root, md, docID, clonePath)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	// Claude Code uses --session-id to *create* a session and --resume to
 	// continue one. EnsureDocument set mutated=true exactly when the UUID
 	// was freshly minted (new doc, or healed from an invalid session id),
@@ -138,11 +144,11 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 }
 
 // buildSystemPrompt is the v1 context injection — just enough for Claude to
-// know which file to treat as the document, and (when the project has a
-// submodule) which clone to treat as the target-code workspace. Upstream-
-// document assembly, stage/doc guidance fragments, and soul.md layering come
-// later.
-func buildSystemPrompt(md *request.Metadata, docID, clonePath string) string {
+// know which file to treat as the document, which clone to treat as the
+// target-code workspace (when the project has a submodule), and which
+// lifecycle-stage guidance applies. Upstream-document assembly, per-document
+// fragments, and soul.md layering come later.
+func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
 	content := request.ContentPath(md.Project, md.ID, docID)
 	prompt := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for request %q (project %q) in a Ministry of Everything bureaucracy repo.
@@ -168,7 +174,43 @@ the lifetime of this request — your edits are isolated from other concurrent
 activities and from the canonical submodule until the request is signed off.
 `, clonePath, md.Project)
 	}
-	return prompt
+
+	frag, err := stageFragment(root, md.ID)
+	if err != nil {
+		return "", err
+	}
+	if frag != "" {
+		prompt += "\n---\n\n" + frag
+	}
+	return prompt, nil
+}
+
+// stageFragment returns the markdown guidance for the lifecycle stage the
+// request is currently in, or "" if there's nothing to inject.
+//
+// Only the design stage is wired up today: it applies from request open
+// until `pr` is signed. When a pr-stage (or later) fragment lands, add a
+// branch here — the mechanic is deliberately a chain of explicit checks
+// rather than a table, so each stage's applicability rule stays readable.
+//
+// A missing fragment file is not an error. Guidance fragments are optional;
+// bureaucracies that haven't written one just get no fragment.
+func stageFragment(root, requestID string) (string, error) {
+	prSigned, err := stage.IsSigned(root, requestID, "pr")
+	if err != nil {
+		return "", err
+	}
+	if prSigned {
+		return "", nil
+	}
+	b, err := os.ReadFile(filepath.Join(root, "stages", "design.md"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read stages/design.md: %w", err)
+	}
+	return string(b), nil
 }
 
 // commitTurn stages the document dir and request.json, then commits with
