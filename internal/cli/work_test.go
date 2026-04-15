@@ -90,10 +90,10 @@ func TestBuildSystemPromptInjectsDesignFragment(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptSwitchesToPRFragmentAfterDesignSigned(t *testing.T) {
+func TestBuildSystemPromptSwitchesToCodeFragmentAfterDesignSigned(t *testing.T) {
 	root := newTestBureaucracy(t)
 	writeStageDesign(t, root, "DESIGN-BODY")
-	writeStageFile(t, root, "pr.md", "PR-BODY")
+	writeStageFile(t, root, "code.md", "CODE-BODY")
 	signStage(t, root, "fix-it", "design")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
@@ -101,18 +101,18 @@ func TestBuildSystemPromptSwitchesToPRFragmentAfterDesignSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "PR-BODY") {
-		t.Fatalf("expected pr fragment after design signed:\n%s", got)
+	if !strings.Contains(got, "CODE-BODY") {
+		t.Fatalf("expected code fragment after design signed:\n%s", got)
 	}
 	if strings.Contains(got, "DESIGN-BODY") {
 		t.Fatalf("design fragment should drop out once design is signed:\n%s", got)
 	}
 }
 
-func TestBuildSystemPromptOmitsFragmentAfterPRSigned(t *testing.T) {
+func TestBuildSystemPromptOmitsFragmentAfterCodeSigned(t *testing.T) {
 	root := newTestBureaucracy(t)
 	writeStageDesign(t, root, "design guidance body")
-	signStage(t, root, "fix-it", "pr")
+	signStage(t, root, "fix-it", "code")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
 	got, err := buildSystemPrompt(root, md, "spec", "")
@@ -120,7 +120,7 @@ func TestBuildSystemPromptOmitsFragmentAfterPRSigned(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(got, "design guidance body") {
-		t.Fatalf("design fragment should drop out once pr is signed:\n%s", got)
+		t.Fatalf("design fragment should drop out once code is signed:\n%s", got)
 	}
 }
 

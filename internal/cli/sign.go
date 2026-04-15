@@ -16,7 +16,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "sign",
-		Summary: "sign off on a request stage (design, pr, review, test, retro, deploy)",
+		Summary: "sign off on a request stage (design, code, review, test, retro, deploy)",
 		Run:     runSign,
 	})
 	Register(&Command{
@@ -156,7 +156,7 @@ func runSignUnsign(args []string, stdout, stderr io.Writer, signing bool) int {
 }
 
 // flipOneStage records a single MoE-Stage-Signed or -Unsigned commit for
-// stageName, applying the stage's side-effect (today: only `pr` flips the
+// stageName, applying the stage's side-effect (today: only `code` flips the
 // request status) inside the same commit. Used both for the explicitly
 // requested stage and, during unsign, for each cascaded dependent.
 func flipOneStage(root string, md *request.Metadata, projectID, reqID, stageName string, signing bool, stdout io.Writer) error {
@@ -168,7 +168,7 @@ func flipOneStage(root string, md *request.Metadata, projectID, reqID, stageName
 	}
 
 	var pathspecs []string
-	if stageName == "pr" {
+	if stageName == "code" {
 		if signing {
 			md.Status = "approved"
 		} else {
@@ -191,9 +191,9 @@ MoE-Project: %s
 		return err
 	}
 	moePrintf(stdout, "%s %s/%s stage %q\n", verb, projectID, reqID, stageName)
-	if stageName == "pr" && signing {
+	if stageName == "code" && signing {
 		moePrintln(stdout, "  (target-repo PR open is not yet implemented; status flipped only)")
-		// A signed `pr` stage terminates the request's active work against
+		// A signed `code` stage terminates the request's active work against
 		// the target code, so the sandbox clone is no longer needed. Fire
 		// and forget: a leftover clone is a disk nuisance, not a correctness
 		// bug, so we don't fail the sign over it.

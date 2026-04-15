@@ -6,7 +6,7 @@
 // repo's main branch (MoE-Stage-Signed / MoE-Stage-Unsigned), so the journal
 // itself is the source of truth; there is no status field to keep in sync.
 //
-// The active set is small on purpose. `design` and `pr` have real meaning
+// The active set is small on purpose. `design` and `code` have real meaning
 // today; `review`, `test`, `retro`, and `deploy` are reserved names with no
 // side-effects yet, so real workflows can start accumulating the trailers
 // immediately and we can wire behavior in later without renaming history.
@@ -28,7 +28,7 @@ type Stage struct {
 
 var all = map[string]Stage{
 	"design": {Name: "design", Help: "design is settled; implementation can start"},
-	"pr":     {Name: "pr", Requires: []string{"design"}, Help: "ready to open a PR on the target repo"},
+	"code":   {Name: "code", Requires: []string{"design"}, Help: "code is done; ready to push the submodule and open a PR"},
 	"review": {Name: "review", Help: "reviewed (trailer only; behavior TBD)"},
 	"test":   {Name: "test", Help: "tests run/passed (trailer only; behavior TBD)"},
 	"retro":  {Name: "retro", Help: "retrospective captured (trailer only; behavior TBD)"},
