@@ -287,6 +287,39 @@ func hasStagedChanges(root string) bool {
 	return err != nil
 }
 
+// LatestWorkTurnSHA returns the SHA and committer time of the most recent
+// `work: update <docID>` commit for the request, identified by the
+// MoE-Request and MoE-Document trailers commitTurn writes. Returns
+// ("", time.Time{}, nil) when there has been no work turn yet — the caller
+// treats that as "first turn, nothing to diff against."
+func LatestWorkTurnSHA(root, requestID, docID string) (sha string, when time.Time, err error) {
+	cmd := exec.Command("git",
+		"log", "-1",
+		"--all-match",
+		"--grep", fmt.Sprintf("MoE-Request: %s", requestID),
+		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
+		"--format=%H %ct",
+	)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("request: git log: %w", err)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", time.Time{}, nil
+	}
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) != 2 {
+		return "", time.Time{}, fmt.Errorf("request: unexpected git log output %q", line)
+	}
+	epoch, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("request: parse %%ct %q: %w", parts[1], err)
+	}
+	return parts[0], time.Unix(epoch, 0).UTC(), nil
+}
+
 // Load reads requests/<project>/runs/<id>/request.json.
 func Load(root, projectID, id string) (*Metadata, error) {
 	path := filepath.Join(root, RunDir(projectID, id), "request.json")
