@@ -335,6 +335,59 @@ func Load(root, projectID, id string) (*Metadata, error) {
 	return md, nil
 }
 
+// Scan walks requests/*/runs/*/request.json under root and returns every
+// request's metadata, in unspecified order. The caller does the sorting
+// and bucketing (moe dash, moe history). A missing or empty requests/
+// directory returns (nil, nil) — a freshly-initialized bureaucracy is a
+// valid state, not an error.
+func Scan(root string) ([]*Metadata, error) {
+	pattern := filepath.Join(root, "requests", "*", "runs", "*", "request.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("request: glob: %w", err)
+	}
+	out := make([]*Metadata, 0, len(matches))
+	for _, path := range matches {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("request: read %s: %w", path, err)
+		}
+		md := &Metadata{}
+		if err := json.Unmarshal(b, md); err != nil {
+			return nil, fmt.Errorf("request: parse %s: %w", path, err)
+		}
+		out = append(out, md)
+	}
+	return out, nil
+}
+
+// LastActivity returns the committer time of the most recent commit
+// carrying MoE-Request: <requestID>, or the zero time if no such commit
+// exists (a request dir can exist without its opening commit being
+// reachable from HEAD, though that's unusual). Used by moe dash to sort
+// buckets and to distinguish dormant requests from live ones.
+func LastActivity(root, requestID string) (time.Time, error) {
+	cmd := exec.Command("git",
+		"log", "-1",
+		"--grep", fmt.Sprintf("MoE-Request: %s", requestID),
+		"--format=%ct",
+	)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("request: git log: %w", err)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return time.Time{}, nil
+	}
+	epoch, err := strconv.ParseInt(line, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("request: parse %%ct %q: %w", line, err)
+	}
+	return time.Unix(epoch, 0).UTC(), nil
+}
+
 // nextFreeID walks base, base-2, base-3, … until it finds a slug whose run
 // dir doesn't already exist. The base itself is never returned — the caller
 // has already checked it. We strip any trailing -N from base before counting
