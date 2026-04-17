@@ -27,10 +27,20 @@ import (
 
 // Document is the machine-readable slice of a single document's state.
 // Documents themselves are just files on disk (content.md); this struct
-// carries only the data that can't be derived from them — the Claude Code
-// session id so `moe work` can resume the same conversation.
+// carries only the data that can't be derived from them — the Claude
+// Code session id so `moe work` can resume the same conversation, and
+// the Managed Agents session id when the document has a dispatched
+// async run in flight or awaiting collection.
 type Document struct {
 	Session string `json:"session"`
+	// Managed is the session id returned by POST /v1/sessions when the
+	// document was last dispatched to Anthropic's Managed Agents API.
+	// Empty when the document has never been dispatched, or after a
+	// dispatched session has been collected and reconciled into the
+	// bureaucracy. `moe tail` and `moe status` address the session by
+	// this id, so the same (project, request, doc) grammar works for
+	// both local and async runs.
+	Managed string `json:"managed,omitempty"`
 }
 
 // Metadata is the on-disk shape of requests/<project>/runs/<id>/request.json.

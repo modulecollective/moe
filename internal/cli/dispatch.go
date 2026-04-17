@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,27 +20,36 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "dispatch",
-		Summary: "fire off an async Managed Agents session for a document (dry-run today)",
+		Summary: "fire off an async Managed Agents session for a document",
 		Run:     runDispatch,
 	})
 }
 
-// runDispatch prepares the payload that would be POSTed to Anthropic's
-// /v1/sessions for a `moe work`-equivalent turn and prints it. Today it
-// stops there — the HTTP client and the symmetric `moe status` / `moe
-// tail` commands that collect and follow a running session are the
-// next iterations. Keeping dispatch dry-run-only means the payload
-// shape (submodule expansion, read-only bureaucracy mount, branch
-// naming) can be validated against a real bureaucracy without needing
-// real API credentials wired up.
+// runDispatch kicks off an async Managed Agents session for a
+// document. In the normal path it POSTs /v1/sessions and stores the
+// returned session id on the document so `moe tail` and `moe status`
+// can find it later. With --dry-run it prints the payload instead of
+// calling the API — useful for validating submodule expansion and
+// resource layout without real credentials wired up.
+//
+// Refuses to re-fire if a managed session is already recorded on the
+// document; pass --force to overwrite. This protects against double
+// spend and accidentally abandoning an in-flight run.
 func runDispatch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	dryRun := fs.Bool("dry-run", false, "print the /v1/sessions body instead of POSTing it")
+	force := fs.Bool("force", false, "replace an existing managed session id on the document")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe dispatch <project> <request> <document>")
+		moePrintln(stderr, "usage: moe dispatch [--dry-run] [--force] <project> <request> <document>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Emits the JSON payload for POST /v1/sessions on Anthropic's")
-		moePrintln(stderr, "Managed Agents API. Does not call the API yet.")
+		moePrintln(stderr, "Creates a session on Anthropic's Managed Agents API and records its")
+		moePrintln(stderr, "id on the document. Use `moe tail` to watch and `moe status` to")
+		moePrintln(stderr, "reconcile results when the session terminates.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Required env for a real call: ANTHROPIC_API_KEY,")
+		moePrintln(stderr, "MOE_MANAGED_AGENT_ID, MOE_MANAGED_ENVIRONMENT_ID,")
+		moePrintln(stderr, "MOE_GITHUB_TOKEN_WRITE, MOE_GITHUB_TOKEN_READ.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -72,58 +82,122 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 			docID, projectID, reqID, docID)
 		return 1
 	}
+	if doc.Managed != "" && !*force && !*dryRun {
+		moePrintf(stderr, "document %q already has managed session %s; run `moe status` to reconcile it, or --force to replace it\n",
+			docID, doc.Managed)
+		return 1
+	}
 
-	pj, err := loadProjectJSON(root, md.Project)
+	body, err := buildDispatchSession(root, md, doc, docID, *dryRun)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+
+	if *dryRun {
+		b, err := body.MarshalIndent()
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		if _, err := stdout.Write(append(b, '\n')); err != nil {
+			return 1
+		}
+		moePrintln(stderr, "")
+		moePrintln(stderr, "(dry-run) JSON above is the body for POST /v1/sessions.")
+		return 0
+	}
+
+	client, err := managed.NewClientFromEnv()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	resp, err := client.CreateSession(context.Background(), body)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	doc.Managed = resp.ID
+	if err := request.Save(root, md); err != nil {
+		moePrintf(stderr, "save request.json: %v\n", err)
+		return 1
+	}
+	// Commit so the session-id lands in the bureaucracy's history.
+	// Using a distinct subject ("dispatch") keeps `moe work` turn
+	// grepping (subject "work: update") clean.
+	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
+	msg := fmt.Sprintf(`dispatch: %s (managed %s)
+
+MoE-Request: %s
+MoE-Project: %s
+MoE-Document: %s
+MoE-Session: %s
+MoE-Managed-Session: %s
+`, docID, resp.ID, md.ID, md.Project, docID, doc.Session, resp.ID)
+	if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
+		moePrintf(stderr, "commit dispatch record: %v\n", err)
+		return 1
+	}
+
+	moePrintf(stdout, "dispatched %s/%s/%s as managed session %s (state: %s)\n",
+		md.Project, md.ID, docID, resp.ID, resp.Status)
+	moePrintf(stdout, "follow: moe tail %s %s %s\n", md.Project, md.ID, docID)
+	moePrintf(stdout, "collect: moe status %s %s %s\n", md.Project, md.ID, docID)
+	return 0
+}
+
+// buildDispatchSession assembles the POST /v1/sessions body for this
+// document. Extracted so both real and dry-run modes run through
+// identical construction — the only difference is whether we POST.
+//
+// When dryRun is true we tolerate missing env vars by substituting
+// visible placeholders ("$FOO_BAR") into token fields; that keeps the
+// dry-run output legible for operators iterating on the shape without
+// creds. Real mode keeps the env-var string literally, which will
+// cause the server to reject the request — a loud failure is the
+// right signal.
+func buildDispatchSession(root string, md *request.Metadata, doc *request.Document, docID string, dryRun bool) (*managed.Session, error) {
+	pj, err := loadProjectJSON(root, md.Project)
+	if err != nil {
+		return nil, err
 	}
 
 	// Pull the per-request sandbox clone into existence if it's not
-	// already there. We need it on disk so we can parse .gitmodules and
-	// read pinned SHAs for each submodule. The clone is cheap (APFS
-	// clonefile on macOS, plain copy elsewhere) and identical to what
-	// `moe work` would produce.
+	// already there. We need it on disk so we can parse .gitmodules
+	// and read pinned SHAs for each submodule. The clone is cheap
+	// (APFS clonefile on macOS, plain copy elsewhere) and identical
+	// to what `moe work` would produce.
 	clonePath, err := sandbox.Ensure(root, md.Project, md.ID)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, err
 	}
 
-	// Read the PATs from env. We deliberately do not store tokens in
-	// the bureaucracy — that's a commit away from leaking on `git push`.
-	// Callers plumb them in via env per invocation.
-	projectToken := os.Getenv("MOE_GITHUB_TOKEN_WRITE")
-	if projectToken == "" {
-		projectToken = "$MOE_GITHUB_TOKEN_WRITE"
-	}
-	bureauToken := os.Getenv("MOE_GITHUB_TOKEN_READ")
-	if bureauToken == "" {
-		bureauToken = "$MOE_GITHUB_TOKEN_READ"
-	}
+	// Tokens are read from env, never persisted. Dry-run substitutes
+	// visible placeholders so the emitted JSON is self-documenting.
+	projectToken := tokenOr("MOE_GITHUB_TOKEN_WRITE", dryRun)
+	bureauToken := tokenOr("MOE_GITHUB_TOKEN_READ", dryRun)
 
 	submodules, err := managed.ExpandSubmodules(clonePath, projectToken)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, err
 	}
 
 	bureauRemote, bureauSHA, err := bureaucracyPinning(root)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, err
 	}
 
-	agentID := envOr("MOE_MANAGED_AGENT_ID", "$MOE_MANAGED_AGENT_ID")
-	environmentID := envOr("MOE_MANAGED_ENVIRONMENT_ID", "$MOE_MANAGED_ENVIRONMENT_ID")
+	agentID := tokenOr("MOE_MANAGED_AGENT_ID", dryRun)
+	environmentID := tokenOr("MOE_MANAGED_ENVIRONMENT_ID", dryRun)
 
 	prompt, err := buildSystemPrompt(root, md, docID, clonePath)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, err
 	}
 
-	sess, err := managed.BuildSession(managed.Params{
+	return managed.BuildSession(managed.Params{
 		AgentID:          agentID,
 		EnvironmentID:    environmentID,
 		ProjectRepo:      pj.Remote,
@@ -141,24 +215,19 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 			"moe_session_uuid": doc.Session,
 		},
 	})
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
+}
 
-	body, err := sess.MarshalIndent()
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+// tokenOr returns the env var's value, or a "$NAME" placeholder in
+// dry-run mode. Real mode returns "" when unset so the downstream
+// validator (or the API server) can surface the specific missing var.
+func tokenOr(key string, dryRun bool) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	if _, err := stdout.Write(append(body, '\n')); err != nil {
-		return 1
+	if dryRun {
+		return "$" + key
 	}
-	moePrintln(stderr, "")
-	moePrintln(stderr, "(dry-run) The JSON above is the body for POST /v1/sessions.")
-	moePrintln(stderr, "Set MOE_GITHUB_TOKEN_WRITE / _READ and MOE_MANAGED_AGENT_ID /")
-	moePrintln(stderr, "MOE_MANAGED_ENVIRONMENT_ID before the real POST ships.")
-	return 0
+	return ""
 }
 
 // projectJSON is the subset of project.Metadata we need here. Declared
@@ -208,11 +277,4 @@ func gitOutput(dir string, args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
