@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -263,7 +264,7 @@ func StageAndCommit(root, msg string, pathspecs ...string) error {
 
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
 // changes — signals "turn produced no document edits" to the caller.
-var ErrNothingToCommit = fmt.Errorf("request: nothing to commit")
+var ErrNothingToCommit = errors.New("request: nothing to commit")
 
 // CommitAllowEmpty stages pathspecs (if any) and commits with msg, passing
 // --allow-empty so the commit lands even when nothing is staged. Used for

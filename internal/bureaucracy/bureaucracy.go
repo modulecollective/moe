@@ -110,12 +110,20 @@ func Init(dir, remote string) error {
 	}
 
 	if remote != "" {
-		// `remote add` fails if origin already exists; set-url handles both.
-		if err := runGit(abs, "remote", "remove", "origin"); err != nil {
-			// Ignore — remote probably didn't exist.
-		}
-		if err := runGit(abs, "remote", "add", "origin", remote); err != nil {
-			return fmt.Errorf("bureaucracy: set remote: %w", err)
+		// Use `get-url` as a silent probe so the common fresh-init path
+		// doesn't spew "No such remote" to the operator's stderr. If origin
+		// already exists (git init is idempotent, so we might land on top of
+		// a pre-existing repo), repoint it; otherwise add it.
+		probe := exec.Command("git", "remote", "get-url", "origin")
+		probe.Dir = abs
+		if probe.Run() == nil {
+			if err := runGit(abs, "remote", "set-url", "origin", remote); err != nil {
+				return fmt.Errorf("bureaucracy: set remote: %w", err)
+			}
+		} else {
+			if err := runGit(abs, "remote", "add", "origin", remote); err != nil {
+				return fmt.Errorf("bureaucracy: set remote: %w", err)
+			}
 		}
 	}
 
