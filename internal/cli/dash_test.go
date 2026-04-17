@@ -102,7 +102,7 @@ func TestDashReadyToSignLandsInNeedsAttention(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", "in_progress")
+	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "design", "# spec\nready.\n")
 	// Represent the work turn that produced the content.
 	commitWorkTurnAt(t, root, "fix-it", "design",
@@ -131,7 +131,7 @@ func TestDashPrereqResignedKeepsInActive(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", "in_progress")
+	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
@@ -164,7 +164,7 @@ func TestDashEmptyContentStaysInActive(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", "in_progress")
+	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
 	// Empty content.md — a fresh document dir, no work yet.
 	writeContent(t, root, "tele", "fix-it", "design", "")
 
@@ -188,7 +188,7 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", "approved")
+	seedRequest(t, root, "tele", "fix-it", request.StatusApproved)
 	// An approved request needs a recent commit so LastActivity doesn't
 	// return the opening commit's time (which would still be recent in
 	// a freshly-made fixture, so this is belt-and-suspenders).
@@ -216,7 +216,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	// An in_progress request whose last activity is 60 days ago.
-	seedRequest(t, root, "tele", "old-one", "in_progress")
+	seedRequest(t, root, "tele", "old-one", request.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Request: old-one\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
@@ -249,12 +249,12 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "older", "in_progress")
+	seedRequest(t, root, "tele", "older", request.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Request: older\nMoE-Document: spec",
 		time.Now().UTC().Add(-3*24*time.Hour))
 
-	seedRequest(t, root, "tele", "newer", "in_progress")
+	seedRequest(t, root, "tele", "newer", request.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Request: newer\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))

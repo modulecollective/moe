@@ -171,9 +171,9 @@ func flipOneStage(root string, md *request.Metadata, projectID, reqID, stageName
 	var pathspecs []string
 	if stageName == "code" {
 		if signing {
-			md.Status = "approved"
+			md.Status = request.StatusApproved
 		} else {
-			md.Status = "in_progress"
+			md.Status = request.StatusInProgress
 		}
 		if err := request.Save(root, md); err != nil {
 			return err

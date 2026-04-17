@@ -9,6 +9,7 @@ package project
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -203,7 +204,7 @@ func Unregister(root, id string) error {
 		return fmt.Errorf("project: git rm project.json: %w", err)
 	}
 	// requests/<id>/ is now empty; git doesn't track directories, so delete it ourselves.
-	if err := os.Remove(filepath.Join(root, requestsDir)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(root, requestsDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("project: remove %s: %w", requestsDir, err)
 	}
 
