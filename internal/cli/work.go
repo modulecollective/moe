@@ -7,13 +7,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
-	"github.com/modulecollective/moe/internal/claude"
+	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/stage"
@@ -79,12 +78,6 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
-	claudeBin, err := exec.LookPath("claude")
-	if err != nil {
-		moePrintf(stderr, "claude CLI not found on PATH: %v\n", err)
-		return 1
-	}
-
 	// Every `moe work` gets a private copy-on-write clone of the project's
 	// submodule. First turn creates it; later turns reuse the same clone so
 	// session state in the target repo (branches, uncommitted edits) persists
@@ -105,50 +98,19 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	// Claude Code uses --session-id to *create* a session and --resume to
-	// continue one. EnsureDocument set mutated=true exactly when the UUID
-	// was freshly minted (new doc, or healed from an invalid session id),
-	// which is the same condition as "no server-side session yet."
-	sessionFlag := "--resume"
-	if mutated {
-		sessionFlag = "--session-id"
-	}
-	// --add-dir <root> grants the agent native filesystem access to the
-	// bureaucracy repo even when cwd is the sandbox clone. The canvas (and,
-	// at code stage, upstream documents the banner may point at) live under
-	// root, and we want `git -C <root> diff` to work without per-call
-	// permission prompts. For document-only projects this is redundant
-	// (cwd == root) but harmless.
-	cmd := exec.Command(claudeBin,
-		sessionFlag, doc.Session,
-		"--append-system-prompt", prompt,
-		"--add-dir", root,
-	)
-	// Run Claude from inside the sandbox clone when there is one — that's
-	// the same posture a human operator would take (cd into the target repo,
-	// open Claude Code there), and it lets Claude Code's own CLAUDE.md
-	// discovery pick up whatever guidance the target repo ships. For
-	// document-only projects, fall back to the bureaucracy root.
-	if clonePath != "" {
-		cmd.Dir = clonePath
-	} else {
-		cmd.Dir = root
-	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	runErr := cmd.Run()
 
-	// Mirror Claude Code's session JSONL into the document dir so the
-	// conversation lives in-repo alongside content.md. A missing transcript
-	// (operator aborted before claude wrote anything, or the session was
-	// resumed on a different machine) is legal — just skip. Other I/O
-	// errors get reported but don't block the document commit: the
-	// operator's edits are the valuable state.
-	threadPath := filepath.Join(root, request.ThreadPath(md.Project, md.ID, docID))
-	if _, err := claude.CopyTranscript(doc.Session, threadPath); err != nil {
-		moePrintf(stderr, "save transcript: %v\n", err)
-	}
+	runErr := executor.ClaudeCLI{}.Execute(executor.Request{
+		Root:       root,
+		Metadata:   md,
+		DocID:      docID,
+		SessionID:  doc.Session,
+		NewSession: mutated,
+		Prompt:     prompt,
+		ClonePath:  clonePath,
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     stderr,
+	})
 
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.
