@@ -43,6 +43,15 @@ type Document struct {
 	Managed string `json:"managed,omitempty"`
 }
 
+// Request status values written to Metadata.Status. A request opens in
+// StatusInProgress and flips to StatusApproved when the `code` stage is
+// signed; unsigning `code` flips it back. Kept as a small closed set so
+// moe dash and related readers can bucket without string-typo risk.
+const (
+	StatusInProgress = "in_progress"
+	StatusApproved   = "approved"
+)
+
 // Metadata is the on-disk shape of requests/<project>/runs/<id>/request.json.
 type Metadata struct {
 	ID        string               `json:"id"`
@@ -156,7 +165,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		ID:        id,
 		Project:   projectID,
 		Title:     title,
-		Status:    "in_progress",
+		Status:    StatusInProgress,
 		Created:   now().UTC().Format("2006-01-02"),
 		Documents: map[string]*Document{},
 	}

@@ -2,6 +2,7 @@ package managed
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,7 +59,7 @@ type gitmoduleEntry struct {
 func parseGitmodules(path string) ([]gitmoduleEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("managed: open %s: %w", path, err)

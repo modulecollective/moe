@@ -103,7 +103,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 	activeCount := 0
 	for _, md := range mds {
-		if md.Status == "in_progress" {
+		if md.Status == request.StatusInProgress {
 			activeCount++
 		}
 	}
@@ -151,14 +151,14 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 // classify decides which bucket a request lands in. See designs/dash.md
 // for which attention-filter rules are live today versus deferred.
 func classify(root string, md *request.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
-	if md.Status == "approved" {
+	if md.Status == request.StatusApproved {
 		if !last.IsZero() && now.Sub(last) <= recentWindow {
 			return bucketRecent, fmt.Sprintf("approved %s", humanAgo(now, last)), nil
 		}
 		return bucketNone, "", nil
 	}
 
-	if md.Status != "in_progress" {
+	if md.Status != request.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
 		// `moe scrap` lands). Leave them off the dashboard rather than
 		// guess a bucket — they'll surface via `moe history` when that
