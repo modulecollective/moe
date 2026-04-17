@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/stage"
@@ -78,7 +79,7 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
-	claude, err := exec.LookPath("claude")
+	claudeBin, err := exec.LookPath("claude")
 	if err != nil {
 		moePrintf(stderr, "claude CLI not found on PATH: %v\n", err)
 		return 1
@@ -118,7 +119,7 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	// root, and we want `git -C <root> diff` to work without per-call
 	// permission prompts. For document-only projects this is redundant
 	// (cwd == root) but harmless.
-	cmd := exec.Command(claude,
+	cmd := exec.Command(claudeBin,
 		sessionFlag, doc.Session,
 		"--append-system-prompt", prompt,
 		"--add-dir", root,
@@ -137,6 +138,17 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	runErr := cmd.Run()
+
+	// Mirror Claude Code's session JSONL into the document dir so the
+	// conversation lives in-repo alongside content.md. A missing transcript
+	// (operator aborted before claude wrote anything, or the session was
+	// resumed on a different machine) is legal — just skip. Other I/O
+	// errors get reported but don't block the document commit: the
+	// operator's edits are the valuable state.
+	threadPath := filepath.Join(root, request.ThreadPath(md.Project, md.ID, docID))
+	if _, err := claude.CopyTranscript(doc.Session, threadPath); err != nil {
+		moePrintf(stderr, "save transcript: %v\n", err)
+	}
 
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.

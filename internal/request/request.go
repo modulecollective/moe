@@ -189,6 +189,14 @@ func ContentPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "content.md")
 }
 
+// ThreadPath returns the path (relative to the bureaucracy root) of a
+// document's conversation transcript. `moe work` mirrors Claude Code's
+// per-session JSONL here every turn, so the full human/agent exchange is
+// stored in-repo alongside the compressed content.md.
+func ThreadPath(projectID, id, docID string) string {
+	return filepath.Join(DocDir(projectID, id, docID), "thread.jsonl")
+}
+
 // uuidV4Pattern matches the canonical 8-4-4-4-12 hex form Claude Code
 // requires for --session-id. Kept here so EnsureDocument can detect and
 // heal entries that predate the UUID requirement.
