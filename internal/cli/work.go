@@ -351,7 +351,7 @@ func readBureaucracyFile(root, relPath string) (string, error) {
 // branch per request" for the trailer convention.
 func commitTurn(root string, md *request.Metadata, docID string) error {
 	docDir := request.DocDir(md.Project, md.ID, docID)
-	reqJSON := request.RunDir(md.Project, md.ID) + "/request.json"
+	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
 	msg := fmt.Sprintf(`work: update %s
 
 MoE-Request: %s

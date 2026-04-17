@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
@@ -177,7 +178,7 @@ func flipOneStage(root string, md *request.Metadata, projectID, reqID, stageName
 		if err := request.Save(root, md); err != nil {
 			return err
 		}
-		pathspecs = []string{request.RunDir(projectID, reqID) + "/request.json"}
+		pathspecs = []string{filepath.Join(request.RunDir(projectID, reqID), "request.json")}
 	}
 
 	msg := fmt.Sprintf(`%s: %s
