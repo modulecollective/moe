@@ -131,6 +131,28 @@ func cloneGitDir(worktreeClone, srcGitDir, root, projectID, requestID string) er
 	return nil
 }
 
+// CheckoutBranch makes branch the current HEAD in the clone, creating it
+// off the current HEAD if it doesn't already exist. Used by the stage
+// session setup so `moe code` lands the agent on moe/<request-id>
+// without the agent having to remember the incantation.
+func CheckoutBranch(clonePath, branch string) error {
+	// -B creates the branch if missing and resets it to HEAD if it exists,
+	// which is wrong for re-runs. Use a check-then-switch instead so an
+	// existing branch is resumed, not reset.
+	if err := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run(); err == nil {
+		cmd := exec.Command("git", "-C", clonePath, "checkout", branch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("sandbox: checkout %s: %w (%s)", branch, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	cmd := exec.Command("git", "-C", clonePath, "checkout", "-b", branch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sandbox: checkout -b %s: %w (%s)", branch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Remove tears down the clone and its sibling gitdir, if any. Idempotent.
 func Remove(root, projectID, requestID string) error {
 	var firstErr error
