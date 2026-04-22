@@ -1,13 +1,7 @@
-// Package executor abstracts the backend that actually runs a stage
-// turn, so moe can host more than one: the interactive Claude Code CLI
-// (today's only implementation) and, later, Anthropic's Managed Agents
-// API for fire-and-forget async runs.
-//
-// The interface is small on purpose. A Request carries everything an
-// executor needs to run one turn against one document; the executor
-// owns the details of how the agent runs, what filesystem it sees, and
-// where the turn's transcript ends up. The stage driver stays the same
-// shape regardless of which executor it picks.
+// Package executor runs one stage turn against the local `claude`
+// binary: assembles the CLI args, wires stdio to the operator's
+// terminal, and mirrors the session's on-disk JSONL into the
+// document's thread.jsonl when the turn ends.
 package executor
 
 import (
@@ -23,16 +17,17 @@ import (
 
 // Request is the inputs for one turn on one document.
 type Request struct {
-	// Root is the bureaucracy repo root. Executors that drop transcripts
-	// or other artifacts back into the bureaucracy use it to compute
-	// canonical in-repo paths.
+	// Root is the bureaucracy repo root. Used to compute canonical
+	// in-repo paths (e.g. where to write the mirrored transcript) and
+	// passed to claude as --add-dir so the canvas stays reachable when
+	// the agent's cwd is the sandbox clone.
 	Root string
-	// Metadata is the run's on-disk state. Read-only for executors.
+	// Metadata is the run's on-disk state. Read-only.
 	Metadata *run.Metadata
 	// DocID is which document on the run this turn is for.
 	DocID string
 	// SessionID is the canonical UUID that identifies this document's
-	// conversation. Executors use it to create or resume their own
+	// conversation. Claude Code uses it to create or resume its own
 	// session keyed to the same identity.
 	SessionID string
 	// NewSession is true when SessionID was just minted this turn
@@ -43,31 +38,19 @@ type Request struct {
 	Prompt string
 	// ClonePath is the private per-run sandbox clone of the target
 	// project's submodule, or "" for document-only runs. When set,
-	// executors should run the agent with this as its working directory.
+	// claude runs with this as its working directory.
 	ClonePath string
 	// InitialPrompt, if non-empty, is auto-sent as the first user message
 	// of the turn so the operator doesn't have to type anything to kick
 	// the session off. Stage handlers use it to have the agent greet the
 	// operator and ask what they'd like to work on.
 	InitialPrompt string
-	// Stdin / Stdout / Stderr let executors wire interactive agents to
-	// the operator's terminal or capture output in tests.
+	// Stdin / Stdout / Stderr wire the interactive agent to the
+	// operator's terminal or capture output in tests.
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 }
-
-// Executor runs one turn. A non-nil error means the agent itself exited
-// non-zero; callers still commit whatever document edits landed on disk,
-// because the operator may have bailed mid-edit intentionally.
-type Executor interface {
-	Execute(r Request) error
-}
-
-// ClaudeCLI runs a turn against the local `claude` binary. It is the
-// default executor stage sessions use; behavior is unchanged from the
-// pre-interface implementation.
-type ClaudeCLI struct{}
 
 // sandboxSettings is layered on top of the operator's settings.json via
 // `--settings` to pin the claude subprocess into the built-in sandbox
@@ -78,8 +61,10 @@ const sandboxSettings = `{"sandbox":{"enabled":true}}`
 
 // Execute shells out to `claude`, wires stdio to the operator's
 // terminal, and mirrors the session's on-disk JSONL into the document's
-// thread.jsonl when the turn ends.
-func (ClaudeCLI) Execute(r Request) error {
+// thread.jsonl when the turn ends. A non-nil error means claude itself
+// exited non-zero; callers still commit whatever document edits landed
+// on disk, because the operator may have bailed mid-edit intentionally.
+func Execute(r Request) error {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("executor: claude CLI not found on PATH: %w", err)

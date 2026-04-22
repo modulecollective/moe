@@ -104,7 +104,7 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		newSession = tp == ""
 	}
 
-	runErr := executor.ClaudeCLI{}.Execute(executor.Request{
+	runErr := executor.Execute(executor.Request{
 		Root:          root,
 		Metadata:      md,
 		DocID:         docID,
