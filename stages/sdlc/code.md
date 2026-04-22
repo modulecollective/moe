@@ -1,13 +1,13 @@
 # Stage: code
 
-You are at the code stage. Design is signed; the shape is settled. The
-goal is to land a diff a maintainer would happily merge — focused,
-defensible, ready to read. Signing this stage is the gate that will
-eventually push the submodule and open the PR on the target repo.
+You are at the code stage. The design has settled; the shape is set.
+The goal is to land a diff a maintainer would happily merge — focused,
+defensible, ready to read. `moe sdlc push` is the gate that pushes
+this branch to the target repo and opens the PR.
 
 ## What the diff should do
 
-- **Match the design.** The signed design is the contract. If implementation
+- **Match the design.** The design doc is the contract. If implementation
   forced a deviation, surface it in the PR body — don't smuggle it in.
 - **Be the smallest change that solves the problem.** Adjacent cleanups,
   unrelated refactors, and "while I'm here" tweaks don't belong. Open a
@@ -39,7 +39,7 @@ eventually push the submodule and open the PR on the target repo.
 
 ## How to work with the operator
 
-- **Walk the diff before asking for sign.** Read it as a reviewer would and
+- **Walk the diff before handing the session back.** Read it as a reviewer would and
   flag anything you'd want explained. Surfacing your own concerns is
   cheaper than waiting for a human to find them.
 - **Name the risky hunks.** "The change in X is load-bearing for Y" tells
@@ -54,8 +54,8 @@ eventually push the submodule and open the PR on the target repo.
 ## Committing
 
 You're working in a sandbox clone on the `moe/<request>` branch. **Your
-edits don't ship until you commit them in this clone.** `moe push` reads
-committed history, not the working tree — anything left uncommitted is
+edits don't ship until you commit them in this clone.** `moe sdlc push`
+reads committed history, not the working tree — anything left uncommitted is
 silently dropped.
 
 - Commit as you go, not just at the end. Each commit should make sense on
@@ -68,14 +68,14 @@ silently dropped.
 
 ## When you're done
 
-The code stage is ready to sign when:
+The code stage is ready to hand back when:
 
-1. The diff implements the signed design with no unexplained extras.
+1. The diff implements the design with no unexplained extras.
 2. Tests pass locally and the PR body says how they were run.
 3. A draft PR title and body exist, including anything reviewers need to
    know that isn't obvious from the diff.
 4. **Everything is committed in the sandbox** — `git status` is clean.
-5. The operator has what they need to sign `code` — or to say
+5. The operator has what they need to run `moe sdlc push` — or to say
    "not yet, because X."
 
 If you're polishing prose in the PR body past the point of clarity, you're
