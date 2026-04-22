@@ -51,6 +51,21 @@ eventually push the submodule and open the PR on the target repo.
 - **Draft the PR body.** Title, summary, test notes, and any follow-ups.
   The operator edits; you don't make them start from a blank box.
 
+## Committing
+
+You're working in a sandbox clone on the `moe/<request>` branch. **Your
+edits don't ship until you commit them in this clone.** `moe push` reads
+committed history, not the working tree — anything left uncommitted is
+silently dropped.
+
+- Commit as you go, not just at the end. Each commit should make sense on
+  its own; the series should tell the story (see "Stay readable as a
+  sequence of commits" above).
+- Write the message yourself. The operator and the reviewer both read it.
+- Before you hand the session back to the operator, `git status` should be
+  clean. If you've left work in progress on purpose, say so explicitly so
+  the operator knows the session needs to resume before push.
+
 ## When you're done
 
 The code stage is ready to sign when:
@@ -59,7 +74,8 @@ The code stage is ready to sign when:
 2. Tests pass locally and the PR body says how they were run.
 3. A draft PR title and body exist, including anything reviewers need to
    know that isn't obvious from the diff.
-4. The operator has what they need to sign `code` — or to say
+4. **Everything is committed in the sandbox** — `git status` is clean.
+5. The operator has what they need to sign `code` — or to say
    "not yet, because X."
 
 If you're polishing prose in the PR body past the point of clarity, you're

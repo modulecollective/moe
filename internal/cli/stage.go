@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
@@ -197,19 +197,11 @@ func promptNextStage(root string, md *request.Metadata, stdout, stderr io.Writer
 func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
 	var sections []string
 
-	soul, err := readBureaucracyFile(root, "soul.md")
-	if err != nil {
-		return "", err
-	}
-	if soul != "" {
+	if soul := moe.Soul(); soul != "" {
 		sections = append(sections, soul)
 	}
 
-	frag, err := stageFragment(root, docID)
-	if err != nil {
-		return "", err
-	}
-	if frag != "" {
+	if frag := moe.Stage(md.Workflow, docID); frag != "" {
 		sections = append(sections, frag)
 	}
 
@@ -337,28 +329,6 @@ request is pushed.
 `, clonePath)
 	}
 	return out
-}
-
-// stageFragment returns the markdown guidance for docID, read from
-// stages/<docID>.md, or "" if no fragment exists. Bureaucracies that
-// haven't authored a fragment for a given doc just get no injection.
-func stageFragment(root, docID string) (string, error) {
-	return readBureaucracyFile(root, filepath.Join("stages", docID+".md"))
-}
-
-// readBureaucracyFile reads <root>/<relPath> and returns its contents, or
-// "" if the file doesn't exist. Used for optional guidance fragments —
-// bureaucracies that haven't written one just get no injection. Other I/O
-// errors (permissions, unreadable, etc.) are surfaced.
-func readBureaucracyFile(root, relPath string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(root, relPath))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("read %s: %w", relPath, err)
-	}
-	return string(b), nil
 }
 
 // commitTurn stages the document dir and request.json, then commits with

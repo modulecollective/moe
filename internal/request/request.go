@@ -63,17 +63,14 @@ type Metadata struct {
 	Documents map[string]*Document `json:"documents"`
 }
 
-// DefaultWorkflow is the name used for records written before the
-// workflow field existed. Load applies it when the field is empty so
-// the rest of moe doesn't need to handle the unset case.
-const DefaultWorkflow = "sdlc"
-
-// Options carries optional user-supplied fields for New.
+// Options carries user-supplied fields for New. Workflow is required;
+// the rest are optional.
 type Options struct {
 	// ID overrides the auto-derived slug. Must match idPattern if set.
 	ID string
-	// Workflow names the workflow this request belongs to. Empty means
-	// DefaultWorkflow. Callers that want to validate against a registry
+	// Workflow names the workflow this request belongs to. Required —
+	// fragment lookup in buildSystemPrompt keys on this, so there is no
+	// safe default. Callers that want to validate against a registry
 	// should do so before invoking New.
 	Workflow string
 	// Now is injected for deterministic tests. Defaults to time.Now.
@@ -128,6 +125,9 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	if title == "" {
 		return nil, fmt.Errorf("request: title is required")
 	}
+	if opts.Workflow == "" {
+		return nil, fmt.Errorf("request: workflow is required")
+	}
 
 	projectJSON := filepath.Join(root, "requests", projectID, "project.json")
 	if _, err := os.Stat(projectJSON); err != nil {
@@ -171,16 +171,12 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	if now == nil {
 		now = time.Now
 	}
-	workflow := opts.Workflow
-	if workflow == "" {
-		workflow = DefaultWorkflow
-	}
 	md := &Metadata{
 		ID:        id,
 		Project:   projectID,
 		Title:     title,
 		Status:    StatusInProgress,
-		Workflow:  workflow,
+		Workflow:  opts.Workflow,
 		Created:   now().UTC().Format("2006-01-02"),
 		Documents: map[string]*Document{},
 	}
@@ -375,7 +371,7 @@ func Load(root, projectID, id string) (*Metadata, error) {
 		return nil, fmt.Errorf("request: parse %s: %w", path, err)
 	}
 	if md.Workflow == "" {
-		md.Workflow = DefaultWorkflow
+		return nil, fmt.Errorf("request: %s: workflow is required", path)
 	}
 	return md, nil
 }
@@ -402,7 +398,7 @@ func Scan(root string) ([]*Metadata, error) {
 			return nil, fmt.Errorf("request: parse %s: %w", path, err)
 		}
 		if md.Workflow == "" {
-			md.Workflow = DefaultWorkflow
+			return nil, fmt.Errorf("request: %s: workflow is required", path)
 		}
 		out = append(out, md)
 	}
