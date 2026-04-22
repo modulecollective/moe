@@ -17,33 +17,27 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "dash",
-		Summary: "show the home-screen dashboard (needs-attention / active / recent)",
+		Summary: "show the home-screen dashboard (backlog / runs)",
 		Run:     runDash,
 	})
 }
 
-// dormantCutoff is the staleness threshold for the ACTIVE bucket. A
+// dormantCutoff is the staleness threshold for the RUNS section. A
 // run with no MoE-Run-scoped commit in this window is considered
 // dormant and hidden unless --all is passed. Matches README §"The
 // attention filter": "Dormant runs (no activity in 30+ days)
 // collapse out of the default view".
 const dormantCutoff = 30 * 24 * time.Hour
 
-// recentWindow is how far back the RECENT bucket looks for approved
-// runs. README mock uses "RECENT (last 7 days)".
-const recentWindow = 7 * 24 * time.Hour
-
-// bucket labels a run's slot in the dashboard. Ordered so that the
-// most actionable sits at the top (needs attention) and historical
-// context sits at the bottom (recent).
+// bucket labels a row's section. Runs and backlog ideas live on
+// different rails — runs have a lifecycle stage, ideas don't — so
+// they render in separate sections.
 type bucket int
 
 const (
-	bucketNeedsAttention bucket = iota
-	bucketActive
-	bucketBacklog // captured ideas, not yet promoted to a run
-	bucketRecent
-	bucketNone // filtered out entirely (dormant without --all)
+	bucketBacklog bucket = iota // captured ideas, not yet promoted to a run
+	bucketRuns                  // everything with a lifecycle: in-progress and terminal
+	bucketNone                  // filtered out entirely (dormant without --all)
 )
 
 // dashRow is one entry in the dashboard. Kept flat so tabwriter can
@@ -52,8 +46,8 @@ const (
 type dashRow struct {
 	project string
 	run     string
-	note    string
-	when    time.Time // sort key within the bucket; most recent first
+	note    string    // for runs: next stage name, or "done"; for backlog: idea title.
+	when    time.Time // sort key within the section; most recent first.
 	bucket  bucket
 }
 
@@ -153,9 +147,8 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 			bucket:  bucketBacklog,
 		})
 	}
-	// Within a bucket, most-recent activity first. Across buckets, the
-	// renderer walks buckets in order, so a secondary sort on bucket
-	// keeps rows grouped even if the caller ever mixes them.
+	// Within a section, most-recent activity first. Secondary sort on
+	// bucket keeps sections grouped if the caller ever mixes them.
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].bucket != rows[j].bucket {
 			return rows[i].bucket < rows[j].bucket
@@ -165,27 +158,24 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 	return rows, nil
 }
 
-// classify decides which bucket a run lands in. See designs/dash.md
-// for which attention-filter rules are live today versus deferred.
-// Bucket choice is driven by workflow.Next: when the next stage is
-// `push` and the code document has PR-ready content → NEEDS ATTENTION;
-// any other unsatisfied stage → ACTIVE; past-terminal pushed → RECENT.
+// classify decides which section a run lands in and what note to
+// render. In-progress runs show their next stage (from workflow.Next);
+// runs past their terminal stage show "done". Dormant runs are
+// dropped unless the caller asked for --all.
 func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
-	if md.Status == run.StatusPushed {
-		if !last.IsZero() && now.Sub(last) <= recentWindow {
-			return bucketRecent, fmt.Sprintf("pushed %s", humanAgo(now, last)), nil
-		}
+	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
-
+	if md.Status == run.StatusPushed {
+		return bucketRuns, "done", nil
+	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
 		// `moe scrap` lands). Leave them off the dashboard rather than
-		// guess a bucket — they'll surface via `moe history` when that
+		// guess a label — they'll surface via `moe history` when that
 		// ships.
 		return bucketNone, "", nil
 	}
-
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		return 0, "", err
@@ -194,35 +184,13 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if err != nil {
 		return 0, "", err
 	}
-	if kind != NextKindStage {
-		// NextKindDone without StatusPushed is a consistency gap.
-		return bucketNone, "", nil
+	if kind == NextKindDone {
+		// Terminal stage satisfied but no push transition — e.g. KB
+		// workflow, which ends at `summarize` and has no push. Treat
+		// the same as StatusPushed for dashboard purposes.
+		return bucketRuns, "done", nil
 	}
-	if next.Name == "push" && readyToShipContent(root, md) {
-		return bucketNeedsAttention, "ready to " + next.Name, nil
-	}
-	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
-		return bucketNone, "", nil
-	}
-	// Ship-stage-but-empty-content falls back to the code stage in the
-	// note: the operator needs another code turn to produce a PR body.
-	if next.Name == "push" {
-		return bucketActive, fmt.Sprintf("%s: code", wf.Name), nil
-	}
-	return bucketActive, fmt.Sprintf("%s: %s", wf.Name, next.Name), nil
-}
-
-// readyToShipContent reports whether the code document has produced
-// PR-body content. workflow.Next already tells us the stage ladder is
-// satisfied; this is the belt-and-braces check that the code document
-// isn't a zero-byte stub: pushing an empty body is never the right move.
-func readyToShipContent(root string, md *run.Metadata) bool {
-	contentPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
-	info, err := os.Stat(contentPath)
-	if err != nil {
-		return false
-	}
-	return info.Size() > 0
+	return bucketRuns, next.Name, nil
 }
 
 // humanAgo renders "Xd ago" / "Xh ago" / "just now". tabwriter-friendly
@@ -256,44 +224,47 @@ func countProjects(root string) (int, error) {
 	return len(matches), nil
 }
 
-// renderDash prints the header, three bucket sections, and footer.
-// tabwriter aligns columns per section rather than across the whole
-// output so a tight NEEDS ATTENTION block isn't widened by a long
-// ACTIVE row beneath it. Section headings use the cyan-moe style from
-// output.go; rows stay plain so tabwriter's byte-counting aligns
-// correctly (ANSI codes would skew column widths).
+// renderDash prints the header, two sections (BACKLOG, RUNS), and
+// footer. tabwriter aligns columns per section so a long idea title
+// doesn't widen the runs rows above it. Section headings use the
+// cyan-moe style from output.go; rows stay plain so tabwriter's
+// byte-counting aligns correctly (ANSI codes would skew column widths).
 func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, activeCount int) {
 	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
 
-	sections := []struct {
-		label  string
-		bucket bucket
-	}{
-		{"NEEDS ATTENTION", bucketNeedsAttention},
-		{"ACTIVE", bucketActive},
-		{"BACKLOG", bucketBacklog},
-		{"RECENT (last 7 days)", bucketRecent},
+	var backlog, runs []dashRow
+	for _, r := range rows {
+		switch r.bucket {
+		case bucketBacklog:
+			backlog = append(backlog, r)
+		case bucketRuns:
+			runs = append(runs, r)
+		}
 	}
-	for _, sec := range sections {
-		var section []dashRow
-		for _, r := range rows {
-			if r.bucket == sec.bucket {
-				section = append(section, r)
-			}
-		}
-		moePrintf(w, "%s (%d)\n", sec.label, len(section))
-		if len(section) == 0 {
-			fmt.Fprintln(w, "  (none)")
-			fmt.Fprintln(w)
-			continue
-		}
+
+	moePrintf(w, "BACKLOG (%d)\n", len(backlog))
+	if len(backlog) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, r := range section {
+		for _, r := range backlog {
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", r.project, r.run, r.note)
 		}
 		tw.Flush()
-		fmt.Fprintln(w)
 	}
+	fmt.Fprintln(w)
+
+	moePrintf(w, "RUNS (%d)\n", len(runs))
+	if len(runs) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range runs {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.project, r.run, humanAgo(now, r.when), r.note)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
 
 	moePrintf(w, "%d project(s) registered · %d active\n", projectCount, activeCount)
 }

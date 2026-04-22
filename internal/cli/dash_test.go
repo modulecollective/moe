@@ -15,7 +15,7 @@ import (
 // seedRun writes a minimal run.json + project.json pair under root so
 // moe dash's scan finds it. The opening commit is what newTestBureaucracy
 // plus commitTrailer supply — tests add work/sign trailers on top.
-func seedRun(t *testing.T, root, projectID, runID, status string) *run.Metadata {
+func seedRun(t *testing.T, root, projectID, runID, workflow, status string) *run.Metadata {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "projects", projectID), 0o755); err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func seedRun(t *testing.T, root, projectID, runID, status string) *run.Metadata 
 		Project:   projectID,
 		Title:     "T",
 		Status:    status,
-		Workflow:  "sdlc",
+		Workflow:  workflow,
 		Created:   "2026-04-01",
 		Documents: map[string]*run.Document{},
 	}
@@ -86,9 +86,8 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"Ministry of Everything",
-		"NEEDS ATTENTION (0)",
-		"ACTIVE (0)",
-		"RECENT (last 7 days) (0)",
+		"BACKLOG (0)",
+		"RUNS (0)",
 		"0 project(s) registered · 0 active",
 	} {
 		if !strings.Contains(got, want) {
@@ -97,16 +96,16 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	}
 }
 
-func TestDashReadyToShipLandsInNeedsAttention(t *testing.T) {
+// TestDashReadyToPushShowsPushStage: design + code turns are in, no
+// push turn yet. dash should render the run with next stage "push".
+func TestDashReadyToPushShowsPushStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
-	// A design turn first, then a later code turn — design is settled,
-	// code has landed, ready to ship.
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "fix-it", "design", t0)
 	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
@@ -117,30 +116,31 @@ func TestDashReadyToShipLandsInNeedsAttention(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "NEEDS ATTENTION (1)") {
-		t.Fatalf("expected one needs-attention row, got:\n%s", got)
+	if !strings.Contains(got, "RUNS (1)") {
+		t.Fatalf("expected one run row, got:\n%s", got)
 	}
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
 	}
-	if !strings.Contains(got, "ready to push") {
-		t.Fatalf("expected readiness note, got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "push") {
+		t.Fatalf("expected run row with stage 'push', got:\n%s", got)
 	}
 }
 
-func TestDashPrereqReworkedKeepsInActive(t *testing.T) {
+// TestDashPrereqReworkedShowsCodeStage: design is re-signed after the
+// code turn, so Next() points back at code. dash should show "code".
+func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "fix-it", "design", t0)
 	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
-	// Design reworked after the code turn → readiness rejects; ACTIVE.
 	commitWorkTurnAt(t, root, "fix-it", "design", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -149,26 +149,23 @@ func TestDashPrereqReworkedKeepsInActive(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "NEEDS ATTENTION (0)") {
-		t.Fatalf("expected empty needs-attention, got:\n%s", got)
+	if !strings.Contains(got, "RUNS (1)") {
+		t.Fatalf("expected one run row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active row, got:\n%s", got)
-	}
-	if !strings.Contains(got, "sdlc: code") {
-		t.Fatalf("expected active-stage note, got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "code") {
+		t.Fatalf("expected run row with stage 'code', got:\n%s", got)
 	}
 }
 
-func TestDashEmptyContentStaysInActive(t *testing.T) {
+// TestDashFreshRunShowsFirstStage: a seeded run with no work turns at
+// all still shows up, with "design" as its next stage.
+func TestDashFreshRunShowsFirstStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
-	// Empty content.md — a fresh document dir, no work yet.
-	writeContent(t, root, "tele", "fix-it", "code", "")
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -176,24 +173,24 @@ func TestDashEmptyContentStaysInActive(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "NEEDS ATTENTION (0)") {
-		t.Fatalf("empty content should not be ready to ship:\n%s", got)
+	if !strings.Contains(got, "RUNS (1)") {
+		t.Fatalf("expected one run row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected ACTIVE row, got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "design") {
+		t.Fatalf("expected run row with stage 'design', got:\n%s", got)
 	}
 }
 
-func TestDashApprovedLandsInRecent(t *testing.T) {
+// TestDashPushedRunShowsDone: a run with StatusPushed renders as "done"
+// in RUNS alongside in-progress runs — terminal runs are no longer
+// segregated into a separate RECENT bucket.
+func TestDashPushedRunShowsDone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", run.StatusPushed)
-	// An approved run needs a recent commit so LastActivity doesn't
-	// return the opening commit's time (which would still be recent in
-	// a freshly-made fixture, so this is belt-and-suspenders).
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
 	commitTrailer(t, root, "push: fix-it",
 		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/1",
 		time.Now().UTC().Add(-2*24*time.Hour))
@@ -204,11 +201,40 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RECENT (last 7 days) (1)") {
-		t.Fatalf("expected recent row, got:\n%s", got)
+	if !strings.Contains(got, "RUNS (1)") {
+		t.Fatalf("expected one run row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "pushed") {
-		t.Fatalf("expected 'pushed' in note, got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "done") {
+		t.Fatalf("expected run row with stage 'done', got:\n%s", got)
+	}
+}
+
+// TestDashKBRunAfterSummarizeShowsDone is the regression for the
+// disappearing-KB-run bug: a KB run with both research and summarize
+// turns committed has Next()==Done but Status==InProgress (KB has no
+// push), and must still render as "done" in RUNS.
+func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
+	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
+	commitWorkTurnAt(t, root, "lookup", "research", t0)
+	commitWorkTurnAt(t, root, "lookup", "summarize", t0.Add(time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "RUNS (1)") {
+		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
+	}
+	if !containsRunRow(got, "tele", "lookup", "done") {
+		t.Fatalf("expected KB run row with stage 'done', got:\n%s", got)
 	}
 }
 
@@ -218,8 +244,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// An in_progress run whose last activity is 60 days ago.
-	seedRun(t, root, "tele", "old-one", run.StatusInProgress)
+	seedRun(t, root, "tele", "old-one", "sdlc", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Run: old-one\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
@@ -230,7 +255,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE (0)") {
+	if !strings.Contains(out.String(), "RUNS (0)") {
 		t.Fatalf("dormant run should be hidden, got:\n%s", out.String())
 	}
 
@@ -241,7 +266,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE (1)") {
+	if !strings.Contains(out.String(), "RUNS (1)") {
 		t.Fatalf("--all should reveal dormant run, got:\n%s", out.String())
 	}
 }
@@ -252,12 +277,12 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "older", run.StatusInProgress)
+	seedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Run: older\nMoE-Document: spec",
 		time.Now().UTC().Add(-3*24*time.Hour))
 
-	seedRun(t, root, "tele", "newer", run.StatusInProgress)
+	seedRun(t, root, "tele", "newer", "sdlc", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
 		"MoE-Run: newer\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))
@@ -308,13 +333,11 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 			t.Fatalf("backlog missing %q in:\n%s", want, got)
 		}
 	}
-	// Backlog sits between ACTIVE and RECENT.
-	activeIdx := strings.Index(got, "ACTIVE")
+	// BACKLOG sits above RUNS.
 	backlogIdx := strings.Index(got, "BACKLOG")
-	recentIdx := strings.Index(got, "RECENT")
-	if !(activeIdx < backlogIdx && backlogIdx < recentIdx) {
-		t.Fatalf("section order wrong (active=%d backlog=%d recent=%d):\n%s",
-			activeIdx, backlogIdx, recentIdx, got)
+	runsIdx := strings.Index(got, "RUNS")
+	if !(backlogIdx >= 0 && runsIdx >= 0 && backlogIdx < runsIdx) {
+		t.Fatalf("section order wrong (backlog=%d runs=%d):\n%s", backlogIdx, runsIdx, got)
 	}
 }
 
@@ -361,4 +384,25 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 	if !strings.Contains(out.String(), "3 project(s) registered") {
 		t.Fatalf("expected 3 projects in footer, got:\n%s", out.String())
 	}
+}
+
+// containsRunRow checks that dash output has a row for (project, run)
+// whose last tabwriter field matches stage — ignores the humanAgo
+// middle column so tests can be written without pinning wall-clock
+// deltas. tabwriter pads with spaces so we scan each line for the
+// three tokens in order and require no other tokens after stage.
+func containsRunRow(out, project, runID, stage string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[0] != project || fields[1] != runID {
+			continue
+		}
+		if fields[len(fields)-1] == stage {
+			return true
+		}
+	}
+	return false
 }
