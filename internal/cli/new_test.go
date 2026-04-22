@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-// captureIdea is a small wrapper around `moe idea new` for tests that
+// captureIdea is a small wrapper around `moe idea add` for tests that
 // need a pre-existing idea to promote.
 func captureIdea(t *testing.T, projectID, title string) {
 	t.Helper()
 	noEditor(t)
-	if code := Run([]string{"idea", "new", projectID, title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "add", projectID, title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed for %q", title)
 	}
 }

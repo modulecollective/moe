@@ -38,8 +38,10 @@ func runIdea(args []string, stdout, stderr io.Writer) int {
 	case "-h", "--help", "help":
 		printIdeaUsage(stdout)
 		return 0
-	case "new":
-		return runIdeaNew(args[1:], stdout, stderr)
+	case "add":
+		return runIdeaAdd(args[1:], stdout, stderr)
+	case "remove":
+		return runIdeaRemove(args[1:], stdout, stderr)
 	case "list":
 		return runIdeaList(args[1:], stdout, stderr)
 	default:
@@ -53,7 +55,8 @@ func printIdeaUsage(w io.Writer) {
 	moePrintln(w, "usage: moe idea <subcommand> [args...]")
 	moePrintln(w, "")
 	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "new", "capture a new idea (writes a stub and opens $EDITOR)")
+	moePrintf(w, "  %-14s  %s\n", "add", "capture a new idea (writes a stub and opens $EDITOR)")
+	moePrintf(w, "  %-14s  %s\n", "remove", "delete a captured idea and commit the removal")
 	moePrintf(w, "  %-14s  %s\n", "list", "list this project's captured ideas")
 }
 
@@ -74,12 +77,12 @@ func ideaPath(projectID, slug string) string {
 	return filepath.Join(ideaDir(projectID), slug+".md")
 }
 
-func runIdeaNew(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
+func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea new [--id <slug>] <project> \"title\"\n")
+		moePrintf(stderr, "usage: moe idea add [--id <slug>] <project> \"title\"\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -152,6 +155,77 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 
 	moePrintf(stdout, "captured idea %s/%s\n%s\n", projectID, slug, abs)
 	return editorCode
+}
+
+func runIdeaRemove(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea remove", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea remove <project> <slug>\n")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	projectID := fs.Arg(0)
+	slug := fs.Arg(1)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	root, err := bureaucracy.Find(cwd, os.Getenv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
+		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
+			projectID, filepath.Join("projects", projectID, "project.json"))
+		return 1
+	}
+
+	dirty, err := run.WorkingTreeDirty(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if dirty {
+		moePrintln(stderr, "idea: working tree has uncommitted changes; commit or stash first")
+		return 1
+	}
+
+	rel := ideaPath(projectID, slug)
+	abs := filepath.Join(root, rel)
+	if _, err := os.Stat(abs); err != nil {
+		moePrintf(stderr, "idea: %s does not exist; run `moe idea list %s` to see captured ideas\n",
+			rel, projectID)
+		return 1
+	}
+	title, err := readIdeaTitle(abs)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if title == "" {
+		title = slug
+	}
+	if err := os.Remove(abs); err != nil {
+		moePrintf(stderr, "idea: remove %s: %v\n", rel, err)
+		return 1
+	}
+	msg := fmt.Sprintf("Remove idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
+		projectID, slug, title, slug, projectID)
+	if err := run.StageAndCommit(root, msg, rel); err != nil {
+		moePrintf(stderr, "idea: commit: %v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "removed idea %s/%s\n", projectID, slug)
+	return 0
 }
 
 func runIdeaList(args []string, stdout, stderr io.Writer) int {
