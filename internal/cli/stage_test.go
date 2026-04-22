@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -276,6 +277,249 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 	if strings.Contains(got, "Since your last turn") {
 		t.Errorf("banner should not fire for a doc with no prereqs:\n%s", got)
 	}
+}
+
+// TestCommitSessionStartWritesTrailersAndKeepsTreeClean is the core
+// property commitSessionStart was introduced to guarantee: after
+// EnsureDocument mints a fresh session and the metadata is saved, the
+// eager commit lands on HEAD with the standard MoE trailer block and
+// the working tree reaches a clean state (no dirty run.json sitting
+// around for the duration of the Claude run).
+func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	doc, mutated, err := run.EnsureDocument(root, md, "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mutated {
+		t.Fatalf("expected EnsureDocument to mutate on fresh document")
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	subject := gitLogFormat(t, root, 1, "HEAD", "%s")
+	if subject != "work: start session for design" {
+		t.Errorf("subject = %q, want %q", subject, "work: start session for design")
+	}
+	body := gitLogFormat(t, root, 1, "HEAD", "%B")
+	for _, want := range []string{
+		"MoE-Run: fix-it",
+		"MoE-Project: tele",
+		"MoE-Document: design",
+		"MoE-Session: " + doc.Session,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("commit body missing %q:\n%s", want, body)
+		}
+	}
+
+	if out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	} else if len(strings.TrimSpace(string(out))) != 0 {
+		t.Errorf("expected clean tree after eager commit, got:\n%s", out)
+	}
+}
+
+// TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone is the other
+// half of the contract: the eager commit is scoped to run.json, so an
+// operator who had stray edits in their tree before launching the
+// stage keeps those edits — they are neither staged nor committed.
+func TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	stray := filepath.Join(root, "stray.txt")
+	if err := os.WriteFile(stray, []byte("operator WIP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+	porcelain := strings.TrimSpace(string(out))
+	// Stray file should still be untracked; nothing else should be dirty.
+	if porcelain != "?? stray.txt" {
+		t.Errorf("unexpected porcelain after eager commit:\n%s", out)
+	}
+
+	// And HEAD should only mention run.json, not stray.txt.
+	diff, err := exec.Command("git", "-C", root, "show", "--name-only", "--pretty=", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v\n%s", err, diff)
+	}
+	names := strings.TrimSpace(string(diff))
+	wantPath := filepath.Join("projects", "tele", "runs", "fix-it", "run.json")
+	if names != wantPath {
+		t.Errorf("HEAD files = %q, want %q", names, wantPath)
+	}
+}
+
+// TestCommitSessionStartRegeneratesUUIDForLegacyDocument covers the
+// "invalid session id" branch of EnsureDocument: a legacy Document
+// entry with an empty / malformed Session gets a new UUID, mutated=true,
+// and the eager commit carries the freshly minted UUID in its trailer.
+func TestCommitSessionStartRegeneratesUUIDForLegacyDocument(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{
+			"design": {Session: "not-a-uuid"},
+		},
+	}
+	doc, mutated, err := run.EnsureDocument(root, md, "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mutated {
+		t.Fatalf("expected EnsureDocument to re-mint legacy session id")
+	}
+	if doc.Session == "not-a-uuid" || doc.Session == "" {
+		t.Fatalf("Session not refreshed: %q", doc.Session)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	body := gitLogFormat(t, root, 1, "HEAD", "%B")
+	if !strings.Contains(body, "MoE-Session: "+doc.Session) {
+		t.Errorf("trailer missing freshly minted session %q:\n%s", doc.Session, body)
+	}
+}
+
+// TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits is
+// the composition check: on a first turn, the eager start-session
+// commit plus the closing commitTurn commit produce two commits on
+// HEAD with distinct subjects. Mirrors the intended runtime sequence
+// without dragging in the executor.
+func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	// Simulate the agent writing content.md mid-session.
+	contentRel := run.ContentPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitTurn(root, md, "design"); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+
+	log := gitLogFormat(t, root, 2, "HEAD", "%s")
+	subjects := strings.Split(strings.TrimSpace(log), "\n")
+	// git log is newest-first.
+	want := []string{"work: update design", "work: start session for design"}
+	if len(subjects) != len(want) || subjects[0] != want[0] || subjects[1] != want[1] {
+		t.Errorf("subjects = %v, want %v", subjects, want)
+	}
+}
+
+// TestSecondTurnOnExistingDocumentSkipsEagerCommit guards the other
+// side of the `if mutated` gate in runStageSession: once a document
+// has a valid session UUID committed, EnsureDocument no longer
+// mutates, so a subsequent turn produces only the closing
+// `work: update` commit — no duplicate `work: start session` commit
+// per turn.
+func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+	// First turn lands a bit of content via commitTurn.
+	contentRel := run.ContentPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitTurn(root, md, "design"); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+
+	// Second turn: EnsureDocument should NOT mutate; mirror the
+	// `if mutated { commitSessionStart }` gate by simply not calling
+	// commitSessionStart on this path. Then the agent writes, and
+	// commitTurn is the only new commit.
+	_, mutated, err := run.EnsureDocument(root, md, "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutated {
+		t.Fatalf("expected mutated=false on second turn, got true")
+	}
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
+	if err := commitTurn(root, md, "design"); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+	headAfter := gitLogFormat(t, root, 1, "HEAD", "%H")
+	if headBefore == headAfter {
+		t.Fatal("expected commitTurn to add a commit on second turn")
+	}
+	// Exactly one new commit, and its subject is `work: update …`.
+	subj := gitLogFormat(t, root, 1, "HEAD", "%s")
+	if subj != "work: update design" {
+		t.Errorf("second-turn HEAD subject = %q, want %q", subj, "work: update design")
+	}
+	// HEAD~1 must still be the first-turn update, not a duplicate start-session.
+	prev := gitLogFormat(t, root, 1, "HEAD~1", "%s")
+	if prev != "work: update design" {
+		t.Errorf("HEAD~1 subject = %q, want %q (no eager commit on second turn)", prev, "work: update design")
+	}
+}
+
+// gitLogFormat runs `git log -n <n> --format=<fmt> <rev>` and returns
+// the trimmed stdout — small helper so each assertion doesn't
+// reimplement the exec.Command plumbing.
+func gitLogFormat(t *testing.T, root string, n int, rev, format string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", root, "log", fmt.Sprintf("-n%d", n), "--format="+format, rev).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v\n%s", err, out)
+	}
+	return strings.TrimRight(string(out), "\n")
 }
 
 // registerThrowawayWorkflow adds a one-off workflow to the package

@@ -59,6 +59,10 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
+		if err := commitSessionStart(root, md, docID); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
 		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
@@ -330,6 +334,31 @@ run is pushed.
 `, clonePath)
 	}
 	return out
+}
+
+// commitSessionStart commits run.json immediately after EnsureDocument
+// mints a fresh Claude session UUID, so the long Claude run that follows
+// doesn't leave the bureaucracy tree dirty for hours. Only run.json is
+// staged — any unrelated edits the operator had in the tree stay put.
+//
+// ErrNothingToCommit is tolerated silently: the caller only reaches this
+// path when mutated=true, so run.json is expected to differ from HEAD,
+// but if some concurrent action already committed the identical state
+// there's no work to do and no reason to fail the turn.
+func commitSessionStart(root string, md *run.Metadata, docID string) error {
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf(`work: start session for %s
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Document: %s
+MoE-Session: %s
+`, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
+	err := run.StageAndCommit(root, msg, runJSON)
+	if errors.Is(err, run.ErrNothingToCommit) {
+		return nil
+	}
+	return err
 }
 
 // commitTurn stages the document dir and run.json, then commits with
