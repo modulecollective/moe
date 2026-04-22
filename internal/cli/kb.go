@@ -49,9 +49,10 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	const kickoff = "The operator just opened this research session. " +
-		"In one or two sentences, acknowledge where the source list stands " +
-		"(fresh start vs. resumed) and ask what topic or angle they'd like " +
-		"you to search for. Then wait for their reply."
+		"Read the canvas file before replying, so your acknowledgement reflects " +
+		"what's actually on it. In one or two sentences, acknowledge where the " +
+		"source list stands (fresh start vs. resumed) and ask what topic or " +
+		"angle they'd like you to search for. Then wait for their reply."
 	return runStageSession(fs.Arg(0), fs.Arg(1), "research", false, kickoff, stdout, stderr)
 }
 
@@ -73,8 +74,9 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	const kickoff = "The operator just opened this summarize session. " +
-		"In one or two sentences, acknowledge where the article stands " +
-		"(fresh start vs. resumed) and ask what they'd like to work on next. " +
-		"Then wait for their reply."
+		"Read the canvas file before replying, so your acknowledgement reflects " +
+		"what's actually on it. In one or two sentences, acknowledge where the " +
+		"article stands (fresh start vs. resumed) and ask what they'd like to " +
+		"work on next. Then wait for their reply."
 	return runStageSession(fs.Arg(0), fs.Arg(1), "summarize", false, kickoff, stdout, stderr)
 }
