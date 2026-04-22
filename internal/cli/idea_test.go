@@ -187,6 +187,29 @@ func TestIdeaAddIDOverrideErrorsOnCollision(t *testing.T) {
 	}
 }
 
+// Regression: --id placed after the project positional should still
+// be honored; reorderFlags hoists it to the front.
+func TestIdeaAddTolerantToFlagAfterPositional(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "add", "tele", "something", "--id=custom-slug"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "captured idea tele/custom-slug") {
+		t.Fatalf("expected slug from --id override, got: %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "ideas", "custom-slug.md")); err != nil {
+		t.Fatalf("idea file should exist under override slug: %v", err)
+	}
+}
+
 func TestIdeaAddRefusesUnregisteredProject(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
