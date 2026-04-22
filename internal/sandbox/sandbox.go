@@ -116,7 +116,14 @@ func cloneGitDir(worktreeClone, srcGitDir, root, projectID, requestID string) er
 	// The submodule's gitdir config has core.worktree pointing at the
 	// canonical working tree. Repoint it at the clone so git commands
 	// run inside the clone treat the clone's files as the worktree.
-	cmd := exec.Command("git", "-C", worktreeClone, "config", "core.worktree", abs)
+	//
+	// We use "git config -f" to edit the cloned gitdir's config file
+	// directly. Using "git -C" would fail because git tries to resolve
+	// the old core.worktree (a relative path baked into the source
+	// gitdir) before writing the new value, and that relative path is
+	// invalid from the clone's new location.
+	cfgPath := filepath.Join(dstGitDir, "config")
+	cmd := exec.Command("git", "config", "-f", cfgPath, "core.worktree", abs)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(dstGitDir)
 		return fmt.Errorf("sandbox: set core.worktree: %w (%s)", err, strings.TrimSpace(string(out)))

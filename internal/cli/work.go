@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -99,12 +100,23 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// mutated means EnsureDocument just minted the session UUID this
+	// turn, so the session is definitely new. But even when the document
+	// already existed, the local Claude Code session data may have been
+	// cleaned up (or moe is running on a different machine). Probe the
+	// transcript as a proxy: no transcript → nothing to --resume.
+	newSession := mutated
+	if !newSession {
+		tp, _ := claude.TranscriptPath(doc.Session)
+		newSession = tp == ""
+	}
+
 	runErr := executor.ClaudeCLI{}.Execute(executor.Request{
 		Root:       root,
 		Metadata:   md,
 		DocID:      docID,
 		SessionID:  doc.Session,
-		NewSession: mutated,
+		NewSession: newSession,
 		Prompt:     prompt,
 		ClonePath:  clonePath,
 		Stdin:      os.Stdin,
