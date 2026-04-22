@@ -37,13 +37,17 @@ type Document struct {
 // StatusInProgress; `moe sdlc push` lands it in StatusMerged (the
 // default FF-merge path) or StatusPushed (`--pr`, waiting on the human
 // to merge or close on GitHub). `moe sync` then reconciles pushed runs
-// into StatusMerged or StatusClosed. Kept as a small closed set so
-// moe dash and related readers can bucket without string-typo risk.
+// into StatusMerged or StatusClosed. StatusPromoted is the terminal for
+// an idea run handed off to another run — peer to StatusClosed but
+// distinguishable without reading trailers, so dash can tell "moved on"
+// from "dropped". Kept as a small closed set so readers can bucket
+// without string-typo risk.
 const (
 	StatusInProgress = "in_progress"
 	StatusPushed     = "pushed"
 	StatusMerged     = "merged"
 	StatusClosed     = "closed"
+	StatusPromoted   = "promoted"
 )
 
 // Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.

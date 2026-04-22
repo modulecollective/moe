@@ -29,7 +29,7 @@ const (
 // surfaces that distinction separately.
 func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, error) {
 	switch md.Status {
-	case run.StatusPushed, run.StatusMerged, run.StatusClosed:
+	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:
 		return nil, NextKindDone, nil
 	}
 	for _, stage := range w.stageOrder {
