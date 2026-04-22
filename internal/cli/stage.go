@@ -15,8 +15,10 @@ import (
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/session"
 )
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
@@ -24,9 +26,18 @@ import (
 // session keyed to that document's session-id, and commit whatever changed
 // when Claude exits.
 //
-// needsSandbox controls the sandbox clone: design=false never gets one,
+// The session runs inside a throwaway git worktree on a branch named
+// session/<project>/<run>/<doc>. All per-turn commits (session-start,
+// work turn) land on that branch; when Claude exits, the branch is
+// rebased onto main, fast-forwarded in, pushed (best-effort) and
+// cleaned up. The repo-wide lock is held only during open (short) and
+// close (seconds), not across the Claude session itself.
+//
+// needsSandbox controls the code sandbox: design=false never gets one,
 // code=true always requires one (with a clear error if the project isn't
-// registered as a submodule). See README for the broader model.
+// registered as a submodule). The sandbox lives under the canonical
+// bureaucracy root (not the session worktree) so it persists across
+// turns.
 //
 // initialPrompt, if non-empty, is auto-sent as the first user message of
 // the turn — it's how stages spare the operator from typing "go" every
@@ -43,32 +54,55 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		return 1
 	}
 
-	md, err := run.Load(root, projectID, runID)
+	// Open (or resume) the session worktree under the repo lock. Short
+	// hold: the only work is `git worktree add` (or a lookup).
+	var sess *session.Session
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "stage-open",
+		Run:     projectID + "/" + runID,
+	}, func() error {
+		s, err := session.Open(root, projectID, runID, docID)
+		if err != nil {
+			return err
+		}
+		sess = s
+		return nil
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	workRoot := sess.WorktreePath
+
+	md, err := run.Load(workRoot, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
-	doc, mutated, err := run.EnsureDocument(root, md, docID)
+	doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	if mutated {
-		if err := run.Save(root, md); err != nil {
+		if err := run.Save(workRoot, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		if err := commitSessionStart(root, md, docID); err != nil {
+		// Commit on the session branch — no repo lock needed because
+		// the branch has a single writer (this session).
+		if err := commitSessionStart(workRoot, md, docID); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
 		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
-	// Sandbox clone: only for stages that actually edit code. design=false
-	// never sees a clone; code=true insists on one and pre-positions it on
-	// the moe/<run-id> branch so the agent's commits (and any later
+	// Code sandbox — still keyed off the canonical bureaucracy root so
+	// per-run sandbox persistence works across turns. design=false
+	// never sees a clone; code=true insists on one and pre-positions it
+	// on the moe/<run-id> branch so the agent's commits (and any later
 	// `moe sdlc push`) land on a branch we own.
 	clonePath := ""
 	if needsSandbox {
@@ -87,7 +121,10 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		}
 	}
 
-	prompt, err := buildSystemPrompt(root, md, docID, clonePath)
+	// Prompt paths point at the session worktree, where Claude's edits
+	// land. When the session closes, those edits rebase + ff-merge into
+	// main at the canonical root.
+	prompt, err := buildSystemPrompt(workRoot, md, docID, clonePath)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -105,7 +142,7 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 	}
 
 	runErr := executor.Execute(executor.Request{
-		Root:          root,
+		Root:          workRoot,
 		Metadata:      md,
 		DocID:         docID,
 		SessionID:     doc.Session,
@@ -120,7 +157,19 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.
-	commitErr := commitTurn(root, md, docID)
+	commitErr := commitTurn(workRoot, md, docID)
+
+	// Close the session: land it on main and tear the worktree down.
+	// Longer budget + heartbeat because the close window does real work
+	// (rebase, ff-merge, optional push) and may sit on the network.
+	closeErr := withRepoLock(root, repolock.Options{
+		Purpose:   "stage-close",
+		Run:       projectID + "/" + runID,
+		Budget:    repolock.CronBudget,
+		Heartbeat: true,
+	}, func() error {
+		return session.Close(sess, stdout, stderr)
+	})
 
 	if runErr != nil {
 		moePrintf(stderr, "claude exited: %v\n", runErr)
@@ -134,6 +183,10 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		return 1
 	default:
 		moePrintf(stdout, "committed turn for %s/%s/%s\n", md.Project, md.ID, docID)
+	}
+	if closeErr != nil {
+		moePrintf(stderr, "session close: %v\n", closeErr)
+		return 1
 	}
 	if runErr != nil {
 		return 1
