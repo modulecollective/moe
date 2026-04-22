@@ -80,14 +80,5 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
-
-	// Print the first stage's invocation as a copy-pasteable hint. We
-	// deliberately don't auto-launch it: every stage is one explicit
-	// command, typed by the operator.
-	if wf, err := LookupWorkflow(md.Workflow); err == nil {
-		if stages := wf.Stages(); len(stages) > 0 {
-			moePrintf(stdout, "next: moe %s %s %s %s\n", wf.Name, stages[0], md.Project, md.ID)
-		}
-	}
-	return 0
+	return promptNextStage(root, md, stdout, stderr)
 }
