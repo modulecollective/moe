@@ -131,6 +131,28 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 	}
 }
 
+func TestInitWritesMoeGitignore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(cfg, []byte("[user]\n\temail = t@example.com\n\tname = T\n[init]\n\tdefaultBranch = main\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+	dir := t.TempDir()
+	if err := Init(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(body), ".moe/") {
+		t.Errorf(".gitignore missing .moe/: %q", body)
+	}
+}
+
 func TestInitRefusesExistingMarker(t *testing.T) {
 	dir := t.TempDir()
 	writeMarker(t, dir)

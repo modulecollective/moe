@@ -98,6 +98,13 @@ func Init(dir, remote string) error {
 	if err := os.WriteFile(filepath.Join(abs, Marker), []byte(markerBody), 0o644); err != nil {
 		return fmt.Errorf("bureaucracy: write %s: %w", Marker, err)
 	}
+	// Ignore moe's per-repo scratch dir (locks, session worktrees,
+	// sandbox clones). Written up-front rather than lazily so
+	// freshly-initialized repos don't surface .moe/ as an untracked
+	// path on first `moe run new` or `moe sdlc design`.
+	if err := ensureRootGitignore(abs); err != nil {
+		return err
+	}
 	// Git doesn't track empty dirs, so a .gitkeep reserves the path and
 	// makes future project registration land in a tracked spot.
 	// projects/ is the sole top-level state directory — project.json and
@@ -127,10 +134,46 @@ func Init(dir, remote string) error {
 		}
 	}
 
-	if err := runGit(abs, "add", Marker, "projects/.gitkeep"); err != nil {
+	if err := runGit(abs, "add", Marker, ".gitignore", "projects/.gitkeep"); err != nil {
 		return fmt.Errorf("bureaucracy: git add: %w", err)
 	}
 	return nil
+}
+
+// ensureRootGitignore writes a .gitignore at the bureaucracy root
+// listing .moe/ so per-repo scratch state never leaks into git
+// history. If a .gitignore already exists, the .moe/ entry is
+// appended when missing; otherwise a fresh file is written.
+func ensureRootGitignore(root string) error {
+	const wanted = ".moe/"
+	path := filepath.Join(root, ".gitignore")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("bureaucracy: read .gitignore: %w", err)
+	}
+	body := string(existing)
+	if hasGitignoreLine(body, wanted) {
+		return nil
+	}
+	if len(body) > 0 && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	body += wanted + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("bureaucracy: write .gitignore: %w", err)
+	}
+	return nil
+}
+
+// hasGitignoreLine reports whether body already contains line as a
+// standalone, uncommented entry.
+func hasGitignoreLine(body, line string) bool {
+	for _, l := range strings.Split(body, "\n") {
+		if strings.TrimSpace(l) == line {
+			return true
+		}
+	}
+	return false
 }
 
 // runGit invokes git with stdio wired to the user's terminal so credential
