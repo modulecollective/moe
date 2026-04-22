@@ -313,4 +313,3 @@ func TestReconcileSkipsNonPushedRuns(t *testing.T) {
 		t.Fatalf("expected silence on non-pushed run, got %q", stdout.String())
 	}
 }
-
