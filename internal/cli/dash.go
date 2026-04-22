@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+
 func init() {
 	Register(&Command{
 		Name:    "dash",
@@ -119,7 +120,10 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 }
 
 // buildDashRows maps scanned metadata to dashboard rows. Per-run
-// git queries live here so renderDash stays a pure printer.
+// git queries live here so renderDash stays a pure printer. Ideas are
+// just runs with workflow=idea; classify routes open ones to the
+// backlog bucket and closed/promoted ones to completed, so there's no
+// separate scan of a markdown-file shelf.
 func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool) ([]dashRow, error) {
 	rows := make([]dashRow, 0, len(mds))
 	for _, md := range mds {
@@ -140,27 +144,6 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 			note:    note,
 			when:    last,
 			bucket:  b,
-		})
-	}
-	ideas, err := scanAllIdeas(root)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range ideas {
-		rel, err := filepath.Rel(root, e.path)
-		if err != nil {
-			return nil, err
-		}
-		when, err := run.LastFileActivity(root, rel)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, dashRow{
-			project: e.project,
-			run:     e.slug,
-			note:    e.title,
-			when:    when,
-			bucket:  bucketBacklog,
 		})
 	}
 	// Within a section, most-recent activity first. Secondary sort on
@@ -184,6 +167,20 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
+	// Idea runs have their own lane: open ones are backlog, closed /
+	// promoted ones go to completed with a distinguishing label so the
+	// operator can tell "handed off to another run" from "dropped".
+	if md.Workflow == ideaWorkflow {
+		switch md.Status {
+		case run.StatusInProgress:
+			return bucketBacklog, md.Title, nil
+		case run.StatusPromoted:
+			return bucketCompletedRuns, "promoted", nil
+		case run.StatusClosed:
+			return bucketCompletedRuns, "closed", nil
+		}
+		return bucketNone, "", nil
+	}
 	switch md.Status {
 	case run.StatusPushed:
 		note := "awaiting merge"
@@ -195,6 +192,11 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		return bucketCompletedRuns, "merged", nil
 	case run.StatusClosed:
 		return bucketCompletedRuns, "closed", nil
+	case run.StatusPromoted:
+		// Non-idea runs shouldn't wear StatusPromoted, but if one
+		// ever does (future --from-run promotion), surface it as
+		// completed with the same label as the idea case.
+		return bucketCompletedRuns, "promoted", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once

@@ -8,28 +8,57 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 
 	moe "github.com/modulecollective/moe"
-	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// `moe idea` is a deliberately small top-level for capture: a markdown
-// file in projects/<p>/ideas/, no workflow, no agent. Promoting an
-// idea to a run is `moe sdlc new --from-idea=<slug>` (or kb's `new`),
-// not a verb here — see designs/idea-capture.md.
+// `moe idea` is the backlog surface: a shelf of thoughts-worth-capturing
+// that sit between nothing and a full run. Ideas are just runs in a
+// dedicated single-stage workflow (ideaWorkflow, ideaDocID) so the slug
+// namespace, dash bucketing, and trailer conventions are the same as
+// sdlc/kb/quick. The distinguishing discipline: `moe idea` verbs never
+// launch Claude unless --chat is passed — capture stays cheap.
+//
+// The idea workflow itself is registered in the workflow registry (for
+// LookupWorkflow / dash), but not as a top-level dispatcher — `moe idea`
+// is its own top-level so muscle memory for `add/edit/remove/list`
+// maps directly onto the new verbs.
+
+// ideaWorkflow is the workflow name written to run.json's `workflow`
+// field for idea runs. Kept as a constant so the few places that
+// special-case it (dash, from-idea promotion) can key off one symbol.
+const ideaWorkflow = "idea"
+
+// ideaDocID is the document id for the idea's sole stage. Canvas lives
+// at projects/<p>/runs/<slug>/documents/idea/content.md.
+const ideaDocID = "idea"
 
 func init() {
 	Register(&Command{
 		Name:    "idea",
-		Summary: "lightweight backlog: capture an idea or list ideas (no workflow, no agent)",
+		Summary: "lightweight backlog: capture an idea or list ideas (no agent unless --chat)",
 		Run:     runIdea,
 	})
+
+	// Register the idea workflow so run.Load, dash lookup, and
+	// --from-idea's wf.Stages() all resolve it. The stage command
+	// itself is unreachable — the dispatcher above handles idea verbs,
+	// not `moe idea idea` — so we give it a usage stub just in case.
+	wf := NewWorkflow(ideaWorkflow, "single-stage idea-capture workflow (driven by `moe idea`)")
+	wf.Register(&Command{
+		Name:    ideaDocID,
+		Summary: "idea canvas (use `moe idea edit` instead of invoking directly)",
+		Run: func(args []string, stdout, stderr io.Writer) int {
+			moePrintln(stderr, "idea runs are driven via `moe idea` — try `moe idea edit <project> <slug>`")
+			return 2
+		},
+	})
+	RegisterWorkflow(wf)
 }
 
 func runIdea(args []string, stdout, stderr io.Writer) int {
@@ -41,14 +70,16 @@ func runIdea(args []string, stdout, stderr io.Writer) int {
 	case "-h", "--help", "help":
 		printIdeaUsage(stdout)
 		return 0
-	case "add":
-		return runIdeaAdd(args[1:], stdout, stderr)
+	case "new":
+		return runIdeaNew(args[1:], stdout, stderr)
 	case "edit":
 		return runIdeaEdit(args[1:], stdout, stderr)
-	case "remove":
-		return runIdeaRemove(args[1:], stdout, stderr)
+	case "close":
+		return runIdeaClose(args[1:], stdout, stderr)
 	case "list":
 		return runIdeaList(args[1:], stdout, stderr)
+	case "migrate":
+		return runIdeaMigrate(args[1:], stdout, stderr)
 	default:
 		moePrintf(stderr, "unknown idea subcommand %q\n", args[0])
 		printIdeaUsage(stderr)
@@ -60,36 +91,20 @@ func printIdeaUsage(w io.Writer) {
 	moePrintln(w, "usage: moe idea <subcommand> [args...]")
 	moePrintln(w, "")
 	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "add", "capture a new idea (opens $EDITOR, or --chat for Claude Code)")
+	moePrintf(w, "  %-14s  %s\n", "new", "capture a new idea (opens $EDITOR, or --chat for Claude Code)")
 	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea ($EDITOR, or --chat for Claude Code)")
-	moePrintf(w, "  %-14s  %s\n", "remove", "delete a captured idea and commit the removal")
-	moePrintf(w, "  %-14s  %s\n", "list", "list this project's captured ideas")
+	moePrintf(w, "  %-14s  %s\n", "close", "close a captured idea without promoting (status → closed)")
+	moePrintf(w, "  %-14s  %s\n", "list", "list this project's open ideas")
+	moePrintf(w, "  %-14s  %s\n", "migrate", "convert pre-existing projects/<p>/ideas/*.md files into idea runs (one-shot)")
 }
 
-// ideaSlugPattern matches the same shape as run id slugs: lowercase
-// letters/digits with internal dashes.
-var ideaSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-
-// ideaDir is the on-disk directory (relative to the bureaucracy root)
-// for a project's idea files. Centralized here so dash and runNew share
-// the same convention without duplicating the path literal.
-func ideaDir(projectID string) string {
-	return filepath.Join("projects", projectID, "ideas")
-}
-
-// ideaPath is the on-disk path for a single idea (relative to the
-// bureaucracy root).
-func ideaPath(projectID, slug string) string {
-	return filepath.Join(ideaDir(projectID), slug+".md")
-}
-
-func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea add", flag.ContinueOnError)
+func runIdeaNew(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	chat := fs.Bool("chat", false, "open a Claude Code session on the new idea instead of $EDITOR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea add [--id <slug>] [--chat] <project> \"title\"\n")
+		moePrintf(stderr, "usage: moe idea new [--id <slug>] [--chat] <project> \"title\"\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
@@ -106,87 +121,84 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	cwd, err := os.Getwd()
+	root, err := findRoot(stderr)
 	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
+	if err := requireCleanTree(root); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
-		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
-			projectID, filepath.Join("projects", projectID, "project.json"))
-		return 1
-	}
-
-	dirty, err := run.WorkingTreeDirty(root)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if dirty {
-		moePrintln(stderr, "idea: working tree has uncommitted changes; commit or stash first")
-		return 1
-	}
-
-	slug, err := resolveIdeaSlug(root, projectID, *idOverride, title)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
 	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea add needs an editor")
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea new needs an editor")
 		return 1
 	}
 
-	rel := ideaPath(projectID, slug)
-	abs := filepath.Join(root, rel)
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		moePrintf(stderr, "idea: mkdir: %v\n", err)
+	// Write the stub to a tempfile outside the bureaucracy tree so the
+	// editor/chat flow doesn't dirty it. We pass the edited body into
+	// run.New as seed content — run.New writes the canvas at its
+	// canonical location and commits run.json + canvas atomically.
+	tmpDir, err := os.MkdirTemp("", "moe-idea-new-")
+	if err != nil {
+		moePrintf(stderr, "idea: tempdir: %v\n", err)
 		return 1
 	}
-	body := fmt.Sprintf("# %s\n", title)
-	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
-		moePrintf(stderr, "idea: write %s: %v\n", rel, err)
+	defer os.RemoveAll(tmpDir)
+	tmpPath := filepath.Join(tmpDir, "content.md")
+	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("# %s\n", title)), 0o644); err != nil {
+		moePrintf(stderr, "idea: write stub: %v\n", err)
 		return 1
 	}
-	// Open the editor (or --chat session) first and commit whatever's on
-	// disk afterward, so the operator's saved content lands in the capture
-	// commit. If they quit without editing, the stub itself is still a
-	// valid capture.
-	var editorCode int
+
 	if *chat {
-		editorCode = runIdeaChat(root, abs, "capture", stdout, stderr)
+		if code := runIdeaChat(root, tmpPath, "capture", stdout, stderr); code != 0 {
+			return code
+		}
 	} else {
-		editorCode = launchEditor(abs, stdout, stderr)
+		if code := launchEditor(tmpPath, stdout, stderr); code != 0 {
+			return code
+		}
 	}
-	msg := fmt.Sprintf("Capture idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
-		projectID, slug, title, slug, projectID)
+
+	body, err := os.ReadFile(tmpPath)
+	if err != nil {
+		moePrintf(stderr, "idea: read edited canvas: %v\n", err)
+		return 1
+	}
+
+	opts := run.Options{
+		ID:       *idOverride,
+		Workflow: ideaWorkflow,
+		SeedDocs: map[string]string{ideaDocID: string(body)},
+	}
+	runRef := projectID
+	if *idOverride != "" {
+		runRef = projectID + "/" + *idOverride
+	}
+	var md *run.Metadata
 	err = withRepoLock(root, repolock.Options{
-		Purpose: "idea-add",
-		Run:     projectID + "/" + slug,
+		Purpose: "idea-new",
+		Run:     runRef,
 	}, func() error {
-		return run.StageAndCommit(root, msg, rel)
+		m, err := run.New(root, projectID, title, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
 	})
 	if err != nil {
-		moePrintf(stderr, "idea: commit: %v\n", err)
+		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
-
-	moePrintf(stdout, "captured idea %s/%s\n%s\n", projectID, slug, abs)
-	return editorCode
+	moePrintf(stdout, "captured idea %s/%s\n", md.Project, md.ID)
+	return 0
 }
 
-// runIdeaEdit reopens a captured idea in $EDITOR and lands any saves
-// as a single `Refine idea …` commit. No-op saves do not produce an
-// empty commit. Kept separate from runIdeaAdd because add resolves a
-// brand-new slug (collisions error) while edit requires an existing
-// slug (miss errors) — opposite checks would only waste a mode flag
-// if merged.
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -205,71 +217,57 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	projectID := fs.Arg(0)
 	slug := fs.Arg(1)
 
-	cwd, err := os.Getwd()
+	root, err := findRoot(stderr)
 	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
+	if err := requireCleanTree(root); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
-		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
-			projectID, filepath.Join("projects", projectID, "project.json"))
-		return 1
-	}
 
-	dirty, err := run.WorkingTreeDirty(root)
-	if err != nil {
+	if _, err := loadIdeaRun(root, projectID, slug); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if dirty {
-		moePrintln(stderr, "idea: working tree has uncommitted changes; commit or stash first")
-		return 1
-	}
-
-	rel := ideaPath(projectID, slug)
-	abs := filepath.Join(root, rel)
-	if _, err := os.Stat(abs); err != nil {
-		moePrintf(stderr, "idea: %s does not exist; run `moe idea list %s` to see captured ideas\n",
-			rel, projectID)
-		return 1
-	}
-
 	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
 		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea edit needs an editor")
 		return 1
 	}
 
-	var editorCode int
-	if *chat {
-		editorCode = runIdeaChat(root, abs, "refine", stdout, stderr)
-	} else {
-		editorCode = launchEditor(abs, stdout, stderr)
-	}
-
-	// Title for the commit subject tracks the current H1 (post-edit),
-	// with the slug as the same fallback scanIdeas already uses. If the
-	// operator blanked the H1, the slug keeps the history greppable.
-	title, err := readIdeaTitle(abs)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
+	abs := filepath.Join(root, run.ContentPath(projectID, slug, ideaDocID))
+	if _, err := os.Stat(abs); err != nil {
+		moePrintf(stderr, "idea: canvas missing: %v\n", err)
 		return 1
 	}
-	if title == "" {
-		title = slug
+
+	if *chat {
+		if code := runIdeaChat(root, abs, "refine", stdout, stderr); code != 0 {
+			return code
+		}
+	} else {
+		if code := launchEditor(abs, stdout, stderr); code != 0 {
+			return code
+		}
 	}
 
-	msg := fmt.Sprintf("Refine idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
-		projectID, slug, title, slug, projectID)
+	docDir := run.DocDir(projectID, slug, ideaDocID)
+	msg := fmt.Sprintf(`work: update %s
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Workflow: %s
+MoE-Document: %s
+`, ideaDocID, slug, projectID, ideaWorkflow, ideaDocID)
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
 	}, func() error {
-		return run.StageAndCommit(root, msg, rel)
+		return run.StageAndCommit(root, msg, docDir)
 	})
 	switch {
 	case errors.Is(err, run.ErrNothingToCommit):
@@ -280,14 +278,14 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	default:
 		moePrintf(stdout, "refined idea %s/%s\n", projectID, slug)
 	}
-	return editorCode
+	return 0
 }
 
-func runIdeaRemove(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea remove", flag.ContinueOnError)
+func runIdeaClose(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea close", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea remove <project> <slug>\n")
+		moePrintf(stderr, "usage: moe idea close <project> <slug>\n")
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -299,63 +297,51 @@ func runIdeaRemove(args []string, stdout, stderr io.Writer) int {
 	projectID := fs.Arg(0)
 	slug := fs.Arg(1)
 
-	cwd, err := os.Getwd()
+	root, err := findRoot(stderr)
 	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
+	if err := requireCleanTree(root); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
-		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
-			projectID, filepath.Join("projects", projectID, "project.json"))
 		return 1
 	}
 
-	dirty, err := run.WorkingTreeDirty(root)
+	md, err := loadIdeaRun(root, projectID, slug)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if dirty {
-		moePrintln(stderr, "idea: working tree has uncommitted changes; commit or stash first")
+	if md.Status != run.StatusInProgress {
+		moePrintf(stderr, "idea %s/%s already %s\n", projectID, slug, md.Status)
 		return 1
 	}
 
-	rel := ideaPath(projectID, slug)
-	abs := filepath.Join(root, rel)
-	if _, err := os.Stat(abs); err != nil {
-		moePrintf(stderr, "idea: %s does not exist; run `moe idea list %s` to see captured ideas\n",
-			rel, projectID)
-		return 1
-	}
-	title, err := readIdeaTitle(abs)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if title == "" {
-		title = slug
-	}
-	msg := fmt.Sprintf("Remove idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
-		projectID, slug, title, slug, projectID)
+	md.Status = run.StatusClosed
+	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
+	msg := fmt.Sprintf(`Close idea %s/%s
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Workflow: %s
+`, projectID, slug, slug, projectID, ideaWorkflow)
 	err = withRepoLock(root, repolock.Options{
-		Purpose: "idea-remove",
+		Purpose: "idea-close",
 		Run:     projectID + "/" + slug,
 	}, func() error {
-		if err := os.Remove(abs); err != nil {
-			return fmt.Errorf("remove %s: %w", rel, err)
+		if err := run.Save(root, md); err != nil {
+			return err
 		}
-		return run.StageAndCommit(root, msg, rel)
+		return run.StageAndCommit(root, msg, runJSONRel)
 	})
 	if err != nil {
-		moePrintf(stderr, "idea: %v\n", err)
+		moePrintf(stderr, "idea: close: %v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "removed idea %s/%s\n", projectID, slug)
+	moePrintf(stdout, "closed idea %s/%s\n", projectID, slug)
 	return 0
 }
 
@@ -374,23 +360,16 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	}
 	projectID := fs.Arg(0)
 
-	cwd, err := os.Getwd()
+	root, err := findRoot(stderr)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
+	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
-		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
-			projectID, filepath.Join("projects", projectID, "project.json"))
 		return 1
 	}
 
-	entries, err := scanIdeas(root, projectID)
+	entries, err := scanOpenIdeas(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -402,125 +381,81 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// ideaEntry is the minimal projection of an idea file used by both
-// `moe idea list` and `moe dash`'s backlog bucket.
+// ideaEntry is the minimal projection of an idea run used by `moe idea
+// list` and `moe dash`'s backlog bucket.
 type ideaEntry struct {
 	project string
 	slug    string
 	title   string
-	path    string // absolute
 }
 
-// scanIdeas reads projects/<projectID>/ideas/*.md, parses each title
-// from its first H1 line, and returns one entry per file. Order is
-// unspecified; callers sort to taste.
-func scanIdeas(root, projectID string) ([]ideaEntry, error) {
-	dir := filepath.Join(root, ideaDir(projectID))
-	matches, err := filepath.Glob(filepath.Join(dir, "*.md"))
+// scanOpenIdeas returns all in-progress idea runs for projectID. If
+// projectID is "", all projects are scanned — used by dash.
+func scanOpenIdeas(root, projectID string) ([]ideaEntry, error) {
+	mds, err := run.Scan(root)
 	if err != nil {
-		return nil, fmt.Errorf("idea: glob: %w", err)
+		return nil, err
 	}
-	out := make([]ideaEntry, 0, len(matches))
-	for _, p := range matches {
-		slug := strings.TrimSuffix(filepath.Base(p), ".md")
-		title, err := readIdeaTitle(p)
-		if err != nil {
-			return nil, err
+	out := make([]ideaEntry, 0, len(mds))
+	for _, md := range mds {
+		if md.Workflow != ideaWorkflow {
+			continue
 		}
-		if title == "" {
-			title = slug
+		if md.Status != run.StatusInProgress {
+			continue
 		}
-		out = append(out, ideaEntry{project: projectID, slug: slug, title: title, path: p})
+		if projectID != "" && md.Project != projectID {
+			continue
+		}
+		out = append(out, ideaEntry{
+			project: md.Project,
+			slug:    md.ID,
+			title:   md.Title,
+		})
 	}
 	return out, nil
 }
 
-// scanAllIdeas walks every project's ideas dir under root.
-func scanAllIdeas(root string) ([]ideaEntry, error) {
-	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "ideas", "*.md"))
+// loadIdeaRun loads an idea run and verifies it is in fact an idea run
+// (workflow=idea), producing a recognisable error when the slug names
+// a different workflow's run.
+func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
+	md, err := run.Load(root, projectID, slug)
 	if err != nil {
-		return nil, fmt.Errorf("idea: glob all: %w", err)
-	}
-	out := make([]ideaEntry, 0, len(matches))
-	for _, p := range matches {
-		// projects/<project>/ideas/<slug>.md → project = parent-of-parent
-		ideasDir := filepath.Dir(p)
-		projectID := filepath.Base(filepath.Dir(ideasDir))
-		slug := strings.TrimSuffix(filepath.Base(p), ".md")
-		title, err := readIdeaTitle(p)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("idea %s/%s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
 		}
-		if title == "" {
-			title = slug
-		}
-		out = append(out, ideaEntry{project: projectID, slug: slug, title: title, path: p})
+		return nil, err
 	}
-	return out, nil
+	if md.Workflow != ideaWorkflow {
+		return nil, fmt.Errorf("run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
+	}
+	return md, nil
 }
 
-// readIdeaTitle returns the trimmed text of the file's first H1 line,
-// or "" if no `# ` line appears in the head of the file. Only the head
-// is scanned so a long body doesn't slow `moe dash`.
-func readIdeaTitle(path string) (string, error) {
-	b, err := os.ReadFile(path)
+// requireProject errors if projectID has no project.json on disk.
+func requireProject(root, projectID string) error {
+	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
+		return fmt.Errorf("project %s not registered (%s missing)",
+			projectID, filepath.Join("projects", projectID, "project.json"))
+	}
+	return nil
+}
+
+// requireCleanTree errors if the working tree has uncommitted changes.
+func requireCleanTree(root string) error {
+	dirty, err := run.WorkingTreeDirty(root)
 	if err != nil {
-		return "", fmt.Errorf("idea: read %s: %w", path, err)
+		return err
 	}
-	return firstH1(string(b)), nil
-}
-
-// firstH1 returns the trimmed text after the first `# ` line in body,
-// or "" if none appears in the head of the file.
-func firstH1(body string) string {
-	for _, line := range strings.SplitN(body, "\n", 16) {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# ") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
-		}
+	if dirty {
+		return fmt.Errorf("working tree has uncommitted changes; commit or stash first")
 	}
-	return ""
-}
-
-// resolveIdeaSlug picks the slug for a new idea, mirroring run.New's
-// rule: explicit --id is taken as-is and collisions error; an
-// auto-derived slug from the title falls back to base-2, base-3, … on
-// collision.
-func resolveIdeaSlug(root, projectID, override, title string) (string, error) {
-	if override != "" {
-		if !ideaSlugPattern.MatchString(override) {
-			return "", fmt.Errorf("idea: id %q must match %s", override, ideaSlugPattern)
-		}
-		if _, err := os.Stat(filepath.Join(root, ideaPath(projectID, override))); err == nil {
-			return "", fmt.Errorf("idea: %s already exists", ideaPath(projectID, override))
-		}
-		return override, nil
-	}
-	base := run.Slugify(title)
-	if base == "" {
-		return "", fmt.Errorf("idea: cannot derive slug from title %q; pass --id to set one explicitly", title)
-	}
-	if _, err := os.Stat(filepath.Join(root, ideaPath(projectID, base))); err != nil {
-		return base, nil
-	}
-	// Strip an existing numeric -N suffix so collisions on foo-2 continue
-	// to foo-3 rather than producing foo-2-2 — same shape as run.nextFreeID.
-	root2 := base
-	if i := strings.LastIndex(root2, "-"); i >= 0 {
-		if _, err := strconv.Atoi(root2[i+1:]); err == nil {
-			root2 = root2[:i]
-		}
-	}
-	for n := 2; ; n++ {
-		c := fmt.Sprintf("%s-%d", root2, n)
-		if _, err := os.Stat(filepath.Join(root, ideaPath(projectID, c))); err != nil {
-			return c, nil
-		}
-	}
+	return nil
 }
 
 // runIdeaChat launches an interactive Claude Code session on the idea
-// file. mode is "capture" (new idea) or "refine" (existing idea) and
+// canvas. mode is "capture" (new idea) or "refine" (existing idea) and
 // selects which stages/_idea fragment seeds the system prompt. Unlike
 // stage-session chats this one is one-shot: no --session-id, no
 // thread persistence, no per-turn commits. When the operator exits
@@ -551,6 +486,13 @@ func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
 		"--add-dir", root,
 		"--append-system-prompt", prompt,
 	}
+	// In `new` flow the canvas is a tempfile outside the repo; give
+	// claude explicit access to its parent so the edit permission
+	// sandbox doesn't block the write. For `edit` flow the canvas
+	// lives under root and this is a harmless duplicate add.
+	if canvasDir := filepath.Dir(abs); canvasDir != "" && canvasDir != root {
+		args = append(args, "--add-dir", canvasDir)
+	}
 	if kickoff != "" {
 		args = append(args, kickoff)
 	}
@@ -570,7 +512,8 @@ func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
 // an idea chat session: soul → stages/_idea/<mode>.md → a minimal
 // operational core naming the canvas file. Deliberately narrower than
 // buildSystemPrompt (used by stage sessions), which is tied to
-// run.Metadata and per-document thread files that ideas don't have.
+// run.Metadata and per-document thread files that ideas don't carry
+// a live Claude session for.
 func buildIdeaChatPrompt(abs, mode string) string {
 	var sections []string
 	if soul := moe.Soul(); soul != "" {
@@ -611,4 +554,274 @@ func launchEditor(path string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// runIdeaMigrate is the one-shot housekeeping verb that converts the
+// pre-run-workflow idea layout (projects/<p>/ideas/<slug>.md) into
+// idea runs (projects/<p>/runs/<slug>/{run.json,documents/idea/content.md}).
+// It's deliberately a single commit per migration pass — the whole
+// fleet flips at once so there's no dual-read period to maintain. If a
+// slug collides with an existing run, the idea migrates under a
+// -N-suffixed slug (run.New's usual rule); the source file is removed
+// regardless. Refuses to run on a dirty tree.
+func runIdeaMigrate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea migrate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dryRun := fs.Bool("dry-run", false, "print what would happen and exit without touching the repo")
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe idea migrate [--dry-run]")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireCleanTree(root); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "ideas", "*.md"))
+	if err != nil {
+		moePrintf(stderr, "idea migrate: glob: %v\n", err)
+		return 1
+	}
+	if len(matches) == 0 {
+		moePrintln(stdout, "no legacy idea files found — nothing to migrate")
+		return 0
+	}
+
+	// Sort for deterministic commit order across re-runs of a dry run.
+	sort.Strings(matches)
+
+	type plan struct {
+		project string
+		oldSlug string
+		newSlug string
+		title   string
+		body    string
+		oldRel  string
+	}
+	plans := make([]plan, 0, len(matches))
+	for _, abs := range matches {
+		// projects/<project>/ideas/<slug>.md
+		rel, err := filepath.Rel(root, abs)
+		if err != nil {
+			moePrintf(stderr, "idea migrate: rel %s: %v\n", abs, err)
+			return 1
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) != 4 || parts[0] != "projects" || parts[2] != "ideas" {
+			moePrintf(stderr, "idea migrate: unexpected path shape %s\n", rel)
+			return 1
+		}
+		projectID := parts[1]
+		slug := strings.TrimSuffix(parts[3], ".md")
+		body, err := os.ReadFile(abs)
+		if err != nil {
+			moePrintf(stderr, "idea migrate: read %s: %v\n", rel, err)
+			return 1
+		}
+		title := firstH1(string(body))
+		if title == "" {
+			title = slug
+		}
+		plans = append(plans, plan{
+			project: projectID,
+			oldSlug: slug,
+			newSlug: slug,
+			title:   title,
+			body:    string(body),
+			oldRel:  rel,
+		})
+	}
+
+	// Preview (and finalize) slugs, auto-suffixing on collision. We
+	// reuse run.New's collision suffix via a pre-flight check; the
+	// actual writes happen after so the whole fleet can share a
+	// single commit.
+	for i := range plans {
+		p := &plans[i]
+		// Check against existing runs AND earlier-in-this-batch
+		// planned slugs: migrating two ideas with the same slug
+		// across two projects is fine (namespace is per-project),
+		// but within a project we need to advance past earlier
+		// picks too.
+		collisions := 0
+		for {
+			conflict, err := slugConflict(root, p.project, p.newSlug)
+			if err != nil {
+				moePrintf(stderr, "idea migrate: %v\n", err)
+				return 1
+			}
+			for j := 0; j < i && !conflict; j++ {
+				if plans[j].project == p.project && plans[j].newSlug == p.newSlug {
+					conflict = true
+				}
+			}
+			if !conflict {
+				break
+			}
+			collisions++
+			p.newSlug = fmt.Sprintf("%s-%d", trimNumericSuffix(p.oldSlug), collisions+1)
+		}
+	}
+
+	if *dryRun {
+		for _, p := range plans {
+			if p.newSlug == p.oldSlug {
+				moePrintf(stdout, "would migrate %s/%s → runs/%s\n", p.project, p.oldSlug, p.newSlug)
+			} else {
+				moePrintf(stdout, "would migrate %s/%s → runs/%s (suffixed for collision)\n", p.project, p.oldSlug, p.newSlug)
+			}
+		}
+		return 0
+	}
+
+	return withRepoLockCode(root, repolock.Options{
+		Purpose: "idea-migrate",
+	}, func() int {
+		addPaths := make([]string, 0, 2*len(plans))
+		for _, p := range plans {
+			md := &run.Metadata{
+				ID:        p.newSlug,
+				Project:   p.project,
+				Title:     p.title,
+				Status:    run.StatusInProgress,
+				Workflow:  ideaWorkflow,
+				Created:   migrateTimestamp(),
+				Documents: map[string]*run.Document{},
+			}
+			if err := run.Save(root, md); err != nil {
+				moePrintf(stderr, "idea migrate: save %s/%s run.json: %v\n", p.project, p.newSlug, err)
+				return 1
+			}
+			canvasRel := run.ContentPath(p.project, p.newSlug, ideaDocID)
+			canvasAbs := filepath.Join(root, canvasRel)
+			if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
+				moePrintf(stderr, "idea migrate: mkdir %s: %v\n", filepath.Dir(canvasAbs), err)
+				return 1
+			}
+			if err := os.WriteFile(canvasAbs, []byte(p.body), 0o644); err != nil {
+				moePrintf(stderr, "idea migrate: write %s: %v\n", canvasRel, err)
+				return 1
+			}
+			addPaths = append(addPaths,
+				filepath.Join(run.Dir(p.project, p.newSlug), "run.json"),
+				canvasRel,
+			)
+		}
+		if err := run.Stage(root, addPaths...); err != nil {
+			moePrintf(stderr, "idea migrate: git add: %v\n", err)
+			return 1
+		}
+		for _, p := range plans {
+			if err := gitRM(root, p.oldRel); err != nil {
+				moePrintf(stderr, "idea migrate: git rm %s: %v\n", p.oldRel, err)
+				return 1
+			}
+		}
+		msg := fmt.Sprintf("migrate: convert %d idea file(s) to idea runs\n\nMoE-Workflow: %s\n", len(plans), ideaWorkflow)
+		if err := gitCommit(root, msg); err != nil {
+			moePrintf(stderr, "idea migrate: commit: %v\n", err)
+			return 1
+		}
+		for _, p := range plans {
+			moePrintf(stdout, "migrated %s/%s → runs/%s\n", p.project, p.oldSlug, p.newSlug)
+		}
+		return 0
+	})
+}
+
+// slugConflict reports whether (project, slug) already names a run dir
+// or a history entry. Thin wrapper so migrate can reuse run.New's
+// collision discipline without opening a run.
+func slugConflict(root, projectID, slug string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(root, run.Dir(projectID, slug))); err == nil {
+		return true, nil
+	}
+	// Fall back to git-log grep by shelling out via run's existing
+	// command surface would be ideal; but slugTaken is unexported.
+	// For migration, a history-only collision (no on-disk dir) is
+	// unlikely — the bureaucracy repos that predate this change have
+	// ideas under ideas/, not runs/. An on-disk check is sufficient
+	// here, and run.New's own suffix rule catches any history
+	// collision if the operator re-runs.
+	return false, nil
+}
+
+// trimNumericSuffix strips a trailing "-N" (N integer) from slug so
+// collisions on foo-2 advance to foo-3 rather than foo-2-2. Mirrors
+// run.nextFreeID's rule.
+func trimNumericSuffix(slug string) string {
+	slug = strings.TrimRight(slug, "-")
+	if i := strings.LastIndex(slug, "-"); i >= 0 {
+		for _, r := range slug[i+1:] {
+			if r < '0' || r > '9' {
+				return slug
+			}
+		}
+		return slug[:i]
+	}
+	return slug
+}
+
+// migrateTimestamp returns today's date in the format run.New writes
+// to Metadata.Created.
+func migrateTimestamp() string {
+	return time.Now().UTC().Format("2006-01-02")
+}
+
+// withRepoLockCode is a thin wrapper that lets a repolock block
+// return an exit code directly (the same int convention runIdea* verbs
+// use) rather than funnelling through an error.
+func withRepoLockCode(root string, opts repolock.Options, fn func() int) int {
+	var code int
+	err := withRepoLock(root, opts, func() error {
+		code = fn()
+		return nil
+	})
+	if err != nil {
+		return 1
+	}
+	return code
+}
+
+// gitRM runs `git rm -- path` under root. Thin helper because the
+// public run.Stage only does `git add`.
+func gitRM(root, path string) error {
+	cmd := exec.Command("git", "rm", "--", path)
+	cmd.Dir = root
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// gitCommit runs `git commit -m msg` under root.
+func gitCommit(root, msg string) error {
+	cmd := exec.Command("git", "commit", "-m", msg)
+	cmd.Dir = root
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// firstH1 returns the trimmed text after the first `# ` line in body,
+// or "" if none appears in the head of the file. Only the head is
+// scanned so a long body doesn't slow the migrator.
+func firstH1(body string) string {
+	for _, line := range strings.SplitN(body, "\n", 16) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+		}
+	}
+	return ""
 }

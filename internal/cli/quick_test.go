@@ -156,12 +156,14 @@ func TestRunNewFromIdeaSeedsQuickFirstStage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	// Quick's first stage is `code` — seed should land there.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "bump-timeout", "documents", "code", "content.md")); err != nil {
+	// Quick's first stage is `code` — seed should land there. The
+	// idea and the promoted run share the slug namespace, so the
+	// quick run auto-suffixes to bump-timeout-2.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "bump-timeout-2", "documents", "code", "content.md")); err != nil {
 		t.Fatalf("quick's first-stage doc not seeded: %v", err)
 	}
 	// And not in a non-existent design dir.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "bump-timeout", "documents", "design")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "bump-timeout-2", "documents", "design")); !os.IsNotExist(err) {
 		t.Fatalf("quick run should not have a design dir; stat err=%v", err)
 	}
 }

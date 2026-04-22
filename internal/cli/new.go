@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -36,18 +37,19 @@ func newRunCommand(workflowName string) *Command {
 // is implicit in which top-level command the operator typed (`moe sdlc
 // new` vs `moe kb new`).
 //
-// --from-idea=<slug> promotes a captured idea into a fresh run: the
-// idea's H1 becomes the run title (unless an explicit title is also
-// passed, which wins), the idea body seeds the workflow's first-stage
-// content.md, and the idea file is `git rm`d in the same commit so
-// the transition is atomic in git history. Lives here rather than on
-// each workflow facade so kb, sdlc, and any future workflow inherit
-// the behavior for free.
+// --from-idea=<slug> promotes an idea run into a fresh run in the
+// target workflow: the idea's title and canvas seed the new run's
+// first-stage doc, and the idea run's status is bumped to
+// StatusPromoted with a MoE-Promoted-To trailer so the original is
+// still greppable and the dash can tell "handed off" from "dropped".
+// The new run carries a reciprocal MoE-Idea trailer on its open
+// commit. Two commits total — not one, since the status bump lives on
+// its own.
 func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflowName+" new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
-	fromIdea := fs.String("from-idea", "", "promote projects/<project>/ideas/<slug>.md into a new run, seeding the first-stage doc")
+	fromIdea := fs.String("from-idea", "", "promote an open idea run (by slug) into a new run, seeding the first-stage doc from its canvas")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
@@ -56,7 +58,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// Title is required normally, optional when --from-idea is set
-	// (the idea's H1 supplies it).
+	// (the idea's title supplies it).
 	if fs.NArg() < 1 || (fs.NArg() < 2 && *fromIdea == "") {
 		fs.Usage()
 		return 2
@@ -90,24 +92,34 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		ID:       *idOverride,
 		Workflow: workflowName,
 	}
+
+	// Keep a handle on the source idea run so we can bump its status
+	// *after* the new run opens. Doing it in the other order would
+	// mean a failure mid-flight leaves the idea marked promoted with
+	// no destination.
+	var sourceIdea *run.Metadata
 	if *fromIdea != "" {
-		ideaTitle, ideaBody, err := loadIdeaForPromote(root, project, *fromIdea)
+		if workflowName == ideaWorkflow {
+			moePrintf(stderr, "--from-idea: cannot promote an idea into another idea run\n")
+			return 1
+		}
+		src, seed, err := loadIdeaForPromote(root, project, *fromIdea)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
 		if title == "" {
-			title = ideaTitle
+			title = src.Title
 		}
 		stages := wf.Stages()
 		if len(stages) == 0 {
 			moePrintf(stderr, "workflow %q has no stages to seed from --from-idea\n", workflowName)
 			return 1
 		}
-		opts.SeedDocs = map[string]string{stages[0]: ideaBody}
-		opts.RemovePaths = []string{ideaPath(project, *fromIdea)}
+		opts.SeedDocs = map[string]string{stages[0]: seed}
 		opts.SubjectFrom = "idea " + *fromIdea
 		opts.ExtraTrailers = []string{"MoE-Idea: " + *fromIdea}
+		sourceIdea = src
 	}
 
 	// Run-identifier for the lock record is advisory — use the
@@ -134,24 +146,69 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
+
+	if sourceIdea != nil {
+		if err := markIdeaPromoted(root, sourceIdea, md); err != nil {
+			moePrintf(stderr, "warning: could not mark idea %s/%s promoted: %v\n", sourceIdea.Project, sourceIdea.ID, err)
+			// The new run is already open; surface the warning but
+			// don't fail the command, since the idea->run transition
+			// is still greppable via the new run's MoE-Idea trailer.
+		}
+	}
+
 	return promptNextStage(root, md, stdout, stderr)
 }
 
-// loadIdeaForPromote reads the idea file and returns its title (the
-// first H1 line, or the slug as fallback) and the full body to seed
-// the first stage's canvas with. The whole file is the body — H1
-// included — so the agent that opens the first stage starts on a
-// canvas that already names what it's about.
-func loadIdeaForPromote(root, projectID, slug string) (title, body string, err error) {
-	rel := ideaPath(projectID, slug)
-	b, readErr := os.ReadFile(filepath.Join(root, rel))
-	if readErr != nil {
-		return "", "", fmt.Errorf("--from-idea: read %s: %w", rel, readErr)
+// loadIdeaForPromote returns the source idea run and its canvas body
+// to seed the next workflow's first-stage doc with. The canvas is the
+// full file — H1 included — so the agent that opens the first stage
+// starts on a canvas that already names what it's about. Errors when
+// the slug doesn't name an idea run (wrong workflow or missing).
+func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, error) {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "", fmt.Errorf("--from-idea: run %s/%s does not exist", projectID, slug)
+		}
+		return nil, "", fmt.Errorf("--from-idea: %w", err)
 	}
-	body = string(b)
-	title = firstH1(body)
-	if title == "" {
-		title = slug
+	if md.Workflow != ideaWorkflow {
+		return nil, "", fmt.Errorf("--from-idea: run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
-	return title, body, nil
+	if md.Status != run.StatusInProgress {
+		return nil, "", fmt.Errorf("--from-idea: idea %s/%s is already %s", projectID, slug, md.Status)
+	}
+	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
+	b, err := os.ReadFile(filepath.Join(root, canvasRel))
+	if err != nil {
+		return nil, "", fmt.Errorf("--from-idea: read %s: %w", canvasRel, err)
+	}
+	return md, string(b), nil
+}
+
+// markIdeaPromoted bumps the source idea run's status to
+// StatusPromoted and commits the transition with a MoE-Promoted-To
+// trailer pointing at the new run. Separate commit from the new run's
+// open: two short commits keep the git history honest (one event per
+// commit) and dodges the RemovePaths hack that used to inline the
+// idea-file delete into the open commit.
+func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
+	md.Status = run.StatusPromoted
+	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf(`Promote idea %s/%s → %s/%s
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Workflow: %s
+MoE-Promoted-To: %s/%s
+`, md.Project, md.ID, dest.Project, dest.ID, md.ID, md.Project, ideaWorkflow, dest.Project, dest.ID)
+	return withRepoLock(root, repolock.Options{
+		Purpose: "idea-promote",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		return run.StageAndCommit(root, msg, runJSONRel)
+	})
 }

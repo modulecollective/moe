@@ -83,7 +83,11 @@ func commitTrailer(t *testing.T, root, subject, trailers string, when time.Time)
 // Stages listed in noFragmentStages are operational (e.g. push), don't
 // build a system prompt, and are exempt by design.
 func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
-	noFragmentStages := map[string]bool{"push": true}
+	// `push` is operational (no stage session). `idea` never enters a
+	// stage session either — `moe idea` verbs drive it directly and
+	// build their own prompt via buildIdeaChatPrompt, so no per-stage
+	// fragment is shipped for it.
+	noFragmentStages := map[string]bool{"push": true, "idea": true}
 	for _, wfName := range WorkflowNames() {
 		// Other tests register throwaway workflows with a "test-"
 		// prefix to exercise the missing-fragment fallback; by design

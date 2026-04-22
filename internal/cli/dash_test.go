@@ -371,10 +371,10 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	// Capture two ideas via the CLI so the file shape and commit
-	// trailers come straight from production code paths.
+	// Capture two ideas via the CLI so the commit shape comes straight
+	// from production code paths.
 	for _, title := range []string{"Cross-project search", "Faster dash load"} {
-		if code := Run([]string{"idea", "add", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 			t.Fatalf("setup capture failed for %q", title)
 		}
 	}
