@@ -17,8 +17,6 @@ for downstream work. The harness is domain-agnostic; software
 development is the first ministry to open. The bureaucracy — journal
 on main, guidance as markdown, no orchestrator — is the feature.
 
-**"Please take a number."**
-
 ---
 
 ## Data Model
