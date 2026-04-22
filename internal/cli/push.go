@@ -20,29 +20,33 @@ import (
 
 var pushCmd = &Command{
 	Name:    "push",
-	Summary: "push the run's code branch and open (or update) a PR on the target repo",
+	Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
 	Run:     runPush,
 }
 
 const branchPrefix = "moe/"
 
-// runPush pushes the run's sandbox branch to the target repo and, on
-// first ship, opens a PR with the `code` document as its body. Safely
-// re-runnable: a rerun after more `moe sdlc code` turns pushes the new
-// commits to the same branch and prints the existing PR URL. The sandbox
-// clone is deliberately NOT removed — iteration via `moe sdlc code` stays
-// a one-liner.
+// runPush ships the sandbox branch. The default path fast-forwards the
+// target repo's default branch to include moe/<run>, deletes the remote
+// branch, drops the sandbox clone, and marks the run `merged`. The
+// `--pr` path is today's behavior: push the branch, open (or re-use) a
+// PR, mark the run `pushed`, keep the sandbox. A pushed run later
+// reconciles to merged/closed via `moe sync`.
+//
+// Idempotent on terminal runs: rerunning after a merged/closed run is
+// a no-op that prints the terminal state and exits 0.
 func runPush(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc push <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc push [--pr] <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Pushes moe/<run> from the sandbox clone to the target repo and")
-		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe sdlc code`")
-		moePrintln(stderr, "turns to update the branch; the sandbox stays in place.")
+		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
+		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
+		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
@@ -67,6 +71,23 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+
+	// Terminal statuses short-circuit before touching the sandbox — the
+	// clone is expected to be gone for `merged`, and for `closed` the
+	// run is archived. Mirror today's "existing PR" idempotency.
+	switch md.Status {
+	case run.StatusMerged:
+		if sha := mergedSHA(root, md.ID); sha != "" {
+			moePrintf(stdout, "already merged at %s\n", shortSHA(sha))
+		} else {
+			moePrintln(stdout, "already merged")
+		}
+		return 0
+	case run.StatusClosed:
+		moePrintln(stdout, "already closed")
+		return 0
+	}
+
 	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -92,18 +113,42 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-
 	if err := ensureOrigin(clonePath, pj.Remote); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
-	moePrintf(stdout, "pushing %s to %s...\n", branch, pj.Remote)
-	if err := gitPush(clonePath, branch, stdout, stderr); err != nil {
+	if err := pushBranch(clonePath, branch, pj.Remote, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
+	if *prFlag {
+		return openPRPath(root, md, pj, branch, stdout, stderr)
+	}
+	return mergePath(root, md, pj, clonePath, branch, stdout, stderr)
+}
+
+// pushBranch pushes moe/<run> to origin with -u so a fresh branch
+// gets tracking set. Streams stdout/stderr so credential prompts and
+// progress stay visible.
+func pushBranch(clonePath, branch, remote string, stdout, stderr io.Writer) error {
+	moePrintf(stdout, "pushing %s to %s...\n", branch, remote)
+	cmd := exec.Command("git", "-C", clonePath, "push", "-u", "origin", branch)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("push: git push: %w", err)
+	}
+	return nil
+}
+
+// openPRPath is the --pr behavior: open (or re-use) a PR for the
+// already-pushed branch and record the first push's state. The
+// sandbox is intentionally left in place — iteration via
+// `moe sdlc code` stays a one-liner until the PR merges.
+func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
 	ghRepo, err := ghRepoSpec(pj.Remote)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -149,6 +194,116 @@ MoE-PR: %s
 		}
 	}
 	return 0
+}
+
+// mergePath is the default path: fast-forward the target repo's
+// default branch to include moe/<run>, delete the remote branch, drop
+// the sandbox, and mark the run merged. Sandbox and branch deletion
+// happen after the merge-push succeeds so a failure mid-flight leaves
+// both intact for retry.
+func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, stdout, stderr io.Writer) int {
+	tipSHA, err := gitRevParse(clonePath, "refs/heads/"+branch)
+	if err != nil {
+		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
+		return 1
+	}
+
+	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
+	if err := ffPushToDefault(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		moePrintf(stderr, "       default may have moved past the merge-base — rebase inside the sandbox or retry with --pr\n")
+		return 1
+	}
+
+	if err := deleteRemoteBranch(clonePath, branch, stdout, stderr); err != nil {
+		// Merge already landed; warn but don't fail the command.
+		moePrintf(stderr, "warning: %v\n", err)
+	}
+
+	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
+		moePrintf(stderr, "warning: remove sandbox: %v\n", err)
+	}
+
+	md.Status = run.StatusMerged
+	if err := run.Save(root, md); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf(`push: %s/%s merged
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Document: push
+MoE-Merged: %s
+`, md.Project, md.ID, md.ID, md.Project, tipSHA)
+	if err := run.StageAndCommit(root, msg, runJSON); err != nil {
+		moePrintf(stderr, "commit merge record: %v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, shortSHA(tipSHA))
+	return 0
+}
+
+// ffPushToDefault fast-forwards the remote's default branch to the
+// tip of moe/<run> via `git push origin <branch>:<default>`. The push
+// is rejected server-side if it isn't a fast-forward — no --force, ever.
+func ffPushToDefault(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
+	cmd := exec.Command("git", "-C", clonePath, "push", "origin", branch+":"+defaultBranch)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("push: ff-merge %s into %s: %w", branch, defaultBranch, err)
+	}
+	return nil
+}
+
+// deleteRemoteBranch removes moe/<run> from origin. Non-fatal on
+// failure — the merge has already landed; a stray remote branch is a
+// minor cleanup issue, not worth rolling back the run for.
+func deleteRemoteBranch(clonePath, branch string, stdout, stderr io.Writer) error {
+	moePrintf(stdout, "deleting %s on origin...\n", branch)
+	cmd := exec.Command("git", "-C", clonePath, "push", "origin", "--delete", branch)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("push: delete remote branch %s: %w", branch, err)
+	}
+	return nil
+}
+
+// mergedSHA returns the merge SHA recorded in the most recent
+// MoE-Merged trailer for runID, or "" if none has been recorded.
+func mergedSHA(root, runID string) string {
+	return trailerValue(root, runID, "MoE-Merged")
+}
+
+// trailerValue pulls the value from the most recent `<trailer>:` line
+// in any commit that also carries `MoE-Run: <runID>`. Returns "" when
+// no such commit exists.
+func trailerValue(root, runID, trailer string) string {
+	cmd := exec.Command("git", "-C", root, "log",
+		"--all-match",
+		"--grep", "MoE-Run: "+runID,
+		"--grep", trailer+":",
+		"--format=%B", "-z",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	prefix := trailer + ":"
+	for _, body := range strings.Split(string(out), "\x00") {
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, prefix) {
+				return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			}
+		}
+	}
+	return ""
 }
 
 func checkCodeContent(root string, md *run.Metadata) error {
@@ -236,19 +391,6 @@ func ensureOrigin(clonePath, remote string) error {
 	cmd := exec.Command("git", "-C", clonePath, "remote", "set-url", "origin", remote)
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("push: set-url origin: %w (%s)", err, strings.TrimSpace(string(combined)))
-	}
-	return nil
-}
-
-// gitPush runs `git push -u origin <branch>` in the clone, streaming
-// stdout/stderr so the operator sees progress and any credential prompts.
-func gitPush(clonePath, branch string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("git", "-C", clonePath, "push", "-u", "origin", branch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: git push: %w", err)
 	}
 	return nil
 }
