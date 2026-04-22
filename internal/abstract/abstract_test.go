@@ -3,8 +3,10 @@ package abstract
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -178,4 +180,118 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestClaudeCLISummarizerInvokesBinary covers argv construction, the
+// stdin payload, and stdout capture against a fake `claude` shell
+// script on disk. The real binary isn't installed in CI; the contract
+// we care about is "moe runs the CLI with these flags and this stdin,
+// and returns whatever stdout comes back."
+func TestClaudeCLISummarizerInvokesBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake /bin/sh script isn't portable to Windows")
+	}
+	dir := t.TempDir()
+	argvPath := filepath.Join(dir, "argv")
+	stdinPath := filepath.Join(dir, "stdin")
+	fake := filepath.Join(dir, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+# Record each argv entry on its own line so tests can split cleanly.
+: > %q
+for a in "$@"; do
+  printf '%%s\n' "$a" >> %q
+done
+cat > %q
+printf 'fake abstract output'
+`, argvPath, argvPath, stdinPath)
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	md := &run.Metadata{ID: "kb-dns", Project: "tele", Title: "DNS"}
+	docs := map[string]string{"research": "r-body", "summarize": "s-body"}
+	s := &ClaudeCLISummarizer{Binary: fake, Model: "claude-test-model"}
+
+	out, err := s.Summarize(context.Background(), md, docs)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if out != "fake abstract output" {
+		t.Errorf("stdout = %q", out)
+	}
+
+	argvBytes, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
+	// Spot-check the flags we rely on; order matters to claude's parser
+	// because --tools is variadic, so pin the adjacency of --tools/"".
+	wantContains := []string{
+		"--print",
+		"--model", "claude-test-model",
+		"--system-prompt",
+		"--output-format", "text",
+		"--no-session-persistence",
+	}
+	for _, w := range wantContains {
+		found := false
+		for _, a := range argv {
+			if a == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("argv missing %q:\n%s", w, argvBytes)
+		}
+	}
+	// --tools must be followed immediately by "" (one argv, empty).
+	toolsIdx := -1
+	for i, a := range argv {
+		if a == "--tools" {
+			toolsIdx = i
+			break
+		}
+	}
+	if toolsIdx < 0 || toolsIdx+1 >= len(argv) || argv[toolsIdx+1] != "" {
+		t.Errorf("--tools not followed by empty string; argv=\n%s", argvBytes)
+	}
+
+	stdin, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"tele/kb-dns", "research", "r-body", "summarize", "s-body"} {
+		if !strings.Contains(string(stdin), w) {
+			t.Errorf("stdin missing %q:\n%s", w, stdin)
+		}
+	}
+}
+
+// TestClaudeCLISummarizerWrapsNonZeroExit pins the error path: stderr
+// content from the subprocess surfaces in the returned error so the
+// operator has something actionable in the post-turn warning.
+func TestClaudeCLISummarizerWrapsNonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake /bin/sh script isn't portable to Windows")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "claude")
+	script := `#!/bin/sh
+echo "something broke" >&2
+exit 3
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &ClaudeCLISummarizer{Binary: fake, Model: "claude-test-model"}
+	md := &run.Metadata{ID: "r", Project: "p"}
+	_, err := s.Summarize(context.Background(), md, map[string]string{"d": "body"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "something broke") {
+		t.Errorf("error missing stderr content: %v", err)
+	}
 }
