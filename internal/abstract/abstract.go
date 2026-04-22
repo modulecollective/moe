@@ -3,23 +3,28 @@
 // commit, so the refreshed abstract rides along in the same commit as
 // the document edits that produced it.
 //
-// The call is non-fatal by design: an API outage or oversized-context
-// failure logs a warning and leaves the prior abstract in place. That's
-// also our throttle — a pathologically large run that overruns the
-// model's context will surface as a warning, which is our cue to cap
-// it if it ever actually happens. Don't pre-build a cap; typical run
-// docs are well under a few thousand tokens.
+// The summarizer shells out to `claude --print` rather than calling the
+// Messages API directly. That lets the abstract call inherit whatever
+// auth the operator has already set up for the interactive `claude`
+// CLI — OAuth, subscription keychain, or ANTHROPIC_API_KEY — instead
+// of requiring ANTHROPIC_API_KEY specifically. See the no-abstract run
+// for the history behind this choice.
+//
+// The call is non-fatal by design: a missing binary, a subprocess
+// failure, or an empty response leaves the prior abstract in place.
+// That's also our throttle — a pathologically large run that overruns
+// the model's context will surface as a warning, which is our cue to
+// cap it if it ever actually happens. Don't pre-build a cap; typical
+// run docs are well under a few thousand tokens.
 package abstract
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,21 +32,14 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// DefaultModel is the Sonnet tier used for abstract synthesis. Cheap,
+// DefaultModel is the Haiku tier used for abstract synthesis. Cheap,
 // fast, no reasoning depth needed — this is pure summarisation over
 // bounded input with no tool use.
-const DefaultModel = "claude-sonnet-4-6"
-
-// DefaultBaseURL is the Anthropic Messages API host.
-const DefaultBaseURL = "https://api.anthropic.com"
-
-// maxOutputTokens caps the response so a misbehaving model can't
-// generate a novella. 300 tokens is comfortably above 2–3 sentences.
-const maxOutputTokens = 300
+const DefaultModel = "claude-haiku-4-5"
 
 // Summarizer produces the abstract text from the run's current docs.
 // Exposed as an interface so tests can inject a deterministic stub
-// without standing up an HTTP server.
+// without standing up a subprocess.
 type Summarizer interface {
 	Summarize(ctx context.Context, md *run.Metadata, docs map[string]string) (string, error)
 }
@@ -97,95 +95,60 @@ func readAllDocs(root string, md *run.Metadata) (map[string]string, error) {
 	return out, nil
 }
 
-// AnthropicSummarizer calls POST /v1/messages. Construct with NewFromEnv
-// to read ANTHROPIC_API_KEY; construct directly for tests that supply
-// their own http.Client.
-type AnthropicSummarizer struct {
-	APIKey  string
-	BaseURL string
-	Model   string
-	HTTP    *http.Client
+// ClaudeCLISummarizer invokes `claude --print` as a one-shot subprocess.
+// Binary is the resolved absolute path to the binary; NewCLI fills it
+// from exec.LookPath. Tests construct the struct directly with a fake
+// binary path.
+type ClaudeCLISummarizer struct {
+	Binary string
+	Model  string
 }
 
-// NewFromEnv builds a summarizer from ANTHROPIC_API_KEY (and the
-// optional MOE_ANTHROPIC_API_BASE override that moe's managed-agents
-// client also honors). Returns an error when the key is unset so
-// callers fail fast and the post-turn hook can skip cleanly rather
-// than silently swallow misconfiguration.
-func NewFromEnv() (*AnthropicSummarizer, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return nil, errors.New("abstract: ANTHROPIC_API_KEY is not set")
+// NewCLI resolves `claude` on PATH and returns a summarizer bound to
+// it. Returns an error when the binary is missing so callers fail fast
+// and the post-turn hook can surface the situation rather than silently
+// no-op (which was the original bug motivating this rewrite).
+func NewCLI() (*ClaudeCLISummarizer, error) {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return nil, fmt.Errorf("claude CLI not found on PATH: %w", err)
 	}
-	return &AnthropicSummarizer{
-		APIKey:  key,
-		BaseURL: os.Getenv("MOE_ANTHROPIC_API_BASE"),
-		Model:   DefaultModel,
-	}, nil
+	return &ClaudeCLISummarizer{Binary: bin, Model: DefaultModel}, nil
 }
 
-// Summarize implements Summarizer.
-func (s *AnthropicSummarizer) Summarize(ctx context.Context, md *run.Metadata, docs map[string]string) (string, error) {
+// Summarize implements Summarizer. It invokes `claude --print` with
+// the abstract system prompt, pipes the user prompt on stdin (so large
+// doc bodies don't hit argv limits), disables tools and session
+// persistence, and returns trimmed stdout.
+func (s *ClaudeCLISummarizer) Summarize(ctx context.Context, md *run.Metadata, docs map[string]string) (string, error) {
 	user := buildUserPrompt(md, docs)
-	body := messagesRequest{
-		Model:     s.model(),
-		MaxTokens: maxOutputTokens,
-		System:    systemPrompt,
-		Messages: []messagesMessage{
-			{Role: "user", Content: user},
-		},
+	args := []string{
+		"--print",
+		"--model", s.model(),
+		"--system-prompt", systemPrompt,
+		"--tools", "",
+		"--output-format", "text",
+		"--no-session-persistence",
 	}
-	b, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("abstract: marshal body: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", s.url()+"/v1/messages", bytes.NewReader(b))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", s.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := s.HTTP
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("abstract: POST /v1/messages: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return "", fmt.Errorf("abstract: %d %s: %s", resp.StatusCode, resp.Status, strings.TrimSpace(string(body)))
-	}
-	var decoded messagesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return "", fmt.Errorf("abstract: decode response: %w", err)
-	}
-	var out strings.Builder
-	for _, blk := range decoded.Content {
-		if blk.Type == "text" {
-			out.WriteString(blk.Text)
+	cmd := exec.CommandContext(ctx, s.Binary, args...)
+	cmd.Stdin = strings.NewReader(user)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("claude --print: %w: %s", err, msg)
 		}
+		return "", fmt.Errorf("claude --print: %w", err)
 	}
-	return out.String(), nil
+	return stdout.String(), nil
 }
 
-func (s *AnthropicSummarizer) model() string {
+func (s *ClaudeCLISummarizer) model() string {
 	if s.Model != "" {
 		return s.Model
 	}
 	return DefaultModel
-}
-
-func (s *AnthropicSummarizer) url() string {
-	if s.BaseURL != "" {
-		return strings.TrimRight(s.BaseURL, "/")
-	}
-	return DefaultBaseURL
 }
 
 // systemPrompt narrows the model to the one task: 2–3 sentences of
@@ -229,30 +192,7 @@ func sortStrings(s []string) {
 	}
 }
 
-// messagesRequest / messagesResponse are the tiny slices of the
-// Messages API shape that the abstract call uses. Fields not listed
-// are ignored on decode; if the API grows additive fields, they land
-// unsurfaced and the call still succeeds.
-type messagesRequest struct {
-	Model     string            `json:"model"`
-	MaxTokens int               `json:"max_tokens"`
-	System    string            `json:"system,omitempty"`
-	Messages  []messagesMessage `json:"messages"`
-}
-
-type messagesMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type messagesResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
-// DefaultTimeout bounds the summarizer call so a wedged API doesn't
-// block the commit indefinitely. Callers that want a different budget
-// can build their own context.
+// DefaultTimeout bounds the summarizer call so a wedged subprocess
+// doesn't block the commit indefinitely. Callers that want a different
+// budget can build their own context.
 const DefaultTimeout = 30 * time.Second

@@ -338,11 +338,11 @@ run is pushed.
 // a trailer block keyed to the document/session. See README §"one run
 // branch per run" for the trailer convention.
 //
-// Before committing, the run's abstract is refreshed via a separate
-// Sonnet call so the updated summary rides along in the same commit
-// as the document edits that produced it. Abstract failures are
-// non-fatal — a warning is written to stderr and the prior abstract
-// is preserved.
+// Before committing, the run's abstract is refreshed via a one-shot
+// `claude --print` call so the updated summary rides along in the
+// same commit as the document edits that produced it. Abstract
+// failures are non-fatal — a prefixed warning is emitted through
+// moePrintf and the prior abstract is preserved.
 func commitTurn(root string, md *run.Metadata, docID string, stderr io.Writer) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
@@ -375,26 +375,33 @@ MoE-Session: %s
 	return run.StageAndCommit(root, msg, docDir, runJSON)
 }
 
-// refreshAbstract issues the post-turn Sonnet summarisation call and
-// mutates md.Abstract on success. All failure modes are non-fatal —
-// a missing API key, an API outage, or an empty response leaves the
-// prior abstract in place and logs a one-line warning so operators
-// know the summary didn't refresh. The auto-abstract design calls
-// this out explicitly: "if the call errors or the output doesn't
-// parse, log a warning and skip the abstract update."
+// refreshAbstract issues the post-turn summarisation call and mutates
+// md.Abstract on success. All failure modes are non-fatal — a missing
+// `claude` binary, a subprocess failure, or an empty response leaves
+// the prior abstract in place.
+//
+// The warning is routed through moePrintf (same channel as
+// "committed turn for …") and prefixed "warning: abstract not
+// refreshed:" so the operator catches it on the same turn rather than
+// hunting through logs after noticing the abstract field never lands.
+// That visibility is the whole point of this rewrite — see the
+// no-abstract run's design.
 func refreshAbstract(root string, md *run.Metadata, stderr io.Writer) {
-	s, err := abstract.NewFromEnv()
+	s, err := abstract.NewCLI()
 	if err != nil {
-		if stderr != nil {
-			fmt.Fprintf(stderr, "abstract: %v (keeping prior abstract)\n", err)
-		}
+		abstractWarn(stderr, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), abstract.DefaultTimeout)
 	defer cancel()
 	if err := abstract.Update(ctx, root, md, s); err != nil {
-		if stderr != nil {
-			fmt.Fprintf(stderr, "abstract: %v (keeping prior abstract)\n", err)
-		}
+		abstractWarn(stderr, err)
 	}
+}
+
+func abstractWarn(stderr io.Writer, err error) {
+	if stderr == nil {
+		return
+	}
+	moePrintf(stderr, "warning: abstract not refreshed: %v\n", err)
 }
