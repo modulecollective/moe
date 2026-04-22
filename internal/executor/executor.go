@@ -11,14 +11,17 @@
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/termout"
 )
 
 // Request is the inputs for one turn on one document.
@@ -91,6 +94,7 @@ func (ClaudeCLI) Execute(r Request) error {
 	// (<directories...>), so it must not be the last flag before the
 	// positional prompt — otherwise claude parses the prompt as a second
 	// directory and the session launches with nothing to send.
+	name := bin
 	args := []string{
 		sessionFlag, r.SessionID,
 		"--add-dir", r.Root,
@@ -102,7 +106,24 @@ func (ClaudeCLI) Execute(r Request) error {
 	if r.InitialPrompt != "" {
 		args = append(args, r.InitialPrompt)
 	}
-	cmd := exec.Command(bin, args...)
+
+	// Wrap the claude subprocess with srt (Anthropic Sandbox Runtime)
+	// for OS-level isolation — sandbox-exec on macOS, bubblewrap on
+	// Linux, plus a domain-filtering proxy. srt inherits cwd and stdio,
+	// so the rest of this function is unchanged.
+	srtBin, cfg, err := resolveSRT(r.Root, os.Getenv("MOE_SANDBOX"))
+	if err != nil {
+		return err
+	}
+	if srtBin != "" {
+		name = srtBin
+		args = append([]string{"--settings", cfg, bin}, args...)
+		if r.Stderr != nil {
+			termout.Printf(r.Stderr, "moe: sandboxing claude via srt (%s)\n", cfg)
+		}
+	}
+
+	cmd := exec.Command(name, args...)
 	if r.ClonePath != "" {
 		cmd.Dir = r.ClonePath
 	} else {
@@ -131,3 +152,109 @@ func (ClaudeCLI) Execute(r Request) error {
 	}
 	return runErr
 }
+
+// resolveSRT decides whether to wrap claude with srt, based on the
+// MOE_SANDBOX env var and whether srt is on PATH. A non-empty srtBin
+// means "wrap"; an empty srtBin means "run claude direct." The decision
+// table (from the design):
+//
+//	MOE_SANDBOX   srt installed   behaviour
+//	unset         yes             wrap
+//	unset         no              direct
+//	off           either          direct
+//	on / 1        yes             wrap
+//	on / 1        no              error
+//
+// Any other value for MOE_SANDBOX is an error so typos like
+// MOE_SANDBOX=false don't silently fall back to the default.
+func resolveSRT(root, envVal string) (srtBin, cfg string, err error) {
+	switch envVal {
+	case "", "on", "1", "off":
+	default:
+		return "", "", fmt.Errorf("executor: invalid MOE_SANDBOX=%q (want \"on\", \"1\", \"off\", or unset)", envVal)
+	}
+	if envVal == "off" {
+		return "", "", nil
+	}
+	bin, lookErr := exec.LookPath("srt")
+	if lookErr != nil {
+		if envVal == "on" || envVal == "1" {
+			return "", "", fmt.Errorf("executor: MOE_SANDBOX=%s but srt not on PATH: %w", envVal, lookErr)
+		}
+		return "", "", nil
+	}
+	cfg, err = ensureSRTSettings(root)
+	if err != nil {
+		return "", "", err
+	}
+	return bin, cfg, nil
+}
+
+// ensureSRTSettings lazily writes <root>/.moe/srt-settings.json the
+// first time sandboxing kicks in. The template is literal except for
+// the <root> token, which is replaced with the absolute bureaucracy
+// path so srt's allowWrite covers clones and transcripts. Mirrors
+// ensureGitignore in internal/sandbox/sandbox.go.
+func ensureSRTSettings(root string) (string, error) {
+	dir := filepath.Join(root, ".moe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("executor: mkdir %s: %w", dir, err)
+	}
+	p := filepath.Join(dir, "srt-settings.json")
+	if _, err := os.Stat(p); err == nil {
+		return p, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("executor: stat %s: %w", p, err)
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("executor: resolve %s: %w", root, err)
+	}
+	body := strings.ReplaceAll(srtSettingsTemplate, "<root>", abs)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("executor: write %s: %w", p, err)
+	}
+	return p, nil
+}
+
+// srtSettingsTemplate is the starter settings file written on first
+// sandboxed run. The allowWrite and denyRead lists are the minimum that
+// lets Claude do useful work on this repo (build Go, run tests, write
+// the sandbox clone, persist its own session JSONL under ~/.claude)
+// without handing it access to ~/.ssh, cloud creds, or browser
+// profiles. allowedDomains is the minimum network set Claude needs for
+// normal moe work — the operator is expected to extend it as real
+// projects demand more.
+const srtSettingsTemplate = `{
+  "filesystem": {
+    "allowWrite": [
+      "<root>",
+      "/tmp",
+      "~/go/pkg/mod",
+      "~/.cache/go-build",
+      "~/Library/Caches/go-build",
+      "~/.claude"
+    ],
+    "denyRead": [
+      "~/.ssh",
+      "~/.aws",
+      "~/.config/gh",
+      "~/.gnupg",
+      "~/Library/Application Support/Google/Chrome",
+      "~/Library/Application Support/Firefox"
+    ]
+  },
+  "network": {
+    "allowedDomains": [
+      "api.anthropic.com",
+      "statsig.anthropic.com",
+      "*.anthropic.com",
+      "github.com",
+      "*.github.com",
+      "proxy.golang.org",
+      "sum.golang.org",
+      "registry.npmjs.org"
+    ]
+  }
+}
+`
