@@ -113,7 +113,7 @@ For v1 the only project-level file is `project.json`. A human-maintained `backlo
 
 ### Run
 
-A unit of work against a project. Has a defined lifecycle and terminates. Every run belongs to exactly one project and exactly one workflow (`sdlc`, and future `kb`, `ops`, …); the workflow determines which stages the run moves through.
+A unit of work against a project. Has a defined lifecycle and terminates. Every run belongs to exactly one project and exactly one workflow (`sdlc`, `kb`, and future `ops`, …); the workflow determines which stages the run moves through.
 
 ```json
 // projects/telomere/runs/fix-timeout-bug/run.json
@@ -133,6 +133,8 @@ A unit of work against a project. Has a defined lifecycle and terminates. Every 
 
 Run statuses: `in_progress | pushed`. Documents have no status field — they are just files on disk (`content.md`), and a document's history is its commit history. The only per-document data in `run.json` is the Claude Code session id so `moe sdlc design`/`moe sdlc code` can resume the same conversation.
 
+`run.json` also carries an `abstract` field: a 2–3 sentence prose summary of the run's current substance, refreshed by a separate Sonnet call at the end of every stage turn (applies to every workflow, not just `kb`). Discovery across runs is a filesystem walk: `find projects -name run.json | xargs jq -r '.abstract'`. Abstract refresh is best-effort — a failed call logs a warning and leaves the prior abstract in place.
+
 **Stages are a canonical document per phase, not a separate sign-off state.** The run's progress is readable from the git log: a `work: update design` commit means design has been worked on; a later `work: update code` means code has moved past design. Re-running `moe sdlc design` after a `work: update code` is how the operator revises the spec — and the next `moe sdlc code` turn sees an upstream-change banner pointing at the diff. Shipping is a separate verb (`moe sdlc push`) that runs the mechanical outbound work; there is no explicit "sign this stage" ceremony between turns.
 
 Known stages in the `sdlc` workflow:
@@ -140,6 +142,11 @@ Known stages in the `sdlc` workflow:
 - `design` — design is settled; `moe sdlc design` edits its canvas
 - `code` — code is settled; `moe sdlc code` edits its canvas inside the run's sandbox clone
 - `push` — the terminal stage; `moe sdlc push` publishes the code branch and opens a PR
+
+Known stages in the `kb` workflow:
+
+- `research` — `moe kb research` searches the web and extends a source list with 1–3 sentence abstracts; resumed sessions add rather than replace
+- `summarize` — `moe kb summarize` synthesizes a Wikipedia-style article from the research doc; signing this stage is publication (there is no push — the artifact is markdown inside the bureaucracy)
 
 Additional stages (review, test, deploy, retro, …) or additional workflows will be added when a real use case forces the question.
 
