@@ -12,7 +12,7 @@ import (
 // need a pre-existing idea to promote.
 func captureIdea(t *testing.T, projectID, title string) {
 	t.Helper()
-	noEditor(t)
+	stubEditor(t)
 	if code := Run([]string{"idea", "add", projectID, title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed for %q", title)
 	}
@@ -44,7 +44,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndDeletesIdea(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "Cross-project search")
@@ -98,7 +98,7 @@ func TestRunNewFromIdeaExplicitTitleOverridesH1(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "Original title")
@@ -125,7 +125,7 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "DNS basics")
@@ -147,7 +147,7 @@ func TestRunNewFromIdeaErrorsOnMissingIdea(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"--from-idea=nope", "tele"}, &out, &errb)
@@ -156,6 +156,54 @@ func TestRunNewFromIdeaErrorsOnMissingIdea(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "--from-idea") || !strings.Contains(errb.String(), "nope.md") {
 		t.Fatalf("expected missing-idea error to name the path, got: %q", errb.String())
+	}
+}
+
+// Regression: the operator typed `moe sdlc new moe --from-idea=x` and
+// stdlib `flag` stopped at the first positional, so `--from-idea=x`
+// became part of the title. After reorderFlags this shape seeds the
+// first-stage doc just like the --from-idea-first form does.
+func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	captureIdea(t, "tele", "Flag ordering")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"tele", "--from-idea=flag-ordering"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "opened run tele/flag-ordering") {
+		t.Fatalf("missing open confirmation: %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "ideas", "flag-ordering.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected idea file deleted, stat err=%v", err)
+	}
+}
+
+// After reorderFlags hoists every --foo to the front, stdlib `flag`
+// rejects unknown ones outright rather than silently taking them as
+// titles. That's the belt-and-braces behavior the design called for.
+func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"tele", "Some title", "--bogus"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "bogus") {
+		t.Fatalf("expected error naming --bogus, got: %q", errb.String())
 	}
 }
 

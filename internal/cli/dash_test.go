@@ -310,7 +310,7 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	// Capture two ideas via the CLI so the file shape and commit
 	// trailers come straight from production code paths.
