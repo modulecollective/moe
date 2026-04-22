@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/abstract"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
@@ -116,7 +118,7 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.
-	commitErr := commitTurn(root, md, docID)
+	commitErr := commitTurn(root, md, docID, stderr)
 
 	if runErr != nil {
 		moePrintf(stderr, "claude exited: %v\n", runErr)
@@ -335,9 +337,34 @@ run is pushed.
 // commitTurn stages the document dir and run.json, then commits with
 // a trailer block keyed to the document/session. See README §"one run
 // branch per run" for the trailer convention.
-func commitTurn(root string, md *run.Metadata, docID string) error {
+//
+// Before committing, the run's abstract is refreshed via a separate
+// Sonnet call so the updated summary rides along in the same commit
+// as the document edits that produced it. Abstract failures are
+// non-fatal — a warning is written to stderr and the prior abstract
+// is preserved.
+func commitTurn(root string, md *run.Metadata, docID string, stderr io.Writer) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+
+	// Pre-stage the doc so we can detect "no work to commit" before we
+	// spend an API call refreshing the abstract. If the operator
+	// exited Claude without edits, we bail cleanly with no side effects.
+	if err := run.Stage(root, docDir); err != nil {
+		return err
+	}
+	if !run.HasStagedChanges(root) {
+		return run.ErrNothingToCommit
+	}
+
+	refreshAbstract(root, md, stderr)
+
+	// Persist whatever refreshAbstract produced (or didn't); a no-op
+	// Save is cheap and keeps the flow simple.
+	if err := run.Save(root, md); err != nil {
+		return err
+	}
+
 	msg := fmt.Sprintf(`work: update %s
 
 MoE-Run: %s
@@ -346,4 +373,28 @@ MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
 	return run.StageAndCommit(root, msg, docDir, runJSON)
+}
+
+// refreshAbstract issues the post-turn Sonnet summarisation call and
+// mutates md.Abstract on success. All failure modes are non-fatal —
+// a missing API key, an API outage, or an empty response leaves the
+// prior abstract in place and logs a one-line warning so operators
+// know the summary didn't refresh. The auto-abstract design calls
+// this out explicitly: "if the call errors or the output doesn't
+// parse, log a warning and skip the abstract update."
+func refreshAbstract(root string, md *run.Metadata, stderr io.Writer) {
+	s, err := abstract.NewFromEnv()
+	if err != nil {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "abstract: %v (keeping prior abstract)\n", err)
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), abstract.DefaultTimeout)
+	defer cancel()
+	if err := abstract.Update(ctx, root, md, s); err != nil {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "abstract: %v (keeping prior abstract)\n", err)
+		}
+	}
 }

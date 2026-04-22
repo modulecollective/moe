@@ -85,6 +85,13 @@ the document reuses that `--session-id`, so multi-turn continuity is
 server-side. An append-only `thread.jsonl` sits alongside for audit;
 downstream agents read the compressed `content.md`, not the thread.
 
+`run.json` also carries an auto-refreshed `abstract` field — 2–3
+sentences of prose, rewritten by a Sonnet call after each stage turn
+and bundled into the same commit as the doc edits. Discovery across
+runs is a filesystem walk: `find projects -name run.json | xargs jq -r
+.abstract`. The refresh is best-effort; a failed call logs and leaves
+the prior abstract in place.
+
 Document slugs are free-form (`spec`, `architecture`, `migration-plan`,
 …). Conventionally each stage has a canonical document sharing its
 name (`design`, `code`) because that is what upstream-change detection
@@ -98,9 +105,10 @@ them; the banner is a social cue made legible.
 MoE deliberately does not maintain a typed document graph — no
 `document-graph.conf`, no node-type taxonomy, no `depends_on` edges.
 The only typed graph is the stage DAG in `internal/stage/stage.go`
-(`design` → `code` → `push`). Which documents a run has and how they
-relate is operator judgment, guided by `docs/<slug>.md` and
-`stages/<stage>.md` fragments rather than a parsed schema.
+(`sdlc`: `design` → `code` → `push`; `kb`: `research` → `summarize`).
+Which documents a run has and how they relate is operator judgment,
+guided by `docs/<slug>.md` and `stages/<stage>.md` fragments rather
+than a parsed schema.
 
 ---
 

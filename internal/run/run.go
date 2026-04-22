@@ -54,12 +54,17 @@ const (
 
 // Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.
 type Metadata struct {
-	ID        string               `json:"id"`
-	Project   string               `json:"project"`
-	Title     string               `json:"title"`
-	Status    string               `json:"status"`
-	Workflow  string               `json:"workflow"`
-	Created   string               `json:"created"`
+	ID       string `json:"id"`
+	Project  string `json:"project"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Workflow string `json:"workflow"`
+	Created  string `json:"created"`
+	// Abstract is a 2–3 sentence prose summary of the run's current
+	// state, maintained automatically after each work turn. Discovery
+	// (moe dash, downstream agents scanning runs with jq) reads this.
+	// Empty until the first successful auto-summary lands.
+	Abstract  string               `json:"abstract,omitempty"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -290,14 +295,33 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 // if there's nothing staged after the add — common for a stage turn where
 // the operator exited Claude without having it write anything.
 func StageAndCommit(root, msg string, pathspecs ...string) error {
-	addArgs := append([]string{"add", "--"}, pathspecs...)
-	if err := runGit(root, addArgs...); err != nil {
+	if err := Stage(root, pathspecs...); err != nil {
 		return err
 	}
-	if !hasStagedChanges(root) {
+	if !HasStagedChanges(root) {
 		return ErrNothingToCommit
 	}
 	return runGit(root, "commit", "-m", msg)
+}
+
+// Stage runs `git add -- pathspecs...` under root. A split primitive so
+// callers that need to introspect staging state before committing (e.g.,
+// run a pre-commit hook only when the doc actually changed) can do so
+// without reimplementing the exec.
+func Stage(root string, pathspecs ...string) error {
+	if len(pathspecs) == 0 {
+		return nil
+	}
+	addArgs := append([]string{"add", "--"}, pathspecs...)
+	return runGit(root, addArgs...)
+}
+
+// HasStagedChanges reports whether the index has anything staged
+// relative to HEAD. Used by the stage session's commitTurn to decide
+// whether to spend an API call on the auto-abstract update before
+// falling through to ErrNothingToCommit.
+func HasStagedChanges(root string) bool {
+	return hasStagedChanges(root)
 }
 
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
