@@ -11,8 +11,13 @@ projects — those get their own guidance assembled from `soul.md` and
   `claude -p`, `git`, and the Go standard library. No YAML parser, no
   CLI framework, no DAG engine, no third-party dependency without a
   reason that survives review.
-- **Format and vet before handing off.** Run `gofmt -l -w . && go vet
-  ./...` at the end of every round of Go edits. Not optional.
+
+## Before you say you're done
+
+**Run `gofmt -l -w . && go vet ./...` at the end of every round of Go
+edits.** Not optional — not even for a one-line fix, not even if the
+tests already pass. If you're about to write "fixed it" or "done",
+you're about to run these two commands first.
 
 ## Tools worth reaching for
 

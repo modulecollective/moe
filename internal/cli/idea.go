@@ -139,6 +139,10 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea: write %s: %v\n", rel, err)
 		return 1
 	}
+	// Open the editor first and commit whatever's on disk afterward, so the
+	// operator's saved content lands in the capture commit. If they quit
+	// without editing, the stub itself is still a valid capture.
+	editorCode := launchEditor(abs, stdout, stderr)
 	msg := fmt.Sprintf("Capture idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
 		projectID, slug, title, slug, projectID)
 	if err := run.StageAndCommit(root, msg, rel); err != nil {
@@ -147,7 +151,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	}
 
 	moePrintf(stdout, "captured idea %s/%s\n%s\n", projectID, slug, abs)
-	return launchEditor(abs, stdout, stderr)
+	return editorCode
 }
 
 func runIdeaList(args []string, stdout, stderr io.Writer) int {

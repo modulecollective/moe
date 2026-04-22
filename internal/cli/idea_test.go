@@ -98,6 +98,54 @@ func TestIdeaNewCreatesFileAndCommits(t *testing.T) {
 	}
 }
 
+func TestIdeaNewCommitsEditorEdits(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// Fake editor: append a line so we can tell the capture commit
+	// reflects the post-edit file, not the stub.
+	script := filepath.Join(t.TempDir(), "fake-editor.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'added by editor\\n' >> \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"idea", "new", "tele", "With body"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "ideas", "with-body.md"))
+	if err != nil {
+		t.Fatalf("idea file not written: %v", err)
+	}
+	if !strings.Contains(string(body), "added by editor") {
+		t.Fatalf("editor edit not on disk: %q", body)
+	}
+
+	// The edit must be in the commit, not left as an uncommitted change.
+	status := exec.Command("git", "-C", root, "status", "--porcelain")
+	st, err := status.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, st)
+	}
+	if len(bytes.TrimSpace(st)) != 0 {
+		t.Fatalf("working tree should be clean after capture, got:\n%s", st)
+	}
+	show := exec.Command("git", "-C", root, "show", "HEAD:projects/tele/ideas/with-body.md")
+	shown, err := show.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v\n%s", err, shown)
+	}
+	if !strings.Contains(string(shown), "added by editor") {
+		t.Fatalf("HEAD version missing editor edit:\n%s", shown)
+	}
+}
+
 func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
