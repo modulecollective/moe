@@ -396,14 +396,23 @@ func hasStagedChanges(root string) bool {
 }
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
-// `work: update <docID>` commit for the run, identified by the
-// MoE-Run and MoE-Document trailers commitTurn writes. Returns
-// ("", time.Time{}, nil) when there has been no work turn yet — the caller
-// treats that as "first turn, nothing to diff against."
-func LatestWorkTurnSHA(root, runID, docID string) (sha string, when time.Time, err error) {
+// `work: update <docID>` commit for the run. Slugs are unique per
+// project across all workflows (the runs/<slug> directory namespace is
+// flat), so (project, run, document) is enough to key a run's history;
+// the workflow trailer is written but not filtered on. An anchored
+// subject grep keeps session-start, merge, and push commits from
+// slipping past. Returns ("", time.Time{}, nil) when there has been no
+// work turn yet — the caller treats that as "first turn, nothing to
+// diff against."
+func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
+	// Doc IDs are [a-z0-9-]+ today, so QuoteMeta is belt-and-suspenders:
+	// nothing in that class is a BRE metacharacter, but escape anyway so
+	// a future looser validator can't turn a doc ID into a regex foot-gun.
 	cmd := exec.Command("git",
 		"log", "-1",
 		"--all-match",
+		"--grep", fmt.Sprintf("^work: update %s$", regexp.QuoteMeta(docID)),
+		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
 		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
 		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
 		"--format=%H %ct",

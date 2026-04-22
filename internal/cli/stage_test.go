@@ -45,10 +45,11 @@ func newTestBureaucracy(t *testing.T) string {
 // commitWorkTurnAt records a `work: update <docID>` commit with the trailers
 // commitTurn writes in production, dated to when. Returns HEAD's SHA so the
 // caller can assert it appears in the banner.
-func commitWorkTurnAt(t *testing.T, root, runID, docID string, when time.Time) string {
+func commitWorkTurnAt(t *testing.T, root, projectID, runID, workflow, docID string, when time.Time) string {
 	t.Helper()
-	commitTrailer(t, root, "work: update "+docID,
-		"MoE-Run: "+runID+"\nMoE-Document: "+docID, when)
+	trailers := fmt.Sprintf("MoE-Run: %s\nMoE-Project: %s\nMoE-Workflow: %s\nMoE-Document: %s",
+		runID, projectID, workflow, docID)
+	commitTrailer(t, root, "work: update "+docID, trailers, when)
 	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)
@@ -266,9 +267,9 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	runID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	// First turn on design, then on code, then design is touched again.
-	commitWorkTurnAt(t, root, runID, "design", t0)
-	workSHA := commitWorkTurnAt(t, root, runID, "code", t0.Add(10*time.Second))
-	commitWorkTurnAt(t, root, runID, "design", t0.Add(20*time.Second))
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0)
+	workSHA := commitWorkTurnAt(t, root, "tele", runID, "sdlc", "code", t0.Add(10*time.Second))
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
@@ -294,7 +295,7 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	runID := "fix-it"
-	commitWorkTurnAt(t, root, runID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
@@ -311,9 +312,9 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 
 	runID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, runID, "design", t0)
-	commitWorkTurnAt(t, root, runID, "design", t0.Add(10*time.Second)) // another design turn before any code
-	commitWorkTurnAt(t, root, runID, "code", t0.Add(20*time.Second))
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0)
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0.Add(10*time.Second)) // another design turn before any code
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "code", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
@@ -331,7 +332,7 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 	runID := "fix-it"
 	// Design has no prereqs in prereqDocs. Even with a prior work turn,
 	// there's nothing to surface.
-	commitWorkTurnAt(t, root, runID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")

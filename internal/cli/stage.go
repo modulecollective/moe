@@ -326,7 +326,7 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 		return "", nil
 	}
 
-	lastSHA, lastWhen, err := run.LatestWorkTurnSHA(root, md.ID, docID)
+	lastSHA, lastWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, docID)
 	if err != nil {
 		return "", err
 	}
@@ -341,7 +341,7 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 	}
 	var moved []move
 	for _, dep := range deps {
-		_, depWhen, err := run.LatestWorkTurnSHA(root, md.ID, dep)
+		_, depWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, dep)
 		if err != nil {
 			return "", err
 		}

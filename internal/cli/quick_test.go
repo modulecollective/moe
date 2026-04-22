@@ -78,7 +78,7 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "r", "code", t0)
+	commitWorkTurnAt(t, root, "p", "r", "quick", "code", t0)
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)

@@ -109,8 +109,8 @@ func TestDashReadyToPushShowsPushStage(t *testing.T) {
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "fix-it", "design", t0)
-	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -141,9 +141,9 @@ func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "fix-it", "design", t0)
-	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
-	commitWorkTurnAt(t, root, "fix-it", "design", t0.Add(2*time.Hour))
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -281,8 +281,8 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 
 	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
 	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "lookup", "research", t0)
-	commitWorkTurnAt(t, root, "lookup", "summarize", t0.Add(time.Hour))
+	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
+	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "summarize", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)

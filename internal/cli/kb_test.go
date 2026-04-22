@@ -75,7 +75,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "r", "research", t0)
+	commitWorkTurnAt(t, root, "p", "r", "kb", "research", t0)
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after research: expected stage summarize, got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
-	commitWorkTurnAt(t, root, "r", "summarize", t0.Add(time.Hour))
+	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))
 	_, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)

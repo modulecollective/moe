@@ -45,7 +45,7 @@ func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, erro
 }
 
 func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (bool, error) {
-	_, stageWhen, err := run.LatestWorkTurnSHA(root, md.ID, stage)
+	_, stageWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, stage)
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +53,7 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (
 		return false, nil
 	}
 	for _, dep := range w.prereqs[stage] {
-		_, depWhen, err := run.LatestWorkTurnSHA(root, md.ID, dep)
+		_, depWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, dep)
 		if err != nil {
 			return false, err
 		}
