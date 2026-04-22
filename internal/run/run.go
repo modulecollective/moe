@@ -54,11 +54,11 @@ const (
 
 // Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.
 type Metadata struct {
-	ID       string `json:"id"`
-	Project  string `json:"project"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Workflow string `json:"workflow"`
+	ID        string               `json:"id"`
+	Project   string               `json:"project"`
+	Title     string               `json:"title"`
+	Status    string               `json:"status"`
+	Workflow  string               `json:"workflow"`
 	Created   string               `json:"created"`
 	Documents map[string]*Document `json:"documents"`
 }
