@@ -69,6 +69,13 @@ type Executor interface {
 // unchanged.
 type ClaudeCLI struct{}
 
+// sandboxSettings is layered on top of the operator's settings.json via
+// `--settings` to pin the claude subprocess into the built-in sandbox
+// regardless of the operator's personal configuration. Array fields
+// (filesystem/network allowlists) merge with the operator's settings,
+// so this only forces the toggle on without narrowing their allowlists.
+const sandboxSettings = `{"sandbox":{"enabled":true}}`
+
 // Execute shells out to `claude`, wires stdio to the operator's
 // terminal, and mirrors the session's on-disk JSONL into the document's
 // thread.jsonl when the turn ends.
@@ -94,6 +101,7 @@ func (ClaudeCLI) Execute(r Request) error {
 	args := []string{
 		sessionFlag, r.SessionID,
 		"--add-dir", r.Root,
+		"--settings", sandboxSettings,
 		"--append-system-prompt", r.Prompt,
 	}
 	// A positional prompt launches claude interactively but auto-sends
