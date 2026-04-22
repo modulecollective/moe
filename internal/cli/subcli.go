@@ -12,11 +12,18 @@ import (
 // pick short stage names without colliding.
 //
 // A Workflow is itself exposed as a top-level Command via Command(),
-// which lets cli.Register keep a flat top-level table.
+// which lets cli.Register keep a flat top-level table. The workflow
+// also tracks stage order, prereq edges, and a cross-workflow terminal
+// so `moe work` can compute "what's next" without hard-coding the
+// design→code→push pipeline at each callsite (see Next).
 type Workflow struct {
 	Name    string
 	Summary string
+
 	stages  map[string]*Command
+	order   []string
+	prereqs map[string][]string
+	term    *Command
 }
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
@@ -26,16 +33,42 @@ func NewWorkflow(name, summary string) *Workflow {
 		Name:    name,
 		Summary: summary,
 		stages:  map[string]*Command{},
+		prereqs: map[string][]string{},
 	}
 }
 
 // Register adds a stage command to this workflow. Panics on duplicate
 // stage names within the workflow — same contract as top-level Register.
-func (w *Workflow) Register(c *Command) {
+// Optional prereq stage names record that c's satisfaction depends on
+// those stages' latest work turns; the list is consumed by Next,
+// checkStaleness (push), and upstreamChangeBanner (stage session).
+func (w *Workflow) Register(c *Command, prereqs ...string) {
 	if _, dup := w.stages[c.Name]; dup {
 		panic("cli: duplicate stage " + w.Name + " " + c.Name)
 	}
 	w.stages[c.Name] = c
+	w.order = append(w.order, c.Name)
+	if len(prereqs) > 0 {
+		w.prereqs[c.Name] = append([]string(nil), prereqs...)
+	}
+}
+
+// SetTerminal wires a cross-workflow verb (e.g. push) that Next
+// returns once every stage is satisfied. Leave unset for workflows
+// that end with their last stage.
+func (w *Workflow) SetTerminal(c *Command) { w.term = c }
+
+// Stages returns the registered stage names in registration order.
+func (w *Workflow) Stages() []string {
+	out := make([]string, len(w.order))
+	copy(out, w.order)
+	return out
+}
+
+// Prereqs returns the prereq doc ids for stage, or nil if stage has
+// none (or isn't part of this workflow).
+func (w *Workflow) Prereqs(stage string) []string {
+	return w.prereqs[stage]
 }
 
 // Command returns the workflow as a top-level Command suitable for

@@ -18,12 +18,14 @@ import (
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
+var pushCmd = &Command{
+	Name:    "push",
+	Summary: "push the request's code branch and open (or update) a PR on the target repo",
+	Run:     runPush,
+}
+
 func init() {
-	Register(&Command{
-		Name:    "push",
-		Summary: "push the request's code branch and open (or update) a PR on the target repo",
-		Run:     runPush,
-	})
+	Register(pushCmd)
 }
 
 const branchPrefix = "moe/"
@@ -168,14 +170,20 @@ func checkCodeContent(root string, md *request.Metadata) error {
 }
 
 // checkStaleness is the hard gate that signing's cascade used to provide:
-// if the design document was touched after the last code turn, refuse to
-// ship until the operator re-runs `moe sdlc code` to reconcile.
+// if any prereq of the code document was touched after the last code
+// turn, refuse to ship until the operator re-runs `moe sdlc code` to
+// reconcile. Prereqs come from the request's workflow so new stages
+// slot in without editing this gate.
 func checkStaleness(root string, md *request.Metadata) error {
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return err
+	}
 	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
 	if err != nil {
 		return err
 	}
-	for _, dep := range prereqDocs["code"] {
+	for _, dep := range wf.Prereqs("code") {
 		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return err
