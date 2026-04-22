@@ -388,10 +388,15 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	if !strings.Contains(got, "BACKLOG (2)") {
 		t.Fatalf("expected BACKLOG (2), got:\n%s", got)
 	}
-	for _, want := range []string{"cross-project-search", "Cross-project search", "faster-dash-load", "Faster dash load"} {
+	for _, want := range []string{"cross-project-search", "faster-dash-load"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("backlog missing %q in:\n%s", want, got)
 		}
+	}
+	// Third column is a relative "updated …" timestamp from the idea
+	// file's last commit, one per row.
+	if n := strings.Count(got, "updated "); n < 2 {
+		t.Fatalf("expected 'updated ' on each backlog row, got %d in:\n%s", n, got)
 	}
 	// Sections render top-to-bottom: ACTIVE RUNS → BACKLOG → COMPLETED RUNS.
 	activeIdx := strings.Index(got, "ACTIVE RUNS")

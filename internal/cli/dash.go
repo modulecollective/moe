@@ -147,9 +147,13 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 		return nil, err
 	}
 	for _, e := range ideas {
-		when := time.Time{}
-		if info, err := os.Stat(e.path); err == nil {
-			when = info.ModTime().UTC()
+		rel, err := filepath.Rel(root, e.path)
+		if err != nil {
+			return nil, err
+		}
+		when, err := run.LastFileActivity(root, rel)
+		if err != nil {
+			return nil, err
 		}
 		rows = append(rows, dashRow{
 			project: e.project,
@@ -307,7 +311,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range backlog {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", r.project, r.run, r.note)
+			fmt.Fprintf(tw, "  %s\t%s\tupdated %s\n", r.project, r.run, humanAgo(now, r.when))
 		}
 		tw.Flush()
 	}

@@ -511,6 +511,32 @@ func LastActivity(root, runID string) (time.Time, error) {
 	return time.Unix(epoch, 0).UTC(), nil
 }
 
+// LastFileActivity returns the committer time of the most recent commit
+// that touched relPath (relative to root), or the zero time if the
+// path has no git history. Scoped by path rather than by MoE-Run
+// trailer, but otherwise mirrors LastActivity.
+func LastFileActivity(root, relPath string) (time.Time, error) {
+	cmd := exec.Command("git",
+		"log", "-1",
+		"--format=%ct",
+		"--", relPath,
+	)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("run: git log: %w", err)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return time.Time{}, nil
+	}
+	epoch, err := strconv.ParseInt(line, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", line, err)
+	}
+	return time.Unix(epoch, 0).UTC(), nil
+}
+
 // nextFreeID walks base, base-2, base-3, … until it finds a slug whose run
 // dir doesn't already exist. The base itself is never returned — the caller
 // has already checked it. We strip any trailing -N from base before counting
