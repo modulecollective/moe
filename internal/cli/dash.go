@@ -29,15 +29,22 @@ func init() {
 // collapse out of the default view".
 const dormantCutoff = 30 * 24 * time.Hour
 
-// bucket labels a row's section. Runs and backlog ideas live on
-// different rails — runs have a lifecycle stage, ideas don't — so
-// they render in separate sections.
+// completedCap bounds the COMPLETED RUNS section. Finished runs are
+// history — useful as recent context, not as a backlog — so we show
+// the newest N and let the bureaucracy repo itself be the archive.
+const completedCap = 10
+
+// bucket labels a row's section. Active runs (next stage to run) and
+// completed runs (pushed or terminal) live on different rails from
+// backlog ideas, and the operator's eye lands on active work first,
+// so the iota order mirrors the on-screen order.
 type bucket int
 
 const (
-	bucketBacklog bucket = iota // captured ideas, not yet promoted to a run
-	bucketRuns                  // everything with a lifecycle: in-progress and terminal
-	bucketNone                  // filtered out entirely (dormant without --all)
+	bucketActiveRuns    bucket = iota // in-progress runs with a next stage
+	bucketBacklog                     // captured ideas, not yet promoted to a run
+	bucketCompletedRuns               // pushed or terminal runs, shown as "done"
+	bucketNone                        // filtered out entirely (dormant without --all)
 )
 
 // dashRow is one entry in the dashboard. Kept flat so tabwriter can
@@ -95,9 +102,13 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	// Count active from buckets rather than md.Status so the footer
+	// matches what the ACTIVE RUNS section actually shows. A KB run
+	// past its terminal stage is Status=in_progress on disk but lives
+	// in COMPLETED here — counting it as active would mislead.
 	activeCount := 0
-	for _, md := range mds {
-		if md.Status == run.StatusInProgress {
+	for _, r := range rows {
+		if r.bucket == bucketActiveRuns {
 			activeCount++
 		}
 	}
@@ -159,15 +170,15 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 }
 
 // classify decides which section a run lands in and what note to
-// render. In-progress runs show their next stage (from workflow.Next);
-// runs past their terminal stage show "done". Dormant runs are
-// dropped unless the caller asked for --all.
+// render. In-progress runs with more work to do land in ACTIVE;
+// pushed or terminal-stage runs land in COMPLETED with the note
+// "done". Dormant runs are dropped unless the caller asked for --all.
 func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
 	if md.Status == run.StatusPushed {
-		return bucketRuns, "done", nil
+		return bucketCompletedRuns, "done", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
@@ -188,9 +199,9 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		// Terminal stage satisfied but no push transition — e.g. KB
 		// workflow, which ends at `summarize` and has no push. Treat
 		// the same as StatusPushed for dashboard purposes.
-		return bucketRuns, "done", nil
+		return bucketCompletedRuns, "done", nil
 	}
-	return bucketRuns, next.Name, nil
+	return bucketActiveRuns, next.Name, nil
 }
 
 // humanAgo renders "Xd ago" / "Xh ago" / "just now". tabwriter-friendly
@@ -224,23 +235,41 @@ func countProjects(root string) (int, error) {
 	return len(matches), nil
 }
 
-// renderDash prints the header, two sections (BACKLOG, RUNS), and
-// footer. tabwriter aligns columns per section so a long idea title
-// doesn't widen the runs rows above it. Section headings use the
-// cyan-moe style from output.go; rows stay plain so tabwriter's
-// byte-counting aligns correctly (ANSI codes would skew column widths).
+// renderDash prints the header, three sections (ACTIVE RUNS, BACKLOG,
+// COMPLETED RUNS), and footer. Order is operator-first: what you can
+// act on now, then what's queued, then what's already done. tabwriter
+// aligns columns per section so a long idea title doesn't widen the
+// run rows. COMPLETED RUNS is capped at completedCap — older finished
+// runs still live in the bureaucracy repo, they just don't clutter
+// the dashboard. Section headings use the cyan-moe style from
+// output.go; rows stay plain so tabwriter's byte-counting aligns
+// correctly (ANSI codes would skew column widths).
 func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, activeCount int) {
 	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
 
-	var backlog, runs []dashRow
+	var active, backlog, completed []dashRow
 	for _, r := range rows {
 		switch r.bucket {
+		case bucketActiveRuns:
+			active = append(active, r)
 		case bucketBacklog:
 			backlog = append(backlog, r)
-		case bucketRuns:
-			runs = append(runs, r)
+		case bucketCompletedRuns:
+			completed = append(completed, r)
 		}
 	}
+
+	moePrintf(w, "ACTIVE RUNS (%d)\n", len(active))
+	if len(active) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range active {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.project, r.run, humanAgo(now, r.when), r.note)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
 
 	moePrintf(w, "BACKLOG (%d)\n", len(backlog))
 	if len(backlog) == 0 {
@@ -254,12 +283,20 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 	}
 	fmt.Fprintln(w)
 
-	moePrintf(w, "RUNS (%d)\n", len(runs))
-	if len(runs) == 0 {
+	shown := completed
+	if len(completed) > completedCap {
+		shown = completed[:completedCap]
+	}
+	if len(shown) < len(completed) {
+		moePrintf(w, "COMPLETED RUNS (%d of %d)\n", len(shown), len(completed))
+	} else {
+		moePrintf(w, "COMPLETED RUNS (%d)\n", len(completed))
+	}
+	if len(shown) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, r := range runs {
+		for _, r := range shown {
 			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.project, r.run, humanAgo(now, r.when), r.note)
 		}
 		tw.Flush()

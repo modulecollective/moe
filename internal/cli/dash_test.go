@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,8 +87,9 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"Ministry of Everything",
+		"ACTIVE RUNS (0)",
 		"BACKLOG (0)",
-		"RUNS (0)",
+		"COMPLETED RUNS (0)",
 		"0 project(s) registered · 0 active",
 	} {
 		if !strings.Contains(got, want) {
@@ -116,8 +118,8 @@ func TestDashReadyToPushShowsPushStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RUNS (1)") {
-		t.Fatalf("expected one run row, got:\n%s", got)
+	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
@@ -149,8 +151,8 @@ func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RUNS (1)") {
-		t.Fatalf("expected one run row, got:\n%s", got)
+	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "code") {
 		t.Fatalf("expected run row with stage 'code', got:\n%s", got)
@@ -173,8 +175,8 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RUNS (1)") {
-		t.Fatalf("expected one run row, got:\n%s", got)
+	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "design") {
 		t.Fatalf("expected run row with stage 'design', got:\n%s", got)
@@ -182,8 +184,7 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 }
 
 // TestDashPushedRunShowsDone: a run with StatusPushed renders as "done"
-// in RUNS alongside in-progress runs — terminal runs are no longer
-// segregated into a separate RECENT bucket.
+// in the COMPLETED RUNS section.
 func TestDashPushedRunShowsDone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -201,8 +202,8 @@ func TestDashPushedRunShowsDone(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RUNS (1)") {
-		t.Fatalf("expected one run row, got:\n%s", got)
+	if !strings.Contains(got, "COMPLETED RUNS (1)") {
+		t.Fatalf("expected one completed run row, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "done") {
 		t.Fatalf("expected run row with stage 'done', got:\n%s", got)
@@ -212,7 +213,7 @@ func TestDashPushedRunShowsDone(t *testing.T) {
 // TestDashKBRunAfterSummarizeShowsDone is the regression for the
 // disappearing-KB-run bug: a KB run with both research and summarize
 // turns committed has Next()==Done but Status==InProgress (KB has no
-// push), and must still render as "done" in RUNS.
+// push), and must still render as "done" — landing in COMPLETED RUNS.
 func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -230,7 +231,7 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "RUNS (1)") {
+	if !strings.Contains(got, "COMPLETED RUNS (1)") {
 		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "lookup", "done") {
@@ -255,7 +256,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "RUNS (0)") {
+	if !strings.Contains(out.String(), "ACTIVE RUNS (0)") {
 		t.Fatalf("dormant run should be hidden, got:\n%s", out.String())
 	}
 
@@ -266,7 +267,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "RUNS (1)") {
+	if !strings.Contains(out.String(), "ACTIVE RUNS (1)") {
 		t.Fatalf("--all should reveal dormant run, got:\n%s", out.String())
 	}
 }
@@ -333,11 +334,12 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 			t.Fatalf("backlog missing %q in:\n%s", want, got)
 		}
 	}
-	// BACKLOG sits above RUNS.
+	// Sections render top-to-bottom: ACTIVE RUNS → BACKLOG → COMPLETED RUNS.
+	activeIdx := strings.Index(got, "ACTIVE RUNS")
 	backlogIdx := strings.Index(got, "BACKLOG")
-	runsIdx := strings.Index(got, "RUNS")
-	if !(backlogIdx >= 0 && runsIdx >= 0 && backlogIdx < runsIdx) {
-		t.Fatalf("section order wrong (backlog=%d runs=%d):\n%s", backlogIdx, runsIdx, got)
+	completedIdx := strings.Index(got, "COMPLETED RUNS")
+	if !(activeIdx >= 0 && backlogIdx >= 0 && completedIdx >= 0 && activeIdx < backlogIdx && backlogIdx < completedIdx) {
+		t.Fatalf("section order wrong (active=%d backlog=%d completed=%d):\n%s", activeIdx, backlogIdx, completedIdx, got)
 	}
 }
 
@@ -383,6 +385,46 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "3 project(s) registered") {
 		t.Fatalf("expected 3 projects in footer, got:\n%s", out.String())
+	}
+}
+
+// TestDashCompletedCapsAtTen seeds more completed runs than the
+// dashboard cap and asserts (a) the header shows "N of total" and
+// (b) only the newest ten rows render. The cap exists so the section
+// doesn't grow unbounded and drown the live sections above it.
+func TestDashCompletedCapsAtTen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// 12 pushed runs, oldest first so "newest-first" ordering pushes
+	// the newer slugs to the top of the section.
+	for i := 0; i < 12; i++ {
+		slug := fmt.Sprintf("done-%02d", i)
+		seedRun(t, root, "tele", slug, "sdlc", run.StatusPushed)
+		commitTrailer(t, root, "push: "+slug,
+			"MoE-Run: "+slug+"\nMoE-PR: https://example.com/pr/"+slug,
+			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "COMPLETED RUNS (10 of 12)") {
+		t.Fatalf("expected capped header, got:\n%s", got)
+	}
+	// Oldest two (done-00, done-01) should be dropped; newest (done-11) shown.
+	if !containsRunRow(got, "tele", "done-11", "done") {
+		t.Fatalf("expected newest completed run to render, got:\n%s", got)
+	}
+	for _, dropped := range []string{"done-00", "done-01"} {
+		if strings.Contains(got, dropped) {
+			t.Fatalf("expected %q to be truncated below cap, got:\n%s", dropped, got)
+		}
 	}
 }
 
