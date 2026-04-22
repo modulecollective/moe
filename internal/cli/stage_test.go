@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/request"
 )
 
@@ -37,24 +39,6 @@ func newTestBureaucracy(t *testing.T) string {
 		}
 	}
 	return root
-}
-
-func writeStageFile(t *testing.T, root, name, body string) {
-	t.Helper()
-	dir := filepath.Join(root, "stages")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeSoul(t *testing.T, root, body string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "soul.md"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // commitWorkTurnAt records a `work: update <docID>` commit with the trailers
@@ -87,79 +71,121 @@ func commitTrailer(t *testing.T, root, subject, trailers string, when time.Time)
 	}
 }
 
-func TestBuildSystemPromptInjectsDesignFragment(t *testing.T) {
-	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "design.md", "# Stage: design\n\nresist over-specifying.\n")
+// TestEmbeddedFragmentsCoverRegisteredStages is the load-bearing
+// coverage check. For every registered (workflow, stage) pair that opens
+// an agent session, the embedded FS must carry a non-empty fragment.
+// Adding a new session stage without a fragment, or typoing the embed
+// directory name, becomes a failing test here rather than a silent
+// "prompt lost its stage lens" regression at runtime.
+//
+// Stages listed in noFragmentStages are operational (e.g. push), don't
+// build a system prompt, and are exempt by design.
+func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
+	noFragmentStages := map[string]bool{"push": true}
+	for _, wfName := range WorkflowNames() {
+		// Other tests register throwaway workflows with a "test-"
+		// prefix to exercise the missing-fragment fallback; by design
+		// those don't ship fragments, so skip them here.
+		if strings.HasPrefix(wfName, "test-") {
+			continue
+		}
+		wf, err := LookupWorkflow(wfName)
+		if err != nil {
+			t.Fatalf("lookup %q: %v", wfName, err)
+		}
+		for _, stage := range wf.Stages() {
+			if noFragmentStages[stage] {
+				continue
+			}
+			got := moe.Stage(wfName, stage)
+			if got == "" {
+				t.Errorf("missing embedded fragment for workflow=%q stage=%q", wfName, stage)
+			}
+		}
+	}
+}
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+// TestEmbeddedSoulIsNonEmpty catches a busted //go:embed directive on
+// soul.md — trivial to check, would otherwise degrade silently.
+func TestEmbeddedSoulIsNonEmpty(t *testing.T) {
+	if moe.Soul() == "" {
+		t.Fatal("moe.Soul() is empty; //go:embed soul.md likely broken")
+	}
+}
+
+// TestBuildSystemPromptInjectsSdlcDesignFragment is the end-to-end
+// wiring check: the real sdlc/design.md fragment should land in the
+// prompt when the request names the sdlc workflow. Uses a known
+// heading as the sentinel so the assertion survives minor body edits
+// (and breaks loudly if the heading itself is renamed, which is the
+// point — renaming the heading is a signal the framing changed).
+func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "resist over-specifying.") {
-		t.Fatalf("prompt missing design fragment:\n%s", got)
+	if !strings.Contains(got, "# Stage: design") {
+		t.Fatalf("prompt missing design fragment heading:\n%s", got)
 	}
 	if !strings.Contains(got, "\n---\n") {
 		t.Fatalf("prompt missing fragment separator:\n%s", got)
 	}
 }
 
-func TestBuildSystemPromptInjectsCodeFragment(t *testing.T) {
+func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "code.md", "CODE-BODY")
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "CODE-BODY") {
-		t.Fatalf("expected code fragment for code doc:\n%s", got)
+	if !strings.Contains(got, "# Stage: code") {
+		t.Fatalf("prompt missing code fragment heading:\n%s", got)
 	}
 }
 
+// TestBuildSystemPromptMissingFragmentIsNotAnError registers a
+// throwaway workflow with a stage that has no embedded fragment and
+// confirms buildSystemPrompt still returns (no error, no ghost empty
+// section). The soul section is always embedded so we still expect
+// exactly one separator — between soul and the operational core —
+// not two or more in a row from an empty stage insert.
 func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
-	// no soul.md, no stages/<doc>.md written
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "design", "")
+	wf := registerThrowawayWorkflow(t, "noFragment")
+
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: wf.Name}
+	got, err := buildSystemPrompt(root, md, "ghost", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(got, "Your canvas for this document") {
 		t.Fatalf("core prompt missing:\n%s", got)
 	}
-	if strings.Contains(got, "\n---\n") {
-		t.Fatalf("no fragment, no separator expected:\n%s", got)
-	}
-}
-
-func TestBuildSystemPromptInjectsSoul(t *testing.T) {
-	root := newTestBureaucracy(t)
-	writeSoul(t, root, "# Soul\n\ndo the thing that's asked.\n")
-
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "design", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "do the thing that's asked.") {
-		t.Fatalf("prompt missing soul content:\n%s", got)
+	// Two sections (soul, core) → one separator. If Stage() had leaked
+	// an empty section we'd see the separator twice in a row.
+	if strings.Count(got, "\n---\n") != 1 {
+		t.Fatalf("expected exactly one separator (soul→core), got %d:\n%s",
+			strings.Count(got, "\n---\n"), got)
 	}
 }
 
 func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeSoul(t, root, "SOUL-MARKER")
-	writeStageFile(t, root, "design.md", "STAGE-MARKER")
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	soulIdx := strings.Index(got, "SOUL-MARKER")
-	stageIdx := strings.Index(got, "STAGE-MARKER")
+	// Sentinels: soul.md heading, stage heading, first line of
+	// operationalCore. All three must appear in order.
+	soulIdx := strings.Index(got, "# Soul")
+	stageIdx := strings.Index(got, "# Stage: design")
 	opIdx := strings.Index(got, "You are collaborating")
 	if soulIdx < 0 || stageIdx < 0 || opIdx < 0 {
 		t.Fatalf("missing section(s) soul=%d stage=%d op=%d in:\n%s", soulIdx, stageIdx, opIdx, got)
@@ -171,8 +197,6 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 
 func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "design.md", "DESIGN-BODY")
-	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
@@ -181,7 +205,7 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	workSHA := commitWorkTurnAt(t, root, requestID, "code", t0.Add(10*time.Second))
 	commitWorkTurnAt(t, root, requestID, "design", t0.Add(20*time.Second))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -203,13 +227,11 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 
 func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "design.md", "DESIGN-BODY")
-	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
 	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -221,8 +243,6 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 
 func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "design.md", "DESIGN-BODY")
-	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
@@ -230,7 +250,7 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	commitWorkTurnAt(t, root, requestID, "design", t0.Add(10*time.Second)) // another design turn before any code
 	commitWorkTurnAt(t, root, requestID, "code", t0.Add(20*time.Second))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -242,14 +262,13 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 
 func TestBannerSilentAtDesignStage(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageFile(t, root, "design.md", "DESIGN-BODY")
 
 	requestID := "fix-it"
 	// Design has no prereqs in prereqDocs. Even with a prior work turn,
 	// there's nothing to surface.
 	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
+	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
@@ -257,4 +276,21 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 	if strings.Contains(got, "Since your last turn") {
 		t.Errorf("banner should not fire for a doc with no prereqs:\n%s", got)
 	}
+}
+
+// registerThrowawayWorkflow adds a one-off workflow to the package
+// registry for the duration of the test run. Tests use it to probe the
+// missing-fragment fallback without touching real workflows. The name
+// is derived from t.Name() so parallel runs don't collide on the
+// registry's duplicate-guard panic. The registry has no deregister
+// hook; entries just accumulate across tests in the same process,
+// which is fine — they're only read by LookupWorkflow/WorkflowNames.
+func registerThrowawayWorkflow(t *testing.T, suffix string) *Workflow {
+	t.Helper()
+	name := "test-" + suffix + "-" + strings.ReplaceAll(t.Name(), "/", "-")
+	wf := NewWorkflow(name, "test workflow")
+	noop := func(args []string, stdout, stderr io.Writer) int { return 0 }
+	wf.Register(&Command{Name: "ghost", Summary: "no fragment on disk", Run: noop})
+	RegisterWorkflow(wf)
+	return wf
 }
