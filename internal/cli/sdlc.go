@@ -41,7 +41,15 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return runStageSession(fs.Arg(0), fs.Arg(1), "design", false, stdout, stderr)
+	// The agent produces the user-facing cue itself: Claude Code has no
+	// way to pre-seed the input box with editable text, so instead of a
+	// printed banner (which the TUI would cover on launch) we ask the
+	// agent to greet the operator and prompt for input.
+	const kickoff = "The operator just opened this design session. " +
+		"In one or two sentences, acknowledge where the design stands " +
+		"(fresh start vs. resumed) and ask what they'd like to work on " +
+		"next. Then wait for their reply."
+	return runStageSession(fs.Arg(0), fs.Arg(1), "design", false, kickoff, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
@@ -61,5 +69,5 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, stdout, stderr)
+	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, "implement the design", stdout, stderr)
 }

@@ -35,7 +35,11 @@ var prereqDocs = map[string][]string{
 // needsSandbox controls the sandbox clone: design=false never gets one,
 // code=true always requires one (with a clear error if the project isn't
 // registered as a submodule). See README §"moe work" for the broader model.
-func runStageSession(projectID, reqID, docID string, needsSandbox bool, stdout, stderr io.Writer) int {
+//
+// initialPrompt, if non-empty, is auto-sent as the first user message of
+// the turn — it's how stages spare the operator from typing "go" every
+// time they resume a session.
+func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialPrompt string, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -105,16 +109,17 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, stdout, 
 	}
 
 	runErr := executor.ClaudeCLI{}.Execute(executor.Request{
-		Root:       root,
-		Metadata:   md,
-		DocID:      docID,
-		SessionID:  doc.Session,
-		NewSession: newSession,
-		Prompt:     prompt,
-		ClonePath:  clonePath,
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     stderr,
+		Root:          root,
+		Metadata:      md,
+		DocID:         docID,
+		SessionID:     doc.Session,
+		NewSession:    newSession,
+		Prompt:        prompt,
+		ClonePath:     clonePath,
+		InitialPrompt: initialPrompt,
+		Stdin:         os.Stdin,
+		Stdout:        os.Stdout,
+		Stderr:        stderr,
 	})
 
 	// Commit any document changes even if Claude exited non-zero — the

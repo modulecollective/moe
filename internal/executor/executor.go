@@ -45,6 +45,11 @@ type Request struct {
 	// project's submodule, or "" for document-only requests. When set,
 	// executors should run the agent with this as its working directory.
 	ClonePath string
+	// InitialPrompt, if non-empty, is auto-sent as the first user message
+	// of the turn so the operator doesn't have to type anything to kick
+	// the session off. Stage handlers use it for things like a cue to the
+	// user in design or "implement the design" in code.
+	InitialPrompt string
 	// Stdin / Stdout / Stderr let executors wire interactive agents to
 	// the operator's terminal or capture output in tests.
 	Stdin  io.Reader
@@ -83,11 +88,18 @@ func (ClaudeCLI) Execute(r Request) error {
 	// --add-dir <root> grants access to the bureaucracy repo even when
 	// cwd is the sandbox clone, so the canvas and upstream documents
 	// stay reachable without per-call permission prompts.
-	cmd := exec.Command(bin,
+	args := []string{
 		sessionFlag, r.SessionID,
 		"--append-system-prompt", r.Prompt,
 		"--add-dir", r.Root,
-	)
+	}
+	// A positional prompt launches claude interactively but auto-sends
+	// it as the first user message, so the operator lands in a session
+	// that's already in motion.
+	if r.InitialPrompt != "" {
+		args = append(args, r.InitialPrompt)
+	}
+	cmd := exec.Command(bin, args...)
 	if r.ClonePath != "" {
 		cmd.Dir = r.ClonePath
 	} else {
