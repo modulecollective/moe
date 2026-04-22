@@ -385,11 +385,11 @@ func TestReadGitmoduleEntriesIncludesBranch(t *testing.T) {
 
 func TestProjectIDForSubmodulePath(t *testing.T) {
 	cases := map[string]string{
-		"projects/moe/src":   "moe",
+		"projects/moe/src":     "moe",
 		"projects/foo-bar/src": "foo-bar",
-		"projects/moe":       "",   // not the canonical shape
-		"vendor/thing":       "",
-		"":                   "",
+		"projects/moe":         "", // not the canonical shape
+		"vendor/thing":         "",
+		"":                     "",
 	}
 	for in, want := range cases {
 		if got := projectIDForSubmodulePath(in); got != want {

@@ -54,14 +54,14 @@ func TestIdeaRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "list"} {
+	for _, want := range []string{"add", "remove", "list"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("idea usage missing subcommand %q: %q", want, out.String())
 		}
 	}
 }
 
-func TestIdeaNewCreatesFileAndCommits(t *testing.T) {
+func TestIdeaAddCreatesFileAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -70,7 +70,7 @@ func TestIdeaNewCreatesFileAndCommits(t *testing.T) {
 	noEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "Faster dash load"}, &out, &errb)
+	code := Run([]string{"idea", "add", "tele", "Faster dash load"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -98,7 +98,7 @@ func TestIdeaNewCreatesFileAndCommits(t *testing.T) {
 	}
 }
 
-func TestIdeaNewCommitsEditorEdits(t *testing.T) {
+func TestIdeaAddCommitsEditorEdits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -115,7 +115,7 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	t.Setenv("VISUAL", "")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"idea", "new", "tele", "With body"}, &out, &errb); code != 0 {
+	if code := Run([]string{"idea", "add", "tele", "With body"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -146,7 +146,7 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	}
 }
 
-func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
+func TestIdeaAddAutoSuffixesOnCollision(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -156,7 +156,7 @@ func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 
 	for _, want := range []string{"tele/foo", "tele/foo-2", "tele/foo-3"} {
 		var out, errb bytes.Buffer
-		code := Run([]string{"idea", "new", "tele", "foo"}, &out, &errb)
+		code := Run([]string{"idea", "add", "tele", "foo"}, &out, &errb)
 		if code != 0 {
 			t.Fatalf("exit=%d stderr=%q", code, errb.String())
 		}
@@ -166,7 +166,7 @@ func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 	}
 }
 
-func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
+func TestIdeaAddIDOverrideErrorsOnCollision(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -174,11 +174,11 @@ func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	noEditor(t)
 
-	if code := Run([]string{"idea", "new", "--id=mine", "tele", "first"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "add", "--id=mine", "tele", "first"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("first new failed: code=%d", code)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "--id=mine", "tele", "second"}, &out, &errb)
+	code := Run([]string{"idea", "add", "--id=mine", "tele", "second"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on explicit-id collision, got 0; stderr=%q", errb.String())
 	}
@@ -187,7 +187,7 @@ func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
 	}
 }
 
-func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
+func TestIdeaAddRefusesUnregisteredProject(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -195,7 +195,7 @@ func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
 	noEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "ghost", "anything"}, &out, &errb)
+	code := Run([]string{"idea", "add", "ghost", "anything"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing project, got 0; stdout=%q", out.String())
 	}
@@ -204,7 +204,7 @@ func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
 	}
 }
 
-func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
+func TestIdeaAddRefusesDirtyWorkingTree(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -217,7 +217,7 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "x"}, &out, &errb)
+	code := Run([]string{"idea", "add", "tele", "x"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
 	}
@@ -235,7 +235,7 @@ func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 	noEditor(t)
 
 	for _, title := range []string{"Cross-project search", "Faster dash load", "Zzz last"} {
-		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		if code := Run([]string{"idea", "add", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 			t.Fatalf("setup capture failed for %q", title)
 		}
 	}
@@ -277,6 +277,131 @@ func TestIdeaListEmptyProjectIsZero(t *testing.T) {
 	}
 	if out.String() != "" {
 		t.Fatalf("expected empty stdout for project with no ideas, got: %q", out.String())
+	}
+}
+
+func TestIdeaRemoveDeletesFileAndCommits(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	if code := Run([]string{"idea", "add", "tele", "Faster dash load"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "remove", "tele", "faster-dash-load"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "removed idea tele/faster-dash-load") {
+		t.Fatalf("missing removal confirmation: %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "ideas", "faster-dash-load.md")); !os.IsNotExist(err) {
+		t.Fatalf("idea file should be gone, stat err=%v", err)
+	}
+
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "Remove idea tele/faster-dash-load: Faster dash load") {
+		t.Fatalf("commit subject wrong:\n%s", head)
+	}
+	for _, want := range []string{"MoE-Idea: faster-dash-load", "MoE-Project: tele"} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("commit missing trailer %q:\n%s", want, head)
+		}
+	}
+
+	// Tree should be clean after the removal commit.
+	status := exec.Command("git", "-C", root, "status", "--porcelain")
+	st, err := status.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, st)
+	}
+	if len(bytes.TrimSpace(st)) != 0 {
+		t.Fatalf("working tree should be clean after remove, got:\n%s", st)
+	}
+}
+
+func TestIdeaRemoveMissingSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "remove", "tele", "ghost"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on missing idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "does not exist") {
+		t.Fatalf("expected missing-idea error, got: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe idea list") {
+		t.Fatalf("expected hint pointing at `moe idea list`, got: %q", errb.String())
+	}
+}
+
+func TestIdeaRemoveRefusesUnregisteredProject(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "remove", "ghost", "anything"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on missing project, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not registered") {
+		t.Fatalf("expected unregistered-project error, got: %q", errb.String())
+	}
+}
+
+func TestIdeaRemoveRefusesDirtyWorkingTree(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	if code := Run([]string{"idea", "add", "tele", "A thing"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "remove", "tele", "a-thing"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "uncommitted changes") {
+		t.Fatalf("expected dirty-tree error, got: %q", errb.String())
+	}
+	// Idea file must still be on disk — the dirty-tree check runs first.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "ideas", "a-thing.md")); err != nil {
+		t.Fatalf("idea file should still exist after aborted remove: %v", err)
+	}
+}
+
+func TestIdeaRemoveUsageErrorsOnMissingArgs(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "remove", "tele"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected exit=2 on missing slug, got %d; stderr=%q", code, errb.String())
 	}
 }
 

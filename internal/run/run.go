@@ -540,7 +540,7 @@ func workingTreeDirty(root string) (bool, error) {
 }
 
 // WorkingTreeDirty exposes the same precondition New uses internally so
-// other commit-on-create entry points (e.g. `moe idea new`) can refuse
+// other commit-on-create entry points (e.g. `moe idea add`) can refuse
 // to ride a stray edit on their commit.
 func WorkingTreeDirty(root string) (bool, error) {
 	return workingTreeDirty(root)
