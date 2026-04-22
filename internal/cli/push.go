@@ -18,21 +18,24 @@ import (
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
+var pushCmd = &Command{
+	Name:    "push",
+	Summary: "push the request's code branch and open (or update) a PR on the target repo",
+	Run:     runPush,
+}
+
 func init() {
-	Register(&Command{
-		Name:    "push",
-		Summary: "push the request's code branch and open (or update) a PR on the target repo",
-		Run:     runPush,
-	})
+	Register(pushCmd)
 }
 
 const branchPrefix = "moe/"
 
 // runPush pushes the request's sandbox branch to the target repo and, on
 // first ship, opens a PR with the `code` document as its body. Safely
-// re-runnable: a rerun after more `moe code` turns pushes the new commits
-// to the same branch and prints the existing PR URL. The sandbox clone is
-// deliberately NOT removed — iteration via `moe code` stays a one-liner.
+// re-runnable: a rerun after more `moe sdlc code` turns pushes the new
+// commits to the same branch and prints the existing PR URL. The sandbox
+// clone is deliberately NOT removed — iteration via `moe sdlc code` stays
+// a one-liner.
 func runPush(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -40,7 +43,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "usage: moe push <project> <request>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Pushes moe/<request> from the sandbox clone to the target repo and")
-		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe code`")
+		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe sdlc code`")
 		moePrintln(stderr, "turns to update the branch; the sandbox stays in place.")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -89,6 +92,10 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	branch := branchPrefix + md.ID
+	if err := checkCleanWorkTree(clonePath); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	if err := checkBranchHasCommits(clonePath, branch, pj.DefaultBranch); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -156,31 +163,37 @@ func checkCodeContent(root string, md *request.Metadata) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe code %s %s` first", md.Project, md.ID)
+			return fmt.Errorf("push: code document not written yet; run `moe sdlc code %s %s` first", md.Project, md.ID)
 		}
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe code %s %s` and produce a PR body first", md.Project, md.ID)
+		return fmt.Errorf("push: code document is empty; run `moe sdlc code %s %s` and produce a PR body first", md.Project, md.ID)
 	}
 	return nil
 }
 
 // checkStaleness is the hard gate that signing's cascade used to provide:
-// if the design document was touched after the last code turn, refuse to
-// ship until the operator re-runs `moe code` to reconcile.
+// if any prereq of the code document was touched after the last code
+// turn, refuse to ship until the operator re-runs `moe sdlc code` to
+// reconcile. Prereqs come from the request's workflow so new stages
+// slot in without editing this gate.
 func checkStaleness(root string, md *request.Metadata) error {
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return err
+	}
 	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
 	if err != nil {
 		return err
 	}
-	for _, dep := range prereqDocs["code"] {
+	for _, dep := range wf.Prereqs("code") {
 		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return err
 		}
 		if !depWhen.IsZero() && depWhen.After(codeWhen) {
-			return fmt.Errorf("push: %s has changed since your last `moe code` turn — run `moe code %s %s` to reconcile, then retry", dep, md.Project, md.ID)
+			return fmt.Errorf("push: %s has changed since your last `moe sdlc code` turn — run `moe sdlc code %s %s` to reconcile, then retry", dep, md.Project, md.ID)
 		}
 	}
 	return nil
@@ -188,9 +201,29 @@ func checkStaleness(root string, md *request.Metadata) error {
 
 func sandboxClonePath(root string, md *request.Metadata) (string, error) {
 	if !sandbox.Exists(root, md.Project, md.ID) {
-		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe code %s %s` first", md.Project, md.ID, md.Project, md.ID)
+		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe sdlc code %s %s` first", md.Project, md.ID, md.Project, md.ID)
 	}
 	return sandbox.Ensure(root, md.Project, md.ID)
+}
+
+// checkCleanWorkTree refuses to push when the sandbox has uncommitted
+// changes — staged, unstaged, or untracked. The agent is responsible for
+// committing inside the sandbox before exiting; if it didn't, the loose
+// edits would silently be left behind by the push and we'd ship a branch
+// that doesn't reflect the agent's actual work. Better to surface it.
+func checkCleanWorkTree(clonePath string) error {
+	out, err := exec.Command("git", "-C", clonePath, "status", "--porcelain").Output()
+	if err != nil {
+		return fmt.Errorf("push: git status in sandbox: %w", err)
+	}
+	trimmed := bytes.TrimRight(out, "\n")
+	if len(bytes.TrimSpace(trimmed)) == 0 {
+		return nil
+	}
+	n := bytes.Count(trimmed, []byte{'\n'}) + 1
+	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
+       sandbox: %s
+       re-run `+"`moe sdlc code`"+` and ask the agent to commit, or commit manually in the sandbox`, n, clonePath)
 }
 
 // checkBranchHasCommits confirms the sandbox clone has branch `branch`
@@ -200,7 +233,7 @@ func checkBranchHasCommits(clonePath, branch, base string) error {
 	// First, does the branch exist?
 	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe code` and have the agent commit", branch)
+		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe sdlc code` and have the agent commit", branch)
 	}
 	// Then, is it ahead of base? Use `git rev-list --count base..branch`.
 	// If base isn't a known ref, skip this check — we can't tell, but the

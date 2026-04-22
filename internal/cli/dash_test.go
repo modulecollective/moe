@@ -154,7 +154,7 @@ func TestDashPrereqReworkedKeepsInActive(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "stage code") {
+	if !strings.Contains(got, "sdlc: code") {
 		t.Fatalf("expected active-stage note, got:\n%s", got)
 	}
 }

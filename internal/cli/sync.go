@@ -12,7 +12,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "sync",
-		Summary: "sync the bureaucracy repo with origin (git push)",
+		Summary: "sync the bureaucracy repo with origin (git pull --ff-only, then push)",
 		Run:     runSync,
 	})
 }
@@ -33,12 +33,24 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// --ff-only so a divergence surfaces instead of silently rebasing.
+	// Skipped on a brand-new branch with no upstream — nothing to pull from.
+	if hasUpstream(root) {
+		pull := exec.Command("git", "pull", "--ff-only", "--recurse-submodules")
+		pull.Dir = root
+		pull.Stdout = stdout
+		pull.Stderr = stderr
+		if err := pull.Run(); err != nil {
+			return 1
+		}
+	}
+
 	// If the current branch has no upstream configured, push with -u so the
 	// first push sets one. After that, plain `git push` is correct and keeps
 	// whatever upstream the operator chose.
-	pushArgs := []string{"push"}
+	pushArgs := []string{"push", "--recurse-submodules=on-demand"}
 	if !hasUpstream(root) {
-		pushArgs = []string{"push", "-u", "origin", "HEAD"}
+		pushArgs = []string{"push", "--recurse-submodules=on-demand", "-u", "origin", "HEAD"}
 	}
 	cmd := exec.Command("git", pushArgs...)
 	cmd.Dir = root

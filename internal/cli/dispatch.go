@@ -78,8 +78,8 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 	}
 	doc, ok := md.Documents[docID]
 	if !ok || doc.Session == "" {
-		moePrintf(stderr, "document %q not opened yet; run `moe work %s %s %s` once first\n",
-			docID, projectID, reqID, docID)
+		moePrintf(stderr, "document %q not opened yet; run `moe %s %s %s %s` once first\n",
+			docID, md.Workflow, docID, projectID, reqID)
 		return 1
 	}
 	if doc.Managed != "" && !*force && !*dryRun {

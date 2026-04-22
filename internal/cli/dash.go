@@ -149,6 +149,8 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 
 // classify decides which bucket a request lands in. See designs/dash.md
 // for which attention-filter rules are live today versus deferred.
+// Bucket choice is driven by workflow.Next: "terminal" (e.g. push) →
+// NEEDS ATTENTION; any stage → ACTIVE; past-terminal pushed → RECENT.
 func classify(root string, md *request.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
 	if md.Status == request.StatusPushed {
 		if !last.IsZero() && now.Sub(last) <= recentWindow {
@@ -165,68 +167,47 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 		return bucketNone, "", nil
 	}
 
-	ready, readyNote, err := readyToShip(root, md)
+	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		return 0, "", err
 	}
-	if ready {
-		return bucketNeedsAttention, readyNote, nil
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		return 0, "", err
 	}
-
-	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
+	switch kind {
+	case NextKindTerminal:
+		if !readyToShipContent(root, md) {
+			// Stages are satisfied but the code document is empty or
+			// missing — no content to put in a PR. Hold in ACTIVE so the
+			// operator runs another code turn to actually write it.
+			if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
+				return bucketNone, "", nil
+			}
+			return bucketActive, fmt.Sprintf("%s: code", wf.Name), nil
+		}
+		return bucketNeedsAttention, "ready to " + next.Name, nil
+	case NextKindStage:
+		if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
+			return bucketNone, "", nil
+		}
+		return bucketActive, fmt.Sprintf("%s: %s", wf.Name, next.Name), nil
+	default: // NextKindDone without StatusPushed is a consistency gap.
 		return bucketNone, "", nil
 	}
-	return bucketActive, activeNote(root, md), nil
 }
 
-// readyToShip reports whether the request's code document is a reasonable
-// `moe push` target right now: code/content.md is non-empty, has at least
-// one `work: update code` commit, and no prerequisite document (today:
-// design) has been worked on since that code turn. Same check the push
-// staleness gate and the `moe code` upstream-change banner use.
-func readyToShip(root string, md *request.Metadata) (bool, string, error) {
-	const docID = "code"
-	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
+// readyToShipContent reports whether the code document has produced
+// PR-body content. workflow.Next already tells us the stage ladder is
+// satisfied; this is the belt-and-braces check that the code document
+// isn't a zero-byte stub: pushing an empty body is never the right move.
+func readyToShipContent(root string, md *request.Metadata) bool {
+	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, "code"))
 	info, err := os.Stat(contentPath)
-	if err != nil || info.Size() == 0 {
-		return false, "", nil
-	}
-
-	_, lastWhen, err := request.LatestWorkTurnSHA(root, md.ID, docID)
 	if err != nil {
-		return false, "", err
+		return false
 	}
-	if lastWhen.IsZero() {
-		// content.md exists but no work-turn commit recorded it (stray
-		// edit, hand-authored file). Treat as "not yet ready" — the
-		// operator should run a turn so the document is on the journal.
-		return false, "", nil
-	}
-	for _, dep := range prereqDocs[docID] {
-		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
-		if err != nil {
-			return false, "", err
-		}
-		if !depWhen.IsZero() && depWhen.After(lastWhen) {
-			return false, "", nil
-		}
-	}
-	return true, "ready to push", nil
-}
-
-// activeNote is the short status blurb shown in the ACTIVE bucket. It
-// names the active stage so the operator can see at a glance where the
-// request is without running `moe status`. Heuristic: if any `work:
-// update code` commit exists, the operator has moved past design.
-func activeNote(root string, md *request.Metadata) string {
-	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
-	if err != nil {
-		return ""
-	}
-	if !codeWhen.IsZero() {
-		return "stage code"
-	}
-	return "stage design"
+	return info.Size() > 0
 }
 
 // humanAgo renders "Xd ago" / "Xh ago" / "just now". tabwriter-friendly
