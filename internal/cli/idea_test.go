@@ -621,7 +621,7 @@ func TestIdeaRemoveUsageErrorsOnMissingArgs(t *testing.T) {
 	}
 }
 
-// buildIdeaChatPrompt should include soul.md, the stages/idea/<mode>.md
+// buildIdeaChatPrompt should include soul.md, the stages/_idea/<mode>.md
 // fragment, and the operational core naming the canvas file.
 func TestBuildIdeaChatPromptHasAllSections(t *testing.T) {
 	got := buildIdeaChatPrompt("/tmp/ideas/foo.md", "capture")
