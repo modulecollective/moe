@@ -13,9 +13,9 @@ import (
 //
 // A Workflow is itself exposed as a top-level Command via Command(),
 // which lets cli.Register keep a flat top-level table. The workflow
-// also tracks stage order, prereq edges, and a cross-workflow terminal
-// so `moe work` can compute "what's next" without hard-coding the
-// design→code→push pipeline at each callsite (see Next).
+// also tracks stage order and prereq edges so callers (like `moe dash`)
+// can compute "what's next" without hard-coding the design→code→push
+// pipeline at each callsite (see Next).
 type Workflow struct {
 	Name    string
 	Summary string
@@ -23,7 +23,6 @@ type Workflow struct {
 	stages  map[string]*Command
 	order   []string
 	prereqs map[string][]string
-	term    *Command
 }
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
@@ -52,11 +51,6 @@ func (w *Workflow) Register(c *Command, prereqs ...string) {
 		w.prereqs[c.Name] = append([]string(nil), prereqs...)
 	}
 }
-
-// SetTerminal wires a cross-workflow verb (e.g. push) that Next
-// returns once every stage is satisfied. Leave unset for workflows
-// that end with their last stage.
-func (w *Workflow) SetTerminal(c *Command) { w.term = c }
 
 // Stages returns the registered stage names in registration order.
 func (w *Workflow) Stages() []string {

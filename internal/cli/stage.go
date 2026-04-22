@@ -24,7 +24,7 @@ import (
 //
 // needsSandbox controls the sandbox clone: design=false never gets one,
 // code=true always requires one (with a clear error if the project isn't
-// registered as a submodule). See README §"moe work" for the broader model.
+// registered as a submodule). See README for the broader model.
 //
 // initialPrompt, if non-empty, is auto-sent as the first user message of
 // the turn — it's how stages spare the operator from typing "go" every
@@ -63,7 +63,7 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 	// Sandbox clone: only for stages that actually edit code. design=false
 	// never sees a clone; code=true insists on one and pre-positions it on
 	// the moe/<request-id> branch so the agent's commits (and any later
-	// `moe push`) land on a branch we own.
+	// `moe sdlc push`) land on a branch we own.
 	clonePath := ""
 	if needsSandbox {
 		if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err != nil {

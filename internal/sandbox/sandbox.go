@@ -1,7 +1,7 @@
 // Package sandbox gives every request a private, copy-on-write working
 // copy of its project's submodule.
 //
-// On first `moe work` against a request, Ensure clones
+// On first `moe sdlc code` against a request, Ensure clones
 // projects/<project>/ to .moe/clones/<project>/<request>/. Subsequent
 // turns for the same request reuse that clone — it is the session's
 // workspace for the life of the request. Two requests against the same

@@ -13,20 +13,17 @@ type NextKind int
 const (
 	// NextKindStage means the returned Command is the next incomplete stage.
 	NextKindStage NextKind = iota
-	// NextKindTerminal means every stage is satisfied and the returned
-	// Command is the workflow's terminal verb (today: `moe push`).
-	NextKindTerminal
-	// NextKindDone means the request is already past its terminal. The
-	// returned Command is nil.
+	// NextKindDone means every stage is satisfied (or the request is
+	// already past its final stage). The returned Command is nil.
 	NextKindDone
 )
 
 // Next reports what the request should do next. A stage is "satisfied"
 // when its most recent work turn is newer than every prereq's most
 // recent work turn. The first unsatisfied stage is returned with
-// NextKindStage. Once every stage is satisfied the terminal (if any)
-// is returned with NextKindTerminal. A request in StatusPushed
-// short-circuits to NextKindDone regardless of stage state.
+// NextKindStage. Once every stage is satisfied, Next returns
+// NextKindDone. A request in StatusPushed short-circuits to
+// NextKindDone regardless of stage state.
 func (w *Workflow) Next(root string, md *request.Metadata) (*Command, NextKind, error) {
 	if md.Status == request.StatusPushed {
 		return nil, NextKindDone, nil
@@ -39,9 +36,6 @@ func (w *Workflow) Next(root string, md *request.Metadata) (*Command, NextKind, 
 		if !satisfied {
 			return w.stages[stage], NextKindStage, nil
 		}
-	}
-	if w.term != nil {
-		return w.term, NextKindTerminal, nil
 	}
 	return nil, NextKindDone, nil
 }

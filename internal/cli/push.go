@@ -24,10 +24,6 @@ var pushCmd = &Command{
 	Run:     runPush,
 }
 
-func init() {
-	Register(pushCmd)
-}
-
 const branchPrefix = "moe/"
 
 // runPush pushes the request's sandbox branch to the target repo and, on
@@ -37,10 +33,10 @@ const branchPrefix = "moe/"
 // clone is deliberately NOT removed — iteration via `moe sdlc code` stays
 // a one-liner.
 func runPush(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("push", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sdlc push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe push <project> <request>")
+		moePrintln(stderr, "usage: moe sdlc push <project> <request>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Pushes moe/<request> from the sandbox clone to the target repo and")
 		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe sdlc code`")
@@ -78,10 +74,6 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if err := checkCodeContent(root, md); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if err := checkStaleness(root, md); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -148,6 +140,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 
 MoE-Request: %s
 MoE-Project: %s
+MoE-Document: push
 MoE-PR: %s
 `, md.Project, md.ID, md.ID, md.Project, url)
 		if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
@@ -169,32 +162,6 @@ func checkCodeContent(root string, md *request.Metadata) error {
 	}
 	if info.Size() == 0 {
 		return fmt.Errorf("push: code document is empty; run `moe sdlc code %s %s` and produce a PR body first", md.Project, md.ID)
-	}
-	return nil
-}
-
-// checkStaleness is the hard gate that signing's cascade used to provide:
-// if any prereq of the code document was touched after the last code
-// turn, refuse to ship until the operator re-runs `moe sdlc code` to
-// reconcile. Prereqs come from the request's workflow so new stages
-// slot in without editing this gate.
-func checkStaleness(root string, md *request.Metadata) error {
-	wf, err := LookupWorkflow(md.Workflow)
-	if err != nil {
-		return err
-	}
-	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
-	if err != nil {
-		return err
-	}
-	for _, dep := range wf.Prereqs("code") {
-		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
-		if err != nil {
-			return err
-		}
-		if !depWhen.IsZero() && depWhen.After(codeWhen) {
-			return fmt.Errorf("push: %s has changed since your last `moe sdlc code` turn — run `moe sdlc code %s %s` to reconcile, then retry", dep, md.Project, md.ID)
-		}
 	}
 	return nil
 }

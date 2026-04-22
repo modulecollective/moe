@@ -80,13 +80,13 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "opened request %s/%s\n", md.Project, md.ID)
 
-	// Offer to jump straight into the first stage. Scripts get a clean
-	// exit — they can chain `&& moe work ...` explicitly.
-	if !stdinIsTerminal() {
-		return 0
+	// Print the first stage's invocation as a copy-pasteable hint. We
+	// deliberately don't auto-launch it: every stage is one explicit
+	// command, typed by the operator.
+	if wf, err := LookupWorkflow(md.Workflow); err == nil {
+		if stages := wf.Stages(); len(stages) > 0 {
+			moePrintf(stdout, "next: moe %s %s %s %s\n", wf.Name, stages[0], md.Project, md.ID)
+		}
 	}
-	if !promptYes(os.Stdin, stdout, "Start work now? [Y/n] ") {
-		return 0
-	}
-	return runWork([]string{md.Project, md.ID}, stdout, stderr)
+	return 0
 }
