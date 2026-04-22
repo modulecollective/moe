@@ -159,7 +159,13 @@ func Close(s *Session) error {
 
 	// Remove worktree and delete branch. Order matters: `git branch -d`
 	// refuses while a worktree has the branch checked out.
-	if out, err := runGit(s.Root, "worktree", "remove", s.WorktreePath); err != nil {
+	//
+	// --force is required when the superproject has submodules: plain
+	// `git worktree remove` refuses with "working trees containing
+	// submodules cannot be moved or removed". By this point the rebase
+	// and fast-forward have succeeded, so there's no unsaved state the
+	// safety check would protect.
+	if out, err := runGit(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
 		return fmt.Errorf("session close: remove worktree %s: %w (%s)",
 			s.WorktreePath, err, strings.TrimSpace(out))
 	}

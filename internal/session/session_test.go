@@ -116,6 +116,68 @@ func TestOpenCloseRoundtrip(t *testing.T) {
 	}
 }
 
+// TestCloseWithSubmodule guards against regressing to plain `git worktree
+// remove`, which refuses with "working trees containing submodules
+// cannot be moved or removed" whenever the superproject has a submodule
+// checked out (as the bureaucracy root does for projects/*/src).
+func TestCloseWithSubmodule(t *testing.T) {
+	root := newTestRoot(t)
+
+	// Donor repo to serve as the submodule source.
+	donor := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"commit", "--allow-empty", "-m", "donor seed"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = donor
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("donor git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	// Add the donor as a submodule. `protocol.file.allow=always` is
+	// needed since Git 2.38 (CVE-2022-39253) disabled file:// by default.
+	addCmd := exec.Command("git", "-c", "protocol.file.allow=always",
+		"submodule", "add", donor, "sub")
+	addCmd.Dir = root
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git submodule add: %v\n%s", err, out)
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "add submodule")
+	commitCmd.Dir = root
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit submodule: %v\n%s", err, out)
+	}
+
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Init the submodule inside the new worktree. `git worktree add`
+	// does not populate submodules by default, but in real bureaucracy
+	// use the submodule ends up checked out in the session worktree.
+	// Plain `git worktree remove` only refuses when the submodule is
+	// actually present on disk, so this step is what makes the test
+	// actually exercise the regression.
+	initCmd := exec.Command("git", "-c", "protocol.file.allow=always",
+		"submodule", "update", "--init")
+	initCmd.Dir = s.WorktreePath
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("submodule update --init: %v\n%s", err, out)
+	}
+
+	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md",
+		"# Design\n", "work: update design")
+
+	if err := Close(s); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(s.WorktreePath); !os.IsNotExist(err) {
+		t.Errorf("worktree still present after Close: err=%v", err)
+	}
+}
+
 func TestOpenResumesExistingSession(t *testing.T) {
 	root := newTestRoot(t)
 	first, err := Open(root, "moe", "r1", "design")
