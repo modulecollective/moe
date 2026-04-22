@@ -92,6 +92,10 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	branch := branchPrefix + md.ID
+	if err := checkCleanWorkTree(clonePath); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	if err := checkBranchHasCommits(clonePath, branch, pj.DefaultBranch); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -200,6 +204,26 @@ func sandboxClonePath(root string, md *request.Metadata) (string, error) {
 		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe sdlc code %s %s` first", md.Project, md.ID, md.Project, md.ID)
 	}
 	return sandbox.Ensure(root, md.Project, md.ID)
+}
+
+// checkCleanWorkTree refuses to push when the sandbox has uncommitted
+// changes — staged, unstaged, or untracked. The agent is responsible for
+// committing inside the sandbox before exiting; if it didn't, the loose
+// edits would silently be left behind by the push and we'd ship a branch
+// that doesn't reflect the agent's actual work. Better to surface it.
+func checkCleanWorkTree(clonePath string) error {
+	out, err := exec.Command("git", "-C", clonePath, "status", "--porcelain").Output()
+	if err != nil {
+		return fmt.Errorf("push: git status in sandbox: %w", err)
+	}
+	trimmed := bytes.TrimRight(out, "\n")
+	if len(bytes.TrimSpace(trimmed)) == 0 {
+		return nil
+	}
+	n := bytes.Count(trimmed, []byte{'\n'}) + 1
+	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
+       sandbox: %s
+       re-run `+"`moe sdlc code`"+` and ask the agent to commit, or commit manually in the sandbox`, n, clonePath)
 }
 
 // checkBranchHasCommits confirms the sandbox clone has branch `branch`
