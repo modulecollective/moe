@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 func init() {
@@ -56,6 +60,14 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	// Done after the pull so we're working from the latest bureaucracy state,
 	// and before the push so the bump goes out in the same round trip.
 	if err := bumpProjectPointers(root, stdout, stderr); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	// Reconcile any pushed runs: if GitHub says the PR merged or
+	// closed, flip the run's status and clean up the branch + sandbox
+	// so the end state matches the direct-merge path.
+	if err := reconcilePushedRuns(root, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -413,4 +425,171 @@ func runGitCaptured(dir string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// reconcilePushedRuns walks every run in StatusPushed, asks GitHub
+// what state its PR is in, and — when the PR has been merged or
+// closed — flips the run's status, tears down the branch and sandbox,
+// and records a closing trailer. Open PRs are a silent no-op; sync
+// prints exactly one line per transition and nothing for runs that
+// didn't move.
+func reconcilePushedRuns(root string, stdout, stderr io.Writer) error {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return fmt.Errorf("moe sync: scan runs: %w", err)
+	}
+	// Deterministic order so transition lines come out the same way
+	// across invocations — helps when the operator is scanning output
+	// and makes test assertions stable.
+	sort.Slice(mds, func(i, j int) bool {
+		if mds[i].Project != mds[j].Project {
+			return mds[i].Project < mds[j].Project
+		}
+		return mds[i].ID < mds[j].ID
+	})
+	for _, md := range mds {
+		if md.Status != run.StatusPushed {
+			continue
+		}
+		if err := reconcileOnePushedRun(root, md, stdout, stderr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// prViewState is the subset of `gh pr view --json state,mergeCommit`
+// output that we care about. state is "OPEN", "MERGED", or "CLOSED".
+type prViewState struct {
+	State       string `json:"state"`
+	MergeCommit struct {
+		OID string `json:"oid"`
+	} `json:"mergeCommit"`
+}
+
+func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+	prURL := trailerValue(root, md.ID, "MoE-PR")
+	if prURL == "" {
+		// No MoE-PR trailer on record despite StatusPushed. Flag and
+		// skip rather than guess — the operator can untangle by hand.
+		moePrintf(stderr, "moe sync: %s/%s is pushed but has no MoE-PR trailer; skipping\n", md.Project, md.ID)
+		return nil
+	}
+	state, err := ghPRState(prURL)
+	if err != nil {
+		moePrintf(stderr, "moe sync: %s/%s: %v; skipping\n", md.Project, md.ID, err)
+		return nil
+	}
+	switch strings.ToUpper(state.State) {
+	case "OPEN":
+		return nil
+	case "MERGED":
+		mergeSHA := state.MergeCommit.OID
+		if mergeSHA == "" {
+			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
+			return nil
+		}
+		if err := finalizePushedRun(root, md, run.StatusMerged, "MoE-Merged", mergeSHA, stderr); err != nil {
+			return err
+		}
+		moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, shortSHA(mergeSHA))
+	case "CLOSED":
+		if err := finalizePushedRun(root, md, run.StatusClosed, "MoE-Closed", prURL, stderr); err != nil {
+			return err
+		}
+		moePrintf(stdout, "%s: pushed -> closed\n", md.ID)
+	default:
+		moePrintf(stderr, "moe sync: %s/%s has unexpected PR state %q; skipping\n", md.Project, md.ID, state.State)
+	}
+	return nil
+}
+
+// ghPRState shells out to `gh pr view <url> --json state,mergeCommit`
+// and decodes the response.
+func ghPRState(prURL string) (*prViewState, error) {
+	cmd := exec.Command("gh", "pr", "view", prURL, "--json", "state,mergeCommit")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, fmt.Errorf("gh CLI not found on PATH; install https://cli.github.com/")
+		}
+		return nil, fmt.Errorf("gh pr view %s: %w (%s)", prURL, err, strings.TrimSpace(out.String()))
+	}
+	var s prViewState
+	if err := json.Unmarshal(out.Bytes(), &s); err != nil {
+		return nil, fmt.Errorf("parse gh pr view output: %w", err)
+	}
+	return &s, nil
+}
+
+// finalizePushedRun flips md.Status, deletes the remote branch and
+// the sandbox clone, and commits run.json with the closing trailer.
+// The cleanup mirrors the direct-merge path so the end state is
+// indistinguishable regardless of how the run reached a terminal
+// status. Branch/sandbox deletion failures are warned but non-fatal —
+// the reconciliation has otherwise succeeded and a stray branch or
+// clone is a cleanup nuisance, not a correctness bug.
+func finalizePushedRun(root string, md *run.Metadata, status, trailer, value string, stderr io.Writer) error {
+	md.Status = status
+	if err := run.Save(root, md); err != nil {
+		return fmt.Errorf("moe sync: save run.json for %s/%s: %w", md.Project, md.ID, err)
+	}
+	if err := deleteRemoteBranchForRun(root, md); err != nil {
+		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
+	}
+	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
+		moePrintf(stderr, "warning: %s/%s: remove sandbox: %v\n", md.Project, md.ID, err)
+	}
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf(`sync: %s/%s %s
+
+MoE-Run: %s
+MoE-Project: %s
+MoE-Document: push
+%s: %s
+`, md.Project, md.ID, strings.ToLower(status), md.ID, md.Project, trailer, value)
+	if err := run.StageAndCommit(root, msg, runJSON); err != nil {
+		return fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
+	}
+	return nil
+}
+
+// deleteRemoteBranchForRun asks GitHub to drop moe/<run> from the
+// project's remote. Uses `gh api DELETE /repos/.../git/refs/heads/<branch>`
+// so we don't need a working clone in hand — the submodule may be
+// detached, mid-sync, or absent. A 422 on a branch GitHub already
+// deleted (common after merge with auto-delete enabled) is treated
+// as success.
+func deleteRemoteBranchForRun(root string, md *run.Metadata) error {
+	pj, err := project.Load(root, md.Project)
+	if err != nil {
+		return fmt.Errorf("load project: %w", err)
+	}
+	repo, err := ghRepoSpec(pj.Remote)
+	if err != nil {
+		return err
+	}
+	branch := branchPrefix + md.ID
+	cmd := exec.Command("gh", "api", "--method", "DELETE",
+		"/repos/"+repo+"/git/refs/heads/"+branch,
+		"--silent",
+	)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("gh CLI not found on PATH")
+		}
+		msg := strings.TrimSpace(out.String())
+		// A 422 with "Reference does not exist" means someone (GitHub
+		// auto-delete, an earlier merge) already removed it. No-op.
+		if strings.Contains(msg, "Reference does not exist") {
+			return nil
+		}
+		return fmt.Errorf("delete remote %s: %w (%s)", branch, err, msg)
+	}
+	return nil
 }
