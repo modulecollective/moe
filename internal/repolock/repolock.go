@@ -98,10 +98,10 @@ type Lock struct {
 	record Record
 	opts   Options
 
-	mu        sync.Mutex // guards record during heartbeat rewrites
-	stopHB    chan struct{}
-	doneHB    chan struct{}
-	released  bool
+	mu       sync.Mutex // guards record during heartbeat rewrites
+	stopHB   chan struct{}
+	doneHB   chan struct{}
+	released bool
 }
 
 // TimeoutError is returned by Acquire when the budget is exhausted and

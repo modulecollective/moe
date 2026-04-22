@@ -71,7 +71,7 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 			err := withRepoLock(root, repolock.Options{
 				Purpose:    "run-new",
 				Budget:     30 * 1_000_000_000, // 30s in ns
-				BackoffCap: 10_000_000,          // 10ms
+				BackoffCap: 10_000_000,         // 10ms
 			}, func() error {
 				md, err := run.New(root, "demo", "concurrent one", run.Options{Workflow: "sdlc"})
 				if err != nil {
