@@ -41,6 +41,7 @@ type bucket int
 const (
 	bucketNeedsAttention bucket = iota
 	bucketActive
+	bucketBacklog // captured ideas, not yet promoted to a run
 	bucketRecent
 	bucketNone // filtered out entirely (dormant without --all)
 )
@@ -133,6 +134,23 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 			note:    note,
 			when:    last,
 			bucket:  b,
+		})
+	}
+	ideas, err := scanAllIdeas(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range ideas {
+		when := time.Time{}
+		if info, err := os.Stat(e.path); err == nil {
+			when = info.ModTime().UTC()
+		}
+		rows = append(rows, dashRow{
+			project: e.project,
+			run:     e.slug,
+			note:    e.title,
+			when:    when,
+			bucket:  bucketBacklog,
 		})
 	}
 	// Within a bucket, most-recent activity first. Across buckets, the
@@ -253,6 +271,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 	}{
 		{"NEEDS ATTENTION", bucketNeedsAttention},
 		{"ACTIVE", bucketActive},
+		{"BACKLOG", bucketBacklog},
 		{"RECENT (last 7 days)", bucketRecent},
 	}
 	for _, sec := range sections {

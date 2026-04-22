@@ -75,6 +75,35 @@ type Options struct {
 	Workflow string
 	// Now is injected for deterministic tests. Defaults to time.Now.
 	Now func() time.Time
+
+	// SeedDocs, when non-empty, writes an initial content.md for each
+	// listed document alongside the run's creation. Keys are document
+	// ids (e.g. "design"); values are the file bodies. The files land
+	// under DocDir(project, id, docID) and ride along on the open
+	// commit, so a promoted-from-idea run starts with its first-stage
+	// canvas already populated. Seeded files intentionally do NOT
+	// carry a MoE-Document trailer — the stage is not yet satisfied,
+	// its agent still owes a work turn.
+	SeedDocs map[string]string
+
+	// RemovePaths, when non-empty, lists paths (relative to root)
+	// whose deletion should land in the same commit as the run's
+	// creation. Used by --from-idea to atomically drop the source
+	// idea file so the idea-to-run transition is a single commit in
+	// git history.
+	RemovePaths []string
+
+	// SubjectFrom, when non-empty, inserts ` from <SubjectFrom>` into
+	// the open commit's subject after the run id, before the colon —
+	// so a promoted idea commits as `Open run p/r from idea slug: T`
+	// rather than the default `Open run p/r: T`.
+	SubjectFrom string
+
+	// ExtraTrailers, when non-empty, appends additional trailers to
+	// the open commit's message body (one per entry, e.g.
+	// `MoE-Idea: <slug>`). Standard MoE-Run / MoE-Project trailers
+	// are always written first.
+	ExtraTrailers []string
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -185,14 +214,43 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	if err := writeJSON(filepath.Join(root, runJSONRel), md); err != nil {
 		return nil, err
 	}
-	if err := runGit(root, "add", runJSONRel); err != nil {
+	addPaths := []string{runJSONRel}
+	for docID, body := range opts.SeedDocs {
+		if !idPattern.MatchString(docID) {
+			return nil, fmt.Errorf("run: seed document id %q must match %s", docID, idPattern)
+		}
+		seedRel := ContentPath(projectID, id, docID)
+		if err := os.MkdirAll(filepath.Join(root, DocDir(projectID, id, docID)), 0o755); err != nil {
+			return nil, fmt.Errorf("run: mkdir seed doc dir: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, seedRel), []byte(body), 0o644); err != nil {
+			return nil, fmt.Errorf("run: write seed doc: %w", err)
+		}
+		addPaths = append(addPaths, seedRel)
+	}
+	addArgs := append([]string{"add", "--"}, addPaths...)
+	if err := runGit(root, addArgs...); err != nil {
 		return nil, fmt.Errorf("run: git add: %w", err)
 	}
-	msg := fmt.Sprintf(`Open run %s/%s: %s
+	for _, p := range opts.RemovePaths {
+		if err := runGit(root, "rm", "--", p); err != nil {
+			return nil, fmt.Errorf("run: git rm %s: %w", p, err)
+		}
+	}
 
-MoE-Run: %s
-MoE-Project: %s
-`, projectID, id, title, id, projectID)
+	subject := fmt.Sprintf("Open run %s/%s", projectID, id)
+	if opts.SubjectFrom != "" {
+		subject += " from " + opts.SubjectFrom
+	}
+	subject += ": " + title
+
+	var trailers strings.Builder
+	fmt.Fprintf(&trailers, "MoE-Run: %s\nMoE-Project: %s\n", id, projectID)
+	for _, t := range opts.ExtraTrailers {
+		trailers.WriteString(t)
+		trailers.WriteString("\n")
+	}
+	msg := subject + "\n\n" + trailers.String()
 	if err := runGit(root, "commit", "-m", msg); err != nil {
 		return nil, fmt.Errorf("run: git commit: %w", err)
 	}
@@ -479,6 +537,13 @@ func workingTreeDirty(root string) (bool, error) {
 		return false, fmt.Errorf("run: git status: %w", err)
 	}
 	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// WorkingTreeDirty exposes the same precondition New uses internally so
+// other commit-on-create entry points (e.g. `moe idea new`) can refuse
+// to ride a stray edit on their commit.
+func WorkingTreeDirty(root string) (bool, error) {
+	return workingTreeDirty(root)
 }
 
 // runGit invokes git with stdio wired to the user's terminal so credential
