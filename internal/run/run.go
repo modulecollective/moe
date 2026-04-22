@@ -173,14 +173,24 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		autoSuffix = true
 	}
 
-	runDirRel := Dir(projectID, id)
-	if _, err := os.Stat(filepath.Join(root, runDirRel)); err == nil {
-		if !autoSuffix {
-			return nil, fmt.Errorf("run: %s already exists", runDirRel)
-		}
-		id = nextFreeID(root, projectID, id)
-		runDirRel = Dir(projectID, id)
+	taken, err := slugTaken(root, projectID, id)
+	if err != nil {
+		return nil, err
 	}
+	if taken {
+		if !autoSuffix {
+			suggestion, serr := nextFreeID(root, projectID, id)
+			if serr != nil {
+				return nil, serr
+			}
+			return nil, fmt.Errorf("run: slug %q is already used in project %s (existing run or prior history); try --id=%s", id, projectID, suggestion)
+		}
+		id, err = nextFreeID(root, projectID, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	runDirRel := Dir(projectID, id)
 
 	dirty, err := workingTreeDirty(root)
 	if err != nil {
@@ -536,12 +546,12 @@ func LastFileActivity(root, relPath string) (time.Time, error) {
 	return time.Unix(epoch, 0).UTC(), nil
 }
 
-// nextFreeID walks base, base-2, base-3, … until it finds a slug whose run
-// dir doesn't already exist. The base itself is never returned — the caller
-// has already checked it. We strip any trailing -N from base before counting
-// so a collision on fix-timeout-2 continues to -3 rather than producing
-// fix-timeout-2-2.
-func nextFreeID(root, projectID, base string) string {
+// nextFreeID walks base, base-2, base-3, … until it finds a slug that
+// isn't taken — see slugTaken for what "taken" means. The base itself
+// is never returned; the caller has already checked it. A trailing -N
+// is stripped before counting so a collision on fix-timeout-2 continues
+// to -3 rather than producing fix-timeout-2-2.
+func nextFreeID(root, projectID, base string) (string, error) {
 	base = strings.TrimRight(base, "-")
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		tail := base[i+1:]
@@ -551,11 +561,41 @@ func nextFreeID(root, projectID, base string) string {
 	}
 	for n := 2; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", base, n)
-		if _, err := os.Stat(filepath.Join(root, Dir(projectID, candidate))); err == nil {
-			continue
+		taken, err := slugTaken(root, projectID, candidate)
+		if err != nil {
+			return "", err
 		}
-		return candidate
+		if !taken {
+			return candidate, nil
+		}
 	}
+}
+
+// slugTaken reports whether (projectID, slug) is usable for a new run.
+// "Taken" means either the run dir already exists on disk OR main
+// carries a commit with `MoE-Project: <p>` and `MoE-Run: <slug>`
+// trailers. The history check is load-bearing: runs/<slug> is a flat
+// namespace, so reusing a deleted run's slug reintroduces its old work
+// turns into a fresh run's stage-satisfaction check.
+func slugTaken(root, projectID, slug string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(root, Dir(projectID, slug))); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("run: stat %s: %w", Dir(projectID, slug), err)
+	}
+	cmd := exec.Command("git",
+		"log", "-1",
+		"--all-match",
+		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
+		"--grep", fmt.Sprintf("MoE-Run: %s", slug),
+		"--format=%H",
+	)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("run: git log: %w", err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 func workingTreeDirty(root string) (bool, error) {
