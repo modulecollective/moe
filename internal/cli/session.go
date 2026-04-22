@@ -1,0 +1,165 @@
+package cli
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"sort"
+
+	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/repolock"
+	"github.com/modulecollective/moe/internal/session"
+)
+
+// `moe session` manages the throwaway branches and worktrees created
+// by stage sessions. Normal operation auto-cleans them on Claude exit,
+// but a crash, killed process, or rebase conflict can leave state
+// behind — these subcommands make it discoverable and actionable.
+
+func init() {
+	Register(&Command{
+		Name:    "session",
+		Summary: "list or clean up leftover stage-session worktrees and branches",
+		Run:     runSession,
+	})
+}
+
+func runSession(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printSessionUsage(stdout)
+		return 0
+	}
+	switch args[0] {
+	case "-h", "--help", "help":
+		printSessionUsage(stdout)
+		return 0
+	case "list":
+		return runSessionList(args[1:], stdout, stderr)
+	case "abandon":
+		return runSessionAbandon(args[1:], stdout, stderr)
+	case "resolve":
+		return runSessionResolve(args[1:], stdout, stderr)
+	default:
+		moePrintf(stderr, "unknown session subcommand %q\n", args[0])
+		printSessionUsage(stderr)
+		return 1
+	}
+}
+
+func printSessionUsage(w io.Writer) {
+	moePrintln(w, "usage: moe session <subcommand> [args...]")
+	moePrintln(w, "")
+	moePrintln(w, "subcommands:")
+	moePrintf(w, "  %-14s  %s\n", "list", "list open stage-session worktrees and branches")
+	moePrintf(w, "  %-14s  %s\n", "abandon", "drop a session's worktree and branch without landing its commits")
+	moePrintf(w, "  %-14s  %s\n", "resolve", "retry rebase + ff-merge for a session whose close failed")
+}
+
+func runSessionList(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		moePrintln(stderr, "usage: moe session list")
+		return 2
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	sessions, err := session.List(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if len(sessions) == 0 {
+		moePrintln(stdout, "no open sessions")
+		return 0
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Branch < sessions[j].Branch
+	})
+	for _, s := range sessions {
+		moePrintf(stdout, "%s\t%s\n", s.Branch, s.WorktreePath)
+	}
+	return 0
+}
+
+func runSessionAbandon(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		moePrintln(stderr, "usage: moe session abandon <branch>")
+		moePrintln(stderr, "       (branch is of the form session/<project>/<run>/<doc>; see `moe session list`)")
+		return 2
+	}
+	branch := args[0]
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	err = withRepoLock(root, repolock.Options{Purpose: "session-abandon"}, func() error {
+		s, err := session.FindByBranch(root, branch)
+		if err != nil {
+			return err
+		}
+		if s == nil {
+			return fmt.Errorf("no session found for branch %q", branch)
+		}
+		return session.Abandon(s)
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "abandoned %s\n", branch)
+	return 0
+}
+
+func runSessionResolve(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		moePrintln(stderr, "usage: moe session resolve <branch>")
+		moePrintln(stderr, "       retry rebase + ff-merge for <branch>; run this after fixing conflicts")
+		moePrintln(stderr, "       inside the session worktree (see `moe session list` for the path).")
+		return 2
+	}
+	branch := args[0]
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	err = withRepoLock(root, repolock.Options{
+		Purpose:   "session-resolve",
+		Budget:    repolock.CronBudget,
+		Heartbeat: true,
+	}, func() error {
+		s, err := session.FindByBranch(root, branch)
+		if err != nil {
+			return err
+		}
+		if s == nil {
+			return fmt.Errorf("no session found for branch %q", branch)
+		}
+		if s.WorktreePath == "" {
+			return fmt.Errorf("branch %q has no worktree; use `moe session abandon %s` to drop the branch", branch, branch)
+		}
+		return session.Close(s, stdout, stderr)
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "resolved %s\n", branch)
+	return 0
+}
+
+// findRoot is a small wrapper so the session subcommands can share the
+// cwd → Find → error-print idiom without reimplementing it.
+func findRoot(stderr io.Writer) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", err
+	}
+	root, err := bureaucracy.Find(cwd, os.Getenv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", err
+	}
+	return root, nil
+}
