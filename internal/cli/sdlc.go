@@ -70,5 +70,9 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, "implement the design", stdout, stderr)
+	const kickoff = "The operator just opened this code session. " +
+		"In one or two sentences, acknowledge where the implementation " +
+		"stands (fresh start vs. resumed) and ask what they'd like to " +
+		"work on next. Then wait for their reply."
+	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, kickoff, stdout, stderr)
 }

@@ -47,8 +47,8 @@ type Request struct {
 	ClonePath string
 	// InitialPrompt, if non-empty, is auto-sent as the first user message
 	// of the turn so the operator doesn't have to type anything to kick
-	// the session off. Stage handlers use it for things like a cue to the
-	// user in design or "implement the design" in code.
+	// the session off. Stage handlers use it to have the agent greet the
+	// operator and ask what they'd like to work on.
 	InitialPrompt string
 	// Stdin / Stdout / Stderr let executors wire interactive agents to
 	// the operator's terminal or capture output in tests.
