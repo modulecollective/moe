@@ -11,7 +11,7 @@ import (
 
 // TestWorkflowNextWalksStages exercises the satisfaction logic in the
 // exact sequence a happy-path sdlc run takes: no turns → design → code
-// → terminal. Then we flip status to pushed and confirm we're done.
+// → push. Then we flip status to pushed and confirm we're done.
 func TestWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("sdlc")
@@ -43,8 +43,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindTerminal || next.Name != "push" {
-		t.Fatalf("after code: expected terminal push, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next.Name != "push" {
+		t.Fatalf("after code: expected stage push, got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
 	md.Status = request.StatusPushed
@@ -60,7 +60,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 // TestWorkflowNextReopensStaleStage reproduces the readyToShip
 // staleness rule: a design turn landing after the last code turn
 // should kick Next back to "code" so the operator reconciles before
-// push. This is the same rule `moe push` enforces as a hard gate.
+// the push stage can be satisfied.
 func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("sdlc")
@@ -189,9 +189,9 @@ func TestWorkRunNoProgressGuard(t *testing.T) {
 }
 
 // registerTestWorkflow builds and registers a throwaway workflow for a
-// test and deletes it when the test ends. Stages have no prereqs and
-// no terminal — so Next walks them in order and reports Done after the
-// last one is committed.
+// test and deletes it when the test ends. Stages have no prereqs — so
+// Next walks them in order and reports Done after the last one is
+// committed.
 func registerTestWorkflow(t *testing.T, name string, stages ...*Command) {
 	t.Helper()
 	wf := NewWorkflow(name, "test-only")

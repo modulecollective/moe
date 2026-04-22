@@ -7,13 +7,10 @@ import (
 
 // The SDLC workflow owns the design→code→push lifecycle. Stages are
 // nested under `moe sdlc` so kb (and future workflows) can pick their
-// own short stage names without collision. `push` stays top-level:
-// it's a cross-workflow shipping verb, not a stage — but it is the
-// workflow's terminal, so `moe work` dispatches to it once stages are
-// satisfied.
+// own short stage names without collision.
 
 func init() {
-	sdlc := NewWorkflow("sdlc", "SDLC workflow stages: design and code a request")
+	sdlc := NewWorkflow("sdlc", "SDLC workflow stages: design, code, and push a request")
 	sdlc.Register(&Command{
 		Name:    "design",
 		Summary: "open a Claude Code session on the request's design document",
@@ -24,7 +21,7 @@ func init() {
 		Summary: "open a Claude Code session on the request's code document (in a sandbox clone)",
 		Run:     runCode,
 	}, "design")
-	sdlc.SetTerminal(pushCmd)
+	sdlc.Register(pushCmd, "code")
 	Register(sdlc.Command())
 	RegisterWorkflow(sdlc)
 }
@@ -64,7 +61,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
-		moePrintln(stderr, "from other activity until `moe push` opens a PR.")
+		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

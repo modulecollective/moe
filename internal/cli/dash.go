@@ -149,8 +149,9 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 
 // classify decides which bucket a request lands in. See designs/dash.md
 // for which attention-filter rules are live today versus deferred.
-// Bucket choice is driven by workflow.Next: "terminal" (e.g. push) →
-// NEEDS ATTENTION; any stage → ACTIVE; past-terminal pushed → RECENT.
+// Bucket choice is driven by workflow.Next: when the next stage is
+// `push` and the code document has PR-ready content → NEEDS ATTENTION;
+// any other unsatisfied stage → ACTIVE; past-terminal pushed → RECENT.
 func classify(root string, md *request.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
 	if md.Status == request.StatusPushed {
 		if !last.IsZero() && now.Sub(last) <= recentWindow {
@@ -175,26 +176,22 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 	if err != nil {
 		return 0, "", err
 	}
-	switch kind {
-	case NextKindTerminal:
-		if !readyToShipContent(root, md) {
-			// Stages are satisfied but the code document is empty or
-			// missing — no content to put in a PR. Hold in ACTIVE so the
-			// operator runs another code turn to actually write it.
-			if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
-				return bucketNone, "", nil
-			}
-			return bucketActive, fmt.Sprintf("%s: code", wf.Name), nil
-		}
-		return bucketNeedsAttention, "ready to " + next.Name, nil
-	case NextKindStage:
-		if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
-			return bucketNone, "", nil
-		}
-		return bucketActive, fmt.Sprintf("%s: %s", wf.Name, next.Name), nil
-	default: // NextKindDone without StatusPushed is a consistency gap.
+	if kind != NextKindStage {
+		// NextKindDone without StatusPushed is a consistency gap.
 		return bucketNone, "", nil
 	}
+	if next.Name == "push" && readyToShipContent(root, md) {
+		return bucketNeedsAttention, "ready to " + next.Name, nil
+	}
+	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
+		return bucketNone, "", nil
+	}
+	// Ship-stage-but-empty-content falls back to the code stage in the
+	// note: the operator needs another code turn to produce a PR body.
+	if next.Name == "push" {
+		return bucketActive, fmt.Sprintf("%s: code", wf.Name), nil
+	}
+	return bucketActive, fmt.Sprintf("%s: %s", wf.Name, next.Name), nil
 }
 
 // readyToShipContent reports whether the code document has produced

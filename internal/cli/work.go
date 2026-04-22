@@ -14,7 +14,7 @@ import (
 
 var workCmd = &Command{
 	Name:    "work",
-	Summary: "run the next stage of a request (or its terminal verb)",
+	Summary: "run the next stage of a request",
 	Run:     runWork,
 }
 
@@ -47,9 +47,8 @@ func runWorkInternal(args []string, stdin io.Reader, isTTY bool, stdout, stderr 
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe work <project> <request>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Runs whatever's next for this request: the first incomplete stage,")
-		moePrintln(stderr, "or the workflow's terminal (e.g. push) once every stage is satisfied.")
-		moePrintln(stderr, "Offers to continue into the following stage after a clean exit.")
+		moePrintln(stderr, "Runs the first incomplete stage of this request's workflow, then")
+		moePrintln(stderr, "offers to continue into the following stage after a clean exit.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -92,10 +91,7 @@ func runWorkInternal(args []string, stdin io.Reader, isTTY bool, stdout, stderr 
 			return 0
 		}
 
-		// Stages nest under their workflow (e.g. `moe sdlc design`);
-		// the terminal is top-level (`moe push`). The hint we print
-		// reflects whichever grammar the operator would type.
-		moePrintf(stdout, "running %s\n", commandInvocation(wf, kind, next, md))
+		moePrintf(stdout, "running %s\n", commandInvocation(wf, next, md))
 		if code := next.Run([]string{md.Project, md.ID}, stdout, stderr); code != 0 {
 			return code
 		}
@@ -123,25 +119,21 @@ func runWorkInternal(args []string, stdin io.Reader, isTTY bool, stdout, stderr 
 			return 0
 		}
 		if !isTTY {
-			moePrintf(stdout, "next: %s\n", commandInvocation(wf, followKind, following, md))
+			moePrintf(stdout, "next: %s\n", commandInvocation(wf, following, md))
 			return 0
 		}
 		if !promptYes(stdin, stdout, fmt.Sprintf("Continue to %s? [Y/n] ", following.Name)) {
-			moePrintf(stdout, "next: %s\n", commandInvocation(wf, followKind, following, md))
+			moePrintf(stdout, "next: %s\n", commandInvocation(wf, following, md))
 			return 0
 		}
 	}
 }
 
 // commandInvocation renders the CLI grammar for a next-move Command.
-// Stages live under `moe <workflow> <stage>`; the terminal is a
-// top-level verb (`moe push`). Used for both the "running" banner
-// and the "next:" hint so operators can copy-paste.
-func commandInvocation(wf *Workflow, kind NextKind, c *Command, md *request.Metadata) string {
-	if kind == NextKindStage {
-		return fmt.Sprintf("moe %s %s %s %s", wf.Name, c.Name, md.Project, md.ID)
-	}
-	return fmt.Sprintf("moe %s %s %s", c.Name, md.Project, md.ID)
+// Every stage lives under `moe <workflow> <stage>`. Used for both the
+// "running" banner and the "next:" hint so operators can copy-paste.
+func commandInvocation(wf *Workflow, c *Command, md *request.Metadata) string {
+	return fmt.Sprintf("moe %s %s %s %s", wf.Name, c.Name, md.Project, md.ID)
 }
 
 // promptYes writes prompt to w and reads one line from r. Treats an

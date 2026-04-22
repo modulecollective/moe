@@ -63,7 +63,7 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 	// Sandbox clone: only for stages that actually edit code. design=false
 	// never sees a clone; code=true insists on one and pre-positions it on
 	// the moe/<request-id> branch so the agent's commits (and any later
-	// `moe push`) land on a branch we own.
+	// `moe sdlc push`) land on a branch we own.
 	clonePath := ""
 	if needsSandbox {
 		if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err != nil {

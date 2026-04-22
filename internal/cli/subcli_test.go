@@ -117,7 +117,7 @@ func TestSDLCRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"design", "code"} {
+	for _, want := range []string{"design", "code", "push"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sdlc usage missing stage %q: %q", want, out.String())
 		}

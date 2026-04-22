@@ -44,8 +44,8 @@ type Document struct {
 }
 
 // Request status values written to Metadata.Status. A request opens in
-// StatusInProgress and flips to StatusPushed when `moe push` opens the
-// PR on the target repo. Kept as a small closed set so moe dash and
+// StatusInProgress and flips to StatusPushed when `moe sdlc push` opens
+// the PR on the target repo. Kept as a small closed set so moe dash and
 // related readers can bucket without string-typo risk.
 const (
 	StatusInProgress = "in_progress"
