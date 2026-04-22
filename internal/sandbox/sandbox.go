@@ -1,10 +1,10 @@
-// Package sandbox gives every request a private, copy-on-write working
+// Package sandbox gives every run a private, copy-on-write working
 // copy of its project's submodule.
 //
-// On first `moe sdlc code` against a request, Ensure clones
-// projects/<project>/ to .moe/clones/<project>/<request>/. Subsequent
-// turns for the same request reuse that clone — it is the session's
-// workspace for the life of the request. Two requests against the same
+// On first `moe sdlc code` against a run, Ensure clones
+// projects/<project>/src/ to .moe/clones/<project>/<run>/. Subsequent
+// turns for the same run reuse that clone — it is the session's
+// workspace for the life of the run. Two runs against the same
 // project get two independent clones, so concurrent activities can't
 // step on each other's working tree, index, or refs.
 //
@@ -30,23 +30,23 @@ import (
 	"strings"
 )
 
-// Path returns the clone directory for this request, whether or not it
+// Path returns the clone directory for this run, whether or not it
 // currently exists.
-func Path(root, projectID, requestID string) string {
-	return filepath.Join(root, ".moe", "clones", projectID, requestID)
+func Path(root, projectID, runID string) string {
+	return filepath.Join(root, ".moe", "clones", projectID, runID)
 }
 
 // gitDirPath returns the clone-local gitdir used when the source submodule
 // points its .git at an external directory (standard git-submodule layout).
-func gitDirPath(root, projectID, requestID string) string {
-	return filepath.Join(root, ".moe", "clones", projectID, ".git-modules", requestID)
+func gitDirPath(root, projectID, runID string) string {
+	return filepath.Join(root, ".moe", "clones", projectID, ".git-modules", runID)
 }
 
-// Ensure makes sure the clone for (projectID, requestID) exists and
-// returns its absolute path. First call clones projects/<projectID>/;
+// Ensure makes sure the clone for (projectID, runID) exists and
+// returns its absolute path. First call clones projects/<projectID>/src/;
 // subsequent calls are a stat.
-func Ensure(root, projectID, requestID string) (string, error) {
-	src := filepath.Join(root, "projects", projectID)
+func Ensure(root, projectID, runID string) (string, error) {
+	src := filepath.Join(root, "projects", projectID, "src")
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", fmt.Errorf("sandbox: source submodule %s: %w", src, err)
@@ -55,7 +55,7 @@ func Ensure(root, projectID, requestID string) (string, error) {
 		return "", fmt.Errorf("sandbox: source submodule %s is not a directory", src)
 	}
 
-	dst := Path(root, projectID, requestID)
+	dst := Path(root, projectID, runID)
 	if _, err := os.Stat(dst); err == nil {
 		return absPath(dst)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -79,7 +79,7 @@ func Ensure(root, projectID, requestID string) (string, error) {
 	}
 
 	if gitIsFile {
-		if err := cloneGitDir(dst, srcGitDir, root, projectID, requestID); err != nil {
+		if err := cloneGitDir(dst, srcGitDir, root, projectID, runID); err != nil {
 			// Roll back the worktree clone so Ensure is retryable.
 			_ = os.RemoveAll(dst)
 			return "", err
@@ -91,8 +91,8 @@ func Ensure(root, projectID, requestID string) (string, error) {
 
 // cloneGitDir clones the submodule's real gitdir alongside the worktree
 // clone and repoints the clone's gitfile and core.worktree at it.
-func cloneGitDir(worktreeClone, srcGitDir, root, projectID, requestID string) error {
-	dstGitDir := gitDirPath(root, projectID, requestID)
+func cloneGitDir(worktreeClone, srcGitDir, root, projectID, runID string) error {
+	dstGitDir := gitDirPath(root, projectID, runID)
 	if err := os.MkdirAll(filepath.Dir(dstGitDir), 0o755); err != nil {
 		return fmt.Errorf("sandbox: mkdir %s: %w", filepath.Dir(dstGitDir), err)
 	}
@@ -133,7 +133,7 @@ func cloneGitDir(worktreeClone, srcGitDir, root, projectID, requestID string) er
 
 // CheckoutBranch makes branch the current HEAD in the clone, creating it
 // off the current HEAD if it doesn't already exist. Used by the stage
-// session setup so `moe code` lands the agent on moe/<request-id>
+// session setup so `moe code` lands the agent on moe/<run-id>
 // without the agent having to remember the incantation.
 func CheckoutBranch(clonePath, branch string) error {
 	// -B creates the branch if missing and resets it to HEAD if it exists,
@@ -154,11 +154,11 @@ func CheckoutBranch(clonePath, branch string) error {
 }
 
 // Remove tears down the clone and its sibling gitdir, if any. Idempotent.
-func Remove(root, projectID, requestID string) error {
+func Remove(root, projectID, runID string) error {
 	var firstErr error
 	for _, p := range []string{
-		Path(root, projectID, requestID),
-		gitDirPath(root, projectID, requestID),
+		Path(root, projectID, runID),
+		gitDirPath(root, projectID, runID),
 	} {
 		if err := os.RemoveAll(p); err != nil && firstErr == nil {
 			firstErr = err
@@ -167,10 +167,10 @@ func Remove(root, projectID, requestID string) error {
 	return firstErr
 }
 
-// Exists reports whether a clone directory currently exists for this request.
+// Exists reports whether a clone directory currently exists for this run.
 // A truthy return means Ensure would be a no-op.
-func Exists(root, projectID, requestID string) bool {
-	_, err := os.Stat(Path(root, projectID, requestID))
+func Exists(root, projectID, runID string) bool {
+	_, err := os.Stat(Path(root, projectID, runID))
 	return err == nil
 }
 

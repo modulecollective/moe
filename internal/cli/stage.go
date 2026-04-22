@@ -14,12 +14,13 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
-// resolve the request/document, hand the operator an interactive Claude Code
+// resolve the run/document, hand the operator an interactive Claude Code
 // session keyed to that document's session-id, and commit whatever changed
 // when Claude exits.
 //
@@ -30,7 +31,7 @@ import (
 // initialPrompt, if non-empty, is auto-sent as the first user message of
 // the turn — it's how stages spare the operator from typing "go" every
 // time they resume a session.
-func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialPrompt string, stdout, stderr io.Writer) int {
+func runStageSession(projectID, runID, docID string, needsSandbox bool, initialPrompt string, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -42,19 +43,19 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 		return 1
 	}
 
-	md, err := request.Load(root, projectID, reqID)
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
-	doc, mutated, err := request.EnsureDocument(root, md, docID)
+	doc, mutated, err := run.EnsureDocument(root, md, docID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	if mutated {
-		if err := request.Save(root, md); err != nil {
+		if err := run.Save(root, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
@@ -63,11 +64,11 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 
 	// Sandbox clone: only for stages that actually edit code. design=false
 	// never sees a clone; code=true insists on one and pre-positions it on
-	// the moe/<request-id> branch so the agent's commits (and any later
+	// the moe/<run-id> branch so the agent's commits (and any later
 	// `moe sdlc push`) land on a branch we own.
 	clonePath := ""
 	if needsSandbox {
-		if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err != nil {
+		if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
 			moePrintf(stderr, "project %q has no submodule on disk; cannot run %q without code to edit\n", md.Project, docID)
 			return 1
 		}
@@ -122,7 +123,7 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 		// Fall through to report commit result and exit non-zero.
 	}
 	switch {
-	case errors.Is(commitErr, request.ErrNothingToCommit):
+	case errors.Is(commitErr, run.ErrNothingToCommit):
 		moePrintln(stdout, "no document changes; nothing committed")
 	case commitErr != nil:
 		moePrintf(stderr, "commit turn: %v\n", commitErr)
@@ -142,7 +143,7 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 // never ship a branch; the rest default to Y. Returns the exit code to
 // bubble up from the current stage: 0 on skip/decline/successful chain,
 // the inner command's exit code if the chained stage fails.
-func promptNextStage(root string, md *request.Metadata, stdout, stderr io.Writer) int {
+func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -194,7 +195,7 @@ func promptNextStage(root string, md *request.Metadata, stdout, stderr io.Writer
 // Per-document fragments, overrides, and upstream-document assembly are
 // expected later passes; each new source of guidance slots in as another
 // (string, error)-returning block below.
-func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath string) (string, error) {
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string) (string, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -226,7 +227,7 @@ func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath strin
 // to see what changed.
 //
 // Conditions for firing:
-//   - docID has prerequisites declared by the request's workflow. design
+//   - docID has prerequisites declared by the run's workflow. design
 //     has none in sdlc, so this is a no-op there.
 //   - There has been at least one prior work turn for docID. First-turn
 //     sessions get no banner — the agent will read prerequisites fresh on
@@ -237,7 +238,7 @@ func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath strin
 // The banner is advisory. Per stages/code.md "Match the design" the
 // contract is still social — we're just making the social cue legible
 // instead of trusting the agent to notice on its own.
-func upstreamChangeBanner(root string, md *request.Metadata, docID string) (string, error) {
+func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, error) {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		return "", err
@@ -247,7 +248,7 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 		return "", nil
 	}
 
-	lastSHA, lastWhen, err := request.LatestWorkTurnSHA(root, md.ID, docID)
+	lastSHA, lastWhen, err := run.LatestWorkTurnSHA(root, md.ID, docID)
 	if err != nil {
 		return "", err
 	}
@@ -262,7 +263,7 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 	}
 	var moved []move
 	for _, dep := range deps {
-		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
+		_, depWhen, err := run.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return "", err
 		}
@@ -272,7 +273,7 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 		moved = append(moved, move{
 			doc:     dep,
 			when:    depWhen,
-			relPath: request.ContentPath(md.Project, md.ID, dep),
+			relPath: run.ContentPath(md.Project, md.ID, dep),
 		})
 	}
 	if len(moved) == 0 {
@@ -295,16 +296,16 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 }
 
 // operationalCore is the "what are you doing right now" framing: canvas
-// file, clone workspace (if any), request title. It's the one section
+// file, clone workspace (if any), run title. It's the one section
 // that's always present — everything else in the prompt is optional
 // guidance layered on top.
-func operationalCore(root string, md *request.Metadata, docID, clonePath string) string {
+func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
 	// Absolute path so it resolves regardless of where Claude Code's cwd
 	// lands — document-only runs sit at the bureaucracy root, code-editing
 	// runs sit inside the sandbox clone.
-	content := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
+	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
-for request %q (project %q) in a Ministry of Everything bureaucracy repo.
+for run %q (project %q) in a Ministry of Everything bureaucracy repo.
 
 Your canvas for this document is the single file:
   %s
@@ -314,7 +315,7 @@ artifact. When the operator asks for edits, write them directly to that
 file (create it if it doesn't exist). Keep the file tidy — it becomes
 upstream context for downstream agents once the operator moves on.
 
-Request title: %s
+Run title: %s
 `, docID, md.ID, md.Project, content, md.Title)
 
 	if clonePath != "" {
@@ -323,26 +324,26 @@ Your working directory is a private copy-on-write clone of the target
 project's submodule:
   %s
 That's your code workspace — read and edit files there. The clone is
-yours for the lifetime of this request; your edits are isolated from
+yours for the lifetime of this run; your edits are isolated from
 other concurrent activities and from the canonical submodule until the
-request is pushed.
+run is pushed.
 `, clonePath)
 	}
 	return out
 }
 
-// commitTurn stages the document dir and request.json, then commits with
-// a trailer block keyed to the document/session. See README §"one request
-// branch per request" for the trailer convention.
-func commitTurn(root string, md *request.Metadata, docID string) error {
-	docDir := request.DocDir(md.Project, md.ID, docID)
-	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
+// commitTurn stages the document dir and run.json, then commits with
+// a trailer block keyed to the document/session. See README §"one run
+// branch per run" for the trailer convention.
+func commitTurn(root string, md *run.Metadata, docID string) error {
+	docDir := run.DocDir(md.Project, md.ID, docID)
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`work: update %s
 
-MoE-Request: %s
+MoE-Run: %s
 MoE-Project: %s
 MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
-	return request.StageAndCommit(root, msg, docDir, reqJSON)
+	return run.StageAndCommit(root, msg, docDir, runJSON)
 }

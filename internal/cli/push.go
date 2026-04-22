@@ -14,19 +14,19 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 var pushCmd = &Command{
 	Name:    "push",
-	Summary: "push the request's code branch and open (or update) a PR on the target repo",
+	Summary: "push the run's code branch and open (or update) a PR on the target repo",
 	Run:     runPush,
 }
 
 const branchPrefix = "moe/"
 
-// runPush pushes the request's sandbox branch to the target repo and, on
+// runPush pushes the run's sandbox branch to the target repo and, on
 // first ship, opens a PR with the `code` document as its body. Safely
 // re-runnable: a rerun after more `moe sdlc code` turns pushes the new
 // commits to the same branch and prints the existing PR URL. The sandbox
@@ -36,9 +36,9 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc push <project> <request>")
+		moePrintln(stderr, "usage: moe sdlc push <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Pushes moe/<request> from the sandbox clone to the target repo and")
+		moePrintln(stderr, "Pushes moe/<run> from the sandbox clone to the target repo and")
 		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe sdlc code`")
 		moePrintln(stderr, "turns to update the branch; the sandbox stays in place.")
 	}
@@ -49,7 +49,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, reqID := fs.Arg(0), fs.Arg(1)
+	projectID, runID := fs.Arg(0), fs.Arg(1)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -62,7 +62,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	md, err := request.Load(root, projectID, reqID)
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -118,7 +118,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	if existing {
 		moePrintf(stdout, "existing PR: %s\n", url)
 	} else {
-		bodyPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, "code"))
+		bodyPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 		url, err = createPR(ghRepo, branch, pj.DefaultBranch, md.Title, bodyPath, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
@@ -129,21 +129,21 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 
 	// Only the first push flips status and records the MoE-PR trailer.
 	// Re-runs just pushed branch updates to an already-recorded PR.
-	if md.Status != request.StatusPushed {
-		md.Status = request.StatusPushed
-		if err := request.Save(root, md); err != nil {
+	if md.Status != run.StatusPushed {
+		md.Status = run.StatusPushed
+		if err := run.Save(root, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
+		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 		msg := fmt.Sprintf(`push: %s/%s
 
-MoE-Request: %s
+MoE-Run: %s
 MoE-Project: %s
 MoE-Document: push
 MoE-PR: %s
 `, md.Project, md.ID, md.ID, md.Project, url)
-		if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
+		if err := run.StageAndCommit(root, msg, runJSON); err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
 			return 1
 		}
@@ -151,8 +151,8 @@ MoE-PR: %s
 	return 0
 }
 
-func checkCodeContent(root string, md *request.Metadata) error {
-	path := filepath.Join(root, request.ContentPath(md.Project, md.ID, "code"))
+func checkCodeContent(root string, md *run.Metadata) error {
+	path := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -166,7 +166,7 @@ func checkCodeContent(root string, md *request.Metadata) error {
 	return nil
 }
 
-func sandboxClonePath(root string, md *request.Metadata) (string, error) {
+func sandboxClonePath(root string, md *run.Metadata) (string, error) {
 	if !sandbox.Exists(root, md.Project, md.ID) {
 		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe sdlc code %s %s` first", md.Project, md.ID, md.Project, md.ID)
 	}

@@ -18,16 +18,16 @@ The Ministry is designed for a single operator managing multiple products with a
 
 ### Design Principles
 
-1. **The human is the workflow engine.** No orchestrator, no DAG executor, no scheduler. The operator looks at the request, decides what to work on next, and tells `moe` to do it. A small CLI assembles prompts, invokes Claude Code, and tracks state in git. The harness gets out of the way.
+1. **The human is the workflow engine.** No orchestrator, no DAG executor, no scheduler. The operator looks at the run, decides what to work on next, and tells `moe` to do it. A small CLI assembles prompts, invokes Claude Code, and tracks state in git. The harness gets out of the way.
 2. **The repo is the source of truth.** All state — documents, decisions, conversations, progress — lives in git. Nothing lives in Slack, Google Docs, or people's heads. The bureaucracy repo is the "back office" (workflows, guidance fragments, run history). Target project repos stay clean. The `moe` CLI lives in its own repo — tool and state are separate so the CLI can be open-sourced without leaking private bureaucracy contents.
 3. **Agents are participants, not tools.** Agents join conversations and contribute to documents. Guidance for how they behave lives as plain markdown in the bureaucracy repo (global `soul.md` plus per-stage and per-document fragments assembled at invocation time) — no role taxonomy, no handbook hierarchy.
-4. **Requests terminate, products persist.** Units of work (requests) have a lifecycle and end. Products are the long-lived entities that accumulate completed work.
-5. **Loose recipes, deterministic mechanics.** Stages are a small fixed DAG (`design` → `code` today), each with a canonical document of the same name. Additional documents (knowledge bases, meeting notes, etc.) can be layered on without sign-offs. Within a request, upstream-change detection is deterministic — given per-document work turns on main, what moved since a downstream agent last looked is always derivable from the log.
+4. **Runs terminate, products persist.** Units of work (runs) have a lifecycle and end. Products are the long-lived entities that accumulate completed work.
+5. **Loose recipes, deterministic mechanics.** Stages are a small fixed DAG (`design` → `code` today), each with a canonical document of the same name. Additional documents (knowledge bases, meeting notes, etc.) can be layered on without sign-offs. Within a run, upstream-change detection is deterministic — given per-document work turns on main, what moved since a downstream agent last looked is always derivable from the log.
 6. **Model-agnostic.** The harness works with Claude Code, Ollama/Qwen, Codex, or any LLM backend. A small config routes invocations to the right model, keyed by document type or stage. The harness is the moat, not the model.
 7. **Minimize entropy.** Every agent mistake becomes a guidance-fragment update. The system improves every time you use it.
-8. **One repo, one history, one branch.** All request state and run metadata live on the bureaucracy repo's `main`. There are no per-request branches — the bureaucracy is a journal, not a code repo. Per-request scoping comes from commit trailers (`MoE-Request`, `MoE-Document`, `MoE-Session`, `MoE-PR`); a request's history is `git log --grep="MoE-Request: <id>"`. Stage progress is derived from which documents have `work: update <doc>` commits and when they landed — no separate sign-off state. Code branches live where they belong: inside each target submodule.
+8. **One repo, one history, one branch.** All run state and run metadata live on the bureaucracy repo's `main`. There are no per-run branches — the bureaucracy is a journal, not a code repo. Per-run scoping comes from commit trailers (`MoE-Run`, `MoE-Document`, `MoE-Session`, `MoE-PR`); a run's history is `git log --grep="MoE-Run: <id>"`. Stage progress is derived from which documents have `work: update <doc>` commits and when they landed — no separate sign-off state. Code branches live where they belong: inside each target submodule.
 9. **Target repos are independent.** No MoE coupling in target repos. Works with any repo — open source forks, client projects, personal code. Target projects are registered as git submodules under `projects/`, but only one is checked out at a time during a session.
-10. **Many projects registered, a handful actively worked.** Submodules are cheap to register, so the ceiling on *registered* projects is high. The ceiling on *concurrently active* projects is the operator's review bandwidth — practically ~10-30 — because every request ultimately cashes out in a human reading a diff. MoE helps manage the fan-out, it does not remove it.
+10. **Many projects registered, a handful actively worked.** Submodules are cheap to register, so the ceiling on *registered* projects is high. The ceiling on *concurrently active* projects is the operator's review bandwidth — practically ~10-30 — because every run ultimately cashes out in a human reading a diff. MoE helps manage the fan-out, it does not remove it.
 11. **Stdlib only, where practical.** The `moe` CLI uses Go stdlib plus `git` and `claude` on PATH. No YAML parser, no CLI framework, no DAG engine, no graph library, no web server dependencies. Two stdlib-native config formats match two audiences: JSON for machine state, INI for flat human config. Markdown for guidance. Humans never see JSON.
 
 ### Direction
@@ -46,56 +46,56 @@ bureaucracy/                       # private state repo, cloned alongside the mo
 ├── soul.md                        # Global agent guidance
 ├── stages/                        # Per-stage markdown guidance (design.md, code.md, …)
 ├── docs/                          # Per-document markdown guidance (spec.md, architecture.md, …)
-├── projects/                      # Git submodules pointing at target repos
-│   ├── telomere/                  # → github.com/modulecollective/telomere
-│   └── next-idea/                 # → github.com/modulecollective/next-idea
-├── requests/                      # Request state, per-project documents, run history
+├── projects/                      # Per-project state: registration, run tree, and submodule checkout
 │   ├── telomere/
 │   │   ├── project.json           # Project metadata
+│   │   ├── src/                   # Submodule → github.com/modulecollective/telomere
 │   │   ├── overrides/             # Project-level guidance overrides (optional)
 │   │   └── runs/
 │   │       ├── add-batch-support/ # in_progress
 │   │       ├── fix-timeout-bug/   # in_progress
-│   │       ├── mvp-build/         # approved
+│   │       ├── mvp-build/         # pushed
 │   │       └── websocket-eval/    # scrapped
 │   └── next-idea/
 │       └── …
-├── .moe/                          # Per-request sandbox clones + other transient state (gitignored)
-└── (single branch: main — per-request scoping via commit trailers)
+├── .moe/                          # Per-run sandbox clones + other transient state (gitignored)
+└── (single branch: main — per-run scoping via commit trailers)
 ```
 
-`stages/` and `docs/` are flat directories of optional markdown fragments. `moe work` concatenates the applicable ones with `soul.md`, any request-level overrides, and the upstream documents to build the prompt. No role taxonomy, no handbook-per-agent — just guidance keyed to the two axes that actually vary: the lifecycle stage and the kind of document.
+The submodule lives at `projects/<id>/src/`, not directly at `projects/<id>/` — that leaves room for `project.json`, `runs/`, and `overrides/` to be tracked by the bureaucracy git alongside the submodule. A submodule at `projects/<id>/` would be a single gitlink tree entry, preventing any sibling files under the same path.
+
+`stages/` and `docs/` are flat directories of optional markdown fragments. Stage sessions concatenate the applicable ones with `soul.md`, any run-level overrides, and the upstream documents to build the prompt. No role taxonomy, no handbook-per-agent — just guidance keyed to the two axes that actually vary: the lifecycle stage and the kind of document.
 
 ### Two Repos: CLI and Bureaucracy
 
 MoE is split across two independent git repos, cloned side-by-side, in the same relationship as `git` ↔ a repository or `hugo` ↔ a site:
 
 - **`moe/`** — the CLI repo. Go source for the `moe` binary. No private data, no pointer to the bureaucracy. Open-source-eligible. Installed to `$PATH` like any other tool.
-- **`bureaucracy/`** — the private state repo, cloned at the same level as `moe/`. Holds `soul.md`, per-stage and per-doc guidance, the document graph definition, `requests/`, run history, and `projects/*` submodules pointing at target repos. The `moe` binary operates on whichever bureaucracy directory it's invoked from (discovered via `$PWD` walk or `$MOE_HOME`). The root is identified by a sentinel marker file, `bureaucracy.conf` — its presence is the whole signal; keys inside are reserved for future config. `moe where` prints the resolved root so scripts and the operator can confirm which bureaucracy is in scope.
+- **`bureaucracy/`** — the private state repo, cloned at the same level as `moe/`. Holds `soul.md`, per-stage and per-doc guidance, the document graph definition, and `projects/*` — one directory per registered project, each with its `project.json`, run tree, and submodule checkout under `src/`. The `moe` binary operates on whichever bureaucracy directory it's invoked from (discovered via `$PWD` walk or `$MOE_HOME`). The root is identified by a sentinel marker file, `bureaucracy.conf` — its presence is the whole signal; keys inside are reserved for future config. `moe where` prints the resolved root so scripts and the operator can confirm which bureaucracy is in scope.
 
 Upgrading `moe` is a `go install`; the bureaucracy is untouched. Matches principle 11 — the CLI is just a tool on `$PATH`.
 
 ### The Bureaucracy Repo
 
-The bureaucracy repo holds guidance fragments, request state, and run history across all projects. There is one unified history — one set of request IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
+The bureaucracy repo holds guidance fragments, run state, and run history across all projects. There is one unified history — one set of run IDs, one `git log`. Dashboards, portfolio views, and cross-project queries are all views over the same repo.
 
 ### Project (Target Repo)
 
-A long-lived entity representing a software product or project. Registered as a git submodule under `projects/`. Born from `moe project add <repo-url>`, persists as long as the project is managed.
+A long-lived entity representing a software product or project. Registered as a git submodule under `projects/<id>/src/`. Born from `moe project add <repo-url>`, persists as long as the project is managed.
 
-**Target project repos are registered as git submodules under `projects/`.** The bureaucracy repo stores all orchestration metadata — guidance, request state, run history. The target repo stores only its own code. This separation means:
+**Target project repos are registered as git submodules under `projects/<id>/src/`.** The bureaucracy repo stores all orchestration metadata — guidance, run state, run history — alongside the submodule under `projects/<id>/`. The target repo stores only its own code. This separation means:
 
-- Projects can pre-exist MoE. Fork an interesting open source project, `moe project add` it, and start managing requests against it.
+- Projects can pre-exist MoE. Fork an interesting open source project, `moe project add` it, and start managing runs against it.
 - Target repos stay clean — no MoE files, no framework artifacts. Someone looking at the target repo sees normal, well-crafted commits.
 - Hundreds of projects can be registered. Only one submodule is checked out at a time during a session.
 - Projects can use whatever structure, language, or conventions make sense for them.
 
 ```json
-// requests/telomere/project.json
+// projects/telomere/project.json
 {
   "id": "telomere",
   "status": "incubating",
-  "submodule": "projects/telomere",
+  "submodule": "projects/telomere/src",
   "remote": "git@github.com:modulecollective/telomere.git",
   "default_branch": "main",
   "deploy_url": "https://telomere.modulecollective.dev",
@@ -105,82 +105,67 @@ A long-lived entity representing a software product or project. Registered as a 
 
 The `id` is derived from the repo URL's last path component and doubles as the project's display name — no separate name/description fields. Fresh registrations land in `"incubating"`; the operator bumps status as the project matures (`"live"`, `"archived"`, etc.). `default_branch` is detected from `git ls-remote --symref HEAD` at registration time. `deploy_url` is optional and omitted when unset.
 
-During a session, `moe work` runs `git submodule update --init projects/$target` so agents can read code and (for code-editing work) edit it. Code changes result in submodule pointer updates committed on `main` with the request's trailers. At approval time, the changes inside the submodule are committed, pushed to the target remote, and optionally opened as a PR — the submodule pointer update in the bureaucracy records which target commit was produced.
+Code-editing stages run inside a per-run sandbox clone of `projects/<id>/src/`, not the submodule checkout itself. Code changes land as commits on the clone's `moe/<run>` branch; `moe sdlc push` pushes that branch to the target remote and opens a PR via `gh pr create` — the submodule pointer is not updated as part of the push.
+
+**Project-level concerns (stored in the bureaucracy repo under `projects/<id>/`):**
+
+For v1 the only project-level file is `project.json`. A human-maintained `backlog` doc (run ideas, title + paragraph each) is a natural next addition. Longer-lived artifacts — changelog, decision log, architecture overview, API reference, ops runbook — are deferred; they'd accumulate from completed runs once `moe sdlc push` grows side-effects beyond pushing the branch and opening the PR.
+
+### Run
+
+A unit of work against a project. Has a defined lifecycle and terminates. Every run belongs to exactly one project and exactly one workflow (`sdlc`, and future `kb`, `ops`, …); the workflow determines which stages the run moves through.
 
 ```json
-// In request.json after completion
-{
-  "commits": [
-    {
-      "submodule": "projects/telomere",
-      "range": "abc1234..def5678",
-      "branch": "main",
-      "pr": "https://github.com/modulecollective/telomere/pull/42"
-    }
-  ]
-}
-```
-
-**Project-level concerns (stored in the bureaucracy repo under `requests/<project>/`):**
-
-For v1 the only project-level file is `project.json`. A human-maintained `backlog` doc (request ideas, title + paragraph each) is a natural next addition. Longer-lived artifacts — changelog, decision log, architecture overview, API reference, ops runbook — are deferred; they'd accumulate from completed requests once `moe push` grows side-effects beyond pushing the branch and opening the PR.
-
-### Request
-
-A unit of work against a project. Has a defined lifecycle and terminates.
-
-```json
-// requests/telomere/runs/fix-timeout-bug/request.json
+// projects/telomere/runs/fix-timeout-bug/run.json
 {
   "id": "fix-timeout-bug",
   "project": "telomere",
   "title": "Fix timeout bug from overnight alert",
   "status": "in_progress",
+  "workflow": "sdlc",
   "created": "2026-04-12",
-  "origin": "ops_alert",
-  "priority": "high",
   "documents": {
-    "spec":           { "session": "9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0" },
-    "architecture":   { "session": "1c8e2b9f-3441-4d5a-8e23-9d0f7c2b3a14" },
-    "implementation": { "session": "7d2a5e1c-90b3-4c11-a4d2-2e5b1c0a9f33" }
+    "design": { "session": "9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0" },
+    "code":   { "session": "7d2a5e1c-90b3-4c11-a4d2-2e5b1c0a9f33" }
   }
 }
 ```
 
-Request statuses: `in_progress | approved | scrapped`. Documents have no status field — they are just files on disk (`content.md`), and a document's history is its commit history. The only per-document data in `request.json` is the Claude Code session id so `moe design`/`moe code` can resume the same conversation.
+Run statuses: `in_progress | pushed`. Documents have no status field — they are just files on disk (`content.md`), and a document's history is its commit history. The only per-document data in `run.json` is the Claude Code session id so `moe sdlc design`/`moe sdlc code` can resume the same conversation.
 
-**Stages are a canonical document per phase, not a separate sign-off state.** The request's progress is readable from the git log: a `work: update design` commit means design has been worked on; a later `work: update code` means code has moved past design. Re-running `moe design` after a `work: update code` is how the operator revises the spec — and the next `moe code` turn sees an upstream-change banner pointing at the diff. Shipping is a separate verb (`moe push`) that runs the mechanical outbound work; there is no explicit "sign this stage" ceremony between turns.
+**Stages are a canonical document per phase, not a separate sign-off state.** The run's progress is readable from the git log: a `work: update design` commit means design has been worked on; a later `work: update code` means code has moved past design. Re-running `moe sdlc design` after a `work: update code` is how the operator revises the spec — and the next `moe sdlc code` turn sees an upstream-change banner pointing at the diff. Shipping is a separate verb (`moe sdlc push`) that runs the mechanical outbound work; there is no explicit "sign this stage" ceremony between turns.
 
-Known stages:
+Known stages in the `sdlc` workflow:
 
-- `design` — design is settled; `moe design` edits its canvas
-- `code` — code is settled; `moe code` edits its canvas inside the request's sandbox clone
+- `design` — design is settled; `moe sdlc design` edits its canvas
+- `code` — code is settled; `moe sdlc code` edits its canvas inside the run's sandbox clone
+- `push` — the terminal stage; `moe sdlc push` publishes the code branch and opens a PR
 
-Additional stages (review, test, deploy, retro, …) will be added when a real use case forces the question.
+Additional stages (review, test, deploy, retro, …) or additional workflows will be added when a real use case forces the question.
 
-**Request progress is driven by the operator, not a rigid phase sequence.** Small bug fixes may only touch `code`. Larger work starts in `design` and moves forward. The staleness gate in `moe push` refuses to ship if the design has moved after the last code turn — the operator's recourse is another `moe code` turn to reconcile.
+**Run progress is driven by the operator, not a rigid phase sequence.** Small bug fixes may only touch `code`. Larger work starts in `design` and moves forward. The staleness gate in `moe sdlc push` refuses to ship if the design has moved after the last code turn — the operator's recourse is another `moe sdlc code` turn to reconcile.
 
-Within a request, documents beyond `design` and `code` are allowed: a knowledge base, meeting notes, a rollback plan. These don't participate in the stage DAG — they're just files with a session and a commit history, edited with the generic document-work flow when and if it's reintroduced.
+Within a run, documents beyond `design` and `code` are allowed: a knowledge base, meeting notes, a rollback plan. These don't participate in the stage DAG — they're just files with a session and a commit history, edited with the generic document-work flow when and if it's reintroduced.
 
-**Request rollup on completion:**
+**Run rollup on completion:**
 
-When `moe push <project> <request>` runs:
-- Preconditions: `code/content.md` is non-empty and has a `work: update code` commit; `design/content.md` has not been committed after the last code turn (staleness gate); the request's sandbox clone has branch `moe/<request>` ahead of the target's default branch.
-- `moe push` repoints the clone's `origin` at the target project's remote, pushes `moe/<request>`, and opens a PR via `gh pr create` using `code/content.md` as the body (first push only; reruns detect the existing PR and skip this step).
-- On the first successful push, `request.json` flips to `approved` and the change is committed on main with `MoE-PR: <url>` in the trailers. Re-runs just push new commits; the sandbox stays in place so `moe code` can iterate on review feedback.
+When `moe sdlc push <project> <run>` runs:
+- Preconditions: `code/content.md` is non-empty and has a `work: update code` commit; `design/content.md` has not been committed after the last code turn (staleness gate); the run's sandbox clone has branch `moe/<run>` ahead of the target's default branch.
+- `moe sdlc push` repoints the clone's `origin` at the target project's remote, pushes `moe/<run>`, and opens a PR via `gh pr create` using `code/content.md` as the body (first push only; reruns detect the existing PR and skip this step).
+- On the first successful push, `run.json` flips to `pushed` and the change is committed on main with `MoE-PR: <url>` in the trailers. Re-runs just push new commits; the sandbox stays in place so `moe sdlc code` can iterate on review feedback.
 
-When `moe scrap <request> "reason"` runs (future):
+When `moe scrap <run> "reason"` runs (future):
 - The reason is recorded in a `MoE-Scrapped` commit trailer on main
-- Request remains in the product's history as institutional memory
+- Run remains in the product's history as institutional memory
 - No code or config changes are applied
 
 ### Derived Artifacts
 
-Deferred. `moe push` today flips the request status, pushes the branch, and opens the PR. Generating release notes, decision summaries, or updating long-lived project docs from completed requests is a future phase — when it arrives, it'll run as additional commits on main from inside `moe push` or an adjacent verb, not as a background worker.
+Deferred. `moe sdlc push` today flips the run status, pushes the branch, and opens the PR. Generating release notes, decision summaries, or updating long-lived project docs from completed runs is a future phase — when it arrives, it'll run as additional commits on main from inside `moe sdlc push` or an adjacent verb, not as a background worker.
 
 ### Document
 
-The primary unit of work within a request. A document is both a **living artifact** (the spec, the architecture design, the test plan) and a **conversation space** where you collaborate with agents to produce and refine it.
+The primary unit of work within a run. A document is both a **living artifact** (the spec, the architecture design, the test plan) and a **conversation space** where you collaborate with agents to produce and refine it.
 
 Documents serve two critical functions:
 
@@ -197,22 +182,22 @@ Next document's agent starts with clean, dense input
 
 **Document lifecycle — trailers, not branches:**
 
-All commits land directly on `main`. There are no per-request branches. Each commit carries structured trailers so any one request's history can be reconstructed programmatically:
+All commits land directly on `main`. There are no per-run branches. Each commit carries structured trailers so any one run's history can be reconstructed programmatically:
 
 ```
 work: update spec
 
-MoE-Request: add-batch-support
+MoE-Run: add-batch-support
 MoE-Project: telomere
 MoE-Document: spec
 MoE-Session: 9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0
 ```
 
-A request's full audit trail is `git log --grep="MoE-Request: add-batch-support"`. A document's history is the same plus `MoE-Document: spec`. The atomic-review surface lost by skipping a feature branch is reconstructed by `moe review`, which prints the request's commits and the current state of each document.
+A run's full audit trail is `git log --grep="MoE-Run: add-batch-support"`. A document's history is the same plus `MoE-Document: spec`. The atomic-review surface lost by skipping a feature branch is reconstructed by `moe review`, which prints the run's commits and the current state of each document.
 
 ```
 main (the only branch)
-  ├── commit: "Open request telomere/add-batch-support: …"
+  ├── commit: "Open run telomere/add-batch-support: …"
   ├── commit: "work: update design"
   ├── commit: "work: update design"
   ├── commit: "work: update code"
@@ -220,48 +205,48 @@ main (the only branch)
   └── commit: "push: telomere/add-batch-support"     (MoE-PR: <url>, status→approved)
 ```
 
-Each document stage has a canonical slug (`design`, `code`) and each turn lands as a `work: update <slug>` commit with the request's trailers. `moe push` is the terminal action — it pushes the sandbox branch, opens a PR, and records the outcome as a single commit on main. No separate sign-off state; the journal itself is the record.
+Each document stage has a canonical slug (`design`, `code`) and each turn lands as a `work: update <slug>` commit with the run's trailers. `moe sdlc push` is the terminal action — it pushes the sandbox branch, opens a PR, and records the outcome as a single commit on main. No separate sign-off state; the journal itself is the record.
 
-**The ripple is operator-driven, not background.** Agents only act when `moe design` or `moe code` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
+**The ripple is operator-driven, not background.** Agents only act when `moe sdlc design` or `moe sdlc code` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
 
-- **In progress**: The operator is running `moe design` and `moe code`. Each turn appends a trailer-tagged commit to main.
-- **Ready to push**: code has moved past design, nothing in the design doc has moved since. `moe dash` surfaces this as NEEDS ATTENTION; `moe push` refuses to ship otherwise.
-- **Approved**: `moe push` flipped the request status, opened the PR, and recorded a `MoE-PR:` trailer. The sandbox stays in place so `moe code` can iterate on review feedback and `moe push` again updates the branch.
+- **In progress**: The operator is running `moe sdlc design` and `moe sdlc code`. Each turn appends a trailer-tagged commit to main.
+- **Ready to push**: code has moved past design, nothing in the design doc has moved since. `moe dash` surfaces this as NEEDS ATTENTION; `moe sdlc push` refuses to ship otherwise.
+- **Approved**: `moe sdlc push` flipped the run status, opened the PR, and recorded a `MoE-PR:` trailer. The sandbox stays in place so `moe sdlc code` can iterate on review feedback and `moe sdlc push` again updates the branch.
 
-Human review is required by default at every `moe design` / `moe code` turn and before `moe push`. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the request needs, then carrying the work up to `<stage>` without pausing for input. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `git revert` unwinds cleanly.
+Human review is required by default at every `moe sdlc design` / `moe sdlc code` turn and before `moe sdlc push`. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the run needs, then carrying the work up to `<stage>` without pausing for input. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `git revert` unwinds cleanly.
 
 Note on vocabulary: this MoE-level "yolo" (multi-stage autonomy above the document line) is orthogonal to Claude Code's own `--dangerously-skip-permissions` (tool-call autonomy below the document line, *inside* a single `claude -p` session). Yolo mode generally wants both: skip permissions inside each session, and skip the operator-in-the-loop between sessions.
 
 **Ripple flow in practice:**
 
-1. `moe request new telomere "Add batch support"` — opens the request, commits the scaffolding to main.
-2. `moe design telomere add-batch-support` — you collaborate with Claude on the design canvas; each turn commits on main with trailers.
-3. `moe code telomere add-batch-support` — Claude edits code inside the request's sandbox clone; turns commit on main (for the document) and on `moe/add-batch-support` (for the code).
-4. The code session flags a concern about the design — you carry it back into `moe design …` with "the code session says this interface needs pagination, reconsider". A couple more design turns.
-5. Next `moe code` turn fires the upstream-change banner; Claude reconciles and commits again.
-6. Everything settles. `moe review telomere add-batch-support` — you read the request's commits and current document state.
-7. `moe push telomere add-batch-support` — sandbox branch pushed, PR opened, request flipped to `approved`. Done. Re-run `moe code` and `moe push` if review feedback requires changes.
+1. `moe sdlc new telomere "Add batch support"` — opens the run, commits the scaffolding to main.
+2. `moe sdlc design telomere add-batch-support` — you collaborate with Claude on the design canvas; each turn commits on main with trailers.
+3. `moe sdlc code telomere add-batch-support` — Claude edits code inside the run's sandbox clone; turns commit on main (for the document) and on `moe/add-batch-support` (for the code).
+4. The code session flags a concern about the design — you carry it back into `moe sdlc design …` with "the code session says this interface needs pagination, reconsider". A couple more design turns.
+5. Next `moe sdlc code` turn fires the upstream-change banner; Claude reconciles and commits again.
+6. Everything settles. `moe review telomere add-batch-support` — you read the run's commits and current document state.
+7. `moe sdlc push telomere add-batch-support` — sandbox branch pushed, PR opened, run flipped to `pushed`. Done. Re-run `moe sdlc code` and `moe sdlc push` if review feedback requires changes.
 
-For well-scoped requests with good guidance files, this converges quickly. You start a conversation, the agents ripple through the documents you drive them through, and you come back to a complete package. One conversation, one review, one push.
+For well-scoped runs with good guidance files, this converges quickly. You start a conversation, the agents ripple through the documents you drive them through, and you come back to a complete package. One conversation, one review, one push.
 
-Recovery and rewriting are also branchless. Rollback is `git revert <sha>`. Per-request history is `git log --grep`. Rewinding a stuck conversation is `git reset --soft` — the same regardless of which request you're working on.
+Recovery and rewriting are also branchless. Rollback is `git revert <sha>`. Per-run history is `git log --grep`. Rewinding a stuck conversation is `git reset --soft` — the same regardless of which run you're working on.
 
 **Document slugs are free-form.** `spec`, `architecture`, `implementation`, `security-review`, `migration-plan` — whatever fits. MoE doesn't maintain a typed library; the operator picks a slug, `moe work` creates the directory on first use, and per-doc guidance in `docs/<slug>.md` (if present) gets concatenated into the prompt. Conventionally each **stage** has a canonical document sharing its name — `design`'s work lives in a `design` document, `code`'s in a `code` document — because that's what `upstreamChangeBanner` uses to point downstream agents at what moved.
 
-Each document is just a directory on disk — `documents/<name>/content.md` — and an entry in the parent `request.json` carrying the Claude Code session id. The document's "state" is its content and its commit history; there is no sidecar status file.
+Each document is just a directory on disk — `documents/<name>/content.md` — and an entry in the parent `run.json` carrying the Claude Code session id. The document's "state" is its content and its commit history; there is no sidecar status file.
 
 **Ripple mechanism:**
 
-When a prerequisite document has been committed after a downstream document's last work turn, the next run of the downstream doc's verb (e.g. `moe code` after `moe design`) gets an upstream-change banner in its system prompt: the prereq doc name, the path to its content.md, the bureaucracy SHA the agent last ran on, and the exact `git diff` command to see what moved. The banner is advisory — the contract with the agent is still social, but the social cue is legible instead of implicit.
+When a prerequisite document has been committed after a downstream document's last work turn, the next run of the downstream doc's verb (e.g. `moe sdlc code` after `moe sdlc design`) gets an upstream-change banner in its system prompt: the prereq doc name, the path to its content.md, the bureaucracy SHA the agent last ran on, and the exact `git diff` command to see what moved. The banner is advisory — the contract with the agent is still social, but the social cue is legible instead of implicit.
 
 Mechanics:
 
-- Detection is deterministic: compare each prereq doc's most recent `work: update <doc>` commit time against the downstream doc's most recent work-turn commit (both filtered by `MoE-Request: <id>`). Nothing is mutated in the background.
+- Detection is deterministic: compare each prereq doc's most recent `work: update <doc>` commit time against the downstream doc's most recent work-turn commit (both filtered by `MoE-Run: <id>`). Nothing is mutated in the background.
 - First-turn sessions get no banner — there's no "since" to compute against.
 - `design` has no prerequisites, so the design canvas never sees a banner. `code` sees it when `design` has been re-committed since its last turn.
-- `moe push` turns the same signal into a hard gate: if design moved after the last code turn, push refuses until `moe code` has been re-run to reconcile.
+- `moe sdlc push` turns the same signal into a hard gate: if design moved after the last code turn, push refuses until `moe sdlc code` has been re-run to reconcile.
 
-The operator controls the pace. A touched `design` doesn't force the `code` canvas to pick it up immediately; the banner fires on the next `moe code` run, whenever that happens.
+The operator controls the pace. A touched `design` doesn't force the `code` canvas to pick it up immediately; the banner fires on the next `moe sdlc code` run, whenever that happens.
 
 **Cross-document agent collaboration:**
 
@@ -271,9 +256,9 @@ This turns the stages into a genuine collaborative workspace rather than a one-w
 
 **Ripple summary view:**
 
-`moe review` (planned) synthesizes the per-request view by filtering the main-branch log on the request's trailer:
+`moe review` (planned) synthesizes the per-run view by filtering the main-branch log on the run's trailer:
 
-- The request's commits in order, grouped by document.
+- The run's commits in order, grouped by document.
 - Current `content.md` of each document at HEAD.
 - Any stages where the most recent `MoE-Stage-Signed` commit post-dates a downstream document's last turn — i.e., work the banner will fire on next time that document is opened.
 
@@ -281,7 +266,7 @@ This is the intended primary review surface. One synthesized view, organized so 
 
 **What isn't here:**
 
-MoE does not maintain a typed document graph — no `document-graph.conf`, no node-type taxonomy (`conversational`/`derived`/`persistent`), no `depends_on` edges between documents. The only typed graph in the system is the stage DAG in `internal/stage/stage.go` (`design` → `code`). Everything else — which documents a request should have, how they relate, which ones imply others — is operator judgment at request-open time, guided by conventions in `soul.md` and `docs/<slug>.md` fragments rather than by a parsed schema.
+MoE does not maintain a typed document graph — no `document-graph.conf`, no node-type taxonomy (`conversational`/`derived`/`persistent`), no `depends_on` edges between documents. The only typed graph in the system is the stage DAG in `internal/stage/stage.go` (`design` → `code`). Everything else — which documents a run should have, how they relate, which ones imply others — is operator judgment at run-open time, guided by conventions in `soul.md` and `docs/<slug>.md` fragments rather than by a parsed schema.
 
 This is a deliberate shrink. Earlier drafts speculated a parts bin of 15+ node types with dependency edges, derived artifacts generated at approval, and product-level persistent documents updated on every sign. None of it was built, and every instance I could imagine was better served by the operator writing whatever slug they wanted and the agent reading whatever upstream document they named. When a real need for typed dependencies between documents shows up, it can come back; until then it's speculative generality the `soul.md` warns against.
 
@@ -298,7 +283,7 @@ For auditability, each `moe work` invocation appends a JSONL record to the docum
 {"id": "blip-004", "author": "agent", "type": "agent", "ts": "…", "content": "Got it. I've updated the spec document with the batch endpoint definition, partial semantics, and new acceptance criteria.", "document_version": 3}
 ```
 
-Stored at `requests/<project>/runs/<request>/documents/<doc>/thread.jsonl`. Append-only. JSONL because it's the most stdlib-friendly streaming format: `encoding/json` + `bufio.Scanner`.
+Stored at `projects/<project>/runs/<run>/documents/<doc>/thread.jsonl`. Append-only. JSONL because it's the most stdlib-friendly streaming format: `encoding/json` + `bufio.Scanner`.
 
 The thread is the exploratory space. The document content is the compressed output. Both are preserved, but downstream agents consume the document, not the thread. The thread is there for auditability — understanding *why* the spec says what it says.
 
@@ -318,11 +303,11 @@ Blips are append-only. Replies create sub-threads via the `parent` field, but bl
 The document model and guidance layer together create a natural compression pipeline for agent context:
 
 ```
-Request: "Add batch support"
+Run: "Add batch support"
 
 Working on the spec:
   - Guidance: soul.md + stages/design.md + docs/spec.md + project overrides
-  - Request description (lightweight)
+  - Run description (lightweight)
   - Product-level context (project.json, existing architecture doc)
 
 Working on the architecture:
@@ -366,38 +351,40 @@ bureaucracy/
 │   ├── architecture.md            # "Architecture docs explain why, not just what. Include tradeoffs."
 │   └── implementation.md          # "Keep the task list short. One change per commit."
 ├── agents.conf                    # Model + allowedTools routing, keyed by document (and/or stage)
-├── requests/
+├── projects/
 │   ├── telomere/
+│   │   ├── project.json           # Project metadata
+│   │   ├── src/                   # Submodule checkout
 │   │   ├── overrides/             # Project overrides (optional)
 │   │   │   └── implementation.md  # "Use Deno, not Node. Deploy to Fly.io."
 │   │   └── runs/
 │   │       └── add-batch-support/
-│   │           └── overrides/     # Request overrides (rare, optional)
-│   │               └── implementation.md   # "This request touches billing, extra caution"
+│   │           └── overrides/     # Run overrides (rare, optional)
+│   │               └── implementation.md   # "This run touches billing, extra caution"
 ```
 
-**Layer resolution:** request-level → project-level → global. Same pattern as gitconfig, CSS specificity, or Consul's config hierarchy. `moe work` concatenates whichever override files exist in most-specific-first order.
+**Layer resolution:** run-level → project-level → global. Same pattern as gitconfig, CSS specificity, or Consul's config hierarchy. Stage sessions concatenate whichever override files exist in most-specific-first order.
 
 **`soul.md`** is the equivalent of Codex's AGENTS.md or Claude Code's CLAUDE.md. It's the general guidance every invocation gets: your engineering philosophy, how you like things communicated, quality standards, what to escalate vs. decide autonomously. This is the document that captures your engineering judgment in a form agents can consume.
 
-**Stage fragments** (`stages/<stage>.md`) shape behavior by *where* the work sits in the lifecycle. `stages/design.md` emphasizes exploration and tradeoff-surfacing; `stages/code.md` emphasizes rigor and scope discipline on the way to a landable diff. A fragment applies when the request has entered that stage but not yet signed the next one.
+**Stage fragments** (`stages/<stage>.md`) shape behavior by *where* the work sits in the lifecycle. `stages/design.md` emphasizes exploration and tradeoff-surfacing; `stages/code.md` emphasizes rigor and scope discipline on the way to a landable diff. A fragment applies when the run has entered that stage but not yet signed the next one.
 
 **Document fragments** (`docs/<doc>.md`) shape behavior by *what* is being written. `docs/spec.md` says what a good spec looks like; `docs/architecture.md` says what a good architecture document looks like. These are the closest thing we keep to role definitions — and they're indexed by the artifact, not by a role taxonomy.
 
-**Project and request overrides** let you tailor behavior locally. A prototype might have relaxed standards. A fork of a safety-critical system might have stricter review requirements.
+**Project and run overrides** let you tailor behavior locally. A prototype might have relaxed standards. A fork of a safety-critical system might have stricter review requirements.
 
 Because these are markdown files in git, they evolve through the same mechanism as everything else. An agent makes a recurring mistake → you update the relevant fragment → that mistake doesn't happen again. **The harness improves every time you use it.** Agents can even propose updates to their own guidance fragments (reviewed as a diff, just like any other document change).
 
 ### Agent Context Assembly
 
-When the operator runs `moe work <project> <request> <document>`, the CLI assembles the invocation's context from the guidance layer plus the document model:
+When the operator runs `moe work <project> <run> <document>`, the CLI assembles the invocation's context from the guidance layer plus the document model:
 
 ```
 Context = soul.md
         + stages/<current-stage>.md   (the earliest unsigned active stage)
         + docs/<document>.md          (if present)
         + project overrides           (if any)
-        + request overrides           (if any)
+        + run overrides               (if any)
         + upstream documents          (current content, tagged with stage-signed state)
         + current document content    (what the invocation is working on)
 ```
@@ -432,16 +419,16 @@ Edits to either file show up immediately in the next `moe work` invocation — n
 
 ### Session Continuity & Coordination State
 
-Following Anthropic's harness research, each request maintains:
+Following Anthropic's harness research, each run maintains:
 
-- **`request.json`** (request root): Tracks which documents exist and their Claude Code session ids. That's all — no document statuses; a document's state is its content plus its commit history.
+- **`run.json`** (run root): Tracks which documents exist and their Claude Code session ids. That's all — no document statuses; a document's state is its content plus its commit history.
 - **`features.json`** (inside implementation document directory): Implementation-specific session continuity. Detailed feature list with completion status, test coverage, and quality grades. Lives with the implementation doc because it's only relevant to code-editing work.
 - **Claude Code sessions**: The `--session-id` keeps multi-turn conversation state server-side. Resumption is transparent.
 - **Git history**: The ultimate source of truth for what changed and when.
 
 Most documents get continuity from their Claude Code session and their own `content.md` — they pick up where they left off by reading their output. Implementation work additionally needs `features.json` because it involves complex multi-step work spanning sessions (implementing features, running tests, fixing failures).
 
-The first implementation session in a request uses an **initializer prompt** that sets up the environment, writes the initial feature files, and makes the first commit. Subsequent sessions use the **continuation prompt** that reads progress, picks up where the last session left off, and makes incremental progress.
+The first implementation session in a run uses an **initializer prompt** that sets up the environment, writes the initial feature files, and makes the first commit. Subsequent sessions use the **continuation prompt** that reads progress, picks up where the last session left off, and makes incremental progress.
 
 ### Model Agnosticism
 
@@ -466,7 +453,7 @@ MoE's position: `moe work` spawning `claude -p` from an operator-initiated comma
 claude -p \
   --session-id "moe/telomere/add-batch-support/spec" \
   --append-system-prompt "$(cat assembled-guidance.md)" \
-  --allowedTools "Read,Grep,WebSearch,Edit(requests/telomere/runs/add-batch-support/documents/spec/content.md)" \
+  --allowedTools "Read,Grep,WebSearch,Edit(projects/telomere/runs/add-batch-support/documents/spec/content.md)" \
   --output-format stream-json \
   --verbose \
   --model claude-opus-4-6 \
@@ -475,8 +462,8 @@ claude -p \
 
 **Key mechanics:**
 
-- **Multi-turn sessions via `--session-id`**: Each document maps to a Claude Code session keyed by a per-document UUID stored in `request.json` (Claude Code requires UUIDs as session ids; MoE generates one on first use). Context is preserved server-side across turns. The operator posts a new turn via `moe work`, the agent responds, the CLI appends the response to the thread log and commits any document changes on `main`.
-- **Context injection via `--append-system-prompt`**: `moe work` assembles guidance (soul.md + applicable stage fragment + applicable doc fragment + project/request overrides) and upstream documents (tagged with stage-signed state), then injects them as the system prompt.
+- **Multi-turn sessions via `--session-id`**: Each document maps to a Claude Code session keyed by a per-document UUID stored in `run.json` (Claude Code requires UUIDs as session ids; MoE generates one on first use). Context is preserved server-side across turns. The operator posts a new turn via `moe work`, the agent responds, the CLI appends the response to the thread log and commits any document changes on `main`.
+- **Context injection via `--append-system-prompt`**: `moe work` assembles guidance (soul.md + applicable stage fragment + applicable doc fragment + project/run overrides) and upstream documents (tagged with stage-signed state), then injects them as the system prompt.
 - **Streaming JSON output**: Responses stream back as newline-delimited JSON, which `moe` parses with `json.NewDecoder` over stdout and displays to the operator in real time.
 
 **Permission model — principle of least privilege per document:**
@@ -505,39 +492,39 @@ For additional isolation of code-editing sessions (Docker, Daytona, SSH hosts), 
 ### Commands
 
 ```
-moe                                         # print usage + a hint: "try 'moe dash'"
-moe dash                                    # dashboard — the home screen
-moe next                                    # triage mode — do the top attention item, then the next
-moe init [--remote <url>] [dir]             # scaffold a new MoE workspace (stages but does not commit; prompts interactively)
-moe where                                   # print the resolved bureaucracy root ($MOE_HOME or $PWD walk)
-moe project add <repo-url>                  # register a target repo as submodule
-moe project remove <id>                     # unregister a project (refuses if the request dir has other content)
-moe project list                            # registered submodules
-moe request new <project> "title" [--id slug]      # open a new request, scaffold its dir
-moe status <project> <request>              # per-request view: stages, documents, last turns
-moe design <project> <request>              # open a Claude Code session on the design document
-moe code <project> <request>                # open a Claude Code session on the code document (sandbox clone)
-moe push <project> <request>                # push the request's code branch and open (or update) a PR
-moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
-moe review <project> <request>              # synthesize per-request view (filtered log + doc snapshots)
-moe scrap <project> <request> "reason"      # close without merging, record rationale
-moe flag <project> <request> ["note"]       # mark as needing attention on the dashboard
-moe unflag <project> <request>              # clear the flag
-moe history [project]                       # past requests (git log + cost aggregates)
-moe sync                                    # git push the bureaucracy repo (sets upstream on first push)
-moe version                                 # print moe version / OS / arch / Go runtime
-moe help                                    # print usage
+moe                                           # print usage + a hint: "try 'moe dash'"
+moe dash                                      # dashboard — the home screen
+moe next                                      # triage mode — do the top attention item, then the next
+moe init [--remote <url>] [dir]               # scaffold a new MoE workspace (stages but does not commit; prompts interactively)
+moe where                                     # print the resolved bureaucracy root ($MOE_HOME or $PWD walk)
+moe project add <repo-url>                    # register a target repo as submodule under projects/<id>/src/
+moe project remove <id>                       # unregister a project (refuses if projects/<id>/runs/ holds runs)
+moe project list                              # registered submodules
+moe sdlc new <project> "title" [--id slug]    # open a new sdlc run, scaffold its dir
+moe sdlc design <project> <run>               # open a Claude Code session on the design document
+moe sdlc code <project> <run>                 # open a Claude Code session on the code document (sandbox clone)
+moe sdlc push <project> <run>                 # push the run's code branch and open (or update) a PR
+moe status <project> <run> <document>         # reconcile a dispatched Managed Agents session
+moe show <project> <run> <document>           # render current content.md + tail of thread.jsonl
+moe review <project> <run>                    # synthesize per-run view (filtered log + doc snapshots)
+moe scrap <project> <run> "reason"            # close without merging, record rationale
+moe flag <project> <run> ["note"]             # mark as needing attention on the dashboard
+moe unflag <project> <run>                    # clear the flag
+moe history [project]                         # past runs (git log + cost aggregates)
+moe sync                                      # git push the bureaucracy repo (sets upstream on first push)
+moe version                                   # print moe version / OS / arch / Go runtime
+moe help                                      # print usage
 ```
 
-The ones you live in are `moe dash`, `moe next`, `moe design`, and `moe code`, with `moe push` at the end of each request. `moe where`, `moe sync`, `moe version`, and `moe help` are housekeeping — they don't move request state, just report or publish it.
+Each workflow nests its subcommands under its own verb (`moe sdlc <subcommand>`) so future workflows (`moe kb …`) can pick short stage names without colliding. The ones you live in are `moe dash`, `moe next`, `moe sdlc design`, and `moe sdlc code`, with `moe sdlc push` at the end of each run. `moe where`, `moe sync`, `moe version`, and `moe help` are housekeeping — they don't move run state, just report or publish it.
 
-### `moe design` / `moe code` — The Core Loop
+### `moe sdlc design` / `moe sdlc code` — The Core Loop
 
 ```bash
-moe design telomere add-batch-support
+moe sdlc design telomere add-batch-support
 ```
 
-(Or `moe code` once the design has settled. Either command follows the same flow below, with `moe code` adding the sandbox clone setup and `moe design` skipping it. The original design intent described an editor-based scratch-turn flow; today both commands hand off to an interactive `claude` session directly, and the steps below describe the original intent.)
+(Or `moe sdlc code` once the design has settled. Either command follows the same flow below, with `moe sdlc code` adding the sandbox clone setup and `moe sdlc design` skipping it. The original design intent described an editor-based scratch-turn flow; today both commands hand off to an interactive `claude` session directly, and the steps below describe the original intent.)
 
 This does:
 
@@ -556,38 +543,38 @@ This does:
    Empty file = abort cleanly, no invocation, no commit. Shortcut: `moe work … -m "quick note"` skips the editor for one-liners.
 4. **Assemble the prompt** from the guidance layer:
    - `soul.md` (global)
-   - `stages/<current-stage>.md` (earliest unsigned active stage for the request)
+   - `stages/<current-stage>.md` (earliest unsigned active stage for the run)
    - `docs/<document>.md` (per-document guidance, if present)
-   - `requests/telomere/overrides/<document>.md` (project-level, if exists)
-   - `requests/telomere/runs/add-batch-support/overrides/<document>.md` (request-level, if exists)
+   - `projects/telomere/overrides/<document>.md` (project-level, if exists)
+   - `projects/telomere/runs/add-batch-support/overrides/<document>.md` (run-level, if exists)
    - Upstream documents (e.g., if working on architecture, include the spec — tagged with stage-signed state)
    - Current document content (if resuming)
-   - Request context (`request.json`)
+   - Run context (`run.json`)
    - The operator's scratch turn (as the user message)
-5. **Invoke Claude Code** with the per-document UUID session id stored in `request.json`:
+5. **Invoke Claude Code** with the per-document UUID session id stored in `run.json`:
    ```bash
    claude -p \
      --session-id "9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0" \
      --append-system-prompt "$(cat assembled-guidance.md)" \
-     --allowedTools "Read,Grep,Glob,WebSearch,Edit(requests/telomere/runs/add-batch-support/documents/spec/content.md)" \
+     --allowedTools "Read,Grep,Glob,WebSearch,Edit(projects/telomere/runs/add-batch-support/documents/spec/content.md)" \
      --output-format stream-json \
      --verbose \
      --model claude-opus-4-6 \
      < prompt.md
    ```
-   (Claude Code requires `--session-id` to be a UUID; MoE generates one per document on first use and stores it in `request.json` so subsequent turns resume the same conversation.)
+   (Claude Code requires `--session-id` to be a UUID; MoE generates one per document on first use and stores it in `run.json` so subsequent turns resume the same conversation.)
 6. **Stream output to the operator** via `json.NewDecoder` on the subprocess's stdout. Ctrl-C aborts cleanly — the session stays intact on Anthropic's side; nothing is committed locally.
 7. **Commit the result** on `main` with structured trailers:
    ```
    work: update spec
 
-   MoE-Request: add-batch-support
+   MoE-Run: add-batch-support
    MoE-Project: telomere
    MoE-Document: spec
    MoE-Session: 9b6c0f2a-e041-4d35-9b1a-1ae0f7b1c2f0
    MoE-Cost: $0.12
    ```
-8. **Persist any session-id updates** to `request.json` if EnsureDocument minted a new UUID. Saved with the same commit.
+8. **Persist any session-id updates** to `run.json` if EnsureDocument minted a new UUID. Saved with the same commit.
 9. **Append the turn to `thread.jsonl`** for audit.
 10. **Fire a desktop notification** if the run exceeded a threshold (default 30s) — `osascript` on macOS, `notify-send` on Linux, via `os/exec`.
 
@@ -601,7 +588,7 @@ The operator reads the output, decides what to do:
 
 ### Multi-Turn Continuity
 
-A per-document UUID stored in `request.json` (under `documents.<doc>.session`) is passed as `--session-id` to Claude Code. Each `moe work` invocation on the same document reuses the same UUID, so Claude Code resumes the server-side conversation. The operator posts a message, the agent responds, the document evolves. This is the "conversation is the document" model — using Claude Code's native session management.
+A per-document UUID stored in `run.json` (under `documents.<doc>.session`) is passed as `--session-id` to Claude Code. Each `moe work` invocation on the same document reuses the same UUID, so Claude Code resumes the server-side conversation. The operator posts a message, the agent responds, the document evolves. This is the "conversation is the document" model — using Claude Code's native session management.
 
 ### Per-Document Permissions
 
@@ -621,7 +608,7 @@ Non-code document invocations can only write to their own `content.md`. The impl
 
 ```
 main (the only branch — bureaucracy is a journal, not a code repo)
-  ├── commit: "Open request telomere/add-batch-support: …"   trailers: MoE-Request, MoE-Project
+  ├── commit: "Open run telomere/add-batch-support: …"   trailers: MoE-Run, MoE-Project
   ├── commit: "work: update design"                           trailers: + MoE-Document, MoE-Session
   ├── commit: "work: update design"
   ├── commit: "work: update code"                             ← agent has committed inside the sandbox clone's moe/<id> branch
@@ -629,9 +616,9 @@ main (the only branch — bureaucracy is a journal, not a code repo)
   └── commit: "push: telomere/add-batch-support"              trailers: + MoE-PR (status→approved)
 ```
 
-- One branch (`main`). Per-request scoping comes from commit trailers, not branches.
-- `moe push` pushes the sandbox's `moe/<request>` branch to the target remote, opens a PR via `gh pr create` (first time only), and flips request status — recorded as a commit on main with a `MoE-PR` trailer. `moe scrap` records rationale on main.
-- `moe review` is `git log --grep="MoE-Request: <id>"` plus a render of each document's current state.
+- One branch (`main`). Per-run scoping comes from commit trailers, not branches.
+- `moe sdlc push` pushes the sandbox's `moe/<run>` branch to the target remote, opens a PR via `gh pr create` (first time only), and flips the run's status — recorded as a commit on main with a `MoE-PR` trailer. `moe scrap` records rationale on main.
+- `moe review` is `git log --grep="MoE-Run: <id>"` plus a render of each document's current state.
 - Rewinding is `git reset --soft`; reverting is `git revert <sha>`.
 - No custom checkpoint format. Git is the checkpoint.
 
@@ -639,29 +626,29 @@ The branch model belongs *inside* each target submodule — that's where actual 
 
 **Concurrent work on the same project:**
 
-Without per-request branches, the bureaucracy working tree is no longer the contention point — different requests' files don't overlap. The remaining contention would be the submodule checkout under `projects/<project>/`, which can only be on one target-repo branch at a time. MoE removes that contention by giving every request its own private, copy-on-write clone of the submodule — no opt-in, no flag:
+Without per-run branches, the bureaucracy working tree is no longer the contention point — different runs' files don't overlap. The remaining contention would be the submodule checkout under `projects/<project>/`, which can only be on one target-repo branch at a time. MoE removes that contention by giving every run its own private, copy-on-write clone of the submodule — no opt-in, no flag:
 
-- On first `moe code` against a request, the submodule at `projects/<project>/` is cloned to `.moe/clones/<project>/<request>/`. Later turns on the same request reuse it, so branch state and uncommitted edits persist across invocations.
+- On first `moe sdlc code` against a run, the submodule at `projects/<project>/` is cloned to `.moe/clones/<project>/<run>/`. Later turns on the same run reuse it, so branch state and uncommitted edits persist across invocations.
 - On macOS the clone is an APFS `clonefile(2)` call — O(metadata), no data copied, blocks shared with the source until either side writes. On other platforms a recursive copy is the fallback. Either way, `moe` code is pure-stdlib Go; no container runtime, daemon, or third-party dep.
-- Submodules store their `.git` as a gitfile pointer into `.git/modules/projects/<project>/`. MoE clones that gitdir alongside the worktree (to `.moe/clones/<project>/.git-modules/<request>/`) and rewrites the clone's gitfile and `core.worktree` so the clone is a fully independent git repo. Two activities on the same project never touch each other's index, refs, or objects.
-- `moe push` deliberately leaves the sandbox in place so `moe code` can resume iteration (PR review feedback, post-ship bugs). Cleanup is a separate concern (future `moe close` / `moe scrap`). The canonical `projects/<project>/` checkout is passive — MoE only reads from it to seed clones.
+- Submodules store their `.git` as a gitfile pointer into `.git/modules/projects/<project>/`. MoE clones that gitdir alongside the worktree (to `.moe/clones/<project>/.git-modules/<run>/`) and rewrites the clone's gitfile and `core.worktree` so the clone is a fully independent git repo. Two activities on the same project never touch each other's index, refs, or objects.
+- `moe sdlc push` deliberately leaves the sandbox in place so `moe sdlc code` can resume iteration (PR review feedback, post-ship bugs). Cleanup is a separate concern (future `moe close` / `moe scrap`). The canonical `projects/<project>/` checkout is passive — MoE only reads from it to seed clones.
 
-Document-only sessions (e.g. `moe design` on a design canvas, or future knowledge-base docs) don't touch the submodule and never needed isolation in the first place; they continue to write one markdown file under the bureaucracy and run freely in parallel.
+Document-only sessions (e.g. `moe sdlc design` on a design canvas, or future knowledge-base docs) don't touch the submodule and never needed isolation in the first place; they continue to write one markdown file under the bureaucracy and run freely in parallel.
 
 **Submodule handling:**
 
-- `moe code` requires a submodule on disk and runs the agent inside its sandbox clone. The agent creates branch `moe/<request>` and commits edits there; nothing ever lands on the canonical `projects/<project>/` checkout.
-- `moe push` re-points the clone's `origin` at the project's remote, runs `git push -u origin moe/<request>`, and opens a PR via `gh pr create` (first push only). Re-runs push additional commits to the existing branch and print the open PR URL.
+- `moe sdlc code` requires a submodule on disk and runs the agent inside its sandbox clone. The agent creates branch `moe/<run>` and commits edits there; nothing ever lands on the canonical `projects/<project>/` checkout.
+- `moe sdlc push` re-points the clone's `origin` at the project's remote, runs `git push -u origin moe/<run>`, and opens a PR via `gh pr create` (first push only). Re-runs push additional commits to the existing branch and print the open PR URL.
 
-### Request State
+### Run State
 
-Flat JSON, committed to main with the request's trailers (see the **Request** section for the schema). `moe status` reads it. `moe work` updates it. No databases — just glob `requests/*/runs/*/request.json` and aggregate.
+Flat JSON, committed to main with the run's trailers (see the **Run** section for the schema). Stage commands update `run.json`; readers glob `projects/*/runs/*/run.json` and aggregate. No databases.
 
 ---
 
 ## Session UX
 
-Across many registered projects, only a handful of requests are actually in motion at any time, and on any given morning you're the blocker for a small subset of those. The UX job is to surface that subset fast and get the operator back into flow.
+Across many registered projects, only a handful of runs are actually in motion at any time, and on any given morning you're the blocker for a small subset of those. The UX job is to surface that subset fast and get the operator back into flow.
 
 Nothing runs in the background in v1 — agents act only when `moe work` is invoked. So the problem is **prioritization and resumption**, not live updates. That framing keeps the interface a shell tool, not a long-lived process.
 
@@ -669,10 +656,10 @@ Nothing runs in the background in v1 — agents act only when `moe work` is invo
 
 ```
 $ moe dash                            # what needs me today
-$ moe status telomere add-batch       # drill in: per-request stages, docs, last turns
+$ moe status telomere add-batch       # drill in: per-run stages, docs, last turns
 $ moe work telomere add-batch spec    # compose a turn in $EDITOR, stream response
 $ moe show telomere add-batch spec    # re-read current state without invoking an agent
-$ moe review telomere add-batch       # full request diff before approve
+$ moe review telomere add-batch       # full run diff before approve
 $ moe sign code telomere add-batch      # flip status (future: push submodule, open PR)
 ```
 
@@ -703,19 +690,19 @@ RECENT (last 7 days)
 47 projects registered · 4 active · [moe project list] to browse
 ```
 
-Implementation: `tabwriter` + ANSI color. Globs `requests/*/runs/*/request.json`, applies the attention filter, sorts. ~150 lines.
+Implementation: `tabwriter` + ANSI color. Globs `projects/*/runs/*/run.json`, applies the attention filter, sorts. ~150 lines.
 
 ### The attention filter
 
-A request lands in **NEEDS ATTENTION** when any of the following are true:
+A run lands in **NEEDS ATTENTION** when any of the following are true:
 
 1. **Pending turn** — an agent posed a direct question (detected by the last blip's type + content) and hasn't been answered.
 2. **Settled-upstream stale** — a document is stale *and* all of its upstream docs are part of a signed stage. The clean reconciliation case: no ambiguity about what to do next.
 3. **Ready to sign** — the active stage's documents are coherent and not stale; `moe sign design` or `moe sign code` is the obvious next move.
-4. **Explicit flag** — the operator ran `moe flag <project> <request> "note"`. The note shows in the dashboard. Self-left breadcrumbs.
-5. **Failed run** — the last `moe work` crashed, hit a test failure, or had a submodule conflict. Exit status and last error are recorded in `request.json`.
+4. **Explicit flag** — the operator ran `moe flag <project> <run> "note"`. The note shows in the dashboard. Self-left breadcrumbs.
+5. **Failed run** — the last `moe work` crashed, hit a test failure, or had a submodule conflict. Exit status and last error are recorded in `run.json`.
 
-A request *not* in NEEDS ATTENTION is still discoverable under ACTIVE — it just isn't demanding anything from the operator right now. Dormant requests (no activity in 30+ days) collapse out of the default view; `moe dash --all` shows everything.
+A run *not* in NEEDS ATTENTION is still discoverable under ACTIVE — it just isn't demanding anything from the operator right now. Dormant runs (no activity in 30+ days) collapse out of the default view; `moe dash --all` shows everything.
 
 ### Triage mode (`moe next`)
 
@@ -725,7 +712,7 @@ The dashboard is passive — it tells you what's there. `moe next` is active —
 
 | Trigger | Action |
 |---------|--------|
-| Pending turn | `moe work <project> <request> <doc>` — opens the editor |
+| Pending turn | `moe work <project> <run> <doc>` — opens the editor |
 | Settled-upstream stale | `moe work` on the stale doc (upstream is settled, so the work is clear) |
 | Ready to sign | `moe review`, then prompt: `[g] sign stage / [s]crap / [w]ork / skip` |
 | Explicit flag | show the note, prompt: `[w]ork / [u]nflag / skip` |
@@ -742,7 +729,7 @@ Flags for focused passes:
 
 ```
 moe next --project telomere      # only this project
-moe next --only ready            # only ready-to-sign requests (sign-off day)
+moe next --only ready            # only ready-to-sign runs (sign-off day)
 moe next --only stale            # only stale reconciliations
 moe next --dry-run               # preview the queue without taking action
 ```
@@ -751,7 +738,7 @@ The skip list is in-memory only — it resets when you quit. Quitting mid-sessio
 
 **Why this matters at scale.** Browsing the dashboard to pick what to touch is fine when three things need attention. When twelve do, the browsing itself becomes the friction. `moe next` is the "inbox zero" path — sit down, Enter-Enter-Enter through the obvious ones, skip what needs thought, come out the other side with a smaller list.
 
-### Per-request view (`moe status <project> <request>`)
+### Per-run view (`moe status <project> <run>`)
 
 Stage-aware, not a flat list:
 
@@ -775,7 +762,7 @@ LAST ACTIVITY
 NEXT  moe work telomere add-batch-operations code
 ```
 
-The "NEXT" hint is advisory — the operator can ignore it. The "banner will fire" annotation is derived from the request's filtered commit log: a `MoE-Stage-Signed` commit for an upstream stage that post-dates the downstream document's last `work:` commit. Same data the `upstreamChangeBanner` uses at `moe work` time.
+The "NEXT" hint is advisory — the operator can ignore it. The "banner will fire" annotation is derived from the run's filtered commit log: a `MoE-Stage-Signed` commit for an upstream stage that post-dates the downstream document's last `work:` commit. Same data the `upstreamChangeBanner` uses at `moe work` time.
 
 ### Reading without invoking (`moe show`)
 
@@ -821,7 +808,7 @@ $ moe flag telomere add-batch-operations "need to decide on max batch size"
 $ moe unflag telomere add-batch-operations
 ```
 
-Adds or removes a note attached to the request in `request.json`. Flagged requests always show in NEEDS ATTENTION with the note rendered inline. This is the operator's own Post-it — no magic, just a visible reminder.
+Adds or removes a note attached to the run in `run.json`. Flagged runs always show in NEEDS ATTENTION with the note rendered inline. This is the operator's own Post-it — no magic, just a visible reminder.
 
 ---
 
@@ -878,7 +865,7 @@ No YAML dependency. The files a human edits regularly are never JSON. The files 
 
 | File | Writer | Reader | Format | Parser |
 |------|--------|--------|--------|--------|
-| `request.json`, `features.json`, `project.json` | `moe` CLI | `moe status`, agents | JSON | `encoding/json` |
+| `run.json`, `features.json`, `project.json` | `moe` CLI | `moe status`, agents | JSON | `encoding/json` |
 | `agents.conf` | Human (rare) | `moe work` | INI | `bufio.Scanner` + `strings.Cut`, ~20 lines |
 | `soul.md`, `stages/*.md`, `docs/*.md`, overrides | Human (frequent) | Agents | Markdown | No parsing — concatenated |
 | `thread.jsonl` | `moe work` | Human audit | JSONL | `bufio.Scanner` + `json.Unmarshal` |
@@ -917,7 +904,7 @@ func gitCommit(dir, msg string, paths ...string) error {
 }
 
 func gitLogForRequest(reqID string) (string, error) {
-    out, err := exec.Command("git", "log", "--grep=MoE-Request: "+reqID).Output()
+    out, err := exec.Command("git", "log", "--grep=MoE-Run: "+reqID).Output()
     return string(out), err
 }
 ```
@@ -953,11 +940,11 @@ cmd.Wait()
 
 ### Prompt Assembly
 
-`os.ReadFile` + `strings.Builder`. Concatenate soul.md + applicable stage fragment + applicable doc fragment + overrides (most-specific-first) + upstream documents (tagged with stage-signed state) + current content + request context. ~50 lines.
+`os.ReadFile` + `strings.Builder`. Concatenate soul.md + applicable stage fragment + applicable doc fragment + overrides (most-specific-first) + upstream documents (tagged with stage-signed state) + current content + run context. ~50 lines.
 
 ### File Discovery
 
-`filepath.Glob("requests/*/runs/*/request.json")` for aggregation. One line.
+`filepath.Glob("projects/*/runs/*/run.json")` for aggregation. One line.
 
 ### Stage Operations
 
@@ -976,7 +963,7 @@ var all = map[string]Stage{
 }
 ```
 
-`stage.Active` finds the earliest unsigned stage whose prerequisites are all signed; `stage.Dependents` inverts for unsign cascade; `stage.LatestSign` + the request's filtered commit log drive the upstream-change banner. Two stages, ~170 lines, no adjacency-map abstractions.
+`stage.Active` finds the earliest unsigned stage whose prerequisites are all signed; `stage.Dependents` inverts for unsign cascade; `stage.LatestSign` + the run's filtered commit log drive the upstream-change banner. Two stages, ~170 lines, no adjacency-map abstractions.
 
 ### Terminal Display
 
@@ -991,7 +978,7 @@ moe/
 ├── internal/guidance/           # prompt assembly (~100 lines)
 ├── internal/git/                # branch/submodule/commit helpers (~200 lines)
 ├── internal/claude/             # assemble and exec claude -p, stream parse (~150 lines)
-├── internal/state/              # request.json, thread.jsonl I/O (~150 lines)
+├── internal/state/              # run.json, thread.jsonl I/O (~150 lines)
 ├── internal/stage/              # stage DAG, sign/unsign, upstream-change detection (~170 lines)
 ├── internal/config/             # INI + block parsers (~100 lines)
 └── internal/display/            # tabwriter status, ANSI, diffs (~100 lines)
@@ -1013,13 +1000,13 @@ A read-only web layer reading git state is a future addition once the CLI patter
 
 Planned views (deferred):
 
-- **Ministry Home**: Bureau list with status chips, active request counts, alert badges.
-- **Bureau Dashboard**: Project-level view — changelog, ops health, active requests, backlog, decision log.
-- **Request View**: Google Wave-inspired document workspace. Document selector, split view of document content + thread log, upstream-change banner indicators.
+- **Ministry Home**: Bureau list with status chips, active run counts, alert badges.
+- **Bureau Dashboard**: Project-level view — changelog, ops health, active runs, backlog, decision log.
+- **Run View**: Google Wave-inspired document workspace. Document selector, split view of document content + thread log, upstream-change banner indicators.
 - **Context Panel**: Side panel showing upstream docs, code, test results relevant to the active document.
-- **Request Review**: Per-request synthesized view — filtered commit log + current document content + staleness indicators.
+- **Run Review**: Per-run synthesized view — filtered commit log + current document content + staleness indicators.
 
-Three reusable components compose all views: **document viewer** (rendered markdown), **commit-log viewer** (filtered by request trailer), and **thread viewer** (JSONL log).
+Three reusable components compose all views: **document viewer** (rendered markdown), **commit-log viewer** (filtered by run trailer), and **thread viewer** (JSONL log).
 
 ### Interaction Model
 
@@ -1030,7 +1017,7 @@ Three reusable components compose all views: **document viewer** (rendered markd
 - **Steer**: Edit the document directly and commit (human authorship is first-class).
 - **Advance**: Run `moe work` on the next document to pull the current one in as upstream context.
 
-The thread log accumulates across invocations. The "chat with agents" experience is the sequence of these invocations across a request's lifecycle. True real-time co-editing is a future evolution.
+The thread log accumulates across invocations. The "chat with agents" experience is the sequence of these invocations across a run's lifecycle. True real-time co-editing is a future evolution.
 
 ---
 
@@ -1038,61 +1025,61 @@ The thread log accumulates across invocations. The "chat with agents" experience
 
 ### How a Session Works
 
-1. Operator invokes `moe work <project> <request> <document>`
+1. Operator invokes `moe work <project> <run> <document>`
 2. `moe` inits the target submodule if the session needs code access; otherwise no submodule work
 3. `moe` assembles the prompt from `soul.md`, applicable stage/doc fragments, overrides, upstream documents, current content
 4. `moe` invokes `claude -p` with the assembled prompt, the document's per-document UUID `--session-id`, `--allowedTools`, and the document's configured model
 5. `moe` streams Claude Code's output to the operator and appends to `thread.jsonl`
-6. When Claude Code finishes, `moe` commits the resulting changes (document content.md, request.json status update, and any target-submodule pointer updates) on `main` with structured trailers
+6. When Claude Code finishes, `moe` commits the resulting changes (document content.md, run.json status update, and any target-submodule pointer updates) on `main` with structured trailers
 7. Operator inspects and decides the next move: continue, advance to another document, edit manually, review, approve, scrap
 
 ### Process Model
 
-**The human is the scheduler.** One agent at a time under the operator's attention. Multiple terminal sessions work in parallel across different requests — they don't touch each other on the bureaucracy side because all commits land on `main` with distinct trailers.
+**The human is the scheduler.** One agent at a time under the operator's attention. Multiple terminal sessions work in parallel across different runs — they don't touch each other on the bureaucracy side because all commits land on `main` with distinct trailers.
 
-Concurrent implementation sessions on the same project don't contend, because every `moe work` automatically gets a private copy-on-write clone of the submodule under `.moe/clones/<project>/<request>/` — APFS `clonefile(2)` on macOS, a recursive copy fallback elsewhere. Two requests against the same project get two independent working trees and two independent gitdirs; neither touches the canonical `projects/<project>/` checkout. Document-only sessions don't touch the submodule at all and run freely in parallel. See the **Git Model** section for the concrete mechanism. Docker or SSH wrappers remain a Phase-5 option layered *on top of* the clone, for kernel-enforced isolation rather than concurrency.
+Concurrent implementation sessions on the same project don't contend, because every `moe work` automatically gets a private copy-on-write clone of the submodule under `.moe/clones/<project>/<run>/` — APFS `clonefile(2)` on macOS, a recursive copy fallback elsewhere. Two runs against the same project get two independent working trees and two independent gitdirs; neither touches the canonical `projects/<project>/` checkout. Document-only sessions don't touch the submodule at all and run freely in parallel. See the **Git Model** section for the concrete mechanism. Docker or SSH wrappers remain a Phase-5 option layered *on top of* the clone, for kernel-enforced isolation rather than concurrency.
 
 **Cross-document negotiation is operator-mediated.** When the architecture session pushes back on the spec ("batch size 10,000 needs different storage"), the operator carries that pushback into the spec conversation. No automated inter-agent messaging. A future evolution could add a `for` loop in `moe work --negotiate` to iterate across documents until settled or max iterations — it's a `for` loop, not a DAG engine.
 
 ### Technology
 
-CLI: Go stdlib. Persistence: git + committed JSON/JSONL + INI + block-format config. Agent backend: Claude Code headless (`claude -p`). Per-request workspace isolation: pure-Go APFS `clonefile(2)` on macOS (recursive-copy fallback elsewhere) — no container runtime, no daemon, no dep. Stronger kernel-enforced sandbox for implementation work remains a Phase-5 option via `os/exec` into `docker`/`ssh`/`daytona`, layered on top of the clone.
+CLI: Go stdlib. Persistence: git + committed JSON/JSONL + INI + block-format config. Agent backend: Claude Code headless (`claude -p`). Per-run workspace isolation: pure-Go APFS `clonefile(2)` on macOS (recursive-copy fallback elsewhere) — no container runtime, no daemon, no dep. Stronger kernel-enforced sandbox for implementation work remains a Phase-5 option via `os/exec` into `docker`/`ssh`/`daytona`, layered on top of the clone.
 
 ### Git Model
 
-**Two repos, two audiences.** The bureaucracy repo (back office) contains guidance fragments, request state, run history — all on a single `main` branch, scoped per-request via commit trailers. Target project repos (front office) are git submodules — clean code, no MoE artifacts; their own branch model lives there, where code review actually happens via PRs. The `moe` CLI itself lives in its own repo — tool and state are separate. See the **Hierarchy** and **Git Model** subsections for the full picture.
+**Two repos, two audiences.** The bureaucracy repo (back office) contains guidance fragments, run state, run history — all on a single `main` branch, scoped per-run via commit trailers. Target project repos (front office) are git submodules — clean code, no MoE artifacts; their own branch model lives there, where code review actually happens via PRs. The `moe` CLI itself lives in its own repo — tool and state are separate. See the **Hierarchy** and **Git Model** subsections for the full picture.
 
 ---
 
 ## Bootstrap Plan
 
-The Ministry's first project is itself. Build the minimum that can manage one request end-to-end, then dogfood.
+The Ministry's first project is itself. Build the minimum that can manage one run end-to-end, then dogfood.
 
 ### Phase 0: Workspace Scaffolding
 
-- [x] `moe init` scaffolds the marker file (`bureaucracy.conf`) plus `projects/` and `requests/` (with `.gitkeep`), initializes git on `main`, optionally sets an origin remote, stages the scaffolding, and prompts the operator to commit
+- [x] `moe init` scaffolds the marker file (`bureaucracy.conf`) plus `projects/` (with `.gitkeep`), initializes git on `main`, optionally sets an origin remote, stages the scaffolding, and prompts the operator to commit
 - [x] `moe where` resolves the bureaucracy root via `$MOE_HOME` or a `$PWD` walk to the marker file
-- [x] `moe project add <repo-url>` adds a submodule under `projects/`, detects the default branch via `git ls-remote --symref`, writes `requests/<project>/project.json`, and commits
-- [x] `moe project remove <id>` is the symmetrical inverse (refuses if the request dir has anything beyond `project.json`)
+- [x] `moe project add <repo-url>` adds a submodule under `projects/<id>/src/`, detects the default branch via `git ls-remote --symref`, writes `projects/<id>/project.json`, and commits
+- [x] `moe project remove <id>` is the symmetrical inverse (refuses if `projects/<id>/runs/` holds any runs)
 - [ ] Extend `moe init` to also lay down `stages/`, `docs/`, `soul.md`, `agents.conf`
 - [ ] Write initial `soul.md` and one or two fragments (`stages/design.md`, `docs/spec.md`)
 - [ ] Seed `agents.conf` with the minimal per-doc model + tools entries
 
 ### Phase 1: Single-Document End-to-End
 
-- [x] `moe request new <project> "title" [--id slug]` scaffolds `request.json` and commits it on main with `MoE-Request` / `MoE-Project` trailers (slugs auto-suffix on collision; explicit `--id` is strict)
-- [x] `moe work <project> <request> <document>` mints a UUID session id per document (stored in `request.json`), runs `claude` with `--session-id` (first turn) or `--resume` (subsequent turns), injects a minimal system prompt, and commits any document changes with the full trailer block. Per-request sandbox clones under `.moe/clones/` are provisioned for projects with a submodule.
+- [x] `moe sdlc new <project> "title" [--id slug]` scaffolds `run.json` and commits it on main with `MoE-Run` / `MoE-Project` trailers (slugs auto-suffix on collision; explicit `--id` is strict). Equivalent wrappers will be registered on future workflows (`moe kb new`, …).
+- [x] `moe work <project> <run> <document>` mints a UUID session id per document (stored in `run.json`), runs `claude` with `--session-id` (first turn) or `--resume` (subsequent turns), injects a minimal system prompt, and commits any document changes with the full trailer block. Per-run sandbox clones under `.moe/clones/` are provisioned for projects with a submodule.
 - [ ] Flesh out `moe work` to match the full README description: `-p`/`--output-format stream-json` headless flow, `--allowedTools` per document, `--model` from `agents.conf`, guidance-fragment assembly, upstream-document context injection, editor-based turn composition, streaming display, desktop notification on long runs, `thread.jsonl` audit log
-- [ ] `moe status` reads `request.json` glob, renders with `tabwriter`
-- [ ] `moe review` filters `git log --grep="MoE-Request: <id>"` and renders each document's current content
-- [ ] Run the loop manually against a real request. Iterate on the guidance fragments.
+- [ ] `moe status` reads `run.json` glob, renders with `tabwriter`
+- [ ] `moe review` filters `git log --grep="MoE-Run: <id>"` and renders each document's current content
+- [ ] Run the loop manually against a real run. Iterate on the guidance fragments.
 
-### Phase 2: Full Request Lifecycle
+### Phase 2: Full Run Lifecycle
 
-- [x] `moe sign <project> <request> <stage>` / `moe unsign` record `MoE-Stage-Signed` / `MoE-Stage-Unsigned` commit trailers, enforce `design` as a prerequisite of `code`, cascade unsigns to dependent stages, flip request status on `code`, and tear down the sandbox clone on `sign code`
-- [x] `moe push` publishes the bureaucracy (auto `-u origin HEAD` on first push)
+- [x] `moe sign <project> <run> <stage>` / `moe unsign` record `MoE-Stage-Signed` / `MoE-Stage-Unsigned` commit trailers, enforce `design` as a prerequisite of `code`, cascade unsigns to dependent stages, flip run status on `code`, and tear down the sandbox clone on `sign code`
+- [x] `moe sdlc push` publishes the bureaucracy (auto `-u origin HEAD` on first push)
 - [ ] Finish `moe sign code`: commit+push the target submodule, open a PR on the target remote (deferred side-effects like release notes live in Phase 4)
-- [ ] `moe scrap` — record rationale, flip request status (all on main)
+- [ ] `moe scrap` — record rationale, flip run status (all on main)
 - [ ] `moe history` — `git log` aggregation with cost totals from commit trailers
 - [ ] Additional per-doc fragments (implementation, test-plan, deploy-plan)
 - [ ] Project-level overrides
@@ -1103,18 +1090,18 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 - [x] `upstreamChangeBanner` in `moe work` surfaces re-signed prerequisite stages since the doc's last turn, with file path and diff command
 - [ ] `moe status` shows which downstream documents have pending upstream-change banners, plus per-doc last-turn timestamps
-- [ ] `moe review` renders the per-request synthesized view (filtered log + current doc contents + pending banners)
+- [ ] `moe review` renders the per-run synthesized view (filtered log + current doc contents + pending banners)
 - [ ] `moe work` optionally inlines current upstream-document content into the prompt, not just the banner pointer
 
 ### Phase 4: Derived Artifacts (Revisit)
 
-- [ ] Revisit what, if anything, should be derived from a completed request — release notes, decision summaries, backlog updates. Deferred from v1; design first, build only what earns its place against real requests.
+- [ ] Revisit what, if anything, should be derived from a completed run — release notes, decision summaries, backlog updates. Deferred from v1; design first, build only what earns its place against real runs.
 
 ### Phase 5: Code Editing
 
 - [ ] `docs/implementation.md` with initializer/continuation pattern guidance
 - [ ] `features.json` session continuity
-- [ ] `moe work <project> <request> implementation` with expanded `--allowedTools` scoped to the per-request sandbox clone
+- [ ] `moe work <project> <run> implementation` with expanded `--allowedTools` scoped to the per-run sandbox clone
 - [ ] Submodule commit/push/PR flow at `moe sign code` (push from the clone, bump the canonical submodule pointer)
 - [ ] Optional: Docker/SSH wrapper around `claude -p` for stronger (kernel-enforced) isolation on top of the clone
 
@@ -1122,8 +1109,8 @@ The Ministry's first project is itself. Build the minimum that can manage one re
 
 ### Phase 6: Ops Hooks (Future)
 
-- [ ] `docs/ops.md` / `stages/*` guidance for monitoring-driven requests
-- [ ] External triggers (cron, alerts) that spawn requests — **any trigger without a human at the keyboard must route to the Claude API under Commercial Terms, not Claude Code headless.** See Review Notes.
+- [ ] `docs/ops.md` / `stages/*` guidance for monitoring-driven runs
+- [ ] External triggers (cron, alerts) that spawn runs — **any trigger without a human at the keyboard must route to the Claude API under Commercial Terms, not Claude Code headless.** See Review Notes.
 - [ ] Cross-project queries (likely via shell scripts over `git log` + `jq`; real SQL is deferred until needed)
 
 ### Phase 7: Polish & Optional Web UI
@@ -1149,8 +1136,8 @@ Features not in v1. Not rejected — just sequenced after the minimum works.
 | DuckDB / SQL-queryable run history | Deferred | `git log` + commit trailers cover v1. Shell out to `sqlite3` or DuckDB later if needed. |
 | Anthropic Managed Agents backend | Rejected for core, narrow-yes for implementation work | See Review Notes. |
 | Managed sandbox providers (Docker, Daytona) | Deferred | `os/exec` wrapper around `claude -p` is sufficient when needed. |
-| Cross-project knowledge queries | Deferred | Revisit once enough requests exist to ask questions against `git log` + trailers. |
-| Yolo mode (`moe yolo <req> --through <stage>` — autonomously drafts every document and crosses every gate up to `<stage>`, including `deploy` if the operator asks for it; distinct from Claude Code's in-session `--dangerously-skip-permissions`, though yolo generally wants both) | Deferred | Every request passes human review at every turn and gate in v1. |
+| Cross-project knowledge queries | Deferred | Revisit once enough runs exist to ask questions against `git log` + trailers. |
+| Yolo mode (`moe yolo <req> --through <stage>` — autonomously drafts every document and crosses every gate up to `<stage>`, including `deploy` if the operator asks for it; distinct from Claude Code's in-session `--dangerously-skip-permissions`, though yolo generally wants both) | Deferred | Every run passes human review at every turn and gate in v1. |
 | Interactive TUI | Deferred | One-shot `moe dash` covers the prioritization/resumption problem. Revisit if navigation friction justifies a Bubble Tea or raw-termios TUI — but that would breach the stdlib-only stance, so only if the one-shot dashboard is demonstrably insufficient. |
 
 ---
@@ -1169,7 +1156,7 @@ _Open items from spec review — April 2026._
 
 1. **Multi-user future**: The initial design is single-operator. If consulting clients want visibility, do they get read-only access via the eventual web UI? Worth modeling in the data layer even if not built yet.
 
-2. **Request dependencies**: Requests can spawn other requests. How are cross-request dependencies tracked? Likely lightweight — a `spawned_from` field in `request.json` with a reference to the source request. Blocking dependencies (request B can't start until request A merges) can be enforced by `moe work` refusing to advance B's documents until A is approved.
+2. **Run dependencies**: Runs can spawn other runs. How are cross-run dependencies tracked? Likely lightweight — a `spawned_from` field in `run.json` with a reference to the source run. Blocking dependencies (run B can't start until run A merges) can be enforced by stage sessions refusing to advance B's documents until A is approved.
 
 ---
 

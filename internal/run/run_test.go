@@ -1,4 +1,4 @@
-package request
+package run
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 )
 
 // newTestRoot initializes a throwaway git repo with scoped config so
-// request.New can commit without touching ~/.gitconfig. Mirrors
+// run.New can commit without touching ~/.gitconfig. Mirrors
 // cli/stage_test.go#newTestBureaucracy.
 func newTestRoot(t *testing.T) string {
 	t.Helper()
@@ -41,11 +41,11 @@ func newTestRoot(t *testing.T) string {
 func TestNewRequiresWorkflow(t *testing.T) {
 	root := newTestRoot(t)
 	// Register the project so New's "project registered" check passes.
-	if err := os.MkdirAll(filepath.Join(root, "requests", "tele"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "projects", "tele"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(root, "requests", "tele", "project.json"),
+		filepath.Join(root, "projects", "tele", "project.json"),
 		[]byte(`{"id":"tele"}`),
 		0o644,
 	); err != nil {
@@ -63,7 +63,7 @@ func TestNewRequiresWorkflow(t *testing.T) {
 
 func TestLoadRequiresWorkflow(t *testing.T) {
 	root := newTestRoot(t)
-	runDir := filepath.Join(root, RunDir("tele", "fix-it"))
+	runDir := filepath.Join(root, Dir("tele", "fix-it"))
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +80,13 @@ func TestLoadRequiresWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runDir, "request.json"), b, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(runDir, "run.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err = Load(root, "tele", "fix-it")
 	if err == nil {
-		t.Fatal("expected error loading request.json without workflow key, got nil")
+		t.Fatal("expected error loading run.json without workflow key, got nil")
 	}
 	if !strings.Contains(err.Error(), "workflow is required") {
 		t.Fatalf("error should name the required field, got: %v", err)

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // TestWorkflowNextWalksStages exercises the satisfaction logic in the
@@ -17,7 +17,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := &request.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: request.StatusInProgress}
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after code: expected stage push, got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
-	md.Status = request.StatusPushed
+	md.Status = run.StatusPushed
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := &request.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: request.StatusInProgress}
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "r", "design", t0)
@@ -86,7 +86,7 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 // TestWorkflowNextUnknownWorkflow verifies LookupWorkflow surfaces a
 // useful error for typos — it's the first line of defense against
 // "workflow silently forgot what it was" bugs. Empty now errors the
-// same way: request.Load requires the field, so empty should never
+// same way: run.Load requires the field, so empty should never
 // reach LookupWorkflow in normal use.
 func TestWorkflowNextUnknownWorkflow(t *testing.T) {
 	for _, name := range []string{"bogus", ""} {
@@ -94,6 +94,23 @@ func TestWorkflowNextUnknownWorkflow(t *testing.T) {
 			t.Fatalf("expected error for unknown workflow %q", name)
 		} else if !strings.Contains(err.Error(), "known:") {
 			t.Fatalf("error should list known workflows, got: %v", err)
+		}
+	}
+}
+
+// TestWorkflowNewFacadeNotInStageLadder guards the contract that
+// RegisterFacade (used by `moe sdlc new`) adds to the dispatch table
+// without participating in the stage ladder. A regression here would
+// put "new" into Next()'s walk and make the workflow perpetually think
+// the run hasn't started.
+func TestWorkflowNewFacadeNotInStageLadder(t *testing.T) {
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range wf.Stages() {
+		if s == "new" {
+			t.Fatalf("`new` leaked into Stages(): %v", wf.Stages())
 		}
 	}
 }

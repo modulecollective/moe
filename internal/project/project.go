@@ -1,10 +1,17 @@
 // Package project registers target repos as submodules of the bureaucracy.
 //
 // Registration is a single atomic operation: detect the remote's default
-// branch, add it as a submodule under projects/<id>/, write the project.json
-// schema described in README §"Project (Target Repo)", and commit both on
-// main. The command lives on main because the README treats project
-// registration as settled state, not a request.
+// branch, add it as a submodule under projects/<id>/src/, write the
+// project.json schema described in README §"Project (Target Repo)", and
+// commit both on main. The command lives on main because the README
+// treats project registration as settled state, not a run.
+//
+// The submodule nests one level deep (projects/<id>/src/) so that
+// projects/<id>/ itself is a plain bureaucracy-tracked directory that
+// can hold project.json and the runs/ tree alongside the submodule
+// checkout. A submodule at projects/<id>/ directly would prevent git
+// from tracking any sibling files under the same path — the whole
+// directory would be a single gitlink entry.
 package project
 
 import (
@@ -19,7 +26,7 @@ import (
 	"time"
 )
 
-// Metadata is the on-disk shape of requests/<id>/project.json.
+// Metadata is the on-disk shape of projects/<id>/project.json.
 //
 // The id doubles as the project's display name — there is no separate Name
 // field. One name, derived from the URL, used everywhere.
@@ -41,8 +48,22 @@ type Options struct {
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// SubmoduleDir returns the path (relative to the bureaucracy root) of
+// the project's submodule checkout — projects/<id>/src/. One function so
+// callers don't re-spell the "src" convention.
+func SubmoduleDir(id string) string {
+	return filepath.Join("projects", id, "src")
+}
+
+// Dir returns the path (relative to the bureaucracy root) of the
+// project's state directory — projects/<id>/, which holds project.json,
+// runs/, and the submodule subdirectory.
+func Dir(id string) string {
+	return filepath.Join("projects", id)
+}
+
 // Register adds the repo at url as a submodule of the bureaucracy at root and
-// writes requests/<id>/project.json. Returns the resolved Metadata.
+// writes projects/<id>/project.json. Returns the resolved Metadata.
 func Register(root, url string, opts Options) (*Metadata, error) {
 	id, err := deriveID(url)
 	if err != nil {
@@ -52,8 +73,8 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 		return nil, fmt.Errorf("project: derived id %q from %q must match %s", id, url, idPattern)
 	}
 
-	submodulePath := filepath.Join("projects", id)
-	projectJSONPath := filepath.Join("requests", id, "project.json")
+	submodulePath := SubmoduleDir(id)
+	projectJSONPath := filepath.Join(Dir(id), "project.json")
 
 	if _, err := os.Stat(filepath.Join(root, submodulePath)); err == nil {
 		return nil, fmt.Errorf("project: %s already exists", submodulePath)
@@ -99,14 +120,14 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 	return md, nil
 }
 
-// Load reads requests/<id>/project.json and returns the resolved Metadata.
+// Load reads projects/<id>/project.json and returns the resolved Metadata.
 // Used by commands that operate against a registered project (e.g. dispatch,
 // push) to resolve Remote, DefaultBranch, and Submodule without re-deriving.
 func Load(root, id string) (*Metadata, error) {
 	if !idPattern.MatchString(id) {
 		return nil, fmt.Errorf("project: id %q must match %s", id, idPattern)
 	}
-	path := filepath.Join(root, "requests", id, "project.json")
+	path := filepath.Join(root, Dir(id), "project.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("project: read %s: %w", path, err)
@@ -182,29 +203,27 @@ func runGit(dir string, args ...string) error {
 }
 
 // Unregister is the inverse of Register: remove the submodule, delete
-// requests/<id>/, and commit. Refuses if the request directory holds
-// anything beyond project.json — that signals active work the caller
-// probably didn't mean to throw away.
+// projects/<id>/, and commit. Refuses if projects/<id>/ holds a runs/
+// tree — that signals active work the caller probably didn't mean to
+// throw away.
 func Unregister(root, id string) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("project: id %q must match %s", id, idPattern)
 	}
-	submodulePath := filepath.Join("projects", id)
-	requestsDir := filepath.Join("requests", id)
-	projectJSONPath := filepath.Join(requestsDir, "project.json")
+	submodulePath := SubmoduleDir(id)
+	projectDir := Dir(id)
+	projectJSONPath := filepath.Join(projectDir, "project.json")
 
 	if _, err := os.Stat(filepath.Join(root, projectJSONPath)); err != nil {
 		return fmt.Errorf("project: %s not registered (%s missing)", id, projectJSONPath)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(root, requestsDir))
-	if err != nil {
-		return fmt.Errorf("project: read %s: %w", requestsDir, err)
-	}
-	for _, e := range entries {
-		if e.Name() != "project.json" {
-			return fmt.Errorf("project: %s has %s — remove it manually first", requestsDir, e.Name())
-		}
+	// Refuse if any run dir exists under projects/<id>/runs/ — active
+	// work should be cleaned up (or the run scrapped) before tearing the
+	// project down.
+	runsDir := filepath.Join(root, projectDir, "runs")
+	if entries, err := os.ReadDir(runsDir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("project: %s has %d run(s) — remove them manually first", filepath.Join(projectDir, "runs"), len(entries))
 	}
 
 	// `git rm` handles both .gitmodules bookkeeping and the working-tree
@@ -218,16 +237,16 @@ func Unregister(root, id string) error {
 	}
 	// Leftover git metadata for the submodule; not tracked, so git won't
 	// clean it for us.
-	if err := os.RemoveAll(filepath.Join(root, ".git", "modules", "projects", id)); err != nil {
-		return fmt.Errorf("project: remove .git/modules/projects/%s: %w", id, err)
+	if err := os.RemoveAll(filepath.Join(root, ".git", "modules", "projects", id, "src")); err != nil {
+		return fmt.Errorf("project: remove .git/modules/projects/%s/src: %w", id, err)
 	}
 
 	if err := runGit(root, "rm", "-f", projectJSONPath); err != nil {
 		return fmt.Errorf("project: git rm project.json: %w", err)
 	}
-	// requests/<id>/ is now empty; git doesn't track directories, so delete it ourselves.
-	if err := os.Remove(filepath.Join(root, requestsDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("project: remove %s: %w", requestsDir, err)
+	// projects/<id>/ is now empty; git doesn't track directories, so delete it ourselves.
+	if err := os.Remove(filepath.Join(root, projectDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("project: remove %s: %w", projectDir, err)
 	}
 
 	msg := fmt.Sprintf("Unregister project %s", id)

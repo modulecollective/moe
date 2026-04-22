@@ -54,7 +54,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	}
 	abs, _ := filepath.Abs(dir)
 	moePrintf(stdout, "initialized bureaucracy at %s\n", abs)
-	moePrintln(stdout, "staged: bureaucracy.conf, projects/.gitkeep, requests/.gitkeep")
+	moePrintln(stdout, "staged: bureaucracy.conf, projects/.gitkeep")
 
 	if !stdinIsTerminal() {
 		moePrintln(stdout, "not a terminal — leaving staged; commit when ready.")

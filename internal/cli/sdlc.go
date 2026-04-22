@@ -7,18 +7,20 @@ import (
 
 // The SDLC workflow owns the design→code→push lifecycle. Stages are
 // nested under `moe sdlc` so kb (and future workflows) can pick their
-// own short stage names without collision.
+// own short stage names without collision. `moe sdlc new` is the entry
+// point that creates a run in this workflow.
 
 func init() {
-	sdlc := NewWorkflow("sdlc", "SDLC workflow stages: design, code, and push a request")
+	sdlc := NewWorkflow("sdlc", "SDLC workflow: new, design, code, push")
+	sdlc.RegisterFacade(newRunCommand("sdlc"))
 	sdlc.Register(&Command{
 		Name:    "design",
-		Summary: "open a Claude Code session on the request's design document",
+		Summary: "open a Claude Code session on the run's design document",
 		Run:     runDesign,
 	})
 	sdlc.Register(&Command{
 		Name:    "code",
-		Summary: "open a Claude Code session on the request's code document (in a sandbox clone)",
+		Summary: "open a Claude Code session on the run's code document (in a sandbox clone)",
 		Run:     runCode,
 	}, "design")
 	sdlc.Register(pushCmd, "code")
@@ -30,10 +32,10 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc design", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc design <project> <request>")
+		moePrintln(stderr, "usage: moe sdlc design <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the design canvas.")
-		moePrintln(stderr, "First use on a request creates the document; re-runs resume the session.")
+		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -57,7 +59,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc code <project> <request>")
+		moePrintln(stderr, "usage: moe sdlc code <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")

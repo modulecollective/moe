@@ -13,7 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/managed"
 	"github.com/modulecollective/moe/internal/project"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
@@ -41,7 +41,7 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 	dryRun := fs.Bool("dry-run", false, "print the /v1/sessions body instead of POSTing it")
 	force := fs.Bool("force", false, "replace an existing managed session id on the document")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe dispatch [--dry-run] [--force] <project> <request> <document>")
+		moePrintln(stderr, "usage: moe dispatch [--dry-run] [--force] <project> <run> <document>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Creates a session on Anthropic's Managed Agents API and records its")
 		moePrintln(stderr, "id on the document. Use `moe tail` to watch and `moe status` to")
@@ -58,7 +58,7 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, reqID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
+	projectID, runID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -71,7 +71,7 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	md, err := request.Load(root, projectID, reqID)
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -79,7 +79,7 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 	doc, ok := md.Documents[docID]
 	if !ok || doc.Session == "" {
 		moePrintf(stderr, "document %q not opened yet; run `moe %s %s %s %s` once first\n",
-			docID, md.Workflow, docID, projectID, reqID)
+			docID, md.Workflow, docID, projectID, runID)
 		return 1
 	}
 	if doc.Managed != "" && !*force && !*dryRun {
@@ -120,23 +120,23 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 	}
 
 	doc.Managed = resp.ID
-	if err := request.Save(root, md); err != nil {
-		moePrintf(stderr, "save request.json: %v\n", err)
+	if err := run.Save(root, md); err != nil {
+		moePrintf(stderr, "save run.json: %v\n", err)
 		return 1
 	}
 	// Commit so the session-id lands in the bureaucracy's history.
 	// Using a distinct subject ("dispatch") keeps stage-turn grepping
 	// (subject "work: update") clean.
-	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`dispatch: %s (managed %s)
 
-MoE-Request: %s
+MoE-Run: %s
 MoE-Project: %s
 MoE-Document: %s
 MoE-Session: %s
 MoE-Managed-Session: %s
 `, docID, resp.ID, md.ID, md.Project, docID, doc.Session, resp.ID)
-	if err := request.StageAndCommit(root, msg, reqJSON); err != nil {
+	if err := run.StageAndCommit(root, msg, runJSON); err != nil {
 		moePrintf(stderr, "commit dispatch record: %v\n", err)
 		return 1
 	}
@@ -158,13 +158,13 @@ MoE-Managed-Session: %s
 // creds. Real mode keeps the env-var string literally, which will
 // cause the server to reject the request — a loud failure is the
 // right signal.
-func buildDispatchSession(root string, md *request.Metadata, doc *request.Document, docID string, dryRun bool) (*managed.Session, error) {
+func buildDispatchSession(root string, md *run.Metadata, doc *run.Document, docID string, dryRun bool) (*managed.Session, error) {
 	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		return nil, err
 	}
 
-	// Pull the per-request sandbox clone into existence if it's not
+	// Pull the per-run sandbox clone into existence if it's not
 	// already there. We need it on disk so we can parse .gitmodules
 	// and read pinned SHAs for each submodule. The clone is cheap
 	// (APFS clonefile on macOS, plain copy elsewhere) and identical
@@ -210,7 +210,7 @@ func buildDispatchSession(root string, md *request.Metadata, doc *request.Docume
 		Prompt:           prompt,
 		Metadata: map[string]string{
 			"moe_project":      md.Project,
-			"moe_request":      md.ID,
+			"moe_run":          md.ID,
 			"moe_document":     docID,
 			"moe_session_uuid": doc.Session,
 		},
