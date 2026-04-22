@@ -278,6 +278,62 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 	}
 }
 
+func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	// Capture two ideas via the CLI so the file shape and commit
+	// trailers come straight from production code paths.
+	for _, title := range []string{"Cross-project search", "Faster dash load"} {
+		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup capture failed for %q", title)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "BACKLOG (2)") {
+		t.Fatalf("expected BACKLOG (2), got:\n%s", got)
+	}
+	for _, want := range []string{"cross-project-search", "Cross-project search", "faster-dash-load", "Faster dash load"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("backlog missing %q in:\n%s", want, got)
+		}
+	}
+	// Backlog sits between ACTIVE and RECENT.
+	activeIdx := strings.Index(got, "ACTIVE")
+	backlogIdx := strings.Index(got, "BACKLOG")
+	recentIdx := strings.Index(got, "RECENT")
+	if !(activeIdx < backlogIdx && backlogIdx < recentIdx) {
+		t.Fatalf("section order wrong (active=%d backlog=%d recent=%d):\n%s",
+			activeIdx, backlogIdx, recentIdx, got)
+	}
+}
+
+func TestDashBacklogEmptyShowsNone(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "BACKLOG (0)") {
+		t.Fatalf("expected empty BACKLOG section, got:\n%s", out.String())
+	}
+}
+
 func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
