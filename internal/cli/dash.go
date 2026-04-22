@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -171,14 +172,25 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 
 // classify decides which section a run lands in and what note to
 // render. In-progress runs with more work to do land in ACTIVE;
-// pushed or terminal-stage runs land in COMPLETED with the note
-// "done". Dormant runs are dropped unless the caller asked for --all.
+// pushed runs land in ACTIVE too with "awaiting merge: #<n>" since
+// the operator still owes a click on GitHub; merged and closed runs
+// land in COMPLETED. Dormant runs are dropped unless the caller asked
+// for --all.
 func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
-	if md.Status == run.StatusPushed {
-		return bucketCompletedRuns, "done", nil
+	switch md.Status {
+	case run.StatusPushed:
+		note := "awaiting merge"
+		if n, ok := prNumberForRun(root, md.ID); ok {
+			note = fmt.Sprintf("awaiting merge: #%s", n)
+		}
+		return bucketActiveRuns, note, nil
+	case run.StatusMerged:
+		return bucketCompletedRuns, "merged", nil
+	case run.StatusClosed:
+		return bucketCompletedRuns, "closed", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
@@ -202,6 +214,24 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		return bucketCompletedRuns, "done", nil
 	}
 	return bucketActiveRuns, next.Name, nil
+}
+
+// prNumberForRun finds the PR number recorded for runID by pulling
+// the MoE-PR URL from commit trailers and reading the number off the
+// end. Returns ("", false) when no MoE-PR trailer is on record — dash
+// then falls back to an unnumbered "awaiting merge" label.
+func prNumberForRun(root, runID string) (string, bool) {
+	url := trailerValue(root, runID, "MoE-PR")
+	if url == "" {
+		return "", false
+	}
+	if i := strings.LastIndex(url, "/"); i >= 0 {
+		n := strings.TrimSpace(url[i+1:])
+		if n != "" {
+			return n, true
+		}
+	}
+	return "", false
 }
 
 // humanAgo renders "Xd ago" / "Xh ago" / "just now". tabwriter-friendly
