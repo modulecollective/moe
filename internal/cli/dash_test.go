@@ -183,9 +183,11 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 	}
 }
 
-// TestDashPushedRunShowsDone: a run with StatusPushed renders as "done"
-// in the COMPLETED RUNS section.
-func TestDashPushedRunShowsDone(t *testing.T) {
+// TestDashPushedRunShowsAwaitingMerge: a run with StatusPushed renders
+// in ACTIVE RUNS with an "awaiting merge: #<n>" label so the operator
+// sees it still owes a click on GitHub. PR number comes from the
+// MoE-PR trailer.
+func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -193,7 +195,37 @@ func TestDashPushedRunShowsDone(t *testing.T) {
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
 	commitTrailer(t, root, "push: fix-it",
-		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/1",
+		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/42",
+		time.Now().UTC().Add(-2*24*time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+		t.Fatalf("expected pushed run in ACTIVE, got:\n%s", got)
+	}
+	if !containsRunRow(got, "tele", "fix-it", "#42") {
+		t.Fatalf("expected run row with PR number '#42', got:\n%s", got)
+	}
+	if !strings.Contains(got, "awaiting merge: #42") {
+		t.Fatalf("expected 'awaiting merge: #42' label, got:\n%s", got)
+	}
+}
+
+// TestDashMergedRunShowsMerged: a run with StatusMerged renders as
+// "merged" in COMPLETED RUNS.
+func TestDashMergedRunShowsMerged(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusMerged)
+	commitTrailer(t, root, "push: fix-it merged",
+		"MoE-Run: fix-it\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -203,10 +235,37 @@ func TestDashPushedRunShowsDone(t *testing.T) {
 	}
 	got := out.String()
 	if !strings.Contains(got, "COMPLETED RUNS (1)") {
-		t.Fatalf("expected one completed run row, got:\n%s", got)
+		t.Fatalf("expected merged run in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "done") {
-		t.Fatalf("expected run row with stage 'done', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "merged") {
+		t.Fatalf("expected run row with stage 'merged', got:\n%s", got)
+	}
+}
+
+// TestDashClosedRunShowsClosed: a run with StatusClosed (PR closed
+// without merging) renders as "closed" in COMPLETED RUNS.
+func TestDashClosedRunShowsClosed(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusClosed)
+	commitTrailer(t, root, "push: fix-it closed",
+		"MoE-Run: fix-it\nMoE-Closed: https://example.com/pr/42",
+		time.Now().UTC().Add(-2*24*time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "COMPLETED RUNS (1)") {
+		t.Fatalf("expected closed run in COMPLETED, got:\n%s", got)
+	}
+	if !containsRunRow(got, "tele", "fix-it", "closed") {
+		t.Fatalf("expected run row with stage 'closed', got:\n%s", got)
 	}
 }
 
@@ -398,13 +457,13 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// 12 pushed runs, oldest first so "newest-first" ordering pushes
+	// 12 merged runs, oldest first so "newest-first" ordering pushes
 	// the newer slugs to the top of the section.
 	for i := 0; i < 12; i++ {
 		slug := fmt.Sprintf("done-%02d", i)
-		seedRun(t, root, "tele", slug, "sdlc", run.StatusPushed)
-		commitTrailer(t, root, "push: "+slug,
-			"MoE-Run: "+slug+"\nMoE-PR: https://example.com/pr/"+slug,
+		seedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
+		commitTrailer(t, root, "push: "+slug+" merged",
+			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
 
@@ -418,7 +477,7 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		t.Fatalf("expected capped header, got:\n%s", got)
 	}
 	// Oldest two (done-00, done-01) should be dropped; newest (done-11) shown.
-	if !containsRunRow(got, "tele", "done-11", "done") {
+	if !containsRunRow(got, "tele", "done-11", "merged") {
 		t.Fatalf("expected newest completed run to render, got:\n%s", got)
 	}
 	for _, dropped := range []string{"done-00", "done-01"} {

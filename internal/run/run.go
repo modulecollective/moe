@@ -44,12 +44,16 @@ type Document struct {
 }
 
 // Run status values written to Metadata.Status. A run opens in
-// StatusInProgress and flips to StatusPushed when `moe sdlc push` opens
-// the PR on the target repo. Kept as a small closed set so moe dash and
-// related readers can bucket without string-typo risk.
+// StatusInProgress; `moe sdlc push` lands it in StatusMerged (the
+// default FF-merge path) or StatusPushed (`--pr`, waiting on the human
+// to merge or close on GitHub). `moe sync` then reconciles pushed runs
+// into StatusMerged or StatusClosed. Kept as a small closed set so
+// moe dash and related readers can bucket without string-typo risk.
 const (
 	StatusInProgress = "in_progress"
 	StatusPushed     = "pushed"
+	StatusMerged     = "merged"
+	StatusClosed     = "closed"
 )
 
 // Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.

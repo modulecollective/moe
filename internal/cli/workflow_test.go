@@ -46,13 +46,15 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after code: expected stage push, got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
-	md.Status = run.StatusPushed
-	next, kind, err = wf.Next(root, md)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if kind != NextKindDone || next != nil {
-		t.Fatalf("after pushed: expected done, got kind=%v name=%v", kind, nameOrNil(next))
+	for _, terminal := range []string{run.StatusPushed, run.StatusMerged, run.StatusClosed} {
+		md.Status = terminal
+		next, kind, err = wf.Next(root, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != NextKindDone || next != nil {
+			t.Fatalf("after %s: expected done, got kind=%v name=%v", terminal, kind, nameOrNil(next))
+		}
 	}
 }
 

@@ -142,11 +142,13 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 }
 
 // promptNextStage prints the next incomplete stage's exact invocation
-// and, on an interactive terminal, offers to run it in-process. Stages
-// with external side effects (push) default to N so a reflex Enter can
-// never ship a branch; the rest default to Y. Returns the exit code to
-// bubble up from the current stage: 0 on skip/decline/successful chain,
-// the inner command's exit code if the chained stage fails.
+// and, on an interactive terminal, offers to run it in-process. The
+// push stage is special-cased: two ship paths (merge/pr) make the
+// prompt three-way ([N/m/p]), and N-as-default preserves the rule that
+// an external-side-effect stage can't ship on a reflex Enter. All
+// other stages keep the Y-default yes/no prompt. Returns the exit
+// code to bubble up from the current stage: 0 on skip/decline/successful
+// chain, the inner command's exit code if the chained stage fails.
 func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -166,26 +168,45 @@ func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) in
 		moePrintf(stdout, "next: %s\n", hint)
 		return 0
 	}
-	defaultYes := next.Name != "push"
-	label := "[Y/n]"
-	if !defaultYes {
-		label = "[y/N]"
+	switch next.Name {
+	case "push":
+		return promptPushNextStage(next, md, hint, stdout, stderr)
 	}
-	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
+	moePrintf(stdout, "next: %s — run now? [Y/n] ", hint)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
-	accepted := defaultYes
-	if answer != "" {
-		accepted = strings.HasPrefix(answer, "y")
-	}
+	accepted := answer == "" || strings.HasPrefix(answer, "y")
 	if !accepted {
 		return 0
 	}
 	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+}
+
+// promptPushNextStage offers three choices: decline (default), merge
+// (`moe sdlc push`), or PR (`moe sdlc push --pr`). Parsing is
+// case-insensitive; the label capitalization just signals the default.
+// N-as-default is load-bearing — a reflex Enter must never ship.
+func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	switch answer {
+	case "m":
+		return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+	case "p":
+		return next.Run([]string{"--pr", md.Project, md.ID}, stdout, stderr)
+	}
+	// Anything else — blank, "n", or a typo — declines. Safer than
+	// guessing which ship path a garbled answer meant.
+	return 0
 }
 
 // buildSystemPrompt assembles the `--append-system-prompt` payload in the
