@@ -3,7 +3,6 @@ package executor
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -71,9 +70,7 @@ func TestResolveSRTDecisionTable(t *testing.T) {
 // TestEnsureSRTSettingsGeneratesValidJSON confirms the lazy write
 // produces a well-formed settings file with <root> substituted for the
 // absolute path. The resulting JSON must parse and expose the minimum
-// keys srt expects (filesystem.{allowWrite,denyWrite,denyRead},
-// network.{allowedDomains,deniedDomains}) — srt's schema validator
-// rejects configs missing denyWrite or deniedDomains.
+// keys srt expects (filesystem, network).
 func TestEnsureSRTSettingsGeneratesValidJSON(t *testing.T) {
 	root := t.TempDir()
 	p, err := ensureSRTSettings(root)
@@ -98,81 +95,32 @@ func TestEnsureSRTSettingsGeneratesValidJSON(t *testing.T) {
 		t.Fatalf("settings still contains literal <root>: %s", b)
 	}
 
-	// Use a map so "key present but empty" is distinguishable from "key
-	// absent" — srt's validator treats them differently.
-	var parsed map[string]map[string]json.RawMessage
+	var parsed struct {
+		Filesystem struct {
+			AllowWrite []string `json:"allowWrite"`
+			DenyRead   []string `json:"denyRead"`
+		} `json:"filesystem"`
+		Network struct {
+			AllowedDomains []string `json:"allowedDomains"`
+		} `json:"network"`
+	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
 		t.Fatalf("settings is not valid JSON: %v\n%s", err, b)
 	}
-	for _, key := range []string{"allowWrite", "denyWrite", "denyRead"} {
-		if _, ok := parsed["filesystem"][key]; !ok {
-			t.Fatalf("filesystem.%s key missing: %s", key, b)
-		}
+	if len(parsed.Filesystem.AllowWrite) == 0 {
+		t.Fatal("allowWrite is empty")
 	}
-	for _, key := range []string{"allowedDomains", "deniedDomains"} {
-		if _, ok := parsed["network"][key]; !ok {
-			t.Fatalf("network.%s key missing: %s", key, b)
-		}
+	if len(parsed.Filesystem.DenyRead) == 0 {
+		t.Fatal("denyRead is empty")
+	}
+	if len(parsed.Network.AllowedDomains) == 0 {
+		t.Fatal("allowedDomains is empty")
 	}
 	// First entry of allowWrite should be the absolute root so srt lets
 	// claude write into the clone and the transcript dir.
-	var allowWrite []string
-	if err := json.Unmarshal(parsed["filesystem"]["allowWrite"], &allowWrite); err != nil {
-		t.Fatal(err)
+	if parsed.Filesystem.AllowWrite[0] != absRoot {
+		t.Fatalf("allowWrite[0]: got %q want %q", parsed.Filesystem.AllowWrite[0], absRoot)
 	}
-	if len(allowWrite) == 0 || allowWrite[0] != absRoot {
-		t.Fatalf("allowWrite[0]: got %v want %q", allowWrite, absRoot)
-	}
-}
-
-// TestShellJoinSurvivesSrtArgMangling covers the arg forms that broke
-// moe against srt 1.0.0: multi-line strings, shell metacharacters,
-// embedded single quotes, and empty strings. srt's default mode runs
-// commandArgs.join(' ') through `sh -c` with zero escaping, so shellJoin
-// has to produce something sh can parse back into the original argv.
-func TestShellJoinSurvivesSrtArgMangling(t *testing.T) {
-	cases := [][]string{
-		{"echo", "hello"},
-		{"claude", "--append-system-prompt", "line1\nline2\nline3"},
-		{"sh", "-c", "echo $HOME && ls /"},
-		{"echo", "it's a \"quoted\" string"},
-		{"echo", ""},
-		{"echo", "has space", "simple"},
-	}
-	for _, argv := range cases {
-		cmd := shellJoin(argv)
-		// Re-parse by invoking sh -c with an argv-printer and comparing.
-		parsed, err := roundtripViaSh(cmd, len(argv))
-		if err != nil {
-			t.Fatalf("roundtrip %v: %v (cmd=%q)", argv, err, cmd)
-		}
-		if len(parsed) != len(argv) {
-			t.Fatalf("argc: got %d want %d (cmd=%q parsed=%v)", len(parsed), len(argv), cmd, parsed)
-		}
-		for i := range argv {
-			if parsed[i] != argv[i] {
-				t.Fatalf("argv[%d]: got %q want %q (cmd=%q)", i, parsed[i], argv[i], cmd)
-			}
-		}
-	}
-}
-
-// roundtripViaSh runs `sh -c 'printf %s\\0 "$@"' _ <cmd>` and splits on
-// NULs. The printf trick preserves every arg verbatim, including
-// newlines, so we can assert shellJoin produced a sh-parseable string.
-func roundtripViaSh(cmd string, _ int) ([]string, error) {
-	wrapped := `set -- ` + cmd + `; for a; do printf '%s\0' "$a"; done`
-	out, err := exec.Command("sh", "-c", wrapped).Output()
-	if err != nil {
-		return nil, err
-	}
-	s := string(out)
-	if s == "" {
-		return nil, nil
-	}
-	// Trailing NUL means the last field is empty — strip it.
-	s = strings.TrimSuffix(s, "\x00")
-	return strings.Split(s, "\x00"), nil
 }
 
 // TestEnsureSRTSettingsIdempotent ensures a second call is a no-op —

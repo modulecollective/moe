@@ -109,20 +109,15 @@ func (ClaudeCLI) Execute(r Request) error {
 
 	// Wrap the claude subprocess with srt (Anthropic Sandbox Runtime)
 	// for OS-level isolation — sandbox-exec on macOS, bubblewrap on
-	// Linux, plus a domain-filtering proxy. srt inherits cwd and stdio.
-	//
-	// srt's default mode joins argv with a bare space and runs the
-	// result through `sh -c` with no escaping, which mangles any arg
-	// containing whitespace, newlines, or shell metacharacters (moe's
-	// system prompt is multi-line). We pre-quote each arg and hand srt
-	// a ready-made command string via its `-c` mode instead.
+	// Linux, plus a domain-filtering proxy. srt inherits cwd and stdio,
+	// so the rest of this function is unchanged.
 	srtBin, cfg, err := resolveSRT(r.Root, os.Getenv("MOE_SANDBOX"))
 	if err != nil {
 		return err
 	}
 	if srtBin != "" {
 		name = srtBin
-		args = []string{"--settings", cfg, "-c", shellJoin(append([]string{bin}, args...))}
+		args = append([]string{"--settings", cfg, bin}, args...)
 		if r.Stderr != nil {
 			termout.Printf(r.Stderr, "moe: sandboxing claude via srt (%s)\n", cfg)
 		}
@@ -229,9 +224,7 @@ func ensureSRTSettings(root string) (string, error) {
 // without handing it access to ~/.ssh, cloud creds, or browser
 // profiles. allowedDomains is the minimum network set Claude needs for
 // normal moe work — the operator is expected to extend it as real
-// projects demand more. denyWrite and deniedDomains are required keys
-// in srt's config schema; we ship them empty because allowWrite and
-// allowedDomains are already restrictive.
+// projects demand more.
 const srtSettingsTemplate = `{
   "filesystem": {
     "allowWrite": [
@@ -242,7 +235,6 @@ const srtSettingsTemplate = `{
       "~/Library/Caches/go-build",
       "~/.claude"
     ],
-    "denyWrite": [],
     "denyRead": [
       "~/.ssh",
       "~/.aws",
@@ -262,45 +254,7 @@ const srtSettingsTemplate = `{
       "proxy.golang.org",
       "sum.golang.org",
       "registry.npmjs.org"
-    ],
-    "deniedDomains": []
+    ]
   }
 }
 `
-
-// shellJoin POSIX-quotes each arg and joins them with spaces, producing
-// a command string safe to pass to `sh -c`. Used to work around srt's
-// default-mode arg handling, which joins argv without escaping.
-func shellJoin(args []string) string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = shellQuote(a)
-	}
-	return strings.Join(out, " ")
-}
-
-// shellQuote returns s wrapped in single quotes with any embedded single
-// quote escaped as '\''. Single-quote wrapping disables all shell
-// interpretation (whitespace, $, backticks, \, newlines) so the arg
-// survives `sh -c` unchanged.
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	safe := true
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '_', r == '-', r == '/', r == '.', r == '=', r == ':', r == ',', r == '@', r == '+':
-		default:
-			safe = false
-		}
-		if !safe {
-			break
-		}
-	}
-	if safe {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
