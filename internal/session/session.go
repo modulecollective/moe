@@ -25,7 +25,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,13 +118,18 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	}, nil
 }
 
-// Close lands the session branch on main and cleans up the worktree.
-// Caller must hold the repo lock.
+// Close lands the session branch on local main and cleans up the
+// worktree. Caller must hold the repo lock.
+//
+// Pushing to origin is intentionally NOT part of close — the lock is
+// scoped to same-machine concurrency, and `moe sync` is the explicit
+// origin-push point. Making every session exit block on the network
+// would add no correctness and a lot of latency.
 //
 // On rebase failure, the rebase is aborted, the worktree and branch
 // are left intact, and the error names both so the operator can
 // resolve by hand or run `moe session abandon`.
-func Close(s *Session, stdout, stderr io.Writer) error {
+func Close(s *Session) error {
 	// Record the pre-rebase tip for the old-value check on the main
 	// ref update, so a concurrent writer (not us — we hold the lock)
 	// can't cause silent data loss.
@@ -134,10 +138,9 @@ func Close(s *Session, stdout, stderr io.Writer) error {
 		return fmt.Errorf("session close: resolve main: %w", err)
 	}
 
-	// Rebase inside the worktree. We deliberately do not run `git
-	// fetch` or rebase onto origin/main — bureaucracy pushes happen
-	// through `moe sync`, which holds the same repo lock. Under the
-	// lock, local main is the source of truth.
+	// Rebase inside the worktree. We don't fetch origin first —
+	// bureaucracy pushes happen through `moe sync`, which holds the
+	// same repo lock. Under the lock, local main is the source of truth.
 	if out, err := runGit(s.WorktreePath, "rebase", "main"); err != nil {
 		_, _ = runGit(s.WorktreePath, "rebase", "--abort")
 		return fmt.Errorf(
@@ -165,15 +168,6 @@ func Close(s *Session, stdout, stderr io.Writer) error {
 		if out, err := runGit(s.Root, "update-ref", "refs/heads/main", tip, mainBefore); err != nil {
 			return fmt.Errorf("session close: fast-forward main from %s to %s: %w (%s)",
 				short(mainBefore), short(tip), err, strings.TrimSpace(out))
-		}
-	}
-
-	// Best-effort push. If there's no origin, or the push fails
-	// (network, auth, non-ff), warn and continue — main has already
-	// advanced locally and that state is valid.
-	if hasOrigin(s.Root) && stderr != nil {
-		if out, err := runGit(s.Root, "push", "origin", "main"); err != nil {
-			fmt.Fprintf(stderr, "session close: push origin main: %v\n%s\n", err, strings.TrimSpace(out))
 		}
 	}
 
@@ -362,11 +356,6 @@ func gitRevParse(dir, ref string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
-}
-
-func hasOrigin(root string) bool {
-	_, err := runGitOut(root, "remote", "get-url", "origin")
-	return err == nil
 }
 
 func newUUID() (string, error) {

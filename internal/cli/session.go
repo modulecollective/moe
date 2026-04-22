@@ -123,11 +123,7 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	err = withRepoLock(root, repolock.Options{
-		Purpose:   "session-resolve",
-		Budget:    repolock.CronBudget,
-		Heartbeat: true,
-	}, func() error {
+	err = withRepoLock(root, repolock.Options{Purpose: "session-resolve"}, func() error {
 		s, err := session.FindByBranch(root, branch)
 		if err != nil {
 			return err
@@ -138,7 +134,7 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 		if s.WorktreePath == "" {
 			return fmt.Errorf("branch %q has no worktree; use `moe session abandon %s` to drop the branch", branch, branch)
 		}
-		return session.Close(s, stdout, stderr)
+		return session.Close(s)
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

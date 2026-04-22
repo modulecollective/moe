@@ -159,16 +159,14 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 	// operator may have chosen to bail mid-edit but kept the edits.
 	commitErr := commitTurn(workRoot, md, docID)
 
-	// Close the session: land it on main and tear the worktree down.
-	// Longer budget + heartbeat because the close window does real work
-	// (rebase, ff-merge, optional push) and may sit on the network.
+	// Close the session: land it on local main and tear the worktree
+	// down. Local-only — origin push is moe sync's job — so a short
+	// budget and no heartbeat are fine.
 	closeErr := withRepoLock(root, repolock.Options{
-		Purpose:   "stage-close",
-		Run:       projectID + "/" + runID,
-		Budget:    repolock.CronBudget,
-		Heartbeat: true,
+		Purpose: "stage-close",
+		Run:     projectID + "/" + runID,
 	}, func() error {
-		return session.Close(sess, stdout, stderr)
+		return session.Close(sess)
 	})
 
 	if runErr != nil {

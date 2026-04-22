@@ -1,7 +1,6 @@
 package session
 
 import (
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +74,7 @@ func TestOpenCloseRoundtrip(t *testing.T) {
 	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md",
 		"# Design\nhello\n", "work: update design")
 
-	if err := Close(s, io.Discard, io.Discard); err != nil {
+	if err := Close(s); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -182,7 +181,7 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 		}
 	}
 
-	err = Close(s, io.Discard, io.Discard)
+	err = Close(s)
 	if err == nil {
 		t.Fatal("expected rebase conflict error, got nil")
 	}
