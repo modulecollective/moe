@@ -44,12 +44,12 @@ type Document struct {
 }
 
 // Request status values written to Metadata.Status. A request opens in
-// StatusInProgress and flips to StatusApproved when the `code` stage is
-// signed; unsigning `code` flips it back. Kept as a small closed set so
-// moe dash and related readers can bucket without string-typo risk.
+// StatusInProgress and flips to StatusPushed when `moe push` opens the
+// PR on the target repo. Kept as a small closed set so moe dash and
+// related readers can bucket without string-typo risk.
 const (
 	StatusInProgress = "in_progress"
-	StatusApproved   = "approved"
+	StatusPushed     = "pushed"
 )
 
 // Metadata is the on-disk shape of requests/<project>/runs/<id>/request.json.

@@ -150,9 +150,9 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 // classify decides which bucket a request lands in. See designs/dash.md
 // for which attention-filter rules are live today versus deferred.
 func classify(root string, md *request.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
-	if md.Status == request.StatusApproved {
+	if md.Status == request.StatusPushed {
 		if !last.IsZero() && now.Sub(last) <= recentWindow {
-			return bucketRecent, fmt.Sprintf("approved %s", humanAgo(now, last)), nil
+			return bucketRecent, fmt.Sprintf("pushed %s", humanAgo(now, last)), nil
 		}
 		return bucketNone, "", nil
 	}

@@ -189,7 +189,7 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", request.StatusApproved)
+	seedRequest(t, root, "tele", "fix-it", request.StatusPushed)
 	// An approved request needs a recent commit so LastActivity doesn't
 	// return the opening commit's time (which would still be recent in
 	// a freshly-made fixture, so this is belt-and-suspenders).
@@ -206,8 +206,8 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 	if !strings.Contains(got, "RECENT (last 7 days) (1)") {
 		t.Fatalf("expected recent row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "approved") {
-		t.Fatalf("expected 'approved' in note, got:\n%s", got)
+	if !strings.Contains(got, "pushed") {
+		t.Fatalf("expected 'pushed' in note, got:\n%s", got)
 	}
 }
 

@@ -130,8 +130,8 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 
 	// Only the first push flips status and records the MoE-PR trailer.
 	// Re-runs just pushed branch updates to an already-recorded PR.
-	if md.Status != request.StatusApproved {
-		md.Status = request.StatusApproved
+	if md.Status != request.StatusPushed {
+		md.Status = request.StatusPushed
 		if err := request.Save(root, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
