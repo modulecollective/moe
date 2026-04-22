@@ -186,9 +186,10 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 
 MoE-Run: %s
 MoE-Project: %s
+MoE-Workflow: %s
 MoE-Document: push
 MoE-PR: %s
-`, md.Project, md.ID, md.ID, md.Project, url)
+`, md.Project, md.ID, md.ID, md.Project, md.Workflow, url)
 		err := withRepoLock(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
@@ -232,9 +233,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 
 MoE-Run: %s
 MoE-Project: %s
+MoE-Workflow: %s
 MoE-Document: push
 MoE-Merged: %s
-`, md.Project, md.ID, md.ID, md.Project, tipSHA)
+`, md.Project, md.ID, md.ID, md.Project, md.Workflow, tipSHA)
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
