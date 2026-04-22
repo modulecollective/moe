@@ -70,14 +70,11 @@ func RegisterWorkflow(w *Workflow) {
 	workflows[w.Name] = w
 }
 
-// LookupWorkflow returns the registered workflow named name. An empty
-// name resolves to "sdlc" — the default for records that predate
-// Metadata.Workflow. An unknown name returns a listing of what is
-// registered so the operator can see the typo.
+// LookupWorkflow returns the registered workflow named name. An unknown
+// or empty name returns a listing of what is registered so the operator
+// can see the typo; Metadata.Workflow is required on disk, so an empty
+// name reaching here is a bug upstream rather than a normal default.
 func LookupWorkflow(name string) (*Workflow, error) {
-	if name == "" {
-		name = "sdlc"
-	}
 	w, ok := workflows[name]
 	if !ok {
 		return nil, fmt.Errorf("workflow %q not registered (known: %v)", name, WorkflowNames())

@@ -37,7 +37,7 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("request new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
-	workflow := fs.String("workflow", request.DefaultWorkflow, "workflow this request belongs to (sdlc is the only one today)")
+	workflow := fs.String("workflow", "sdlc", "workflow this request belongs to (sdlc is the only one today)")
 	fs.Usage = func() {
 		moePrintln(stderr, `usage: moe request new [--workflow <name>] [--id <slug>] <project> "title"`)
 		fs.PrintDefaults()

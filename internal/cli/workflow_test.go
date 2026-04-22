@@ -85,16 +85,16 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 
 // TestWorkflowNextUnknownWorkflow verifies LookupWorkflow surfaces a
 // useful error for typos — it's the first line of defense against
-// "workflow silently forgot what it was" bugs.
+// "workflow silently forgot what it was" bugs. Empty now errors the
+// same way: request.Load requires the field, so empty should never
+// reach LookupWorkflow in normal use.
 func TestWorkflowNextUnknownWorkflow(t *testing.T) {
-	if _, err := LookupWorkflow("bogus"); err == nil {
-		t.Fatal("expected error for unknown workflow")
-	} else if !strings.Contains(err.Error(), "known:") {
-		t.Fatalf("error should list known workflows, got: %v", err)
-	}
-	// Empty name defaults to sdlc.
-	if _, err := LookupWorkflow(""); err != nil {
-		t.Fatalf("empty name should default to sdlc, got: %v", err)
+	for _, name := range []string{"bogus", ""} {
+		if _, err := LookupWorkflow(name); err == nil {
+			t.Fatalf("expected error for unknown workflow %q", name)
+		} else if !strings.Contains(err.Error(), "known:") {
+			t.Fatalf("error should list known workflows, got: %v", err)
+		}
 	}
 }
 

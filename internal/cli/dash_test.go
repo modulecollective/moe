@@ -32,6 +32,7 @@ func seedRequest(t *testing.T, root, projectID, reqID, status string) *request.M
 		Project:   projectID,
 		Title:     "T",
 		Status:    status,
+		Workflow:  "sdlc",
 		Created:   "2026-04-01",
 		Documents: map[string]*request.Document{},
 	}
