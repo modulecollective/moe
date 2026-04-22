@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,6 +41,8 @@ func runIdea(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "add":
 		return runIdeaAdd(args[1:], stdout, stderr)
+	case "edit":
+		return runIdeaEdit(args[1:], stdout, stderr)
 	case "remove":
 		return runIdeaRemove(args[1:], stdout, stderr)
 	case "list":
@@ -56,6 +59,7 @@ func printIdeaUsage(w io.Writer) {
 	moePrintln(w, "")
 	moePrintln(w, "subcommands:")
 	moePrintf(w, "  %-14s  %s\n", "add", "capture a new idea (writes a stub and opens $EDITOR)")
+	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea in $EDITOR and commit the changes")
 	moePrintf(w, "  %-14s  %s\n", "remove", "delete a captured idea and commit the removal")
 	moePrintf(w, "  %-14s  %s\n", "list", "list this project's captured ideas")
 }
@@ -159,6 +163,96 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 	}
 
 	moePrintf(stdout, "captured idea %s/%s\n%s\n", projectID, slug, abs)
+	return editorCode
+}
+
+// runIdeaEdit reopens a captured idea in $EDITOR and lands any saves
+// as a single `Refine idea …` commit. No-op saves do not produce an
+// empty commit. Kept separate from runIdeaAdd because add resolves a
+// brand-new slug (collisions error) while edit requires an existing
+// slug (miss errors) — opposite checks would only waste a mode flag
+// if merged.
+func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea edit <project> <slug>\n")
+	}
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	projectID := fs.Arg(0)
+	slug := fs.Arg(1)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	root, err := bureaucracy.Find(cwd, os.Getenv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
+		moePrintf(stderr, "idea: project %s not registered (%s missing)\n",
+			projectID, filepath.Join("projects", projectID, "project.json"))
+		return 1
+	}
+
+	dirty, err := run.WorkingTreeDirty(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if dirty {
+		moePrintln(stderr, "idea: working tree has uncommitted changes; commit or stash first")
+		return 1
+	}
+
+	rel := ideaPath(projectID, slug)
+	abs := filepath.Join(root, rel)
+	if _, err := os.Stat(abs); err != nil {
+		moePrintf(stderr, "idea: %s does not exist; run `moe idea list %s` to see captured ideas\n",
+			rel, projectID)
+		return 1
+	}
+
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea edit needs an editor")
+		return 1
+	}
+
+	editorCode := launchEditor(abs, stdout, stderr)
+
+	// Title for the commit subject tracks the current H1 (post-edit),
+	// with the slug as the same fallback scanIdeas already uses. If the
+	// operator blanked the H1, the slug keeps the history greppable.
+	title, err := readIdeaTitle(abs)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if title == "" {
+		title = slug
+	}
+
+	msg := fmt.Sprintf("Refine idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
+		projectID, slug, title, slug, projectID)
+	err = run.StageAndCommit(root, msg, rel)
+	switch {
+	case errors.Is(err, run.ErrNothingToCommit):
+		moePrintf(stdout, "idea %s/%s unchanged\n", projectID, slug)
+	case err != nil:
+		moePrintf(stderr, "idea: commit: %v\n", err)
+		return 1
+	default:
+		moePrintf(stdout, "refined idea %s/%s\n", projectID, slug)
+	}
 	return editorCode
 }
 

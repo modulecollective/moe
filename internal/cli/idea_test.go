@@ -64,7 +64,7 @@ func TestIdeaRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"add", "remove", "list"} {
+	for _, want := range []string{"add", "edit", "remove", "list"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("idea usage missing subcommand %q: %q", want, out.String())
 		}
@@ -344,6 +344,155 @@ func TestIdeaListEmptyProjectIsZero(t *testing.T) {
 	}
 	if out.String() != "" {
 		t.Fatalf("expected empty stdout for project with no ideas, got: %q", out.String())
+	}
+}
+
+// Editor edits to an existing idea land as a single `Refine idea …`
+// commit. Title in the commit subject tracks the current H1 after
+// the edit.
+func TestIdeaEditCommitsEditorEdits(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "add", "tele", "Starter"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+
+	// Fake editor: rewrite the idea to a new title + body so we can
+	// assert on both the commit subject and the on-disk content.
+	script := filepath.Join(t.TempDir(), "refine-editor.sh")
+	body := "#!/bin/sh\ncat > \"$1\" <<BODY\n# Starter refined\n\n- a bullet\nBODY\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "tele", "starter"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "refined idea tele/starter") {
+		t.Fatalf("missing refine confirmation: %q", out.String())
+	}
+
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "Refine idea tele/starter: Starter refined") {
+		t.Fatalf("commit subject wrong:\n%s", head)
+	}
+	for _, want := range []string{"MoE-Idea: starter", "MoE-Project: tele"} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("commit missing trailer %q:\n%s", want, head)
+		}
+	}
+
+	// Tree clean after the refine commit.
+	status := exec.Command("git", "-C", root, "status", "--porcelain")
+	st, err := status.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, st)
+	}
+	if len(bytes.TrimSpace(st)) != 0 {
+		t.Fatalf("tree should be clean after refine, got:\n%s", st)
+	}
+}
+
+// A no-op save must not produce an empty `Refine idea …` commit.
+func TestIdeaEditNoChangeDoesNotCommit(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "add", "tele", "Leave it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+
+	beforeHead := gitLog(t, root, "-1", "--format=%H")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "tele", "leave-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "unchanged") {
+		t.Fatalf("expected 'unchanged' message on no-op, got: %q", out.String())
+	}
+
+	afterHead := gitLog(t, root, "-1", "--format=%H")
+	if beforeHead != afterHead {
+		t.Fatalf("no-op edit created a commit:\nbefore=%safter=%s", beforeHead, afterHead)
+	}
+}
+
+func TestIdeaEditMissingSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "tele", "ghost"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on missing idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "does not exist") {
+		t.Fatalf("expected missing-idea error, got: %q", errb.String())
+	}
+}
+
+func TestIdeaEditRequiresEditor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	stubEditor(t)
+	if code := Run([]string{"idea", "add", "tele", "Ed gate"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "tele", "ed-gate"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero with no editor, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "EDITOR") || !strings.Contains(errb.String(), "VISUAL") {
+		t.Fatalf("expected error naming $EDITOR/$VISUAL, got: %q", errb.String())
+	}
+}
+
+func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "add", "tele", "Busy"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "tele", "busy"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "uncommitted changes") {
+		t.Fatalf("expected dirty-tree error, got: %q", errb.String())
 	}
 }
 
