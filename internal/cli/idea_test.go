@@ -621,6 +621,116 @@ func TestIdeaRemoveUsageErrorsOnMissingArgs(t *testing.T) {
 	}
 }
 
+// buildIdeaChatPrompt should include soul.md, the stages/idea/<mode>.md
+// fragment, and the operational core naming the canvas file.
+func TestBuildIdeaChatPromptHasAllSections(t *testing.T) {
+	got := buildIdeaChatPrompt("/tmp/ideas/foo.md", "capture")
+	for _, want := range []string{
+		"/tmp/ideas/foo.md",
+		"Stage: idea capture",
+		"pre-design shelf",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("capture prompt missing %q:\n%s", want, got)
+		}
+	}
+	got = buildIdeaChatPrompt("/tmp/ideas/bar.md", "refine")
+	if !strings.Contains(got, "Stage: idea refine") {
+		t.Fatalf("refine prompt missing refine fragment:\n%s", got)
+	}
+}
+
+// --chat bypasses the $EDITOR gate. We can't spawn a real claude
+// binary in tests, so point $PATH at a tempdir with a fake `claude`
+// executable that simply writes to the canvas file and exits 0. That
+// lets us assert the full flow end-to-end: no editor required, the
+// chat "session" produced edits, and the capture commit recorded them.
+func TestIdeaAddChatSkipsEditorGate(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	// Real claude would write to the canvas file based on the system
+	// prompt. The fake simulates that by walking every idea file under
+	// cwd (which runIdeaChat sets to root) and appending to it.
+	fakeClaudeOnPath(t, `#!/bin/sh
+for f in "$PWD"/projects/*/ideas/*.md; do
+  [ -f "$f" ] && printf 'written by fake claude\n' >> "$f"
+done
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "add", "--chat", "tele", "Chat capture"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "captured idea tele/chat-capture") {
+		t.Fatalf("missing capture confirmation: %q out=%q err=%q", out.String(), out.String(), errb.String())
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "ideas", "chat-capture.md"))
+	if err != nil {
+		t.Fatalf("idea file missing: %v", err)
+	}
+	if !strings.Contains(string(body), "written by fake claude") {
+		t.Fatalf("expected fake-claude edit on disk: %q", body)
+	}
+}
+
+func TestIdeaEditChatSkipsEditorGate(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	stubEditor(t)
+	if code := Run([]string{"idea", "add", "tele", "Chat refine"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	noEditor(t)
+
+	fakeClaudeOnPath(t, `#!/bin/sh
+for f in "$PWD"/projects/*/ideas/*.md; do
+  [ -f "$f" ] && printf '\nrefined by fake claude\n' >> "$f"
+done
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "edit", "--chat", "tele", "chat-refine"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "refined idea tele/chat-refine") {
+		t.Fatalf("missing refine confirmation: %q", out.String())
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "ideas", "chat-refine.md"))
+	if err != nil {
+		t.Fatalf("idea file missing: %v", err)
+	}
+	if !strings.Contains(string(body), "refined by fake claude") {
+		t.Fatalf("expected fake-claude edit on disk: %q", body)
+	}
+}
+
+// fakeClaudeOnPath drops an executable named `claude` into a tempdir
+// and prepends that dir to $PATH so exec.LookPath("claude") finds it.
+// Script contents are the argument to the shebang — the caller writes
+// the shell body.
+func fakeClaudeOnPath(t *testing.T, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "claude")
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // gitLog runs `git -C root log <args>` and returns its stdout.
 func gitLog(t *testing.T, root string, args ...string) string {
 	t.Helper()

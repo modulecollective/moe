@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -58,8 +59,8 @@ func printIdeaUsage(w io.Writer) {
 	moePrintln(w, "usage: moe idea <subcommand> [args...]")
 	moePrintln(w, "")
 	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "add", "capture a new idea (writes a stub and opens $EDITOR)")
-	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea in $EDITOR and commit the changes")
+	moePrintf(w, "  %-14s  %s\n", "add", "capture a new idea (opens $EDITOR, or --chat for Claude Code)")
+	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea ($EDITOR, or --chat for Claude Code)")
 	moePrintf(w, "  %-14s  %s\n", "remove", "delete a captured idea and commit the removal")
 	moePrintf(w, "  %-14s  %s\n", "list", "list this project's captured ideas")
 }
@@ -85,8 +86,9 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
+	chat := fs.Bool("chat", false, "open a Claude Code session on the new idea instead of $EDITOR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea add [--id <slug>] <project> \"title\"\n")
+		moePrintf(stderr, "usage: moe idea add [--id <slug>] [--chat] <project> \"title\"\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
@@ -135,8 +137,8 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea add needs an editor")
+	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea add needs an editor")
 		return 1
 	}
 
@@ -151,10 +153,16 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea: write %s: %v\n", rel, err)
 		return 1
 	}
-	// Open the editor first and commit whatever's on disk afterward, so the
-	// operator's saved content lands in the capture commit. If they quit
-	// without editing, the stub itself is still a valid capture.
-	editorCode := launchEditor(abs, stdout, stderr)
+	// Open the editor (or --chat session) first and commit whatever's on
+	// disk afterward, so the operator's saved content lands in the capture
+	// commit. If they quit without editing, the stub itself is still a
+	// valid capture.
+	var editorCode int
+	if *chat {
+		editorCode = runIdeaChat(root, abs, "capture", stdout, stderr)
+	} else {
+		editorCode = launchEditor(abs, stdout, stderr)
+	}
 	msg := fmt.Sprintf("Capture idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
 		projectID, slug, title, slug, projectID)
 	if err := run.StageAndCommit(root, msg, rel); err != nil {
@@ -175,8 +183,10 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	chat := fs.Bool("chat", false, "open a Claude Code session on the idea instead of $EDITOR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit <project> <slug>\n")
+		moePrintf(stderr, "usage: moe idea edit [--chat] <project> <slug>\n")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -222,12 +232,17 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea edit needs an editor")
+	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea edit needs an editor")
 		return 1
 	}
 
-	editorCode := launchEditor(abs, stdout, stderr)
+	var editorCode int
+	if *chat {
+		editorCode = runIdeaChat(root, abs, "refine", stdout, stderr)
+	} else {
+		editorCode = launchEditor(abs, stdout, stderr)
+	}
 
 	// Title for the commit subject tracks the current H1 (post-edit),
 	// with the slug as the same fallback scanIdeas already uses. If the
@@ -485,6 +500,80 @@ func resolveIdeaSlug(root, projectID, override, title string) (string, error) {
 			return c, nil
 		}
 	}
+}
+
+// runIdeaChat launches an interactive Claude Code session on the idea
+// file. mode is "capture" (new idea) or "refine" (existing idea) and
+// selects which stages/idea fragment seeds the system prompt. Unlike
+// stage-session chats this one is one-shot: no --session-id, no
+// thread persistence, no per-turn commits. When the operator exits
+// claude, the caller stages & commits whatever landed on disk.
+func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		moePrintf(stderr, "idea: claude CLI not found on PATH: %v\n", err)
+		return 1
+	}
+
+	prompt := buildIdeaChatPrompt(abs, mode)
+
+	var kickoff string
+	switch mode {
+	case "capture":
+		kickoff = "The operator just captured a new idea. Read the canvas " +
+			"file first. If the title is ambiguous, ask one clarifying " +
+			"question; otherwise write a terse body (one to ten bullets) " +
+			"directly to the file and stop."
+	case "refine":
+		kickoff = "The operator just opened an existing idea to refine. " +
+			"Read the canvas file first, then ask what they'd like to " +
+			"sharpen. Wait for their reply before editing."
+	}
+
+	args := []string{
+		"--add-dir", root,
+		"--append-system-prompt", prompt,
+	}
+	if kickoff != "" {
+		args = append(args, kickoff)
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = root
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		moePrintf(stderr, "idea: chat session exited: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// buildIdeaChatPrompt assembles the --append-system-prompt payload for
+// an idea chat session: soul → stages/idea/<mode>.md → a minimal
+// operational core naming the canvas file. Deliberately narrower than
+// buildSystemPrompt (used by stage sessions), which is tied to
+// run.Metadata and per-document thread files that ideas don't have.
+func buildIdeaChatPrompt(abs, mode string) string {
+	var sections []string
+	if soul := moe.Soul(); soul != "" {
+		sections = append(sections, soul)
+	}
+	if frag := moe.Stage("idea", mode); frag != "" {
+		sections = append(sections, frag)
+	}
+	sections = append(sections, fmt.Sprintf(
+		`You are helping the operator capture or refine an *idea* in a
+Ministry of Everything bureaucracy repo. Ideas are a pre-design shelf:
+terse, unstructured, meant to be cheap to record.
+
+Your canvas is the single file:
+  %s
+
+Edit the file directly — do not propose a diff. When the idea is
+captured (or the operator says they're done refining), stop. Do not
+design, plan, or open follow-ups.`, abs))
+	return strings.Join(sections, "\n---\n\n")
 }
 
 // launchEditor opens path in $VISUAL or $EDITOR with stdio wired to
