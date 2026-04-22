@@ -125,8 +125,8 @@ func runDispatch(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Commit so the session-id lands in the bureaucracy's history.
-	// Using a distinct subject ("dispatch") keeps `moe work` turn
-	// grepping (subject "work: update") clean.
+	// Using a distinct subject ("dispatch") keeps stage-turn grepping
+	// (subject "work: update") clean.
 	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
 	msg := fmt.Sprintf(`dispatch: %s (managed %s)
 
@@ -168,7 +168,7 @@ func buildDispatchSession(root string, md *request.Metadata, doc *request.Docume
 	// already there. We need it on disk so we can parse .gitmodules
 	// and read pinned SHAs for each submodule. The clone is cheap
 	// (APFS clonefile on macOS, plain copy elsewhere) and identical
-	// to what `moe work` would produce.
+	// to what `moe sdlc code` would produce.
 	clonePath, err := sandbox.Ensure(root, md.Project, md.ID)
 	if err != nil {
 		return nil, err

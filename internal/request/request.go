@@ -4,10 +4,10 @@
 // requests/<project>/runs/<id>/request.json and commits it on main. The
 // bureaucracy is branchless on purpose — it's an engineering journal, not a
 // code repo. Per-request scoping comes from commit trailers (MoE-Request,
-// MoE-Document, MoE-Session) attached by `moe work` and friends.
+// MoE-Document, MoE-Session) attached by stage sessions and friends.
 //
-// Document conversations are layered on later by `moe work` — request.New
-// only opens the folder.
+// Document conversations are layered on by the stage sessions (e.g.
+// `moe sdlc design`) — request.New only opens the folder.
 package request
 
 import (
@@ -28,7 +28,7 @@ import (
 // Document is the machine-readable slice of a single document's state.
 // Documents themselves are just files on disk (content.md); this struct
 // carries only the data that can't be derived from them — the Claude
-// Code session id so `moe work` can resume the same conversation, and
+// Code session id so stage sessions can resume the same conversation, and
 // the Managed Agents session id when the document has a dispatched
 // async run in flight or awaiting collection.
 type Document struct {
@@ -224,9 +224,9 @@ func ContentPath(projectID, id, docID string) string {
 }
 
 // ThreadPath returns the path (relative to the bureaucracy root) of a
-// document's conversation transcript. `moe work` mirrors Claude Code's
-// per-session JSONL here every turn, so the full human/agent exchange is
-// stored in-repo alongside the compressed content.md.
+// document's conversation transcript. Stage sessions mirror Claude
+// Code's per-session JSONL here every turn, so the full human/agent
+// exchange is stored in-repo alongside the compressed content.md.
 func ThreadPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "thread.jsonl")
 }
@@ -291,7 +291,7 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 }
 
 // StageAndCommit stages pathspecs and commits with msg. Returns ErrNothingToCommit
-// if there's nothing staged after the add — common for a `moe work` turn where
+// if there's nothing staged after the add — common for a stage turn where
 // the operator exited Claude without having it write anything.
 func StageAndCommit(root, msg string, pathspecs ...string) error {
 	addArgs := append([]string{"add", "--"}, pathspecs...)

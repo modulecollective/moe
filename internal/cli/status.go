@@ -165,7 +165,7 @@ MoE-Managed-Status: %s
 
 // writeTranscript streams the session's events and writes them as JSONL
 // to dest, creating parent dirs. Each event is one line; matches the
-// shape `moe work` already writes so downstream readers don't care
+// shape stage sessions already write so downstream readers don't care
 // which executor produced the transcript.
 func writeTranscript(ctx context.Context, client *managed.Client, sessionID, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {

@@ -1,4 +1,4 @@
-// Package executor abstracts the backend that actually runs a `moe work`
+// Package executor abstracts the backend that actually runs a stage
 // turn, so moe can host more than one: the interactive Claude Code CLI
 // (today's only implementation) and, later, Anthropic's Managed Agents
 // API for fire-and-forget async runs.
@@ -6,8 +6,8 @@
 // The interface is small on purpose. A Request carries everything an
 // executor needs to run one turn against one document; the executor
 // owns the details of how the agent runs, what filesystem it sees, and
-// where the turn's transcript ends up. `moe work` stays the same shape
-// regardless of which executor it picks.
+// where the turn's transcript ends up. The stage driver stays the same
+// shape regardless of which executor it picks.
 package executor
 
 import (
@@ -68,8 +68,8 @@ type Executor interface {
 }
 
 // ClaudeCLI runs a turn against the local `claude` binary. It is the
-// executor `moe work` used before the interface existed; behavior is
-// unchanged.
+// default executor stage sessions use; behavior is unchanged from the
+// pre-interface implementation.
 type ClaudeCLI struct{}
 
 // Execute shells out to `claude`, wires stdio to the operator's
@@ -228,7 +228,7 @@ func ensureSRTSettings(root string) (string, error) {
 // the sandbox clone, persist its own session JSONL under ~/.claude)
 // without handing it access to ~/.ssh, cloud creds, or browser
 // profiles. allowedDomains is the minimum network set Claude needs for
-// normal moe work — the operator is expected to extend it as real
+// normal stage work — the operator is expected to extend it as real
 // projects demand more. denyWrite and deniedDomains are required keys
 // in srt's config schema; we ship them empty because allowWrite and
 // allowedDomains are already restrictive.

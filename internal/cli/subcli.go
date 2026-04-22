@@ -13,9 +13,9 @@ import (
 //
 // A Workflow is itself exposed as a top-level Command via Command(),
 // which lets cli.Register keep a flat top-level table. The workflow
-// also tracks stage order and prereq edges so `moe work` can compute
-// "what's next" without hard-coding the design→code→push pipeline at
-// each callsite (see Next).
+// also tracks stage order and prereq edges so callers (like `moe dash`)
+// can compute "what's next" without hard-coding the design→code→push
+// pipeline at each callsite (see Next).
 type Workflow struct {
 	Name    string
 	Summary string

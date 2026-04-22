@@ -24,7 +24,7 @@ import (
 //
 // needsSandbox controls the sandbox clone: design=false never gets one,
 // code=true always requires one (with a clear error if the project isn't
-// registered as a submodule). See README §"moe work" for the broader model.
+// registered as a submodule). See README for the broader model.
 //
 // initialPrompt, if non-empty, is auto-sent as the first user message of
 // the turn — it's how stages spare the operator from typing "go" every

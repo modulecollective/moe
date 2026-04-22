@@ -2,9 +2,9 @@
 //
 // The only artifact today is the per-session transcript Claude Code writes
 // to <CLAUDE_CONFIG_DIR>/projects/<encoded-cwd>/<session-id>.jsonl every
-// turn. `moe work` copies that file into the document's thread.jsonl so the
-// conversation lives in the bureaucracy repo alongside the document it
-// produced. See designs/conversation-saving.md.
+// turn. Each stage turn copies that file into the document's thread.jsonl
+// so the conversation lives in the bureaucracy repo alongside the document
+// it produced. See designs/conversation-saving.md.
 package claude
 
 import (

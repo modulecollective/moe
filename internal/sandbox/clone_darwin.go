@@ -25,7 +25,7 @@ const (
 //
 // The call is O(metadata): data blocks are shared with the source until
 // either side writes. That's what makes per-request clones cheap enough
-// to create unconditionally on every `moe work` invocation.
+// to create unconditionally on every stage invocation that needs one.
 func Clone(src, dst string) error {
 	s, err := syscall.BytePtrFromString(src)
 	if err != nil {
