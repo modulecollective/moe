@@ -375,13 +375,18 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 
 // sharedStageFragments returns the cross-workflow guidance blocks that
 // apply to Claude-driven stages. They live under stages/_shared/ and
-// are appended after the per-stage fragment. Today only sdlc/design
-// and sdlc/code receive them; idea-mode prompts are intentionally left
-// alone. Order is stable: completeness first (a gate the agent should
-// run before anything else), then cross-run (a rule that scopes where
-// writes are allowed).
+// are appended after the per-stage fragment. Today sdlc/design,
+// sdlc/code, and quick/code receive them; idea-mode prompts are
+// intentionally left alone. The allow-list is explicit rather than
+// "any non-idea stage" so the set of prompts a given stage sees stays
+// predictable as more workflows get added. Order is stable:
+// completeness first (a gate the agent should run before anything
+// else), then cross-run (a rule that scopes where writes are allowed).
 func sharedStageFragments(workflow, docID string) []string {
-	if workflow != "sdlc" || (docID != "design" && docID != "code") {
+	switch {
+	case workflow == "sdlc" && (docID == "design" || docID == "code"):
+	case workflow == "quick" && docID == "code":
+	default:
 		return nil
 	}
 	var out []string
@@ -445,9 +450,10 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 
 MoE-Run: %s
 MoE-Project: %s
+MoE-Workflow: %s
 MoE-Document: %s
 MoE-Session: %s
-`, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
+`, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
 	err := run.StageAndCommit(root, msg, runJSON)
 	if errors.Is(err, run.ErrNothingToCommit) {
 		return nil
@@ -477,8 +483,9 @@ func commitTurn(root string, md *run.Metadata, docID string) error {
 
 MoE-Run: %s
 MoE-Project: %s
+MoE-Workflow: %s
 MoE-Document: %s
 MoE-Session: %s
-`, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
+`, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
 	return run.StageAndCommit(root, msg, docDir, runJSON)
 }
