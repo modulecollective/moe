@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
-	"github.com/modulecollective/moe/internal/abstract"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
@@ -118,7 +116,7 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.
-	commitErr := commitTurn(root, md, docID, stderr)
+	commitErr := commitTurn(root, md, docID)
 
 	if runErr != nil {
 		moePrintf(stderr, "claude exited: %v\n", runErr)
@@ -337,19 +335,10 @@ run is pushed.
 // commitTurn stages the document dir and run.json, then commits with
 // a trailer block keyed to the document/session. See README §"one run
 // branch per run" for the trailer convention.
-//
-// Before committing, the run's abstract is refreshed via a one-shot
-// `claude --print` call so the updated summary rides along in the
-// same commit as the document edits that produced it. Abstract
-// failures are non-fatal — a prefixed warning is emitted through
-// moePrintf and the prior abstract is preserved.
-func commitTurn(root string, md *run.Metadata, docID string, stderr io.Writer) error {
+func commitTurn(root string, md *run.Metadata, docID string) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
-	// Pre-stage the doc so we can detect "no work to commit" before we
-	// spend an API call refreshing the abstract. If the operator
-	// exited Claude without edits, we bail cleanly with no side effects.
 	if err := run.Stage(root, docDir); err != nil {
 		return err
 	}
@@ -357,10 +346,6 @@ func commitTurn(root string, md *run.Metadata, docID string, stderr io.Writer) e
 		return run.ErrNothingToCommit
 	}
 
-	refreshAbstract(root, md, stderr)
-
-	// Persist whatever refreshAbstract produced (or didn't); a no-op
-	// Save is cheap and keeps the flow simple.
 	if err := run.Save(root, md); err != nil {
 		return err
 	}
@@ -373,35 +358,4 @@ MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, docID, md.Documents[docID].Session)
 	return run.StageAndCommit(root, msg, docDir, runJSON)
-}
-
-// refreshAbstract issues the post-turn summarisation call and mutates
-// md.Abstract on success. All failure modes are non-fatal — a missing
-// `claude` binary, a subprocess failure, or an empty response leaves
-// the prior abstract in place.
-//
-// The warning is routed through moePrintf (same channel as
-// "committed turn for …") and prefixed "warning: abstract not
-// refreshed:" so the operator catches it on the same turn rather than
-// hunting through logs after noticing the abstract field never lands.
-// That visibility is the whole point of this rewrite — see the
-// no-abstract run's design.
-func refreshAbstract(root string, md *run.Metadata, stderr io.Writer) {
-	s, err := abstract.NewCLI()
-	if err != nil {
-		abstractWarn(stderr, err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), abstract.DefaultTimeout)
-	defer cancel()
-	if err := abstract.Update(ctx, root, md, s); err != nil {
-		abstractWarn(stderr, err)
-	}
-}
-
-func abstractWarn(stderr io.Writer, err error) {
-	if stderr == nil {
-		return
-	}
-	moePrintf(stderr, "warning: abstract not refreshed: %v\n", err)
 }

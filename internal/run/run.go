@@ -59,12 +59,7 @@ type Metadata struct {
 	Title    string `json:"title"`
 	Status   string `json:"status"`
 	Workflow string `json:"workflow"`
-	Created  string `json:"created"`
-	// Abstract is a 2–3 sentence prose summary of the run's current
-	// state, maintained automatically after each work turn. Discovery
-	// (moe dash, downstream agents scanning runs with jq) reads this.
-	// Empty until the first successful auto-summary lands.
-	Abstract  string               `json:"abstract,omitempty"`
+	Created   string               `json:"created"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -317,9 +312,7 @@ func Stage(root string, pathspecs ...string) error {
 }
 
 // HasStagedChanges reports whether the index has anything staged
-// relative to HEAD. Used by the stage session's commitTurn to decide
-// whether to spend an API call on the auto-abstract update before
-// falling through to ErrNothingToCommit.
+// relative to HEAD.
 func HasStagedChanges(root string) bool {
 	return hasStagedChanges(root)
 }
