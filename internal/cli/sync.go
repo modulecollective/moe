@@ -319,10 +319,9 @@ func shortSHA(s string) string {
 	return s[:7]
 }
 
-// gitmoduleEntry mirrors the one in internal/managed/submodules.go but
-// adds `branch`, which sync needs as a fallback when project.json is
-// unavailable. Kept local to cli/sync.go so managed's INI parser stays
-// focused on its own concerns.
+// gitmoduleEntry is the parsed shape of one [submodule "..."] stanza in
+// a .gitmodules file. branch is a fallback for sync when project.json
+// is unavailable.
 type gitmoduleEntry struct {
 	name   string
 	path   string
@@ -399,8 +398,7 @@ func gitRevParse(dir, ref string) (string, error) {
 }
 
 // gitlinkSHA reads the gitlink that bureaucracy's HEAD commit records
-// for submodule at subPath. Mirrors managed.pinnedSHA; kept local to
-// keep sync's dependencies tight.
+// for submodule at subPath.
 func gitlinkSHA(root, subPath string) (string, error) {
 	out, err := exec.Command("git", "-C", root, "ls-tree", "HEAD", subPath).Output()
 	if err != nil {

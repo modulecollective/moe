@@ -121,8 +121,8 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 }
 
 // Load reads projects/<id>/project.json and returns the resolved Metadata.
-// Used by commands that operate against a registered project (e.g. dispatch,
-// push) to resolve Remote, DefaultBranch, and Submodule without re-deriving.
+// Used by commands that operate against a registered project (e.g. push)
+// to resolve Remote, DefaultBranch, and Submodule without re-deriving.
 func Load(root, id string) (*Metadata, error) {
 	if !idPattern.MatchString(id) {
 		return nil, fmt.Errorf("project: id %q must match %s", id, idPattern)
