@@ -87,11 +87,14 @@ func (ClaudeCLI) Execute(r Request) error {
 	}
 	// --add-dir <root> grants access to the bureaucracy repo even when
 	// cwd is the sandbox clone, so the canvas and upstream documents
-	// stay reachable without per-call permission prompts.
+	// stay reachable without per-call permission prompts. It's variadic
+	// (<directories...>), so it must not be the last flag before the
+	// positional prompt — otherwise claude parses the prompt as a second
+	// directory and the session launches with nothing to send.
 	args := []string{
 		sessionFlag, r.SessionID,
-		"--append-system-prompt", r.Prompt,
 		"--add-dir", r.Root,
+		"--append-system-prompt", r.Prompt,
 	}
 	// A positional prompt launches claude interactively but auto-sends
 	// it as the first user message, so the operator lands in a session
