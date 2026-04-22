@@ -15,6 +15,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -43,6 +44,26 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// sync is one logical bureaucracy mutation (pull → pointer bumps →
+	// reconcile pushed runs → push). Hold the repo lock for the whole
+	// sequence so two syncs don't clobber each other mid-flight.
+	// Heartbeat is on because sync can sit on the network for a while.
+	err = withRepoLock(root, repolock.Options{
+		Purpose:   "sync",
+		Budget:    repolock.CronBudget,
+		Heartbeat: true,
+	}, func() error {
+		return doSync(root, stdout, stderr)
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// doSync runs the sync pipeline under an already-held repo lock.
+func doSync(root string, stdout, stderr io.Writer) error {
 	// --ff-only so a divergence surfaces instead of silently rebasing.
 	// Skipped on a brand-new branch with no upstream — nothing to pull from.
 	if hasUpstream(root) {
@@ -51,7 +72,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		pull.Stdout = stdout
 		pull.Stderr = stderr
 		if err := pull.Run(); err != nil {
-			return 1
+			return fmt.Errorf("git pull: %w", err)
 		}
 	}
 
@@ -60,16 +81,14 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	// Done after the pull so we're working from the latest bureaucracy state,
 	// and before the push so the bump goes out in the same round trip.
 	if err := bumpProjectPointers(root, stdout, stderr); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return err
 	}
 
 	// Reconcile any pushed runs: if GitHub says the PR merged or
 	// closed, flip the run's status and clean up the branch + sandbox
 	// so the end state matches the direct-merge path.
 	if err := reconcilePushedRuns(root, stdout, stderr); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return err
 	}
 
 	// If the current branch has no upstream configured, push with -u so the
@@ -84,10 +103,10 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		// git already printed the details; just propagate non-zero.
-		return 1
+		// git already printed the details; wrap in a bare error.
+		return fmt.Errorf("git push: %w", err)
 	}
-	return 0
+	return nil
 }
 
 func hasUpstream(dir string) bool {

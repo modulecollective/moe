@@ -15,6 +15,7 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -165,7 +166,13 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 	}
 	msg := fmt.Sprintf("Capture idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
 		projectID, slug, title, slug, projectID)
-	if err := run.StageAndCommit(root, msg, rel); err != nil {
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "idea-add",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		return run.StageAndCommit(root, msg, rel)
+	})
+	if err != nil {
 		moePrintf(stderr, "idea: commit: %v\n", err)
 		return 1
 	}
@@ -258,7 +265,12 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 
 	msg := fmt.Sprintf("Refine idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
 		projectID, slug, title, slug, projectID)
-	err = run.StageAndCommit(root, msg, rel)
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "idea-edit",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		return run.StageAndCommit(root, msg, rel)
+	})
 	switch {
 	case errors.Is(err, run.ErrNothingToCommit):
 		moePrintf(stdout, "idea %s/%s unchanged\n", projectID, slug)
@@ -328,14 +340,19 @@ func runIdeaRemove(args []string, stdout, stderr io.Writer) int {
 	if title == "" {
 		title = slug
 	}
-	if err := os.Remove(abs); err != nil {
-		moePrintf(stderr, "idea: remove %s: %v\n", rel, err)
-		return 1
-	}
 	msg := fmt.Sprintf("Remove idea %s/%s: %s\n\nMoE-Idea: %s\nMoE-Project: %s\n",
 		projectID, slug, title, slug, projectID)
-	if err := run.StageAndCommit(root, msg, rel); err != nil {
-		moePrintf(stderr, "idea: commit: %v\n", err)
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "idea-remove",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		if err := os.Remove(abs); err != nil {
+			return fmt.Errorf("remove %s: %w", rel, err)
+		}
+		return run.StageAndCommit(root, msg, rel)
+	})
+	if err != nil {
+		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
 	moePrintf(stdout, "removed idea %s/%s\n", projectID, slug)

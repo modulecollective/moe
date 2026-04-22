@@ -7,6 +7,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
 )
 
 func init() {
@@ -57,7 +58,15 @@ func runProjectAdd(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	md, err := project.Register(root, url, project.Options{})
+	var md *project.Metadata
+	err = withRepoLock(root, repolock.Options{Purpose: "project-add"}, func() error {
+		m, err := project.Register(root, url, project.Options{})
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -89,7 +98,10 @@ func runProjectRemove(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if err := project.Unregister(root, id); err != nil {
+	err = withRepoLock(root, repolock.Options{Purpose: "project-remove"}, func() error {
+		return project.Unregister(root, id)
+	})
+	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}

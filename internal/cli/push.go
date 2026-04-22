@@ -14,6 +14,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -188,7 +189,13 @@ MoE-Project: %s
 MoE-Document: push
 MoE-PR: %s
 `, md.Project, md.ID, md.ID, md.Project, url)
-		if err := run.StageAndCommit(root, msg, runJSON); err != nil {
+		err := withRepoLock(root, repolock.Options{
+			Purpose: "push-pr",
+			Run:     md.Project + "/" + md.ID,
+		}, func() error {
+			return run.StageAndCommit(root, msg, runJSON)
+		})
+		if err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
 			return 1
 		}
@@ -220,15 +227,6 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
-	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
-		moePrintf(stderr, "warning: remove sandbox: %v\n", err)
-	}
-
-	md.Status = run.StatusMerged
-	if err := run.Save(root, md); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`push: %s/%s merged
 
@@ -237,7 +235,20 @@ MoE-Project: %s
 MoE-Document: push
 MoE-Merged: %s
 `, md.Project, md.ID, md.ID, md.Project, tipSHA)
-	if err := run.StageAndCommit(root, msg, runJSON); err != nil {
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "push-merge",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
+			moePrintf(stderr, "warning: remove sandbox: %v\n", err)
+		}
+		md.Status = run.StatusMerged
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		return run.StageAndCommit(root, msg, runJSON)
+	})
+	if err != nil {
 		moePrintf(stderr, "commit merge record: %v\n", err)
 		return 1
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -109,7 +110,25 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		opts.ExtraTrailers = []string{"MoE-Idea: " + *fromIdea}
 	}
 
-	md, err := run.New(root, project, title, opts)
+	// Run-identifier for the lock record is advisory — use the
+	// project plus whatever slug we have so far (may be blank if the
+	// caller didn't pass --id; run.New will derive one inside the lock).
+	runRef := project
+	if *idOverride != "" {
+		runRef = project + "/" + *idOverride
+	}
+	var md *run.Metadata
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "run-new",
+		Run:     runRef,
+	}, func() error {
+		m, err := run.New(root, project, title, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
