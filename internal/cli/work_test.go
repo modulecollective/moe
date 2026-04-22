@@ -39,11 +39,6 @@ func newTestBureaucracy(t *testing.T) string {
 	return root
 }
 
-func writeStageDesign(t *testing.T, root, body string) {
-	t.Helper()
-	writeStageFile(t, root, "design.md", body)
-}
-
 func writeStageFile(t *testing.T, root, name, body string) {
 	t.Helper()
 	dir := filepath.Join(root, "stages")
@@ -60,22 +55,6 @@ func writeSoul(t *testing.T, root, body string) {
 	if err := os.WriteFile(filepath.Join(root, "soul.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// signStage records a MoE-Stage-Signed: <name> trailer for requestID, the same
-// way `moe sign` does. Used to move the request past the design stage in tests.
-func signStage(t *testing.T, root, requestID, name string) {
-	t.Helper()
-	commitTrailer(t, root, "sign: "+name, "MoE-Request: "+requestID+"\nMoE-Stage-Signed: "+name, time.Time{})
-}
-
-// signStageAt is signStage with an explicit committer date. Banner detection
-// compares git committer epochs (%ct, integer seconds), so tests that exercise
-// "since last turn" need controlled ordering — two commits made in the same
-// second look simultaneous to the comparison.
-func signStageAt(t *testing.T, root, requestID, name string, when time.Time) {
-	t.Helper()
-	commitTrailer(t, root, "sign: "+name, "MoE-Request: "+requestID+"\nMoE-Stage-Signed: "+name, when)
 }
 
 // commitWorkTurnAt records a `work: update <docID>` commit with the trailers
@@ -110,10 +89,10 @@ func commitTrailer(t *testing.T, root, subject, trailers string, when time.Time)
 
 func TestBuildSystemPromptInjectsDesignFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "# Stage: design\n\nresist over-specifying.\n")
+	writeStageFile(t, root, "design.md", "# Stage: design\n\nresist over-specifying.\n")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,54 +104,25 @@ func TestBuildSystemPromptInjectsDesignFragment(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptSwitchesToCodeFragmentAfterDesignSigned(t *testing.T) {
+func TestBuildSystemPromptInjectsCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "DESIGN-BODY")
 	writeStageFile(t, root, "code.md", "CODE-BODY")
-	signStage(t, root, "fix-it", "design")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(got, "CODE-BODY") {
-		t.Fatalf("expected code fragment after design signed:\n%s", got)
-	}
-	if strings.Contains(got, "DESIGN-BODY") {
-		t.Fatalf("design fragment should drop out once design is signed:\n%s", got)
-	}
-}
-
-func TestBuildSystemPromptOmitsFragmentAfterCodeSigned(t *testing.T) {
-	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "design guidance body")
-	writeStageFile(t, root, "code.md", "code guidance body")
-	// Realistic terminal state: every stage signed in order. `moe sign`
-	// refuses to sign `code` without `design` first (sign.go preconditions),
-	// so exercising "code-signed-in-isolation" would test a journal state
-	// the CLI cannot produce.
-	signStage(t, root, "fix-it", "design")
-	signStage(t, root, "fix-it", "code")
-
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(got, "design guidance body") {
-		t.Fatalf("design fragment should drop out once code is signed:\n%s", got)
-	}
-	if strings.Contains(got, "code guidance body") {
-		t.Fatalf("code fragment should drop out once code is signed:\n%s", got)
+		t.Fatalf("expected code fragment for code doc:\n%s", got)
 	}
 }
 
 func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
-	// no soul.md, no stages/design.md written
+	// no soul.md, no stages/<doc>.md written
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +139,7 @@ func TestBuildSystemPromptInjectsSoul(t *testing.T) {
 	writeSoul(t, root, "# Soul\n\ndo the thing that's asked.\n")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +151,10 @@ func TestBuildSystemPromptInjectsSoul(t *testing.T) {
 func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	root := newTestBureaucracy(t)
 	writeSoul(t, root, "SOUL-MARKER")
-	writeStageDesign(t, root, "STAGE-MARKER")
+	writeStageFile(t, root, "design.md", "STAGE-MARKER")
 
 	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,16 +169,17 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	}
 }
 
-func TestBannerFiresWhenPrereqResignedAfterWorkTurn(t *testing.T) {
+func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "DESIGN-BODY")
+	writeStageFile(t, root, "design.md", "DESIGN-BODY")
 	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	signStageAt(t, root, requestID, "design", t0)
+	// First turn on design, then on code, then design is touched again.
+	commitWorkTurnAt(t, root, requestID, "design", t0)
 	workSHA := commitWorkTurnAt(t, root, requestID, "code", t0.Add(10*time.Second))
-	signStageAt(t, root, requestID, "design", t0.Add(20*time.Second))
+	commitWorkTurnAt(t, root, requestID, "design", t0.Add(20*time.Second))
 
 	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
 	got, err := buildSystemPrompt(root, md, "code", "")
@@ -252,11 +203,11 @@ func TestBannerFiresWhenPrereqResignedAfterWorkTurn(t *testing.T) {
 
 func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "DESIGN-BODY")
+	writeStageFile(t, root, "design.md", "DESIGN-BODY")
 	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
-	signStageAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
 	got, err := buildSystemPrompt(root, md, "code", "")
@@ -264,19 +215,19 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(got, "Since your last turn") {
-		t.Errorf("did not expect banner before first work turn:\n%s", got)
+		t.Errorf("did not expect banner before first work turn on code:\n%s", got)
 	}
 }
 
-func TestBannerSilentWhenPrereqResignedBeforeLastTurn(t *testing.T) {
+func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "DESIGN-BODY")
+	writeStageFile(t, root, "design.md", "DESIGN-BODY")
 	writeStageFile(t, root, "code.md", "CODE-BODY")
 
 	requestID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	signStageAt(t, root, requestID, "design", t0)
-	signStageAt(t, root, requestID, "design", t0.Add(10*time.Second)) // re-sign before any work
+	commitWorkTurnAt(t, root, requestID, "design", t0)
+	commitWorkTurnAt(t, root, requestID, "design", t0.Add(10*time.Second)) // another design turn before any code
 	commitWorkTurnAt(t, root, requestID, "code", t0.Add(20*time.Second))
 
 	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
@@ -285,25 +236,25 @@ func TestBannerSilentWhenPrereqResignedBeforeLastTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(got, "Since your last turn") {
-		t.Errorf("banner should not fire when prereq was re-signed before last turn:\n%s", got)
+		t.Errorf("banner should not fire when prereq moved before last turn:\n%s", got)
 	}
 }
 
 func TestBannerSilentAtDesignStage(t *testing.T) {
 	root := newTestBureaucracy(t)
-	writeStageDesign(t, root, "DESIGN-BODY")
+	writeStageFile(t, root, "design.md", "DESIGN-BODY")
 
 	requestID := "fix-it"
-	// design unsigned → active stage is design, which has no prereqs. Even
-	// with a prior work turn, there is nothing to surface.
-	commitWorkTurnAt(t, root, requestID, "spec", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	// Design has no prereqs in prereqDocs. Even with a prior work turn,
+	// there's nothing to surface.
+	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it"}
-	got, err := buildSystemPrompt(root, md, "spec", "")
+	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(got, "Since your last turn") {
-		t.Errorf("banner should not fire at design stage (no prereqs):\n%s", got)
+		t.Errorf("banner should not fire for a doc with no prereqs:\n%s", got)
 	}
 }

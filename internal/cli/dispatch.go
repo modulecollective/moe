@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/managed"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -159,7 +159,7 @@ MoE-Managed-Session: %s
 // cause the server to reject the request — a loud failure is the
 // right signal.
 func buildDispatchSession(root string, md *request.Metadata, doc *request.Document, docID string, dryRun bool) (*managed.Session, error) {
-	pj, err := loadProjectJSON(root, md.Project)
+	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -228,30 +228,6 @@ func tokenOr(key string, dryRun bool) string {
 		return "$" + key
 	}
 	return ""
-}
-
-// projectJSON is the subset of project.Metadata we need here. Declared
-// locally to avoid importing the whole project package just for its
-// Remote / DefaultBranch fields.
-type projectJSON struct {
-	Remote        string `json:"remote"`
-	DefaultBranch string `json:"default_branch"`
-}
-
-func loadProjectJSON(root, projectID string) (*projectJSON, error) {
-	path := filepath.Join(root, "requests", projectID, "project.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("dispatch: read %s: %w", path, err)
-	}
-	p := &projectJSON{}
-	if err := json.Unmarshal(b, p); err != nil {
-		return nil, fmt.Errorf("dispatch: parse %s: %w", path, err)
-	}
-	if p.Remote == "" {
-		return nil, fmt.Errorf("dispatch: %s has no remote", path)
-	}
-	return p, nil
 }
 
 // bureaucracyPinning returns the bureaucracy's origin URL and current

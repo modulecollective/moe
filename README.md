@@ -22,10 +22,10 @@ The Ministry is designed for a single operator managing multiple products with a
 2. **The repo is the source of truth.** All state — documents, decisions, conversations, progress — lives in git. Nothing lives in Slack, Google Docs, or people's heads. The bureaucracy repo is the "back office" (workflows, guidance fragments, run history). Target project repos stay clean. The `moe` CLI lives in its own repo — tool and state are separate so the CLI can be open-sourced without leaking private bureaucracy contents.
 3. **Agents are participants, not tools.** Agents join conversations and contribute to documents. Guidance for how they behave lives as plain markdown in the bureaucracy repo (global `soul.md` plus per-stage and per-document fragments assembled at invocation time) — no role taxonomy, no handbook hierarchy.
 4. **Requests terminate, products persist.** Units of work (requests) have a lifecycle and end. Products are the long-lived entities that accumulate completed work.
-5. **Loose recipes, deterministic mechanics.** Stages are a small fixed DAG (`design` → `code` today); documents are whatever slugs the operator decides a request needs. Within a request, upstream-change detection is deterministic — given the signed-stage events and the per-document work turns, what moved since a downstream agent last looked is always derivable from the log.
+5. **Loose recipes, deterministic mechanics.** Stages are a small fixed DAG (`design` → `code` today), each with a canonical document of the same name. Additional documents (knowledge bases, meeting notes, etc.) can be layered on without sign-offs. Within a request, upstream-change detection is deterministic — given per-document work turns on main, what moved since a downstream agent last looked is always derivable from the log.
 6. **Model-agnostic.** The harness works with Claude Code, Ollama/Qwen, Codex, or any LLM backend. A small config routes invocations to the right model, keyed by document type or stage. The harness is the moat, not the model.
 7. **Minimize entropy.** Every agent mistake becomes a guidance-fragment update. The system improves every time you use it.
-8. **One repo, one history, one branch.** All request state and run metadata live on the bureaucracy repo's `main`. There are no per-request branches — the bureaucracy is a journal, not a code repo. Per-request scoping and lifecycle state come from commit trailers (`MoE-Request`, `MoE-Document`, `MoE-Session`, `MoE-Stage-Signed`, `MoE-Stage-Unsigned`); a request's history is `git log --grep="MoE-Request: <id>"` and its stage state is derived from that log. Code branches live where they belong: inside each target submodule.
+8. **One repo, one history, one branch.** All request state and run metadata live on the bureaucracy repo's `main`. There are no per-request branches — the bureaucracy is a journal, not a code repo. Per-request scoping comes from commit trailers (`MoE-Request`, `MoE-Document`, `MoE-Session`, `MoE-PR`); a request's history is `git log --grep="MoE-Request: <id>"`. Stage progress is derived from which documents have `work: update <doc>` commits and when they landed — no separate sign-off state. Code branches live where they belong: inside each target submodule.
 9. **Target repos are independent.** No MoE coupling in target repos. Works with any repo — open source forks, client projects, personal code. Target projects are registered as git submodules under `projects/`, but only one is checked out at a time during a session.
 10. **Many projects registered, a handful actively worked.** Submodules are cheap to register, so the ceiling on *registered* projects is high. The ceiling on *concurrently active* projects is the operator's review bandwidth — practically ~10-30 — because every request ultimately cashes out in a human reading a diff. MoE helps manage the fan-out, it does not remove it.
 11. **Stdlib only, where practical.** The `moe` CLI uses Go stdlib plus `git` and `claude` on PATH. No YAML parser, no CLI framework, no DAG engine, no graph library, no web server dependencies. Two stdlib-native config formats match two audiences: JSON for machine state, INI for flat human config. Markdown for guidance. Humans never see JSON.
@@ -123,7 +123,7 @@ During a session, `moe work` runs `git submodule update --init projects/$target`
 
 **Project-level concerns (stored in the bureaucracy repo under `requests/<project>/`):**
 
-For v1 the only project-level file is `project.json`. A human-maintained `backlog` doc (request ideas, title + paragraph each) is a natural next addition. Longer-lived artifacts — changelog, decision log, architecture overview, API reference, ops runbook — are deferred; they'd accumulate from completed requests once `moe sign code` grows side-effects beyond the status flip.
+For v1 the only project-level file is `project.json`. A human-maintained `backlog` doc (request ideas, title + paragraph each) is a natural next addition. Longer-lived artifacts — changelog, decision log, architecture overview, API reference, ops runbook — are deferred; they'd accumulate from completed requests once `moe push` grows side-effects beyond pushing the branch and opening the PR.
 
 ### Request
 
@@ -147,31 +147,27 @@ A unit of work against a project. Has a defined lifecycle and terminates.
 }
 ```
 
-Request statuses: `in_progress | approved | scrapped`. Documents have no status field — they are just files on disk (`content.md`), and a document's history is its commit history. The only per-document data in `request.json` is the Claude Code session id so `moe work` can resume the same conversation.
+Request statuses: `in_progress | approved | scrapped`. Documents have no status field — they are just files on disk (`content.md`), and a document's history is its commit history. The only per-document data in `request.json` is the Claude Code session id so `moe design`/`moe code` can resume the same conversation.
 
-**Gates live at stage transitions, not on every document.** The human-in-the-loop pauses are `moe sign <project> <request> <stage>` — one call per lifecycle checkpoint. `moe unsign` reverses a stage. A sign is recorded as a commit on main with `MoE-Stage-Signed: <stage>` in the trailers; a stage is "signed" iff its most recent signed trailer is newer than its most recent unsigned trailer (or there's no unsign). No status field to keep in sync; the journal is the source of truth.
-
-**Unsign cascades.** Reopening a stage invalidates anything that required it. If `code` was signed because `design` was signed, then `moe unsign design` automatically unsigns `code` in the same command — as a separate commit, with its own trailer, so the journal shows exactly what happened. The cascade walks the dependency graph breadth-first and only touches stages that are currently signed, so running unsign twice is still a safe no-op.
+**Stages are a canonical document per phase, not a separate sign-off state.** The request's progress is readable from the git log: a `work: update design` commit means design has been worked on; a later `work: update code` means code has moved past design. Re-running `moe design` after a `work: update code` is how the operator revises the spec — and the next `moe code` turn sees an upstream-change banner pointing at the diff. Shipping is a separate verb (`moe push`) that runs the mechanical outbound work; there is no explicit "sign this stage" ceremony between turns.
 
 Known stages:
 
-- `design` — design is settled; implementation can start
-- `code` — code is done; signing it flips request status to `approved` (requires `design`; future side-effects: push the submodule, open a PR on the target repo)
+- `design` — design is settled; `moe design` edits its canvas
+- `code` — code is settled; `moe code` edits its canvas inside the request's sandbox clone
 
-Additional stages (review, test, deploy, retro, …) will be added when a real use case forces the question. Stage names live forever in commit trailers, so reserving labels before their semantics are settled is a cost, not a hedge.
+Additional stages (review, test, deploy, retro, …) will be added when a real use case forces the question.
 
-**Request progress is driven by the operator, not a rigid phase sequence.** Small bug fixes might sign nothing but `code`. Larger work signs `design` first. The stage vocabulary is a closed set so history stays comparable across requests; additions are a deliberate change, not a config knob.
+**Request progress is driven by the operator, not a rigid phase sequence.** Small bug fixes may only touch `code`. Larger work starts in `design` and moves forward. The staleness gate in `moe push` refuses to ship if the design has moved after the last code turn — the operator's recourse is another `moe code` turn to reconcile.
 
-Within a request, documents often have a natural ordering — a spec before an architecture before an implementation plan — but that's operator judgment, not a typed graph. Document slugs are free-form strings passed to `moe work`; the only structure MoE enforces is the stage DAG (`design` → `code`).
-
-Phase transitions are **explicit but lightweight** — they happen when the operator runs `moe sign <stage>`. Stages are checkpoints, not a state machine layered over every document.
+Within a request, documents beyond `design` and `code` are allowed: a knowledge base, meeting notes, a rollback plan. These don't participate in the stage DAG — they're just files with a session and a commit history, edited with the generic document-work flow when and if it's reintroduced.
 
 **Request rollup on completion:**
 
-When `moe sign <project> <request> code` runs:
-- Precondition: `design` must already be signed. The command refuses otherwise.
-- The request's status flips to `approved` in `request.json` and the change is committed on main with `MoE-Stage-Signed: code` in the trailers; history stays browsable via `git log --grep="MoE-Request: <id>"`
-- Future behavior (not yet implemented): push the target submodule, open a PR on the target remote. These will become side-effects of `moe sign code` — a single atomic gate the operator crosses once per request.
+When `moe push <project> <request>` runs:
+- Preconditions: `code/content.md` is non-empty and has a `work: update code` commit; `design/content.md` has not been committed after the last code turn (staleness gate); the request's sandbox clone has branch `moe/<request>` ahead of the target's default branch.
+- `moe push` repoints the clone's `origin` at the target project's remote, pushes `moe/<request>`, and opens a PR via `gh pr create` using `code/content.md` as the body (first push only; reruns detect the existing PR and skip this step).
+- On the first successful push, `request.json` flips to `approved` and the change is committed on main with `MoE-PR: <url>` in the trailers. Re-runs just push new commits; the sandbox stays in place so `moe code` can iterate on review feedback.
 
 When `moe scrap <request> "reason"` runs (future):
 - The reason is recorded in a `MoE-Scrapped` commit trailer on main
@@ -180,7 +176,7 @@ When `moe scrap <request> "reason"` runs (future):
 
 ### Derived Artifacts
 
-Deferred. `moe sign code` today only flips the request status and records the trailer. Generating release notes, decision summaries, or updating long-lived project docs from completed requests is a future phase — when it arrives, it'll run as additional commits on main from inside the `sign code` command, not as a background worker.
+Deferred. `moe push` today flips the request status, pushes the branch, and opens the PR. Generating release notes, decision summaries, or updating long-lived project docs from completed requests is a future phase — when it arrives, it'll run as additional commits on main from inside `moe push` or an adjacent verb, not as a background worker.
 
 ### Document
 
@@ -217,40 +213,36 @@ A request's full audit trail is `git log --grep="MoE-Request: add-batch-support"
 ```
 main (the only branch)
   ├── commit: "Open request telomere/add-batch-support: …"
-  ├── commit: "work: update spec"
-  ├── commit: "work: update spec"
-  ├── commit: "work: update architecture"
-  ├── commit: "work: update architecture"
-  ├── commit: "work: update implementation"
-  ├── commit: "work: update test-plan"
-  ├── commit: "sign: design"                    (MoE-Stage-Signed: design)
-  └── commit: "sign: code"                        (MoE-Stage-Signed: code, status→approved)
+  ├── commit: "work: update design"
+  ├── commit: "work: update design"
+  ├── commit: "work: update code"
+  ├── commit: "work: update code"
+  └── commit: "push: telomere/add-batch-support"     (MoE-PR: <url>, status→approved)
 ```
 
-Stage sign-offs (`design`, `code`) are the coordination signals; they live only in the git log as `MoE-Stage-Signed` / `MoE-Stage-Unsigned` trailers, flipped by `moe sign` / `moe unsign`. `moe sign code` is the hard gate that will eventually trigger the submodule push and derived-artifact generation.
+Each document stage has a canonical slug (`design`, `code`) and each turn lands as a `work: update <slug>` commit with the request's trailers. `moe push` is the terminal action — it pushes the sandbox branch, opens a PR, and records the outcome as a single commit on main. No separate sign-off state; the journal itself is the record.
 
-**The ripple is operator-driven, not background.** Agents only act when `moe work` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
+**The ripple is operator-driven, not background.** Agents only act when `moe design` or `moe code` is invoked. "Rippling through documents" means the operator walking the graph — typically via `moe next`, which dispatches the obvious action for each attention-triggering doc. There is no background worker; there is a human pressing Enter through an attention queue.
 
-- **In progress**: The operator is invoking `moe work …`. Each turn appends a trailer-tagged commit to main.
-- **Design signed**: `moe sign <proj> <req> design` records the checkpoint. Implementation work can start in earnest. `moe review` is the per-request synthesized view.
-- **Approved**: `moe sign <proj> <req> code` flips the request status and (eventually) pushes the submodule, opens a PR — all as further commits on main.
+- **In progress**: The operator is running `moe design` and `moe code`. Each turn appends a trailer-tagged commit to main.
+- **Ready to push**: code has moved past design, nothing in the design doc has moved since. `moe dash` surfaces this as NEEDS ATTENTION; `moe push` refuses to ship otherwise.
+- **Approved**: `moe push` flipped the request status, opened the PR, and recorded a `MoE-PR:` trailer. The sandbox stays in place so `moe code` can iterate on review feedback and `moe push` again updates the branch.
 
-Human review is required by default at every `moe work` turn and before each `moe sign` gate. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the request needs, then crossing each stage gate up to `<stage>` without pausing for input. The operator picks the stage; `--through code` is the common case, but `--through deploy` is valid too if you actually want to try it. No stage is special-cased — the control is the `--through` argument, not a hardcoded ceiling. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `moe unsign` and `git revert` unwind cleanly.
+Human review is required by default at every `moe design` / `moe code` turn and before `moe push`. A future **yolo mode** can collapse those into one operator command — `moe yolo <proj> <req> --through <stage>` — which walks the document graph autonomously, drafting every document the request needs, then carrying the work up to `<stage>` without pausing for input. Yolo is the right-hand end of a spectrum: operator watches the shell, Ctrl-C is always the off switch, every step still lands as trailer-tagged commits on main so `git revert` unwinds cleanly.
 
 Note on vocabulary: this MoE-level "yolo" (multi-stage autonomy above the document line) is orthogonal to Claude Code's own `--dangerously-skip-permissions` (tool-call autonomy below the document line, *inside* a single `claude -p` session). Yolo mode generally wants both: skip permissions inside each session, and skip the operator-in-the-loop between sessions.
 
 **Ripple flow in practice:**
 
 1. `moe request new telomere "Add batch support"` — opens the request, commits the scaffolding to main.
-2. `moe work telomere add-batch-support spec` — you collaborate with Claude on the spec; commit lands on main with trailers.
-3. `moe work telomere add-batch-support architecture` — with the spec in upstream context, Claude drafts the architecture; commit.
-4. `moe work telomere add-batch-support implementation` — with both upstream, Claude drafts the implementation plan; commit.
-5. The implementation session flags a concern about the architecture — you carry it back into `moe work … architecture` with "the implementation session says the interface needs pagination, reconsider". Two more turns, two more trailer-tagged commits.
+2. `moe design telomere add-batch-support` — you collaborate with Claude on the design canvas; each turn commits on main with trailers.
+3. `moe code telomere add-batch-support` — Claude edits code inside the request's sandbox clone; turns commit on main (for the document) and on `moe/add-batch-support` (for the code).
+4. The code session flags a concern about the design — you carry it back into `moe design …` with "the code session says this interface needs pagination, reconsider". A couple more design turns.
+5. Next `moe code` turn fires the upstream-change banner; Claude reconciles and commits again.
 6. Everything settles. `moe review telomere add-batch-support` — you read the request's commits and current document state.
-7. `moe sign telomere add-batch-support design` — you cross the design gate.
-8. `moe sign telomere add-batch-support code` — request status flips; (future) submodule code is pushed, a PR is opened. Done.
+7. `moe push telomere add-batch-support` — sandbox branch pushed, PR opened, request flipped to `approved`. Done. Re-run `moe code` and `moe push` if review feedback requires changes.
 
-For well-scoped requests with good guidance files, this converges quickly. You start a conversation, the agents ripple through the documents you drive them through, and you come back to a complete package. One conversation, one review, one sign-code.
+For well-scoped requests with good guidance files, this converges quickly. You start a conversation, the agents ripple through the documents you drive them through, and you come back to a complete package. One conversation, one review, one push.
 
 Recovery and rewriting are also branchless. Rollback is `git revert <sha>`. Per-request history is `git log --grep`. Rewinding a stuck conversation is `git reset --soft` — the same regardless of which request you're working on.
 
@@ -260,16 +252,16 @@ Each document is just a directory on disk — `documents/<name>/content.md` — 
 
 **Ripple mechanism:**
 
-Ripple is stage-scoped, not document-scoped. When a prerequisite **stage** is re-signed after a downstream document's last work turn, the next `moe work` on that document gets an upstream-change banner in its system prompt: the prereq stage name, the path to its canonical document, the bureaucracy SHA the agent last ran on, and the exact `git diff` command to see what moved. The banner is advisory — the contract with the agent is still social, but the social cue is legible instead of implicit.
+When a prerequisite document has been committed after a downstream document's last work turn, the next run of the downstream doc's verb (e.g. `moe code` after `moe design`) gets an upstream-change banner in its system prompt: the prereq doc name, the path to its content.md, the bureaucracy SHA the agent last ran on, and the exact `git diff` command to see what moved. The banner is advisory — the contract with the agent is still social, but the social cue is legible instead of implicit.
 
 Mechanics:
 
-- Detection is deterministic: compare each prereq stage's most recent `MoE-Stage-Signed` commit time against the last `work:` commit for this document (both filtered by `MoE-Request: <id>`). Nothing is mutated in the background.
+- Detection is deterministic: compare each prereq doc's most recent `work: update <doc>` commit time against the downstream doc's most recent work-turn commit (both filtered by `MoE-Request: <id>`). Nothing is mutated in the background.
 - First-turn sessions get no banner — there's no "since" to compute against.
-- If every stage is signed, work is done; nothing to surface.
-- `design` has no prerequisites, so design-stage documents never see a banner. Downstream stages (just `code` today) see it when `design` has been re-signed since their last turn.
+- `design` has no prerequisites, so the design canvas never sees a banner. `code` sees it when `design` has been re-committed since its last turn.
+- `moe push` turns the same signal into a hard gate: if design moved after the last code turn, push refuses until `moe code` has been re-run to reconcile.
 
-The operator controls the pace. A re-signed `design` doesn't force the `code` document to pick it up immediately; the banner just fires on the next turn, whenever that happens.
+The operator controls the pace. A touched `design` doesn't force the `code` canvas to pick it up immediately; the banner fires on the next `moe code` run, whenever that happens.
 
 **Cross-document agent collaboration:**
 
@@ -523,27 +515,29 @@ moe project remove <id>                     # unregister a project (refuses if t
 moe project list                            # registered submodules
 moe request new <project> "title" [--id slug]      # open a new request, scaffold its dir
 moe status <project> <request>              # per-request view: stages, documents, last turns
-moe work <project> <request> <document>     # the main command — work on a document
+moe design <project> <request>              # open a Claude Code session on the design document
+moe code <project> <request>                # open a Claude Code session on the code document (sandbox clone)
+moe push <project> <request>                # push the request's code branch and open (or update) a PR
 moe show <project> <request> <document>     # render current content.md + tail of thread.jsonl
-moe sign <project> <request> <stage>        # sign a lifecycle stage (design, code)
-moe unsign <project> <request> <stage>      # reverse moe sign (cascades to dependent stages)
 moe review <project> <request>              # synthesize per-request view (filtered log + doc snapshots)
 moe scrap <project> <request> "reason"      # close without merging, record rationale
 moe flag <project> <request> ["note"]       # mark as needing attention on the dashboard
 moe unflag <project> <request>              # clear the flag
 moe history [project]                       # past requests (git log + cost aggregates)
-moe push                                    # git push the bureaucracy repo (sets upstream on first push)
+moe sync                                    # git push the bureaucracy repo (sets upstream on first push)
 moe version                                 # print moe version / OS / arch / Go runtime
 moe help                                    # print usage
 ```
 
-The ones you live in are `moe dash`, `moe next`, and `moe work`, with `moe sign` sprinkled between turns. `moe where`, `moe push`, `moe version`, and `moe help` are housekeeping — they don't move request state, just report or publish it.
+The ones you live in are `moe dash`, `moe next`, `moe design`, and `moe code`, with `moe push` at the end of each request. `moe where`, `moe sync`, `moe version`, and `moe help` are housekeeping — they don't move request state, just report or publish it.
 
-### `moe work` — The Core Loop
+### `moe design` / `moe code` — The Core Loop
 
 ```bash
-moe work telomere add-batch-support spec
+moe design telomere add-batch-support
 ```
+
+(Or `moe code` once the design has settled. Either command follows the same flow below, with `moe code` adding the sandbox clone setup and `moe design` skipping it. The original design intent described an editor-based scratch-turn flow; today both commands hand off to an interactive `claude` session directly, and the steps below describe the original intent.)
 
 This does:
 
@@ -628,17 +622,15 @@ Non-code document invocations can only write to their own `content.md`. The impl
 ```
 main (the only branch — bureaucracy is a journal, not a code repo)
   ├── commit: "Open request telomere/add-batch-support: …"   trailers: MoE-Request, MoE-Project
-  ├── commit: "work: update spec"                             trailers: + MoE-Document, MoE-Session
-  ├── commit: "work: update spec"
-  ├── commit: "work: update architecture"
-  ├── commit: "work: update implementation"                   ← includes submodule pointer update
-  ├── commit: "work: update test-plan"
-  ├── commit: "sign: design"                                  trailers: + MoE-Stage-Signed: design
-  └── commit: "sign: code"                                      trailers: + MoE-Stage-Signed: code (status→approved)
+  ├── commit: "work: update design"                           trailers: + MoE-Document, MoE-Session
+  ├── commit: "work: update design"
+  ├── commit: "work: update code"                             ← agent has committed inside the sandbox clone's moe/<id> branch
+  ├── commit: "work: update code"
+  └── commit: "push: telomere/add-batch-support"              trailers: + MoE-PR (status→approved)
 ```
 
 - One branch (`main`). Per-request scoping comes from commit trailers, not branches.
-- `moe sign code` runs the submodule push and flips the request status — all as further commits on main. `moe scrap` records rationale on main.
+- `moe push` pushes the sandbox's `moe/<request>` branch to the target remote, opens a PR via `gh pr create` (first time only), and flips request status — recorded as a commit on main with a `MoE-PR` trailer. `moe scrap` records rationale on main.
 - `moe review` is `git log --grep="MoE-Request: <id>"` plus a render of each document's current state.
 - Rewinding is `git reset --soft`; reverting is `git revert <sha>`.
 - No custom checkpoint format. Git is the checkpoint.
@@ -649,20 +641,17 @@ The branch model belongs *inside* each target submodule — that's where actual 
 
 Without per-request branches, the bureaucracy working tree is no longer the contention point — different requests' files don't overlap. The remaining contention would be the submodule checkout under `projects/<project>/`, which can only be on one target-repo branch at a time. MoE removes that contention by giving every request its own private, copy-on-write clone of the submodule — no opt-in, no flag:
 
-- On first `moe work` against a request, the submodule at `projects/<project>/` is cloned to `.moe/clones/<project>/<request>/`. Later turns on the same request reuse it, so branch state and uncommitted edits persist across invocations.
+- On first `moe code` against a request, the submodule at `projects/<project>/` is cloned to `.moe/clones/<project>/<request>/`. Later turns on the same request reuse it, so branch state and uncommitted edits persist across invocations.
 - On macOS the clone is an APFS `clonefile(2)` call — O(metadata), no data copied, blocks shared with the source until either side writes. On other platforms a recursive copy is the fallback. Either way, `moe` code is pure-stdlib Go; no container runtime, daemon, or third-party dep.
 - Submodules store their `.git` as a gitfile pointer into `.git/modules/projects/<project>/`. MoE clones that gitdir alongside the worktree (to `.moe/clones/<project>/.git-modules/<request>/`) and rewrites the clone's gitfile and `core.worktree` so the clone is a fully independent git repo. Two activities on the same project never touch each other's index, refs, or objects.
-- `moe sign code` tears down the clone after the status flip. `moe scrap` (future) will do the same. The canonical `projects/<project>/` checkout is passive — MoE only reads from it to seed clones.
+- `moe push` deliberately leaves the sandbox in place so `moe code` can resume iteration (PR review feedback, post-ship bugs). Cleanup is a separate concern (future `moe close` / `moe scrap`). The canonical `projects/<project>/` checkout is passive — MoE only reads from it to seed clones.
 
-Document-only sessions (spec, architecture, test-plan, deploy-plan) don't touch the submodule and never needed isolation in the first place; they continue to write one markdown file under the bureaucracy and run freely in parallel.
+Document-only sessions (e.g. `moe design` on a design canvas, or future knowledge-base docs) don't touch the submodule and never needed isolation in the first place; they continue to write one markdown file under the bureaucracy and run freely in parallel.
 
 **Submodule handling:**
 
-- `moe work` runs `git submodule update --init projects/$target` before invoking Claude Code (only when the session will touch code).
-- Code changes inside `projects/$target/` result in submodule pointer updates committed to main with the request's trailers.
-- `moe sign code` does: commit inside submodule → push to target remote → update pointer in bureaucracy repo → flip request status → optionally open a PR on the target repo. All bureaucracy-side commits land on main. (Today only the status flip is implemented; the rest is Phase 5.)
-
-**`moe sign code` is resumable.** Once the submodule push and PR step exist, each substep (commit-in-submodule, push, bureaucracy pointer update, PR open, status flip) writes a separate commit with a `MoE-Approve-Step: <substep>` trailer. If a step fails (network blip, push rejected), `moe sign code` exits with a clear error; `moe sign code --resume` filters main's log for the request's approve steps, skips ones already produced, and continues from the first missing step. The status flip happens last so partial-approve state is always "request still in_progress; some side-effects landed." Safe to re-run, safe to abandon.
+- `moe code` requires a submodule on disk and runs the agent inside its sandbox clone. The agent creates branch `moe/<request>` and commits edits there; nothing ever lands on the canonical `projects/<project>/` checkout.
+- `moe push` re-points the clone's `origin` at the project's remote, runs `git push -u origin moe/<request>`, and opens a PR via `gh pr create` (first push only). Re-runs push additional commits to the existing branch and print the open PR URL.
 
 ### Request State
 

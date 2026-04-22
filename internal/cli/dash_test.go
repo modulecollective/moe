@@ -96,17 +96,19 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	}
 }
 
-func TestDashReadyToSignLandsInNeedsAttention(t *testing.T) {
+func TestDashReadyToShipLandsInNeedsAttention(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
-	writeContent(t, root, "tele", "fix-it", "design", "# spec\nready.\n")
-	// Represent the work turn that produced the content.
-	commitWorkTurnAt(t, root, "fix-it", "design",
-		time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC))
+	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
+	// A design turn first, then a later code turn — design is settled,
+	// code has landed, ready to ship.
+	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	commitWorkTurnAt(t, root, "fix-it", "design", t0)
+	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -120,12 +122,12 @@ func TestDashReadyToSignLandsInNeedsAttention(t *testing.T) {
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/request:\n%s", got)
 	}
-	if !strings.Contains(got, "ready to sign design") {
+	if !strings.Contains(got, "ready to push") {
 		t.Fatalf("expected readiness note, got:\n%s", got)
 	}
 }
 
-func TestDashPrereqResignedKeepsInActive(t *testing.T) {
+func TestDashPrereqReworkedKeepsInActive(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -135,11 +137,10 @@ func TestDashPrereqResignedKeepsInActive(t *testing.T) {
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	signStageAt(t, root, "fix-it", "design", t0)
+	commitWorkTurnAt(t, root, "fix-it", "design", t0)
 	commitWorkTurnAt(t, root, "fix-it", "code", t0.Add(time.Hour))
-	// Design re-signed after the code work turn → readiness should
-	// reject this request; it belongs in ACTIVE.
-	signStageAt(t, root, "fix-it", "design", t0.Add(2*time.Hour))
+	// Design reworked after the code turn → readiness rejects; ACTIVE.
+	commitWorkTurnAt(t, root, "fix-it", "design", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -166,7 +167,7 @@ func TestDashEmptyContentStaysInActive(t *testing.T) {
 
 	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
 	// Empty content.md — a fresh document dir, no work yet.
-	writeContent(t, root, "tele", "fix-it", "design", "")
+	writeContent(t, root, "tele", "fix-it", "code", "")
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -175,7 +176,7 @@ func TestDashEmptyContentStaysInActive(t *testing.T) {
 	}
 	got := out.String()
 	if !strings.Contains(got, "NEEDS ATTENTION (0)") {
-		t.Fatalf("empty content should not be ready to sign:\n%s", got)
+		t.Fatalf("empty content should not be ready to ship:\n%s", got)
 	}
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected ACTIVE row, got:\n%s", got)
@@ -192,7 +193,8 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 	// An approved request needs a recent commit so LastActivity doesn't
 	// return the opening commit's time (which would still be recent in
 	// a freshly-made fixture, so this is belt-and-suspenders).
-	signStageAt(t, root, "fix-it", "code",
+	commitTrailer(t, root, "push: fix-it",
+		"MoE-Request: fix-it\nMoE-PR: https://example.com/pr/1",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer

@@ -12,7 +12,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/request"
-	"github.com/modulecollective/moe/internal/stage"
 )
 
 func init() {
@@ -166,7 +165,7 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 		return bucketNone, "", nil
 	}
 
-	ready, readyNote, err := readyToSign(root, md)
+	ready, readyNote, err := readyToShip(root, md)
 	if err != nil {
 		return 0, "", err
 	}
@@ -180,23 +179,20 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 	return bucketActive, activeNote(root, md), nil
 }
 
-// readyToSign reports whether the request's active stage is a
-// reasonable sign target right now: the canonical document for the
-// stage has a non-empty content.md, and no prerequisite was re-signed
-// since that document's last work turn. Same "readiness" the
-// upstream-change banner uses, inverted.
-func readyToSign(root string, md *request.Metadata) (bool, string, error) {
-	active, ok, err := stage.Active(root, md.ID)
-	if err != nil || !ok {
-		return false, "", err
-	}
-	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, active.Name))
+// readyToShip reports whether the request's code document is a reasonable
+// `moe push` target right now: code/content.md is non-empty, has at least
+// one `work: update code` commit, and no prerequisite document (today:
+// design) has been worked on since that code turn. Same check the push
+// staleness gate and the `moe code` upstream-change banner use.
+func readyToShip(root string, md *request.Metadata) (bool, string, error) {
+	const docID = "code"
+	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))
 	info, err := os.Stat(contentPath)
 	if err != nil || info.Size() == 0 {
 		return false, "", nil
 	}
 
-	_, lastWhen, err := request.LatestWorkTurnSHA(root, md.ID, active.Name)
+	_, lastWhen, err := request.LatestWorkTurnSHA(root, md.ID, docID)
 	if err != nil {
 		return false, "", err
 	}
@@ -206,41 +202,31 @@ func readyToSign(root string, md *request.Metadata) (bool, string, error) {
 		// operator should run a turn so the document is on the journal.
 		return false, "", nil
 	}
-	for _, dep := range active.Requires {
-		_, signedWhen, err := stage.LatestSign(root, md.ID, dep)
+	for _, dep := range prereqDocs[docID] {
+		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return false, "", err
 		}
-		if !signedWhen.IsZero() && signedWhen.After(lastWhen) {
+		if !depWhen.IsZero() && depWhen.After(lastWhen) {
 			return false, "", nil
 		}
 	}
-	return true, fmt.Sprintf("%s signed, ready to sign %s", joinOrNone(active.Requires), active.Name), nil
+	return true, "ready to push", nil
 }
 
 // activeNote is the short status blurb shown in the ACTIVE bucket. It
 // names the active stage so the operator can see at a glance where the
-// request is without running `moe status`.
+// request is without running `moe status`. Heuristic: if any `work:
+// update code` commit exists, the operator has moved past design.
 func activeNote(root string, md *request.Metadata) string {
-	active, ok, err := stage.Active(root, md.ID)
-	if err != nil || !ok {
+	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
+	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("stage %s", active.Name)
-}
-
-// joinOrNone formats the Requires list for the NEEDS-ATTENTION note.
-// The design stage has no prereqs; saying "design signed, ready to
-// sign design" would be nonsense, so collapse to a cleaner phrasing.
-func joinOrNone(reqs []string) string {
-	if len(reqs) == 0 {
-		return "ready"
+	if !codeWhen.IsZero() {
+		return "stage code"
 	}
-	s := reqs[0]
-	for _, r := range reqs[1:] {
-		s += ", " + r
-	}
-	return s
+	return "stage design"
 }
 
 // humanAgo renders "Xd ago" / "Xh ago" / "just now". tabwriter-friendly

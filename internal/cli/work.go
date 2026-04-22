@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,39 +15,27 @@ import (
 	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/request"
 	"github.com/modulecollective/moe/internal/sandbox"
-	"github.com/modulecollective/moe/internal/stage"
 )
 
-func init() {
-	Register(&Command{
-		Name:    "work",
-		Summary: "open a Claude Code session on a request document",
-		Run:     runWork,
-	})
+// prereqDocs is the flat stage dependency graph used by the upstream-change
+// banner, the `moe push` staleness gate, and the dashboard. Today there is
+// one edge: the code document depends on design. Adding a new stage-doc
+// edge (e.g. a "review" doc that depends on code) is a one-line change
+// here — no separate state machine needed.
+var prereqDocs = map[string][]string{
+	"design": nil,
+	"code":   {"design"},
 }
 
-// runWork is the core loop: resolve the request/document, hand the operator
-// an interactive Claude Code session keyed to that document's session-id,
-// and commit whatever changed when Claude exits. See README §"moe work".
-func runWork(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("work", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe work <project> <request> <document-name>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "<document-name> is a slug like 'spec', 'architecture', or 'implementation'.")
-		moePrintln(stderr, "First use on a name creates the document; re-runs resume the same Claude session.")
-		moePrintln(stderr, "Example: moe work loveletter395 fix-timeout spec")
-	}
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if fs.NArg() != 3 {
-		fs.Usage()
-		return 2
-	}
-	projectID, reqID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
-
+// runStageSession is the core loop shared by `moe design` and `moe code`:
+// resolve the request/document, hand the operator an interactive Claude Code
+// session keyed to that document's session-id, and commit whatever changed
+// when Claude exits.
+//
+// needsSandbox controls the sandbox clone: design=false never gets one,
+// code=true always requires one (with a clear error if the project isn't
+// registered as a submodule). See README §"moe work" for the broader model.
+func runStageSession(projectID, reqID, docID string, needsSandbox bool, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -79,14 +66,14 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
 	}
 
-	// Every `moe work` gets a private copy-on-write clone of the project's
-	// submodule. First turn creates it; later turns reuse the same clone so
-	// session state in the target repo (branches, uncommitted edits) persists
-	// across invocations. Document-only projects (no projects/<id>/ on disk)
-	// silently skip this — the feature only applies where there's code to
-	// isolate.
+	// Sandbox clone: only for stages that actually edit code. design=false
+	// never sees a clone; code=true insists on one.
 	clonePath := ""
-	if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err == nil {
+	if needsSandbox {
+		if _, err := os.Stat(filepath.Join(root, "projects", md.Project)); err != nil {
+			moePrintf(stderr, "project %q has no submodule on disk; cannot run %q without code to edit\n", md.Project, docID)
+			return 1
+		}
 		clonePath, err = sandbox.Ensure(root, md.Project, md.ID)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
@@ -151,9 +138,9 @@ func runWork(args []string, stdout, stderr io.Writer) int {
 // order described in README §"Agent Context Assembly":
 //
 //	soul.md                → global philosophy / quality bar
-//	stages/<stage>.md      → lifecycle-phase lens (earliest unsigned)
+//	stages/<stage>.md      → lifecycle-phase lens (for the doc being edited)
 //	operational core       → what specifically this invocation is doing
-//	upstream-change banner → prereq stages that moved since last turn
+//	upstream-change banner → prereq docs that moved since last turn
 //
 // Per-document fragments, overrides, and upstream-document assembly are
 // expected later passes; each new source of guidance slots in as another
@@ -169,7 +156,7 @@ func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath strin
 		sections = append(sections, soul)
 	}
 
-	frag, err := stageFragment(root, md.ID)
+	frag, err := stageFragment(root, docID)
 	if err != nil {
 		return "", err
 	}
@@ -191,33 +178,27 @@ func buildSystemPrompt(root string, md *request.Metadata, docID, clonePath strin
 }
 
 // upstreamChangeBanner returns a system-prompt section listing prerequisite
-// stages that were (re-)signed after this document's most recent work turn,
-// or "" if there is nothing to surface. The banner names each prerequisite,
-// the absolute path to its content.md, and the SHA the agent last ran on,
-// so the agent can `git -C <root> diff <sha>..HEAD -- <relpath>` to see what
-// changed.
+// documents that were re-committed after this document's most recent work
+// turn, or "" if there is nothing to surface. The banner names each
+// prerequisite, the absolute path to its content.md, and the SHA the agent
+// last ran on, so the agent can `git -C <root> diff <sha>..HEAD -- <relpath>`
+// to see what changed.
 //
 // Conditions for firing:
-//   - The request has an active stage (one whose prerequisites are all
-//     signed and whose own sign is pending). If every stage is signed, work
-//     is done; nothing to surface.
-//   - The active stage has prerequisites. design has none, so this is a
+//   - docID has prerequisites in prereqDocs. design has none, so this is a
 //     no-op there.
 //   - There has been at least one prior work turn for docID. First-turn
 //     sessions get no banner — the agent will read prerequisites fresh on
 //     its own; there is no "since" to compute against.
-//   - At least one prerequisite was MoE-Stage-Signed *after* the last work
-//     turn's commit time.
+//   - At least one prerequisite document had its latest `work: update`
+//     commit land *after* the active doc's last work turn.
 //
 // The banner is advisory. Per stages/code.md "Match the design" the
 // contract is still social — we're just making the social cue legible
 // instead of trusting the agent to notice on its own.
 func upstreamChangeBanner(root string, md *request.Metadata, docID string) (string, error) {
-	active, ok, err := stage.Active(root, md.ID)
-	if err != nil {
-		return "", err
-	}
-	if !ok || len(active.Requires) == 0 {
+	deps := prereqDocs[docID]
+	if len(deps) == 0 {
 		return "", nil
 	}
 
@@ -230,22 +211,22 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 	}
 
 	type move struct {
-		stage   string
+		doc     string
 		when    time.Time
 		relPath string
 	}
 	var moved []move
-	for _, dep := range active.Requires {
-		_, signedWhen, err := stage.LatestSign(root, md.ID, dep)
+	for _, dep := range deps {
+		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return "", err
 		}
-		if signedWhen.IsZero() || !signedWhen.After(lastWhen) {
+		if depWhen.IsZero() || !depWhen.After(lastWhen) {
 			continue
 		}
 		moved = append(moved, move{
-			stage:   dep,
-			when:    signedWhen,
+			doc:     dep,
+			when:    depWhen,
 			relPath: request.ContentPath(md.Project, md.ID, dep),
 		})
 	}
@@ -255,10 +236,10 @@ func upstreamChangeBanner(root string, md *request.Metadata, docID string) (stri
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Since your last turn on %q (bureaucracy commit %s),\n", docID, lastSHA)
-	fmt.Fprintf(&b, "the following prerequisite stage(s) for %q were re-signed and may have\n", active.Name)
+	b.WriteString("the following prerequisite document(s) were updated and may have\n")
 	b.WriteString("changed under you:\n\n")
 	for _, m := range moved {
-		fmt.Fprintf(&b, "- %s (signed %s)\n", m.stage, m.when.Format(time.RFC3339))
+		fmt.Fprintf(&b, "- %s (updated %s)\n", m.doc, m.when.Format(time.RFC3339))
 		fmt.Fprintf(&b, "  document: %s\n", filepath.Join(root, m.relPath))
 		fmt.Fprintf(&b, "  diff:     git -C %s diff %s..HEAD -- %s\n", root, lastSHA, m.relPath)
 	}
@@ -286,7 +267,7 @@ Your canvas for this document is the single file:
 Treat the conversation as exploratory, and the file as the compressed
 artifact. When the operator asks for edits, write them directly to that
 file (create it if it doesn't exist). Keep the file tidy — it becomes
-upstream context for downstream agents once the operator signs it.
+upstream context for downstream agents once the operator moves on.
 
 Request title: %s
 `, docID, md.ID, md.Project, content, md.Title)
@@ -299,22 +280,17 @@ project's submodule:
 That's your code workspace — read and edit files there. The clone is
 yours for the lifetime of this request; your edits are isolated from
 other concurrent activities and from the canonical submodule until the
-request is signed off.
+request is pushed.
 `, clonePath)
 	}
 	return out
 }
 
-// stageFragment returns the markdown guidance for the lifecycle stage the
-// request is currently in, or "" if there's nothing to inject (all stages
-// signed, or no candidate is ready). The "which stage is active" walk
-// lives in stage.Active; this function is only the file-lookup side.
-func stageFragment(root, requestID string) (string, error) {
-	active, ok, err := stage.Active(root, requestID)
-	if err != nil || !ok {
-		return "", err
-	}
-	return readBureaucracyFile(root, filepath.Join("stages", active.Name+".md"))
+// stageFragment returns the markdown guidance for docID, read from
+// stages/<docID>.md, or "" if no fragment exists. Bureaucracies that
+// haven't authored a fragment for a given doc just get no injection.
+func stageFragment(root, docID string) (string, error) {
+	return readBureaucracyFile(root, filepath.Join("stages", docID+".md"))
 }
 
 // readBureaucracyFile reads <root>/<relPath> and returns its contents, or

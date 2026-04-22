@@ -99,6 +99,28 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 	return md, nil
 }
 
+// Load reads requests/<id>/project.json and returns the resolved Metadata.
+// Used by commands that operate against a registered project (e.g. dispatch,
+// push) to resolve Remote, DefaultBranch, and Submodule without re-deriving.
+func Load(root, id string) (*Metadata, error) {
+	if !idPattern.MatchString(id) {
+		return nil, fmt.Errorf("project: id %q must match %s", id, idPattern)
+	}
+	path := filepath.Join(root, "requests", id, "project.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("project: read %s: %w", path, err)
+	}
+	md := &Metadata{}
+	if err := json.Unmarshal(b, md); err != nil {
+		return nil, fmt.Errorf("project: parse %s: %w", path, err)
+	}
+	if md.Remote == "" {
+		return nil, fmt.Errorf("project: %s has no remote", path)
+	}
+	return md, nil
+}
+
 // deriveID extracts a project id from the last path component of a repo URL,
 // stripping a trailing .git.
 func deriveID(url string) (string, error) {
