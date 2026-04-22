@@ -231,6 +231,8 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string) (
 		sections = append(sections, frag)
 	}
 
+	sections = append(sections, sharedStageFragments(md.Workflow, docID)...)
+
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
 
 	banner, err := upstreamChangeBanner(root, md, docID)
@@ -318,6 +320,26 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 	b.WriteString("before continuing. If the change invalidates the approach, surface it to\n")
 	b.WriteString("the operator rather than smuggling a deviation in.\n")
 	return b.String(), nil
+}
+
+// sharedStageFragments returns the cross-workflow guidance blocks that
+// apply to Claude-driven stages. They live under stages/_shared/ and
+// are appended after the per-stage fragment. Today only sdlc/design
+// and sdlc/code receive them; idea-mode prompts are intentionally left
+// alone. Order is stable: completeness first (a gate the agent should
+// run before anything else), then cross-run (a rule that scopes where
+// writes are allowed).
+func sharedStageFragments(workflow, docID string) []string {
+	if workflow != "sdlc" || (docID != "design" && docID != "code") {
+		return nil
+	}
+	var out []string
+	for _, name := range []string{"completeness", "cross-run"} {
+		if frag := moe.Stage("_shared", name); frag != "" {
+			out = append(out, frag)
+		}
+	}
+	return out
 }
 
 // operationalCore is the "what are you doing right now" framing: canvas

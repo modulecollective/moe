@@ -114,6 +114,20 @@ func TestEmbeddedSoulIsNonEmpty(t *testing.T) {
 	}
 }
 
+// TestEmbeddedSharedFragmentsAreNonEmpty catches a regression on the
+// //go:embed directive specifically: fs.Embed skips "_"-prefixed paths
+// unless the directive uses the `all:` prefix. Without it, stages/_shared/
+// silently disappears from the binary and every Claude-driven stage
+// loses its shared guidance blocks — exactly the failure mode this
+// run was added to prevent.
+func TestEmbeddedSharedFragmentsAreNonEmpty(t *testing.T) {
+	for _, name := range []string{"completeness", "cross-run"} {
+		if got := moe.Stage("_shared", name); got == "" {
+			t.Errorf("moe.Stage(%q, %q) is empty; //go:embed likely missing `all:` prefix", "_shared", name)
+		}
+	}
+}
+
 // TestBuildSystemPromptInjectsSdlcDesignFragment is the end-to-end
 // wiring check: the real sdlc/design.md fragment should land in the
 // prompt when the run names the sdlc workflow. Uses a known
@@ -146,6 +160,56 @@ func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	}
 	if !strings.Contains(got, "# Stage: code") {
 		t.Fatalf("prompt missing code fragment heading:\n%s", got)
+	}
+}
+
+// TestBuildSystemPromptInjectsSharedFragmentsAtSdlcStages is the
+// wiring check for the cross-workflow guidance blocks under
+// stages/_shared/. Both fragments must land in the prompt for
+// sdlc/design and sdlc/code, in a stable order (completeness before
+// cross-run), and after the per-stage fragment but before the
+// operational core.
+func TestBuildSystemPromptInjectsSharedFragmentsAtSdlcStages(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	for _, docID := range []string{"design", "code"} {
+		md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+		got, err := buildSystemPrompt(root, md, docID, "")
+		if err != nil {
+			t.Fatalf("%s: %v", docID, err)
+		}
+		stageIdx := strings.Index(got, "# Stage: "+docID)
+		completeIdx := strings.Index(got, "## Before you start")
+		crossRunIdx := strings.Index(got, "## Only edit this run")
+		opIdx := strings.Index(got, "You are collaborating")
+		if stageIdx < 0 || completeIdx < 0 || crossRunIdx < 0 || opIdx < 0 {
+			t.Fatalf("%s: missing section(s) stage=%d complete=%d cross=%d op=%d in:\n%s",
+				docID, stageIdx, completeIdx, crossRunIdx, opIdx, got)
+		}
+		if !(stageIdx < completeIdx && completeIdx < crossRunIdx && crossRunIdx < opIdx) {
+			t.Fatalf("%s: expected stage < completeness < cross-run < op, got stage=%d complete=%d cross=%d op=%d",
+				docID, stageIdx, completeIdx, crossRunIdx, opIdx)
+		}
+	}
+}
+
+// TestBuildSystemPromptOmitsSharedFragmentsOutsideSdlcDesignAndCode
+// is the negative counterpart: the shared fragments are scoped to
+// Claude-driven sdlc stages. Other workflows (and sdlc stages that
+// aren't design or code) get no shared block.
+func TestBuildSystemPromptOmitsSharedFragmentsOutsideSdlcDesignAndCode(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "brief", Project: "tele", Title: "Brief", Workflow: "kb"}
+	got, err := buildSystemPrompt(root, md, "research", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "## Before you start") {
+		t.Errorf("shared completeness fragment leaked into kb/research:\n%s", got)
+	}
+	if strings.Contains(got, "## Only edit this run") {
+		t.Errorf("shared cross-run fragment leaked into kb/research:\n%s", got)
 	}
 }
 
