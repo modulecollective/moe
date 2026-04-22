@@ -27,7 +27,7 @@ var prereqDocs = map[string][]string{
 	"code":   {"design"},
 }
 
-// runStageSession is the core loop shared by `moe design` and `moe code`:
+// runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
 // resolve the request/document, hand the operator an interactive Claude Code
 // session keyed to that document's session-id, and commit whatever changed
 // when Claude exits.

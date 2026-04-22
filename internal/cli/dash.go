@@ -183,7 +183,7 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 // `moe push` target right now: code/content.md is non-empty, has at least
 // one `work: update code` commit, and no prerequisite document (today:
 // design) has been worked on since that code turn. Same check the push
-// staleness gate and the `moe code` upstream-change banner use.
+// staleness gate and the `moe sdlc code` upstream-change banner use.
 func readyToShip(root string, md *request.Metadata) (bool, string, error) {
 	const docID = "code"
 	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, docID))

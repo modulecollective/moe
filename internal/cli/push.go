@@ -30,9 +30,10 @@ const branchPrefix = "moe/"
 
 // runPush pushes the request's sandbox branch to the target repo and, on
 // first ship, opens a PR with the `code` document as its body. Safely
-// re-runnable: a rerun after more `moe code` turns pushes the new commits
-// to the same branch and prints the existing PR URL. The sandbox clone is
-// deliberately NOT removed — iteration via `moe code` stays a one-liner.
+// re-runnable: a rerun after more `moe sdlc code` turns pushes the new
+// commits to the same branch and prints the existing PR URL. The sandbox
+// clone is deliberately NOT removed — iteration via `moe sdlc code` stays
+// a one-liner.
 func runPush(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -40,7 +41,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "usage: moe push <project> <request>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Pushes moe/<request> from the sandbox clone to the target repo and")
-		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe code`")
+		moePrintln(stderr, "opens a PR if one isn't already open. Re-run after more `moe sdlc code`")
 		moePrintln(stderr, "turns to update the branch; the sandbox stays in place.")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -156,19 +157,19 @@ func checkCodeContent(root string, md *request.Metadata) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe code %s %s` first", md.Project, md.ID)
+			return fmt.Errorf("push: code document not written yet; run `moe sdlc code %s %s` first", md.Project, md.ID)
 		}
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe code %s %s` and produce a PR body first", md.Project, md.ID)
+		return fmt.Errorf("push: code document is empty; run `moe sdlc code %s %s` and produce a PR body first", md.Project, md.ID)
 	}
 	return nil
 }
 
 // checkStaleness is the hard gate that signing's cascade used to provide:
 // if the design document was touched after the last code turn, refuse to
-// ship until the operator re-runs `moe code` to reconcile.
+// ship until the operator re-runs `moe sdlc code` to reconcile.
 func checkStaleness(root string, md *request.Metadata) error {
 	_, codeWhen, err := request.LatestWorkTurnSHA(root, md.ID, "code")
 	if err != nil {
@@ -180,7 +181,7 @@ func checkStaleness(root string, md *request.Metadata) error {
 			return err
 		}
 		if !depWhen.IsZero() && depWhen.After(codeWhen) {
-			return fmt.Errorf("push: %s has changed since your last `moe code` turn — run `moe code %s %s` to reconcile, then retry", dep, md.Project, md.ID)
+			return fmt.Errorf("push: %s has changed since your last `moe sdlc code` turn — run `moe sdlc code %s %s` to reconcile, then retry", dep, md.Project, md.ID)
 		}
 	}
 	return nil
@@ -188,7 +189,7 @@ func checkStaleness(root string, md *request.Metadata) error {
 
 func sandboxClonePath(root string, md *request.Metadata) (string, error) {
 	if !sandbox.Exists(root, md.Project, md.ID) {
-		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe code %s %s` first", md.Project, md.ID, md.Project, md.ID)
+		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe sdlc code %s %s` first", md.Project, md.ID, md.Project, md.ID)
 	}
 	return sandbox.Ensure(root, md.Project, md.ID)
 }
@@ -200,7 +201,7 @@ func checkBranchHasCommits(clonePath, branch, base string) error {
 	// First, does the branch exist?
 	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe code` and have the agent commit", branch)
+		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe sdlc code` and have the agent commit", branch)
 	}
 	// Then, is it ahead of base? Use `git rev-list --count base..branch`.
 	// If base isn't a known ref, skip this check — we can't tell, but the
