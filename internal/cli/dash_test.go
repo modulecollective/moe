@@ -9,51 +9,51 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
-// seedRequest writes a minimal request.json + project.json pair under
-// root so moe dash's scan finds it. The opening commit is what newTestBureaucracy
+// seedRun writes a minimal run.json + project.json pair under root so
+// moe dash's scan finds it. The opening commit is what newTestBureaucracy
 // plus commitTrailer supply — tests add work/sign trailers on top.
-func seedRequest(t *testing.T, root, projectID, reqID, status string) *request.Metadata {
+func seedRun(t *testing.T, root, projectID, runID, status string) *run.Metadata {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "requests", projectID), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "projects", projectID), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(root, "requests", projectID, "project.json"),
+		filepath.Join(root, "projects", projectID, "project.json"),
 		[]byte(`{"id":"`+projectID+`"}`),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
 	}
-	md := &request.Metadata{
-		ID:        reqID,
+	md := &run.Metadata{
+		ID:        runID,
 		Project:   projectID,
 		Title:     "T",
 		Status:    status,
 		Workflow:  "sdlc",
 		Created:   "2026-04-01",
-		Documents: map[string]*request.Document{},
+		Documents: map[string]*run.Document{},
 	}
-	if err := request.Save(root, md); err != nil {
+	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	// Commit it so git log --grep=MoE-Request finds the request at all.
-	reqJSONRel := filepath.Join(request.RunDir(projectID, reqID), "request.json")
-	projectJSONRel := filepath.Join("requests", projectID, "project.json")
-	addCmd := exec.Command("git", "-C", root, "add", reqJSONRel, projectJSONRel)
+	// Commit it so git log --grep=MoE-Run finds the run at all.
+	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
+	projectJSONRel := filepath.Join("projects", projectID, "project.json")
+	addCmd := exec.Command("git", "-C", root, "add", runJSONRel, projectJSONRel)
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v\n%s", err, out)
 	}
-	commitTrailer(t, root, "Open request "+projectID+"/"+reqID+": T",
-		"MoE-Request: "+reqID+"\nMoE-Project: "+projectID, time.Time{})
+	commitTrailer(t, root, "Open run "+projectID+"/"+runID+": T",
+		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, time.Time{})
 	return md
 }
 
-func writeContent(t *testing.T, root, projectID, reqID, docID, body string) {
+func writeContent(t *testing.T, root, projectID, runID, docID, body string) {
 	t.Helper()
-	path := filepath.Join(root, request.ContentPath(projectID, reqID, docID))
+	path := filepath.Join(root, run.ContentPath(projectID, runID, docID))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestDashReadyToShipLandsInNeedsAttention(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
+	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 	// A design turn first, then a later code turn — design is settled,
 	// code has landed, ready to ship.
@@ -121,7 +121,7 @@ func TestDashReadyToShipLandsInNeedsAttention(t *testing.T) {
 		t.Fatalf("expected one needs-attention row, got:\n%s", got)
 	}
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
-		t.Fatalf("row missing project/request:\n%s", got)
+		t.Fatalf("row missing project/run:\n%s", got)
 	}
 	if !strings.Contains(got, "ready to push") {
 		t.Fatalf("expected readiness note, got:\n%s", got)
@@ -134,7 +134,7 @@ func TestDashPrereqReworkedKeepsInActive(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
+	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
@@ -166,7 +166,7 @@ func TestDashEmptyContentStaysInActive(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", request.StatusInProgress)
+	seedRun(t, root, "tele", "fix-it", run.StatusInProgress)
 	// Empty content.md — a fresh document dir, no work yet.
 	writeContent(t, root, "tele", "fix-it", "code", "")
 
@@ -190,12 +190,12 @@ func TestDashApprovedLandsInRecent(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "fix-it", request.StatusPushed)
-	// An approved request needs a recent commit so LastActivity doesn't
+	seedRun(t, root, "tele", "fix-it", run.StatusPushed)
+	// An approved run needs a recent commit so LastActivity doesn't
 	// return the opening commit's time (which would still be recent in
 	// a freshly-made fixture, so this is belt-and-suspenders).
 	commitTrailer(t, root, "push: fix-it",
-		"MoE-Request: fix-it\nMoE-PR: https://example.com/pr/1",
+		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/1",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -218,10 +218,10 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// An in_progress request whose last activity is 60 days ago.
-	seedRequest(t, root, "tele", "old-one", request.StatusInProgress)
+	// An in_progress run whose last activity is 60 days ago.
+	seedRun(t, root, "tele", "old-one", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
-		"MoE-Request: old-one\nMoE-Document: spec",
+		"MoE-Run: old-one\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
 	// Default: hidden.
@@ -231,7 +231,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "ACTIVE (0)") {
-		t.Fatalf("dormant request should be hidden, got:\n%s", out.String())
+		t.Fatalf("dormant run should be hidden, got:\n%s", out.String())
 	}
 
 	// --all: shown.
@@ -242,7 +242,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "ACTIVE (1)") {
-		t.Fatalf("--all should reveal dormant request, got:\n%s", out.String())
+		t.Fatalf("--all should reveal dormant run, got:\n%s", out.String())
 	}
 }
 
@@ -252,14 +252,14 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRequest(t, root, "tele", "older", request.StatusInProgress)
+	seedRun(t, root, "tele", "older", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
-		"MoE-Request: older\nMoE-Document: spec",
+		"MoE-Run: older\nMoE-Document: spec",
 		time.Now().UTC().Add(-3*24*time.Hour))
 
-	seedRequest(t, root, "tele", "newer", request.StatusInProgress)
+	seedRun(t, root, "tele", "newer", run.StatusInProgress)
 	commitTrailer(t, root, "work: update spec",
-		"MoE-Request: newer\nMoE-Document: spec",
+		"MoE-Run: newer\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -285,11 +285,11 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	for _, p := range []string{"alpha", "beta", "gamma"} {
-		if err := os.MkdirAll(filepath.Join(root, "requests", p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "projects", p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(
-			filepath.Join(root, "requests", p, "project.json"),
+			filepath.Join(root, "projects", p, "project.json"),
 			[]byte(`{"id":"`+p+`"}`),
 			0o644,
 		); err != nil {

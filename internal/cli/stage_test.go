@@ -10,7 +10,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // newTestBureaucracy initializes a throwaway git repo with scoped git config,
@@ -44,10 +44,10 @@ func newTestBureaucracy(t *testing.T) string {
 // commitWorkTurnAt records a `work: update <docID>` commit with the trailers
 // commitTurn writes in production, dated to when. Returns HEAD's SHA so the
 // caller can assert it appears in the banner.
-func commitWorkTurnAt(t *testing.T, root, requestID, docID string, when time.Time) string {
+func commitWorkTurnAt(t *testing.T, root, runID, docID string, when time.Time) string {
 	t.Helper()
 	commitTrailer(t, root, "work: update "+docID,
-		"MoE-Request: "+requestID+"\nMoE-Document: "+docID, when)
+		"MoE-Run: "+runID+"\nMoE-Document: "+docID, when)
 	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)
@@ -115,14 +115,14 @@ func TestEmbeddedSoulIsNonEmpty(t *testing.T) {
 
 // TestBuildSystemPromptInjectsSdlcDesignFragment is the end-to-end
 // wiring check: the real sdlc/design.md fragment should land in the
-// prompt when the request names the sdlc workflow. Uses a known
+// prompt when the run names the sdlc workflow. Uses a known
 // heading as the sentinel so the assertion survives minor body edits
 // (and breaks loudly if the heading itself is renamed, which is the
 // point — renaming the heading is a signal the framing changed).
 func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
 func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf := registerThrowawayWorkflow(t, "noFragment")
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: wf.Name}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: wf.Name}
 	got, err := buildSystemPrompt(root, md, "ghost", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -177,7 +177,7 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	md := &request.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)
@@ -198,14 +198,14 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	requestID := "fix-it"
+	runID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	// First turn on design, then on code, then design is touched again.
-	commitWorkTurnAt(t, root, requestID, "design", t0)
-	workSHA := commitWorkTurnAt(t, root, requestID, "code", t0.Add(10*time.Second))
-	commitWorkTurnAt(t, root, requestID, "design", t0.Add(20*time.Second))
+	commitWorkTurnAt(t, root, runID, "design", t0)
+	workSHA := commitWorkTurnAt(t, root, runID, "code", t0.Add(10*time.Second))
+	commitWorkTurnAt(t, root, runID, "design", t0.Add(20*time.Second))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +216,7 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	if !strings.Contains(got, workSHA) {
 		t.Errorf("banner missing last-turn SHA %q:\n%s", workSHA, got)
 	}
-	relPath := request.ContentPath("tele", requestID, "design")
+	relPath := run.ContentPath("tele", runID, "design")
 	if !strings.Contains(got, relPath) {
 		t.Errorf("banner missing prereq content path %q:\n%s", relPath, got)
 	}
@@ -228,10 +228,10 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	requestID := "fix-it"
-	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	runID := "fix-it"
+	commitWorkTurnAt(t, root, runID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -244,13 +244,13 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	requestID := "fix-it"
+	runID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, requestID, "design", t0)
-	commitWorkTurnAt(t, root, requestID, "design", t0.Add(10*time.Second)) // another design turn before any code
-	commitWorkTurnAt(t, root, requestID, "code", t0.Add(20*time.Second))
+	commitWorkTurnAt(t, root, runID, "design", t0)
+	commitWorkTurnAt(t, root, runID, "design", t0.Add(10*time.Second)) // another design turn before any code
+	commitWorkTurnAt(t, root, runID, "code", t0.Add(20*time.Second))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
@@ -263,12 +263,12 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 func TestBannerSilentAtDesignStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	requestID := "fix-it"
+	runID := "fix-it"
 	// Design has no prereqs in prereqDocs. Even with a prior work turn,
 	// there's nothing to surface.
-	commitWorkTurnAt(t, root, requestID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
+	commitWorkTurnAt(t, root, runID, "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
-	md := &request.Metadata{ID: requestID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "design", "")
 	if err != nil {
 		t.Fatal(err)

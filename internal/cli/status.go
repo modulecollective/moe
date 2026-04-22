@@ -12,7 +12,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/managed"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
@@ -30,7 +30,7 @@ func init() {
 // hasn't been reconciled yet, it:
 //
 //  1. fetches the full event stream and writes it to thread.jsonl,
-//  2. fetches moe/<request-id> on the project's sandbox clone so the
+//  2. fetches moe/<run-id> on the project's sandbox clone so the
 //     operator can inspect the agent's pushed branch locally,
 //  3. commits a `work: update <doc>` turn against the bureaucracy
 //     with the standard trailer block,
@@ -44,7 +44,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe status <project> <request> <document>")
+		moePrintln(stderr, "usage: moe status <project> <run> <document>")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -53,7 +53,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, reqID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
+	projectID, runID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -65,7 +65,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	md, err := request.Load(root, projectID, reqID)
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -113,20 +113,20 @@ func reconcile(
 	ctx context.Context,
 	client *managed.Client,
 	root string,
-	md *request.Metadata,
-	doc *request.Document,
+	md *run.Metadata,
+	doc *run.Document,
 	docID string,
 	sess *managed.SessionResponse,
 	stdout, stderr io.Writer,
 ) error {
-	threadPath := filepath.Join(root, request.ThreadPath(md.Project, md.ID, docID))
+	threadPath := filepath.Join(root, run.ThreadPath(md.Project, md.ID, docID))
 	if err := writeTranscript(ctx, client, doc.Managed, threadPath); err != nil {
 		return fmt.Errorf("write transcript: %w", err)
 	}
-	moePrintf(stdout, "wrote transcript: %s\n", request.ThreadPath(md.Project, md.ID, docID))
+	moePrintf(stdout, "wrote transcript: %s\n", run.ThreadPath(md.Project, md.ID, docID))
 
 	// The project sandbox clone is where the operator will git-diff
-	// the agent's work. Fetching moe/<request-id> makes the pushed
+	// the agent's work. Fetching moe/<run-id> makes the pushed
 	// branch available locally without forcing the operator to
 	// remember the fetch incantation.
 	if clonePath, err := sandbox.Ensure(root, md.Project, md.ID); err == nil {
@@ -141,22 +141,22 @@ func reconcile(
 	// "already running" state. Save happens inside the commit step
 	// so the JSON update and the trailer commit land atomically.
 	doc.Managed = ""
-	if err := request.Save(root, md); err != nil {
-		return fmt.Errorf("save request.json: %w", err)
+	if err := run.Save(root, md); err != nil {
+		return fmt.Errorf("save run.json: %w", err)
 	}
 
-	docDir := request.DocDir(md.Project, md.ID, docID)
-	reqJSON := filepath.Join(request.RunDir(md.Project, md.ID), "request.json")
+	docDir := run.DocDir(md.Project, md.ID, docID)
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`work: update %s (managed %s)
 
-MoE-Request: %s
+MoE-Run: %s
 MoE-Project: %s
 MoE-Document: %s
 MoE-Session: %s
 MoE-Managed-Session: %s
 MoE-Managed-Status: %s
 `, docID, sess.ID, md.ID, md.Project, docID, doc.Session, sess.ID, sess.Status)
-	if err := request.StageAndCommit(root, msg, docDir, reqJSON); err != nil {
+	if err := run.StageAndCommit(root, msg, docDir, runJSON); err != nil {
 		return fmt.Errorf("commit turn: %w", err)
 	}
 	moePrintf(stdout, "committed reconciliation for %s/%s/%s\n", md.Project, md.ID, docID)
@@ -215,8 +215,8 @@ func writeTranscript(ctx context.Context, client *managed.Client, sessionID, des
 // branch. Refusing with --force intentionally — if the operator has
 // local work on that name we don't want to clobber it; they can merge
 // or rename manually.
-func fetchBranch(clonePath, requestID string) error {
-	branch := "moe/" + requestID
+func fetchBranch(clonePath, runID string) error {
+	branch := "moe/" + runID
 	cmd := exec.Command("git", "-C", clonePath, "fetch", "origin", branch+":"+branch)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

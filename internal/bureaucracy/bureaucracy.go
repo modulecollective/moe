@@ -68,8 +68,8 @@ const markerBody = `# Bureaucracy root marker. Presence of this file identifies 
 `
 
 // Init scaffolds a bureaucracy repo at dir: initializes git if needed, writes
-// the marker file and the empty projects/ and requests/ scaffolding, and
-// stages them. If remote is non-empty, it's set as `origin`.
+// the marker file and the empty projects/ scaffolding, and stages them.
+// If remote is non-empty, it's set as `origin`.
 //
 // Init stops short of committing so the operator can inspect the initial
 // state (add a .gitignore, tweak the marker file, etc.) before the first
@@ -99,14 +99,14 @@ func Init(dir, remote string) error {
 		return fmt.Errorf("bureaucracy: write %s: %w", Marker, err)
 	}
 	// Git doesn't track empty dirs, so a .gitkeep reserves the path and
-	// makes future submodule-add / request-creation land in a tracked spot.
-	for _, sub := range []string{"projects", "requests"} {
-		if err := os.MkdirAll(filepath.Join(abs, sub), 0o755); err != nil {
-			return fmt.Errorf("bureaucracy: mkdir %s: %w", sub, err)
-		}
-		if err := os.WriteFile(filepath.Join(abs, sub, ".gitkeep"), nil, 0o644); err != nil {
-			return fmt.Errorf("bureaucracy: write %s/.gitkeep: %w", sub, err)
-		}
+	// makes future project registration land in a tracked spot.
+	// projects/ is the sole top-level state directory — project.json and
+	// runs/ both live under projects/<id>/.
+	if err := os.MkdirAll(filepath.Join(abs, "projects"), 0o755); err != nil {
+		return fmt.Errorf("bureaucracy: mkdir projects: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(abs, "projects", ".gitkeep"), nil, 0o644); err != nil {
+		return fmt.Errorf("bureaucracy: write projects/.gitkeep: %w", err)
 	}
 
 	if remote != "" {
@@ -127,7 +127,7 @@ func Init(dir, remote string) error {
 		}
 	}
 
-	if err := runGit(abs, "add", Marker, "projects/.gitkeep", "requests/.gitkeep"); err != nil {
+	if err := runGit(abs, "add", Marker, "projects/.gitkeep"); err != nil {
 		return fmt.Errorf("bureaucracy: git add: %w", err)
 	}
 	return nil

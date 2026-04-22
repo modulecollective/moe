@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/claude"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // Request is the inputs for one turn on one document.
@@ -27,9 +27,9 @@ type Request struct {
 	// or other artifacts back into the bureaucracy use it to compute
 	// canonical in-repo paths.
 	Root string
-	// Metadata is the request's on-disk state. Read-only for executors.
-	Metadata *request.Metadata
-	// DocID is which document on the request this turn is for.
+	// Metadata is the run's on-disk state. Read-only for executors.
+	Metadata *run.Metadata
+	// DocID is which document on the run this turn is for.
 	DocID string
 	// SessionID is the canonical UUID that identifies this document's
 	// conversation. Executors use it to create or resume their own
@@ -41,8 +41,8 @@ type Request struct {
 	NewSession bool
 	// Prompt is the assembled system prompt from buildSystemPrompt.
 	Prompt string
-	// ClonePath is the private per-request sandbox clone of the target
-	// project's submodule, or "" for document-only requests. When set,
+	// ClonePath is the private per-run sandbox clone of the target
+	// project's submodule, or "" for document-only runs. When set,
 	// executors should run the agent with this as its working directory.
 	ClonePath string
 	// InitialPrompt, if non-empty, is auto-sent as the first user message
@@ -133,7 +133,7 @@ func (ClaudeCLI) Execute(r Request) error {
 	// Transcript copy is best-effort: a missing file is legal (operator
 	// aborted before claude wrote anything, or ran on another machine),
 	// and other I/O errors don't block the caller's post-run commit.
-	threadPath := filepath.Join(r.Root, request.ThreadPath(r.Metadata.Project, r.Metadata.ID, r.DocID))
+	threadPath := filepath.Join(r.Root, run.ThreadPath(r.Metadata.Project, r.Metadata.ID, r.DocID))
 	if _, err := claude.CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
 		fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
 	}

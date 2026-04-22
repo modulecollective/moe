@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-// Workflow groups a set of stage Commands under one top-level verb,
+// Workflow groups a set of Commands under one top-level verb,
 // e.g. `moe sdlc design ...`. It implements the "nested dispatcher"
 // shape chosen in the consider-workflow-subcommands design: each
 // workflow owns its own stage namespace so SDLC and (future) kb can
@@ -16,46 +16,71 @@ import (
 // also tracks stage order and prereq edges so callers (like `moe dash`)
 // can compute "what's next" without hard-coding the design→code→push
 // pipeline at each callsite (see Next).
+//
+// Workflow subcommands come in two shapes: stages (Register), which
+// participate in the stage ladder — and facades (RegisterFacade) for
+// workflow entry points that dispatch alongside the stages but aren't
+// themselves stages to satisfy. `moe sdlc new` is a facade: it opens a
+// run, it doesn't advance one.
 type Workflow struct {
 	Name    string
 	Summary string
 
-	stages  map[string]*Command
-	order   []string
-	prereqs map[string][]string
+	// commands is the full dispatch table — stages and facades —
+	// keyed by subcommand name. All entries are addressable as
+	// `moe <workflow> <name>`.
+	commands map[string]*Command
+	// stageOrder is the subset of commands that make up the stage
+	// ladder, in registration order. Stages() returns a copy; Next
+	// walks it to compute the next incomplete stage.
+	stageOrder []string
+	prereqs    map[string][]string
 }
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
 // Register and then hand Command() to cli.Register.
 func NewWorkflow(name, summary string) *Workflow {
 	return &Workflow{
-		Name:    name,
-		Summary: summary,
-		stages:  map[string]*Command{},
-		prereqs: map[string][]string{},
+		Name:     name,
+		Summary:  summary,
+		commands: map[string]*Command{},
+		prereqs:  map[string][]string{},
 	}
 }
 
-// Register adds a stage command to this workflow. Panics on duplicate
-// stage names within the workflow — same contract as top-level Register.
+// Register adds a stage command to this workflow's ladder. Panics on
+// duplicate subcommand names — same contract as top-level Register.
 // Optional prereq stage names record that c's satisfaction depends on
 // those stages' latest work turns; the list is consumed by Next,
 // checkStaleness (push), and upstreamChangeBanner (stage session).
 func (w *Workflow) Register(c *Command, prereqs ...string) {
-	if _, dup := w.stages[c.Name]; dup {
-		panic("cli: duplicate stage " + w.Name + " " + c.Name)
+	if _, dup := w.commands[c.Name]; dup {
+		panic("cli: duplicate subcommand " + w.Name + " " + c.Name)
 	}
-	w.stages[c.Name] = c
-	w.order = append(w.order, c.Name)
+	w.commands[c.Name] = c
+	w.stageOrder = append(w.stageOrder, c.Name)
 	if len(prereqs) > 0 {
 		w.prereqs[c.Name] = append([]string(nil), prereqs...)
 	}
 }
 
+// RegisterFacade adds a non-stage subcommand to the workflow's
+// dispatch table — a command accessible as `moe <workflow> <name>` but
+// not part of the stage ladder. Used for workflow entry points like
+// `new` whose job is to create or manipulate runs rather than advance
+// them through stages.
+func (w *Workflow) RegisterFacade(c *Command) {
+	if _, dup := w.commands[c.Name]; dup {
+		panic("cli: duplicate subcommand " + w.Name + " " + c.Name)
+	}
+	w.commands[c.Name] = c
+}
+
 // Stages returns the registered stage names in registration order.
+// Facades (e.g., `new`) are not included.
 func (w *Workflow) Stages() []string {
-	out := make([]string, len(w.order))
-	copy(out, w.order)
+	out := make([]string, len(w.stageOrder))
+	copy(out, w.stageOrder)
 	return out
 }
 
@@ -85,9 +110,9 @@ func (w *Workflow) run(args []string, stdout, stderr io.Writer) int {
 		w.printUsage(stdout)
 		return 0
 	}
-	cmd, ok := w.stages[name]
+	cmd, ok := w.commands[name]
 	if !ok {
-		moePrintf(stderr, "unknown %s stage %q\n", w.Name, name)
+		moePrintf(stderr, "unknown %s subcommand %q\n", w.Name, name)
 		w.printUsage(stderr)
 		return 1
 	}
@@ -95,15 +120,15 @@ func (w *Workflow) run(args []string, stdout, stderr io.Writer) int {
 }
 
 func (w *Workflow) printUsage(out io.Writer) {
-	moePrintf(out, "usage: moe %s <stage> [args...]\n", w.Name)
+	moePrintf(out, "usage: moe %s <subcommand> [args...]\n", w.Name)
 	moePrintln(out, "")
-	moePrintln(out, "stages:")
-	names := make([]string, 0, len(w.stages))
-	for n := range w.stages {
+	moePrintln(out, "subcommands:")
+	names := make([]string, 0, len(w.commands))
+	for n := range w.commands {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		moePrintf(out, "  %-14s  %s\n", n, w.stages[n].Summary)
+		moePrintf(out, "  %-14s  %s\n", n, w.commands[n].Summary)
 	}
 }

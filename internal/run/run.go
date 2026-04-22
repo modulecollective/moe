@@ -1,14 +1,14 @@
-// Package request creates and loads request state on the bureaucracy repo.
+// Package run creates and loads run state on the bureaucracy repo.
 //
-// A request is a unit of work against a registered project. New() writes
-// requests/<project>/runs/<id>/request.json and commits it on main. The
+// A run is a unit of work against a registered project. New() writes
+// projects/<project>/runs/<id>/run.json and commits it on main. The
 // bureaucracy is branchless on purpose — it's an engineering journal, not a
-// code repo. Per-request scoping comes from commit trailers (MoE-Request,
+// code repo. Per-run scoping comes from commit trailers (MoE-Run,
 // MoE-Document, MoE-Session) attached by stage sessions and friends.
 //
 // Document conversations are layered on by the stage sessions (e.g.
-// `moe sdlc design`) — request.New only opens the folder.
-package request
+// `moe sdlc design`) — run.New only opens the folder.
+package run
 
 import (
 	"crypto/rand"
@@ -38,12 +38,12 @@ type Document struct {
 	// Empty when the document has never been dispatched, or after a
 	// dispatched session has been collected and reconciled into the
 	// bureaucracy. `moe tail` and `moe status` address the session by
-	// this id, so the same (project, request, doc) grammar works for
+	// this id, so the same (project, run, doc) grammar works for
 	// both local and async runs.
 	Managed string `json:"managed,omitempty"`
 }
 
-// Request status values written to Metadata.Status. A request opens in
+// Run status values written to Metadata.Status. A run opens in
 // StatusInProgress and flips to StatusPushed when `moe sdlc push` opens
 // the PR on the target repo. Kept as a small closed set so moe dash and
 // related readers can bucket without string-typo risk.
@@ -52,7 +52,7 @@ const (
 	StatusPushed     = "pushed"
 )
 
-// Metadata is the on-disk shape of requests/<project>/runs/<id>/request.json.
+// Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.
 type Metadata struct {
 	ID        string               `json:"id"`
 	Project   string               `json:"project"`
@@ -68,7 +68,7 @@ type Metadata struct {
 type Options struct {
 	// ID overrides the auto-derived slug. Must match idPattern if set.
 	ID string
-	// Workflow names the workflow this request belongs to. Required —
+	// Workflow names the workflow this run belongs to. Required —
 	// fragment lookup in buildSystemPrompt keys on this, so there is no
 	// safe default. Callers that want to validate against a registry
 	// should do so before invoking New.
@@ -101,13 +101,13 @@ func Slugify(title string) string {
 	return strings.TrimRight(b.String(), "-")
 }
 
-// RunDir returns the path (relative to the bureaucracy root) where a
-// request's state lives.
-func RunDir(projectID, id string) string {
-	return filepath.Join("requests", projectID, "runs", id)
+// Dir returns the path (relative to the bureaucracy root) where a
+// run's state lives.
+func Dir(projectID, id string) string {
+	return filepath.Join("projects", projectID, "runs", id)
 }
 
-// New opens a fresh request: writes requests/<project>/runs/<id>/request.json
+// New opens a fresh run: writes projects/<project>/runs/<id>/run.json
 // and commits it on main.
 //
 // The id is derived from the title (Slugify) unless opts.ID is set. On
@@ -116,22 +116,22 @@ func RunDir(projectID, id string) string {
 //
 // Refuses if the project is not registered, the explicit id collides, or
 // the working tree is dirty (a stray edit shouldn't ride along on the
-// "open request" commit).
+// "open run" commit).
 func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	if !idPattern.MatchString(projectID) {
-		return nil, fmt.Errorf("request: project id %q must match %s", projectID, idPattern)
+		return nil, fmt.Errorf("run: project id %q must match %s", projectID, idPattern)
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return nil, fmt.Errorf("request: title is required")
+		return nil, fmt.Errorf("run: title is required")
 	}
 	if opts.Workflow == "" {
-		return nil, fmt.Errorf("request: workflow is required")
+		return nil, fmt.Errorf("run: workflow is required")
 	}
 
-	projectJSON := filepath.Join(root, "requests", projectID, "project.json")
+	projectJSON := filepath.Join(root, "projects", projectID, "project.json")
 	if _, err := os.Stat(projectJSON); err != nil {
-		return nil, fmt.Errorf("request: project %s not registered (%s missing)", projectID, filepath.Join("requests", projectID, "project.json"))
+		return nil, fmt.Errorf("run: project %s not registered (%s missing)", projectID, filepath.Join("projects", projectID, "project.json"))
 	}
 
 	var id string
@@ -139,24 +139,24 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	if opts.ID != "" {
 		id = opts.ID
 		if !idPattern.MatchString(id) {
-			return nil, fmt.Errorf("request: id %q must match %s", id, idPattern)
+			return nil, fmt.Errorf("run: id %q must match %s", id, idPattern)
 		}
 	} else {
 		base := Slugify(title)
 		if base == "" {
-			return nil, fmt.Errorf("request: cannot derive slug from title %q; pass --id to set one explicitly", title)
+			return nil, fmt.Errorf("run: cannot derive slug from title %q; pass --id to set one explicitly", title)
 		}
 		id = base
 		autoSuffix = true
 	}
 
-	runDirRel := RunDir(projectID, id)
+	runDirRel := Dir(projectID, id)
 	if _, err := os.Stat(filepath.Join(root, runDirRel)); err == nil {
 		if !autoSuffix {
-			return nil, fmt.Errorf("request: %s already exists", runDirRel)
+			return nil, fmt.Errorf("run: %s already exists", runDirRel)
 		}
 		id = nextFreeID(root, projectID, id)
-		runDirRel = RunDir(projectID, id)
+		runDirRel = Dir(projectID, id)
 	}
 
 	dirty, err := workingTreeDirty(root)
@@ -164,7 +164,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		return nil, err
 	}
 	if dirty {
-		return nil, fmt.Errorf("request: working tree has uncommitted changes; commit or stash first")
+		return nil, fmt.Errorf("run: working tree has uncommitted changes; commit or stash first")
 	}
 
 	now := opts.Now
@@ -181,36 +181,36 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		Documents: map[string]*Document{},
 	}
 
-	reqJSONRel := filepath.Join(runDirRel, "request.json")
-	if err := writeJSON(filepath.Join(root, reqJSONRel), md); err != nil {
+	runJSONRel := filepath.Join(runDirRel, "run.json")
+	if err := writeJSON(filepath.Join(root, runJSONRel), md); err != nil {
 		return nil, err
 	}
-	if err := runGit(root, "add", reqJSONRel); err != nil {
-		return nil, fmt.Errorf("request: git add: %w", err)
+	if err := runGit(root, "add", runJSONRel); err != nil {
+		return nil, fmt.Errorf("run: git add: %w", err)
 	}
-	msg := fmt.Sprintf(`Open request %s/%s: %s
+	msg := fmt.Sprintf(`Open run %s/%s: %s
 
-MoE-Request: %s
+MoE-Run: %s
 MoE-Project: %s
 `, projectID, id, title, id, projectID)
 	if err := runGit(root, "commit", "-m", msg); err != nil {
-		return nil, fmt.Errorf("request: git commit: %w", err)
+		return nil, fmt.Errorf("run: git commit: %w", err)
 	}
 	return md, nil
 }
 
-// Save persists md to requests/<project>/runs/<id>/request.json, creating
+// Save persists md to projects/<project>/runs/<id>/run.json, creating
 // the directory if needed. The caller is responsible for staging and
 // committing afterward.
 func Save(root string, md *Metadata) error {
-	path := filepath.Join(root, RunDir(md.Project, md.ID), "request.json")
+	path := filepath.Join(root, Dir(md.Project, md.ID), "run.json")
 	return writeJSON(path, md)
 }
 
 // DocDir returns the path (relative to the bureaucracy root) where a
 // document's files live: documents/<doc>/ under the run dir.
 func DocDir(projectID, id, docID string) string {
-	return filepath.Join(RunDir(projectID, id), "documents", docID)
+	return filepath.Join(Dir(projectID, id), "documents", docID)
 }
 
 // ContentPath returns the canonical content file for a document, relative
@@ -234,11 +234,11 @@ var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 // newSessionID returns a fresh random UUIDv4 for use as a Claude Code
 // --session-id. Claude Code rejects non-UUID session ids, so we mint one
-// per document and store it in request.json.
+// per document and store it in run.json.
 func newSessionID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("request: generate session id: %w", err)
+		return "", fmt.Errorf("run: generate session id: %w", err)
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
@@ -260,7 +260,7 @@ func newSessionID() (string, error) {
 // whether to persist (Save + commit).
 func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, error) {
 	if !idPattern.MatchString(docID) {
-		return nil, false, fmt.Errorf("request: document id %q must match %s", docID, idPattern)
+		return nil, false, fmt.Errorf("run: document id %q must match %s", docID, idPattern)
 	}
 	if md.Documents == nil {
 		md.Documents = map[string]*Document{}
@@ -281,7 +281,7 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 		mutated = true
 	}
 	if err := os.MkdirAll(filepath.Join(root, DocDir(md.Project, md.ID, docID)), 0o755); err != nil {
-		return nil, false, fmt.Errorf("request: mkdir document dir: %w", err)
+		return nil, false, fmt.Errorf("run: mkdir document dir: %w", err)
 	}
 	return doc, mutated, nil
 }
@@ -302,7 +302,7 @@ func StageAndCommit(root, msg string, pathspecs ...string) error {
 
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
 // changes — signals "turn produced no document edits" to the caller.
-var ErrNothingToCommit = errors.New("request: nothing to commit")
+var ErrNothingToCommit = errors.New("run: nothing to commit")
 
 // CommitAllowEmpty stages pathspecs (if any) and commits with msg, passing
 // --allow-empty so the commit lands even when nothing is staged. Used for
@@ -327,22 +327,22 @@ func hasStagedChanges(root string) bool {
 }
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
-// `work: update <docID>` commit for the request, identified by the
-// MoE-Request and MoE-Document trailers commitTurn writes. Returns
+// `work: update <docID>` commit for the run, identified by the
+// MoE-Run and MoE-Document trailers commitTurn writes. Returns
 // ("", time.Time{}, nil) when there has been no work turn yet — the caller
 // treats that as "first turn, nothing to diff against."
-func LatestWorkTurnSHA(root, requestID, docID string) (sha string, when time.Time, err error) {
+func LatestWorkTurnSHA(root, runID, docID string) (sha string, when time.Time, err error) {
 	cmd := exec.Command("git",
 		"log", "-1",
 		"--all-match",
-		"--grep", fmt.Sprintf("MoE-Request: %s", requestID),
+		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
 		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
 		"--format=%H %ct",
 	)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("request: git log: %w", err)
+		return "", time.Time{}, fmt.Errorf("run: git log: %w", err)
 	}
 	line := strings.TrimSpace(string(out))
 	if line == "" {
@@ -350,55 +350,55 @@ func LatestWorkTurnSHA(root, requestID, docID string) (sha string, when time.Tim
 	}
 	parts := strings.SplitN(line, " ", 2)
 	if len(parts) != 2 {
-		return "", time.Time{}, fmt.Errorf("request: unexpected git log output %q", line)
+		return "", time.Time{}, fmt.Errorf("run: unexpected git log output %q", line)
 	}
 	epoch, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("request: parse %%ct %q: %w", parts[1], err)
+		return "", time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", parts[1], err)
 	}
 	return parts[0], time.Unix(epoch, 0).UTC(), nil
 }
 
-// Load reads requests/<project>/runs/<id>/request.json.
+// Load reads projects/<project>/runs/<id>/run.json.
 func Load(root, projectID, id string) (*Metadata, error) {
-	path := filepath.Join(root, RunDir(projectID, id), "request.json")
+	path := filepath.Join(root, Dir(projectID, id), "run.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("request: read %s: %w", path, err)
+		return nil, fmt.Errorf("run: read %s: %w", path, err)
 	}
 	md := &Metadata{}
 	if err := json.Unmarshal(b, md); err != nil {
-		return nil, fmt.Errorf("request: parse %s: %w", path, err)
+		return nil, fmt.Errorf("run: parse %s: %w", path, err)
 	}
 	if md.Workflow == "" {
-		return nil, fmt.Errorf("request: %s: workflow is required", path)
+		return nil, fmt.Errorf("run: %s: workflow is required", path)
 	}
 	return md, nil
 }
 
-// Scan walks requests/*/runs/*/request.json under root and returns every
-// request's metadata, in unspecified order. The caller does the sorting
-// and bucketing (moe dash, moe history). A missing or empty requests/
+// Scan walks projects/*/runs/*/run.json under root and returns every
+// run's metadata, in unspecified order. The caller does the sorting
+// and bucketing (moe dash, moe history). A missing or empty projects/
 // directory returns (nil, nil) — a freshly-initialized bureaucracy is a
 // valid state, not an error.
 func Scan(root string) ([]*Metadata, error) {
-	pattern := filepath.Join(root, "requests", "*", "runs", "*", "request.json")
+	pattern := filepath.Join(root, "projects", "*", "runs", "*", "run.json")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("request: glob: %w", err)
+		return nil, fmt.Errorf("run: glob: %w", err)
 	}
 	out := make([]*Metadata, 0, len(matches))
 	for _, path := range matches {
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("request: read %s: %w", path, err)
+			return nil, fmt.Errorf("run: read %s: %w", path, err)
 		}
 		md := &Metadata{}
 		if err := json.Unmarshal(b, md); err != nil {
-			return nil, fmt.Errorf("request: parse %s: %w", path, err)
+			return nil, fmt.Errorf("run: parse %s: %w", path, err)
 		}
 		if md.Workflow == "" {
-			return nil, fmt.Errorf("request: %s: workflow is required", path)
+			return nil, fmt.Errorf("run: %s: workflow is required", path)
 		}
 		out = append(out, md)
 	}
@@ -406,20 +406,20 @@ func Scan(root string) ([]*Metadata, error) {
 }
 
 // LastActivity returns the committer time of the most recent commit
-// carrying MoE-Request: <requestID>, or the zero time if no such commit
-// exists (a request dir can exist without its opening commit being
+// carrying MoE-Run: <runID>, or the zero time if no such commit
+// exists (a run dir can exist without its opening commit being
 // reachable from HEAD, though that's unusual). Used by moe dash to sort
-// buckets and to distinguish dormant requests from live ones.
-func LastActivity(root, requestID string) (time.Time, error) {
+// buckets and to distinguish dormant runs from live ones.
+func LastActivity(root, runID string) (time.Time, error) {
 	cmd := exec.Command("git",
 		"log", "-1",
-		"--grep", fmt.Sprintf("MoE-Request: %s", requestID),
+		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
 		"--format=%ct",
 	)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return time.Time{}, fmt.Errorf("request: git log: %w", err)
+		return time.Time{}, fmt.Errorf("run: git log: %w", err)
 	}
 	line := strings.TrimSpace(string(out))
 	if line == "" {
@@ -427,7 +427,7 @@ func LastActivity(root, requestID string) (time.Time, error) {
 	}
 	epoch, err := strconv.ParseInt(line, 10, 64)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("request: parse %%ct %q: %w", line, err)
+		return time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", line, err)
 	}
 	return time.Unix(epoch, 0).UTC(), nil
 }
@@ -447,7 +447,7 @@ func nextFreeID(root, projectID, base string) string {
 	}
 	for n := 2; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", base, n)
-		if _, err := os.Stat(filepath.Join(root, RunDir(projectID, candidate))); err == nil {
+		if _, err := os.Stat(filepath.Join(root, Dir(projectID, candidate))); err == nil {
 			continue
 		}
 		return candidate
@@ -459,7 +459,7 @@ func workingTreeDirty(root string) (bool, error) {
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("request: git status: %w", err)
+		return false, fmt.Errorf("run: git status: %w", err)
 	}
 	return strings.TrimSpace(string(out)) != "", nil
 }

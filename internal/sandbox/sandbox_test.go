@@ -44,7 +44,7 @@ func TestClonePlainTree(t *testing.T) {
 func TestEnsurePlainRepo(t *testing.T) {
 	requireGit(t)
 	root := t.TempDir()
-	src := filepath.Join(root, "projects", "thing")
+	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestEnsurePlainRepo(t *testing.T) {
 func TestEnsureGitfileSubmodule(t *testing.T) {
 	requireGit(t)
 	root := t.TempDir()
-	src := filepath.Join(root, "projects", "thing")
+	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 	runGit(t, src, "add", "code.txt")
 	runGit(t, src, "commit", "-m", "v1")
 
-	realGitDir := filepath.Join(root, ".git", "modules", "projects", "thing")
+	realGitDir := filepath.Join(root, ".git", "modules", "projects", "thing", "src")
 	if err := os.MkdirAll(filepath.Dir(realGitDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestRemoveIdempotent(t *testing.T) {
 func TestRemoveAfterEnsure(t *testing.T) {
 	requireGit(t)
 	root := t.TempDir()
-	src := filepath.Join(root, "projects", "thing")
+	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestRemoveAfterEnsure(t *testing.T) {
 func TestEnsureWritesGitignore(t *testing.T) {
 	requireGit(t)
 	root := t.TempDir()
-	src := filepath.Join(root, "projects", "thing")
+	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}

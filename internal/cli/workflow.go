@@ -4,44 +4,44 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
-// NextKind enumerates what Workflow.Next decided about a request's next move.
+// NextKind enumerates what Workflow.Next decided about a run's next move.
 type NextKind int
 
 const (
 	// NextKindStage means the returned Command is the next incomplete stage.
 	NextKindStage NextKind = iota
-	// NextKindDone means every stage is satisfied (or the request is
+	// NextKindDone means every stage is satisfied (or the run is
 	// already past its final stage). The returned Command is nil.
 	NextKindDone
 )
 
-// Next reports what the request should do next. A stage is "satisfied"
+// Next reports what the run should do next. A stage is "satisfied"
 // when its most recent work turn is newer than every prereq's most
 // recent work turn. The first unsatisfied stage is returned with
 // NextKindStage. Once every stage is satisfied, Next returns
-// NextKindDone. A request in StatusPushed short-circuits to
+// NextKindDone. A run in StatusPushed short-circuits to
 // NextKindDone regardless of stage state.
-func (w *Workflow) Next(root string, md *request.Metadata) (*Command, NextKind, error) {
-	if md.Status == request.StatusPushed {
+func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, error) {
+	if md.Status == run.StatusPushed {
 		return nil, NextKindDone, nil
 	}
-	for _, stage := range w.order {
+	for _, stage := range w.stageOrder {
 		satisfied, err := w.stageSatisfied(root, md, stage)
 		if err != nil {
 			return nil, 0, err
 		}
 		if !satisfied {
-			return w.stages[stage], NextKindStage, nil
+			return w.commands[stage], NextKindStage, nil
 		}
 	}
 	return nil, NextKindDone, nil
 }
 
-func (w *Workflow) stageSatisfied(root string, md *request.Metadata, stage string) (bool, error) {
-	_, stageWhen, err := request.LatestWorkTurnSHA(root, md.ID, stage)
+func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (bool, error) {
+	_, stageWhen, err := run.LatestWorkTurnSHA(root, md.ID, stage)
 	if err != nil {
 		return false, err
 	}
@@ -49,7 +49,7 @@ func (w *Workflow) stageSatisfied(root string, md *request.Metadata, stage strin
 		return false, nil
 	}
 	for _, dep := range w.prereqs[stage] {
-		_, depWhen, err := request.LatestWorkTurnSHA(root, md.ID, dep)
+		_, depWhen, err := run.LatestWorkTurnSHA(root, md.ID, dep)
 		if err != nil {
 			return false, err
 		}

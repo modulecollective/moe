@@ -111,9 +111,12 @@ func TestRegisterHappyPath(t *testing.T) {
 	if md.Status != "incubating" {
 		t.Errorf("status=%q", md.Status)
 	}
+	if md.Submodule != "projects/remote/src" {
+		t.Errorf("submodule=%q want projects/remote/src", md.Submodule)
+	}
 
 	// project.json on disk matches.
-	b, err := os.ReadFile(filepath.Join(root, "requests/remote/project.json"))
+	b, err := os.ReadFile(filepath.Join(root, "projects/remote/project.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,13 +124,15 @@ func TestRegisterHappyPath(t *testing.T) {
 	if err := json.Unmarshal(b, &roundTrip); err != nil {
 		t.Fatal(err)
 	}
-	if roundTrip.ID != "remote" || roundTrip.Submodule != "projects/remote" {
+	if roundTrip.ID != "remote" || roundTrip.Submodule != "projects/remote/src" {
 		t.Errorf("bad round-trip: %+v", roundTrip)
 	}
 
-	// Submodule checkout exists.
-	if _, err := os.Stat(filepath.Join(root, "projects/remote/README")); err != nil {
-		t.Errorf("submodule not checked out: %v", err)
+	// Submodule checkout exists at projects/remote/src, not directly at
+	// projects/remote — that's what leaves room for project.json and
+	// runs/ to be bureaucracy-tracked alongside the submodule.
+	if _, err := os.Stat(filepath.Join(root, "projects/remote/src/README")); err != nil {
+		t.Errorf("submodule not checked out at projects/remote/src: %v", err)
 	}
 
 	// Commit landed.
@@ -169,8 +174,9 @@ func TestUnregisterRoundTrip(t *testing.T) {
 	}
 	for _, p := range []string{
 		"projects/" + md.ID,
-		"requests/" + md.ID,
-		".git/modules/projects/" + md.ID,
+		"projects/" + md.ID + "/src",
+		"projects/" + md.ID + "/project.json",
+		".git/modules/projects/" + md.ID + "/src",
 	} {
 		if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
 			t.Errorf("%s still exists (err=%v)", p, err)
@@ -213,12 +219,12 @@ func TestUnregisterRefusesExtraContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runsDir := filepath.Join(root, "requests", md.ID, "runs")
+	runsDir := filepath.Join(root, "projects", md.ID, "runs", "some-run")
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	err = Unregister(root, md.ID)
-	if err == nil || !strings.Contains(err.Error(), "remove it manually") {
+	if err == nil || !strings.Contains(err.Error(), "remove them manually") {
 		t.Fatalf("want safety error, got %v", err)
 	}
 }

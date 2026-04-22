@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 func init() {
@@ -23,17 +23,17 @@ func init() {
 }
 
 // dormantCutoff is the staleness threshold for the ACTIVE bucket. A
-// request with no MoE-Request-scoped commit in this window is considered
+// run with no MoE-Run-scoped commit in this window is considered
 // dormant and hidden unless --all is passed. Matches README §"The
-// attention filter": "Dormant requests (no activity in 30+ days)
+// attention filter": "Dormant runs (no activity in 30+ days)
 // collapse out of the default view".
 const dormantCutoff = 30 * 24 * time.Hour
 
 // recentWindow is how far back the RECENT bucket looks for approved
-// requests. README mock uses "RECENT (last 7 days)".
+// runs. README mock uses "RECENT (last 7 days)".
 const recentWindow = 7 * 24 * time.Hour
 
-// bucket labels a request's slot in the dashboard. Ordered so that the
+// bucket labels a run's slot in the dashboard. Ordered so that the
 // most actionable sits at the top (needs attention) and historical
 // context sits at the bottom (recent).
 type bucket int
@@ -50,7 +50,7 @@ const (
 // runs up front in buildDashRows.
 type dashRow struct {
 	project string
-	request string
+	run     string
 	note    string
 	when    time.Time // sort key within the bucket; most recent first
 	bucket  bucket
@@ -59,7 +59,7 @@ type dashRow struct {
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "include dormant requests (no activity in 30+ days)")
+	all := fs.Bool("all", false, "include dormant runs (no activity in 30+ days)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe dash [--all]")
 	}
@@ -82,7 +82,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	mds, err := request.Scan(root)
+	mds, err := run.Scan(root)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -102,7 +102,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 	activeCount := 0
 	for _, md := range mds {
-		if md.Status == request.StatusInProgress {
+		if md.Status == run.StatusInProgress {
 			activeCount++
 		}
 	}
@@ -111,12 +111,12 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// buildDashRows maps scanned metadata to dashboard rows. Per-request
+// buildDashRows maps scanned metadata to dashboard rows. Per-run
 // git queries live here so renderDash stays a pure printer.
-func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeDormant bool) ([]dashRow, error) {
+func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool) ([]dashRow, error) {
 	rows := make([]dashRow, 0, len(mds))
 	for _, md := range mds {
-		last, err := request.LastActivity(root, md.ID)
+		last, err := run.LastActivity(root, md.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +129,7 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 		}
 		rows = append(rows, dashRow{
 			project: md.Project,
-			request: md.ID,
+			run:     md.ID,
 			note:    note,
 			when:    last,
 			bucket:  b,
@@ -147,20 +147,20 @@ func buildDashRows(root string, mds []*request.Metadata, now time.Time, includeD
 	return rows, nil
 }
 
-// classify decides which bucket a request lands in. See designs/dash.md
+// classify decides which bucket a run lands in. See designs/dash.md
 // for which attention-filter rules are live today versus deferred.
 // Bucket choice is driven by workflow.Next: when the next stage is
 // `push` and the code document has PR-ready content → NEEDS ATTENTION;
 // any other unsatisfied stage → ACTIVE; past-terminal pushed → RECENT.
-func classify(root string, md *request.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
-	if md.Status == request.StatusPushed {
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
+	if md.Status == run.StatusPushed {
 		if !last.IsZero() && now.Sub(last) <= recentWindow {
 			return bucketRecent, fmt.Sprintf("pushed %s", humanAgo(now, last)), nil
 		}
 		return bucketNone, "", nil
 	}
 
-	if md.Status != request.StatusInProgress {
+	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
 		// `moe scrap` lands). Leave them off the dashboard rather than
 		// guess a bucket — they'll surface via `moe history` when that
@@ -198,8 +198,8 @@ func classify(root string, md *request.Metadata, last, now time.Time, includeDor
 // PR-body content. workflow.Next already tells us the stage ladder is
 // satisfied; this is the belt-and-braces check that the code document
 // isn't a zero-byte stub: pushing an empty body is never the right move.
-func readyToShipContent(root string, md *request.Metadata) bool {
-	contentPath := filepath.Join(root, request.ContentPath(md.Project, md.ID, "code"))
+func readyToShipContent(root string, md *run.Metadata) bool {
+	contentPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 	info, err := os.Stat(contentPath)
 	if err != nil {
 		return false
@@ -228,10 +228,10 @@ func humanAgo(now, t time.Time) string {
 }
 
 // countProjects returns the number of registered projects, i.e. the
-// number of requests/<id>/project.json files. Matches how
+// number of projects/<id>/project.json files. Matches how
 // moe project add writes them.
 func countProjects(root string) (int, error) {
-	matches, err := filepath.Glob(filepath.Join(root, "requests", "*", "project.json"))
+	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "project.json"))
 	if err != nil {
 		return 0, fmt.Errorf("dash: glob projects: %w", err)
 	}
@@ -270,7 +270,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 		}
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range section {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", r.project, r.request, r.note)
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", r.project, r.run, r.note)
 		}
 		tw.Flush()
 		fmt.Fprintln(w)

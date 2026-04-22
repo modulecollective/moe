@@ -92,10 +92,14 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 	if err := Init(dir, ""); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{Marker, "projects/.gitkeep", "requests/.gitkeep", ".git"} {
+	for _, p := range []string{Marker, "projects/.gitkeep", ".git"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+	// requests/ is gone — projects/ is the sole top-level state dir.
+	if _, err := os.Stat(filepath.Join(dir, "requests")); !os.IsNotExist(err) {
+		t.Errorf("requests/ should not exist after init (err=%v)", err)
 	}
 	got, err := Find(dir, noEnv)
 	if err != nil {
@@ -117,10 +121,13 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 		t.Fatalf("diff --cached: %v\n%s", err, out)
 	}
 	staged := strings.TrimSpace(string(out))
-	for _, want := range []string{"bureaucracy.conf", "projects/.gitkeep", "requests/.gitkeep"} {
+	for _, want := range []string{"bureaucracy.conf", "projects/.gitkeep"} {
 		if !strings.Contains(staged, want) {
 			t.Errorf("staged set missing %s:\n%s", want, staged)
 		}
+	}
+	if strings.Contains(staged, "requests/.gitkeep") {
+		t.Errorf("staged set should not include requests/.gitkeep:\n%s", staged)
 	}
 }
 

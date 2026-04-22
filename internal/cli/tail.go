@@ -11,7 +11,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/managed"
-	"github.com/modulecollective/moe/internal/request"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 func init() {
@@ -33,7 +33,7 @@ func runTail(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe tail <project> <request> <document>")
+		moePrintln(stderr, "usage: moe tail <project> <run> <document>")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -42,7 +42,7 @@ func runTail(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, reqID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
+	projectID, runID, docID := fs.Arg(0), fs.Arg(1), fs.Arg(2)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -54,7 +54,7 @@ func runTail(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	md, err := request.Load(root, projectID, reqID)
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

@@ -18,7 +18,7 @@ func TestWorkflowNoArgsPrintsUsage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "usage: moe wf <stage>") {
+	if !strings.Contains(got, "usage: moe wf <subcommand>") {
 		t.Fatalf("missing usage header: %q", got)
 	}
 	for _, want := range []string{"alpha", "beta", "A", "B"} {
@@ -41,7 +41,7 @@ func TestWorkflowHelpFlags(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("%s: exit=%d stderr=%q", arg, code, errb.String())
 		}
-		if !strings.Contains(out.String(), "usage: moe wf <stage>") {
+		if !strings.Contains(out.String(), "usage: moe wf <subcommand>") {
 			t.Fatalf("%s: expected usage in stdout, got %q", arg, out.String())
 		}
 	}
@@ -54,9 +54,9 @@ func TestWorkflowUnknownStage(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := w.Command().Run([]string{"bogus"}, &out, &errb)
 	if code == 0 {
-		t.Fatal("expected non-zero exit on unknown stage")
+		t.Fatal("expected non-zero exit on unknown subcommand")
 	}
-	if !strings.Contains(errb.String(), `unknown wf stage "bogus"`) {
+	if !strings.Contains(errb.String(), `unknown wf subcommand "bogus"`) {
 		t.Fatalf("stderr=%q", errb.String())
 	}
 }
@@ -94,7 +94,7 @@ func TestWorkflowRegisterPanicsOnDuplicate(t *testing.T) {
 	w.Register(&Command{Name: "alpha", Summary: "A", Run: nopRun})
 	defer func() {
 		if recover() == nil {
-			t.Fatal("expected panic on duplicate stage registration")
+			t.Fatal("expected panic on duplicate subcommand registration")
 		}
 	}()
 	w.Register(&Command{Name: "alpha", Summary: "A2", Run: nopRun})
@@ -117,9 +117,9 @@ func TestSDLCRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"design", "code", "push"} {
+	for _, want := range []string{"new", "design", "code", "push"} {
 		if !strings.Contains(out.String(), want) {
-			t.Fatalf("sdlc usage missing stage %q: %q", want, out.String())
+			t.Fatalf("sdlc usage missing subcommand %q: %q", want, out.String())
 		}
 	}
 }
