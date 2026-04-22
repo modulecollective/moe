@@ -5,10 +5,12 @@ import (
 	"io"
 )
 
-// The SDLC workflow owns the design→code→(push) lifecycle. Stages are
+// The SDLC workflow owns the design→code→push lifecycle. Stages are
 // nested under `moe sdlc` so kb (and future workflows) can pick their
 // own short stage names without collision. `push` stays top-level:
-// it's a cross-workflow shipping verb, not a stage.
+// it's a cross-workflow shipping verb, not a stage — but it is the
+// workflow's terminal, so `moe work` dispatches to it once stages are
+// satisfied.
 
 func init() {
 	sdlc := NewWorkflow("sdlc", "SDLC workflow stages: design and code a request")
@@ -21,8 +23,10 @@ func init() {
 		Name:    "code",
 		Summary: "open a Claude Code session on the request's code document (in a sandbox clone)",
 		Run:     runCode,
-	})
+	}, "design")
+	sdlc.SetTerminal(pushCmd)
 	Register(sdlc.Command())
+	RegisterWorkflow(sdlc)
 }
 
 func runDesign(args []string, stdout, stderr io.Writer) int {

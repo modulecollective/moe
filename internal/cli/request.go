@@ -37,8 +37,9 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("request new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
+	workflow := fs.String("workflow", request.DefaultWorkflow, "workflow this request belongs to (sdlc is the only one today)")
 	fs.Usage = func() {
-		moePrintln(stderr, `usage: moe request new [--id <slug>] <project> "title"`)
+		moePrintln(stderr, `usage: moe request new [--workflow <name>] [--id <slug>] <project> "title"`)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -52,6 +53,13 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 	// Join remaining args so an unquoted multi-word title still works.
 	title := strings.Join(fs.Args()[1:], " ")
 
+	// Validate against the workflow registry up front so a typo fails
+	// before we write request.json — no orphaned state to clean up.
+	if _, err := LookupWorkflow(*workflow); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -62,11 +70,23 @@ func runRequestNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	md, err := request.New(root, project, title, request.Options{ID: *idOverride})
+	md, err := request.New(root, project, title, request.Options{
+		ID:       *idOverride,
+		Workflow: *workflow,
+	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	moePrintf(stdout, "opened request %s/%s\n", md.Project, md.ID)
-	return 0
+
+	// Offer to jump straight into the first stage. Scripts get a clean
+	// exit — they can chain `&& moe work ...` explicitly.
+	if !stdinIsTerminal() {
+		return 0
+	}
+	if !promptYes(os.Stdin, stdout, "Start work now? [Y/n] ") {
+		return 0
+	}
+	return runWork([]string{md.Project, md.ID}, stdout, stderr)
 }
