@@ -15,8 +15,8 @@ import (
 // See xnu's bsd/kern/syscalls.master. The number is stable ABI — it has
 // not moved across macOS releases.
 const (
-	sysClonefileat = 462
-	atFDCWD        = -2 // <fcntl.h> AT_FDCWD on Darwin
+	sysClonefileat     = 462
+	atFDCWD        int = -2 // <fcntl.h> AT_FDCWD on Darwin
 )
 
 // Clone makes an APFS copy-on-write clone of src at dst. dst must not
@@ -35,10 +35,12 @@ func Clone(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	cwd := atFDCWD
+	fdcwd := uintptr(cwd)
 	_, _, errno := syscall.Syscall6(sysClonefileat,
-		uintptr(atFDCWD),
+		fdcwd,
 		uintptr(unsafe.Pointer(s)),
-		uintptr(atFDCWD),
+		fdcwd,
 		uintptr(unsafe.Pointer(d)),
 		0, // flags: default (follow symlinks, copy ownership)
 		0,
