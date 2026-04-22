@@ -101,6 +101,19 @@ func TestOpenCloseRoundtrip(t *testing.T) {
 	if !strings.Contains(string(out), "hello") {
 		t.Errorf("landed content missing expected body: %q", out)
 	}
+
+	// The working tree at the canonical root must also reflect the
+	// landed content — `update-ref` updates the ref but not the index
+	// or worktree, so downstream commands that read files via os.Stat
+	// would see stale state. Guard against regressing to that shape.
+	diskPath := filepath.Join(root, "projects/moe/runs/r1/documents/design/content.md")
+	body, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("read landed file from working tree: %v", err)
+	}
+	if !strings.Contains(string(body), "hello") {
+		t.Errorf("working tree content missing expected body: %q", body)
+	}
 }
 
 func TestOpenResumesExistingSession(t *testing.T) {

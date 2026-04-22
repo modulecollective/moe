@@ -130,14 +130,6 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 // are left intact, and the error names both so the operator can
 // resolve by hand or run `moe session abandon`.
 func Close(s *Session) error {
-	// Record the pre-rebase tip for the old-value check on the main
-	// ref update, so a concurrent writer (not us — we hold the lock)
-	// can't cause silent data loss.
-	mainBefore, err := gitRevParse(s.Root, "refs/heads/main")
-	if err != nil {
-		return fmt.Errorf("session close: resolve main: %w", err)
-	}
-
 	// Rebase inside the worktree. We don't fetch origin first —
 	// bureaucracy pushes happen through `moe sync`, which holds the
 	// same repo lock. Under the lock, local main is the source of truth.
@@ -153,22 +145,16 @@ func Close(s *Session) error {
 			s.Branch, err, s.WorktreePath, s.Branch, s.Branch, strings.TrimSpace(out))
 	}
 
-	tip, err := gitRevParse(s.WorktreePath, "HEAD")
-	if err != nil {
-		return fmt.Errorf("session close: resolve worktree HEAD: %w", err)
-	}
-
-	// If the session landed no new commits (all its work was already
-	// reachable from main), tip == mainBefore and there's nothing to
-	// update. Skip the update-ref to avoid an unnecessary no-op.
-	if tip != mainBefore {
-		// update-ref with old-value performs an atomic CAS. Under the
-		// repo lock this can't race, but pass it anyway as
-		// belt-and-suspenders against an off-lock mutator.
-		if out, err := runGit(s.Root, "update-ref", "refs/heads/main", tip, mainBefore); err != nil {
-			return fmt.Errorf("session close: fast-forward main from %s to %s: %w (%s)",
-				short(mainBefore), short(tip), err, strings.TrimSpace(out))
-		}
+	// Fast-forward main from the canonical root, not via `update-ref`.
+	// `update-ref` would move the ref but leave the canonical root's
+	// working tree and index at the old main, so downstream commands
+	// (e.g. `moe sdlc push`) would read stale files from disk. `merge
+	// --ff-only` updates ref, index, and working tree in one step and
+	// refuses non-fast-forward, giving us the same safety check the
+	// old-value CAS did.
+	if out, err := runGit(s.Root, "merge", "--ff-only", s.Branch); err != nil {
+		return fmt.Errorf("session close: fast-forward main to %s failed: %w (%s)",
+			s.Branch, err, strings.TrimSpace(out))
 	}
 
 	// Remove worktree and delete branch. Order matters: `git branch -d`
@@ -372,13 +358,6 @@ func newUUID() (string, error) {
 		hex.EncodeToString(b[8:10]),
 		hex.EncodeToString(b[10:16]),
 	), nil
-}
-
-func short(sha string) string {
-	if len(sha) < 7 {
-		return sha
-	}
-	return sha[:7]
 }
 
 // canonPath returns an absolute, symlink-resolved version of p. On
