@@ -22,10 +22,14 @@ const (
 // when its most recent work turn is newer than every prereq's most
 // recent work turn. The first unsatisfied stage is returned with
 // NextKindStage. Once every stage is satisfied, Next returns
-// NextKindDone. A run in StatusPushed short-circuits to
-// NextKindDone regardless of stage state.
+// NextKindDone. Terminal statuses (merged, closed) short-circuit to
+// NextKindDone regardless of stage state. StatusPushed does too —
+// there's no next stage for moe to run, even though the run is still
+// "active" in the sense that a human owes the PR a click; dash
+// surfaces that distinction separately.
 func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, error) {
-	if md.Status == run.StatusPushed {
+	switch md.Status {
+	case run.StatusPushed, run.StatusMerged, run.StatusClosed:
 		return nil, NextKindDone, nil
 	}
 	for _, stage := range w.stageOrder {
