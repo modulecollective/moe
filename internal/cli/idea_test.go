@@ -34,8 +34,18 @@ func seedProject(t *testing.T, root, projectID string) {
 	}
 }
 
-// noEditor unsets EDITOR/VISUAL so launchEditor takes the print-hint
-// path instead of trying to spawn an interactive program in the test.
+// stubEditor points EDITOR at `true` — a no-op that exits 0 — so
+// launchEditor spawns something real but non-interactive. Satisfies
+// the editor-available gate without dropping the test into vi.
+func stubEditor(t *testing.T) {
+	t.Helper()
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
+}
+
+// noEditor clears both EDITOR and VISUAL so the editor-available gate
+// trips. Used by the handful of tests that explicitly exercise the
+// "no editor configured" failure path.
 func noEditor(t *testing.T) {
 	t.Helper()
 	t.Setenv("EDITOR", "")
@@ -67,7 +77,7 @@ func TestIdeaAddCreatesFileAndCommits(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "add", "tele", "Faster dash load"}, &out, &errb)
@@ -152,7 +162,7 @@ func TestIdeaAddAutoSuffixesOnCollision(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	for _, want := range []string{"tele/foo", "tele/foo-2", "tele/foo-3"} {
 		var out, errb bytes.Buffer
@@ -172,7 +182,7 @@ func TestIdeaAddIDOverrideErrorsOnCollision(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	if code := Run([]string{"idea", "add", "--id=mine", "tele", "first"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("first new failed: code=%d", code)
@@ -195,7 +205,7 @@ func TestIdeaAddTolerantToFlagAfterPositional(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "add", "tele", "something", "--id=custom-slug"}, &out, &errb)
@@ -210,12 +220,46 @@ func TestIdeaAddTolerantToFlagAfterPositional(t *testing.T) {
 	}
 }
 
+// The editor gate: without $EDITOR or $VISUAL, idea add must refuse
+// up front and leave the tree untouched. The previous behavior wrote
+// the stub, printed a hint, and committed the title-only file anyway.
+func TestIdeaAddRequiresEditor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "add", "tele", "needs an editor"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit with no editor set, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "EDITOR") || !strings.Contains(errb.String(), "VISUAL") {
+		t.Fatalf("expected error naming $EDITOR/$VISUAL, got: %q", errb.String())
+	}
+	// No file should have been written.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "ideas", "needs-an-editor.md")); !os.IsNotExist(err) {
+		t.Fatalf("idea file should not exist on editor-gate failure, stat err=%v", err)
+	}
+	// Tree must still be clean (no orphan commit, no untracked stub).
+	status := exec.Command("git", "-C", root, "status", "--porcelain")
+	st, err := status.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, st)
+	}
+	if len(bytes.TrimSpace(st)) != 0 {
+		t.Fatalf("tree should be clean after editor-gate failure, got:\n%s", st)
+	}
+}
+
 func TestIdeaAddRefusesUnregisteredProject(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "add", "ghost", "anything"}, &out, &errb)
@@ -233,7 +277,7 @@ func TestIdeaAddRefusesDirtyWorkingTree(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	// Drop a stray untracked file so `git status --porcelain` reports it.
 	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
@@ -255,7 +299,7 @@ func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	for _, title := range []string{"Cross-project search", "Faster dash load", "Zzz last"} {
 		if code := Run([]string{"idea", "add", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -309,7 +353,7 @@ func TestIdeaRemoveDeletesFileAndCommits(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	if code := Run([]string{"idea", "add", "tele", "Faster dash load"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
@@ -354,7 +398,7 @@ func TestIdeaRemoveMissingSlug(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "remove", "tele", "ghost"}, &out, &errb)
@@ -374,7 +418,7 @@ func TestIdeaRemoveRefusesUnregisteredProject(t *testing.T) {
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "remove", "ghost", "anything"}, &out, &errb)
@@ -392,7 +436,7 @@ func TestIdeaRemoveRefusesDirtyWorkingTree(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	if code := Run([]string{"idea", "add", "tele", "A thing"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")

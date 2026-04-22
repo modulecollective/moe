@@ -12,7 +12,7 @@ import (
 // need a pre-existing idea to promote.
 func captureIdea(t *testing.T, projectID, title string) {
 	t.Helper()
-	noEditor(t)
+	stubEditor(t)
 	if code := Run([]string{"idea", "add", projectID, title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed for %q", title)
 	}
@@ -44,7 +44,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndDeletesIdea(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "Cross-project search")
@@ -98,7 +98,7 @@ func TestRunNewFromIdeaExplicitTitleOverridesH1(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "Original title")
@@ -125,7 +125,7 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "DNS basics")
@@ -147,7 +147,7 @@ func TestRunNewFromIdeaErrorsOnMissingIdea(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"--from-idea=nope", "tele"}, &out, &errb)
@@ -169,7 +169,7 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 	seedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
+	stubEditor(t)
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "Flag ordering")

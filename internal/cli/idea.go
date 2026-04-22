@@ -131,6 +131,11 @@ func runIdeaAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea add needs an editor")
+		return 1
+	}
+
 	rel := ideaPath(projectID, slug)
 	abs := filepath.Join(root, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
@@ -388,18 +393,14 @@ func resolveIdeaSlug(root, projectID, override, title string) (string, error) {
 	}
 }
 
-// launchEditor opens path in $VISUAL or $EDITOR with stdio wired to the
-// terminal, so the operator drops straight into editing the new stub.
-// When neither variable is set, we just print a hint — the file is
-// already on disk and the path was printed above.
+// launchEditor opens path in $VISUAL or $EDITOR with stdio wired to
+// the terminal, so the operator drops straight into editing the file.
+// Callers are expected to have gated on an editor being available —
+// running with neither var set is a programmer error.
 func launchEditor(path string, stdout, stderr io.Writer) int {
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
-	}
-	if editor == "" {
-		moePrintln(stdout, "(set $EDITOR or $VISUAL to open the file directly next time)")
-		return 0
 	}
 	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
 	cmd.Stdin = os.Stdin
