@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -132,7 +133,54 @@ func runStageSession(projectID, reqID, docID string, needsSandbox bool, initialP
 	if runErr != nil {
 		return 1
 	}
-	return 0
+	return promptNextStage(root, md, stdout, stderr)
+}
+
+// promptNextStage prints the next incomplete stage's exact invocation
+// and, on an interactive terminal, offers to run it in-process. Stages
+// with external side effects (push) default to N so a reflex Enter can
+// never ship a branch; the rest default to Y. Returns the exit code to
+// bubble up from the current stage: 0 on skip/decline/successful chain,
+// the inner command's exit code if the chained stage fails.
+func promptNextStage(root string, md *request.Metadata, stdout, stderr io.Writer) int {
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if kind != NextKindStage || next == nil {
+		return 0
+	}
+	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
+	if !stdinIsTerminal() {
+		moePrintf(stdout, "next: %s\n", hint)
+		return 0
+	}
+	defaultYes := next.Name != "push"
+	label := "[Y/n]"
+	if !defaultYes {
+		label = "[y/N]"
+	}
+	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	accepted := defaultYes
+	if answer != "" {
+		accepted = strings.HasPrefix(answer, "y")
+	}
+	if !accepted {
+		return 0
+	}
+	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
 }
 
 // buildSystemPrompt assembles the `--append-system-prompt` payload in the
