@@ -42,20 +42,24 @@ func TestWorkflowDispatcherRoutesToRegisteredWorkflow(t *testing.T) {
 	}
 }
 
-// TestWorkflowDispatcherRejectsUnexposed confirms that workflows opting
-// out of `moe workflow` (ExposedViaCLI=false — e.g. idea) are not
-// reachable through either the long or short alias.
+// TestWorkflowDispatcherRejectsUnexposed confirms a workflow that
+// opts out of `moe workflow` (ExposedViaCLI=false) stays invisible to
+// the dispatcher through either alias. Uses a throwaway workflow so
+// the test doesn't depend on any real workflow choosing to hide.
 func TestWorkflowDispatcherRejectsUnexposed(t *testing.T) {
-	if wf, err := LookupWorkflow("idea"); err != nil || wf.ExposedViaCLI {
-		t.Fatalf("precondition: idea workflow should exist with ExposedViaCLI=false (wf=%v, err=%v)", wf, err)
-	}
+	wf := NewWorkflow("__hidden", "test-only hidden workflow")
+	wf.ExposedViaCLI = false
+	wf.Register(&Command{Name: "ping", Summary: "p", Run: nopRun})
+	RegisterWorkflow(wf)
+	defer delete(workflows, "__hidden")
+
 	for _, verb := range []string{"workflow", "wf"} {
 		var out, errb bytes.Buffer
-		code := Run([]string{verb, "idea", "edit", "tele", "x"}, &out, &errb)
+		code := Run([]string{verb, "__hidden", "ping"}, &out, &errb)
 		if code == 0 {
 			t.Fatalf("%s: expected non-zero exit, got 0 (stdout=%q)", verb, out.String())
 		}
-		if !strings.Contains(errb.String(), `unknown workflow "idea"`) {
+		if !strings.Contains(errb.String(), `unknown workflow "__hidden"`) {
 			t.Fatalf("%s: stderr should mention unknown workflow, got %q", verb, errb.String())
 		}
 	}
@@ -73,14 +77,10 @@ func TestWorkflowDispatcherNoArgsPrintsUsage(t *testing.T) {
 		if !strings.Contains(out.String(), "usage: moe workflow") {
 			t.Fatalf("%s: missing usage header: %q", verb, out.String())
 		}
-		for _, want := range []string{"sdlc", "kb", "quick"} {
+		for _, want := range []string{"sdlc", "kb", "quick", "idea"} {
 			if !strings.Contains(out.String(), want) {
 				t.Fatalf("%s: usage missing workflow %q: %q", verb, want, out.String())
 			}
-		}
-		// idea opts out of CLI exposure.
-		if strings.Contains(out.String(), "idea") {
-			t.Fatalf("%s: usage should not list unexposed workflow 'idea': %q", verb, out.String())
 		}
 		if errb.Len() != 0 {
 			t.Fatalf("%s: stderr should be empty, got %q", verb, errb.String())

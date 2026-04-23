@@ -16,6 +16,11 @@ type Command struct {
 	Name    string
 	Summary string
 	Run     func(args []string, stdout, stderr io.Writer) int
+	// Hidden omits the command from usage listings while keeping it
+	// reachable by exact name. Used for stub stages (e.g. the idea
+	// workflow's single stage is load-bearing for Workflow.Next but
+	// isn't an operator-facing verb).
+	Hidden bool
 }
 
 var commands = map[string]*Command{}
@@ -52,7 +57,10 @@ func PrintUsage(w io.Writer) {
 	moePrintln(w, "")
 	moePrintln(w, "commands:")
 	names := make([]string, 0, len(commands))
-	for n := range commands {
+	for n, c := range commands {
+		if c.Hidden {
+			continue
+		}
 		names = append(names, n)
 	}
 	sort.Strings(names)

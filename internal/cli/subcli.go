@@ -133,7 +133,10 @@ func (w *Workflow) printUsage(out io.Writer) {
 	moePrintln(out, "")
 	moePrintln(out, "subcommands:")
 	names := make([]string, 0, len(w.commands))
-	for n := range w.commands {
+	for n, c := range w.commands {
+		if c.Hidden {
+			continue
+		}
 		names = append(names, n)
 	}
 	sort.Strings(names)
