@@ -23,10 +23,12 @@ import (
 // sdlc/kb/quick. The distinguishing discipline: `moe idea` verbs never
 // launch Claude unless --chat is passed — capture stays cheap.
 //
-// The idea workflow itself is registered in the workflow registry (for
-// LookupWorkflow / dash), but opts out of `moe workflow` dispatch via
-// ExposedViaCLI=false — `moe idea` is its own top-level verb so muscle
-// memory for `new/edit/close/list` maps directly onto the new verbs.
+// The idea workflow is reachable two ways: the short `moe idea <verb>`
+// top-level command keeps capture cheap, and the same verbs also hang
+// off `moe workflow idea <verb>` so the workflow namespace is complete.
+// Both doors land on the same runIdeaNew/Edit/Close/List handlers —
+// the short form stays canonical; the workflow form is there so
+// `moe workflow` listings don't have a hole.
 
 // ideaWorkflow is the workflow name written to run.json's `workflow`
 // field for idea runs. Kept as a constant so the few places that
@@ -45,20 +47,40 @@ func init() {
 	})
 
 	// Register the idea workflow so run.Load, dash lookup, and
-	// --from-idea's wf.Stages() all resolve it. ExposedViaCLI is false
-	// so `moe workflow idea` rejects with "unknown workflow" — the
-	// idea verbs live on the top-level `moe idea` command above. The
-	// stage command itself is thus unreachable; we give it a usage
-	// stub just in case an internal caller reaches for it.
-	wf := NewWorkflow(ideaWorkflow, "single-stage idea-capture workflow (driven by `moe idea`)")
-	wf.ExposedViaCLI = false
+	// --from-idea's wf.Stages() all resolve it — and expose its verbs
+	// under `moe workflow idea` as facades pointing at the same
+	// handlers the top-level `moe idea` uses. The single stage is kept
+	// as a defensive stub; the real operator-facing verbs are the
+	// facades below.
+	wf := NewWorkflow(ideaWorkflow, "lightweight backlog: capture and list ideas")
 	wf.Register(&Command{
 		Name:    ideaDocID,
 		Summary: "idea canvas (use `moe idea edit` instead of invoking directly)",
+		Hidden:  true, // kept in stageOrder for Workflow.Next; hidden from usage
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			moePrintln(stderr, "idea runs are driven via `moe idea` — try `moe idea edit <project> <slug>`")
 			return 2
 		},
+	})
+	wf.RegisterFacade(&Command{
+		Name:    "new",
+		Summary: "capture a new idea (opens $EDITOR, or --chat for Claude Code)",
+		Run:     runIdeaNew,
+	})
+	wf.RegisterFacade(&Command{
+		Name:    "edit",
+		Summary: "refine a captured idea ($EDITOR, or --chat for Claude Code)",
+		Run:     runIdeaEdit,
+	})
+	wf.RegisterFacade(&Command{
+		Name:    "close",
+		Summary: "close a captured idea without promoting (status → closed)",
+		Run:     runIdeaClose,
+	})
+	wf.RegisterFacade(&Command{
+		Name:    "list",
+		Summary: "list this project's open ideas",
+		Run:     runIdeaList,
 	})
 	RegisterWorkflow(wf)
 }
