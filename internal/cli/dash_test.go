@@ -87,9 +87,9 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"Ministry of Everything",
-		"ACTIVE RUNS (0)",
+		"ACTIVE (0)",
 		"BACKLOG (0)",
-		"COMPLETED RUNS (0)",
+		"COMPLETED (0)",
 		"0 project(s) registered · 0 active",
 	} {
 		if !strings.Contains(got, want) {
@@ -118,7 +118,7 @@ func TestDashReadyToPushShowsPushStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
@@ -151,7 +151,7 @@ func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "sdlc:code") {
@@ -175,7 +175,7 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
@@ -184,7 +184,7 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 }
 
 // TestDashPushedRunShowsAwaitingMerge: a run with StatusPushed renders
-// in ACTIVE RUNS with an "awaiting merge: #<n>" label so the operator
+// in ACTIVE with an "awaiting merge: #<n>" label so the operator
 // sees it still owes a click on GitHub. PR number comes from the
 // MoE-PR trailer.
 func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
@@ -204,7 +204,7 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "ACTIVE RUNS (1)") {
+	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected pushed run in ACTIVE, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "#42") {
@@ -216,7 +216,7 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 }
 
 // TestDashMergedRunShowsMerged: a run with StatusMerged renders as
-// "merged" in COMPLETED RUNS.
+// "merged" in COMPLETED.
 func TestDashMergedRunShowsMerged(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -234,7 +234,7 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED RUNS (1)") {
+	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("expected merged run in COMPLETED, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "sdlc:merged") {
@@ -243,7 +243,7 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 }
 
 // TestDashClosedRunShowsClosed: a run with StatusClosed (PR closed
-// without merging) renders as "closed" in COMPLETED RUNS.
+// without merging) renders as "closed" in COMPLETED.
 func TestDashClosedRunShowsClosed(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -261,7 +261,7 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED RUNS (1)") {
+	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("expected closed run in COMPLETED, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "fix-it", "sdlc:closed") {
@@ -272,7 +272,7 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 // TestDashKBRunAfterSummarizeShowsDone is the regression for the
 // disappearing-KB-run bug: a KB run with both research and summarize
 // turns committed has Next()==Done but Status==InProgress (KB has no
-// push), and must still render as "done" — landing in COMPLETED RUNS.
+// push), and must still render as "done" — landing in COMPLETED.
 func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -290,7 +290,7 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED RUNS (1)") {
+	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "lookup", "kb:done") {
@@ -315,7 +315,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE RUNS (0)") {
+	if !strings.Contains(out.String(), "ACTIVE (0)") {
 		t.Fatalf("dormant run should be hidden, got:\n%s", out.String())
 	}
 
@@ -326,7 +326,7 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE RUNS (1)") {
+	if !strings.Contains(out.String(), "ACTIVE (1)") {
 		t.Fatalf("--all should reveal dormant run, got:\n%s", out.String())
 	}
 }
@@ -400,10 +400,10 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 			t.Fatalf("backlog missing workflow-prefixed note %q in:\n%s", want, got)
 		}
 	}
-	// Sections render top-to-bottom: ACTIVE RUNS → BACKLOG → COMPLETED RUNS.
-	activeIdx := strings.Index(got, "ACTIVE RUNS")
+	// Sections render top-to-bottom: ACTIVE → BACKLOG → COMPLETED.
+	activeIdx := strings.Index(got, "ACTIVE")
 	backlogIdx := strings.Index(got, "BACKLOG")
-	completedIdx := strings.Index(got, "COMPLETED RUNS")
+	completedIdx := strings.Index(got, "COMPLETED")
 	if !(activeIdx >= 0 && backlogIdx >= 0 && completedIdx >= 0 && activeIdx < backlogIdx && backlogIdx < completedIdx) {
 		t.Fatalf("section order wrong (active=%d backlog=%d completed=%d):\n%s", activeIdx, backlogIdx, completedIdx, got)
 	}
@@ -480,7 +480,7 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED RUNS (10 of 12)") {
+	if !strings.Contains(got, "COMPLETED (10 of 12)") {
 		t.Fatalf("expected capped header, got:\n%s", got)
 	}
 	// Oldest two (done-00, done-01) should be dropped; newest (done-11) shown.
@@ -491,6 +491,94 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		if strings.Contains(got, dropped) {
 			t.Fatalf("expected %q to be truncated below cap, got:\n%s", dropped, got)
 		}
+	}
+}
+
+// TestDashSectionHeadingsDropRuns pins the operator-facing section
+// labels: "ACTIVE" and "COMPLETED" — the bare nouns, without the
+// implementation-flavored "RUNS" suffix that used to read like a
+// schema label rather than a status.
+func TestDashSectionHeadingsDropRuns(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"ACTIVE (0)", "BACKLOG (0)", "COMPLETED (0)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in output:\n%s", want, got)
+		}
+	}
+	for _, banned := range []string{"ACTIVE RUNS", "COMPLETED RUNS"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("unexpected %q in output:\n%s", banned, got)
+		}
+	}
+}
+
+// TestDashPromotedIdeaShowsSuccessorWorkflow: a promoted idea row
+// gains a " → <workflow>" suffix pointing at the workflow of the run
+// it was promoted to, sourced from the MoE-Promoted-To trailer.
+func TestDashPromotedIdeaShowsSuccessorWorkflow(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	idea := seedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
+	idea.Title = "Cross-project search"
+	if err := run.Save(root, idea); err != nil {
+		t.Fatal(err)
+	}
+	seedRun(t, root, "tele", "search-impl", "sdlc", run.StatusInProgress)
+	commitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
+		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
+		time.Time{})
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "idea:promoted → sdlc") {
+		t.Fatalf("expected 'idea:promoted → sdlc' on the promoted row, got:\n%s", got)
+	}
+}
+
+// TestDashPromotedIdeaMissingTargetFallsBack: when the successor run
+// recorded on the trailer isn't present in the scanned set (deleted,
+// not yet pulled, etc.), the row falls back to the bare
+// "idea:promoted" label — the arrow only appears when we can name the
+// destination workflow.
+func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "ghost-idea", ideaWorkflow, run.StatusPromoted)
+	commitTrailer(t, root, "Promote idea tele/ghost-idea → tele/never-seeded",
+		"MoE-Run: ghost-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/never-seeded",
+		time.Time{})
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "idea:promoted") {
+		t.Fatalf("expected promoted row, got:\n%s", got)
+	}
+	if strings.Contains(got, "→") {
+		t.Fatalf("expected no arrow when destination is missing, got:\n%s", got)
 	}
 }
 

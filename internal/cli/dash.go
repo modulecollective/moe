@@ -30,7 +30,7 @@ func init() {
 // collapse out of the default view".
 const dormantCutoff = 30 * 24 * time.Hour
 
-// completedCap bounds the COMPLETED RUNS section. Finished runs are
+// completedCap bounds the COMPLETED section. Finished runs are
 // history — useful as recent context, not as a backlog — so we show
 // the newest N and let the bureaucracy repo itself be the archive.
 const completedCap = 10
@@ -104,9 +104,9 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Count active from buckets rather than md.Status so the footer
-	// matches what the ACTIVE RUNS section actually shows. A KB run
-	// past its terminal stage is Status=in_progress on disk but lives
-	// in COMPLETED here — counting it as active would mislead.
+	// matches what the ACTIVE section actually shows. A KB run past
+	// its terminal stage is Status=in_progress on disk but lives in
+	// COMPLETED here — counting it as active would mislead.
 	activeCount := 0
 	for _, r := range rows {
 		if r.bucket == bucketActiveRuns {
@@ -124,13 +124,20 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 // backlog bucket and closed/promoted ones to completed, so there's no
 // separate scan of a markdown-file shelf.
 func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool) ([]dashRow, error) {
+	// byRunKey lets the promoted-idea branch resolve a successor run's
+	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
+	// without a second disk scan.
+	byRunKey := make(map[string]*run.Metadata, len(mds))
+	for _, md := range mds {
+		byRunKey[md.Project+"/"+md.ID] = md
+	}
 	rows := make([]dashRow, 0, len(mds))
 	for _, md := range mds {
 		last, err := run.LastActivity(root, md.ID)
 		if err != nil {
 			return nil, err
 		}
-		b, note, err := classify(root, md, last, now, includeDormant)
+		b, note, err := classify(root, md, last, now, includeDormant, byRunKey)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +169,7 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 // the operator still owes a click on GitHub; merged and closed runs
 // land in COMPLETED. Dormant runs are dropped unless the caller asked
 // for --all.
-func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool) (bucket, string, error) {
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata) (bucket, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
@@ -179,7 +186,11 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		case run.StatusInProgress:
 			return bucketBacklog, prefix + md.Title, nil
 		case run.StatusPromoted:
-			return bucketCompletedRuns, prefix + "promoted", nil
+			note := prefix + "promoted"
+			if wf, ok := promotedToWorkflow(root, md.ID, byRunKey); ok {
+				note += " → " + wf
+			}
+			return bucketCompletedRuns, note, nil
 		case run.StatusClosed:
 			return bucketCompletedRuns, prefix + "closed", nil
 		}
@@ -224,6 +235,24 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		return bucketCompletedRuns, prefix + "done", nil
 	}
 	return bucketActiveRuns, prefix + next.Name, nil
+}
+
+// promotedToWorkflow returns the workflow name of the successor run
+// recorded on a promoted idea's MoE-Promoted-To trailer
+// (`<project>/<runID>`). Returns ("", false) when the trailer is
+// missing, malformed, or the destination run is no longer in the
+// scanned set — caller falls back to the bare "promoted" label so the
+// arrow only appears when we actually know where it went.
+func promotedToWorkflow(root, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
+	v := trailerValue(root, runID, "MoE-Promoted-To")
+	if v == "" {
+		return "", false
+	}
+	dest, ok := byRunKey[v]
+	if !ok {
+		return "", false
+	}
+	return dest.Workflow, true
 }
 
 // prNumberForRun finds the PR number recorded for runID by pulling
@@ -275,11 +304,11 @@ func countProjects(root string) (int, error) {
 	return len(matches), nil
 }
 
-// renderDash prints the header, three sections (ACTIVE RUNS, BACKLOG,
-// COMPLETED RUNS), and footer. Order is operator-first: what you can
+// renderDash prints the header, three sections (ACTIVE, BACKLOG,
+// COMPLETED), and footer. Order is operator-first: what you can
 // act on now, then what's queued, then what's already done. tabwriter
 // aligns columns per section so a long idea title doesn't widen the
-// run rows. COMPLETED RUNS is capped at completedCap — older finished
+// run rows. COMPLETED is capped at completedCap — older finished
 // runs still live in the bureaucracy repo, they just don't clutter
 // the dashboard. Section headings use the cyan-moe style from
 // output.go; rows stay plain so tabwriter's byte-counting aligns
@@ -299,7 +328,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 		}
 	}
 
-	moePrintf(w, "ACTIVE RUNS (%d)\n", len(active))
+	moePrintf(w, "ACTIVE (%d)\n", len(active))
 	if len(active) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
@@ -328,9 +357,9 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 		shown = completed[:completedCap]
 	}
 	if len(shown) < len(completed) {
-		moePrintf(w, "COMPLETED RUNS (%d of %d)\n", len(shown), len(completed))
+		moePrintf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
 	} else {
-		moePrintf(w, "COMPLETED RUNS (%d)\n", len(completed))
+		moePrintf(w, "COMPLETED (%d)\n", len(completed))
 	}
 	if len(shown) == 0 {
 		fmt.Fprintln(w, "  (none)")
