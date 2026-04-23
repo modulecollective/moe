@@ -28,6 +28,7 @@ func init() {
 		Summary: "open a Claude Code session on the run's synthesized article",
 		Run:     runSummarize,
 	}, "research")
+	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
 	Register(kb.Command())
 	RegisterWorkflow(kb)
 }

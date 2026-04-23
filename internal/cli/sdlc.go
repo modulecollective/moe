@@ -24,6 +24,7 @@ func init() {
 		Run:     runCode,
 	}, "design")
 	sdlc.Register(pushCmd, "code")
+	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", sdlcCloseCleanup))
 	Register(sdlc.Command())
 	RegisterWorkflow(sdlc)
 }

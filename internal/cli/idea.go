@@ -277,68 +277,12 @@ MoE-Document: %s
 	return 0
 }
 
+// runIdeaClose is the entry point for `moe idea close`. Delegates to
+// the shared close handler in close.go; ideas keep the short `Close
+// idea <p>/<r>` subject shape that predates the shared helper (sdlc/kb
+// use `Close <wf> run <p>/<r>` — see design).
 func runIdeaClose(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea close", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea close <project> <slug>\n")
-	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
-		return 2
-	}
-	projectID := fs.Arg(0)
-	slug := fs.Arg(1)
-
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if err := requireCleanTree(root); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
-	md, err := loadIdeaRun(root, projectID, slug)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if md.Status != run.StatusInProgress {
-		moePrintf(stderr, "idea %s/%s already %s\n", projectID, slug, md.Status)
-		return 1
-	}
-
-	md.Status = run.StatusClosed
-	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	msg := fmt.Sprintf(`Close idea %s/%s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-`, projectID, slug, slug, projectID, ideaWorkflow)
-	err = withRepoLock(root, repolock.Options{
-		Purpose: "idea-close",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		if err := run.Save(root, md); err != nil {
-			return err
-		}
-		return run.StageAndCommit(root, msg, runJSONRel)
-	})
-	if err != nil {
-		moePrintf(stderr, "idea: close: %v\n", err)
-		return 1
-	}
-	moePrintf(stdout, "closed idea %s/%s\n", projectID, slug)
-	return 0
+	return runClose(ideaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)
 }
 
 func runIdeaList(args []string, stdout, stderr io.Writer) int {
