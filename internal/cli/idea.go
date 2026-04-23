@@ -452,7 +452,7 @@ func requireCleanTree(root string) error {
 
 // runIdeaChat launches an interactive Claude Code session on the idea
 // canvas. mode is "capture" (new idea) or "refine" (existing idea) and
-// selects which stages/_idea fragment seeds the system prompt. Unlike
+// selects which stages/idea fragment seeds the system prompt. Unlike
 // stage-session chats this one is one-shot: no --session-id, no
 // thread persistence, no per-turn commits. When the operator exits
 // claude, the caller stages & commits whatever landed on disk.
@@ -505,7 +505,7 @@ func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
 }
 
 // buildIdeaChatPrompt assembles the --append-system-prompt payload for
-// an idea chat session: soul → stages/_idea/<mode>.md → a minimal
+// an idea chat session: soul → stages/idea/<mode>.md → a minimal
 // operational core naming the canvas file. Deliberately narrower than
 // buildSystemPrompt (used by stage sessions), which is tied to
 // run.Metadata and per-document thread files that ideas don't carry
@@ -515,7 +515,7 @@ func buildIdeaChatPrompt(abs, mode string) string {
 	if soul := moe.Soul(); soul != "" {
 		sections = append(sections, soul)
 	}
-	if frag := moe.Stage("_idea", mode); frag != "" {
+	if frag := moe.Stage(ideaWorkflow, mode); frag != "" {
 		sections = append(sections, frag)
 	}
 	sections = append(sections, fmt.Sprintf(
