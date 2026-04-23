@@ -7,7 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fixedNow returns an Options.Now that always yields t — so tests that
+// assert on a dated slug suffix aren't sensitive to wall-clock drift.
+func fixedNow(t time.Time) func() time.Time {
+	return func() time.Time { return t }
+}
 
 // newTestRoot initializes a throwaway git repo with scoped config so
 // run.New can commit without touching ~/.gitconfig. Mirrors
@@ -178,6 +185,96 @@ func deleteRunDir(t *testing.T, root, projectID, id string) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
+	}
+}
+
+// TestNewIDBaseFreeSlugNoSuffix covers the no-collision path through
+// the IDBase branch: when runs/<base> is free, the slug is the base
+// verbatim, no date. Unreachable via the CLI today (idea run dirs
+// persist post-promote) but the code path exists and stays covered.
+func TestNewIDBaseFreeSlugNoSuffix(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	md, err := New(root, "tele", "Whatever", Options{
+		Workflow: "sdlc",
+		IDBase:   "my-idea-slug",
+		Now:      fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if md.ID != "my-idea-slug" {
+		t.Fatalf("id = %q, want %q (free base should not date-suffix)", md.ID, "my-idea-slug")
+	}
+}
+
+// TestNewIDBaseCollisionGetsDateSuffix is the main IDBase behavior:
+// when the base is already taken, the slug becomes base-YYYY-MM-DD.
+// Unlike Slugify-derived collisions (which get -N), IDBase collisions
+// get an honest date that tells a reader *when* the second run opened.
+func TestNewIDBaseCollisionGetsDateSuffix(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	// Seed the idea-shaped occupant at my-idea-slug.
+	if _, err := New(root, "tele", "First", Options{
+		Workflow: "idea",
+		ID:       "my-idea-slug",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Promote-style call with IDBase set; collision should resolve to
+	// the dated form.
+	md, err := New(root, "tele", "Second", Options{
+		Workflow: "sdlc",
+		IDBase:   "my-idea-slug",
+		Now:      fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if md.ID != "my-idea-slug-2026-04-22" {
+		t.Fatalf("id = %q, want %q", md.ID, "my-idea-slug-2026-04-22")
+	}
+}
+
+// TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter locks in the
+// rare-but-real case where two promotes of the same idea slug happen
+// on the same calendar day. The first resolves to base-YYYY-MM-DD; the
+// second falls back to base-YYYY-MM-DD-2.
+func TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	fixedDay := fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC))
+
+	// Occupy both my-idea-slug and my-idea-slug-2026-04-22.
+	if _, err := New(root, "tele", "First", Options{
+		Workflow: "idea",
+		ID:       "my-idea-slug",
+	}); err != nil {
+		t.Fatalf("seed base: %v", err)
+	}
+	if _, err := New(root, "tele", "Second", Options{
+		Workflow: "sdlc",
+		IDBase:   "my-idea-slug",
+		Now:      fixedDay,
+	}); err != nil {
+		t.Fatalf("seed dated: %v", err)
+	}
+
+	md, err := New(root, "tele", "Third", Options{
+		Workflow: "sdlc",
+		IDBase:   "my-idea-slug",
+		Now:      fixedDay,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if md.ID != "my-idea-slug-2026-04-22-2" {
+		t.Fatalf("id = %q, want %q", md.ID, "my-idea-slug-2026-04-22-2")
 	}
 }
 

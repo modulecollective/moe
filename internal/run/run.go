@@ -66,6 +66,14 @@ type Metadata struct {
 type Options struct {
 	// ID overrides the auto-derived slug. Must match idPattern if set.
 	ID string
+	// IDBase, when non-empty and ID is empty, supplies the slug base
+	// instead of Slugify(title). Used by the --from-idea promote path
+	// to keep the run slug anchored to the idea's stable filename slug
+	// rather than the (editable) H1. On collision the suffix is the
+	// current date (YYYY-MM-DD), falling back to -YYYY-MM-DD-N if two
+	// promotes land on the same day — a dated suffix is honest about
+	// *when* the collision happened without pretending to explain *why*.
+	IDBase string
 	// Workflow names the workflow this run belongs to. Required —
 	// fragment lookup in buildSystemPrompt keys on this, so there is no
 	// safe default. Callers that want to validate against a registry
@@ -137,9 +145,12 @@ func Dir(projectID, id string) string {
 // New opens a fresh run: writes projects/<project>/runs/<id>/run.json
 // and commits it on main.
 //
-// The id is derived from the title (Slugify) unless opts.ID is set. On
-// collision the slug gets a -2, -3, … suffix. An explicit opts.ID is
-// never auto-suffixed; collisions there are an error so the caller notices.
+// The id is derived from the title (Slugify) unless opts.ID or
+// opts.IDBase is set. On collision a title-derived slug gets a -2, -3,
+// … suffix; an IDBase-derived slug gets a -YYYY-MM-DD suffix (today,
+// UTC) so promoted-idea slugs read as "same topic, opened on date X"
+// rather than arbitrary `-2`. An explicit opts.ID is never
+// auto-suffixed; collisions there are an error so the caller notices.
 //
 // Refuses if the project is not registered, the explicit id collides, or
 // the working tree is dirty (a stray edit shouldn't ride along on the
@@ -161,14 +172,28 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		return nil, fmt.Errorf("run: project %s not registered (%s missing)", projectID, filepath.Join("projects", projectID, "project.json"))
 	}
 
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+
 	var id string
 	var autoSuffix bool
-	if opts.ID != "" {
+	var dateSuffix bool
+	switch {
+	case opts.ID != "":
 		id = opts.ID
 		if !idPattern.MatchString(id) {
 			return nil, fmt.Errorf("run: id %q must match %s", id, idPattern)
 		}
-	} else {
+	case opts.IDBase != "":
+		if !idPattern.MatchString(opts.IDBase) {
+			return nil, fmt.Errorf("run: id base %q must match %s", opts.IDBase, idPattern)
+		}
+		id = opts.IDBase
+		autoSuffix = true
+		dateSuffix = true
+	default:
 		base := Slugify(title)
 		if base == "" {
 			return nil, fmt.Errorf("run: cannot derive slug from title %q; pass --id to set one explicitly", title)
@@ -189,7 +214,11 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 			}
 			return nil, fmt.Errorf("run: slug %q is already used in project %s (existing run or prior history); try --id=%s", id, projectID, suggestion)
 		}
-		id, err = nextFreeID(root, projectID, id)
+		if dateSuffix {
+			id, err = nextFreeDatedID(root, projectID, opts.IDBase, now())
+		} else {
+			id, err = nextFreeID(root, projectID, id)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -204,10 +233,6 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		return nil, fmt.Errorf("run: working tree has uncommitted changes; commit or stash first")
 	}
 
-	now := opts.Now
-	if now == nil {
-		now = time.Now
-	}
 	md := &Metadata{
 		ID:        id,
 		Project:   projectID,
@@ -548,6 +573,31 @@ func LastFileActivity(root, relPath string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", line, err)
 	}
 	return time.Unix(epoch, 0).UTC(), nil
+}
+
+// nextFreeDatedID resolves an IDBase collision to base-YYYY-MM-DD. If
+// that's already taken (two promotes of the same idea-slug in one day),
+// it walks base-YYYY-MM-DD-2, base-YYYY-MM-DD-3, … Dates use UTC so the
+// slug doesn't flip around the operator's local midnight.
+func nextFreeDatedID(root, projectID, base string, now time.Time) (string, error) {
+	dated := base + "-" + now.UTC().Format("2006-01-02")
+	taken, err := slugTaken(root, projectID, dated)
+	if err != nil {
+		return "", err
+	}
+	if !taken {
+		return dated, nil
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", dated, n)
+		taken, err := slugTaken(root, projectID, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
 }
 
 // nextFreeID walks base, base-2, base-3, … until it finds a slug that
