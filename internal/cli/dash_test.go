@@ -124,8 +124,8 @@ func TestDashReadyToPushShowsPushStage(t *testing.T) {
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "push") {
-		t.Fatalf("expected run row with stage 'push', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:push") {
+		t.Fatalf("expected run row with stage 'sdlc:push', got:\n%s", got)
 	}
 }
 
@@ -154,8 +154,8 @@ func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE RUNS (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "code") {
-		t.Fatalf("expected run row with stage 'code', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:code") {
+		t.Fatalf("expected run row with stage 'sdlc:code', got:\n%s", got)
 	}
 }
 
@@ -178,8 +178,8 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE RUNS (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "design") {
-		t.Fatalf("expected run row with stage 'design', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
+		t.Fatalf("expected run row with stage 'sdlc:design', got:\n%s", got)
 	}
 }
 
@@ -210,8 +210,8 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 	if !containsRunRow(got, "tele", "fix-it", "#42") {
 		t.Fatalf("expected run row with PR number '#42', got:\n%s", got)
 	}
-	if !strings.Contains(got, "awaiting merge: #42") {
-		t.Fatalf("expected 'awaiting merge: #42' label, got:\n%s", got)
+	if !strings.Contains(got, "sdlc:awaiting merge: #42") {
+		t.Fatalf("expected 'sdlc:awaiting merge: #42' label, got:\n%s", got)
 	}
 }
 
@@ -237,8 +237,8 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED RUNS (1)") {
 		t.Fatalf("expected merged run in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "merged") {
-		t.Fatalf("expected run row with stage 'merged', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:merged") {
+		t.Fatalf("expected run row with stage 'sdlc:merged', got:\n%s", got)
 	}
 }
 
@@ -264,8 +264,8 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED RUNS (1)") {
 		t.Fatalf("expected closed run in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "closed") {
-		t.Fatalf("expected run row with stage 'closed', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:closed") {
+		t.Fatalf("expected run row with stage 'sdlc:closed', got:\n%s", got)
 	}
 }
 
@@ -293,8 +293,8 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED RUNS (1)") {
 		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "lookup", "done") {
-		t.Fatalf("expected KB run row with stage 'done', got:\n%s", got)
+	if !containsRunRow(got, "tele", "lookup", "kb:done") {
+		t.Fatalf("expected KB run row with stage 'kb:done', got:\n%s", got)
 	}
 }
 
@@ -393,10 +393,12 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 			t.Fatalf("backlog missing %q in:\n%s", want, got)
 		}
 	}
-	// Third column is a relative "updated …" timestamp from the idea
-	// file's last commit, one per row.
-	if n := strings.Count(got, "updated "); n < 2 {
-		t.Fatalf("expected 'updated ' on each backlog row, got %d in:\n%s", n, got)
+	// Each backlog row carries an `idea:<title>` note so the workflow
+	// identity is visible even on the backlog rail.
+	for _, want := range []string{"idea:Cross-project search", "idea:Faster dash load"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("backlog missing workflow-prefixed note %q in:\n%s", want, got)
+		}
 	}
 	// Sections render top-to-bottom: ACTIVE RUNS → BACKLOG → COMPLETED RUNS.
 	activeIdx := strings.Index(got, "ACTIVE RUNS")
@@ -482,7 +484,7 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		t.Fatalf("expected capped header, got:\n%s", got)
 	}
 	// Oldest two (done-00, done-01) should be dropped; newest (done-11) shown.
-	if !containsRunRow(got, "tele", "done-11", "merged") {
+	if !containsRunRow(got, "tele", "done-11", "sdlc:merged") {
 		t.Fatalf("expected newest completed run to render, got:\n%s", got)
 	}
 	for _, dropped := range []string{"done-00", "done-01"} {

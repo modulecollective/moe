@@ -167,17 +167,22 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", nil
 	}
+	// Every note is prefixed with the workflow name so the dashboard
+	// says "where" a run lives, not just "what's next". Two workflows
+	// can share a stage name (sdlc and kb both have generic stages in
+	// flight), so the prefix is what makes the cell self-describing.
+	prefix := md.Workflow + ":"
 	// Idea runs have their own lane: open ones are backlog, closed /
 	// promoted ones go to completed with a distinguishing label so the
 	// operator can tell "handed off to another run" from "dropped".
 	if md.Workflow == ideaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return bucketBacklog, md.Title, nil
+			return bucketBacklog, prefix + md.Title, nil
 		case run.StatusPromoted:
-			return bucketCompletedRuns, "promoted", nil
+			return bucketCompletedRuns, prefix + "promoted", nil
 		case run.StatusClosed:
-			return bucketCompletedRuns, "closed", nil
+			return bucketCompletedRuns, prefix + "closed", nil
 		}
 		return bucketNone, "", nil
 	}
@@ -187,16 +192,16 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		if n, ok := prNumberForRun(root, md.ID); ok {
 			note = fmt.Sprintf("awaiting merge: #%s", n)
 		}
-		return bucketActiveRuns, note, nil
+		return bucketActiveRuns, prefix + note, nil
 	case run.StatusMerged:
-		return bucketCompletedRuns, "merged", nil
+		return bucketCompletedRuns, prefix + "merged", nil
 	case run.StatusClosed:
-		return bucketCompletedRuns, "closed", nil
+		return bucketCompletedRuns, prefix + "closed", nil
 	case run.StatusPromoted:
 		// Non-idea runs shouldn't wear StatusPromoted, but if one
 		// ever does (future --from-run promotion), surface it as
 		// completed with the same label as the idea case.
-		return bucketCompletedRuns, "promoted", nil
+		return bucketCompletedRuns, prefix + "promoted", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
@@ -217,9 +222,9 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		// Terminal stage satisfied but no push transition — e.g. KB
 		// workflow, which ends at `summarize` and has no push. Treat
 		// the same as StatusPushed for dashboard purposes.
-		return bucketCompletedRuns, "done", nil
+		return bucketCompletedRuns, prefix + "done", nil
 	}
-	return bucketActiveRuns, next.Name, nil
+	return bucketActiveRuns, prefix + next.Name, nil
 }
 
 // prNumberForRun finds the PR number recorded for runID by pulling
@@ -313,7 +318,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range backlog {
-			fmt.Fprintf(tw, "  %s\t%s\tupdated %s\n", r.project, r.run, humanAgo(now, r.when))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.project, r.run, humanAgo(now, r.when), r.note)
 		}
 		tw.Flush()
 	}
