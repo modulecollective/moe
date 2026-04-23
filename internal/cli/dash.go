@@ -15,7 +15,6 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-
 func init() {
 	Register(&Command{
 		Name:    "dash",

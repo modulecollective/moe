@@ -800,7 +800,6 @@ func fakeClaudeOnPath(t *testing.T, script string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-
 // gitLog runs `git -C root log <args>` and returns its stdout.
 func gitLog(t *testing.T, root string, args ...string) string {
 	t.Helper()
