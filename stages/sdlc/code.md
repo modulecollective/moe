@@ -80,3 +80,22 @@ The code stage is ready to hand back when:
 
 If you're polishing prose in the PR body past the point of clarity, you're
 done. Stop and hand it over.
+
+## Before you start
+
+Skim the prior stage's document for this run. If it looks incomplete —
+unresolved questions, missing sections, TODOs, or obvious gaps — stop
+and alert the operator before doing any work on this stage. Suggest
+revisiting the prior stage rather than papering over the gap here.
+
+This is a soft check, not a gate. If the prior stage looks done, just
+proceed.
+
+## Only edit this run
+
+The canvas for this stage lives under this run's `documents/` tree.
+That is the only document you should write to. Other runs under
+`projects/*/runs/*` are read-only context — never edit their
+`content.md` files, even if you notice something that looks wrong.
+If a past run's content is misleading or outdated, tell the operator
+and let them open a new run to address it.

@@ -118,21 +118,22 @@ func TestBuildSystemPromptInjectsQuickCodeFragment(t *testing.T) {
 	}
 }
 
-// TestBuildSystemPromptInjectsSharedFragmentsAtQuickCode confirms the
-// shared-fragment gate admits quick/code alongside sdlc/design and
-// sdlc/code. Without this, the widened allow-list in
-// sharedStageFragments would be dead code.
-func TestBuildSystemPromptInjectsSharedFragmentsAtQuickCode(t *testing.T) {
+// TestBuildSystemPromptInjectsCrossRunBlockAtQuickCode confirms the
+// "Only edit this run" block is inlined into stages/quick/code.md.
+// Quick is a single-stage workflow, so there is no prior-stage
+// "Before you start" block — and that absence is asserted too.
+func TestBuildSystemPromptInjectsCrossRunBlockAtQuickCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-typo", Project: "tele", Title: "Fix typo", Workflow: "quick"}
 	got, err := buildSystemPrompt(root, md, "code", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"## Before you start", "## Only edit this run"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("quick/code missing shared fragment %q:\n%s", want, got)
-		}
+	if !strings.Contains(got, "## Only edit this run") {
+		t.Fatalf("quick/code missing cross-run block:\n%s", got)
+	}
+	if strings.Contains(got, "## Before you start") {
+		t.Errorf("quick/code should not carry a 'Before you start' block (single-stage workflow):\n%s", got)
 	}
 }
 

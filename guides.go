@@ -15,11 +15,7 @@ import (
 //go:embed soul.md
 var soulContent string
 
-// all: prefix so stages/_shared/*.md — the cross-workflow guidance
-// fragments — are included. Without it, //go:embed silently skips any
-// file or directory whose name starts with "_" or ".".
-//
-//go:embed all:stages
+//go:embed stages
 var stagesFS embed.FS
 
 // Soul returns the embedded soul.md content. Never empty in a correctly
