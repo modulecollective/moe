@@ -214,7 +214,7 @@ func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) in
 	if kind != NextKindStage || next == nil {
 		return 0
 	}
-	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
+	hint := fmt.Sprintf("moe workflow %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
 		return 0
@@ -238,9 +238,10 @@ func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) in
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
-// (`moe sdlc push`), or PR (`moe sdlc push --pr`). Parsing is
-// case-insensitive; the label capitalization just signals the default.
-// N-as-default is load-bearing — a reflex Enter must never ship.
+// (`moe workflow <wf> push`), or PR (`moe workflow <wf> push --pr`).
+// Parsing is case-insensitive; the label capitalization just signals
+// the default. N-as-default is load-bearing — a reflex Enter must
+// never ship.
 func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')

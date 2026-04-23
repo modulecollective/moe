@@ -141,7 +141,7 @@ func (f *pushFixture) runInRoot(args ...string) (string, string, int) {
 func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -181,7 +181,7 @@ func TestPushMergeFFRejectedWhenDefaultMoved(t *testing.T) {
 	mustGit(t, work, "push", "origin", "main")
 	movedHead := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
 
-	_, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	_, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero on FF rejection; stderr=%s", stderr)
 	}
@@ -224,7 +224,7 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 
 	mainBefore := f.originHead()
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", "--pr", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -278,13 +278,13 @@ func addInsteadOfRewrite(t *testing.T, fake, real string) {
 func TestPushIdempotentOnMergedRun(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("first push: exit=%d stderr=%s", code, stderr)
 	}
 	_ = stdout
 
-	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code = f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -310,7 +310,7 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	mustGit(t, f.root, "add", filepath.Join("projects", f.projectID, "runs", f.runID, "run.json"))
 	mustGit(t, f.root, "commit", "-m", "sync: close\n\nMoE-Run: "+f.runID+"\nMoE-Closed: https://example.com/pr/1\n")
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -403,7 +403,7 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	code := promptPushNextStage(next, md, "moe sdlc push tele fix-it", &stdout, &stderr)
+	code := promptPushNextStage(next, md, "moe workflow sdlc push tele fix-it", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("promptPushNextStage exit=%d stderr=%s", code, stderr.String())
 	}

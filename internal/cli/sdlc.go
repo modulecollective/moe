@@ -6,9 +6,9 @@ import (
 )
 
 // The SDLC workflow owns the design→code→push lifecycle. Stages are
-// nested under `moe sdlc` so kb (and future workflows) can pick their
-// own short stage names without collision. `moe sdlc new` is the entry
-// point that creates a run in this workflow.
+// nested under `moe workflow sdlc` so kb (and future workflows) can pick
+// their own short stage names without collision. `moe workflow sdlc new`
+// is the entry point that creates a run in this workflow.
 
 func init() {
 	sdlc := NewWorkflow("sdlc", "SDLC workflow: new, design, code, push")
@@ -25,7 +25,6 @@ func init() {
 	}, "design")
 	sdlc.Register(pushCmd, "code")
 	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", sdlcCloseCleanup))
-	Register(sdlc.Command())
 	RegisterWorkflow(sdlc)
 }
 
@@ -33,7 +32,7 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc design", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc design <project> <run>")
+		moePrintln(stderr, "usage: moe workflow sdlc design <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the design canvas.")
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
@@ -61,11 +60,11 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc code <project> <run>")
+		moePrintln(stderr, "usage: moe workflow sdlc code <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
-		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
+		moePrintln(stderr, "from other activity until `moe workflow sdlc push` opens a PR.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

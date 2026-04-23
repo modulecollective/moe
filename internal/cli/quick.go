@@ -10,7 +10,7 @@ import (
 // flag, bump a timeout, fix a typo. It re-uses every piece of code
 // sdlc/code relies on — runStageSession, the sandbox, the push command
 // — and only authors a workflow-specific prompt fragment
-// (stages/quick/code.md) and kickoff string. The design for this
+// (workflows/quick/code.md) and kickoff string. The design for this
 // workflow lives under projects/moe/runs/fix-workflow/.
 
 func init() {
@@ -22,7 +22,6 @@ func init() {
 		Run:     runQuickCode,
 	})
 	quick.Register(pushCmd, "code")
-	Register(quick.Command())
 	RegisterWorkflow(quick)
 }
 
@@ -30,12 +29,12 @@ func runQuickCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("quick code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe quick code <project> <run>")
+		moePrintln(stderr, "usage: moe workflow quick code <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. There is")
 		moePrintln(stderr, "no design stage in this workflow — the canvas is the brief. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
-		moePrintln(stderr, "from other activity until `moe quick push` ships it.")
+		moePrintln(stderr, "from other activity until `moe workflow quick push` ships it.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

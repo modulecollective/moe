@@ -37,11 +37,11 @@ const branchPrefix = "moe/"
 // Idempotent on terminal runs: rerunning after a merged/closed run is
 // a no-op that prints the terminal state and exits 0.
 func runPush(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("sdlc push", flag.ContinueOnError)
+	fs := flag.NewFlagSet("workflow push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc push [--pr] <project> <run>")
+		moePrintln(stderr, "usage: moe workflow <wf> push [--pr] <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
@@ -148,7 +148,7 @@ func pushBranch(clonePath, branch, remote string, stdout, stderr io.Writer) erro
 // openPRPath is the --pr behavior: open (or re-use) a PR for the
 // already-pushed branch and record the first push's state. The
 // sandbox is intentionally left in place — iteration via
-// `moe sdlc code` stays a one-liner until the PR merges.
+// `moe workflow <wf> code` stays a one-liner until the PR merges.
 func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
 	ghRepo, err := ghRepoSpec(pj.Remote)
 	if err != nil {
@@ -324,19 +324,19 @@ func checkCodeContent(root string, md *run.Metadata) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe sdlc code %s %s` first", md.Project, md.ID)
+			return fmt.Errorf("push: code document not written yet; run `moe workflow %s code %s %s` first", md.Workflow, md.Project, md.ID)
 		}
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe sdlc code %s %s` and produce a PR body first", md.Project, md.ID)
+		return fmt.Errorf("push: code document is empty; run `moe workflow %s code %s %s` and produce a PR body first", md.Workflow, md.Project, md.ID)
 	}
 	return nil
 }
 
 func sandboxClonePath(root string, md *run.Metadata) (string, error) {
 	if !sandbox.Exists(root, md.Project, md.ID) {
-		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe sdlc code %s %s` first", md.Project, md.ID, md.Project, md.ID)
+		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe workflow %s code %s %s` first", md.Project, md.ID, md.Workflow, md.Project, md.ID)
 	}
 	return sandbox.Ensure(root, md.Project, md.ID)
 }
@@ -358,7 +358,7 @@ func checkCleanWorkTree(clonePath string) error {
 	n := bytes.Count(trimmed, []byte{'\n'}) + 1
 	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
        sandbox: %s
-       re-run `+"`moe sdlc code`"+` and ask the agent to commit, or commit manually in the sandbox`, n, clonePath)
+       re-run `+"`moe workflow <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, n, clonePath)
 }
 
 // checkBranchHasCommits confirms the sandbox clone has branch `branch`
@@ -368,7 +368,7 @@ func checkBranchHasCommits(clonePath, branch, base string) error {
 	// First, does the branch exist?
 	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe sdlc code` and have the agent commit", branch)
+		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe workflow <wf> code` and have the agent commit", branch)
 	}
 	// Then, is it ahead of base? Use `git rev-list --count base..branch`.
 	// If base isn't a known ref, skip this check — we can't tell, but the

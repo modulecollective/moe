@@ -18,7 +18,7 @@ func TestWorkflowNoArgsPrintsUsage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "usage: moe wf <subcommand>") {
+	if !strings.Contains(got, "usage: moe workflow wf <subcommand>") {
 		t.Fatalf("missing usage header: %q", got)
 	}
 	for _, want := range []string{"alpha", "beta", "A", "B"} {
@@ -41,7 +41,7 @@ func TestWorkflowHelpFlags(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("%s: exit=%d stderr=%q", arg, code, errb.String())
 		}
-		if !strings.Contains(out.String(), "usage: moe wf <subcommand>") {
+		if !strings.Contains(out.String(), "usage: moe workflow wf <subcommand>") {
 			t.Fatalf("%s: expected usage in stdout, got %q", arg, out.String())
 		}
 	}
@@ -100,20 +100,23 @@ func TestWorkflowRegisterPanicsOnDuplicate(t *testing.T) {
 	w.Register(&Command{Name: "alpha", Summary: "A2", Run: nopRun})
 }
 
-// TestSDLCRegistered verifies the init() in sdlc.go actually wired a
-// top-level `sdlc` command into the global table. Guards against a
-// future refactor silently dropping the registration.
+// TestSDLCRegistered verifies the init() in sdlc.go actually wired the
+// sdlc workflow into the registry and exposed it via `moe workflow`.
+// Guards against a future refactor silently dropping the registration.
 func TestSDLCRegistered(t *testing.T) {
-	cmd, ok := commands["sdlc"]
-	if !ok {
-		t.Fatal(`expected top-level command "sdlc" to be registered`)
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cmd.Summary == "" {
-		t.Fatal("sdlc command summary should not be empty")
+	if !wf.ExposedViaCLI {
+		t.Fatal("sdlc workflow should be exposed via `moe workflow`")
+	}
+	if wf.Summary == "" {
+		t.Fatal("sdlc workflow summary should not be empty")
 	}
 	var out, errb bytes.Buffer
-	// `moe sdlc` (no args) should print sub-usage and exit 0.
-	code := cmd.Run(nil, &out, &errb)
+	// `moe workflow sdlc` (no subcommand) should print sub-usage and exit 0.
+	code := Run([]string{"workflow", "sdlc"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

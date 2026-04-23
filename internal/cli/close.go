@@ -41,8 +41,15 @@ func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
 func runClose(workflow, subject string, cleanup closeCleanup, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" close", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	// Idea runs are driven by the top-level `moe idea` command, so
+	// their usage line is the short form. Every other workflow's close
+	// is dispatched via `moe workflow <wf> close`.
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s close <project> <run>\n", workflow)
+		if workflow == ideaWorkflow {
+			moePrintf(stderr, "usage: moe idea close <project> <run>\n")
+		} else {
+			moePrintf(stderr, "usage: moe workflow %s close <project> <run>\n", workflow)
+		}
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -137,7 +144,7 @@ MoE-Workflow: %s
 // state-guard catches the pushed case above), so sandbox.Remove is
 // the single step that takes both branch and worktree with it.
 // Idempotent: a never-opened sandbox (operator abandoned before
-// `moe sdlc code`) is a no-op.
+// `moe workflow sdlc code`) is a no-op.
 func sdlcCloseCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
 		return fmt.Errorf("remove sandbox: %w", err)

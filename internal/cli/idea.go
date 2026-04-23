@@ -24,9 +24,9 @@ import (
 // launch Claude unless --chat is passed — capture stays cheap.
 //
 // The idea workflow itself is registered in the workflow registry (for
-// LookupWorkflow / dash), but not as a top-level dispatcher — `moe idea`
-// is its own top-level so muscle memory for `add/edit/remove/list`
-// maps directly onto the new verbs.
+// LookupWorkflow / dash), but opts out of `moe workflow` dispatch via
+// ExposedViaCLI=false — `moe idea` is its own top-level verb so muscle
+// memory for `new/edit/close/list` maps directly onto the new verbs.
 
 // ideaWorkflow is the workflow name written to run.json's `workflow`
 // field for idea runs. Kept as a constant so the few places that
@@ -45,10 +45,13 @@ func init() {
 	})
 
 	// Register the idea workflow so run.Load, dash lookup, and
-	// --from-idea's wf.Stages() all resolve it. The stage command
-	// itself is unreachable — the dispatcher above handles idea verbs,
-	// not `moe idea idea` — so we give it a usage stub just in case.
+	// --from-idea's wf.Stages() all resolve it. ExposedViaCLI is false
+	// so `moe workflow idea` rejects with "unknown workflow" — the
+	// idea verbs live on the top-level `moe idea` command above. The
+	// stage command itself is thus unreachable; we give it a usage
+	// stub just in case an internal caller reaches for it.
 	wf := NewWorkflow(ideaWorkflow, "single-stage idea-capture workflow (driven by `moe idea`)")
+	wf.ExposedViaCLI = false
 	wf.Register(&Command{
 		Name:    ideaDocID,
 		Summary: "idea canvas (use `moe idea edit` instead of invoking directly)",

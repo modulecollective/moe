@@ -26,9 +26,15 @@ type Workflow struct {
 	Name    string
 	Summary string
 
+	// ExposedViaCLI controls whether `moe workflow <Name>` dispatches
+	// to this workflow. Default true; idea sets it false so its runs
+	// are still registered for LookupWorkflow / dash while the verbs
+	// remain driven by the top-level `moe idea` command.
+	ExposedViaCLI bool
+
 	// commands is the full dispatch table — stages and facades —
 	// keyed by subcommand name. All entries are addressable as
-	// `moe <workflow> <name>`.
+	// `moe workflow <Name> <sub>`.
 	commands map[string]*Command
 	// stageOrder is the subset of commands that make up the stage
 	// ladder, in registration order. Stages() returns a copy; Next
@@ -38,13 +44,15 @@ type Workflow struct {
 }
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
-// Register and then hand Command() to cli.Register.
+// Register and then hand the workflow to RegisterWorkflow. ExposedViaCLI
+// defaults to true.
 func NewWorkflow(name, summary string) *Workflow {
 	return &Workflow{
-		Name:     name,
-		Summary:  summary,
-		commands: map[string]*Command{},
-		prereqs:  map[string][]string{},
+		Name:          name,
+		Summary:       summary,
+		ExposedViaCLI: true,
+		commands:      map[string]*Command{},
+		prereqs:       map[string][]string{},
 	}
 }
 
@@ -90,8 +98,9 @@ func (w *Workflow) Prereqs(stage string) []string {
 	return w.prereqs[stage]
 }
 
-// Command returns the workflow as a top-level Command suitable for
-// passing to the package-level Register.
+// Command returns the workflow as a Command suitable for nesting under
+// the top-level `workflow` dispatcher. The returned Command's Run
+// handler expects args positioned after `moe workflow <Name>`.
 func (w *Workflow) Command() *Command {
 	return &Command{
 		Name:    w.Name,
@@ -120,7 +129,7 @@ func (w *Workflow) run(args []string, stdout, stderr io.Writer) int {
 }
 
 func (w *Workflow) printUsage(out io.Writer) {
-	moePrintf(out, "usage: moe %s <subcommand> [args...]\n", w.Name)
+	moePrintf(out, "usage: moe workflow %s <subcommand> [args...]\n", w.Name)
 	moePrintln(out, "")
 	moePrintln(out, "subcommands:")
 	names := make([]string, 0, len(w.commands))

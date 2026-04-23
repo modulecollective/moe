@@ -29,7 +29,6 @@ func init() {
 		Run:     runSummarize,
 	}, "research")
 	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
-	Register(kb.Command())
 	RegisterWorkflow(kb)
 }
 
@@ -37,7 +36,7 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb research", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb research <project> <run>")
+		moePrintln(stderr, "usage: moe workflow kb research <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the research bibliography.")
 		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
@@ -61,7 +60,7 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb summarize", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb summarize <project> <run>")
+		moePrintln(stderr, "usage: moe workflow kb summarize <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the synthesized article.")
 		moePrintln(stderr, "The agent writes prose from the research doc; signing this stage is")

@@ -11,17 +11,20 @@ import (
 
 // TestKBRegistered is the partner to TestSDLCRegistered: it guards
 // against init() ordering / registration drift silently dropping the
-// top-level `kb` command.
+// kb workflow from the dispatcher.
 func TestKBRegistered(t *testing.T) {
-	cmd, ok := commands["kb"]
-	if !ok {
-		t.Fatal(`expected top-level command "kb" to be registered`)
+	wf, err := LookupWorkflow("kb")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cmd.Summary == "" {
-		t.Fatal("kb command summary should not be empty")
+	if !wf.ExposedViaCLI {
+		t.Fatal("kb workflow should be exposed via `moe workflow`")
+	}
+	if wf.Summary == "" {
+		t.Fatal("kb workflow summary should not be empty")
 	}
 	var out, errb bytes.Buffer
-	code := cmd.Run(nil, &out, &errb)
+	code := Run([]string{"workflow", "kb"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

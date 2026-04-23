@@ -72,13 +72,14 @@ The current workflows are:
 | `kb`      | `research` → `summarize`              | knowledge-base articles              |
 
 Each stage is a subcommand that opens a Claude Code session on that
-stage's document. For example:
+stage's document. All workflow verbs live under `moe workflow <name>
+…` (or `moe wf …` for short). For example:
 
 ```sh
-moe sdlc new "add batch support"   # open a new run
-moe sdlc design                    # threaded chat on design/content.md
-moe sdlc code                      # agent codes inside a sandbox clone
-moe sdlc push --pr                 # open a PR against the target repo
+moe workflow sdlc new "add batch support"   # open a new run
+moe workflow sdlc design                    # threaded chat on design/content.md
+moe workflow sdlc code                      # agent codes inside a sandbox clone
+moe workflow sdlc push --pr                 # open a PR against the target repo
 ```
 
 `moe dash` shows your open runs and backlog. `moe idea` captures
@@ -89,7 +90,7 @@ loose ideas without starting a run.
 ## How it works
 
 - **Guidance is markdown, not config.** Agent behavior comes from
-  concatenating `soul.md`, `stages/<stage>.md`, and `docs/<slug>.md`
+  concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
   fragments into a single `--append-system-prompt`. Every agent
   mistake becomes a fragment edit; the next invocation picks it up.
 - **Per-run sandbox clones.** Code work runs inside a copy-on-write
