@@ -184,11 +184,11 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if md.Workflow == ideaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return bucketBacklog, prefix + md.Title, nil
+			return bucketBacklog, prefix + "capture", nil
 		case run.StatusPromoted:
 			note := prefix + "promoted"
-			if wf, ok := promotedToWorkflow(root, md.ID, byRunKey); ok {
-				note += " → " + wf
+			if slug, ok := promotedToRun(root, md.ID, byRunKey); ok {
+				note += " → " + slug
 			}
 			return bucketCompletedRuns, note, nil
 		case run.StatusClosed:
@@ -237,13 +237,13 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	return bucketActiveRuns, prefix + next.Name, nil
 }
 
-// promotedToWorkflow returns the workflow name of the successor run
-// recorded on a promoted idea's MoE-Promoted-To trailer
-// (`<project>/<runID>`). Returns ("", false) when the trailer is
-// missing, malformed, or the destination run is no longer in the
-// scanned set — caller falls back to the bare "promoted" label so the
-// arrow only appears when we actually know where it went.
-func promotedToWorkflow(root, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
+// promotedToRun returns the slug (run ID) of the successor run recorded
+// on a promoted idea's MoE-Promoted-To trailer (`<project>/<runID>`).
+// Returns ("", false) when the trailer is missing, malformed, or the
+// destination run is no longer in the scanned set — caller falls back
+// to the bare "promoted" label so the arrow only appears when we can
+// name where it went.
+func promotedToRun(root, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
 	v := trailerValue(root, runID, "MoE-Promoted-To")
 	if v == "" {
 		return "", false
@@ -252,7 +252,7 @@ func promotedToWorkflow(root, runID string, byRunKey map[string]*run.Metadata) (
 	if !ok {
 		return "", false
 	}
-	return dest.Workflow, true
+	return dest.ID, true
 }
 
 // prNumberForRun finds the PR number recorded for runID by pulling

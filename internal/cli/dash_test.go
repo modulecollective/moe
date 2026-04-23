@@ -393,12 +393,16 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 			t.Fatalf("backlog missing %q in:\n%s", want, got)
 		}
 	}
-	// Each backlog row carries an `idea:<title>` note so the workflow
-	// identity is visible even on the backlog rail.
-	for _, want := range []string{"idea:Cross-project search", "idea:Faster dash load"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("backlog missing workflow-prefixed note %q in:\n%s", want, got)
-		}
+	// Each backlog row carries an `idea:capture` note so the workflow
+	// identity is visible even on the backlog rail. The idea's title
+	// already appears in the run-slug column, so the note surfaces the
+	// stage instead of repeating it.
+	captureIdx := strings.Index(got, "idea:capture")
+	if captureIdx < 0 {
+		t.Fatalf("backlog missing `idea:capture` stage note in:\n%s", got)
+	}
+	if strings.Index(got[captureIdx+len("idea:capture"):], "idea:capture") < 0 {
+		t.Fatalf("expected two `idea:capture` rows in backlog, got:\n%s", got)
 	}
 	// Sections render top-to-bottom: ACTIVE → BACKLOG → COMPLETED.
 	activeIdx := strings.Index(got, "ACTIVE")
@@ -522,10 +526,12 @@ func TestDashSectionHeadingsDropRuns(t *testing.T) {
 	}
 }
 
-// TestDashPromotedIdeaShowsSuccessorWorkflow: a promoted idea row
-// gains a " → <workflow>" suffix pointing at the workflow of the run
-// it was promoted to, sourced from the MoE-Promoted-To trailer.
-func TestDashPromotedIdeaShowsSuccessorWorkflow(t *testing.T) {
+// TestDashPromotedIdeaShowsSuccessorSlug: a promoted idea row gains a
+// " → <slug>" suffix naming the run it was promoted to, sourced from
+// the MoE-Promoted-To trailer. The slug points the operator at the
+// destination run directly; the workflow is already visible once that
+// run shows up in ACTIVE/COMPLETED.
+func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -547,8 +553,8 @@ func TestDashPromotedIdeaShowsSuccessorWorkflow(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "idea:promoted → sdlc") {
-		t.Fatalf("expected 'idea:promoted → sdlc' on the promoted row, got:\n%s", got)
+	if !strings.Contains(got, "idea:promoted → search-impl") {
+		t.Fatalf("expected 'idea:promoted → search-impl' on the promoted row, got:\n%s", got)
 	}
 }
 
@@ -556,7 +562,7 @@ func TestDashPromotedIdeaShowsSuccessorWorkflow(t *testing.T) {
 // recorded on the trailer isn't present in the scanned set (deleted,
 // not yet pulled, etc.), the row falls back to the bare
 // "idea:promoted" label — the arrow only appears when we can name the
-// destination workflow.
+// destination run.
 func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
