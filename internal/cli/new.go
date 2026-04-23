@@ -119,6 +119,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		opts.SeedDocs = map[string]string{stages[0]: seed}
 		opts.SubjectFrom = "idea " + *fromIdea
 		opts.ExtraTrailers = []string{"MoE-Idea: " + *fromIdea}
+		// Anchor the run slug to the idea's filename, not its (editable)
+		// H1. run.New will date-suffix on collision.
+		opts.IDBase = *fromIdea
 		sourceIdea = src
 	}
 

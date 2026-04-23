@@ -6,7 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// todayDateSuffix returns the current UTC date in YYYY-MM-DD form — the
+// same suffix run.nextFreeDatedID appends on an IDBase collision.
+func todayDateSuffix() string {
+	return time.Now().UTC().Format("2006-01-02")
+}
 
 // captureIdea is a small wrapper around `moe idea new` for tests that
 // need a pre-existing idea to promote.
@@ -40,8 +47,8 @@ func suppressNextStagePrompt(t *testing.T) {
 
 // Ideas and runs share a single slug namespace per project. The idea
 // run captured first occupies "cross-project-search"; the promoted
-// target run auto-suffixes to "cross-project-search-2". The idea
-// canvas gets copied into the new run's first-stage doc, and the
+// target run date-suffixes (YYYY-MM-DD) because IDBase collided. The
+// idea canvas gets copied into the new run's first-stage doc, and the
 // source idea is bumped to StatusPromoted with a MoE-Promoted-To
 // trailer — two commits, not one.
 func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
@@ -60,14 +67,15 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	// Namespace is shared — the sdlc run auto-suffixes because the idea
+	dated := "cross-project-search-" + todayDateSuffix()
+	// Namespace is shared — the sdlc run date-suffixes because the idea
 	// took "cross-project-search" first.
-	if !strings.Contains(out.String(), "opened run tele/cross-project-search-2") {
-		t.Fatalf("expected slug auto-suffix on shared namespace, got: %q", out.String())
+	if !strings.Contains(out.String(), "opened run tele/"+dated) {
+		t.Fatalf("expected slug %q in output, got: %q", dated, out.String())
 	}
 
 	// First-stage (design) doc is seeded with the idea canvas.
-	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "cross-project-search-2", "documents", "design", "content.md"))
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "design", "content.md"))
 	if err != nil {
 		t.Fatalf("seeded design doc missing: %v", err)
 	}
@@ -78,14 +86,14 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	// HEAD is the idea-promote commit (status bump). Its predecessor
 	// is the sdlc open commit.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Promote idea tele/cross-project-search → tele/cross-project-search-2") {
+	if !strings.Contains(head, "Promote idea tele/cross-project-search → tele/"+dated) {
 		t.Fatalf("expected promote commit at HEAD, got:\n%s", head)
 	}
 	for _, want := range []string{
 		"MoE-Run: cross-project-search",
 		"MoE-Project: tele",
 		"MoE-Workflow: idea",
-		"MoE-Promoted-To: tele/cross-project-search-2",
+		"MoE-Promoted-To: tele/" + dated,
 	} {
 		if !strings.Contains(head, want) {
 			t.Fatalf("promote commit missing %q:\n%s", want, head)
@@ -94,11 +102,11 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 
 	// HEAD~1 is the sdlc run-open commit.
 	prev := gitLog(t, root, "-1", "HEAD~1", "--format=%s%n%b")
-	if !strings.Contains(prev, "Open run tele/cross-project-search-2 from idea cross-project-search:") {
+	if !strings.Contains(prev, "Open run tele/"+dated+" from idea cross-project-search:") {
 		t.Fatalf("expected sdlc open commit below promote, got:\n%s", prev)
 	}
 	for _, want := range []string{
-		"MoE-Run: cross-project-search-2",
+		"MoE-Run: " + dated,
 		"MoE-Project: tele",
 		"MoE-Idea: cross-project-search",
 	} {
@@ -124,6 +132,10 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 }
 
 func TestRunNewFromIdeaExplicitTitleOverridesIdeaTitle(t *testing.T) {
+	// Explicit title renames the run (commit subject + Metadata.Title)
+	// but the slug stays anchored to the idea's filename — that's the
+	// point of IDBase. If the operator wants a different slug on top of
+	// the rename, they pass --id.
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedProject(t, root, "tele")
@@ -139,11 +151,14 @@ func TestRunNewFromIdeaExplicitTitleOverridesIdeaTitle(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	// Slug is derived from the explicit title (run.New behaviour).
-	if !strings.Contains(out.String(), "opened run tele/renamed-at-promote") {
-		t.Fatalf("expected slug from explicit title, got: %q", out.String())
+	// Slug is anchored to the idea filename; collides with the idea
+	// itself and date-suffixes.
+	dated := "original-title-" + todayDateSuffix()
+	if !strings.Contains(out.String(), "opened run tele/"+dated) {
+		t.Fatalf("expected slug %q anchored to idea filename, got: %q", dated, out.String())
 	}
-	// HEAD is the promote commit; sdlc open commit is HEAD~1.
+	// HEAD is the promote commit; sdlc open commit is HEAD~1. Title still
+	// carries the explicit rename.
 	prev := gitLog(t, root, "-1", "HEAD~1", "--format=%s")
 	if !strings.Contains(prev, "Renamed at promote") {
 		t.Fatalf("sdlc open subject should carry explicit title, got: %q", prev)
@@ -166,9 +181,10 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	// kb's first stage is "research"; slug auto-suffixes on collision.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "dns-basics-2", "documents", "research", "content.md")); err != nil {
-		t.Fatalf("kb's first-stage doc not seeded: %v", err)
+	// kb's first stage is "research"; slug date-suffixes on collision.
+	dated := "dns-basics-" + todayDateSuffix()
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "research", "content.md")); err != nil {
+		t.Fatalf("kb's first-stage doc not seeded under %s: %v", dated, err)
 	}
 }
 
@@ -235,8 +251,9 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "opened run tele/flag-ordering-2") {
-		t.Fatalf("missing open confirmation: %q", out.String())
+	want := "opened run tele/flag-ordering-" + todayDateSuffix()
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("missing open confirmation %q: %q", want, out.String())
 	}
 }
 
