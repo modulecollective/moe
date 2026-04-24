@@ -5,11 +5,14 @@
 package executor
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/run"
@@ -123,4 +126,98 @@ func Execute(r Request) error {
 		fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
 	}
 	return runErr
+}
+
+// HeadlessRequest drives a one-shot, non-interactive `claude -p` call —
+// no REPL, no --session-id, no transcript mirroring. The agent reads
+// the prompts, produces its response on stdout, and exits. Used by
+// stages like kb/shelve where the agent's job is a bounded question-
+// and-answer ("which category? what hook?") rather than a
+// conversation.
+type HeadlessRequest struct {
+	// WorkDir is the cwd for the claude subprocess. For shelve this is
+	// the bureaucracy root so any incidental Read goes through the
+	// canonical paths.
+	WorkDir string
+	// Model, if non-empty, is passed as --model. Empty string defers to
+	// the operator's configured default. Shelve passes "sonnet".
+	Model string
+	// AllowedTools is the comma-joined --allowed-tools list, e.g.
+	// "Read". Empty means Claude's default set — callers that want a
+	// locked-down tool surface must set this explicitly.
+	AllowedTools string
+	// SystemPrompt is appended to Claude's system prompt via
+	// --append-system-prompt, same as the interactive path.
+	SystemPrompt string
+	// UserPrompt is the `claude -p <prompt>` positional argument — the
+	// single "here is your task" turn for a headless run.
+	UserPrompt string
+	// AddDirs are passed as repeated --add-dir flags for any paths the
+	// agent needs to read outside WorkDir.
+	AddDirs []string
+	// Timeout bounds the whole invocation. Zero means no timeout, which
+	// no caller should actually choose — headless calls that hang are
+	// the worst kind of silent failure.
+	Timeout time.Duration
+	// Stderr, if non-nil, streams the subprocess's stderr so the
+	// operator can see progress/errors in real time. Stdout is captured
+	// and returned rather than streamed — callers parse it (JSON, a
+	// short answer, etc.) and decide what to show the operator.
+	Stderr io.Writer
+}
+
+// ExecuteHeadless runs a single non-interactive `claude -p` call under
+// a timeout and returns the subprocess's stdout as bytes. A non-nil
+// error means claude exited non-zero, the timeout fired, or the binary
+// can't be found — the stdout bytes collected up to that point are
+// still returned so the caller can log them for debugging. Callers
+// treat failures as "this turn produced no commit; operator can retry"
+// — there is no state to unwind.
+func ExecuteHeadless(r HeadlessRequest) ([]byte, error) {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return nil, fmt.Errorf("executor: claude CLI not found on PATH: %w", err)
+	}
+
+	args := []string{"-p"}
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
+	if r.AllowedTools != "" {
+		args = append(args, "--allowed-tools", r.AllowedTools)
+	}
+	for _, d := range r.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	args = append(args, "--settings", sandboxSettings)
+	if r.SystemPrompt != "" {
+		args = append(args, "--append-system-prompt", r.SystemPrompt)
+	}
+	// Positional prompt is the single user turn. --add-dir is variadic,
+	// so the --settings/--append-system-prompt flags must sit between
+	// --add-dir and the positional prompt to avoid claude eating it as
+	// another directory.
+	args = append(args, r.UserPrompt)
+
+	ctx := context.Background()
+	if r.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = r.WorkDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = r.Stderr
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return out.Bytes(), fmt.Errorf("executor: claude -p timed out after %s", r.Timeout)
+		}
+		return out.Bytes(), fmt.Errorf("executor: claude -p: %w", err)
+	}
+	return out.Bytes(), nil
 }
