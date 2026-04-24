@@ -28,7 +28,7 @@ func TestKBRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "research", "summarize"} {
+	for _, want := range []string{"new", "research", "summarize", "shelve"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("kb usage missing subcommand %q: %q", want, out.String())
 		}
@@ -36,14 +36,15 @@ func TestKBRegistered(t *testing.T) {
 }
 
 // TestKBWorkflowStageOrder confirms the workflow's stage ladder is
-// research → summarize and that `new` is a facade, not a stage.
+// research → summarize → shelve and that `new` is a facade, not a
+// stage.
 func TestKBWorkflowStageOrder(t *testing.T) {
 	wf, err := LookupWorkflow("kb")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := wf.Stages()
-	want := []string{"research", "summarize"}
+	want := []string{"research", "summarize", "shelve"}
 	if len(got) != len(want) {
 		t.Fatalf("stages=%v want=%v", got, want)
 	}
@@ -60,7 +61,7 @@ func TestKBWorkflowStageOrder(t *testing.T) {
 }
 
 // TestKBWorkflowNextWalksStages mirrors TestWorkflowNextWalksStages
-// for the kb ladder: no turns → research → summarize → done.
+// for the kb ladder: no turns → research → summarize → shelve → done.
 func TestKBWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("kb")
@@ -88,12 +89,21 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))
+	next, kind, err = wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next.Name != "shelve" {
+		t.Fatalf("after summarize: expected stage shelve, got kind=%v name=%v", kind, nameOrNil(next))
+	}
+
+	commitWorkTurnAt(t, root, "p", "r", "kb", "shelve", t0.Add(2*time.Hour))
 	_, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if kind != NextKindDone {
-		t.Fatalf("after summarize: expected done, got kind=%v", kind)
+		t.Fatalf("after shelve: expected done, got kind=%v", kind)
 	}
 }
 

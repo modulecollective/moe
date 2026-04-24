@@ -69,7 +69,7 @@ The current workflows are:
 |-----------|---------------------------------------|--------------------------------------|
 | `sdlc`    | `design` → `code` → `push`            | designed features with a review loop |
 | `quick`   | `code` → `push`                       | small fixes that don't need a design |
-| `kb`      | `research` → `summarize`              | knowledge-base articles              |
+| `kb`      | `research` → `summarize` → `shelve`   | knowledge-base articles              |
 
 Each stage is a subcommand that opens a Claude Code session on that
 stage's document. All workflow verbs live under `moe workflow <name>
