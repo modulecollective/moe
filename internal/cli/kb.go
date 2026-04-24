@@ -5,18 +5,20 @@ import (
 	"io"
 )
 
-// The kb workflow owns the research→summarize lifecycle for knowledge
-// base runs. There is no push — the artifact is the markdown in the
-// bureaucracy itself, and signing `summarize` is publication. See
-// designs for the shape and rationale.
+// The kb workflow owns the research→summarize→shelve lifecycle for
+// knowledge base runs. There is no push — the artifact is markdown
+// inside the bureaucracy: research builds the bibliography, summarize
+// writes the article, and shelve files the article onto the project's
+// knowledge shelf. See designs for shape and rationale.
 //
-// Neither stage needs a sandbox clone: research edits a source list in
-// place; summarize edits its synthesized article. Both live under
-// projects/<project>/runs/<id>/documents/ alongside any sdlc runs the
-// project hosts.
+// None of the stages need a sandbox clone: research and summarize edit
+// files under projects/<project>/runs/<id>/documents/; shelve is a
+// non-interactive filing step that mutates
+// projects/<project>/knowledge/ directly in Go after a short headless
+// claude -p call that chooses category and hook. See kb_shelve.go.
 
 func init() {
-	kb := NewWorkflow("kb", "Knowledge base workflow: new, research, summarize")
+	kb := NewWorkflow("kb", "Knowledge base workflow: new, research, summarize, shelve")
 	kb.RegisterFacade(newRunCommand("kb"))
 	kb.Register(&Command{
 		Name:    "research",
@@ -28,6 +30,11 @@ func init() {
 		Summary: "open a Claude Code session on the run's synthesized article",
 		Run:     runSummarize,
 	}, "research")
+	kb.Register(&Command{
+		Name:    "shelve",
+		Summary: "file the summarized article onto the project's knowledge shelf (headless)",
+		Run:     runShelve,
+	}, "summarize")
 	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
 	RegisterWorkflow(kb)
 }
