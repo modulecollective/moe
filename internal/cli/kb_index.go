@@ -200,4 +200,3 @@ func ensureTrailingNewline(s string) string {
 	}
 	return s
 }
-
