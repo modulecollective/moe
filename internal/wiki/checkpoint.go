@@ -16,12 +16,12 @@ const CheckpointVersion = 1
 // CheckpointVersion. Pointers on the SHA fields so they marshal as null
 // when the corresponding repo is absent or dirty.
 type Checkpoint struct {
-	Version          int     `json:"version"`
-	LastIngestAt     string  `json:"last_ingest_at"`
-	LastIngestRun    string  `json:"last_ingest_run"`
-	BureaucracySHA   *string `json:"bureaucracy_sha"`
-	Project          string  `json:"project"`
-	ProjectRepoSHA   *string `json:"project_repo_sha"`
+	Version        int     `json:"version"`
+	LastIngestAt   string  `json:"last_ingest_at"`
+	LastIngestRun  string  `json:"last_ingest_run"`
+	BureaucracySHA *string `json:"bureaucracy_sha"`
+	Project        string  `json:"project"`
+	ProjectRepoSHA *string `json:"project_repo_sha"`
 }
 
 // CheckpointPath returns the absolute path to checkpoint.json given a
