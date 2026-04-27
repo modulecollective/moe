@@ -269,12 +269,13 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	}
 }
 
-// TestDashKBRunAfterShelveShowsDone is the regression for the
+// TestDashKBRunAfterSummarizeShowsDone is the regression for the
 // disappearing-KB-run bug: a KB run that's walked the full ladder
-// (research + summarize + shelve) has Next()==Done but
-// Status==InProgress (KB has no push), and must still render as
-// "done" — landing in COMPLETED.
-func TestDashKBRunAfterShelveShowsDone(t *testing.T) {
+// (research + summarize) has Next()==Done but Status==InProgress (KB
+// has no push), and must still render as "done" — landing in
+// COMPLETED. summarize is the terminal stage in the wiki-engine
+// reshape; signing it is publication.
+func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -284,7 +285,6 @@ func TestDashKBRunAfterShelveShowsDone(t *testing.T) {
 	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
 	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
 	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "summarize", t0.Add(time.Hour))
-	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "shelve", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -293,19 +293,17 @@ func TestDashKBRunAfterShelveShowsDone(t *testing.T) {
 	}
 	got := out.String()
 	if !strings.Contains(got, "COMPLETED (1)") {
-		t.Fatalf("expected KB run to stay visible after shelve, got:\n%s", got)
+		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
 	}
 	if !containsRunRow(got, "tele", "lookup", "kb:done") {
 		t.Fatalf("expected KB run row with stage 'kb:done', got:\n%s", got)
 	}
 }
 
-// TestDashKBRunAfterSummarizeShowsShelvePending is the
-// mirror-image check: summarize is written but shelve isn't yet. The
-// design calls this out as a distinct visible state so a broken
-// chain doesn't silently leave the run half-filed. Next() returns
-// shelve, so the dash renders `kb:shelve` under ACTIVE.
-func TestDashKBRunAfterSummarizeShowsShelvePending(t *testing.T) {
+// TestDashKBRunAfterResearchShowsSummarizePending is the mirror-image
+// check: research is written but summarize isn't yet. Next() returns
+// summarize, so the dash renders `kb:summarize` under ACTIVE.
+func TestDashKBRunAfterResearchShowsSummarizePending(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -314,7 +312,6 @@ func TestDashKBRunAfterSummarizeShowsShelvePending(t *testing.T) {
 	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
 	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
 	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
-	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "summarize", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -322,8 +319,8 @@ func TestDashKBRunAfterSummarizeShowsShelvePending(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !containsRunRow(got, "tele", "lookup", "kb:shelve") {
-		t.Fatalf("expected KB run row with stage 'kb:shelve', got:\n%s", got)
+	if !containsRunRow(got, "tele", "lookup", "kb:summarize") {
+		t.Fatalf("expected KB run row with stage 'kb:summarize', got:\n%s", got)
 	}
 }
 

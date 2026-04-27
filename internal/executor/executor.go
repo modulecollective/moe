@@ -130,13 +130,13 @@ func Execute(r Request) error {
 
 // HeadlessRequest drives a one-shot, non-interactive `claude -p` call —
 // no REPL, no --session-id, no transcript mirroring. The agent reads
-// the prompts, produces its response on stdout, and exits. Used by
-// stages like kb/shelve where the agent's job is a bounded question-
-// and-answer ("which category? what hook?") rather than a
-// conversation.
+// the prompts, produces its response on stdout, and exits. Suited to
+// callers whose agent job is a bounded question-and-answer rather than
+// a conversation (e.g. a future wiki finalize that asks the model to
+// summarise a diff into one log entry).
 type HeadlessRequest struct {
-	// WorkDir is the cwd for the claude subprocess. For shelve this is
-	// the bureaucracy root so any incidental Read goes through the
+	// WorkDir is the cwd for the claude subprocess. Typically the
+	// bureaucracy root so any incidental Read goes through the
 	// canonical paths.
 	WorkDir string
 	// Model, if non-empty, is passed as --model. Empty string defers to

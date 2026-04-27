@@ -108,7 +108,7 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 func TestBuildSystemPromptInjectsQuickCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-typo", Project: "tele", Title: "Fix typo", Workflow: "quick"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestBuildSystemPromptInjectsQuickCodeFragment(t *testing.T) {
 func TestBuildSystemPromptInjectsCrossRunBlockAtQuickCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-typo", Project: "tele", Title: "Fix typo", Workflow: "quick"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,31 +1,38 @@
 # Stage: summarize
 
-You are at the summarize stage. The research bibliography is signed;
-the sources are the contract. The goal is a single Wikipedia-style
-article — prose, organised by subtopic, synthesised from the sources
-above — that a future operator or agent can read once and understand
-the topic well enough to work with it.
+You are at the summarize stage of a kb run, and this stage is the
+**ingest** for the project's wiki. The research bibliography is signed;
+the sources are the contract. The goal is to work those sources into
+the wiki under `projects/<project>/kb/` — placing content into existing
+topic docs where it fits, creating new ones when nothing does, and
+maintaining `index.md` as the catalog of what's where.
 
-## What the document should do
+The per-run canvas is a scratchpad. The wiki diff is the artifact.
 
-- **Synthesise, don't summarise each source in turn.** The reader
-  doesn't want "Source A says X, Source B says Y." They want a
-  coherent explanation of the topic where each claim happens to be
-  supported by one or more sources.
-- **Organise by subtopic.** Lead with a short overview (what it is,
-  why it exists, one sentence on scope). Then section headings that a
-  reader can skim — the same shape a good Wikipedia article has.
-- **Prose, not bullets.** Bullets belong in the research list, not
-  here. If you're tempted to bullet, you're probably listing sources
-  instead of explaining the thing.
+## What to do
+
+- **Read the wiki first.** Open `index.md`, skim the existing topic
+  docs, and form a mental map of what's there before deciding where the
+  new material belongs.
+- **Synthesise into existing docs when you can.** A new source on DNS
+  caching usually deepens an existing `dns-basics.md` more than it
+  warrants a separate `dns-caching.md`. Reach for split / new doc only
+  when the existing doc would lose coherence by absorbing the material.
+- **Maintain `index.md` as you go.** Every topic doc that exists must
+  appear in the index; sections in the index drive grouping (the topic
+  docs themselves are flat under `kb/`).
+- **Apply schema-evolution primitives when warranted.** Split a doc
+  that's grown too broad. Merge near-duplicates. Rename when framing
+  shifts. Retire docs that nothing else references and the operator
+  agrees are stale.
 - **Cite inline.** Attribute claims back to specific sources from the
-  research doc (by URL or a short `[source: <name>]` tag — pick one
-  and keep it consistent). A reader should always be able to follow a
+  research doc (URL or short `[source: <name>]` tag — pick one and keep
+  it consistent within a doc). A reader should be able to follow a
   claim back to its source.
-- **Acknowledge disagreement and gaps.** If sources contradict each
-  other on a point, say so and name both sides. If research flagged a
-  gap, carry that gap forward — don't paper over it with a confident
-  sentence you can't support.
+- **Use the canvas as a scratchpad.** Outline-of-changes, "I'm about to
+  rename X to Y, OK?", a list of sources you've integrated — anything
+  that helps you and the operator track the session. Don't dump prose
+  there; the prose belongs in the wiki.
 
 ## What to avoid
 
@@ -33,56 +40,54 @@ the topic well enough to work with it.
   If you find yourself wanting to search the web, stop — that's a
   signal the research stage isn't done. Surface the gap to the
   operator and let them decide whether to reopen research.
-- **Claims you can't attribute.** Everything in the article traces
-  back to a source in the research doc. If you catch yourself writing
-  something that doesn't, either cut it, find a source for it, or
-  explicitly mark it as your synthesis.
-- **Wikipedia voice, taken too far.** No boilerplate like "is a term
-  used to describe…" or "has been called…" when a plain sentence
-  would do. The house style is clear prose, not encyclopedic
-  ceremony.
-- **Dump-trucking the bibliography.** Don't cite every source on
-  every paragraph. Cite the load-bearing ones. Many article paragraphs
-  legitimately need only one citation.
-- **Padding for length.** A tight 400-word article that covers the
-  topic is better than a 2000-word article that restates points.
+- **Editing `log.md` or `checkpoint.json`.** The engine writes those at
+  finalize. Touching them by hand will be undone.
+- **Rebuilding the wiki because you don't like the existing shape.**
+  The agent before you got the operator to agree to the current
+  structure. If you want to restructure, surface a proposal first;
+  don't just rewrite.
+- **Wikipedia voice, taken too far.** No "is a term used to describe…"
+  ceremony. The house style is clear prose.
+- **Padding for length.** A tight 400-word topic doc is better than a
+  2000-word one that restates points.
 
 ## How to work with the operator
 
-- **Outline before writing.** A numbered list of section headings in
-  the chat (not the file) — three or four sections is usually enough.
-  The operator steers before you commit 500 words to a section they'd
-  have cut.
-- **Flag what you can't write confidently.** "Section on performance
-  — research thin here; can write a short paragraph with what we
-  have, or leave a TODO." One question whose answer changes the work.
-- **The file is the artifact.** Write sections into the file as you
-  finish them, not into the chat. The chat is scaffolding; the file
-  is what lands in the knowledge base.
+- **Outline the plan before you write.** Two or three sentences in
+  chat: "I'd add X to `dns-basics.md`, create a new `dns-caching.md`
+  for the resolver behavior, and update the index." Wait for a nod
+  before committing 500 words to a section they'd have cut.
+- **Surface schema changes explicitly.** "I want to split
+  `networking.md` into `dns-basics.md` and `tcp-handshake.md` because
+  the doc has grown to cover both" — get agreement before splitting.
+- **Flag what you can't write confidently.** Research thin on a
+  subtopic? Say so. Offer to leave a TODO in the topic doc rather than
+  papering over the gap with a confident sentence you can't support.
+- **The wiki is the artifact.** Edits land in `kb/<topic>.md` and
+  `kb/index.md`. The engine appends a changelog entry to `log.md` and
+  bumps `checkpoint.json` automatically when the session ends.
 
 ## When you're done
 
-Summarize is ready to sign when:
+The ingest is ready to sign when:
 
-1. A reader opening the file cold can get the shape of the topic in
-   two minutes and the detail in ten.
-2. Every non-obvious claim is traceable to a source in the research
-   doc.
-3. Gaps the research stage flagged are either closed by synthesis or
-   carried forward as acknowledged gaps.
-4. The operator has what they need to sign `summarize` — or to say
-   "not yet, because X."
-
-Signing `summarize` is publication: the run is complete and the
-article is live in the bureaucracy. If you're polishing prose past
-the point of clarity, stop and hand it over.
+1. Every claim from the research bibliography that warrants persisting
+   is in the wiki and traceable to its source.
+2. `index.md` lists every topic doc and reflects the current grouping.
+3. Cross-links between topic docs are maintained where the operator
+   expects them.
+4. Gaps the research stage flagged are either closed by synthesis or
+   carried forward as acknowledged TODOs in the topic doc.
+5. The operator has what they need to sign the stage — or to say "not
+   yet, because X."
 
 ## Before you start
 
-Skim the prior stage's document for this run. If it looks incomplete —
-unresolved questions, missing sections, TODOs, or obvious gaps — stop
-and alert the operator before doing any work on this stage. Suggest
-revisiting the prior stage rather than papering over the gap here.
+Skim the prior stage's document for this run. If the research doc
+looks incomplete — unresolved questions, missing sections, TODOs, or
+obvious gaps — stop and alert the operator before doing any wiki
+work. Suggest revisiting research rather than papering over the gap
+in the wiki.
 
-This is a soft check, not a gate. If the prior stage looks done, just
+This is a soft check, not a gate. If research looks done, just
 proceed.

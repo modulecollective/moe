@@ -19,7 +19,31 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/wiki"
 )
+
+// stageSessionOpts carries the per-stage knobs runStageSession needs
+// beyond the run identifiers. Most stages just set NeedsSandbox and
+// InitialPrompt. Wiki-aware ingest stages (kb summarize, future twin
+// stages) supply WikiBuilder so the engine's prompt section, per-turn
+// staging, and FinalizeIngest hook all wire up automatically.
+type stageSessionOpts struct {
+	// NeedsSandbox switches the per-run sandbox clone on. Code stages
+	// require it; document-only stages leave it false.
+	NeedsSandbox bool
+	// InitialPrompt is auto-sent as the session's first user message
+	// — typically a "greet the operator and ask what they want"
+	// kickoff. Empty drops the auto-send and lands the operator in a
+	// blank prompt.
+	InitialPrompt string
+	// WikiBuilder, when non-nil, is invoked after the bureaucracy
+	// root and run metadata are resolved. It returns the wiki engine
+	// config for this stage; nil means the stage is not an ingest
+	// stage and the wiki integration is skipped. The builder takes
+	// the resolved root rather than asking callers to discover it
+	// themselves — runStageSession owns root discovery.
+	WikiBuilder func(root string, md *run.Metadata) (*wiki.Config, error)
+}
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
 // resolve the run/document, hand the operator an interactive Claude Code
@@ -39,10 +63,13 @@ import (
 // bureaucracy root (not the session worktree) so it persists across
 // turns.
 //
-// initialPrompt, if non-empty, is auto-sent as the first user message of
-// the turn — it's how stages spare the operator from typing "go" every
-// time they resume a session.
-func runStageSession(projectID, runID, docID string, needsSandbox bool, initialPrompt string, stdout, stderr io.Writer) int {
+// opts.InitialPrompt, if non-empty, is auto-sent as the first user
+// message of the turn — it's how stages spare the operator from
+// typing "go" every time they resume a session. opts.WikiBuilder, if
+// non-nil, opts the stage into the wiki engine: an extra system-prompt
+// section, per-turn staging of the wiki dir, and FinalizeIngest at
+// session close.
+func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -105,7 +132,7 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 	// on the moe/<run-id> branch so the agent's commits (and any later
 	// `moe sdlc push`) land on a branch we own.
 	clonePath := ""
-	if needsSandbox {
+	if opts.NeedsSandbox {
 		if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
 			moePrintf(stderr, "project %q has no submodule on disk; cannot run %q without code to edit\n", md.Project, docID)
 			return 1
@@ -121,10 +148,34 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		}
 	}
 
+	// Wiki integration — built once here, used in three places:
+	// the prompt, per-turn staging (commitTurn), and the post-session
+	// FinalizeIngest call. The builder runs against the canonical
+	// bureaucracy root; the resolved ContentDir is then rewritten to
+	// live inside the session worktree so paths in the system prompt
+	// and the engine's git status calls all reference the active
+	// worktree, not main.
+	var wikiCfg *wiki.Config
+	if opts.WikiBuilder != nil {
+		canonical, err := opts.WikiBuilder(root, md)
+		if err != nil {
+			moePrintf(stderr, "wiki: %v\n", err)
+			return 1
+		}
+		if canonical != nil {
+			worktreeCfg := *canonical
+			if rel, relErr := filepath.Rel(root, canonical.ContentDir); relErr == nil && !strings.HasPrefix(rel, "..") {
+				worktreeCfg.ContentDir = filepath.Join(workRoot, rel)
+			}
+			worktreeCfg.BureaucracyPath = workRoot
+			wikiCfg = &worktreeCfg
+		}
+	}
+
 	// Prompt paths point at the session worktree, where Claude's edits
 	// land. When the session closes, those edits rebase + ff-merge into
 	// main at the canonical root.
-	prompt, err := buildSystemPrompt(workRoot, md, docID, clonePath)
+	prompt, err := buildSystemPrompt(workRoot, md, docID, clonePath, wikiCfg)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -149,15 +200,38 @@ func runStageSession(projectID, runID, docID string, needsSandbox bool, initialP
 		NewSession:    newSession,
 		Prompt:        prompt,
 		ClonePath:     clonePath,
-		InitialPrompt: initialPrompt,
+		InitialPrompt: opts.InitialPrompt,
 		Stdin:         os.Stdin,
 		Stdout:        os.Stdout,
 		Stderr:        stderr,
 	})
 
+	// Wiki finalize runs before commitTurn so its writes (log.md and
+	// checkpoint.json) ride along in the same per-turn commit as the
+	// agent's wiki edits. A no-change session is a no-op — finalize
+	// returns without touching disk if the wiki dir is clean. Errors
+	// surface but do not block commitTurn: the agent's edits should
+	// land regardless of whether finalization succeeded, so the
+	// operator can recover by hand if needed.
+	if wikiCfg != nil {
+		_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
+			RunID:    md.ID,
+			RunTitle: md.Title,
+		}, stderr)
+		if ferr != nil {
+			moePrintf(stderr, "wiki: finalize: %v\n", ferr)
+		}
+	}
+
 	// Commit any document changes even if Claude exited non-zero — the
 	// operator may have chosen to bail mid-edit but kept the edits.
-	commitErr := commitTurn(workRoot, md, docID)
+	var extraStagePaths []string
+	if wikiCfg != nil {
+		if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
+			extraStagePaths = append(extraStagePaths, rel)
+		}
+	}
+	commitErr := commitTurn(workRoot, md, docID, extraStagePaths...)
 
 	// Close the session: land it on local main and tear the worktree
 	// down. Local-only — origin push is moe sync's job — so a short
@@ -272,7 +346,7 @@ func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, s
 // Per-document fragments, overrides, and upstream-document assembly are
 // expected later passes; each new source of guidance slots in as another
 // (string, error)-returning block below.
-func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string) (string, error) {
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, wikiCfg *wiki.Config) (string, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -284,6 +358,10 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string) (
 	}
 
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
+
+	if wikiCfg != nil {
+		sections = append(sections, wiki.IngestPromptSection(*wikiCfg))
+	}
 
 	banner, err := upstreamChangeBanner(root, md, docID)
 	if err != nil {
@@ -438,11 +516,18 @@ MoE-Session: %s
 // commitTurn stages the document dir and run.json, then commits with
 // a trailer block keyed to the document/session. See README §"one run
 // branch per run" for the trailer convention.
-func commitTurn(root string, md *run.Metadata, docID string) error {
+//
+// extraPaths lists additional path specs (relative to root) to stage
+// alongside the document dir. Used by ingest stages to ride the wiki
+// dir into the same per-turn commit as the canvas, so the operator
+// always sees the agent's wiki edits and the canvas snapshot moving
+// together in git history.
+func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...string) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
-	if err := run.Stage(root, docDir); err != nil {
+	stagePaths := append([]string{docDir}, extraPaths...)
+	if err := run.Stage(root, stagePaths...); err != nil {
 		return err
 	}
 	if !run.HasStagedChanges(root) {
@@ -461,5 +546,6 @@ MoE-Workflow: %s
 MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
-	return run.StageAndCommit(root, msg, docDir, runJSON)
+	allPaths := append([]string{docDir, runJSON}, extraPaths...)
+	return run.StageAndCommit(root, msg, allPaths...)
 }
