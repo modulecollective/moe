@@ -53,7 +53,8 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"design stands (fresh start vs. resumed) and ask what they'd like to " +
 		"work on next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "design", false, kickoff, stdout, stderr)
+	return runStageSession(fs.Arg(0), fs.Arg(1), "design",
+		stageSessionOpts{InitialPrompt: kickoff}, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
@@ -78,5 +79,6 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"implementation stands (fresh start vs. resumed) and ask what they'd " +
 		"like to work on next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, kickoff, stdout, stderr)
+	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
+		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
 }

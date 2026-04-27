@@ -49,5 +49,6 @@ func runQuickCode(args []string, stdout, stderr io.Writer) int {
 		"acknowledge what the change is asking for (or that this is a resumed " +
 		"session), and ask any single clarifying question whose answer would " +
 		"change what you'd do. Otherwise say you're ready and wait."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "code", true, kickoff, stdout, stderr)
+	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
+		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
 }

@@ -28,23 +28,27 @@ func TestKBRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "research", "summarize", "shelve"} {
+	for _, want := range []string{"new", "research", "summarize"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("kb usage missing subcommand %q: %q", want, out.String())
 		}
 	}
+	if strings.Contains(out.String(), "shelve") {
+		t.Fatalf("kb usage still lists removed `shelve` subcommand: %q", out.String())
+	}
 }
 
 // TestKBWorkflowStageOrder confirms the workflow's stage ladder is
-// research → summarize → shelve and that `new` is a facade, not a
-// stage.
+// research → summarize and that `new` is a facade, not a stage. The
+// wiki-engine reshape collapses the old `shelve` stage; summarize is
+// now the terminal ingest stage.
 func TestKBWorkflowStageOrder(t *testing.T) {
 	wf, err := LookupWorkflow("kb")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := wf.Stages()
-	want := []string{"research", "summarize", "shelve"}
+	want := []string{"research", "summarize"}
 	if len(got) != len(want) {
 		t.Fatalf("stages=%v want=%v", got, want)
 	}
@@ -57,11 +61,14 @@ func TestKBWorkflowStageOrder(t *testing.T) {
 		if s == "new" {
 			t.Fatalf("`new` leaked into Stages(): %v", got)
 		}
+		if s == "shelve" {
+			t.Fatalf("`shelve` should be removed: %v", got)
+		}
 	}
 }
 
 // TestKBWorkflowNextWalksStages mirrors TestWorkflowNextWalksStages
-// for the kb ladder: no turns → research → summarize → shelve → done.
+// for the kb ladder: no turns → research → summarize → done.
 func TestKBWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("kb")
@@ -89,21 +96,12 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))
-	next, kind, err = wf.Next(root, md)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if kind != NextKindStage || next.Name != "shelve" {
-		t.Fatalf("after summarize: expected stage shelve, got kind=%v name=%v", kind, nameOrNil(next))
-	}
-
-	commitWorkTurnAt(t, root, "p", "r", "kb", "shelve", t0.Add(2*time.Hour))
 	_, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if kind != NextKindDone {
-		t.Fatalf("after shelve: expected done, got kind=%v", kind)
+		t.Fatalf("after summarize: expected done, got kind=%v", kind)
 	}
 }
 
@@ -115,7 +113,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
-	got, err := buildSystemPrompt(root, md, "research", "")
+	got, err := buildSystemPrompt(root, md, "research", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +125,43 @@ func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 func TestBuildSystemPromptInjectsKBSummarizeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
-	got, err := buildSystemPrompt(root, md, "summarize", "")
+	got, err := buildSystemPrompt(root, md, "summarize", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(got, "# Stage: summarize") {
 		t.Fatalf("prompt missing summarize fragment heading:\n%s", got)
+	}
+}
+
+// TestKBWikiBuilderPopulatesPromptAndPaths is the integration check
+// that ties the kb workflow to the wiki engine: building the kb wiki
+// config and feeding it through buildSystemPrompt should produce the
+// engine's wiki-section header, the open-schema rules, and the
+// resolved kb/ path. Catches a wiring regression where the engine
+// stops landing in the prompt without anything else exploding.
+func TestKBWikiBuilderPopulatesPromptAndPaths(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
+	cfg, err := kbWikiBuilder(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg == nil {
+		t.Fatal("kbWikiBuilder returned nil config")
+	}
+	got, err := buildSystemPrompt(root, md, "summarize", "", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Wiki: kb (open-schema)",
+		"projects/tele/kb",
+		"split, merge, rename, retire",
+		"open-schema knowledge base",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
 	}
 }

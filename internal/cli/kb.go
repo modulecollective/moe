@@ -3,22 +3,56 @@ package cli
 import (
 	"flag"
 	"io"
+	"path/filepath"
+
+	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
-// The kb workflow owns the research→summarize→shelve lifecycle for
-// knowledge base runs. There is no push — the artifact is markdown
-// inside the bureaucracy: research builds the bibliography, summarize
-// writes the article, and shelve files the article onto the project's
-// knowledge shelf. See designs for shape and rationale.
-//
-// None of the stages need a sandbox clone: research and summarize edit
-// files under projects/<project>/runs/<id>/documents/; shelve is a
-// non-interactive filing step that mutates
-// projects/<project>/knowledge/ directly in Go after a short headless
-// claude -p call that chooses category and hook. See kb_shelve.go.
+// The kb workflow owns the research→summarize lifecycle for knowledge-
+// base runs. There is no push — the artifact is markdown inside the
+// bureaucracy: research builds the bibliography; summarize is the
+// ingest stage, where the operator and agent work the new sources into
+// the project's wiki under projects/<project>/kb/. The wiki engine
+// (internal/wiki) owns the on-disk shape, finalization, and per-turn
+// staging; kb is one shipped config of that engine.
+
+// kbWikiIngestPrompt is the kb-instance framing the engine pastes
+// above its mode rules. Stage tone (process, voice, what to avoid)
+// lives in workflows/kb/summarize.md and is loaded via moe.Stage; this
+// string carries only the wiki-identity framing — what this wiki is
+// *for* — so the same engine can host a closed-schema twin config
+// later by swapping this body and the Mode.
+const kbWikiIngestPrompt = `This is the project's open-schema knowledge base.
+The job is to work the run's research bibliography into the wiki:
+place new content into existing topic docs where it fits, create new
+topic docs when nothing does, and maintain index.md as the catalog of
+what's where. Topic identity is decoupled from run identity — a single
+ingest may update zero, one, or many topic docs.`
+
+// kbWikiBuilder is the WikiBuilder hook the kb summarize stage hands
+// to runStageSession. It resolves the per-project wiki content
+// directory, the project repo's submodule path (best-effort —
+// FinalizeIngest tolerates a missing or dirty repo), and the
+// open-schema config the engine consumes.
+func kbWikiBuilder(root string, md *run.Metadata) (*wiki.Config, error) {
+	contentDir := filepath.Join(root, "projects", md.Project, "kb")
+	cfg := &wiki.Config{
+		Name:              "kb",
+		ContentDir:        contentDir,
+		ProjectRepoPath:   filepath.Join(root, project.SubmoduleDir(md.Project)),
+		Project:           md.Project,
+		BureaucracyPath:   root,
+		Mode:              wiki.Open,
+		IngestPrompt:      kbWikiIngestPrompt,
+		AllowedPrimitives: []string{"split", "merge", "rename", "retire"},
+	}
+	return cfg, nil
+}
 
 func init() {
-	kb := NewWorkflow("kb", "Knowledge base workflow: new, research, summarize, shelve")
+	kb := NewWorkflow("kb", "Knowledge base workflow: new, research, summarize")
 	kb.RegisterFacade(newRunCommand("kb"))
 	kb.Register(&Command{
 		Name:    "research",
@@ -27,14 +61,9 @@ func init() {
 	})
 	kb.Register(&Command{
 		Name:    "summarize",
-		Summary: "open a Claude Code session on the run's synthesized article",
+		Summary: "open a Claude Code ingest session on the project's wiki",
 		Run:     runSummarize,
 	}, "research")
-	kb.Register(&Command{
-		Name:    "shelve",
-		Summary: "file the summarized article onto the project's knowledge shelf (headless)",
-		Run:     runShelve,
-	}, "summarize")
 	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
 	RegisterWorkflow(kb)
 }
@@ -60,7 +89,8 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"source list stands (fresh start vs. resumed) and ask what topic or " +
 		"angle they'd like you to search for. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "research", false, kickoff, stdout, stderr)
+	return runStageSession(fs.Arg(0), fs.Arg(1), "research",
+		stageSessionOpts{InitialPrompt: kickoff}, stdout, stderr)
 }
 
 func runSummarize(args []string, stdout, stderr io.Writer) int {
@@ -69,9 +99,10 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe workflow kb summarize <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the synthesized article.")
-		moePrintln(stderr, "The agent writes prose from the research doc; signing this stage is")
-		moePrintln(stderr, "publication — there is no push stage.")
+		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
+		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/kb/")
+		moePrintln(stderr, "— editing existing topic docs, creating new ones, and maintaining index.md.")
+		moePrintln(stderr, "Per-run canvas is a scratchpad; the wiki diff is the artifact.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -80,10 +111,15 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	const kickoff = "The operator just opened this summarize session. " +
-		"Read the canvas file before replying, so your acknowledgement reflects " +
-		"what's actually on it. In one or two sentences, acknowledge where the " +
-		"article stands (fresh start vs. resumed) and ask what they'd like to " +
-		"work on next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "summarize", false, kickoff, stdout, stderr)
+	const kickoff = "The operator just opened this kb ingest session. " +
+		"Read the run's research bibliography and the project's wiki under " +
+		"projects/<project>/kb/ before replying. In one or two sentences, " +
+		"acknowledge where the wiki stands (fresh vs. populated) and propose " +
+		"how you'd work the new sources in — which existing topic docs you'd " +
+		"extend, where you might add new ones — then wait for the operator's go-ahead."
+	return runStageSession(fs.Arg(0), fs.Arg(1), "summarize",
+		stageSessionOpts{
+			InitialPrompt: kickoff,
+			WikiBuilder:   kbWikiBuilder,
+		}, stdout, stderr)
 }

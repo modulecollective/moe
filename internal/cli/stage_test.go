@@ -129,7 +129,7 @@ func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "design", "")
+	got, err := buildSystemPrompt(root, md, "design", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	wf := registerThrowawayWorkflow(t, "noFragment")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: wf.Name}
-	got, err := buildSystemPrompt(root, md, "ghost", "")
+	got, err := buildSystemPrompt(root, md, "ghost", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "design", "")
+	got, err := buildSystemPrompt(root, md, "design", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "code", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "")
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 	commitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "design", "")
+	got, err := buildSystemPrompt(root, md, "design", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
