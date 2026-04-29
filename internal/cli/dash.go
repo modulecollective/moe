@@ -62,9 +62,11 @@ type dashRow struct {
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "include dormant runs (no activity in 30+ days)")
+	all := fs.Bool("all", false, "show everything (no dormancy filter, no completed-run cap)")
+	project := fs.String("project", "", "show only rows whose run belongs to this project")
+	workflow := fs.String("workflow", "", "show only rows whose run uses this workflow")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe dash [--all]")
+		moePrintln(stderr, "usage: moe dash [--all] [--project <id>] [--workflow <name>]")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -92,7 +94,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 
 	now := time.Now().UTC()
-	rows, err := buildDashRows(root, mds, now, *all)
+	rows, err := buildDashRows(root, mds, now, *all, *project, *workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -114,7 +116,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	renderDash(stdout, now, rows, projectCount, activeCount)
+	renderDash(stdout, now, rows, projectCount, activeCount, *all)
 	return 0
 }
 
@@ -123,7 +125,11 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 // just runs with workflow=idea; classify routes open ones to the
 // backlog bucket and closed/promoted ones to completed, so there's no
 // separate scan of a markdown-file shelf.
-func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool) ([]dashRow, error) {
+//
+// projectFilter and workflowFilter narrow the view; empty string means
+// no filter. Mismatches are dropped before the per-run git query so
+// filtered-out rows don't pay for LastActivity.
+func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool, projectFilter, workflowFilter string) ([]dashRow, error) {
 	// byRunKey lets the promoted-idea branch resolve a successor run's
 	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
 	// without a second disk scan.
@@ -133,6 +139,12 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 	}
 	rows := make([]dashRow, 0, len(mds))
 	for _, md := range mds {
+		if projectFilter != "" && md.Project != projectFilter {
+			continue
+		}
+		if workflowFilter != "" && md.Workflow != workflowFilter {
+			continue
+		}
 		last, err := run.LastActivity(root, md.ID)
 		if err != nil {
 			return nil, err
@@ -308,12 +320,12 @@ func countProjects(root string) (int, error) {
 // COMPLETED), and footer. Order is operator-first: what you can
 // act on now, then what's queued, then what's already done. tabwriter
 // aligns columns per section so a long idea title doesn't widen the
-// run rows. COMPLETED is capped at completedCap — older finished
-// runs still live in the bureaucracy repo, they just don't clutter
-// the dashboard. Section headings use the cyan-moe style from
-// output.go; rows stay plain so tabwriter's byte-counting aligns
-// correctly (ANSI codes would skew column widths).
-func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, activeCount int) {
+// run rows. COMPLETED is capped at completedCap unless showAll is set
+// — older finished runs still live in the bureaucracy repo, they just
+// don't clutter the dashboard. Section headings use the cyan-moe
+// style from output.go; rows stay plain so tabwriter's byte-counting
+// aligns correctly (ANSI codes would skew column widths).
+func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, activeCount int, showAll bool) {
 	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
 
 	var active, backlog, completed []dashRow
@@ -353,7 +365,7 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 	fmt.Fprintln(w)
 
 	shown := completed
-	if len(completed) > completedCap {
+	if !showAll && len(completed) > completedCap {
 		shown = completed[:completedCap]
 	}
 	if len(shown) < len(completed) {

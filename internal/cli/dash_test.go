@@ -614,6 +614,170 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 	}
 }
 
+// TestDashFilterByProject: with two registered projects each holding an
+// active run, `--project foo` narrows the dashboard to foo's row only.
+// Empty-string default = no filter, so this also pins that the flag
+// only kicks in when set.
+func TestDashFilterByProject(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "bar", "beta", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash", "--project", "foo"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE (1)") {
+		t.Fatalf("expected one active row after --project foo, got:\n%s", got)
+	}
+	if !containsRunRow(got, "foo", "alpha", "sdlc:design") {
+		t.Fatalf("expected foo/alpha row, got:\n%s", got)
+	}
+	if strings.Contains(got, "beta") {
+		t.Fatalf("did not expect bar/beta in --project foo view:\n%s", got)
+	}
+}
+
+// TestDashFilterByWorkflow: two runs in the same project on different
+// workflows; `--workflow kb` keeps the kb row and drops the sdlc row.
+func TestDashFilterByWorkflow(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash", "--workflow", "kb"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE (1)") {
+		t.Fatalf("expected one active row after --workflow kb, got:\n%s", got)
+	}
+	if !containsRunRow(got, "tele", "lookup", "kb:research") {
+		t.Fatalf("expected tele/lookup row, got:\n%s", got)
+	}
+	if strings.Contains(got, "fix-it") {
+		t.Fatalf("did not expect sdlc/fix-it in --workflow kb view:\n%s", got)
+	}
+}
+
+// TestDashFilterCombined: --project and --workflow compose to the
+// intersection. Only the row matching both flags survives.
+func TestDashFilterCombined(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "foo", "lookup", "kb", run.StatusInProgress)
+	seedRun(t, root, "bar", "lookup", "kb", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash", "--project", "foo", "--workflow", "kb"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE (1)") {
+		t.Fatalf("expected one row at the intersection, got:\n%s", got)
+	}
+	if !containsRunRow(got, "foo", "lookup", "kb:research") {
+		t.Fatalf("expected foo/lookup (kb) row, got:\n%s", got)
+	}
+	if strings.Contains(got, "alpha") {
+		t.Fatalf("did not expect foo/alpha (sdlc) in combined view:\n%s", got)
+	}
+	if strings.Contains(got, "bar") {
+		t.Fatalf("did not expect bar/lookup in combined view:\n%s", got)
+	}
+}
+
+// TestDashFilterUnknownReturnsEmpty: an unknown filter value isn't an
+// error — the dashboard renders with empty section bodies and exit 0.
+// Filtering is read-only; "(none)" is the obvious miss signal.
+func TestDashFilterUnknownReturnsEmpty(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash", "--project", "bogus"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"ACTIVE (0)", "BACKLOG (0)", "COMPLETED (0)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected empty %q after unknown project, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "fix-it") {
+		t.Fatalf("did not expect any rows for unknown project:\n%s", got)
+	}
+}
+
+// TestDashAllLiftsCompletedCap: with more completed runs than the cap,
+// the default view truncates to completedCap (header reads "X of Y");
+// `--all` lifts the truncation and renders the full list with a plain
+// "COMPLETED (Y)" header.
+func TestDashAllLiftsCompletedCap(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	for i := 0; i < 12; i++ {
+		slug := fmt.Sprintf("done-%02d", i)
+		seedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
+		commitTrailer(t, root, "push: "+slug+" merged",
+			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
+			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
+	}
+
+	// Default: capped at 10.
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "COMPLETED (10 of 12)") {
+		t.Fatalf("expected capped header by default, got:\n%s", out.String())
+	}
+
+	// --all: every completed row renders, plain header.
+	out.Reset()
+	errb.Reset()
+	code = Run([]string{"dash", "--all"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q --all stderr=%q", code, errb.String(), errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "COMPLETED (12)") {
+		t.Fatalf("expected uncapped header under --all, got:\n%s", got)
+	}
+	for i := 0; i < 12; i++ {
+		slug := fmt.Sprintf("done-%02d", i)
+		if !strings.Contains(got, slug) {
+			t.Fatalf("expected %q to render under --all, got:\n%s", slug, got)
+		}
+	}
+}
+
 // containsRunRow checks that dash output has a row for (project, run)
 // whose last tabwriter field matches stage — ignores the humanAgo
 // middle column so tests can be written without pinning wall-clock
