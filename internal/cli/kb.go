@@ -14,9 +14,9 @@ import (
 // base runs. There is no push — the artifact is markdown inside the
 // bureaucracy: research builds the bibliography; summarize is the
 // ingest stage, where the operator and agent work the new sources into
-// the project's wiki under projects/<project>/kb/. The wiki engine
-// (internal/wiki) owns the on-disk shape, finalization, and per-turn
-// staging; kb is one shipped config of that engine.
+// the project's wiki under projects/<project>/knowledge/. The wiki
+// engine (internal/wiki) owns the on-disk shape, finalization, and
+// per-turn staging; kb is one shipped config of that engine.
 
 // kbWikiIngestPrompt is the kb-instance framing the engine pastes
 // above its mode rules. Stage tone (process, voice, what to avoid)
@@ -37,7 +37,7 @@ ingest may update zero, one, or many topic docs.`
 // FinalizeIngest tolerates a missing or dirty repo), and the
 // open-schema config the engine consumes.
 func kbWikiBuilder(root string, md *run.Metadata) (*wiki.Config, error) {
-	contentDir := filepath.Join(root, "projects", md.Project, "kb")
+	contentDir := filepath.Join(root, "projects", md.Project, "knowledge")
 	cfg := &wiki.Config{
 		Name:              "kb",
 		ContentDir:        contentDir,
@@ -115,7 +115,7 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "usage: moe workflow kb summarize <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
-		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/kb/")
+		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")
 		moePrintln(stderr, "— editing existing topic docs, creating new ones, and maintaining index.md.")
 		moePrintln(stderr, "Per-run canvas is a scratchpad; the wiki diff is the artifact.")
 	}
@@ -128,7 +128,7 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	}
 	const kickoff = "The operator just opened this kb ingest session. " +
 		"Read the run's research bibliography and the project's wiki under " +
-		"projects/<project>/kb/ before replying. In one or two sentences, " +
+		"projects/<project>/knowledge/ before replying. In one or two sentences, " +
 		"acknowledge where the wiki stands (fresh vs. populated) and propose " +
 		"how you'd work the new sources in — which existing topic docs you'd " +
 		"extend, where you might add new ones — then wait for the operator's go-ahead."

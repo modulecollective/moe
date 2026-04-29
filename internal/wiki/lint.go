@@ -3,6 +3,7 @@ package wiki
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -94,11 +95,13 @@ operator rather than acting on them yourself.
 // drift) come from the agent walking the corpus during the session.
 type Findings struct {
 	// Orphans are topic docs present on disk but not referenced from
-	// index.md. Paths are relative to ContentDir.
+	// index.md. Paths are relative to ContentDir (e.g.
+	// "topics/dns.md").
 	Orphans []string
 	// MissingFromIndex are paths named in index.md links that don't
-	// exist in the wiki. Paths are as-written in index.md (relative,
-	// canonicalised).
+	// resolve to a topic doc on disk. Paths are relative to ContentDir,
+	// resolved from the as-written link target (e.g. an index entry
+	// "[X](topics/missing.md)" surfaces as "topics/missing.md").
 	MissingFromIndex []string
 	// BrokenLinks are internal links from topic docs that point at
 	// files that don't exist.
@@ -110,8 +113,8 @@ type Findings struct {
 
 // BrokenLink is one cross-link a topic doc makes that doesn't resolve.
 type BrokenLink struct {
-	From   string // doc that contains the link, relative to ContentDir
-	Target string // path the link points at, as written
+	From   string // doc that contains the link, relative to ContentDir (e.g. "topics/dns.md")
+	Target string // path the link resolves to, relative to ContentDir
 }
 
 // IsEmpty reports whether Scan found no structural issues at all.
@@ -125,27 +128,33 @@ func (f Findings) IsEmpty() bool {
 }
 
 // Scan walks the wiki content directory and returns the structural
-// findings. A missing ContentDir is not an error — it produces empty
-// findings (a fresh-wiki lint has nothing to find).
+// findings. A missing ContentDir (or missing topics/ subdir) is not an
+// error — it produces empty findings (a fresh-wiki lint has nothing to
+// find).
 //
 // The scan is best-effort and does not fail on per-file read errors:
 // a doc the engine couldn't read becomes an absence in the orphan /
 // link checks rather than a hard error. Errors that would prevent any
-// scan from completing (e.g. ReadDir on the root failing for reasons
-// other than ENOENT) propagate.
+// scan from completing (e.g. ReadDir on the topics dir failing for
+// reasons other than ENOENT) propagate.
+//
+// Topic docs live under <ContentDir>/topics/; the catalogue is keyed by
+// path relative to ContentDir (e.g. "topics/dns.md") so it matches
+// index.md link targets verbatim, and so a topic doc using a flat
+// sibling reference like [other](other.md) resolves correctly relative
+// to its own directory.
 func Scan(cfg Config) (Findings, error) {
 	var f Findings
 
-	entries, err := os.ReadDir(cfg.ContentDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return f, nil
-		}
-		return f, fmt.Errorf("wiki: read %s: %w", cfg.ContentDir, err)
+	topicsDir := TopicsDir(cfg.ContentDir)
+	entries, err := os.ReadDir(topicsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return f, fmt.Errorf("wiki: read %s: %w", topicsDir, err)
 	}
 
-	// Catalogue topic docs (flat layout, *.md not equal to engine-
-	// managed files). Map for O(1) link checks below.
+	// Catalogue topic docs. Map keys are ContentDir-relative slash paths
+	// (e.g. "topics/dns.md") so link-target resolution and index-entry
+	// comparison work in a single namespace.
 	topics := map[string]bool{}
 	var topicList []string
 	for _, e := range entries {
@@ -156,26 +165,23 @@ func Scan(cfg Config) (Findings, error) {
 		if !strings.HasSuffix(name, ".md") {
 			continue
 		}
-		if name == "index.md" || name == "log.md" {
-			continue
-		}
-		topics[name] = true
-		topicList = append(topicList, name)
+		rel := path.Join(TopicsSubdir, name)
+		topics[rel] = true
+		topicList = append(topicList, rel)
 	}
 
 	indexBody, indexExists, err := readMaybe(IndexPath(cfg.ContentDir))
 	if err != nil {
 		return f, err
 	}
-	indexLinks := extractMarkdownLinks(indexBody)
 	indexed := map[string]bool{}
-	for _, link := range indexLinks {
+	for _, link := range extractMarkdownLinks(indexBody) {
 		// Only consider local .md links — external URLs and anchors
 		// aren't part of the index/topic relationship.
 		if !isLocalMarkdownLink(link) {
 			continue
 		}
-		canon := canonLinkTarget(link)
+		canon := resolveLinkTarget(link, "index.md")
 		indexed[canon] = true
 		if !topics[canon] {
 			f.MissingFromIndex = append(f.MissingFromIndex, canon)
@@ -195,8 +201,7 @@ func Scan(cfg Config) (Findings, error) {
 
 	// Walk every topic doc for broken internal links and empty bodies.
 	for _, t := range topicList {
-		path := filepath.Join(cfg.ContentDir, t)
-		body, _, err := readMaybe(path)
+		body, _, err := readMaybe(filepath.Join(cfg.ContentDir, t))
 		if err != nil {
 			return f, err
 		}
@@ -207,7 +212,7 @@ func Scan(cfg Config) (Findings, error) {
 			if !isLocalMarkdownLink(link) {
 				continue
 			}
-			canon := canonLinkTarget(link)
+			canon := resolveLinkTarget(link, t)
 			if topics[canon] || canon == "index.md" {
 				continue
 			}
@@ -336,18 +341,22 @@ func isLocalMarkdownLink(link string) bool {
 	return strings.HasSuffix(target, ".md")
 }
 
-// canonLinkTarget strips fragments and "./" prefixes from a markdown
-// link target so the result can be looked up against the topic-doc
-// catalogue without further massaging. Paths with directory
-// separators are left as-is (and will fail the catalogue check —
-// topic docs are flat under the wiki dir).
-func canonLinkTarget(link string) string {
+// resolveLinkTarget canonicalises a markdown link target into a path
+// relative to ContentDir, given the file the link appears in (also
+// ContentDir-relative). Fragments are stripped; "./" and ".." segments
+// are resolved against the link source's directory so a topic doc
+// linking to a sibling ("other.md") and one linking up ("../index.md")
+// both produce paths that match the topic catalogue or the engine-
+// managed file names.
+func resolveLinkTarget(link, fromRel string) string {
 	target := link
 	if i := strings.IndexByte(target, '#'); i >= 0 {
 		target = target[:i]
 	}
-	target = strings.TrimPrefix(target, "./")
-	return target
+	// path.Clean uses forward slashes throughout — markdown link targets
+	// are always slash-separated, and the catalogue keys use slashes
+	// too, so resolution stays in one namespace regardless of host OS.
+	return path.Clean(path.Join(path.Dir(fromRel), target))
 }
 
 // isEffectivelyEmpty reports whether body has no meaningful content.

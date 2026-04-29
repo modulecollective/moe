@@ -89,15 +89,18 @@ func wikiPreamble(cfg Config) string {
 	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
 	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
 	b.WriteString(`On-disk shape:
-- index.md — corpus catalog. The authority on grouping; topic docs
-  are flat under the wiki dir, sections in index.md provide the
-  taxonomy.
-- log.md — append-only changelog. The engine writes entries at the
-  end of each ingest; do not edit it yourself.
+- index.md — corpus catalog. Sits at the top of the wiki dir and is
+  the authority on grouping; sections in index.md provide the
+  taxonomy. Bullets reference topic docs via the topics/ subfolder
+  (e.g. [DNS basics](topics/dns-basics.md)).
+- log.md — append-only changelog. Engine-managed; do not edit.
 - checkpoint.json — last-ran SHAs. Engine-managed; do not edit.
-- <topic>.md — one file per topic, flat under the wiki dir. Topic
-  identity is decoupled from run identity; a single ingest may
-  update zero, one, or many topic docs.
+- topics/<topic>.md — one file per topic, flat inside the topics/
+  subfolder. Topic identity is decoupled from run identity; a single
+  ingest may update zero, one, or many topic docs. Cross-links
+  between topic docs stay flat (sibling refs inside topics/ remain
+  [other](other-topic.md)); a link from a topic doc back up to the
+  index is ../index.md.
 
 `)
 	return b.String()

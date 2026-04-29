@@ -58,10 +58,10 @@ func TestLintPromptSectionClosedSchema(t *testing.T) {
 func TestScanCleanWiki(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS basics](dns-basics.md)\n- [TCP](tcp.md)\n")
-	writeFile(t, filepath.Join(dir, "dns-basics.md"),
+		"# kb\n\n- [DNS basics](topics/dns-basics.md)\n- [TCP](topics/tcp.md)\n")
+	writeFile(t, filepath.Join(dir, "topics", "dns-basics.md"),
 		"# DNS basics\n\nSee also [TCP](tcp.md).\n")
-	writeFile(t, filepath.Join(dir, "tcp.md"),
+	writeFile(t, filepath.Join(dir, "topics", "tcp.md"),
 		"# TCP\n\nThree-way handshake is described elsewhere.\n")
 
 	f, err := Scan(Config{ContentDir: dir, Mode: Open})
@@ -79,29 +79,29 @@ func TestScanFlagsOrphanBrokenAndEmpty(t *testing.T) {
 	// topic doc is on disk but unreferenced (orphan); one topic doc
 	// is empty; one topic doc has a broken cross-link.
 	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS](dns.md)\n- [Phantom](missing.md)\n")
-	writeFile(t, filepath.Join(dir, "dns.md"),
+		"# kb\n\n- [DNS](topics/dns.md)\n- [Phantom](topics/missing.md)\n")
+	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
 		"# DNS\n\nSee [TCP handshake](tcp-handshake.md) for context.\n")
-	writeFile(t, filepath.Join(dir, "orphan.md"),
+	writeFile(t, filepath.Join(dir, "topics", "orphan.md"),
 		"# Orphan\n\nNobody links here.\n")
-	writeFile(t, filepath.Join(dir, "stub.md"), "# Stub\n")
+	writeFile(t, filepath.Join(dir, "topics", "stub.md"), "# Stub\n")
 
 	f, err := Scan(Config{ContentDir: dir, Mode: Open})
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	if got, want := f.Orphans, []string{"orphan.md", "stub.md"}; !equalStrings(got, want) {
+	if got, want := f.Orphans, []string{"topics/orphan.md", "topics/stub.md"}; !equalStrings(got, want) {
 		t.Errorf("orphans: got %v want %v", got, want)
 	}
-	if got, want := f.MissingFromIndex, []string{"missing.md"}; !equalStrings(got, want) {
+	if got, want := f.MissingFromIndex, []string{"topics/missing.md"}; !equalStrings(got, want) {
 		t.Errorf("missing-from-index: got %v want %v", got, want)
 	}
-	if got, want := f.EmptyDocs, []string{"stub.md"}; !equalStrings(got, want) {
+	if got, want := f.EmptyDocs, []string{"topics/stub.md"}; !equalStrings(got, want) {
 		t.Errorf("empty: got %v want %v", got, want)
 	}
 	if len(f.BrokenLinks) != 1 ||
-		f.BrokenLinks[0].From != "dns.md" ||
-		f.BrokenLinks[0].Target != "tcp-handshake.md" {
+		f.BrokenLinks[0].From != "topics/dns.md" ||
+		f.BrokenLinks[0].Target != "topics/tcp-handshake.md" {
 		t.Errorf("broken links: %+v", f.BrokenLinks)
 	}
 }
@@ -109,8 +109,8 @@ func TestScanFlagsOrphanBrokenAndEmpty(t *testing.T) {
 func TestScanIgnoresExternalLinksAndAnchors(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS](dns.md)\n")
-	writeFile(t, filepath.Join(dir, "dns.md"),
+		"# kb\n\n- [DNS](topics/dns.md)\n")
+	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
 		"# DNS\n\n"+
 			"See [RFC 1035](https://example.com/rfc1035) and "+
 			"the [intro section](#intro) for context. "+
@@ -133,6 +133,23 @@ func TestScanMissingContentDirIsCleanFindings(t *testing.T) {
 	}
 	if !f.IsEmpty() {
 		t.Errorf("expected empty findings on missing dir, got %+v", f)
+	}
+}
+
+// TestScanMissingTopicsDirIsCleanFindings covers the half-built case
+// where index.md exists at the wiki root but topics/ has not been
+// created yet. Scan should treat that identically to a missing wiki
+// dir — empty findings, no error — so the operator can lint a fresh
+// corpus without seeing a phantom failure.
+func TestScanMissingTopicsDirIsCleanFindings(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "index.md"), "# kb\n\nNothing yet.\n")
+	f, err := Scan(Config{ContentDir: dir, Mode: Open})
+	if err != nil {
+		t.Fatalf("Scan with missing topics dir: %v", err)
+	}
+	if !f.IsEmpty() {
+		t.Errorf("expected empty findings with no topics dir, got %+v", f)
 	}
 }
 

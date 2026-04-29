@@ -170,9 +170,10 @@ func TestBuildSystemPromptInjectsKBSummarizeFragment(t *testing.T) {
 // TestKBWikiBuilderPopulatesPromptAndPaths is the integration check
 // that ties the kb workflow to the wiki engine: building the kb wiki
 // config and feeding it through buildSystemPrompt should produce the
-// engine's wiki-section header, the open-schema rules, and the
-// resolved kb/ path. Catches a wiring regression where the engine
-// stops landing in the prompt without anything else exploding.
+// engine's wiki-section header, the open-schema rules, the resolved
+// knowledge/ path, and the topics/<topic>.md on-disk-shape note.
+// Catches a wiring regression where the engine stops landing in the
+// prompt without anything else exploding.
 func TestKBWikiBuilderPopulatesPromptAndPaths(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
@@ -189,7 +190,8 @@ func TestKBWikiBuilderPopulatesPromptAndPaths(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Wiki: kb (open-schema)",
-		"projects/tele/kb",
+		"projects/tele/knowledge",
+		"topics/<topic>.md",
 		"split, merge, rename, retire",
 		"open-schema knowledge base",
 	} {

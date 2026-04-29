@@ -3,9 +3,9 @@
 You are at the summarize stage of a kb run, and this stage is the
 **ingest** for the project's wiki. The research bibliography is signed;
 the sources are the contract. The goal is to work those sources into
-the wiki under `projects/<project>/kb/` — placing content into existing
-topic docs where it fits, creating new ones when nothing does, and
-maintaining `index.md` as the catalog of what's where.
+the wiki under `projects/<project>/knowledge/` — placing content into
+existing topic docs where it fits, creating new ones when nothing does,
+and maintaining `index.md` as the catalog of what's where.
 
 The per-run canvas is a scratchpad. The wiki diff is the artifact.
 
@@ -20,7 +20,9 @@ The per-run canvas is a scratchpad. The wiki diff is the artifact.
   when the existing doc would lose coherence by absorbing the material.
 - **Maintain `index.md` as you go.** Every topic doc that exists must
   appear in the index; sections in the index drive grouping (the topic
-  docs themselves are flat under `kb/`).
+  docs themselves are flat under `topics/`). Index bullets reference
+  topic docs through the subfolder, e.g.
+  `[DNS basics](topics/dns-basics.md)`.
 - **Apply schema-evolution primitives when warranted.** Split a doc
   that's grown too broad. Merge near-duplicates. Rename when framing
   shifts. Retire docs that nothing else references and the operator
@@ -63,9 +65,10 @@ The per-run canvas is a scratchpad. The wiki diff is the artifact.
 - **Flag what you can't write confidently.** Research thin on a
   subtopic? Say so. Offer to leave a TODO in the topic doc rather than
   papering over the gap with a confident sentence you can't support.
-- **The wiki is the artifact.** Edits land in `kb/<topic>.md` and
-  `kb/index.md`. The engine appends a changelog entry to `log.md` and
-  bumps `checkpoint.json` automatically when the session ends.
+- **The wiki is the artifact.** Edits land in
+  `knowledge/topics/<topic>.md` and `knowledge/index.md`. The engine
+  appends a changelog entry to `log.md` and bumps `checkpoint.json`
+  automatically when the session ends.
 
 ## When you're done
 

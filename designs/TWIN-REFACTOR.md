@@ -49,7 +49,7 @@ A **wiki** in this codebase is a tuple:
 
 Each project gets exactly two wiki instances:
 
-- `bureaucracy/projects/{project}/kb/` — open-schema kb.
+- `bureaucracy/projects/{project}/knowledge/` — open-schema kb.
 - `bureaucracy/projects/{project}/digital-twin/` — closed-schema twin.
 
 Not arbitrary-N. Multi-kb-per-project was considered and dropped: it

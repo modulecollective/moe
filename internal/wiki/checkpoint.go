@@ -24,10 +24,23 @@ type Checkpoint struct {
 	ProjectRepoSHA *string `json:"project_repo_sha"`
 }
 
+// TopicsSubdir is the basename of the directory under ContentDir that
+// holds topic docs. index.md, log.md, checkpoint.json and .wiki-ops
+// stay at the top of ContentDir; per-topic *.md files live inside
+// TopicsSubdir so the corpus catalog (index.md) sits clean above the
+// topic-doc dump.
+const TopicsSubdir = "topics"
+
 // CheckpointPath returns the absolute path to checkpoint.json given a
 // ContentDir.
 func CheckpointPath(contentDir string) string {
 	return filepath.Join(contentDir, "checkpoint.json")
+}
+
+// TopicsDir returns the absolute path to the topics subdirectory given
+// a ContentDir.
+func TopicsDir(contentDir string) string {
+	return filepath.Join(contentDir, TopicsSubdir)
 }
 
 // LogPath returns the absolute path to log.md given a ContentDir.
