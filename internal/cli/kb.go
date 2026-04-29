@@ -65,7 +65,22 @@ func init() {
 		Run:     runSummarize,
 	}, "research")
 	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
+	// Lint is out-of-band relative to runs (no stage, no canvas,
+	// no run.json), so it lives alongside `new` and `close` as a
+	// workflow facade. Reuses kbWikiBuilder so the lint and
+	// summarize sessions agree on the wiki's identity and on-disk
+	// shape.
+	kb.RegisterFacade(lintCommand("kb", kbLintWikiBuilder))
 	RegisterWorkflow(kb)
+}
+
+// kbLintWikiBuilder is the (root, projectID) → *wiki.Config adapter
+// the lint facade calls. kbWikiBuilder takes a *run.Metadata, but
+// lint has no run; this thin wrapper synthesises the minimum
+// metadata kbWikiBuilder needs (just md.Project) so the wiki cfg
+// resolves to the right per-project content directory.
+func kbLintWikiBuilder(root, projectID string) (*wiki.Config, error) {
+	return kbWikiBuilder(root, &run.Metadata{Project: projectID})
 }
 
 func runResearch(args []string, stdout, stderr io.Writer) int {

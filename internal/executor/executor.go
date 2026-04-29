@@ -25,9 +25,13 @@ type Request struct {
 	// passed to claude as --add-dir so the canvas stays reachable when
 	// the agent's cwd is the sandbox clone.
 	Root string
-	// Metadata is the run's on-disk state. Read-only.
+	// Metadata is the run's on-disk state. Read-only. Optional —
+	// run-less sessions (e.g. wiki lint) pass nil, which skips
+	// transcript mirroring at turn end since there is no document
+	// thread.jsonl to copy into.
 	Metadata *run.Metadata
-	// DocID is which document on the run this turn is for.
+	// DocID is which document on the run this turn is for. Ignored
+	// when Metadata is nil.
 	DocID string
 	// SessionID is the canonical UUID that identifies this document's
 	// conversation. Claude Code uses it to create or resume its own
@@ -121,9 +125,13 @@ func Execute(r Request) error {
 	// Transcript copy is best-effort: a missing file is legal (operator
 	// aborted before claude wrote anything, or ran on another machine),
 	// and other I/O errors don't block the caller's post-run commit.
-	threadPath := filepath.Join(r.Root, run.ThreadPath(r.Metadata.Project, r.Metadata.ID, r.DocID))
-	if _, err := claude.CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
-		fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
+	// Run-less sessions (Metadata nil) skip the copy entirely — there
+	// is no per-document thread.jsonl to mirror into.
+	if r.Metadata != nil {
+		threadPath := filepath.Join(r.Root, run.ThreadPath(r.Metadata.Project, r.Metadata.ID, r.DocID))
+		if _, err := claude.CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
+			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
+		}
 	}
 	return runErr
 }

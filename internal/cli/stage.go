@@ -81,14 +81,195 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 		return 1
 	}
 
-	// Open (or resume) the session worktree under the repo lock. Short
-	// hold: the only work is `git worktree add` (or a lookup).
+	// Run-scoped state captured by closure. md is loaded inside
+	// buildSpec (after the worktree is open) and referenced again by
+	// promptNextStage if the turn lands successfully.
+	var md *run.Metadata
+
+	in := wikiSessionInputs{
+		Project:     projectID,
+		RunSlug:     runID,
+		DocID:       docID,
+		LockPurpose: "stage",
+		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
+			if opts.WikiBuilder == nil {
+				return nil, nil
+			}
+			return opts.WikiBuilder(canonicalRoot, md)
+		},
+		// WikiBuilder fires after BuildSpec has populated md. Run-scoped
+		// extras (sandbox, prompt, transcript probe) live in BuildSpec.
+		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			loaded, err := run.Load(workRoot, projectID, runID)
+			if err != nil {
+				return wikiTurnSpec{}, err
+			}
+			md = loaded
+
+			doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
+			if err != nil {
+				return wikiTurnSpec{}, err
+			}
+			if mutated {
+				if err := run.Save(workRoot, md); err != nil {
+					return wikiTurnSpec{}, err
+				}
+				// Commit on the session branch — no repo lock needed
+				// because the branch has a single writer (this session).
+				if err := commitSessionStart(workRoot, md, docID); err != nil {
+					return wikiTurnSpec{}, err
+				}
+				moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
+			}
+
+			// Code sandbox — still keyed off the canonical bureaucracy
+			// root so per-run sandbox persistence works across turns.
+			// design=false never sees a clone; code=true insists on
+			// one and pre-positions it on the moe/<run-id> branch so
+			// the agent's commits (and any later `moe sdlc push`)
+			// land on a branch we own.
+			clonePath := ""
+			if opts.NeedsSandbox {
+				if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
+					return wikiTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
+				}
+				clonePath, err = sandbox.Ensure(root, md.Project, md.ID)
+				if err != nil {
+					return wikiTurnSpec{}, err
+				}
+				if err := sandbox.CheckoutBranch(clonePath, branchPrefix+md.ID); err != nil {
+					return wikiTurnSpec{}, err
+				}
+			}
+
+			// mutated means EnsureDocument just minted the session
+			// UUID this turn, so the session is definitely new. Even
+			// when the document already existed, the local Claude
+			// Code session data may have been cleaned up (or moe is
+			// running on a different machine). Probe the transcript
+			// as a proxy: no transcript → nothing to --resume.
+			newSession := mutated
+			if !newSession {
+				tp, _ := claude.TranscriptPath(doc.Session)
+				newSession = tp == ""
+			}
+
+			return wikiTurnSpec{
+				Metadata:         md,
+				DocID:            docID,
+				ClonePath:        clonePath,
+				SessionUUID:      doc.Session,
+				NewSession:       newSession,
+				InitialPrompt:    opts.InitialPrompt,
+				FinalizeRunID:    md.ID,
+				FinalizeRunTitle: md.Title,
+				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+					return buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
+				},
+				CommitStager: func(workRoot, wikiRel string) error {
+					var extras []string
+					if wikiRel != "" {
+						extras = append(extras, wikiRel)
+					}
+					return commitTurn(workRoot, md, docID, extras...)
+				},
+			}, nil
+		},
+	}
+
+	code := runWikiSession(root, in, stdout, stderr)
+	if code != 0 || md == nil {
+		return code
+	}
+	return promptNextStage(root, md, stdout, stderr)
+}
+
+// wikiSessionInputs is everything runWikiSession needs to drive a
+// wiki-aware session through its full lifecycle: open the session
+// worktree, rewrite the wiki cfg to worktree paths, seed .wiki-ops,
+// run the executor, finalize the wiki, commit, and close. The two
+// callbacks — WikiBuilder and BuildSpec — defer the work that depends
+// on the worktree path (or, for ingest, on the run metadata loaded
+// from inside the worktree).
+type wikiSessionInputs struct {
+	// Project / RunSlug / DocID identify the session worktree branch
+	// (`session/<project>/<runslug>/<doc>`). Stage sessions reuse the
+	// real run id; lint sessions synthesise one (e.g.
+	// "lint-2026-04-27-153022").
+	Project string
+	RunSlug string
+	DocID   string
+	// LockPurpose is the repo-lock label prefix; the helper appends
+	// "-open" / "-close" for the two short-held windows.
+	LockPurpose string
+	// WikiBuilder, if non-nil, returns the canonical wiki cfg the
+	// helper rewrites to worktree paths. Receives the canonical
+	// bureaucracy root. Stage sessions defer until BuildSpec has
+	// populated run metadata; lint sessions return the cfg directly.
+	// May return nil to opt out of the wiki integration entirely
+	// (no .wiki-ops, no FinalizeIngest, no wiki dir staging).
+	WikiBuilder func(canonicalRoot string) (*wiki.Config, error)
+	// BuildSpec resolves the per-turn parameters once the worktree is
+	// open. Errors abort with a stderr report and exit code 1.
+	BuildSpec func(workRoot string) (wikiTurnSpec, error)
+}
+
+// wikiTurnSpec is the data BuildSpec hands back to runWikiSession.
+// Carries everything the executor and commit step need plus the
+// pluggable callbacks for prompt assembly and per-turn staging that
+// differ between ingest and lint.
+type wikiTurnSpec struct {
+	// Metadata is the run state, or nil for run-less sessions (lint).
+	// Drives transcript mirroring in the executor.
+	Metadata *run.Metadata
+	// DocID is which document this turn drives — for transcript
+	// path. Ignored when Metadata is nil.
+	DocID string
+	// ClonePath is the sandbox clone working directory. Empty for
+	// document-only / lint sessions.
+	ClonePath string
+	// SessionUUID is the Claude Code session id. Stage sessions reuse
+	// the per-document UUID stored in run.json; lint sessions mint a
+	// fresh one each invocation.
+	SessionUUID string
+	// NewSession picks --session-id (true) over --resume (false).
+	NewSession bool
+	// InitialPrompt, if non-empty, is auto-sent as the first user
+	// message of the turn.
+	InitialPrompt string
+	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
+	FinalizeRunID    string
+	FinalizeRunTitle string
+	// BuildPrompt assembles the --append-system-prompt payload.
+	// Receives the worktree root and the worktree-rewritten wiki cfg
+	// (nil if the session has no wiki).
+	BuildPrompt func(workRoot string, worktreeWiki *wiki.Config) (string, error)
+	// CommitStager runs after a successful FinalizeIngest. It
+	// receives the worktree root and the wiki dir's path relative to
+	// it (or "" if there is no wiki). It owns staging the
+	// caller-specific paths and committing with an appropriate
+	// message. Returning run.ErrNothingToCommit is treated as a soft
+	// empty turn — reported but not fatal.
+	CommitStager func(workRoot, wikiRel string) error
+}
+
+// runWikiSession owns the full wiki-aware session lifecycle: open the
+// session worktree under the repo lock, rewrite the wiki cfg to the
+// worktree, seed .wiki-ops, ask the caller for the per-turn spec, run
+// the executor, finalize the wiki, commit the turn (via the caller's
+// CommitStager), and close the session worktree. Run-scoped extras
+// (run.json, EnsureDocument, sandbox, promptNextStage) layer on top
+// in runStageSession; lint sessions call the helper directly with no
+// run scaffolding. Returns the exit code to bubble up.
+func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) int {
+	// Open (or resume) the session worktree under the repo lock.
+	// Short hold: the only work is `git worktree add` (or a lookup).
 	var sess *session.Session
-	err = withRepoLock(root, repolock.Options{
-		Purpose: "stage-open",
-		Run:     projectID + "/" + runID,
+	err := withRepoLock(root, repolock.Options{
+		Purpose: in.LockPurpose + "-open",
+		Run:     in.Project + "/" + in.RunSlug,
 	}, func() error {
-		s, err := session.Open(root, projectID, runID, docID)
+		s, err := session.Open(root, in.Project, in.RunSlug, in.DocID)
 		if err != nil {
 			return err
 		}
@@ -101,65 +282,33 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 	}
 	workRoot := sess.WorktreePath
 
-	md, err := run.Load(workRoot, projectID, runID)
+	// Caller's setup: load run metadata, configure sandbox, etc.
+	// Failures here mean we never reached the executor; close the
+	// worktree before returning so we don't leave a dangling branch.
+	spec, err := in.BuildSpec(workRoot)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
+		_ = withRepoLock(root, repolock.Options{
+			Purpose: in.LockPurpose + "-close",
+			Run:     in.Project + "/" + in.RunSlug,
+		}, func() error { return session.Close(sess) })
 		return 1
 	}
 
-	doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if mutated {
-		if err := run.Save(workRoot, md); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		// Commit on the session branch — no repo lock needed because
-		// the branch has a single writer (this session).
-		if err := commitSessionStart(workRoot, md, docID); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
-	}
-
-	// Code sandbox — still keyed off the canonical bureaucracy root so
-	// per-run sandbox persistence works across turns. design=false
-	// never sees a clone; code=true insists on one and pre-positions it
-	// on the moe/<run-id> branch so the agent's commits (and any later
-	// `moe sdlc push`) land on a branch we own.
-	clonePath := ""
-	if opts.NeedsSandbox {
-		if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
-			moePrintf(stderr, "project %q has no submodule on disk; cannot run %q without code to edit\n", md.Project, docID)
-			return 1
-		}
-		clonePath, err = sandbox.Ensure(root, md.Project, md.ID)
-		if err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		if err := sandbox.CheckoutBranch(clonePath, branchPrefix+md.ID); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-	}
-
-	// Wiki integration — built once here, used in three places:
-	// the prompt, per-turn staging (commitTurn), and the post-session
-	// FinalizeIngest call. The builder runs against the canonical
-	// bureaucracy root; the resolved ContentDir is then rewritten to
-	// live inside the session worktree so paths in the system prompt
-	// and the engine's git status calls all reference the active
-	// worktree, not main.
+	// Wiki integration — built after BuildSpec so callers that need
+	// run metadata (e.g. the kb wiki builder reads md.Project) can
+	// resolve it first. The canonical config's ContentDir gets
+	// rewritten to live inside the session worktree so prompt paths
+	// and engine git-status calls reference the active worktree.
 	var wikiCfg *wiki.Config
-	if opts.WikiBuilder != nil {
-		canonical, err := opts.WikiBuilder(root, md)
+	if in.WikiBuilder != nil {
+		canonical, err := in.WikiBuilder(root)
 		if err != nil {
 			moePrintf(stderr, "wiki: %v\n", err)
+			_ = withRepoLock(root, repolock.Options{
+				Purpose: in.LockPurpose + "-close",
+				Run:     in.Project + "/" + in.RunSlug,
+			}, func() error { return session.Close(sess) })
 			return 1
 		}
 		if canonical != nil {
@@ -170,82 +319,77 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 			worktreeCfg.BureaucracyPath = workRoot
 			wikiCfg = &worktreeCfg
 			// Seed the .wiki-ops stash so the agent has a fresh
-			// scratchpad to append schema-evolution tags to. Failure
-			// is non-fatal — the log entry just degrades to today's
-			// content-edit-only shape if the stash never materializes.
+			// scratchpad. Failure is non-fatal — the log entry
+			// degrades to content-edit-only if the stash never
+			// materialises.
 			if err := wiki.EnsureOpsStash(wikiCfg.ContentDir); err != nil {
 				moePrintf(stderr, "wiki: %v\n", err)
 			}
 		}
 	}
 
-	// Prompt paths point at the session worktree, where Claude's edits
-	// land. When the session closes, those edits rebase + ff-merge into
-	// main at the canonical root.
-	prompt, err := buildSystemPrompt(workRoot, md, docID, clonePath, wikiCfg)
+	// Prompt paths point at the session worktree, where Claude's
+	// edits land. When the session closes, those edits rebase +
+	// ff-merge into main at the canonical root.
+	prompt, err := spec.BuildPrompt(workRoot, wikiCfg)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
+		_ = withRepoLock(root, repolock.Options{
+			Purpose: in.LockPurpose + "-close",
+			Run:     in.Project + "/" + in.RunSlug,
+		}, func() error { return session.Close(sess) })
 		return 1
-	}
-
-	// mutated means EnsureDocument just minted the session UUID this
-	// turn, so the session is definitely new. But even when the document
-	// already existed, the local Claude Code session data may have been
-	// cleaned up (or moe is running on a different machine). Probe the
-	// transcript as a proxy: no transcript → nothing to --resume.
-	newSession := mutated
-	if !newSession {
-		tp, _ := claude.TranscriptPath(doc.Session)
-		newSession = tp == ""
 	}
 
 	runErr := executor.Execute(executor.Request{
 		Root:          workRoot,
-		Metadata:      md,
-		DocID:         docID,
-		SessionID:     doc.Session,
-		NewSession:    newSession,
+		Metadata:      spec.Metadata,
+		DocID:         spec.DocID,
+		SessionID:     spec.SessionUUID,
+		NewSession:    spec.NewSession,
 		Prompt:        prompt,
-		ClonePath:     clonePath,
-		InitialPrompt: opts.InitialPrompt,
+		ClonePath:     spec.ClonePath,
+		InitialPrompt: spec.InitialPrompt,
 		Stdin:         os.Stdin,
 		Stdout:        os.Stdout,
 		Stderr:        stderr,
 	})
 
-	// Wiki finalize runs before commitTurn so its writes (log.md and
-	// checkpoint.json) ride along in the same per-turn commit as the
-	// agent's wiki edits. A no-change session is a no-op — finalize
-	// returns without touching disk if the wiki dir is clean. Errors
-	// surface but do not block commitTurn: the agent's edits should
-	// land regardless of whether finalization succeeded, so the
-	// operator can recover by hand if needed.
+	// Wiki finalize runs before the commit so its writes (log.md
+	// and checkpoint.json) ride along in the same per-turn commit
+	// as the agent's wiki edits. A no-change session is a no-op —
+	// finalize returns without touching disk if the wiki dir is
+	// clean. Errors surface but do not block the commit: the
+	// agent's edits should land regardless of whether finalization
+	// succeeded, so the operator can recover by hand if needed.
+	wikiRel := ""
 	if wikiCfg != nil {
 		_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
-			RunID:    md.ID,
-			RunTitle: md.Title,
+			RunID:    spec.FinalizeRunID,
+			RunTitle: spec.FinalizeRunTitle,
 		}, stderr)
 		if ferr != nil {
 			moePrintf(stderr, "wiki: finalize: %v\n", ferr)
 		}
-	}
-
-	// Commit any document changes even if Claude exited non-zero — the
-	// operator may have chosen to bail mid-edit but kept the edits.
-	var extraStagePaths []string
-	if wikiCfg != nil {
 		if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
-			extraStagePaths = append(extraStagePaths, rel)
+			wikiRel = rel
 		}
 	}
-	commitErr := commitTurn(workRoot, md, docID, extraStagePaths...)
 
-	// Close the session: land it on local main and tear the worktree
-	// down. Local-only — origin push is moe sync's job — so a short
-	// budget and no heartbeat are fine.
+	// Commit any document changes even if Claude exited non-zero —
+	// the operator may have chosen to bail mid-edit but kept the
+	// edits.
+	var commitErr error
+	if spec.CommitStager != nil {
+		commitErr = spec.CommitStager(workRoot, wikiRel)
+	}
+
+	// Close the session: land it on local main and tear the
+	// worktree down. Local-only — origin push is moe sync's job —
+	// so a short budget and no heartbeat are fine.
 	closeErr := withRepoLock(root, repolock.Options{
-		Purpose: "stage-close",
-		Run:     projectID + "/" + runID,
+		Purpose: in.LockPurpose + "-close",
+		Run:     in.Project + "/" + in.RunSlug,
 	}, func() error {
 		return session.Close(sess)
 	})
@@ -261,7 +405,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 		moePrintf(stderr, "commit turn: %v\n", commitErr)
 		return 1
 	default:
-		moePrintf(stdout, "committed turn for %s/%s/%s\n", md.Project, md.ID, docID)
+		moePrintf(stdout, "committed turn for %s/%s/%s\n", in.Project, in.RunSlug, in.DocID)
 	}
 	if closeErr != nil {
 		moePrintf(stderr, "session close: %v\n", closeErr)
@@ -270,7 +414,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 	if runErr != nil {
 		return 1
 	}
-	return promptNextStage(root, md, stdout, stderr)
+	return 0
 }
 
 // promptNextStage prints the next incomplete stage's exact invocation

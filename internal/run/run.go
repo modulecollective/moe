@@ -323,10 +323,12 @@ func ThreadPath(projectID, id, docID string) string {
 // heal entries that predate the UUID requirement.
 var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// newSessionID returns a fresh random UUIDv4 for use as a Claude Code
-// --session-id. Claude Code rejects non-UUID session ids, so we mint one
-// per document and store it in run.json.
-func newSessionID() (string, error) {
+// NewSessionID returns a fresh random UUIDv4 for use as a Claude Code
+// --session-id. Claude Code rejects non-UUID session ids, so we mint
+// one per document and store it in run.json. Exported so run-less
+// sessions (e.g. wiki lint) can mint their own without duplicating
+// the generator.
+func NewSessionID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("run: generate session id: %w", err)
@@ -364,7 +366,7 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 		mutated = true
 	}
 	if !uuidV4Pattern.MatchString(doc.Session) {
-		sid, err := newSessionID()
+		sid, err := NewSessionID()
 		if err != nil {
 			return nil, false, err
 		}

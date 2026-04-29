@@ -16,27 +16,7 @@ import (
 // uses for the rest of the prompt.
 func IngestPromptSection(cfg Config) string {
 	var b strings.Builder
-
-	if body := strings.TrimSpace(cfg.IngestPrompt); body != "" {
-		b.WriteString(body)
-		b.WriteString("\n\n")
-	}
-
-	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
-	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
-
-	b.WriteString(`On-disk shape:
-- index.md — corpus catalog. The authority on grouping; topic docs
-  are flat under the wiki dir, sections in index.md provide the
-  taxonomy.
-- log.md — append-only changelog. The engine writes entries at the
-  end of each ingest; do not edit it yourself.
-- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.
-- <topic>.md — one file per topic, flat under the wiki dir. Topic
-  identity is decoupled from run identity; a single ingest may
-  update zero, one, or many topic docs.
-
-`)
+	b.WriteString(wikiPreamble(cfg))
 
 	switch cfg.Mode {
 	case Open:
@@ -93,4 +73,32 @@ Edits land inside the existing topic docs and index.md.
 	}
 
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// wikiPreamble is the shared "what is this wiki" header that opens
+// both ingest and lint prompt sections: the schema-config body, the
+// `## Wiki: <name> (<mode>-schema)` header, the absolute content-dir
+// path, and the on-disk shape contract. Mode-specific framing (ingest
+// vs. lint, open vs. closed) layers on top per-section.
+func wikiPreamble(cfg Config) string {
+	var b strings.Builder
+	if body := strings.TrimSpace(cfg.IngestPrompt); body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	}
+	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
+	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
+	b.WriteString(`On-disk shape:
+- index.md — corpus catalog. The authority on grouping; topic docs
+  are flat under the wiki dir, sections in index.md provide the
+  taxonomy.
+- log.md — append-only changelog. The engine writes entries at the
+  end of each ingest; do not edit it yourself.
+- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.
+- <topic>.md — one file per topic, flat under the wiki dir. Topic
+  identity is decoupled from run identity; a single ingest may
+  update zero, one, or many topic docs.
+
+`)
+	return b.String()
 }
