@@ -169,6 +169,13 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 			}
 			worktreeCfg.BureaucracyPath = workRoot
 			wikiCfg = &worktreeCfg
+			// Seed the .wiki-ops stash so the agent has a fresh
+			// scratchpad to append schema-evolution tags to. Failure
+			// is non-fatal — the log entry just degrades to today's
+			// content-edit-only shape if the stash never materializes.
+			if err := wiki.EnsureOpsStash(wikiCfg.ContentDir); err != nil {
+				moePrintf(stderr, "wiki: %v\n", err)
+			}
 		}
 	}
 
