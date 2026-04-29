@@ -191,33 +191,91 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	opts := run.Options{
-		ID:       *idOverride,
-		Workflow: ideaWorkflow,
-		SeedDocs: map[string]string{ideaDocID: string(body)},
-	}
-	runRef := projectID
-	if *idOverride != "" {
-		runRef = projectID + "/" + *idOverride
-	}
+	// --id is a hard override: collisions are an error so the operator
+	// notices a typo. Without --id, fall through to createIdea which
+	// auto-disambiguates from Slugify(title) — same path the close-time
+	// followups harvester takes.
 	var md *run.Metadata
-	err = withRepoLock(root, repolock.Options{
-		Purpose: "idea-new",
-		Run:     runRef,
-	}, func() error {
-		m, err := run.New(root, projectID, title, opts)
-		if err != nil {
-			return err
+	if *idOverride != "" {
+		opts := run.Options{
+			ID:       *idOverride,
+			Workflow: ideaWorkflow,
+			SeedDocs: map[string]string{ideaDocID: string(body)},
 		}
-		md = m
-		return nil
-	})
+		err = withRepoLock(root, repolock.Options{
+			Purpose: "idea-new",
+			Run:     projectID + "/" + *idOverride,
+		}, func() error {
+			m, err := run.New(root, projectID, title, opts)
+			if err != nil {
+				return err
+			}
+			md = m
+			return nil
+		})
+	} else {
+		err = withRepoLock(root, repolock.Options{
+			Purpose: "idea-new",
+			Run:     projectID,
+		}, func() error {
+			m, err := createIdea(root, projectID, run.Slugify(title), title, string(body), nil)
+			if err != nil {
+				return err
+			}
+			md = m
+			return nil
+		})
+	}
 	if err != nil {
 		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
 	moePrintf(stdout, "captured idea %s/%s\n", md.Project, md.ID)
 	return 0
+}
+
+// createIdea opens a new idea run with slug auto-disambiguated from
+// slugBase: if slugBase is taken, tries slugBase-2, slugBase-3, … until
+// one is free. Used by `moe idea new` (without --id) and by the
+// close-time followups harvester. Caller holds the bureaucracy lock —
+// createIdea does NOT take its own, so it can run inside an existing
+// repolock acquisition (e.g. the harvest loop inside runClose).
+//
+// body is the seed canvas body ("# Title\n" is fine for bare follow-ups;
+// idea new threads the operator's edited body in instead). trailers are
+// extra MoE-* lines appended to the open commit (e.g. MoE-From-Run for
+// harvested ideas). Returns the opened run's metadata so callers can
+// see the resolved slug.
+func createIdea(root, projectID, slugBase, title, body string, trailers []string) (*run.Metadata, error) {
+	if slugBase == "" {
+		return nil, fmt.Errorf("idea: cannot derive slug from title %q", title)
+	}
+	if body == "" {
+		body = fmt.Sprintf("# %s\n", title)
+	}
+	candidate := slugBase
+	for n := 2; ; n++ {
+		opts := run.Options{
+			ID:            candidate,
+			Workflow:      ideaWorkflow,
+			SeedDocs:      map[string]string{ideaDocID: body},
+			ExtraTrailers: trailers,
+			// Callers (idea new, harvest) gate on dirty state above.
+			// The harvester in particular runs while followups.md is
+			// dirty by design — let those modifications stand and
+			// rely on each call's explicit addPaths to keep the new
+			// run's open commit clean.
+			AllowDirty: true,
+		}
+		md, err := run.New(root, projectID, title, opts)
+		if err == nil {
+			return md, nil
+		}
+		if !errors.Is(err, run.ErrSlugTaken) {
+			return nil, err
+		}
+		candidate = fmt.Sprintf("%s-%d", slugBase, n)
+	}
 }
 
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {

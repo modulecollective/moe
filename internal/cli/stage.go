@@ -635,6 +635,19 @@ other concurrent activities and from the canonical submodule until the
 run is pushed.
 `, clonePath)
 	}
+
+	// Capture-as-you-go: the close-time harvester turns each unchecked
+	// line of this file into an idea run. Worded so the agent appends
+	// rather than rewrites — the file accumulates across stages.
+	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
+	out += "\n" +
+		"If you notice something worth doing but out of scope for this cycle —\n" +
+		"adjacent cleanup, a deferred investigation, a reference to chase —\n" +
+		"append a line to:\n" +
+		"  " + followups + "\n" +
+		"Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,\n" +
+		"terse title, no body). The operator harvests unchecked entries into\n" +
+		"ideas at close.\n"
 	return out
 }
 
@@ -678,6 +691,13 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
 	stagePaths := append([]string{docDir}, extraPaths...)
+	// followups.md is sibling of run.json — stages append to it as
+	// they spot adjacent work to capture. Stage it conditionally so
+	// turns that touched neither the doc nor the followups file still
+	// trip ErrNothingToCommit cleanly.
+	if followupsRel, ok := stageableFollowups(root, md); ok {
+		stagePaths = append(stagePaths, followupsRel)
+	}
 	if err := run.Stage(root, stagePaths...); err != nil {
 		return err
 	}
@@ -698,5 +718,20 @@ MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
+	if followupsRel, ok := stageableFollowups(root, md); ok {
+		allPaths = append(allPaths, followupsRel)
+	}
 	return run.StageAndCommit(root, msg, allPaths...)
+}
+
+// stageableFollowups returns the run's followups.md path (relative to
+// root) if the file exists, along with true. A missing file means no
+// agent or operator has captured anything yet — leave it out of the
+// staging set rather than passing a non-existent pathspec to git add.
+func stageableFollowups(root string, md *run.Metadata) (string, bool) {
+	rel := run.FollowupsPath(md.Project, md.ID)
+	if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+		return "", false
+	}
+	return rel, true
 }

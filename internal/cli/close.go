@@ -41,6 +41,11 @@ func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
 func runClose(workflow, subject string, cleanup closeCleanup, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" close", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	// --no-edit skips the followups.md editor step (idiom from `git
+	// commit --no-edit`). The harvester still runs against whatever is
+	// already on disk, so operators driving close from scripts/CI can
+	// trim the file ahead of time and keep close non-interactive.
+	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
 	// Idea runs are driven by the top-level `moe idea` command, so
 	// their usage line is the short form. Every other workflow's close
 	// is dispatched via `moe workflow <wf> close`.
@@ -48,8 +53,9 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		if workflow == ideaWorkflow {
 			moePrintf(stderr, "usage: moe idea close <project> <run>\n")
 		} else {
-			moePrintf(stderr, "usage: moe workflow %s close <project> <run>\n", workflow)
+			moePrintf(stderr, "usage: moe workflow %s close [--no-edit] <project> <run>\n", workflow)
 		}
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -69,7 +75,24 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if err := requireCleanTree(root); err != nil {
+	// Idea closes have no follow-ups dance — the run *is* the capture.
+	// For everything else, the operator's local edits to followups.md
+	// are expected (that's where stage-time captures land), so the
+	// clean-tree gate ignores changes on that path. Anything else
+	// dirty stays a refusal.
+	harvest := workflow != ideaWorkflow
+	followupsRel := run.FollowupsPath(projectID, runID)
+	if harvest {
+		dirty, derr := dirtyOutsidePath(root, followupsRel)
+		if derr != nil {
+			moePrintf(stderr, "%v\n", derr)
+			return 1
+		}
+		if dirty {
+			moePrintf(stderr, "working tree has uncommitted changes; commit or stash first\n")
+			return 1
+		}
+	} else if err := requireCleanTree(root); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -107,13 +130,6 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	if cleanup != nil {
-		if err := cleanup(root, md, stdout, stderr); err != nil {
-			moePrintf(stderr, "%s: close: %v\n", workflow, err)
-			return 1
-		}
-	}
-
 	md.Status = run.StatusClosed
 	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
 	msg := fmt.Sprintf(subject+`
@@ -126,10 +142,24 @@ MoE-Workflow: %s
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 	}, func() error {
+		if harvest {
+			if err := harvestFollowups(root, projectID, runID, workflow, *noEdit); err != nil {
+				return err
+			}
+		}
+		if cleanup != nil {
+			if err := cleanup(root, md, stdout, stderr); err != nil {
+				return err
+			}
+		}
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, runJSONRel)
+		stagePaths := []string{runJSONRel}
+		if _, ferr := os.Stat(filepath.Join(root, followupsRel)); ferr == nil {
+			stagePaths = append(stagePaths, followupsRel)
+		}
+		return run.StageAndCommit(root, msg, stagePaths...)
 	})
 	if err != nil {
 		moePrintf(stderr, "%s: close: %v\n", workflow, err)

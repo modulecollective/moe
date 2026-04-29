@@ -110,6 +110,16 @@ type Options struct {
 	// `MoE-Idea: <slug>`). Standard MoE-Run / MoE-Project trailers
 	// are always written first.
 	ExtraTrailers []string
+
+	// AllowDirty bypasses the working-tree-clean precondition. The
+	// guardrail is there so a stray edit doesn't ride along on the
+	// open-run commit; callers that already vetted the tree (the
+	// followups harvester is the only current example — it allows a
+	// modified followups.md to ride along to the close commit, while
+	// each per-idea open-run commit only stages its own paths) opt out
+	// here. The opt-out is per-caller because run.New still stages
+	// only its addPaths, so dirt elsewhere is not silently committed.
+	AllowDirty bool
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -212,7 +222,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 			if serr != nil {
 				return nil, serr
 			}
-			return nil, fmt.Errorf("run: slug %q is already used in project %s (existing run or prior history); try --id=%s", id, projectID, suggestion)
+			return nil, fmt.Errorf("%w: slug %q in project %s (existing run or prior history); try --id=%s", ErrSlugTaken, id, projectID, suggestion)
 		}
 		if dateSuffix {
 			id, err = nextFreeDatedID(root, projectID, opts.IDBase, now())
@@ -225,12 +235,14 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	}
 	runDirRel := Dir(projectID, id)
 
-	dirty, err := workingTreeDirty(root)
-	if err != nil {
-		return nil, err
-	}
-	if dirty {
-		return nil, fmt.Errorf("run: working tree has uncommitted changes; commit or stash first")
+	if !opts.AllowDirty {
+		dirty, err := workingTreeDirty(root)
+		if err != nil {
+			return nil, err
+		}
+		if dirty {
+			return nil, fmt.Errorf("run: working tree has uncommitted changes; commit or stash first")
+		}
 	}
 
 	md := &Metadata{
@@ -316,6 +328,15 @@ func ContentPath(projectID, id, docID string) string {
 // exchange is stored in-repo alongside the compressed content.md.
 func ThreadPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "thread.jsonl")
+}
+
+// FollowupsPath returns the path (relative to the bureaucracy root) of
+// a run's follow-ups scratch file: a markdown checklist sibling of
+// run.json that grows during stages and is harvested into ideas at
+// close. The file is optional — a run without follow-ups never has one
+// on disk.
+func FollowupsPath(projectID, id string) string {
+	return filepath.Join(Dir(projectID, id), "followups.md")
 }
 
 // uuidV4Pattern matches the canonical 8-4-4-4-12 hex form Claude Code
@@ -413,6 +434,13 @@ func HasStagedChanges(root string) bool {
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
 // changes — signals "turn produced no document edits" to the caller.
 var ErrNothingToCommit = errors.New("run: nothing to commit")
+
+// ErrSlugTaken is returned by New when an explicit Options.ID collides
+// with an existing run dir or a slug that already appears in main's
+// commit history. Wrapped (not the bare error) so callers can detect
+// the condition with errors.Is and retry under a different slug — the
+// followups harvester uses this for auto-disambiguation across a batch.
+var ErrSlugTaken = errors.New("run: slug already used")
 
 // CommitAllowEmpty stages pathspecs (if any) and commits with msg, passing
 // --allow-empty so the commit lands even when nothing is staged. Used for
