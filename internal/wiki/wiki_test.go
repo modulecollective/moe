@@ -28,8 +28,21 @@ func TestIngestPromptSectionOpenSchema(t *testing.T) {
 		"log.md",
 		"checkpoint.json",
 		"open-schema",
-		"split",
-		"retire",
+		// Per-primitive rubric — each primitive gets a labelled bullet
+		// with criteria, evidence, and a "not for X" guard.
+		"**split**",
+		"**merge**",
+		"**rename**",
+		"**retire**",
+		// [wiki-op] tag convention is surfaced with the literal shapes
+		// the parser recognises.
+		"[wiki-op] split",
+		"[wiki-op] merge",
+		"[wiki-op] rename",
+		"[wiki-op] retire",
+		// Stash file path the agent appends to; absolute, derived from
+		// ContentDir.
+		"/some/path/projects/p/kb/.wiki-ops",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q in:\n%s", want, got)
@@ -384,6 +397,196 @@ func TestFinalizeIngestNullsDirtyProjectRepoSHA(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "dirty") {
 		t.Errorf("expected dirty-repo warning on stderr, got %q", stderr.String())
+	}
+}
+
+func TestParseOpsRecognisesAllPrimitives(t *testing.T) {
+	body := `[wiki-op] split networking.md → dns-basics.md, tcp-handshake.md
+[wiki-op] merge dns-caching.md into dns-basics.md
+[wiki-op] rename old-stuff.md → archived-projects.md
+[wiki-op] retire scratch-notes.md
+`
+	ops := parseOps(body)
+	if len(ops) != 4 {
+		t.Fatalf("expected 4 ops, got %d: %+v", len(ops), ops)
+	}
+	if ops[0].Kind != OpSplit ||
+		len(ops[0].Sources) != 1 || ops[0].Sources[0] != "networking.md" ||
+		len(ops[0].Targets) != 2 ||
+		ops[0].Targets[0] != "dns-basics.md" || ops[0].Targets[1] != "tcp-handshake.md" {
+		t.Errorf("split op malformed: %+v", ops[0])
+	}
+	if ops[1].Kind != OpMerge ||
+		len(ops[1].Sources) != 1 || ops[1].Sources[0] != "dns-caching.md" ||
+		len(ops[1].Targets) != 1 || ops[1].Targets[0] != "dns-basics.md" {
+		t.Errorf("merge op malformed: %+v", ops[1])
+	}
+	if ops[2].Kind != OpRename ||
+		ops[2].Sources[0] != "old-stuff.md" || ops[2].Targets[0] != "archived-projects.md" {
+		t.Errorf("rename op malformed: %+v", ops[2])
+	}
+	if ops[3].Kind != OpRetire ||
+		ops[3].Sources[0] != "scratch-notes.md" || len(ops[3].Targets) != 0 {
+		t.Errorf("retire op malformed: %+v", ops[3])
+	}
+}
+
+func TestParseOpsAcceptsAsciiArrow(t *testing.T) {
+	// Operators on keyboards without → should not be locked out.
+	ops := parseOps("[wiki-op] rename old.md -> new.md\n")
+	if len(ops) != 1 || ops[0].Kind != OpRename ||
+		ops[0].Sources[0] != "old.md" || ops[0].Targets[0] != "new.md" {
+		t.Fatalf("ascii arrow rename not parsed: %+v", ops)
+	}
+}
+
+func TestParseOpsSkipsMalformedAndCommentary(t *testing.T) {
+	body := `# random commentary line, not a tag
+[wiki-op] split   <-- missing arrow + targets
+[wiki-op] not-a-real-primitive thing
+[wiki-op] retire
+[wiki-op]
+[wiki-op] retire kept.md
+plain text without a tag prefix
+`
+	ops := parseOps(body)
+	if len(ops) != 1 || ops[0].Kind != OpRetire || ops[0].Sources[0] != "kept.md" {
+		t.Fatalf("expected only the well-formed retire to survive, got %+v", ops)
+	}
+}
+
+func TestEnsureOpsStashCreatesAndTruncates(t *testing.T) {
+	dir := t.TempDir()
+	wikiDir := filepath.Join(dir, "kb")
+
+	// Fresh content dir doesn't exist yet — EnsureOpsStash must mkdir it.
+	if err := EnsureOpsStash(wikiDir); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	stash := OpsStashPath(wikiDir)
+	body, err := os.ReadFile(stash)
+	if err != nil {
+		t.Fatalf("read after first seed: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("expected empty stash on fresh seed, got %q", body)
+	}
+
+	// Pre-populate with content from a prior session and re-seed; the
+	// agent should land on an empty file again.
+	if err := os.WriteFile(stash, []byte("[wiki-op] retire stale.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureOpsStash(wikiDir); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	body, err = os.ReadFile(stash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("expected empty stash after re-seed, got %q", body)
+	}
+}
+
+func TestFinalizeIngestRendersOperationsGroup(t *testing.T) {
+	root := newGitRepo(t)
+	wikiDir := filepath.Join(root, "kb")
+	// Realistic shape: the agent split a doc and added a brand-new one.
+	// log.md should carry both an operations group (from .wiki-ops) and
+	// the deterministic content-edit list (from git status).
+	writeFile(t, filepath.Join(wikiDir, "dns-basics.md"), "# DNS\n")
+	writeFile(t, filepath.Join(wikiDir, "tcp-handshake.md"), "# TCP\n")
+	writeFile(t, filepath.Join(wikiDir, "tls-handshake.md"), "# TLS\n")
+	writeFile(t, filepath.Join(wikiDir, ".wiki-ops"),
+		"[wiki-op] split networking.md → dns-basics.md, tcp-handshake.md\n"+
+			"[wiki-op] retire scratch-notes.md\n")
+
+	cfg := Config{
+		Name:            "kb",
+		ContentDir:      wikiDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		Mode:            Open,
+	}
+	now := time.Date(2026, 4, 27, 15, 30, 0, 0, time.UTC)
+	res, err := FinalizeIngest(cfg, FinalizeContext{
+		RunID:    "wiki-engine",
+		RunTitle: "Wiki engine — applied to kb",
+		Now:      now,
+	}, nil)
+	if err != nil {
+		t.Fatalf("FinalizeIngest: %v", err)
+	}
+	if !res.LogEntryWritten {
+		t.Fatalf("expected log entry, got %+v", res)
+	}
+	// .wiki-ops must not show up as a content change.
+	for _, c := range res.Changes {
+		if c.Path == ".wiki-ops" {
+			t.Fatalf("stash file leaked into change set: %+v", res.Changes)
+		}
+	}
+
+	logBody, err := os.ReadFile(LogPath(wikiDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logS := string(logBody)
+	// Operations group bullets, exactly as the rubric dictates.
+	for _, want := range []string{
+		"- split: networking.md → dns-basics.md, tcp-handshake.md",
+		"- retire: scratch-notes.md",
+		"- added: dns-basics.md, tcp-handshake.md, tls-handshake.md",
+	} {
+		if !strings.Contains(logS, want) {
+			t.Errorf("log.md missing %q:\n%s", want, logS)
+		}
+	}
+	// Operations group sits above the content-edit group.
+	if iSplit := strings.Index(logS, "- split:"); iSplit < 0 {
+		t.Fatalf("log.md missing operations group:\n%s", logS)
+	} else if iAdded := strings.Index(logS, "- added:"); iAdded < 0 || iSplit > iAdded {
+		t.Fatalf("operations should appear above content edits:\n%s", logS)
+	}
+
+	// Stash file must be truncated to zero bytes by finalize so the
+	// next session starts fresh; the truncation rides into the
+	// per-turn commit alongside log.md.
+	stashBody, err := os.ReadFile(OpsStashPath(wikiDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stashBody) != 0 {
+		t.Errorf("stash should be truncated by finalize, got %q", stashBody)
+	}
+}
+
+func TestFinalizeIngestStashOnlyIsNoOp(t *testing.T) {
+	// A session where the agent appended `[wiki-op]` lines but then
+	// reverted all topic-doc edits should not produce a log entry —
+	// the stash being non-empty isn't a wiki edit on its own. The
+	// stash gets truncated as a side effect, which is fine.
+	root := newGitRepo(t)
+	wikiDir := filepath.Join(root, "kb")
+	writeFile(t, filepath.Join(wikiDir, ".wiki-ops"), "[wiki-op] retire stale.md\n")
+
+	cfg := Config{
+		Name:            "kb",
+		ContentDir:      wikiDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		Mode:            Open,
+	}
+	res, err := FinalizeIngest(cfg, FinalizeContext{
+		RunID: "test",
+		Now:   time.Date(2026, 4, 27, 15, 30, 0, 0, time.UTC),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LogEntryWritten || res.CheckpointWritten {
+		t.Fatalf("expected no-op when only stash differs, got %+v", res)
 	}
 }
 

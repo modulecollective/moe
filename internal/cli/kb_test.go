@@ -28,13 +28,46 @@ func TestKBRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "research", "summarize"} {
+	for _, want := range []string{"new", "research", "summarize", "close", "lint"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("kb usage missing subcommand %q: %q", want, out.String())
 		}
 	}
 	if strings.Contains(out.String(), "shelve") {
 		t.Fatalf("kb usage still lists removed `shelve` subcommand: %q", out.String())
+	}
+}
+
+// TestKBLintIsFacadeNotStage guards the design choice that lint is
+// out-of-band relative to runs: it must dispatch as a workflow
+// subcommand but must not appear in the stage ladder (otherwise
+// `moe dash` and the next-stage prompt would treat it as a step to
+// satisfy on every run).
+func TestKBLintIsFacadeNotStage(t *testing.T) {
+	wf, err := LookupWorkflow("kb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range wf.Stages() {
+		if s == "lint" {
+			t.Fatalf("lint must be a facade, but it appeared in the stage ladder: %v", wf.Stages())
+		}
+	}
+}
+
+// TestKBLintRequiresProjectArg confirms the dispatch path reaches
+// runLintSession's flag parser. The actual run-against-a-real-project
+// path requires a live `claude` binary and a registered project, so
+// it's not exercised here — we just verify the usage line lands when
+// arguments are missing.
+func TestKBLintRequiresProjectArg(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := Run([]string{"workflow", "kb", "lint"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit on missing project arg, got 0\nstderr: %s", errb.String())
+	}
+	if !strings.Contains(errb.String(), "usage: moe workflow kb lint <project>") {
+		t.Fatalf("missing usage line in stderr:\n%s", errb.String())
 	}
 }
 

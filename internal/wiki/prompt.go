@@ -16,35 +16,45 @@ import (
 // uses for the rest of the prompt.
 func IngestPromptSection(cfg Config) string {
 	var b strings.Builder
-
-	if body := strings.TrimSpace(cfg.IngestPrompt); body != "" {
-		b.WriteString(body)
-		b.WriteString("\n\n")
-	}
-
-	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
-	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
-
-	b.WriteString(`On-disk shape:
-- index.md — corpus catalog. The authority on grouping; topic docs
-  are flat under the wiki dir, sections in index.md provide the
-  taxonomy.
-- log.md — append-only changelog. The engine writes entries at the
-  end of each ingest; do not edit it yourself.
-- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.
-- <topic>.md — one file per topic, flat under the wiki dir. Topic
-  identity is decoupled from run identity; a single ingest may
-  update zero, one, or many topic docs.
-
-`)
+	b.WriteString(wikiPreamble(cfg))
 
 	switch cfg.Mode {
 	case Open:
 		b.WriteString(`Schema-evolution rules (open-schema):
-You may split a topic doc that has grown too broad, merge near-duplicates,
-rename when framing shifts, and retire docs that are no longer referenced.
-Maintain index.md as content moves; maintain cross-links between topic
-docs. Do not edit log.md or checkpoint.json — the engine writes those.
+
+You may evolve the doc set under the four primitives below. Maintain
+index.md as content moves; maintain cross-links between topic docs.
+Do not edit log.md or checkpoint.json — the engine writes those.
+
+- **split** — when one topic doc covers two distinct things and a
+  reader looking for one would have to skim past the other. Evidence:
+  the doc has two top-level sections that don't share vocabulary; the
+  index entry already strains to describe both. *Not for length alone.*
+- **merge** — when two docs cover the same ground and a reader would
+  have to read both to understand either. Evidence: substantial
+  overlap in claims and sources, near-identical scope statements. *Not
+  for "they're related."*
+- **rename** — when the title no longer matches what the doc has
+  drifted into. Evidence: the doc's opening sentences contradict its
+  filename or index entry. *Not for cosmetic improvements.*
+- **retire** — when nothing else in the wiki references the doc and
+  its content is either fully absorbed elsewhere or no longer
+  load-bearing. Evidence: zero inbound links, claims either obsolete
+  or duplicated. *Not as a substitute for merging.*
+
+Name what you did. As you apply a primitive, append one line to the
+engine's stash file before the per-turn commit, in this exact shape:
+
+    [wiki-op] split <src>.md → <dst1>.md, <dst2>.md
+    [wiki-op] merge <src>.md into <dst>.md
+    [wiki-op] rename <old>.md → <new>.md
+    [wiki-op] retire <doc>.md
+
+Stash file: ` + OpsStashPath(cfg.ContentDir) + `
+
+The engine harvests these tags into log.md and truncates the stash at
+session close. The stash never appears in diffs — it's engine-managed
+scratch.
 
 `)
 	case Closed:
@@ -63,4 +73,32 @@ Edits land inside the existing topic docs and index.md.
 	}
 
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// wikiPreamble is the shared "what is this wiki" header that opens
+// both ingest and lint prompt sections: the schema-config body, the
+// `## Wiki: <name> (<mode>-schema)` header, the absolute content-dir
+// path, and the on-disk shape contract. Mode-specific framing (ingest
+// vs. lint, open vs. closed) layers on top per-section.
+func wikiPreamble(cfg Config) string {
+	var b strings.Builder
+	if body := strings.TrimSpace(cfg.IngestPrompt); body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	}
+	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
+	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
+	b.WriteString(`On-disk shape:
+- index.md — corpus catalog. The authority on grouping; topic docs
+  are flat under the wiki dir, sections in index.md provide the
+  taxonomy.
+- log.md — append-only changelog. The engine writes entries at the
+  end of each ingest; do not edit it yourself.
+- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.
+- <topic>.md — one file per topic, flat under the wiki dir. Topic
+  identity is decoupled from run identity; a single ingest may
+  update zero, one, or many topic docs.
+
+`)
+	return b.String()
 }
