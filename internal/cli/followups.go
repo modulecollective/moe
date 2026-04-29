@@ -89,7 +89,7 @@ func parseFollowups(body []byte) (lines []string, todo []parsedFollowup, err err
 	return lines, todo, nil
 }
 
-// markHarvested rewrites a `- [ ] `slug`` prefix into `- [x] `resolved``
+// markHarvested rewrites a `- [ ] `slug“ prefix into `- [x] `resolved“
 // in place. Preserves indentation and the rest of the line so the title
 // survives unchanged.
 func markHarvested(line, baseSlug, resolvedSlug string) string {
