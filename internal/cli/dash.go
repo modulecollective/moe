@@ -13,6 +13,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 func init() {
@@ -105,6 +106,15 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+
+	// Twin status — per-project freshness and unrecorded-edits
+	// banner. Filtered by --project (matches the workflow filter
+	// behavior: empty projectFilter shows every project's twin).
+	twinRows, err := buildTwinRows(root, *project)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	// Count active from buckets rather than md.Status so the footer
 	// matches what the ACTIVE section actually shows. A KB run past
 	// its terminal stage is Status=in_progress on disk but lives in
@@ -116,7 +126,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	renderDash(stdout, now, rows, projectCount, activeCount, *all)
+	renderDash(stdout, now, rows, twinRows, projectCount, activeCount, *all)
 	return 0
 }
 
@@ -325,7 +335,115 @@ func countProjects(root string) (int, error) {
 // don't clutter the dashboard. Section headings use the cyan-moe
 // style from output.go; rows stay plain so tabwriter's byte-counting
 // aligns correctly (ANSI codes would skew column widths).
-func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, activeCount int, showAll bool) {
+// twinRow is one project's twin status for the TWIN section. Kept
+// flat (not part of dashRow) because the twin is project-scoped, not
+// run-scoped — a different rail than the runs/ideas the rest of the
+// dashboard tracks.
+type twinRow struct {
+	project string
+	note    string
+}
+
+// buildTwinRows scans the bureaucracy for projects whose twin is on
+// disk and emits one row per project naming the most useful status
+// signal: unrecorded edits beat staleness beat "fresh." Projects
+// without a digital-twin/ dir don't appear — they're projects that
+// haven't bootstrapped their twin yet, and the dash shouldn't pester
+// the operator about a feature they haven't opted into.
+//
+// projectFilter narrows the view to a single project (empty = all).
+func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
+	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "project.json"))
+	if err != nil {
+		return nil, fmt.Errorf("dash: glob projects: %w", err)
+	}
+	var rows []twinRow
+	for _, m := range matches {
+		projectID := filepath.Base(filepath.Dir(m))
+		if projectFilter != "" && projectID != projectFilter {
+			continue
+		}
+		cfg, err := twinWikiBuilder(root, projectID)
+		if err != nil || cfg == nil {
+			continue
+		}
+		if _, err := os.Stat(cfg.ContentDir); err != nil {
+			continue
+		}
+		note := twinStatusNote(*cfg)
+		if note == "" {
+			continue
+		}
+		rows = append(rows, twinRow{project: projectID, note: note})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].project < rows[j].project })
+	return rows, nil
+}
+
+// twinStatusNote inspects a twin's checkpoint and unrecorded-edits
+// state and returns the line to render (or "" to suppress the row
+// entirely when the twin is fresh and has no decided edits pending).
+// Priority: unrecorded edits > never-reflected > stale > fresh.
+func twinStatusNote(cfg wiki.Config) string {
+	det, err := wiki.DetectUnrecordedEdits(cfg)
+	if err == nil && len(det.UnrecordedDocs) > 0 {
+		return fmt.Sprintf("unrecorded edits to %s — run `moe workflow twin claim %s`",
+			strings.Join(det.UnrecordedDocs, ", "), cfg.Project)
+	}
+	cp, ok, err := wiki.ReadCheckpoint(cfg.ContentDir)
+	if err != nil {
+		return ""
+	}
+	if !ok || cp.LastIngestAt == "" {
+		return fmt.Sprintf("never reflected — run `moe workflow twin reflect %s`", cfg.Project)
+	}
+	last, err := time.Parse(time.RFC3339, cp.LastIngestAt)
+	if err != nil {
+		return ""
+	}
+	since, err := closedRunsSinceCount(cfg.BureaucracyPath, cfg.Project, last)
+	if err != nil || since == 0 {
+		return ""
+	}
+	noun := "closed runs"
+	if since == 1 {
+		noun = "closed run"
+	}
+	return fmt.Sprintf("last reflected %s — %d %s since",
+		last.Format("2006-01-02"), since, noun)
+}
+
+// closedRunsSinceCount counts the project's closed/merged/promoted
+// runs whose last activity post-dates threshold. Used by the dash
+// twin row to surface freshness in operator-meaningful units ("3
+// closed runs since reflect" reads better than "23 days since").
+func closedRunsSinceCount(root, projectID string, threshold time.Time) (int, error) {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, md := range mds {
+		if md.Project != projectID {
+			continue
+		}
+		switch md.Status {
+		case run.StatusClosed, run.StatusMerged, run.StatusPromoted:
+		default:
+			continue
+		}
+		when, _ := run.LastActivity(root, md.ID)
+		if when.IsZero() {
+			continue
+		}
+		if when.After(threshold) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, projectCount, activeCount int, showAll bool) {
 	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
 
 	var active, backlog, completed []dashRow
@@ -383,6 +501,16 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, projectCount, active
 		tw.Flush()
 	}
 	fmt.Fprintln(w)
+
+	if len(twinRows) > 0 {
+		moePrintf(w, "TWIN (%d)\n", len(twinRows))
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range twinRows {
+			fmt.Fprintf(tw, "  %s\t%s\n", r.project, r.note)
+		}
+		tw.Flush()
+		fmt.Fprintln(w)
+	}
 
 	moePrintf(w, "%d project(s) registered · %d active\n", projectCount, activeCount)
 }
