@@ -240,6 +240,10 @@ type wikiTurnSpec struct {
 	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
 	FinalizeRunID    string
 	FinalizeRunTitle string
+	// FinalizeClaim, when true, signals a closed-schema claim
+	// session. The agent appends to log.md themselves; finalize
+	// advances the checkpoint without writing a fresh entry.
+	FinalizeClaim bool
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg
 	// (nil if the session has no wiki).
@@ -318,6 +322,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			}
 			worktreeCfg.BureaucracyPath = workRoot
 			wikiCfg = &worktreeCfg
+			// Closed-schema bootstrap: create stubs for any managed
+			// doc that doesn't yet exist. Runs before EnsureOpsStash
+			// so the rest of the turn sees a populated content dir.
+			// Open-schema is a no-op.
+			if _, err := wiki.EnsureManagedDocs(*wikiCfg); err != nil {
+				moePrintf(stderr, "wiki: %v\n", err)
+			}
 			// Seed the .wiki-ops stash so the agent has a fresh
 			// scratchpad. Failure is non-fatal — the log entry
 			// degrades to content-edit-only if the stash never
@@ -367,6 +378,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
 			RunID:    spec.FinalizeRunID,
 			RunTitle: spec.FinalizeRunTitle,
+			Claim:    spec.FinalizeClaim,
 		}, stderr)
 		if ferr != nil {
 			moePrintf(stderr, "wiki: finalize: %v\n", ferr)
@@ -506,6 +518,14 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 
 	if frag := moe.Stage(md.Workflow, docID); frag != "" {
 		sections = append(sections, frag)
+	}
+
+	// Twin-as-context: every wiki-aware stage gets a reference block
+	// pointing at the project's digital-twin/ dir (when one exists).
+	// Lands before any wiki-specific section so an ingest agent reads
+	// the twin first, then sees the wiki it's working on.
+	if ref := wiki.TwinReferenceSectionAt(root, md.Project); ref != "" {
+		sections = append(sections, ref)
 	}
 
 	sections = append(sections, operationalCore(root, md, docID, clonePath))

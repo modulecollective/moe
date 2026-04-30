@@ -94,6 +94,12 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		moePrintf(stderr, "wiki: builder returned nil config; lint requires a registered wiki\n")
 		return 1
 	}
+	// Closed-schema guardrail: unrecorded managed-doc edits redirect
+	// to claim. Open-schema returns an empty result.
+	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
+		moePrintf(stderr, "%s\n", unrecordedEditsRedirect(workflow, det))
+		return 1
+	}
 	findings, err := wiki.Scan(*canonical)
 	if err != nil {
 		moePrintf(stderr, "wiki scan: %v\n", err)
@@ -145,6 +151,9 @@ func buildLintSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	var sections []string
 	if soul := moe.Soul(); soul != "" {
 		sections = append(sections, soul)
+	}
+	if ref := wiki.TwinReferenceSection(*worktreeWiki); ref != "" {
+		sections = append(sections, ref)
 	}
 	sections = append(sections, wiki.LintPromptSection(*worktreeWiki))
 	return strings.Join(sections, "\n---\n\n"), nil
