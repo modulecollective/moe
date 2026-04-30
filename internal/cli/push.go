@@ -216,8 +216,35 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1
 	}
 
+	// Harvest follow-ups and flip run.json to merged before the
+	// ff-push: harvest (and any per-idea slug failures) must be
+	// reversible, and ffPushToDefault is the point of no return for
+	// the merged transition. enterTerminal does the harvest under
+	// lock so each createIdea sees a held bureaucracy lock.
+	priorStatus := md.Status
+	var paths []string
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "push-harvest",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		var ferr error
+		paths, ferr = enterTerminal(root, md, run.StatusMerged, true)
+		return ferr
+	})
+	if err != nil {
+		moePrintf(stderr, "push: harvest: %v\n", err)
+		return 1
+	}
+
 	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
 	if err := ffPushToDefault(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
+		// Roll back the status flip enterTerminal just wrote: the
+		// remote merge didn't happen, so the run shouldn't be
+		// "merged" on disk. Harvest commits and followups.md
+		// rewrites stay; harvest is idempotent on retry.
+		if rerr := revertTerminal(root, md, priorStatus); rerr != nil {
+			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
+		}
 		moePrintf(stderr, "%v\n", err)
 		moePrintf(stderr, "       default may have moved past the merge-base — rebase inside the sandbox or retry with --pr\n")
 		return 1
@@ -228,7 +255,6 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
-	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`push: %s/%s merged
 
 MoE-Run: %s
@@ -244,11 +270,7 @@ MoE-Merged: %s
 		if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
 			moePrintf(stderr, "warning: remove sandbox: %v\n", err)
 		}
-		md.Status = run.StatusMerged
-		if err := run.Save(root, md); err != nil {
-			return err
-		}
-		return run.StageAndCommit(root, msg, runJSON)
+		return run.StageAndCommit(root, msg, paths...)
 	})
 	if err != nil {
 		moePrintf(stderr, "commit merge record: %v\n", err)

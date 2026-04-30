@@ -506,15 +506,21 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
 			return nil
 		}
-		if err := finalizePushedRun(root, md, run.StatusMerged, "MoE-Merged", mergeSHA, stderr); err != nil {
+		ok, err := finalizePushedRun(root, md, run.StatusMerged, "MoE-Merged", mergeSHA, stderr)
+		if err != nil {
 			return err
 		}
-		moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, shortSHA(mergeSHA))
+		if ok {
+			moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, shortSHA(mergeSHA))
+		}
 	case "CLOSED":
-		if err := finalizePushedRun(root, md, run.StatusClosed, "MoE-Closed", prURL, stderr); err != nil {
+		ok, err := finalizePushedRun(root, md, run.StatusClosed, "MoE-Closed", prURL, stderr)
+		if err != nil {
 			return err
 		}
-		moePrintf(stdout, "%s: pushed -> closed\n", md.ID)
+		if ok {
+			moePrintf(stdout, "%s: pushed -> closed\n", md.ID)
+		}
 	default:
 		moePrintf(stderr, "moe sync: %s/%s has unexpected PR state %q; skipping\n", md.Project, md.ID, state.State)
 	}
@@ -541,17 +547,23 @@ func ghPRState(prURL string) (*prViewState, error) {
 	return &s, nil
 }
 
-// finalizePushedRun flips md.Status, deletes the remote branch and
-// the sandbox clone, and commits run.json with the closing trailer.
-// The cleanup mirrors the direct-merge path so the end state is
-// indistinguishable regardless of how the run reached a terminal
-// status. Branch/sandbox deletion failures are warned but non-fatal —
-// the reconciliation has otherwise succeeded and a stray branch or
-// clone is a cleanup nuisance, not a correctness bug.
-func finalizePushedRun(root string, md *run.Metadata, status, trailer, value string, stderr io.Writer) error {
-	md.Status = status
-	if err := run.Save(root, md); err != nil {
-		return fmt.Errorf("moe sync: save run.json for %s/%s: %w", md.Project, md.ID, err)
+// finalizePushedRun harvests follow-ups, flips md.Status, deletes the
+// remote branch and the sandbox clone, and commits run.json with the
+// closing trailer. The cleanup mirrors the direct-merge path so the
+// end state is indistinguishable regardless of how the run reached a
+// terminal status. Branch/sandbox deletion failures are warned but
+// non-fatal — the reconciliation has otherwise succeeded and a stray
+// branch or clone is a cleanup nuisance, not a correctness bug.
+//
+// Harvest is best-effort here: a follow-up failure leaves the run in
+// `pushed`, prints a one-line warning, and returns (false, nil) so
+// reconcile can continue with other runs and the next `moe sync`
+// retries. Returns (true, nil) when the transition committed.
+func finalizePushedRun(root string, md *run.Metadata, status, trailer, value string, stderr io.Writer) (bool, error) {
+	paths, err := enterTerminal(root, md, status, true)
+	if err != nil {
+		moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", md.Project, md.ID, err)
+		return false, nil
 	}
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
@@ -559,7 +571,6 @@ func finalizePushedRun(root string, md *run.Metadata, status, trailer, value str
 	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
 		moePrintf(stderr, "warning: %s/%s: remove sandbox: %v\n", md.Project, md.ID, err)
 	}
-	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf(`sync: %s/%s %s
 
 MoE-Run: %s
@@ -567,10 +578,10 @@ MoE-Project: %s
 MoE-Document: push
 %s: %s
 `, md.Project, md.ID, strings.ToLower(status), md.ID, md.Project, trailer, value)
-	if err := run.StageAndCommit(root, msg, runJSON); err != nil {
-		return fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
+	if err := run.StageAndCommit(root, msg, paths...); err != nil {
+		return false, fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
 	}
-	return nil
+	return true, nil
 }
 
 // deleteRemoteBranchForRun asks GitHub to drop moe/<run> from the

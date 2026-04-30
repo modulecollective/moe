@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/modulecollective/moe/internal/repolock"
@@ -132,8 +131,6 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	md.Status = run.StatusClosed
-	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
 	msg := fmt.Sprintf(subject+`
 
 MoE-Run: %s
@@ -144,24 +141,16 @@ MoE-Workflow: %s
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 	}, func() error {
-		if harvest {
-			if err := harvestFollowups(root, projectID, runID, workflow, *noEdit); err != nil {
-				return err
-			}
-		}
 		if cleanup != nil {
 			if err := cleanup(root, md, stdout, stderr); err != nil {
 				return err
 			}
 		}
-		if err := run.Save(root, md); err != nil {
+		paths, err := enterTerminal(root, md, run.StatusClosed, *noEdit)
+		if err != nil {
 			return err
 		}
-		stagePaths := []string{runJSONRel}
-		if _, ferr := os.Stat(filepath.Join(root, followupsRel)); ferr == nil {
-			stagePaths = append(stagePaths, followupsRel)
-		}
-		return run.StageAndCommit(root, msg, stagePaths...)
+		return run.StageAndCommit(root, msg, paths...)
 	})
 	if err != nil {
 		moePrintf(stderr, "%s: close: %v\n", workflow, err)
