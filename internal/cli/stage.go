@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -720,6 +721,20 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	}
 	if err := run.Stage(root, stagePaths...); err != nil {
 		return err
+	}
+	// Guard against turns where the agent never wrote its canvas — or
+	// wrote it to a sibling path. thread.jsonl is mirrored every turn,
+	// so without this check the staging set is non-empty and the turn
+	// commits a transcript-only "successful" snapshot. See the design
+	// doc for the missing-canvas-doc run for the failure mode.
+	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+	switch info, err := os.Stat(canvas); {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("commit: canvas %s does not exist — agent did not write to its canvas this turn", canvas)
+	case err != nil:
+		return fmt.Errorf("commit: stat canvas %s: %w", canvas, err)
+	case info.Size() == 0:
+		return fmt.Errorf("commit: canvas %s is empty", canvas)
 	}
 	if !run.HasStagedChanges(root) {
 		return run.ErrNothingToCommit

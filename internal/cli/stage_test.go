@@ -532,6 +532,82 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 	}
 }
 
+// TestCommitTurnRequiresCanvas guards the post-stage assertion: a turn
+// that produced a thread.jsonl but no content.md must fail loudly
+// rather than silently committing a transcript-only snapshot. This is
+// the failure mode the missing-canvas-doc run was opened against.
+func TestCommitTurnRequiresCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	// Simulate the failure mode: thread.jsonl is mirrored but no
+	// content.md is ever written.
+	threadRel := run.ThreadPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, threadRel), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
+	err := commitTurn(root, md, "design")
+	if err == nil {
+		t.Fatal("commitTurn returned nil, want error about missing canvas")
+	}
+	canvasRel := run.ContentPath("tele", "fix-it", "design")
+	if !strings.Contains(err.Error(), canvasRel) {
+		t.Errorf("error %q does not mention canvas path %q", err.Error(), canvasRel)
+	}
+	if headAfter := gitLogFormat(t, root, 1, "HEAD", "%H"); headBefore != headAfter {
+		t.Fatalf("commitTurn created a commit despite missing canvas: %s -> %s", headBefore, headAfter)
+	}
+}
+
+// TestCommitTurnRejectsEmptyCanvas covers the size==0 branch: a
+// content.md that exists but is empty is treated the same as missing,
+// since the agent has nothing to show for the turn.
+func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	canvasRel := run.ContentPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, canvasRel), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
+	err := commitTurn(root, md, "design")
+	if err == nil {
+		t.Fatal("commitTurn returned nil, want error about empty canvas")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error %q does not mention empty canvas", err.Error())
+	}
+	if headAfter := gitLogFormat(t, root, 1, "HEAD", "%H"); headBefore != headAfter {
+		t.Fatalf("commitTurn created a commit despite empty canvas: %s -> %s", headBefore, headAfter)
+	}
+}
+
 // gitLogFormat runs `git log -n <n> --format=<fmt> <rev>` and returns
 // the trimmed stdout — small helper so each assertion doesn't
 // reimplement the exec.Command plumbing.
