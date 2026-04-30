@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -35,6 +37,11 @@ const dormantCutoff = 30 * 24 * time.Hour
 // history — useful as recent context, not as a backlog — so we show
 // the newest N and let the bureaucracy repo itself be the archive.
 const completedCap = 10
+
+// twinRecentCap is the per-project limit on the "recent: …" sub-line
+// under each TWIN row. Twin sessions aren't dormant the way runs are,
+// so there's no `--all` gate — older sessions stay in `git log`.
+const twinRecentCap = 3
 
 // bucket labels a row's section. Active runs (next stage to run) and
 // completed runs (pushed or terminal) live on different rails from
@@ -342,6 +349,16 @@ func countProjects(root string) (int, error) {
 type twinRow struct {
 	project string
 	note    string
+	recents []twinRecent // newest first, ≤ twinRecentCap.
+}
+
+// twinRecent is one twin session surfaced under a TWIN row. Sessions
+// have no run.json — they're identified by a synthetic
+// `<verb>-<timestamp>` slug recorded on commit trailers — so the
+// dashboard reads them straight off the journal.
+type twinRecent struct {
+	verb string    // "reflect" | "lint" | "claim" — the slug prefix.
+	when time.Time // commit time of the latest commit in this session.
 }
 
 // buildTwinRows scans the bureaucracy for projects whose twin is on
@@ -374,7 +391,11 @@ func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
 		if note == "" {
 			continue
 		}
-		rows = append(rows, twinRow{project: projectID, note: note})
+		// Recent twin sessions are best-effort: a git log error
+		// shouldn't suppress the freshness line. Mirrors the silent-
+		// fallback shape of closedRunsSinceCount above.
+		recents, _ := recentTwinSessions(root, projectID, twinRecentCap)
+		rows = append(rows, twinRow{project: projectID, note: note, recents: recents})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].project < rows[j].project })
 	return rows, nil
@@ -443,6 +464,93 @@ func closedRunsSinceCount(root, projectID string, threshold time.Time) (int, err
 	return count, nil
 }
 
+// recentTwinSessions reads twin sessions for a project off the journal
+// and returns the most recent `limit`, newest first. A session is a
+// group of commits sharing a `MoE-Run: <verb>-<timestamp>` slug; the
+// session's time is the latest commit time in the group. Path-scoped
+// to the project's twin dir so unrelated commits don't match. Mirrors
+// the `--all-match` + multi-`--grep` shape of trailerValue in push.go.
+func recentTwinSessions(root, projectID string, limit int) ([]twinRecent, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	twinDir := filepath.Join("projects", projectID, wiki.TwinDirRel)
+	cmd := exec.Command("git", "-C", root, "log", "--all",
+		"--all-match",
+		"--grep", "MoE-Workflow: twin",
+		"--grep", "MoE-Project: "+projectID,
+		"--format=%ct%x00%B%x1e",
+		"--", twinDir,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("dash: git log twin sessions: %w", err)
+	}
+	// Group by MoE-Run slug; keep the newest commit time per group.
+	type group struct {
+		when time.Time
+		verb string
+	}
+	groups := make(map[string]group)
+	for _, record := range strings.Split(string(out), "\x1e") {
+		record = strings.TrimLeft(record, "\n")
+		if record == "" {
+			continue
+		}
+		nul := strings.IndexByte(record, 0)
+		if nul < 0 {
+			continue
+		}
+		ts, err := strconv.ParseInt(record[:nul], 10, 64)
+		if err != nil {
+			continue
+		}
+		body := record[nul+1:]
+		slug := ""
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
+				slug = strings.TrimSpace(v)
+				break
+			}
+		}
+		if slug == "" {
+			continue
+		}
+		verb := slug
+		if i := strings.IndexByte(slug, '-'); i > 0 {
+			verb = slug[:i]
+		}
+		when := time.Unix(ts, 0).UTC()
+		if cur, ok := groups[slug]; !ok || when.After(cur.when) {
+			groups[slug] = group{when: when, verb: verb}
+		}
+	}
+	out2 := make([]twinRecent, 0, len(groups))
+	for _, g := range groups {
+		out2 = append(out2, twinRecent{verb: g.verb, when: g.when})
+	}
+	sort.Slice(out2, func(i, j int) bool { return out2[i].when.After(out2[j].when) })
+	if len(out2) > limit {
+		out2 = out2[:limit]
+	}
+	return out2, nil
+}
+
+// formatRecents renders the "recent: …" continuation cell. Each entry
+// is "<verb> <humanAgo>"; entries are joined with ", " in the order
+// passed in (caller guarantees newest-first).
+func formatRecents(now time.Time, recents []twinRecent) string {
+	if len(recents) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(recents))
+	for _, r := range recents {
+		parts = append(parts, fmt.Sprintf("%s %s", r.verb, humanAgo(now, r.when)))
+	}
+	return "recent: " + strings.Join(parts, ", ")
+}
+
 func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, projectCount, activeCount int, showAll bool) {
 	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
 
@@ -507,6 +615,12 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, 
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range twinRows {
 			fmt.Fprintf(tw, "  %s\t%s\n", r.project, r.note)
+			// Continuation row keeps the project column blank so the
+			// recent-line aligns under the note column without inventing
+			// a new format.
+			if line := formatRecents(now, r.recents); line != "" {
+				fmt.Fprintf(tw, "  %s\t%s\n", "", line)
+			}
 		}
 		tw.Flush()
 		fmt.Fprintln(w)

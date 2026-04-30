@@ -37,7 +37,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "usage: moe workflow %s reflect <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code reflect session on the project's twin.")
-		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json.")
+		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json — the")
+		moePrintln(stderr, "session surfaces under the dash's TWIN rail (`recent: …`), not in")
+		moePrintln(stderr, "ACTIVE/BACKLOG/COMPLETED.")
 		moePrintln(stderr, "Walks each managed doc against project commits and closed runs since the")
 		moePrintln(stderr, "last reflect, and applies updates the operator agrees to.")
 	}

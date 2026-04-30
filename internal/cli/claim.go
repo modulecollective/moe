@@ -38,7 +38,9 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 		moePrintf(stderr, "usage: moe workflow %s claim <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Record context for decided edits the operator made directly to managed docs.")
-		moePrintln(stderr, "Out-of-band relative to runs. Bookkeeping only — does not edit managed docs.")
+		moePrintln(stderr, "Out-of-band relative to runs (no stage, no canvas, no run.json — surfaces")
+		moePrintln(stderr, "under the dash's TWIN rail, not in ACTIVE/BACKLOG/COMPLETED).")
+		moePrintln(stderr, "Bookkeeping only — does not edit managed docs.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
