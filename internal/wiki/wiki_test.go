@@ -73,10 +73,138 @@ func TestAssertModeInvariantsOpenIsNoOp(t *testing.T) {
 	}
 }
 
-func TestAssertModeInvariantsClosedIsPhase2(t *testing.T) {
+func TestAssertModeInvariantsClosedRequiresManagedDocs(t *testing.T) {
 	err := AssertModeInvariants(Config{Mode: Closed})
-	if err == nil || !strings.Contains(err.Error(), "phase 2") {
-		t.Fatalf("closed-schema should refuse with phase-2 message, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "ManagedDocs") {
+		t.Fatalf("closed-schema with no ManagedDocs should refuse with a managed-docs message, got %v", err)
+	}
+}
+
+func TestAssertModeInvariantsClosedRefusesMissingDoc(t *testing.T) {
+	dir := t.TempDir()
+	// Only one of two docs present — invariants flag the missing one.
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	err := AssertModeInvariants(cfg)
+	if err == nil || !strings.Contains(err.Error(), "architecture.md") {
+		t.Fatalf("expected missing-doc error naming architecture.md, got %v", err)
+	}
+}
+
+func TestAssertModeInvariantsClosedBootstrapTolerantOfMissing(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+	if err := AssertModeInvariantsBootstrap(cfg); err != nil {
+		t.Fatalf("bootstrap should tolerate missing docs, got %v", err)
+	}
+}
+
+func TestAssertModeInvariantsClosedRefusesUnexpectedDoc(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
+	writeFile(t, filepath.Join(dir, "stray.md"), "# Stray\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+	err := AssertModeInvariants(cfg)
+	if err == nil || !strings.Contains(err.Error(), "stray.md") {
+		t.Fatalf("expected unexpected-doc error naming stray.md, got %v", err)
+	}
+}
+
+func TestAssertModeInvariantsClosedRefusesTopicsDir(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
+	if err := os.MkdirAll(filepath.Join(dir, TopicsSubdir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+	err := AssertModeInvariants(cfg)
+	if err == nil || !strings.Contains(err.Error(), TopicsSubdir) {
+		t.Fatalf("expected topics-dir refusal, got %v", err)
+	}
+}
+
+func TestEnsureManagedDocsCreatesStubs(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "twin")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	stubbed, err := EnsureManagedDocs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stubbed {
+		t.Fatal("expected stubbed=true on first run")
+	}
+	for _, name := range []string{"vision.md", "architecture.md"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("missing stub %s: %v", name, err)
+		}
+		if !strings.HasPrefix(string(body), "# ") {
+			t.Errorf("stub %s missing title heading: %q", name, body)
+		}
+	}
+	// Second run is a no-op — existing files aren't clobbered.
+	if err := os.WriteFile(filepath.Join(dir, "vision.md"), []byte("# Vision\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubbed, err = EnsureManagedDocs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stubbed {
+		t.Fatal("expected stubbed=false when all docs present")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "vision.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "body") {
+		t.Errorf("EnsureManagedDocs clobbered an existing file: %q", body)
+	}
+}
+
+func TestEnsureManagedDocsOpenSchemaIsNoOp(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kb")
+	stubbed, err := EnsureManagedDocs(Config{Mode: Open, ContentDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stubbed {
+		t.Fatal("open-schema should not stub anything")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("open-schema EnsureManagedDocs should not create the dir, got err=%v", err)
 	}
 }
 
