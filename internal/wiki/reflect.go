@@ -70,6 +70,10 @@ Do not create, rename, or delete managed docs.
 // prompt under a "## Events since last reflect" heading. The block
 // is empty (returns "") when there's nothing since the checkpoint —
 // a freshly-reflected wiki has no events to walk against.
+//
+// No truncation: the rolling history-summary.md absorbs old history,
+// and this block is the verbatim tail since SHA-prev. On first reflect
+// (no checkpoint) the tail is the full project history.
 func EventsSinceCheckpoint(cfg Config) (string, error) {
 	if cfg.Mode != Closed {
 		return "", fmt.Errorf("wiki: events block is closed-schema only (got %s)", cfg.Mode)
@@ -97,8 +101,8 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 	b.WriteString("## Events since last reflect\n\n")
 	if !ok {
 		b.WriteString("No prior checkpoint — this is the twin's first reflect pass. " +
-			"Showing the most recent project commits and recently closed runs as " +
-			"a starting window.\n\n")
+			"Listing the full project commit history and every closed run; the " +
+			"agent will seed history-summary.md from this pass.\n\n")
 	}
 
 	if len(commits) > 0 {
@@ -107,12 +111,8 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 			fmt.Fprintf(&b, " since %s", shortSHA(*cp.ProjectRepoSHA))
 		}
 		b.WriteString(":\n")
-		shown, more := truncate(commits, eventsCommitCap)
-		for _, c := range shown {
+		for _, c := range commits {
 			fmt.Fprintf(&b, "- %s\n", c)
-		}
-		if more > 0 {
-			fmt.Fprintf(&b, "- (%d more truncated)\n", more)
 		}
 		b.WriteString("\n")
 	}
@@ -123,37 +123,13 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 			fmt.Fprintf(&b, " since %s", cp.LastIngestAt)
 		}
 		b.WriteString(":\n")
-		shown, more := truncate(runs, eventsRunCap)
-		for _, r := range shown {
+		for _, r := range runs {
 			fmt.Fprintf(&b, "- %s\n", r)
-		}
-		if more > 0 {
-			fmt.Fprintf(&b, "- (%d more truncated)\n", more)
 		}
 		b.WriteString("\n")
 	}
 	return b.String(), nil
 }
-
-// eventsCommitCap / eventsRunCap bound how many commits and closed
-// runs the events block names. A long event list dilutes the agent's
-// attention; the design picks ~25 per category as the truncation
-// threshold and notes the cap when it fires.
-const (
-	eventsCommitCap = 25
-	eventsRunCap    = 25
-)
-
-// firstReflectWindow is the project-history window used when no
-// checkpoint exists yet. Long enough to surface meaningful work,
-// short enough not to dump months of commits on the agent. The
-// design notes "last 30 days" as the lean — kept here so a future
-// tuning pass has one place to change.
-const firstReflectWindow = 30 * 24 * time.Hour
-
-// firstReflectClosedRunCap caps the closed-run window for first
-// reflect (when there's no last_ingest_at to filter against).
-const firstReflectClosedRunCap = 5
 
 func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, error) {
 	if cfg.ProjectRepoPath == "" {
@@ -164,13 +140,12 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 		return nil, nil
 	}
 	args := []string{"log", "--no-merges", "--format=%h %s"}
-	switch {
-	case hasCheckpoint && cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != "":
+	if hasCheckpoint && cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != "" {
 		args = append(args, fmt.Sprintf("%s..HEAD", *cp.ProjectRepoSHA))
-	default:
-		// First reflect — last 30 days to seed initial context.
-		args = append(args, fmt.Sprintf("--since=%dh", int(firstReflectWindow.Hours())))
 	}
+	// First reflect (no checkpoint SHA): unbounded `git log`. The
+	// agent folds the full history into history-summary.md at the end
+	// of the pass, so subsequent reflects only walk the tail.
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cfg.ProjectRepoPath
 	out, err := cmd.Output()
@@ -250,13 +225,6 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 		runs = append(runs, closedRun{id: md.ID, title: md.Title, when: when})
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].when.After(runs[j].when) })
-	if !hasCheckpoint || cp.LastIngestAt == "" {
-		// First reflect — cap at the most-recent few rather than dump
-		// the whole project history.
-		if len(runs) > firstReflectClosedRunCap {
-			runs = runs[:firstReflectClosedRunCap]
-		}
-	}
 	out := make([]string, 0, len(runs))
 	for _, r := range runs {
 		title := r.title
@@ -268,16 +236,28 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	return out, nil
 }
 
-func truncate(items []string, cap int) (shown []string, more int) {
-	if len(items) <= cap {
-		return items, 0
-	}
-	return items[:cap], len(items) - cap
-}
-
 func shortSHA(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]
 	}
 	return sha
+}
+
+// ReadHistorySummary reads <ContentDir>/history-summary.md if present.
+// Returns ("", nil) when the file is absent or empty — both are normal
+// states (a fresh wiki has no summary, and the agent seeds it at the
+// end of the first reflect pass). Closed-schema only, like the rest of
+// reflect.
+func ReadHistorySummary(cfg Config) (string, error) {
+	if cfg.Mode != Closed {
+		return "", fmt.Errorf("wiki: history summary is closed-schema only (got %s)", cfg.Mode)
+	}
+	body, err := os.ReadFile(HistorySummaryPath(cfg.ContentDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("wiki: read history summary: %w", err)
+	}
+	return strings.TrimSpace(string(body)), nil
 }

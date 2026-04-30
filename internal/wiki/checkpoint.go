@@ -53,6 +53,15 @@ func IndexPath(contentDir string) string {
 	return filepath.Join(contentDir, "index.md")
 }
 
+// HistorySummaryPath returns the absolute path to history-summary.md
+// given a ContentDir. The summary is reflect's rolling compressed memory
+// of project history before the current checkpoint SHA — maintained by
+// the agent at the end of each reflect pass, alongside the verbatim
+// "events since last reflect" block.
+func HistorySummaryPath(contentDir string) string {
+	return filepath.Join(contentDir, "history-summary.md")
+}
+
 // WriteCheckpoint marshals cp as canonical pretty-printed JSON and
 // writes it to <contentDir>/checkpoint.json, creating the directory
 // if needed. Trailing newline so the file plays nicely with diff

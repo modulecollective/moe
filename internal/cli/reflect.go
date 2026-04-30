@@ -100,6 +100,11 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "wiki: events: %v\n", err)
 		return 1
 	}
+	historySummary, err := wiki.ReadHistorySummary(*canonical)
+	if err != nil {
+		moePrintf(stderr, "wiki: history summary: %v\n", err)
+		return 1
+	}
 
 	in := wikiSessionInputs{
 		Project:     projectID,
@@ -116,7 +121,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 				ClonePath:        "",
 				SessionUUID:      sessionUUID,
 				NewSession:       true,
-				InitialPrompt:    reflectKickoff(*canonical, events),
+				InitialPrompt:    reflectKickoff(*canonical, historySummary, events),
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: "Twin reflect pass",
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
@@ -152,11 +157,15 @@ func buildReflectSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 }
 
 // reflectKickoff is the auto-sent first user message. It frames the
-// pass, lays out the per-doc reflect prompts under a doc-named
-// subhead, and inlines the "events since last reflect" block (commits
-// + closed runs). Empty events → the agent walks the docs against the
-// last-known state without a prompted set of changes, which is fine.
-func reflectKickoff(cfg wiki.Config, events string) string {
+// pass, lays out the per-doc reflect prompts, and inlines two
+// history segments: the rolling history summary (compressed memory of
+// everything before the checkpoint SHA) and the verbatim "events since
+// last reflect" block. Empty events → the agent walks the docs against
+// the last-known state without a prompted set of changes, which is fine.
+//
+// Either segment can be empty: a fresh wiki has no summary yet, and a
+// freshly-reflected wiki has no events.
+func reflectKickoff(cfg wiki.Config, historySummary, events string) string {
 	var b strings.Builder
 	b.WriteString("The operator just opened a twin reflect session. " +
 		"Walk each managed doc against recent project activity and propose updates " +
@@ -173,6 +182,15 @@ func reflectKickoff(cfg wiki.Config, events string) string {
 		b.WriteString("\n\n")
 	}
 
+	b.WriteString("## History summary\n\n")
+	if historySummary != "" {
+		b.WriteString(historySummary)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("(no rolling summary yet — seed `history-summary.md` from the events " +
+			"below at the end of this pass)\n\n")
+	}
+
 	if events != "" {
 		b.WriteString(events)
 	} else {
@@ -182,7 +200,11 @@ func reflectKickoff(cfg wiki.Config, events string) string {
 
 	b.WriteString("Acknowledge in one or two sentences which docs look most likely to need " +
 		"updates and propose how you'd walk through them with the operator. Then wait for " +
-		"the operator's go-ahead.\n")
+		"the operator's go-ahead.\n\n")
+	b.WriteString("Before you finish the pass, propose an updated `history-summary.md` that " +
+		"folds in the events you just walked. The summary is the twin's compressed memory " +
+		"of everything before the next checkpoint — keep it prose, keep it slow-growing, " +
+		"and don't drop signal that future reflects will need.\n")
 	return b.String()
 }
 
