@@ -371,10 +371,12 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// and checkpoint.json) ride along in the same per-turn commit
 	// as the agent's wiki edits. A no-change session is a no-op —
 	// finalize returns without touching disk if the wiki dir is
-	// clean. Errors surface but do not block the commit: the
-	// agent's edits should land regardless of whether finalization
-	// succeeded, so the operator can recover by hand if needed.
+	// clean. Errors do not block the commit (the agent's content
+	// edits should land regardless), but they do surface in the
+	// exit-code waterfall so the operator notices instead of the
+	// drift quietly accumulating across reflect passes.
 	wikiRel := ""
+	var finalizeErr error
 	if wikiCfg != nil {
 		_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
 			RunID:    spec.FinalizeRunID,
@@ -382,7 +384,11 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Claim:    spec.FinalizeClaim,
 		}, stderr)
 		if ferr != nil {
-			moePrintf(stderr, "wiki: finalize: %v\n", ferr)
+			moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
+			moePrintln(stderr, "  agent edits will commit; checkpoint and "+
+				"log.md were NOT written. Re-run the session or fix the "+
+				"underlying issue before the next reflect.")
+			finalizeErr = ferr
 		}
 		if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
 			wikiRel = rel
@@ -407,6 +413,18 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return session.Close(sess)
 	})
 
+	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, stdout, stderr)
+}
+
+// reportWikiSessionExit prints the closing per-turn messages and
+// returns the exit code for runWikiSession. It is the one place that
+// decides how the four possible failures (claude run, commit, close,
+// finalize) compose into a single exit status. Run / finalize errors
+// each independently force a non-zero exit even when the per-turn
+// commit landed cleanly — finalize failure means checkpoint.json /
+// log.md weren't written, and a 0 exit there would let the operator
+// move on without noticing.
+func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
 		moePrintf(stderr, "claude exited: %v\n", runErr)
 		// Fall through to report commit result and exit non-zero.
@@ -424,7 +442,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		moePrintf(stderr, "session close: %v\n", closeErr)
 		return 1
 	}
-	if runErr != nil {
+	if runErr != nil || finalizeErr != nil {
 		return 1
 	}
 	return 0

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -605,6 +607,62 @@ func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
 	}
 	if headAfter := gitLogFormat(t, root, 1, "HEAD", "%H"); headBefore != headAfter {
 		t.Fatalf("commitTurn created a commit despite empty canvas: %s -> %s", headBefore, headAfter)
+	}
+}
+
+// TestReportWikiSessionExitNonZeroOnFinalizeError pins the contract
+// the twin-dash-never-reflected-bug run was opened against: when
+// FinalizeIngest fails, the session exits non-zero so the operator
+// notices, but the per-turn commit is still reported as having
+// landed. Before the fix, finalize errors only logged a stderr line
+// and the session exited 0 — silently letting checkpoint.json /
+// log.md drift from disk and producing the dash's "never reflected"
+// misreport hours later.
+func TestReportWikiSessionExitNonZeroOnFinalizeError(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+	finalizeErr := errors.New("wiki: closed-schema has unexpected top-level doc history-summary.md")
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, nil, nil, nil, finalizeErr, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 on finalize error", code)
+	}
+	// Per-turn commit succeeded (commitErr nil), so the operator still
+	// sees the "committed turn" line — finalize failure is loud but
+	// doesn't masquerade as a commit failure.
+	if !strings.Contains(stdout.String(), "committed turn for moe/r/reflect") {
+		t.Errorf("stdout missing committed-turn line: %q", stdout.String())
+	}
+}
+
+// TestReportWikiSessionExitZeroOnHappyPath is the negative control:
+// no errors → exit 0. Without it the previous test could pass
+// trivially against a function that always returns 1.
+func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, nil, nil, nil, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 on clean run", code)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr non-empty on clean run: %q", stderr.String())
+	}
+}
+
+// TestReportWikiSessionExitNothingToCommitIsCleanExit guards the
+// "no document changes" branch: the operator opens the session,
+// looks around, exits without edits. ErrNothingToCommit is reported
+// to stdout, exit is 0, and a finalize-error-style fallthrough
+// doesn't accidentally promote it to non-zero.
+func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 on nothing-to-commit", code)
+	}
+	if !strings.Contains(stdout.String(), "no document changes") {
+		t.Errorf("stdout missing nothing-to-commit line: %q", stdout.String())
 	}
 }
 
