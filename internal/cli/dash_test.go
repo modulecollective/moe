@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // seedRun writes a minimal run.json + project.json pair under root so
@@ -857,6 +858,103 @@ func TestDashTwinNoSessionsSuppressesContinuation(t *testing.T) {
 	}
 	if strings.Contains(got, "recent:") {
 		t.Fatalf("did not expect a recent sub-line with no twin commits, got:\n%s", got)
+	}
+}
+
+// TestDashTwinFreshTwinShowsRecents: a project with a valid checkpoint
+// (no unrecorded edits, no closed runs since) and recent twin commits
+// renders a single TWIN row with the recents inline. The attention
+// path is silent, so the recents line *is* the row — no synthetic
+// "fresh — last reflected …" prefix, no two-line shape.
+func TestDashTwinFreshTwinShowsRecents(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedTwinProject(t, root, "moe")
+	// Checkpoint dated yesterday: twinStatusNote returns "" because
+	// there are no closed runs since and DetectUnrecordedEdits sees no
+	// managed-doc commits in the bureaucracy.
+	if err := wiki.WriteCheckpoint(
+		filepath.Join(root, "projects", "moe", "digital-twin"),
+		wiki.Checkpoint{
+			Version:      wiki.CheckpointVersion,
+			LastIngestAt: time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339),
+			Project:      "moe",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "reflect", now.Add(-3*time.Hour))
+	seedTwinSession(t, root, "moe", "lint-2026-04-29-110000", "lint", now.Add(-2*time.Hour))
+	seedTwinSession(t, root, "moe", "reflect-2026-04-29-120000", "reflect", now.Add(-1*time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "TWIN (1)") {
+		t.Fatalf("expected TWIN section for fresh twin with recents, got:\n%s", got)
+	}
+	if !strings.Contains(got, "recent:") {
+		t.Fatalf("expected recents line on the fresh row, got:\n%s", got)
+	}
+	for _, banned := range []string{"never reflected", "last reflected", "unrecorded edits"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("unexpected attention text %q on a fresh row, got:\n%s", banned, got)
+		}
+	}
+	// The single-line shape puts the project id and the recents text on
+	// the same line — no continuation row with a blank project column.
+	var freshLine string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "recent:") {
+			freshLine = line
+			break
+		}
+	}
+	fields := strings.Fields(freshLine)
+	if len(fields) == 0 || fields[0] != "moe" {
+		t.Fatalf("expected the recents line to lead with the project id 'moe', got %q in:\n%s", freshLine, got)
+	}
+}
+
+// TestDashTwinFreshAndNoRecentsSuppressesRow: a fresh checkpoint and
+// no twin commits in the journal — both signals are empty — drops the
+// row. With moe as the only twin project, the whole TWIN section
+// vanishes. Pins the both-empty case so a future change can't bring
+// back a content-less row.
+func TestDashTwinFreshAndNoRecentsSuppressesRow(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedTwinProject(t, root, "moe")
+	if err := wiki.WriteCheckpoint(
+		filepath.Join(root, "projects", "moe", "digital-twin"),
+		wiki.Checkpoint{
+			Version:      wiki.CheckpointVersion,
+			LastIngestAt: time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339),
+			Project:      "moe",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if strings.Contains(got, "TWIN (") {
+		t.Fatalf("expected no TWIN section when both signals are empty, got:\n%s", got)
 	}
 }
 

@@ -387,14 +387,18 @@ func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
 		if _, err := os.Stat(cfg.ContentDir); err != nil {
 			continue
 		}
+		// Two independent signals can earn a row: an attention note
+		// (unrecorded edits / never reflected / staleness) and recent
+		// twin activity. Compute both, then admit the row if either
+		// has content — a healthy twin with recent reflects shouldn't
+		// vanish just because nothing needs the operator's attention.
+		// Best-effort on recents: a git log error shouldn't suppress
+		// the row. Mirrors closedRunsSinceCount's silent-fallback shape.
+		recents, _ := recentTwinSessions(root, projectID, twinRecentCap)
 		note := twinStatusNote(*cfg)
-		if note == "" {
+		if note == "" && len(recents) == 0 {
 			continue
 		}
-		// Recent twin sessions are best-effort: a git log error
-		// shouldn't suppress the freshness line. Mirrors the silent-
-		// fallback shape of closedRunsSinceCount above.
-		recents, _ := recentTwinSessions(root, projectID, twinRecentCap)
 		rows = append(rows, twinRow{project: projectID, note: note, recents: recents})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].project < rows[j].project })
@@ -614,12 +618,23 @@ func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, 
 		moePrintf(w, "TWIN (%d)\n", len(twinRows))
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range twinRows {
+			recentLine := formatRecents(now, r.recents)
+			// A row with no attention note collapses to a single line:
+			// project + recents in the note column. The recents line
+			// already implies freshness (a reflect 2 minutes ago is the
+			// signal), so a synthetic "fresh — last reflected …" prefix
+			// would be ceremony. Healthy twins should occupy as little
+			// vertical space as possible while still being visible.
+			if r.note == "" {
+				fmt.Fprintf(tw, "  %s\t%s\n", r.project, recentLine)
+				continue
+			}
 			fmt.Fprintf(tw, "  %s\t%s\n", r.project, r.note)
 			// Continuation row keeps the project column blank so the
 			// recent-line aligns under the note column without inventing
 			// a new format.
-			if line := formatRecents(now, r.recents); line != "" {
-				fmt.Fprintf(tw, "  %s\t%s\n", "", line)
+			if recentLine != "" {
+				fmt.Fprintf(tw, "  %s\t%s\n", "", recentLine)
 			}
 		}
 		tw.Flush()
