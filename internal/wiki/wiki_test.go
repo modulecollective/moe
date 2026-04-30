@@ -148,6 +148,29 @@ func TestAssertModeInvariantsClosedRefusesTopicsDir(t *testing.T) {
 	}
 }
 
+func TestAssertModeInvariantsClosedAllowsHistorySummary(t *testing.T) {
+	// All managed docs present plus history-summary.md, no log.md and
+	// no checkpoint.json. This is the post-reflect-failure state on
+	// disk that today's invariants check rejects with "unexpected
+	// top-level doc history-summary.md" — pinning that the rolling
+	// summary is engine-aware-allowed alongside log.md.
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
+	writeFile(t, filepath.Join(dir, "architecture.md"), "# Architecture\n")
+	writeFile(t, filepath.Join(dir, HistorySummaryName), "# History\n\nthings happened\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	if err := AssertModeInvariants(cfg); err != nil {
+		t.Fatalf("invariants should accept history-summary.md, got %v", err)
+	}
+}
+
 func TestEnsureManagedDocsCreatesStubs(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "twin")
 	cfg := Config{
@@ -715,6 +738,69 @@ func TestFinalizeIngestStashOnlyIsNoOp(t *testing.T) {
 	}
 	if res.LogEntryWritten || res.CheckpointWritten {
 		t.Fatalf("expected no-op when only stash differs, got %+v", res)
+	}
+}
+
+// TestFinalizeIngestClosedSchemaWithHistorySummary pins the bug this
+// run was opened for: a closed-schema reflect pass that touches a
+// managed doc and writes history-summary.md must finalize cleanly —
+// log.md and checkpoint.json get written, history-summary.md rides
+// into the change set as a real ingest output. Before the
+// invariants-exemption fix, finalize aborted at AssertModeInvariants
+// with "unexpected top-level doc history-summary.md", silently
+// dropping the checkpoint write and producing the dash's "never
+// reflected" misreport.
+func TestFinalizeIngestClosedSchemaWithHistorySummary(t *testing.T) {
+	root := newGitRepo(t)
+	wikiDir := filepath.Join(root, "twin")
+	writeFile(t, filepath.Join(wikiDir, "vision.md"), "# Vision\n\nbody\n")
+	writeFile(t, filepath.Join(wikiDir, "architecture.md"), "# Architecture\n")
+	writeFile(t, filepath.Join(wikiDir, HistorySummaryName),
+		"# History\n\nThe twin was reseeded in 2026-Q2.\n")
+
+	cfg := Config{
+		Name:            "twin",
+		ContentDir:      wikiDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		Mode:            Closed,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	now := time.Date(2026, 4, 27, 15, 30, 0, 0, time.UTC)
+	res, err := FinalizeIngest(cfg, FinalizeContext{RunID: "reflect-r", Now: now}, nil)
+	if err != nil {
+		t.Fatalf("FinalizeIngest: %v", err)
+	}
+	if !res.CheckpointWritten {
+		t.Fatalf("expected checkpoint to be written, got %+v", res)
+	}
+	if !res.LogEntryWritten {
+		t.Fatalf("expected log entry to be written, got %+v", res)
+	}
+	// history-summary.md is a real ingest output — it should appear in
+	// the change set so the changelog reflects that the agent edited it.
+	var sawSummary bool
+	for _, c := range res.Changes {
+		if c.Path == HistorySummaryName {
+			sawSummary = true
+		}
+	}
+	if !sawSummary {
+		t.Errorf("expected %s in change set, got %+v", HistorySummaryName, res.Changes)
+	}
+
+	if _, err := os.Stat(CheckpointPath(wikiDir)); err != nil {
+		t.Errorf("checkpoint.json not on disk: %v", err)
+	}
+	logBody, err := os.ReadFile(LogPath(wikiDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logBody), HistorySummaryName) {
+		t.Errorf("log.md missing %s line:\n%s", HistorySummaryName, logBody)
 	}
 }
 

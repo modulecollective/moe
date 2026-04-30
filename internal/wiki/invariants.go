@@ -95,7 +95,11 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 		}
 		// Engine-managed files (log.md / checkpoint.json / .wiki-ops)
 		// are exempt — they're written by finalize, not by the agent.
-		if name == "log.md" {
+		// history-summary.md is engine-aware but agent-written: reflect
+		// instructs the agent to maintain it, so it sits alongside
+		// log.md as a known-and-allowed top-level doc that isn't part
+		// of ManagedDocs.
+		if name == "log.md" || name == HistorySummaryName {
 			continue
 		}
 		return fmt.Errorf("wiki: closed-schema has unexpected top-level doc %s", name)

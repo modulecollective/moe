@@ -53,13 +53,20 @@ func IndexPath(contentDir string) string {
 	return filepath.Join(contentDir, "index.md")
 }
 
+// HistorySummaryName is the basename of the rolling-summary doc the
+// agent maintains during reflect. Exempted from the closed-schema
+// invariants alongside log.md — engine-aware but agent-written, so it's
+// neither a managed doc with a ReflectPrompt nor a stray .md the
+// schema-drift check should reject.
+const HistorySummaryName = "history-summary.md"
+
 // HistorySummaryPath returns the absolute path to history-summary.md
 // given a ContentDir. The summary is reflect's rolling compressed memory
 // of project history before the current checkpoint SHA — maintained by
 // the agent at the end of each reflect pass, alongside the verbatim
 // "events since last reflect" block.
 func HistorySummaryPath(contentDir string) string {
-	return filepath.Join(contentDir, "history-summary.md")
+	return filepath.Join(contentDir, HistorySummaryName)
 }
 
 // WriteCheckpoint marshals cp as canonical pretty-printed JSON and
