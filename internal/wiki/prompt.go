@@ -88,7 +88,19 @@ func wikiPreamble(cfg Config) string {
 	}
 	fmt.Fprintf(&b, "## Wiki: %s (%s-schema)\n\n", cfg.Name, cfg.Mode)
 	fmt.Fprintf(&b, "Wiki content directory:\n  %s\n\n", cfg.ContentDir)
-	b.WriteString(`On-disk shape:
+	switch cfg.Mode {
+	case Closed:
+		b.WriteString("On-disk shape (closed-schema):\n")
+		b.WriteString("- log.md — append-only changelog. Engine-managed; do not edit.\n")
+		b.WriteString("- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.\n")
+		for _, d := range cfg.ManagedDocs {
+			fmt.Fprintf(&b, "- %s — %s. %s\n", d.Filename, d.Title, strings.TrimSpace(d.Purpose))
+		}
+		b.WriteString("\nNo index.md, no topics/. The doc set is fixed; cross-links\n")
+		b.WriteString("between managed docs are flat sibling refs (e.g.\n")
+		b.WriteString("[architecture](architecture.md)).\n\n")
+	default:
+		b.WriteString(`On-disk shape:
 - index.md — corpus catalog. Sits at the top of the wiki dir and is
   the authority on grouping; sections in index.md provide the
   taxonomy. Bullets reference topic docs via the topics/ subfolder
@@ -103,5 +115,6 @@ func wikiPreamble(cfg Config) string {
   index is ../index.md.
 
 `)
+	}
 	return b.String()
 }

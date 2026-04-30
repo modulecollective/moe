@@ -65,15 +65,28 @@ session close, the same as during ingest.
 		b.WriteString(`Lint pass (closed-schema):
 
 This is a health pass on the wiki. The doc set is fixed: do not
-create, rename, or delete topic docs unless the operator has
-explicitly authorized that change in this session. Edits land
-inside the existing topic docs and index.md.
+create, rename, or delete managed docs. Edits land inside the
+existing managed docs.
 
-Walk the corpus with the operator and surface structural issues
-(broken cross-links, index drift, empty docs) and semantic ones
-(content drift, taxonomy mismatch). Apply fixes inline within the
-fixed doc set; raise schema-evolution candidates as findings for the
-operator rather than acting on them yourself.
+Walk the corpus with the operator. The engine has pre-scanned the
+deterministic problems and seeded them in your kickoff prompt:
+
+- Missing managed docs (declared in the schema but absent on disk).
+- Empty or stub docs (zero meaningful content past the title).
+- Broken cross-links between managed docs.
+- Broken footnote refs — ` + "`[^run-id]`" + ` markers whose run id no longer
+  resolves to a real bureaucracy run.
+
+Beyond the structural pre-scan, surface semantic issues: claims
+that should be footnoted but aren't, drift between docs (e.g.
+patterns.md describes a pattern architecture.md doesn't reflect),
+managed docs whose content has wandered from their stated purpose.
+Apply fixes inline as you and the operator agree on them; raise
+candidates that need a decided edit (vision pivot, architectural
+intent) for the operator to handle via ` + "`moe twin claim`" + `.
+
+Schema-evolution rules (closed-schema): the doc set is fixed. Do
+not create, rename, or delete managed docs.
 
 `)
 	}
@@ -96,25 +109,45 @@ operator rather than acting on them yourself.
 type Findings struct {
 	// Orphans are topic docs present on disk but not referenced from
 	// index.md. Paths are relative to ContentDir (e.g.
-	// "topics/dns.md").
+	// "topics/dns.md"). Open-schema only.
 	Orphans []string
 	// MissingFromIndex are paths named in index.md links that don't
 	// resolve to a topic doc on disk. Paths are relative to ContentDir,
 	// resolved from the as-written link target (e.g. an index entry
 	// "[X](topics/missing.md)" surfaces as "topics/missing.md").
+	// Open-schema only.
 	MissingFromIndex []string
-	// BrokenLinks are internal links from topic docs that point at
-	// files that don't exist.
+	// BrokenLinks are internal links from topic docs (open-schema) or
+	// managed docs (closed-schema) that point at files that don't
+	// exist.
 	BrokenLinks []BrokenLink
-	// EmptyDocs are topic docs with no meaningful content (zero-byte,
+	// EmptyDocs are docs with no meaningful content (zero-byte,
 	// whitespace-only, or just a title heading and nothing else).
+	// In closed-schema, this captures unfilled managed docs (typically
+	// just-bootstrapped stubs).
 	EmptyDocs []string
+	// MissingManagedDocs are filenames declared in cfg.ManagedDocs
+	// that don't exist on disk. Closed-schema only — open-schema
+	// wikis don't declare a fixed doc set.
+	MissingManagedDocs []string
+	// BrokenFootnotes are inline `[^run-id]` references whose run id
+	// doesn't resolve to a real bureaucracy run. Closed-schema only;
+	// the kb side doesn't use the run-id footnote convention.
+	BrokenFootnotes []BrokenFootnote
 }
 
 // BrokenLink is one cross-link a topic doc makes that doesn't resolve.
 type BrokenLink struct {
 	From   string // doc that contains the link, relative to ContentDir (e.g. "topics/dns.md")
 	Target string // path the link resolves to, relative to ContentDir
+}
+
+// BrokenFootnote is one `[^run-id]` reference whose run id can't be
+// resolved against the bureaucracy. From is the managed doc the
+// footnote appeared in; RunID is the unresolved run id.
+type BrokenFootnote struct {
+	From  string // doc that contains the footnote, relative to ContentDir
+	RunID string // the run id the footnote references
 }
 
 // IsEmpty reports whether Scan found no structural issues at all.
@@ -124,7 +157,9 @@ func (f Findings) IsEmpty() bool {
 	return len(f.Orphans) == 0 &&
 		len(f.MissingFromIndex) == 0 &&
 		len(f.BrokenLinks) == 0 &&
-		len(f.EmptyDocs) == 0
+		len(f.EmptyDocs) == 0 &&
+		len(f.MissingManagedDocs) == 0 &&
+		len(f.BrokenFootnotes) == 0
 }
 
 // Scan walks the wiki content directory and returns the structural
@@ -138,12 +173,24 @@ func (f Findings) IsEmpty() bool {
 // scan from completing (e.g. ReadDir on the topics dir failing for
 // reasons other than ENOENT) propagate.
 //
-// Topic docs live under <ContentDir>/topics/; the catalogue is keyed by
-// path relative to ContentDir (e.g. "topics/dns.md") so it matches
-// index.md link targets verbatim, and so a topic doc using a flat
-// sibling reference like [other](other.md) resolves correctly relative
-// to its own directory.
+// Open-schema: topic docs live under <ContentDir>/topics/; the
+// catalogue is keyed by path relative to ContentDir (e.g.
+// "topics/dns.md") so it matches index.md link targets verbatim, and so
+// a topic doc using a flat sibling reference like [other](other.md)
+// resolves correctly relative to its own directory.
+//
+// Closed-schema: the catalogue is cfg.ManagedDocs (flat, no topics/);
+// MissingManagedDocs flags unstubbed docs; BrokenFootnotes flags
+// `[^run-id]` references that don't resolve under
+// <BureaucracyPath>/projects/<Project>/runs/.
 func Scan(cfg Config) (Findings, error) {
+	if cfg.Mode == Closed {
+		return scanClosed(cfg)
+	}
+	return scanOpen(cfg)
+}
+
+func scanOpen(cfg Config) (Findings, error) {
 	var f Findings
 
 	topicsDir := TopicsDir(cfg.ContentDir)
@@ -278,7 +325,142 @@ func RenderFindings(f Findings) string {
 		}
 		b.WriteString("\n")
 	}
+	if len(f.MissingManagedDocs) > 0 {
+		b.WriteString("**Missing managed docs** (declared in schema, not present on disk):\n")
+		for _, m := range f.MissingManagedDocs {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+		b.WriteString("\n")
+	}
+	if len(f.BrokenFootnotes) > 0 {
+		b.WriteString("**Broken footnote refs** (cited run id doesn't resolve to a bureaucracy run):\n")
+		for _, bf := range f.BrokenFootnotes {
+			fmt.Fprintf(&b, "- %s → [^%s]\n", bf.From, bf.RunID)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
+}
+
+// scanClosed walks a closed-schema wiki: catalogues managed docs from
+// cfg.ManagedDocs (flat, no topics/), checks each is on disk, runs the
+// per-doc empty/broken-link checks against the same flat namespace,
+// and validates inline `[^run-id]` footnotes against bureaucracy runs.
+func scanClosed(cfg Config) (Findings, error) {
+	var f Findings
+
+	// Catalogue managed docs from cfg, not from disk — closed-schema
+	// invariants forbid extras. Disk presence drives MissingManagedDocs.
+	docs := map[string]bool{}
+	var docList []string
+	for _, d := range cfg.ManagedDocs {
+		docs[d.Filename] = true
+		docList = append(docList, d.Filename)
+	}
+	for _, name := range docList {
+		if _, err := os.Stat(filepath.Join(cfg.ContentDir, name)); err != nil {
+			if os.IsNotExist(err) {
+				f.MissingManagedDocs = append(f.MissingManagedDocs, name)
+				continue
+			}
+			return f, fmt.Errorf("wiki: stat %s: %w", name, err)
+		}
+	}
+
+	// Walk every present managed doc for empty bodies, broken
+	// cross-links, and broken footnote refs.
+	for _, name := range docList {
+		body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, name))
+		if err != nil {
+			return f, err
+		}
+		if !ok {
+			continue
+		}
+		if isEffectivelyEmpty(body) {
+			f.EmptyDocs = append(f.EmptyDocs, name)
+		}
+		for _, link := range extractMarkdownLinks(body) {
+			if !isLocalMarkdownLink(link) {
+				continue
+			}
+			canon := resolveLinkTarget(link, name)
+			if docs[canon] {
+				continue
+			}
+			f.BrokenLinks = append(f.BrokenLinks, BrokenLink{From: name, Target: canon})
+		}
+		for _, runID := range extractFootnoteRunIDs(body) {
+			if !runExists(cfg, runID) {
+				f.BrokenFootnotes = append(f.BrokenFootnotes, BrokenFootnote{From: name, RunID: runID})
+			}
+		}
+	}
+
+	sort.Strings(f.MissingManagedDocs)
+	sort.Strings(f.EmptyDocs)
+	sort.Slice(f.BrokenLinks, func(i, j int) bool {
+		if f.BrokenLinks[i].From != f.BrokenLinks[j].From {
+			return f.BrokenLinks[i].From < f.BrokenLinks[j].From
+		}
+		return f.BrokenLinks[i].Target < f.BrokenLinks[j].Target
+	})
+	sort.Slice(f.BrokenFootnotes, func(i, j int) bool {
+		if f.BrokenFootnotes[i].From != f.BrokenFootnotes[j].From {
+			return f.BrokenFootnotes[i].From < f.BrokenFootnotes[j].From
+		}
+		return f.BrokenFootnotes[i].RunID < f.BrokenFootnotes[j].RunID
+	})
+	return f, nil
+}
+
+// footnoteRefPattern matches inline `[^run-id]` footnote references.
+// The captured group is the run id between the caret and the closing
+// bracket. Reference-block lines (`[^run-id]: …`) are pattern-matched
+// the same way; the caller can decide whether to treat them as
+// duplicates of inline refs (we do — every appearance of a broken id
+// is worth surfacing).
+var footnoteRefPattern = regexp.MustCompile(`\[\^([^\]\s]+)\]`)
+
+// extractFootnoteRunIDs returns the run ids referenced by `[^run-id]`
+// markers in body, in document order, deduplicated. The reference-list
+// definitions at the bottom of a doc (`[^run-id]: ...`) get picked up
+// the same way; the lint check resolves both flavours against the same
+// run-existence test, so an unresolved id in either spot surfaces.
+func extractFootnoteRunIDs(body string) []string {
+	matches := footnoteRefPattern.FindAllStringSubmatch(body, -1)
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		id := m[1]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// runExists reports whether projects/<cfg.Project>/runs/<runID>/ exists
+// on disk under cfg.BureaucracyPath. Missing config (no
+// BureaucracyPath, no Project) is treated as "can't resolve" → return
+// true so an unconfigured scan doesn't carpet the findings with false
+// positives. The lint command always supplies both; this is a safety
+// net for direct callers.
+func runExists(cfg Config, runID string) bool {
+	if cfg.BureaucracyPath == "" || cfg.Project == "" {
+		return true
+	}
+	path := filepath.Join(cfg.BureaucracyPath, "projects", cfg.Project, "runs", runID)
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 // readMaybe reads path, returning ("", false, nil) when the file is

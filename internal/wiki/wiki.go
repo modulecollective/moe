@@ -77,4 +77,30 @@ type Config struct {
 	// {split, merge, rename, retire}; closed-schema is empty (or a
 	// strict subset). Surfaced verbatim in the prompt.
 	AllowedPrimitives []string
+	// ManagedDocs is the hard-fixed set of docs the engine knows
+	// about under closed-schema. Empty for open-schema (kb), required
+	// for closed-schema (twin). Order is the order the docs are
+	// rendered in preambles, kickoff prompts, and lint reports.
+	ManagedDocs []ManagedDoc
+}
+
+// ManagedDoc names one of a closed-schema wiki's hard-fixed docs.
+// Twin's four (vision / architecture / patterns / operations) live in
+// internal/cli/twin.go; the engine treats them as opaque
+// (filename, title, purpose, per-doc reflect framing).
+type ManagedDoc struct {
+	// Filename is the path under ContentDir (e.g. "vision.md").
+	// Flat — closed-schema has no topics/ subfolder.
+	Filename string
+	// Title is the human-readable heading rendered into the doc's
+	// stub on bootstrap and into log entries / preambles.
+	Title string
+	// Purpose is a one-line "what this doc is for" the engine renders
+	// in the closed-schema preamble so the agent knows what each
+	// managed doc is supposed to hold without reading every file.
+	Purpose string
+	// ReflectPrompt is the per-doc framing the reflect kickoff lays
+	// down under a doc-named subhead. Lifted from TWIN-REFACTOR's
+	// twin schema and tightened into prompt form.
+	ReflectPrompt string
 }
