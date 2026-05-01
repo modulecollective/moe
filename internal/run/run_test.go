@@ -309,3 +309,53 @@ func TestLoadRequiresWorkflow(t *testing.T) {
 		t.Fatalf("error should name the required field, got: %v", err)
 	}
 }
+
+// TestLastActivityMapMatchesLastActivity is the load-bearing equivalence
+// check: the batched map and the per-slug git log must agree for every
+// run on disk. moe dash relies on that — replacing N×LastActivity with
+// one map lookup is only safe if both return the same answer.
+func TestLastActivityMapMatchesLastActivity(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, runID string, when time.Time) {
+		t.Helper()
+		msg := subject + "\n\nMoE-Run: " + runID + "\n"
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+		cmd.Dir = root
+		if !when.IsZero() {
+			stamp := when.Format(time.RFC3339)
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_DATE="+stamp,
+				"GIT_COMMITTER_DATE="+stamp,
+			)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	// Two slugs, multiple commits each, including a backdated commit on
+	// HEAD — that's the case `git log -1 --grep` resolves topologically
+	// rather than by committer date, and the map has to agree.
+	commitWith("Open run x/alpha", "alpha", time.Time{})
+	commitWith("Open run x/beta", "beta", time.Time{})
+	commitWith("work on alpha", "alpha", time.Now().Add(-2*time.Hour))
+	commitWith("work on beta backdated", "beta",
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	got, err := LastActivityMap(root)
+	if err != nil {
+		t.Fatalf("LastActivityMap: %v", err)
+	}
+	for _, slug := range []string{"alpha", "beta"} {
+		want, err := LastActivity(root, slug)
+		if err != nil {
+			t.Fatalf("LastActivity %q: %v", slug, err)
+		}
+		if !got[slug].Equal(want) {
+			t.Errorf("slug %q: map=%v LastActivity=%v", slug, got[slug], want)
+		}
+	}
+	// Slugs not present in any commit are absent (zero time on lookup).
+	if v, ok := got["never"]; ok {
+		t.Errorf("expected unknown slug to be absent, got %v", v)
+	}
+}

@@ -581,6 +581,63 @@ func LastActivity(root, runID string) (time.Time, error) {
 	return time.Unix(epoch, 0).UTC(), nil
 }
 
+// LastActivityMap returns one committer time per run slug, keyed by
+// `MoE-Run` trailer value. One batched `git log` covers every run, so
+// callers that need activity for all runs (moe dash) avoid the
+// N×fork+exec cost of calling LastActivity in a loop. Slugs with no
+// reachable commit are absent from the map; callers should treat that
+// as the zero time, the same convention LastActivity uses.
+//
+// For each slug we keep the *first* commit encountered in the log walk —
+// the one `git log -1 --grep "MoE-Run: <slug>"` would have returned —
+// so the result matches LastActivity exactly. That is HEAD-side topo
+// order, not strictly the newest committer date, which is the same
+// distinction LastActivity makes today.
+func LastActivityMap(root string) (map[string]time.Time, error) {
+	cmd := exec.Command("git",
+		"log",
+		"--grep", "^MoE-Run: ",
+		"--format=%ct%x00%B%x1e",
+	)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("run: git log: %w", err)
+	}
+	result := make(map[string]time.Time)
+	for _, record := range strings.Split(string(out), "\x1e") {
+		record = strings.TrimLeft(record, "\n")
+		if record == "" {
+			continue
+		}
+		nul := strings.IndexByte(record, 0)
+		if nul < 0 {
+			continue
+		}
+		epoch, err := strconv.ParseInt(record[:nul], 10, 64)
+		if err != nil {
+			continue
+		}
+		body := record[nul+1:]
+		slug := ""
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
+				slug = strings.TrimSpace(v)
+				break
+			}
+		}
+		if slug == "" {
+			continue
+		}
+		if _, ok := result[slug]; ok {
+			continue
+		}
+		result[slug] = time.Unix(epoch, 0).UTC()
+	}
+	return result, nil
+}
+
 // LastFileActivity returns the committer time of the most recent commit
 // that touched relPath (relative to root), or the zero time if the
 // path has no git history. Scoped by path rather than by MoE-Run
