@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // Document is the machine-readable slice of a single document's state.
@@ -274,11 +276,11 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		addPaths = append(addPaths, seedRel)
 	}
 	addArgs := append([]string{"add", "--"}, addPaths...)
-	if err := runGit(root, addArgs...); err != nil {
+	if err := git.Run(root, addArgs...); err != nil {
 		return nil, fmt.Errorf("run: git add: %w", err)
 	}
 	for _, p := range opts.RemovePaths {
-		if err := runGit(root, "rm", "--", p); err != nil {
+		if err := git.Run(root, "rm", "--", p); err != nil {
 			return nil, fmt.Errorf("run: git rm %s: %w", p, err)
 		}
 	}
@@ -296,7 +298,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		trailers.WriteString("\n")
 	}
 	msg := subject + "\n\n" + trailers.String()
-	if err := runGit(root, "commit", "-m", msg); err != nil {
+	if err := git.Run(root, "commit", "-m", msg); err != nil {
 		return nil, fmt.Errorf("run: git commit: %w", err)
 	}
 	return md, nil
@@ -410,7 +412,7 @@ func StageAndCommit(root, msg string, pathspecs ...string) error {
 	if !HasStagedChanges(root) {
 		return ErrNothingToCommit
 	}
-	return runGit(root, "commit", "-m", msg)
+	return git.Run(root, "commit", "-m", msg)
 }
 
 // Stage runs `git add -- pathspecs...` under root. A split primitive so
@@ -422,7 +424,7 @@ func Stage(root string, pathspecs ...string) error {
 		return nil
 	}
 	addArgs := append([]string{"add", "--"}, pathspecs...)
-	return runGit(root, addArgs...)
+	return git.Run(root, addArgs...)
 }
 
 // HasStagedChanges reports whether the index has anything staged
@@ -449,11 +451,11 @@ var ErrSlugTaken = errors.New("run: slug already used")
 func CommitAllowEmpty(root, msg string, pathspecs ...string) error {
 	if len(pathspecs) > 0 {
 		addArgs := append([]string{"add", "--"}, pathspecs...)
-		if err := runGit(root, addArgs...); err != nil {
+		if err := git.Run(root, addArgs...); err != nil {
 			return err
 		}
 	}
-	return runGit(root, "commit", "--allow-empty", "-m", msg)
+	return git.Run(root, "commit", "--allow-empty", "-m", msg)
 }
 
 func hasStagedChanges(root string) bool {
@@ -697,21 +699,6 @@ func workingTreeDirty(root string) (bool, error) {
 // to ride a stray edit on their commit.
 func WorkingTreeDirty(root string) (bool, error) {
 	return workingTreeDirty(root)
-}
-
-// runGit invokes git with stdio wired to the user's terminal so credential
-// helpers and SSH prompts can complete. Capturing stderr would hide those
-// prompts and make the command appear to hang.
-func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return nil
 }
 
 func writeJSON(path string, v any) error {
