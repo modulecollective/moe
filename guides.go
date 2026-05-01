@@ -36,3 +36,18 @@ func Stage(workflow, docID string) string {
 	}
 	return string(b)
 }
+
+// OneShot returns the embedded workflows/<workflow>/oneshot.md fragment
+// — the addendum buildSystemPrompt appends when a stage is being driven
+// headlessly with no operator on stdin. The fragment tells the agent it
+// has one turn and must either ship the canvas or refuse silently. ""
+// when the workflow has no oneshot.md, in which case headless callers
+// just don't get the addendum (the rest of the prompt assembly still
+// applies).
+func OneShot(workflow string) string {
+	b, err := fs.ReadFile(workflowsFS, path.Join("workflows", workflow, "oneshot.md"))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
