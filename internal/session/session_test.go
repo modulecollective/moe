@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // newTestRoot seeds a git repo with one commit on main so that worktree
@@ -87,7 +89,7 @@ func TestOpenCloseRoundtrip(t *testing.T) {
 	}
 
 	// Main should now carry the content.
-	mainHead, err := gitRevParse(root, "refs/heads/main")
+	mainHead, err := git.RevParse(root, "refs/heads/main")
 	if err != nil {
 		t.Fatalf("rev-parse main: %v", err)
 	}

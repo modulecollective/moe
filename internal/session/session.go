@@ -23,12 +23,12 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // Session identifies one active stage session.
@@ -103,7 +103,7 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	// worktree at HEAD, not origin/main — the caller takes the repo
 	// lock before Open, so a moved origin is the next caller's
 	// concern (their sync will handle it).
-	if out, err := runGit(root, "worktree", "add", "-b", branch, worktreePath); err != nil {
+	if out, err := git.Combined(root, "worktree", "add", "-b", branch, worktreePath); err != nil {
 		_ = os.RemoveAll(worktreePath)
 		return nil, fmt.Errorf("session: git worktree add: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -133,8 +133,8 @@ func Close(s *Session) error {
 	// Rebase inside the worktree. We don't fetch origin first —
 	// bureaucracy pushes happen through `moe sync`, which holds the
 	// same repo lock. Under the lock, local main is the source of truth.
-	if out, err := runGit(s.WorktreePath, "rebase", "main"); err != nil {
-		_, _ = runGit(s.WorktreePath, "rebase", "--abort")
+	if out, err := git.Combined(s.WorktreePath, "rebase", "main"); err != nil {
+		_, _ = git.Combined(s.WorktreePath, "rebase", "--abort")
 		return fmt.Errorf(
 			"session close: rebase %s onto main failed: %w\n"+
 				"  worktree: %s\n"+
@@ -152,7 +152,7 @@ func Close(s *Session) error {
 	// --ff-only` updates ref, index, and working tree in one step and
 	// refuses non-fast-forward, giving us the same safety check the
 	// old-value CAS did.
-	if out, err := runGit(s.Root, "merge", "--ff-only", s.Branch); err != nil {
+	if out, err := git.Combined(s.Root, "merge", "--ff-only", s.Branch); err != nil {
 		return fmt.Errorf("session close: fast-forward main to %s failed: %w (%s)",
 			s.Branch, err, strings.TrimSpace(out))
 	}
@@ -165,11 +165,11 @@ func Close(s *Session) error {
 	// submodules cannot be moved or removed". By this point the rebase
 	// and fast-forward have succeeded, so there's no unsaved state the
 	// safety check would protect.
-	if out, err := runGit(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
+	if out, err := git.Combined(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
 		return fmt.Errorf("session close: remove worktree %s: %w (%s)",
 			s.WorktreePath, err, strings.TrimSpace(out))
 	}
-	if out, err := runGit(s.Root, "branch", "-D", s.Branch); err != nil {
+	if out, err := git.Combined(s.Root, "branch", "-D", s.Branch); err != nil {
 		return fmt.Errorf("session close: delete branch %s: %w (%s)",
 			s.Branch, err, strings.TrimSpace(out))
 	}
@@ -181,7 +181,7 @@ func Close(s *Session) error {
 // session the operator no longer wants. Caller must hold the repo lock.
 func Abandon(s *Session) error {
 	// -f so a mid-rebase or mid-edit worktree still goes.
-	if out, err := runGit(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
+	if out, err := git.Combined(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
 		// Tolerate "not a working tree" — someone may have manually
 		// deleted the directory. Proceed to branch deletion regardless.
 		if !strings.Contains(strings.ToLower(out), "not a working tree") {
@@ -191,7 +191,7 @@ func Abandon(s *Session) error {
 		_ = os.RemoveAll(s.WorktreePath)
 	}
 	if branchExists(s.Root, s.Branch) {
-		if out, err := runGit(s.Root, "branch", "-D", s.Branch); err != nil {
+		if out, err := git.Combined(s.Root, "branch", "-D", s.Branch); err != nil {
 			return fmt.Errorf("session abandon: delete branch: %w (%s)", err, strings.TrimSpace(out))
 		}
 	}
@@ -202,7 +202,7 @@ func Abandon(s *Session) error {
 // <root>/.moe/worktrees/. Caller may read without holding the repo
 // lock — `git worktree list` is read-only.
 func List(root string) ([]*Session, error) {
-	out, err := runGitOut(root, "worktree", "list", "--porcelain")
+	out, err := git.Output(root, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("session list: git worktree list: %w", err)
 	}
@@ -325,7 +325,7 @@ func parseWorktreeList(out string) []worktreeEntry {
 // findWorktreeForBranch returns the absolute path of the worktree that
 // has branch checked out, or "" if none.
 func findWorktreeForBranch(root, branch string) (string, error) {
-	out, err := runGitOut(root, "worktree", "list", "--porcelain")
+	out, err := git.Output(root, "worktree", "list", "--porcelain")
 	if err != nil {
 		return "", fmt.Errorf("session: git worktree list: %w", err)
 	}
@@ -338,16 +338,8 @@ func findWorktreeForBranch(root, branch string) (string, error) {
 }
 
 func branchExists(root, branch string) bool {
-	_, err := runGitOut(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	_, err := git.Output(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	return err == nil
-}
-
-func gitRevParse(dir, ref string) (string, error) {
-	out, err := runGitOut(dir, "rev-parse", ref)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
 }
 
 func newUUID() (string, error) {
@@ -382,27 +374,3 @@ func canonPath(p string) (string, error) {
 	return abs, nil
 }
 
-// runGit runs git in dir capturing combined output, returned as a
-// string even on error so callers can include it in diagnostics.
-func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-// runGitOut runs git in dir capturing stdout, propagating stderr to a
-// returned error if the command fails.
-func runGitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return string(out), nil
-}
