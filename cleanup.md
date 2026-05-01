@@ -5,6 +5,9 @@ severity. Each item is shaped to feed into MoE as an idea or a small
 run on its own — file paths and line numbers included so the agent
 doesn't have to rediscover them.
 
+Tracked as one followup per item under MoE run `pe-cleanup-list-redux`.
+This file is removed once every item is verified done.
+
 ## Real issues
 
 ### `git status --porcelain` parsed without `-z` in five places
