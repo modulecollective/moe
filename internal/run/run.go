@@ -685,13 +685,11 @@ func slugTaken(root, projectID, slug string) (bool, error) {
 }
 
 func workingTreeDirty(root string) (bool, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	entries, err := git.Status(root)
 	if err != nil {
 		return false, fmt.Errorf("run: git status: %w", err)
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	return len(entries) > 0, nil
 }
 
 // WorkingTreeDirty exposes the same precondition New uses internally so
