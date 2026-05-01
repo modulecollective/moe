@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // ReflectPromptSection is the wiki-specific block appended to the
@@ -108,7 +110,7 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 	if len(commits) > 0 {
 		b.WriteString("**Project commits**")
 		if cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != "" {
-			fmt.Fprintf(&b, " since %s", shortSHA(*cp.ProjectRepoSHA))
+			fmt.Fprintf(&b, " since %s", git.ShortSHA(*cp.ProjectRepoSHA))
 		}
 		b.WriteString(":\n")
 		for _, c := range commits {
@@ -236,12 +238,6 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	return out, nil
 }
 
-func shortSHA(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
-	}
-	return sha
-}
 
 // ReadHistorySummary reads <ContentDir>/history-summary.md if present.
 // Returns ("", nil) when the file is absent or empty — both are normal
