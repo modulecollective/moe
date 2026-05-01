@@ -238,7 +238,6 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	return out, nil
 }
 
-
 // ReadHistorySummary reads <ContentDir>/history-summary.md if present.
 // Returns ("", nil) when the file is absent or empty — both are normal
 // states (a fresh wiki has no summary, and the agent seeds it at the

@@ -373,4 +373,3 @@ func canonPath(p string) (string, error) {
 	}
 	return abs, nil
 }
-

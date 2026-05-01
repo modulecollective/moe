@@ -177,4 +177,3 @@ func hasGitignoreLine(body, line string) bool {
 	}
 	return false
 }
-
