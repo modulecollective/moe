@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -291,7 +292,7 @@ func TestPushIdempotentOnMergedRun(t *testing.T) {
 	if !strings.Contains(stdout, "already merged") {
 		t.Fatalf("expected 'already merged' notice, got: %s", stdout)
 	}
-	if !strings.Contains(stdout, shortSHA(f.tipSHA)) {
+	if !strings.Contains(stdout, git.ShortSHA(f.tipSHA)) {
 		t.Fatalf("expected merge SHA in rerun output, got: %s", stdout)
 	}
 }

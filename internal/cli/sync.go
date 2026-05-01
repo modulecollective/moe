@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -159,7 +160,7 @@ func bumpProjectPointers(root string, stdout, stderr io.Writer) error {
 	// bureaucracy with a half-applied index.
 	paths := make([]string, 0, len(bumps))
 	for _, b := range bumps {
-		if out, err := runGitCaptured(root, "add", b.path); err != nil {
+		if out, err := git.Combined(root, "add", b.path); err != nil {
 			return fmt.Errorf("moe sync: git add %s: %w (%s)", b.path, err, out)
 		}
 		paths = append(paths, b.path)
@@ -168,7 +169,7 @@ func bumpProjectPointers(root string, stdout, stderr io.Writer) error {
 	// changes the operator already had staged don't get swept into a
 	// "sync: bump project pointers" commit by accident.
 	commitArgs := append([]string{"commit", "-m", pointerBumpCommitMessage(bumps), "--"}, paths...)
-	if out, err := runGitCaptured(root, commitArgs...); err != nil {
+	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
 	}
 	moePrintf(stdout, "moe sync: bumped %d project pointer(s)\n", len(bumps))
@@ -199,19 +200,19 @@ func advanceSubmodule(root string, e gitmoduleEntry, stdout, stderr io.Writer) (
 	branch := resolveTrackingBranch(root, e)
 
 	moePrintf(stdout, "moe sync: fetching %s\n", e.path)
-	if out, err := runGitCaptured(subAbs, "fetch", "origin"); err != nil {
+	if out, err := git.Combined(subAbs, "fetch", "origin"); err != nil {
 		return nil, fmt.Errorf("moe sync: fetch %s: %w (%s)", e.path, err, out)
 	}
 
 	// Ensure origin has the tracking branch at all — otherwise we'd confuse
 	// "nothing to merge" with "wrong branch name".
-	if out, err := runGitCaptured(subAbs, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err != nil {
+	if out, err := git.Combined(subAbs, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err != nil {
 		return nil, fmt.Errorf("moe sync: %s has no origin/%s (%s)", e.path, branch, strings.TrimSpace(out))
 	}
 
 	// Leave detached HEAD — common after `git submodule update` — behind
 	// by checking out the branch. A no-op if already on it.
-	if out, err := runGitCaptured(subAbs, "checkout", branch); err != nil {
+	if out, err := git.Combined(subAbs, "checkout", branch); err != nil {
 		return nil, fmt.Errorf("moe sync: checkout %s in %s: %w (%s)", branch, e.path, err, out)
 	}
 
@@ -219,7 +220,7 @@ func advanceSubmodule(root string, e gitmoduleEntry, stdout, stderr io.Writer) (
 	if err != nil {
 		return nil, fmt.Errorf("moe sync: head of %s: %w", e.path, err)
 	}
-	remoteSHA, err := gitRevParse(subAbs, "refs/remotes/origin/"+branch)
+	remoteSHA, err := git.RevParse(subAbs, "refs/remotes/origin/"+branch)
 	if err != nil {
 		return nil, fmt.Errorf("moe sync: head of origin/%s in %s: %w", branch, e.path, err)
 	}
@@ -227,14 +228,14 @@ func advanceSubmodule(root string, e gitmoduleEntry, stdout, stderr io.Writer) (
 		// If we're already an ancestor of origin, a fast-forward will work.
 		// Otherwise we've diverged — bail and point the operator at the
 		// commits that are local-only.
-		if out, err := runGitCaptured(subAbs, "merge-base", "--is-ancestor", localSHA, remoteSHA); err != nil {
+		if out, err := git.Combined(subAbs, "merge-base", "--is-ancestor", localSHA, remoteSHA); err != nil {
 			_ = out
 			return nil, fmt.Errorf(
 				"moe sync: %s/%s has diverged from origin — refusing to sync.\n\nRecovery:\n  git -C %s log origin/%s..HEAD   # see local-only commits\n  # decide whether to push, reset, or stash, then retry moe sync",
 				e.path, branch, e.path, branch,
 			)
 		}
-		if out, err := runGitCaptured(subAbs, "merge", "--ff-only", "refs/remotes/origin/"+branch); err != nil {
+		if out, err := git.Combined(subAbs, "merge", "--ff-only", "refs/remotes/origin/"+branch); err != nil {
 			return nil, fmt.Errorf("moe sync: ff %s in %s: %w (%s)", branch, e.path, err, out)
 		}
 	}
@@ -326,16 +327,9 @@ func pointerBumpCommitMessage(bumps []pointerBump) string {
 		if id == "" {
 			id = b.path
 		}
-		fmt.Fprintf(&sb, "%s: %s..%s\n", id, shortSHA(b.fromSHA), shortSHA(b.toSHA))
+		fmt.Fprintf(&sb, "%s: %s..%s\n", id, git.ShortSHA(b.fromSHA), git.ShortSHA(b.toSHA))
 	}
 	return sb.String()
-}
-
-func shortSHA(s string) string {
-	if len(s) < 7 {
-		return s
-	}
-	return s[:7]
 }
 
 // gitmoduleEntry is the parsed shape of one [submodule "..."] stanza in
@@ -405,15 +399,7 @@ func readGitmoduleEntries(path string) ([]gitmoduleEntry, error) {
 }
 
 func gitHeadSHA(dir string) (string, error) {
-	return gitRevParse(dir, "HEAD")
-}
-
-func gitRevParse(dir, ref string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse %s: %w", ref, err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return git.RevParse(dir, "HEAD")
 }
 
 // gitlinkSHA reads the gitlink that bureaucracy's HEAD commit records
@@ -432,16 +418,6 @@ func gitlinkSHA(root, subPath string) (string, error) {
 		return "", fmt.Errorf("unexpected ls-tree output %q", line)
 	}
 	return fields[2], nil
-}
-
-// runGitCaptured runs git in dir capturing stdout+stderr together, for
-// cases where we want the error message in our own prose rather than
-// streaming raw git output to the terminal.
-func runGitCaptured(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
 }
 
 // reconcilePushedRuns walks every run in StatusPushed, asks GitHub
@@ -511,7 +487,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			return err
 		}
 		if ok {
-			moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, shortSHA(mergeSHA))
+			moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, git.ShortSHA(mergeSHA))
 		}
 	case "CLOSED":
 		ok, err := finalizePushedRun(root, md, run.StatusClosed, "MoE-Closed", prURL, stderr)

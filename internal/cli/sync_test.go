@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // syncFixture is a bureaucracy with one or more submodules mounted as
@@ -135,7 +137,7 @@ func TestBumpProjectPointersHappyPath(t *testing.T) {
 	if !strings.Contains(msg, "sync: bump project pointers") {
 		t.Fatalf("commit subject wrong:\n%s", msg)
 	}
-	if !strings.Contains(msg, "proj: "+shortSHA(beforeLink)+".."+shortSHA(newHead)) {
+	if !strings.Contains(msg, "proj: "+git.ShortSHA(beforeLink)+".."+git.ShortSHA(newHead)) {
 		t.Fatalf("commit body missing proj bump:\n%s", msg)
 	}
 }

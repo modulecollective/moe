@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -79,7 +80,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	switch md.Status {
 	case run.StatusMerged:
 		if sha := mergedSHA(root, md.ID); sha != "" {
-			moePrintf(stdout, "already merged at %s\n", shortSHA(sha))
+			moePrintf(stdout, "already merged at %s\n", git.ShortSHA(sha))
 		} else {
 			moePrintln(stdout, "already merged")
 		}
@@ -210,7 +211,7 @@ MoE-PR: %s
 // happen after the merge-push succeeds so a failure mid-flight leaves
 // both intact for retry.
 func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, stdout, stderr io.Writer) int {
-	tipSHA, err := gitRevParse(clonePath, "refs/heads/"+branch)
+	tipSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
 	if err != nil {
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
 		return 1
@@ -276,7 +277,7 @@ MoE-Merged: %s
 		moePrintf(stderr, "commit merge record: %v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, shortSHA(tipSHA))
+	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
 	return 0
 }
 
