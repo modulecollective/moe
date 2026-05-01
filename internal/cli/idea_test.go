@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // seedProject writes a minimal project.json so the project-registered
@@ -200,13 +202,12 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	}
 
 	// The edit rides along on the open commit — single commit, clean tree.
-	status := exec.Command("git", "-C", root, "status", "--porcelain")
-	st, err := status.CombinedOutput()
+	entries, err := git.Status(root)
 	if err != nil {
-		t.Fatalf("git status: %v\n%s", err, st)
+		t.Fatalf("git status: %v", err)
 	}
-	if len(bytes.TrimSpace(st)) != 0 {
-		t.Fatalf("working tree should be clean after capture, got:\n%s", st)
+	if len(entries) != 0 {
+		t.Fatalf("working tree should be clean after capture, got:\n%v", entries)
 	}
 	show := exec.Command("git", "-C", root, "show", "HEAD:projects/tele/runs/with-body/documents/idea/content.md")
 	shown, err := show.CombinedOutput()
@@ -305,13 +306,12 @@ func TestIdeaNewRequiresEditor(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "needs-an-editor")); !os.IsNotExist(err) {
 		t.Fatalf("run dir should not exist on editor-gate failure, stat err=%v", err)
 	}
-	status := exec.Command("git", "-C", root, "status", "--porcelain")
-	st, err := status.CombinedOutput()
+	entries, err := git.Status(root)
 	if err != nil {
-		t.Fatalf("git status: %v\n%s", err, st)
+		t.Fatalf("git status: %v", err)
 	}
-	if len(bytes.TrimSpace(st)) != 0 {
-		t.Fatalf("tree should be clean after editor-gate failure, got:\n%s", st)
+	if len(entries) != 0 {
+		t.Fatalf("tree should be clean after editor-gate failure, got:\n%v", entries)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	// Drop a stray untracked file so `git status --porcelain` reports it.
+	// Drop a stray untracked file so the dirty-tree gate fires.
 	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -493,13 +493,12 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 		}
 	}
 
-	status := exec.Command("git", "-C", root, "status", "--porcelain")
-	st, err := status.CombinedOutput()
+	entries, err := git.Status(root)
 	if err != nil {
-		t.Fatalf("git status: %v\n%s", err, st)
+		t.Fatalf("git status: %v", err)
 	}
-	if len(bytes.TrimSpace(st)) != 0 {
-		t.Fatalf("tree should be clean after refine, got:\n%s", st)
+	if len(entries) != 0 {
+		t.Fatalf("tree should be clean after refine, got:\n%v", entries)
 	}
 }
 

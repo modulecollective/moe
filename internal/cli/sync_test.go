@@ -349,12 +349,19 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 		t.Fatalf("sync commit touched unexpected paths: %v", touched)
 	}
 	// scratch.txt should still be staged, not committed.
-	statusOut, err := exec.Command("git", "-C", f.root, "status", "--porcelain").Output()
+	entries, err := git.Status(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(statusOut), "A  scratch.txt") {
-		t.Fatalf("scratch.txt should still be staged, status=%s", statusOut)
+	found := false
+	for _, e := range entries {
+		if e.XY == "A " && e.Path == "scratch.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("scratch.txt should still be staged, status=%v", entries)
 	}
 }
 

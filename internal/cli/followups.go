@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -232,23 +233,12 @@ MoE-Workflow: %s
 // the close commit, but anything else dirty in the tree is still a
 // guardrail violation.
 func dirtyOutsidePath(root, exceptRel string) (bool, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	entries, err := git.Status(root)
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
 	}
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		// porcelain v1: "XY <space> path" — XY is a 2-char status, then a space.
-		if len(line) < 4 {
-			return true, nil
-		}
-		path := strings.TrimPrefix(line[3:], "\"")
-		path = strings.TrimSuffix(path, "\"")
-		if path == exceptRel {
+	for _, e := range entries {
+		if e.Path == exceptRel {
 			continue
 		}
 		return true, nil

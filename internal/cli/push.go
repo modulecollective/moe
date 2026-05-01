@@ -370,18 +370,16 @@ func sandboxClonePath(root string, md *run.Metadata) (string, error) {
 // edits would silently be left behind by the push and we'd ship a branch
 // that doesn't reflect the agent's actual work. Better to surface it.
 func checkCleanWorkTree(clonePath string) error {
-	out, err := exec.Command("git", "-C", clonePath, "status", "--porcelain").Output()
+	entries, err := git.Status(clonePath)
 	if err != nil {
 		return fmt.Errorf("push: git status in sandbox: %w", err)
 	}
-	trimmed := bytes.TrimRight(out, "\n")
-	if len(bytes.TrimSpace(trimmed)) == 0 {
+	if len(entries) == 0 {
 		return nil
 	}
-	n := bytes.Count(trimmed, []byte{'\n'}) + 1
 	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
        sandbox: %s
-       re-run `+"`moe workflow <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, n, clonePath)
+       re-run `+"`moe workflow <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath)
 }
 
 // checkBranchHasCommits confirms the sandbox clone has branch `branch`

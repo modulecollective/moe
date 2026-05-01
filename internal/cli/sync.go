@@ -188,12 +188,18 @@ func advanceSubmodule(root string, e gitmoduleEntry, stdout, stderr io.Writer) (
 		return nil, nil
 	}
 
-	if dirty, status, err := submoduleDirty(subAbs); err != nil {
+	entries, err := git.Status(subAbs)
+	if err != nil {
 		return nil, fmt.Errorf("moe sync: inspect %s: %w", e.path, err)
-	} else if dirty {
+	}
+	if len(entries) > 0 {
+		var lines []string
+		for _, en := range entries {
+			lines = append(lines, fmt.Sprintf("%s %s", en.XY, en.Path))
+		}
 		return nil, fmt.Errorf(
-			"moe sync: %s has uncommitted changes — refusing to sync.\n\n%s\nRecovery:\n  cd %s\n  git status              # see what's there\n  git stash               # or commit, or restore\n  cd -\n  moe sync                # retry",
-			e.path, status, e.path,
+			"moe sync: %s has uncommitted changes — refusing to sync.\n\n%s\n\nRecovery:\n  cd %s\n  git status              # see what's there\n  git stash               # or commit, or restore\n  cd -\n  moe sync                # retry",
+			e.path, strings.Join(lines, "\n"), e.path,
 		)
 	}
 
@@ -252,19 +258,6 @@ func advanceSubmodule(root string, e gitmoduleEntry, stdout, stderr io.Writer) (
 		return nil, nil
 	}
 	return &pointerBump{path: e.path, fromSHA: linkedSHA, toSHA: newHead}, nil
-}
-
-// submoduleDirty reports whether the submodule working tree has any
-// uncommitted changes (modified, staged, or untracked). The second
-// return is the raw `git status --porcelain` output, useful to echo
-// verbatim in the abort message.
-func submoduleDirty(subAbs string) (bool, string, error) {
-	out, err := exec.Command("git", "-C", subAbs, "status", "--porcelain").Output()
-	if err != nil {
-		return false, "", fmt.Errorf("git status: %w", err)
-	}
-	s := string(out)
-	return strings.TrimSpace(s) != "", s, nil
 }
 
 // resolveTrackingBranch picks the branch we'll advance the submodule

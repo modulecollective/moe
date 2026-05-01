@@ -13,6 +13,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -345,10 +346,10 @@ func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
 		}
 	}
 
-	if out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput(); err != nil {
-		t.Fatalf("git status: %v\n%s", err, out)
-	} else if len(strings.TrimSpace(string(out))) != 0 {
-		t.Errorf("expected clean tree after eager commit, got:\n%s", out)
+	if entries, err := git.Status(root); err != nil {
+		t.Fatalf("git status: %v", err)
+	} else if len(entries) != 0 {
+		t.Errorf("expected clean tree after eager commit, got:\n%v", entries)
 	}
 }
 
@@ -376,14 +377,13 @@ func TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
-	out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput()
+	entries, err := git.Status(root)
 	if err != nil {
-		t.Fatalf("git status: %v\n%s", err, out)
+		t.Fatalf("git status: %v", err)
 	}
-	porcelain := strings.TrimSpace(string(out))
 	// Stray file should still be untracked; nothing else should be dirty.
-	if porcelain != "?? stray.txt" {
-		t.Errorf("unexpected porcelain after eager commit:\n%s", out)
+	if len(entries) != 1 || entries[0].XY != "??" || entries[0].Path != "stray.txt" {
+		t.Errorf("unexpected status after eager commit: %v", entries)
 	}
 
 	// And HEAD should only mention run.json, not stray.txt.
