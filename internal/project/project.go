@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // Metadata is the on-disk shape of projects/<id>/project.json.
@@ -88,7 +90,7 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 		return nil, err
 	}
 
-	if err := runGit(root, "submodule", "add", "-b", branch, url, submodulePath); err != nil {
+	if err := git.Run(root, "submodule", "add", "-b", branch, url, submodulePath); err != nil {
 		return nil, fmt.Errorf("project: git submodule add: %w", err)
 	}
 
@@ -109,11 +111,11 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 		return nil, err
 	}
 
-	if err := runGit(root, "add", ".gitmodules", submodulePath, projectJSONPath); err != nil {
+	if err := git.Run(root, "add", ".gitmodules", submodulePath, projectJSONPath); err != nil {
 		return nil, fmt.Errorf("project: git add: %w", err)
 	}
 	msg := fmt.Sprintf("Register project %s", id)
-	if err := runGit(root, "commit", "-m", msg); err != nil {
+	if err := git.Run(root, "commit", "-m", msg); err != nil {
 		return nil, fmt.Errorf("project: git commit: %w", err)
 	}
 
@@ -187,21 +189,6 @@ func detectDefaultBranch(url string) (string, error) {
 	return "", fmt.Errorf("project: no symbolic HEAD in ls-remote output for %s", url)
 }
 
-// runGit invokes git with stdio wired to the user's terminal so credential
-// helpers and SSH prompts can complete. Capturing stderr would hide those
-// prompts and make the command appear to hang.
-func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return nil
-}
-
 // Unregister is the inverse of Register: remove the submodule, delete
 // projects/<id>/, and commit. Refuses if projects/<id>/ holds a runs/
 // tree — that signals active work the caller probably didn't mean to
@@ -229,10 +216,10 @@ func Unregister(root, id string) error {
 	// `git rm` handles both .gitmodules bookkeeping and the working-tree
 	// removal of the submodule in one shot. `submodule deinit` clears the
 	// active-config entry so the submodule isn't left half-registered.
-	if err := runGit(root, "submodule", "deinit", "-f", "--", submodulePath); err != nil {
+	if err := git.Run(root, "submodule", "deinit", "-f", "--", submodulePath); err != nil {
 		return fmt.Errorf("project: git submodule deinit: %w", err)
 	}
-	if err := runGit(root, "rm", "-f", submodulePath); err != nil {
+	if err := git.Run(root, "rm", "-f", submodulePath); err != nil {
 		return fmt.Errorf("project: git rm submodule: %w", err)
 	}
 	// Leftover git metadata for the submodule; not tracked, so git won't
@@ -241,7 +228,7 @@ func Unregister(root, id string) error {
 		return fmt.Errorf("project: remove .git/modules/projects/%s/src: %w", id, err)
 	}
 
-	if err := runGit(root, "rm", "-f", projectJSONPath); err != nil {
+	if err := git.Run(root, "rm", "-f", projectJSONPath); err != nil {
 		return fmt.Errorf("project: git rm project.json: %w", err)
 	}
 	// projects/<id>/ is now empty; git doesn't track directories, so delete it ourselves.
@@ -250,7 +237,7 @@ func Unregister(root, id string) error {
 	}
 
 	msg := fmt.Sprintf("Unregister project %s", id)
-	if err := runGit(root, "commit", "-m", msg); err != nil {
+	if err := git.Run(root, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("project: git commit: %w", err)
 	}
 	return nil
