@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // Marker is the sentinel filename that identifies a bureaucracy repo root.
@@ -91,7 +93,7 @@ func Init(dir, remote string) error {
 
 	// `git init` is idempotent on an existing repo, so just run it — it
 	// covers both "empty dir" and "pre-existing git repo" in one call.
-	if err := runGit(abs, "init", "-b", "main"); err != nil {
+	if err := git.Run(abs, "init", "-b", "main"); err != nil {
 		return fmt.Errorf("bureaucracy: git init: %w", err)
 	}
 
@@ -124,17 +126,17 @@ func Init(dir, remote string) error {
 		probe := exec.Command("git", "remote", "get-url", "origin")
 		probe.Dir = abs
 		if probe.Run() == nil {
-			if err := runGit(abs, "remote", "set-url", "origin", remote); err != nil {
+			if err := git.Run(abs, "remote", "set-url", "origin", remote); err != nil {
 				return fmt.Errorf("bureaucracy: set remote: %w", err)
 			}
 		} else {
-			if err := runGit(abs, "remote", "add", "origin", remote); err != nil {
+			if err := git.Run(abs, "remote", "add", "origin", remote); err != nil {
 				return fmt.Errorf("bureaucracy: set remote: %w", err)
 			}
 		}
 	}
 
-	if err := runGit(abs, "add", Marker, ".gitignore", "projects/.gitkeep"); err != nil {
+	if err := git.Run(abs, "add", Marker, ".gitignore", "projects/.gitkeep"); err != nil {
 		return fmt.Errorf("bureaucracy: git add: %w", err)
 	}
 	return nil
@@ -176,17 +178,3 @@ func hasGitignoreLine(body, line string) bool {
 	return false
 }
 
-// runGit invokes git with stdio wired to the user's terminal so credential
-// helpers and SSH prompts can complete. Capturing stderr would hide those
-// prompts and make the command appear to hang.
-func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return nil
-}
