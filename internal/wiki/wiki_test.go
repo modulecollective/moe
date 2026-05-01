@@ -294,10 +294,10 @@ func TestCheckpointMarshalsNullSHAs(t *testing.T) {
 }
 
 // finalize_test wires up a real tiny git repo so we exercise the
-// `git status --porcelain` path. Same shape as cli's
-// newTestBureaucracy: scoped git config, throwaway tempdir, one
-// initial commit. The wiki dir lives at <root>/wiki/ and the project
-// repo (when used) is a sibling tempdir.
+// `git.Status` path. Same shape as cli's newTestBureaucracy: scoped
+// git config, throwaway tempdir, one initial commit. The wiki dir
+// lives at <root>/wiki/ and the project repo (when used) is a sibling
+// tempdir.
 
 func newGitRepo(t *testing.T) string {
 	t.Helper()

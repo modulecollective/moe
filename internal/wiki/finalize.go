@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // FinalizeContext carries the run-side facts the engine needs to
@@ -198,11 +200,11 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 // rooted at bureaucracyPath; contentDir must be inside it. Returns a
 // flat list of Changes with ContentDir-relative paths.
 //
-// Implementation note: we use `git status --porcelain=v1 --` scoped to
-// contentDir so we get the full set in one invocation regardless of
-// whether the wiki dir is fresh (no HEAD entries yet) or pre-existing.
-// status's two-character XY codes give us the staged + unstaged view in
-// one shot; we collapse them to Added/Modified/Removed for the log.
+// Implementation note: scoped to contentDir so we get the full set in
+// one invocation regardless of whether the wiki dir is fresh (no HEAD
+// entries yet) or pre-existing. status's two-character XY codes give
+// us the staged + unstaged view in one shot; we collapse them to
+// Added/Modified/Removed for the log.
 func diffContentDir(bureaucracyPath, contentDir string) ([]Change, error) {
 	rel, err := filepath.Rel(bureaucracyPath, contentDir)
 	if err != nil {
@@ -214,37 +216,20 @@ func diffContentDir(bureaucracyPath, contentDir string) ([]Change, error) {
 			contentDir, bureaucracyPath)
 	}
 
-	// --untracked-files=all expands untracked directories so each new
-	// file shows up as its own entry (the default --untracked-files=normal
-	// collapses an untracked dir into one row, which would lose the
-	// per-file disposition the changelog needs).
-	cmd := exec.Command("git", "status", "--porcelain=v1", "--untracked-files=all", "--", rel)
-	cmd.Dir = bureaucracyPath
-	out, err := cmd.Output()
+	entries, err := git.Status(bureaucracyPath, rel)
 	if err != nil {
 		return nil, fmt.Errorf("wiki: git status %s: %w", rel, err)
 	}
 
 	var changes []Change
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		if len(line) < 4 {
-			return nil, fmt.Errorf("wiki: malformed git status line %q", line)
-		}
-		// Porcelain v1: "XY <path>" with X/Y the staged/unstaged
-		// codes. Renames produce "R  old -> new"; we treat the new
-		// path as added and the old as removed for log purposes.
-		xy := line[:2]
-		path := line[3:]
-		x := xy[0]
-		y := xy[1]
+	for _, e := range entries {
+		x := e.XY[0]
+		y := e.XY[1]
 		// Untracked files arrive as "?? <path>". Treat them as
 		// added — they're new files the agent dropped that haven't
 		// been staged yet.
 		if x == '?' && y == '?' {
-			rel, err := relPath(path, contentDir, bureaucracyPath)
+			rel, err := relPath(e.Path, contentDir, bureaucracyPath)
 			if err != nil {
 				return nil, err
 			}
@@ -252,23 +237,21 @@ func diffContentDir(bureaucracyPath, contentDir string) ([]Change, error) {
 			continue
 		}
 		// Renames split into a removal of old + addition of new.
+		// Under -z, e.Path is the new path and e.From is the old.
 		if x == 'R' || y == 'R' {
-			parts := strings.SplitN(path, " -> ", 2)
-			if len(parts) == 2 {
-				oldRel, err := relPath(parts[0], contentDir, bureaucracyPath)
-				if err != nil {
-					return nil, err
-				}
-				newRel, err := relPath(parts[1], contentDir, bureaucracyPath)
-				if err != nil {
-					return nil, err
-				}
-				changes = append(changes,
-					Change{Path: oldRel, Status: Removed},
-					Change{Path: newRel, Status: Added},
-				)
-				continue
+			oldRel, err := relPath(e.From, contentDir, bureaucracyPath)
+			if err != nil {
+				return nil, err
 			}
+			newRel, err := relPath(e.Path, contentDir, bureaucracyPath)
+			if err != nil {
+				return nil, err
+			}
+			changes = append(changes,
+				Change{Path: oldRel, Status: Removed},
+				Change{Path: newRel, Status: Added},
+			)
+			continue
 		}
 		status := Modified
 		switch {
@@ -277,7 +260,7 @@ func diffContentDir(bureaucracyPath, contentDir string) ([]Change, error) {
 		case x == 'D' || y == 'D':
 			status = Removed
 		}
-		rel, err := relPath(path, contentDir, bureaucracyPath)
+		rel, err := relPath(e.Path, contentDir, bureaucracyPath)
 		if err != nil {
 			return nil, err
 		}
@@ -427,11 +410,9 @@ func capturedSHA(repoPath string, checkDirty bool, stderr io.Writer, label strin
 }
 
 func repoDirty(repoPath string) (bool, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = repoPath
-	out, err := cmd.Output()
+	entries, err := git.Status(repoPath)
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	return len(entries) > 0, nil
 }
