@@ -267,20 +267,7 @@ type wikiTurnSpec struct {
 // in runStageSession; lint sessions call the helper directly with no
 // run scaffolding. Returns the exit code to bubble up.
 func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) int {
-	// Open (or resume) the session worktree under the repo lock.
-	// Short hold: the only work is `git worktree add` (or a lookup).
-	var sess *session.Session
-	err := withRepoLock(root, repolock.Options{
-		Purpose: in.LockPurpose + "-open",
-		Run:     in.Project + "/" + in.RunSlug,
-	}, func() error {
-		s, err := session.Open(root, in.Project, in.RunSlug, in.DocID)
-		if err != nil {
-			return err
-		}
-		sess = s
-		return nil
-	})
+	sess, closeSess, err := openWikiSession(root, in)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -293,10 +280,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	spec, err := in.BuildSpec(workRoot)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		_ = withRepoLock(root, repolock.Options{
-			Purpose: in.LockPurpose + "-close",
-			Run:     in.Project + "/" + in.RunSlug,
-		}, func() error { return session.Close(sess) })
+		_ = closeSess()
 		return 1
 	}
 
@@ -310,10 +294,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		canonical, err := in.WikiBuilder(root)
 		if err != nil {
 			moePrintf(stderr, "wiki: %v\n", err)
-			_ = withRepoLock(root, repolock.Options{
-				Purpose: in.LockPurpose + "-close",
-				Run:     in.Project + "/" + in.RunSlug,
-			}, func() error { return session.Close(sess) })
+			_ = closeSess()
 			return 1
 		}
 		if canonical != nil {
@@ -346,10 +327,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	prompt, err := spec.BuildPrompt(workRoot, wikiCfg)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		_ = withRepoLock(root, repolock.Options{
-			Purpose: in.LockPurpose + "-close",
-			Run:     in.Project + "/" + in.RunSlug,
-		}, func() error { return session.Close(sess) })
+		_ = closeSess()
 		return 1
 	}
 
@@ -406,14 +384,41 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// Close the session: land it on local main and tear the
 	// worktree down. Local-only — origin push is moe sync's job —
 	// so a short budget and no heartbeat are fine.
-	closeErr := withRepoLock(root, repolock.Options{
-		Purpose: in.LockPurpose + "-close",
-		Run:     in.Project + "/" + in.RunSlug,
-	}, func() error {
-		return session.Close(sess)
-	})
+	closeErr := closeSess()
 
 	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, stdout, stderr)
+}
+
+// openWikiSession opens the session worktree under the repo lock and
+// returns a closeSess closure already bound to the matching `-close`
+// lock options. Centralising both halves means each early-failure path
+// in runWikiSession is one `_ = closeSess()` line, and adding a new
+// path can't drift the lock purpose / Run key away from the open side.
+func openWikiSession(root string, in wikiSessionInputs) (*session.Session, func() error, error) {
+	// Open (or resume) the session worktree under the repo lock.
+	// Short hold: the only work is `git worktree add` (or a lookup).
+	var sess *session.Session
+	err := withRepoLock(root, repolock.Options{
+		Purpose: in.LockPurpose + "-open",
+		Run:     in.Project + "/" + in.RunSlug,
+	}, func() error {
+		s, err := session.Open(root, in.Project, in.RunSlug, in.DocID)
+		if err != nil {
+			return err
+		}
+		sess = s
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	closeSess := func() error {
+		return withRepoLock(root, repolock.Options{
+			Purpose: in.LockPurpose + "-close",
+			Run:     in.Project + "/" + in.RunSlug,
+		}, func() error { return session.Close(sess) })
+	}
+	return sess, closeSess, nil
 }
 
 // reportWikiSessionExit prints the closing per-turn messages and
