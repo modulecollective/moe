@@ -100,9 +100,17 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	// One batched git log covers every run's last activity. The map
+	// then threads through buildDashRows and buildTwinRows so per-run
+	// and per-project paths reuse it instead of forking git per run.
+	acts, err := run.LastActivityMap(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 
 	now := time.Now().UTC()
-	rows, err := buildDashRows(root, mds, now, *all, *project, *workflow)
+	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -117,7 +125,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	// Twin status — per-project freshness and unrecorded-edits
 	// banner. Filtered by --project (matches the workflow filter
 	// behavior: empty projectFilter shows every project's twin).
-	twinRows, err := buildTwinRows(root, *project)
+	twinRows, err := buildTwinRows(root, mds, acts, *project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -144,9 +152,9 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 // separate scan of a markdown-file shelf.
 //
 // projectFilter and workflowFilter narrow the view; empty string means
-// no filter. Mismatches are dropped before the per-run git query so
-// filtered-out rows don't pay for LastActivity.
-func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDormant bool, projectFilter, workflowFilter string) ([]dashRow, error) {
+// no filter. Last-activity for each run is read from acts (built once by
+// the caller via run.LastActivityMap) instead of forking git per row.
+func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string) ([]dashRow, error) {
 	// byRunKey lets the promoted-idea branch resolve a successor run's
 	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
 	// without a second disk scan.
@@ -162,10 +170,7 @@ func buildDashRows(root string, mds []*run.Metadata, now time.Time, includeDorma
 		if workflowFilter != "" && md.Workflow != workflowFilter {
 			continue
 		}
-		last, err := run.LastActivity(root, md.ID)
-		if err != nil {
-			return nil, err
-		}
+		last := acts[md.ID]
 		b, note, err := classify(root, md, last, now, includeDormant, byRunKey)
 		if err != nil {
 			return nil, err
@@ -369,7 +374,10 @@ type twinRecent struct {
 // the operator about a feature they haven't opted into.
 //
 // projectFilter narrows the view to a single project (empty = all).
-func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
+// mds and acts are the cached scan + last-activity map produced once in
+// runDash; buildTwinRows threads them into twinStatusNote so the twin
+// path doesn't re-scan or re-query git per project.
+func buildTwinRows(root string, mds []*run.Metadata, acts map[string]time.Time, projectFilter string) ([]twinRow, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "project.json"))
 	if err != nil {
 		return nil, fmt.Errorf("dash: glob projects: %w", err)
@@ -395,7 +403,7 @@ func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
 		// Best-effort on recents: a git log error shouldn't suppress
 		// the row. Mirrors closedRunsSinceCount's silent-fallback shape.
 		recents, _ := recentTwinSessions(root, projectID, twinRecentCap)
-		note := twinStatusNote(*cfg)
+		note := twinStatusNote(*cfg, mds, acts)
 		if note == "" && len(recents) == 0 {
 			continue
 		}
@@ -409,7 +417,7 @@ func buildTwinRows(root, projectFilter string) ([]twinRow, error) {
 // state and returns the line to render (or "" to suppress the row
 // entirely when the twin is fresh and has no decided edits pending).
 // Priority: unrecorded edits > never-reflected > stale > fresh.
-func twinStatusNote(cfg wiki.Config) string {
+func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.Time) string {
 	det, err := wiki.DetectUnrecordedEdits(cfg)
 	if err == nil && len(det.UnrecordedDocs) > 0 {
 		return fmt.Sprintf("unrecorded edits to %s — run `moe workflow twin claim %s`",
@@ -426,8 +434,8 @@ func twinStatusNote(cfg wiki.Config) string {
 	if err != nil {
 		return ""
 	}
-	since, err := closedRunsSinceCount(cfg.BureaucracyPath, cfg.Project, last)
-	if err != nil || since == 0 {
+	since := closedRunsSinceCount(mds, acts, cfg.Project, last)
+	if since == 0 {
 		return ""
 	}
 	noun := "closed runs"
@@ -441,12 +449,9 @@ func twinStatusNote(cfg wiki.Config) string {
 // closedRunsSinceCount counts the project's closed/merged/promoted
 // runs whose last activity post-dates threshold. Used by the dash
 // twin row to surface freshness in operator-meaningful units ("3
-// closed runs since reflect" reads better than "23 days since").
-func closedRunsSinceCount(root, projectID string, threshold time.Time) (int, error) {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return 0, err
-	}
+// closed runs since reflect" reads better than "23 days since"). Pure
+// over the cached metadata + activity map — both come from runDash.
+func closedRunsSinceCount(mds []*run.Metadata, acts map[string]time.Time, projectID string, threshold time.Time) int {
 	count := 0
 	for _, md := range mds {
 		if md.Project != projectID {
@@ -457,7 +462,7 @@ func closedRunsSinceCount(root, projectID string, threshold time.Time) (int, err
 		default:
 			continue
 		}
-		when, _ := run.LastActivity(root, md.ID)
+		when := acts[md.ID]
 		if when.IsZero() {
 			continue
 		}
@@ -465,7 +470,7 @@ func closedRunsSinceCount(root, projectID string, threshold time.Time) (int, err
 			count++
 		}
 	}
-	return count, nil
+	return count
 }
 
 // recentTwinSessions reads twin sessions for a project off the journal
