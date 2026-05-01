@@ -136,6 +136,83 @@ func Execute(r Request) error {
 	return runErr
 }
 
+// OneShotRequest drives a single non-interactive `claude -p` turn whose
+// stdout streams to the operator's terminal as it lands — the
+// non-interactive twin of Execute. Same prompt-assembly contract
+// (system prompt + add-dirs + sandbox settings + positional user
+// prompt), but no session id, no REPL, no transcript mirroring: the
+// agent gets one turn, produces its work directly on disk, and exits.
+// Used by `moe workflow sdlc new --one-shot` to chain stage turns
+// without putting the operator on stdin.
+type OneShotRequest struct {
+	// Root is the bureaucracy repo root. Passed as --add-dir so the
+	// canvas stays reachable when cwd is the sandbox clone.
+	Root string
+	// Prompt is the assembled --append-system-prompt payload (same
+	// shape as Request.Prompt — soul + stage fragment + canvas hint +
+	// any one-shot addendum).
+	Prompt string
+	// UserPrompt is the positional `claude -p <prompt>` argument — the
+	// single user turn for this stage.
+	UserPrompt string
+	// ClonePath, when non-empty, is cwd for the claude subprocess —
+	// the per-run sandbox clone for code stages. Empty for
+	// document-only stages (cwd falls back to Root).
+	ClonePath string
+	// Stdout streams claude's output to the operator's terminal. nil
+	// falls back to os.Stdout — the runner wants the operator to watch
+	// progress so they can Ctrl-C if it goes off the rails.
+	Stdout io.Writer
+	// Stderr captures claude's diagnostic output. nil falls back to
+	// os.Stderr.
+	Stderr io.Writer
+}
+
+// ExecuteOneShot runs `claude -p` non-interactively and streams its
+// stdout/stderr to the operator's terminal. The agent gets one turn
+// to do its work; transcript mirroring is intentionally skipped (the
+// canvas + per-turn commit are the durable artifacts — one-shot runs
+// don't carry a thread.jsonl). A non-nil error means the subprocess
+// exited non-zero or the binary can't be found; callers still commit
+// whatever the agent landed on disk because partial work is salvage,
+// not contamination.
+func ExecuteOneShot(r OneShotRequest) error {
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		return fmt.Errorf("executor: claude CLI not found on PATH: %w", err)
+	}
+	// --add-dir is variadic, so --settings/--append-system-prompt
+	// must sit between it and the positional user prompt — same
+	// ordering as Execute and ExecuteHeadless. Otherwise claude eats
+	// the prompt as another directory and the turn launches with
+	// nothing to do.
+	args := []string{
+		"-p",
+		"--add-dir", r.Root,
+		"--settings", sandboxSettings,
+		"--append-system-prompt", r.Prompt,
+		r.UserPrompt,
+	}
+	cmd := exec.Command(bin, args...)
+	if r.ClonePath != "" {
+		cmd.Dir = r.ClonePath
+	} else {
+		cmd.Dir = r.Root
+	}
+	// No stdin: -p mode reads only flags + positional prompt. Wiring
+	// stdin would let claude block on a tty that nobody's typing into.
+	cmd.Stdin = nil
+	cmd.Stdout = r.Stdout
+	cmd.Stderr = r.Stderr
+	if cmd.Stdout == nil {
+		cmd.Stdout = os.Stdout
+	}
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
 // HeadlessRequest drives a one-shot, non-interactive `claude -p` call —
 // no REPL, no --session-id, no transcript mirroring. The agent reads
 // the prompts, produces its response on stdout, and exits. Suited to
