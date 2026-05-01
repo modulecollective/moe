@@ -51,8 +51,13 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	fromIdea := fs.String("from-idea", "", "promote an open idea run (by slug) into a new run, seeding the first-stage doc from its canvas")
+	// --one-shot is sdlc-only by design: the kb / quick / idea workflows
+	// don't have a design→code chain to drive headlessly. The flag
+	// parses on every workflow's `new` (one shared facade) but we
+	// reject it for non-sdlc workflows below before doing any work.
+	oneShot := fs.Bool("one-shot", false, "(sdlc only) after opening, drive design then code headlessly via `claude -p`; skip the next-stage prompt")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe workflow %s new [--id <slug>] [--from-idea <slug>] <project> [\"title\"]\n", workflowName)
+		moePrintf(stderr, "usage: moe workflow %s new [--id <slug>] [--from-idea <slug>] [--one-shot] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
@@ -62,6 +67,10 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// (the idea's title supplies it).
 	if fs.NArg() < 1 || (fs.NArg() < 2 && *fromIdea == "") {
 		fs.Usage()
+		return 2
+	}
+	if *oneShot && workflowName != "sdlc" {
+		moePrintf(stderr, "--one-shot: only sdlc supports headless stage chaining\n")
 		return 2
 	}
 	project := fs.Arg(0)
@@ -160,7 +169,44 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	if *oneShot {
+		return runOneShotChain(md, stdout, stderr)
+	}
 	return promptNextStage(root, md, stdout, stderr)
+}
+
+// runOneShotChain drives `moe wf sdlc new --one-shot`: design then code,
+// each one `claude -p` turn against the run's per-stage canvas. Chains
+// only on a zero exit from the prior stage — commitTurn's
+// canvas-existence assertion already refuses an empty design turn, so a
+// silent refusal stops the chain without needing a second sentinel.
+// Push never runs from this path; the operator runs `moe wf sdlc push`
+// interactively when satisfied.
+func runOneShotChain(md *run.Metadata, stdout, stderr io.Writer) int {
+	moePrintf(stdout, "one-shot: design → code (headless)\n")
+	if code := runOneShotStage(md.Project, md.ID, "design", md.Title, false, stdout, stderr); code != 0 {
+		moePrintf(stderr, "one-shot: design stage exited %d; not chaining to code\n", code)
+		return code
+	}
+	if code := runOneShotStage(md.Project, md.ID, "code", md.Title, true, stdout, stderr); code != 0 {
+		moePrintf(stderr, "one-shot: code stage exited %d\n", code)
+		return code
+	}
+	moePrintf(stdout, "one-shot: design + code complete; run `moe workflow sdlc push %s %s` when ready\n", md.Project, md.ID)
+	return 0
+}
+
+// runOneShotStage runs one stage of the sdlc one-shot chain. It's a
+// thin wrapper over runStageSession that flips the headless and
+// skip-next-stage knobs and seeds the user prompt from the run title
+// (per the design's "the seed user message is the run title").
+func runOneShotStage(projectID, runID, docID, title string, needsSandbox bool, stdout, stderr io.Writer) int {
+	return runStageSession(projectID, runID, docID, stageSessionOpts{
+		NeedsSandbox:  needsSandbox,
+		Headless:      true,
+		SkipNextStage: true,
+		InitialPrompt: title,
+	}, stdout, stderr)
 }
 
 // loadIdeaForPromote returns the source idea run and its canvas body

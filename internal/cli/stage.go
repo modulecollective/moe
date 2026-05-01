@@ -23,6 +23,11 @@ import (
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
+// oneShotPromptDelimiter separates the assembled stage system prompt
+// from the appended one-shot addendum, matching the section delimiter
+// buildSystemPrompt uses internally.
+const oneShotPromptDelimiter = "\n---\n\n"
+
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
 // InitialPrompt. Wiki-aware ingest stages (kb summarize, future twin
@@ -35,8 +40,21 @@ type stageSessionOpts struct {
 	// InitialPrompt is auto-sent as the session's first user message
 	// — typically a "greet the operator and ask what they want"
 	// kickoff. Empty drops the auto-send and lands the operator in a
-	// blank prompt.
+	// blank prompt. In Headless mode it's the entire user turn for
+	// `claude -p` — typically the run title.
 	InitialPrompt string
+	// Headless drives the stage as a one-turn `claude -p` call instead
+	// of an interactive REPL. Output streams to the operator's
+	// terminal (no stdin), the workflow's oneshot.md fragment is
+	// appended to the system prompt, and transcript mirroring is
+	// skipped (the canvas + per-turn commit are the durable
+	// artifacts). Set by `moe wf sdlc new --one-shot`.
+	Headless bool
+	// SkipNextStage suppresses the post-turn "next: …" prompt /
+	// chained-stage call. Used by one-shot, which composes its own
+	// chain (design → code) and never wants the interactive next-stage
+	// prompt to fire mid-chain.
+	SkipNextStage bool
 	// WikiBuilder, when non-nil, is invoked after the bureaucracy
 	// root and run metadata are resolved. It returns the wiki engine
 	// config for this stage; nil means the stage is not an ingest
@@ -162,10 +180,20 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				SessionUUID:      doc.Session,
 				NewSession:       newSession,
 				InitialPrompt:    opts.InitialPrompt,
+				Headless:         opts.Headless,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					return buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
+					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
+					if err != nil {
+						return "", err
+					}
+					if opts.Headless {
+						if frag := moe.OneShot(md.Workflow); frag != "" {
+							p += oneShotPromptDelimiter + frag
+						}
+					}
+					return p, nil
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
 					var extras []string
@@ -181,6 +209,9 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 	code := runWikiSession(root, in, stdout, stderr)
 	if code != 0 || md == nil {
 		return code
+	}
+	if opts.SkipNextStage {
+		return 0
 	}
 	return promptNextStage(root, md, stdout, stderr)
 }
@@ -236,8 +267,15 @@ type wikiTurnSpec struct {
 	// NewSession picks --session-id (true) over --resume (false).
 	NewSession bool
 	// InitialPrompt, if non-empty, is auto-sent as the first user
-	// message of the turn.
+	// message of the turn. In Headless mode it is the entire `claude
+	// -p` user prompt.
 	InitialPrompt string
+	// Headless flips runWikiSession from the interactive REPL path
+	// (executor.Execute) to the one-shot streaming path
+	// (executor.ExecuteOneShot): no stdin, no transcript mirror, exits
+	// after one turn. The rest of the lifecycle — open session
+	// worktree, prompt assembly, commitTurn, close — is unchanged.
+	Headless bool
 	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
 	FinalizeRunID    string
 	FinalizeRunTitle string
@@ -331,19 +369,31 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 
-	runErr := executor.Execute(executor.Request{
-		Root:          workRoot,
-		Metadata:      spec.Metadata,
-		DocID:         spec.DocID,
-		SessionID:     spec.SessionUUID,
-		NewSession:    spec.NewSession,
-		Prompt:        prompt,
-		ClonePath:     spec.ClonePath,
-		InitialPrompt: spec.InitialPrompt,
-		Stdin:         os.Stdin,
-		Stdout:        os.Stdout,
-		Stderr:        stderr,
-	})
+	var runErr error
+	if spec.Headless {
+		runErr = executor.ExecuteOneShot(executor.OneShotRequest{
+			Root:       workRoot,
+			Prompt:     prompt,
+			UserPrompt: spec.InitialPrompt,
+			ClonePath:  spec.ClonePath,
+			Stdout:     stdout,
+			Stderr:     stderr,
+		})
+	} else {
+		runErr = executor.Execute(executor.Request{
+			Root:          workRoot,
+			Metadata:      spec.Metadata,
+			DocID:         spec.DocID,
+			SessionID:     spec.SessionUUID,
+			NewSession:    spec.NewSession,
+			Prompt:        prompt,
+			ClonePath:     spec.ClonePath,
+			InitialPrompt: spec.InitialPrompt,
+			Stdin:         os.Stdin,
+			Stdout:        os.Stdout,
+			Stderr:        stderr,
+		})
+	}
 
 	// Wiki finalize runs before the commit so its writes (log.md
 	// and checkpoint.json) ride along in the same per-turn commit
