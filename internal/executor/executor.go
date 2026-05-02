@@ -168,14 +168,21 @@ type OneShotRequest struct {
 	Stderr io.Writer
 }
 
-// ExecuteOneShot runs `claude -p` non-interactively and streams its
-// stdout/stderr to the operator's terminal. The agent gets one turn
-// to do its work; transcript mirroring is intentionally skipped (the
-// canvas + per-turn commit are the durable artifacts — one-shot runs
-// don't carry a thread.jsonl). A non-nil error means the subprocess
-// exited non-zero or the binary can't be found; callers still commit
-// whatever the agent landed on disk because partial work is salvage,
-// not contamination.
+// ExecuteOneShot runs `claude -p` non-interactively and surfaces a
+// one-line-per-tool-call progress stream to the operator's terminal so
+// the long agent turn doesn't look hung. The agent gets one turn to do
+// its work; transcript mirroring is intentionally skipped (the canvas
+// + per-turn commit are the durable artifacts — one-shot runs don't
+// carry a thread.jsonl). A non-nil error means the subprocess exited
+// non-zero or the binary can't be found; callers still commit whatever
+// the agent landed on disk because partial work is salvage, not
+// contamination.
+//
+// Implementation: claude is invoked with `--output-format stream-json
+// --verbose --include-partial-messages` so its stdout is a JSON event
+// stream rather than buffered final text. A reader goroutine maps each
+// tool_use event to a short progress line (`> reading <path>`,
+// `> bash: <cmd>`, etc.) on r.Stdout; the raw JSON is never shown.
 func ExecuteOneShot(r OneShotRequest) error {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
@@ -186,8 +193,20 @@ func ExecuteOneShot(r OneShotRequest) error {
 	// ordering as Execute and ExecuteHeadless. Otherwise claude eats
 	// the prompt as another directory and the turn launches with
 	// nothing to do.
+	//
+	// --output-format stream-json (with mandatory --verbose) makes
+	// claude emit one JSON event per tool call / message instead of
+	// buffering a final text response, so the translator below can
+	// surface progress as it happens. --include-partial-messages adds
+	// fine-grained delta events; we don't render them today, but the
+	// flag set matches the design's recommendation so future progress
+	// vocabulary (token counts, thinking) can layer on without
+	// re-plumbing claude's output mode.
 	args := []string{
 		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
 		"--add-dir", r.Root,
 		"--settings", sandboxSettings,
 		"--append-system-prompt", r.Prompt,
@@ -202,15 +221,33 @@ func ExecuteOneShot(r OneShotRequest) error {
 	// No stdin: -p mode reads only flags + positional prompt. Wiring
 	// stdin would let claude block on a tty that nobody's typing into.
 	cmd.Stdin = nil
-	cmd.Stdout = r.Stdout
-	cmd.Stderr = r.Stderr
-	if cmd.Stdout == nil {
-		cmd.Stdout = os.Stdout
+	stdout := r.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
 	}
+	cmd.Stderr = r.Stderr
 	if cmd.Stderr == nil {
 		cmd.Stderr = os.Stderr
 	}
-	return cmd.Run()
+
+	// StdoutPipe + Start/Wait (not Run) — the docs say it's incorrect
+	// to call Run when using StdoutPipe, because Wait closes the pipe
+	// after the process exits and Run does both internally.
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("executor: claude -p stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("executor: claude -p start: %w", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pipeOneShotProgress(pipe, stdout, r.Root)
+	}()
+	waitErr := cmd.Wait()
+	<-done
+	return waitErr
 }
 
 // HeadlessRequest drives a one-shot, non-interactive `claude -p` call —
