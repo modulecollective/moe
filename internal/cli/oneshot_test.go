@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // seedSdlcOneShotProject sets up a registered project with a real
@@ -556,4 +559,74 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		t.Fatalf("no code commit should land on refusal; got:\n%s", log)
 	}
 }
+
+// promptStageNextStage offers [Y/n/o] for sdlc non-push stages and
+// `o` invokes the next stage with --one-shot prepended. Non-sdlc
+// workflows keep the [Y/n] label and never see the o option. Mirrors
+// capturePromptDispatch's shape: stub the next.Run, pipe stdin, call
+// the helper directly so the test isn't bound to stdinIsTerminal().
+func TestPromptNextStageOfferOneShot(t *testing.T) {
+	cases := []struct {
+		name      string
+		workflow  string
+		input     string
+		wantLabel string
+		wantArgs  []string
+	}{
+		{name: "sdlc-o-runs-headless", workflow: "sdlc", input: "o\n", wantLabel: "[Y/n/o]", wantArgs: []string{"--one-shot", "tele", "fix-it"}},
+		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/o]", wantArgs: nil},
+		{name: "kb-no-o-option", workflow: "kb", input: "o\n", wantLabel: "[Y/n]", wantArgs: nil},
+		{name: "kb-default-runs", workflow: "kb", input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &promptDispatchRecord{}
+			next := &Command{
+				Name: "code",
+				Run: func(args []string, _, _ io.Writer) int {
+					rec.ran = true
+					rec.args = append([]string(nil), args...)
+					return 0
+				},
+			}
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: tc.workflow, Status: run.StatusInProgress}
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if _, err := io.WriteString(w, tc.input); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			oldStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = oldStdin })
+
+			var stdout, stderr bytes.Buffer
+			if code := promptStageNextStage(next, md, "moe workflow "+tc.workflow+" code tele fix-it", &stdout, &stderr); code != 0 {
+				t.Fatalf("promptStageNextStage exit=%d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tc.wantLabel) {
+				t.Fatalf("expected label %q in prompt, got: %q", tc.wantLabel, stdout.String())
+			}
+			if tc.wantArgs == nil {
+				if rec.ran {
+					t.Fatalf("expected no dispatch, got args=%v", rec.args)
+				}
+				return
+			}
+			if !rec.ran {
+				t.Fatalf("expected dispatch with args=%v, got none", tc.wantArgs)
+			}
+			if got, want := strings.Join(rec.args, " "), strings.Join(tc.wantArgs, " "); got != want {
+				t.Fatalf("dispatched args = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 

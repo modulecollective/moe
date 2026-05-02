@@ -548,13 +548,33 @@ func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) in
 	case "push":
 		return promptPushNextStage(next, md, hint, stdout, stderr)
 	}
-	moePrintf(stdout, "next: %s — run now? [Y/n] ", hint)
+	return promptStageNextStage(next, md, hint, stdout, stderr)
+}
+
+// promptStageNextStage offers the non-push stage prompt: [Y/n] for most
+// workflows, [Y/n/o] for sdlc non-push stages where headless one-shot
+// is supported. Y still defaults so a reflex Enter chains the next
+// stage interactively, the same as before. `o` invokes the next stage
+// with `--one-shot` prepended to its argv. Hardcoding the sdlc gate
+// keeps the prompt honest — no other workflow has --one-shot today,
+// and we'd rather widen deliberately than offer a flag that doesn't
+// exist.
+func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+	offerOneShot := md.Workflow == "sdlc"
+	label := "[Y/n]"
+	if offerOneShot {
+		label = "[Y/n/o]"
+	}
+	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
+	if offerOneShot && answer == "o" {
+		return next.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
+	}
 	accepted := answer == "" || strings.HasPrefix(answer, "y")
 	if !accepted {
 		return 0
