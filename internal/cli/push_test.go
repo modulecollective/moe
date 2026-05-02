@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -535,6 +536,157 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 		t.Fatalf("expected [N/m/p] label in prompt, got: %s", stdout.String())
 	}
 	return rec
+}
+
+// writeHookScript drops an executable script into
+// projects/<p>/hooks/<event>.d/. Returns the absolute path.
+func writeHookScript(t *testing.T, root, projectID, event, name, body string) string {
+	t.Helper()
+	dir := filepath.Join(root, "projects", projectID, "hooks", event+".d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestPushRunsProjectHooksBeforeBuiltins drops a pre-push.d script
+// that snapshots its CWD-evidence and key MOE_* env vars, then runs
+// push. The canary file confirms the script ran with CWD = sandbox
+// clone (it observes feature.txt, the run-branch's only added file)
+// and the dispatcher exported the documented env contract.
+func TestPushRunsProjectHooksBeforeBuiltins(t *testing.T) {
+	f := newPushFixture(t)
+
+	canary := filepath.Join(t.TempDir(), "canary.txt")
+	body := fmt.Sprintf(`#!/bin/sh
+{
+  echo "feature_seen=$([ -f feature.txt ] && echo 1 || echo 0)"
+  echo "MOE_PROJECT=$MOE_PROJECT"
+  echo "MOE_RUN=$MOE_RUN"
+  echo "MOE_DOCUMENT=$MOE_DOCUMENT"
+  echo "MOE_WORKFLOW=$MOE_WORKFLOW"
+  echo "MOE_SANDBOX=$MOE_SANDBOX"
+  echo "MOE_BUREAUCRACY=$MOE_BUREAUCRACY"
+  echo "MOE_TARGET_BRANCH=$MOE_TARGET_BRANCH"
+} > %q
+`, canary)
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-canary.sh", body)
+
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+
+	got, err := os.ReadFile(canary)
+	if err != nil {
+		t.Fatalf("read canary: %v", err)
+	}
+	canaryStr := string(got)
+	if !strings.Contains(canaryStr, "feature_seen=1") {
+		t.Errorf("hook CWD: feature.txt not observable from $PWD, canary:\n%s", canaryStr)
+	}
+	for _, want := range []string{
+		"MOE_PROJECT=" + f.projectID,
+		"MOE_RUN=" + f.runID,
+		"MOE_DOCUMENT=push",
+		"MOE_WORKFLOW=sdlc",
+		"MOE_SANDBOX=" + f.clonePath,
+		"MOE_BUREAUCRACY=" + f.root,
+		"MOE_TARGET_BRANCH=main",
+	} {
+		if !strings.Contains(canaryStr, want) {
+			t.Errorf("hook env: want %q in canary:\n%s", want, canaryStr)
+		}
+	}
+	if !strings.Contains(stdout, "running pre-push hook ") {
+		t.Errorf("stdout missing 'running pre-push hook' notice:\n%s", stdout)
+	}
+}
+
+// TestPushHookFailureChainsBackToCodeSession asserts a non-zero
+// project hook halts push, surfaces the captured output via the
+// generic chain-back, leaves origin / sandbox / run state untouched,
+// and exits non-zero.
+func TestPushHookFailureChainsBackToCodeSession(t *testing.T) {
+	f := newPushFixture(t)
+
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-fail.sh", `#!/bin/sh
+echo "intentional hook output"
+exit 7
+`)
+
+	var captured *hookFailure
+	var capturedRun *run.Metadata
+	prev := openCodeSessionForHookFailure
+	openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, _, _ io.Writer) int {
+		capturedRun = md
+		captured = fail
+		return 1
+	}
+	t.Cleanup(func() { openCodeSessionForHookFailure = prev })
+
+	mainBefore := f.originHead()
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit on hook failure; stdout=%s stderr=%s", stdout, stderr)
+	}
+	if captured == nil {
+		t.Fatal("expected chain-back to be invoked with hook failure context")
+	}
+	if capturedRun == nil || capturedRun.ID != f.runID {
+		t.Fatalf("chain-back run.Metadata: want id=%s, got %#v", f.runID, capturedRun)
+	}
+	if captured.event != hookEventPrePush {
+		t.Fatalf("event: want %q, got %q", hookEventPrePush, captured.event)
+	}
+	if !strings.HasSuffix(captured.script, "10-fail.sh") {
+		t.Fatalf("script: want suffix 10-fail.sh, got %q", captured.script)
+	}
+	if !strings.Contains(captured.output, "intentional hook output") {
+		t.Fatalf("captured output: want hook stdout, got %q", captured.output)
+	}
+
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin/main must not advance on hook failure: want %s, got %s", mainBefore, got)
+	}
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("sandbox must remain on hook failure so the agent can fix")
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status should remain in_progress on hook failure, got %s", md.Status)
+	}
+
+	kickoff := buildHookFailureKickoff(captured)
+	if !strings.Contains(kickoff, "10-fail.sh") {
+		t.Fatalf("kickoff missing script name: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "intentional hook output") {
+		t.Fatalf("kickoff missing captured output: %s", kickoff)
+	}
+}
+
+// TestPushNoHooksDirectoryIsNoOp asserts that the absence of a hooks
+// dir is a clean no-op: push succeeds with no "running ..." notice
+// and no missing-dir errors logged.
+func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
+	f := newPushFixture(t)
+
+	hooksDir := filepath.Join(f.root, "projects", f.projectID, "hooks")
+	if _, err := os.Stat(hooksDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fixture should not have a hooks dir; stat err=%v", err)
+	}
+
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "running pre-push hook ") || strings.Contains(stderr, "running pre-push hook ") {
+		t.Fatalf("no scripts to run, but saw 'running pre-push hook' in output:\n%s\n%s", stdout, stderr)
+	}
 }
 
 // mustGitOutput runs git and returns its stdout, failing the test on error.

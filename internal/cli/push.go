@@ -120,11 +120,25 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := syncBranchBeforePush(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
+	hooks := hookEnv{
+		Project:      md.Project,
+		Run:          md.ID,
+		Document:     "push",
+		Workflow:     md.Workflow,
+		Sandbox:      clonePath,
+		Bureaucracy:  root,
+		TargetBranch: pj.DefaultBranch,
+	}
+	if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
 		var conflict *rebaseConflictError
 		if errors.As(err, &conflict) {
 			moePrintf(stderr, "%v\n", conflict)
 			return openCodeSessionForRebaseConflict(md, conflict, stdout, stderr)
+		}
+		var fail *hookFailure
+		if errors.As(err, &fail) {
+			moePrintf(stderr, "%v\n", fail)
+			return openCodeSessionForHookFailure(md, fail, stdout, stderr)
 		}
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -171,6 +185,20 @@ func pushBranch(clonePath, branch, remote string, force bool, stdout, stderr io.
 		return fmt.Errorf("push: git push: %w", err)
 	}
 	return nil
+}
+
+// init registers the rebase-onto-default check as the first pre-push
+// built-in. Project scripts (in pre-push.d/) run before built-ins per
+// the design, so an operator script can refuse the push before the
+// rebase even fires.
+func init() {
+	registerBuiltinHook(hookEventPrePush, builtinHook{
+		Name: "rebase-onto-default",
+		Run: func(env hookEnv, stdout, stderr io.Writer) error {
+			branch := branchPrefix + env.Run
+			return syncBranchBeforePush(env.Sandbox, branch, env.TargetBranch, stdout, stderr)
+		},
+	})
 }
 
 // rebaseConflictError carries the failed rebase's diagnostic context
