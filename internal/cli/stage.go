@@ -138,7 +138,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				if err := commitSessionStart(workRoot, md, docID); err != nil {
 					return wikiTurnSpec{}, err
 				}
-				moePrintf(stderr, "document %q ready (session %s)\n", docID, doc.Session)
+				moePrintf(stderr, "opened %s canvas (session %s)\n", docID, doc.Session)
 			}
 
 			// Code sandbox — still keyed off the canonical bureaucracy
