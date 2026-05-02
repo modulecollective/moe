@@ -2,7 +2,13 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // The SDLC workflow owns the design→code→push lifecycle. Stages are
@@ -31,18 +37,24 @@ func init() {
 func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc design", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow sdlc design <project> <run>")
+		moePrintln(stderr, "usage: moe workflow sdlc design [--one-shot] <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the design canvas.")
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
+		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
 		fs.Usage()
 		return 2
+	}
+	if *oneShot {
+		return runStageSession(fs.Arg(0), fs.Arg(1), "design",
+			stageSessionOpts{Headless: true}, stdout, stderr)
 	}
 	// The agent produces the user-facing cue itself: Claude Code has no
 	// way to pre-seed the input box with editable text, so instead of a
@@ -60,19 +72,29 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 func runCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow sdlc code <project> <run>")
+		moePrintln(stderr, "usage: moe workflow sdlc code [--one-shot] <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
 		moePrintln(stderr, "from other activity until `moe workflow sdlc push` opens a PR.")
+		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
 		fs.Usage()
 		return 2
+	}
+	if err := requireDesignCanvas(fs.Arg(0), fs.Arg(1)); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if *oneShot {
+		return runStageSession(fs.Arg(0), fs.Arg(1), "code",
+			stageSessionOpts{NeedsSandbox: true, Headless: true}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this code session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
@@ -81,4 +103,27 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		"like to work on next. Then wait for their reply."
 	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
 		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
+}
+
+// requireDesignCanvas refuses the code stage when the run's design
+// canvas is missing or empty. The fail-loud invariant the design twin
+// records on the commit side carries into the read side: code can't
+// drive against a design that was never opened. Applies to both
+// interactive and `--one-shot` paths so an operator skipping straight
+// to `sdlc code` on a fresh run gets the same error either way.
+func requireDesignCanvas(projectID, runID string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	root, err := bureaucracy.Find(cwd, os.Getenv)
+	if err != nil {
+		return err
+	}
+	canvas := filepath.Join(root, run.ContentPath(projectID, runID, "design"))
+	info, err := os.Stat(canvas)
+	if err != nil || info.Size() == 0 {
+		return fmt.Errorf("design canvas missing — run `moe workflow sdlc design %s %s` first", projectID, runID)
+	}
+	return nil
 }

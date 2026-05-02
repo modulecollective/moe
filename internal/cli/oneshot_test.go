@@ -382,3 +382,178 @@ exit 0
 		t.Fatalf("expected 2 argv captures (design + code), got %d", got)
 	}
 }
+
+// Per-stage --one-shot on design lands the canvas headlessly. The run
+// title flows through as the user prompt (not the interactive kickoff
+// string), so the agent gets the same context the chained one-shot
+// already exercises.
+func TestRunDesignOneShot(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	argvFile := filepath.Join(t.TempDir(), "argv.txt")
+	t.Setenv("MOE_TEST_ARGV_DUMP", argvFile)
+	fakeClaudeOnPath(t, `#!/bin/sh
+prompt=
+next=0
+for a in "$@"; do
+  printf '%s\n' "$a" >> "$MOE_TEST_ARGV_DUMP"
+  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
+  case "$a" in --append-system-prompt) next=1 ;; esac
+done
+printf -- '--END-ARGV--\n' >> "$MOE_TEST_ARGV_DUMP"
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+if [ -n "$canvas" ]; then printf 'design via per-stage one-shot\n' >> "$canvas"; fi
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele", "Per-stage design"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runDesign([]string{"--one-shot", "tele", "per-stage-design"}, &out, &errb); code != 0 {
+		t.Fatalf("runDesign --one-shot exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-design", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("design canvas missing: %v", err)
+	}
+	if !strings.Contains(string(body), "design via per-stage one-shot") {
+		t.Fatalf("design canvas missing fake-claude marker: %q", body)
+	}
+
+	dump, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("argv dump missing: %v", err)
+	}
+	args := string(dump)
+	// Run title is the user prompt under -p; the interactive kickoff
+	// must not leak in.
+	if !strings.Contains(args, "Per-stage design") {
+		t.Fatalf("expected run title as user prompt, got argv:\n%s", args)
+	}
+	if strings.Contains(args, "greet the operator") {
+		t.Fatalf("interactive kickoff string leaked into headless argv:\n%s", args)
+	}
+	if !strings.Contains(args, "-p\n") {
+		t.Fatalf("expected -p invocation, got argv:\n%s", args)
+	}
+}
+
+// Per-stage --one-shot on code runs under the sandbox clone with the
+// design canvas pre-seeded. Canvas lands; design canvas keeps the
+// content the design turn wrote.
+func TestRunCodeOneShot(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+	fakeOneShotClaude(t, "", 0, "written by fake claude")
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele", "Per-stage code"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	// Land the design canvas first so the precheck passes and code has
+	// something to work against.
+	out.Reset()
+	errb.Reset()
+	if code := runDesign([]string{"--one-shot", "tele", "per-stage-code"}, &out, &errb); code != 0 {
+		t.Fatalf("runDesign --one-shot exit=%d stderr=%q", code, errb.String())
+	}
+	designCanvas := filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "design", "content.md")
+	beforeDesign, err := os.ReadFile(designCanvas)
+	if err != nil {
+		t.Fatalf("design canvas missing after design stage: %v", err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runCode([]string{"--one-shot", "tele", "per-stage-code"}, &out, &errb); code != 0 {
+		t.Fatalf("runCode --one-shot exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "code", "content.md"))
+	if err != nil {
+		t.Fatalf("code canvas missing: %v", err)
+	}
+	if !strings.Contains(string(body), "written by fake claude") {
+		t.Fatalf("code canvas missing fake-claude marker: %q", body)
+	}
+
+	// Design canvas is unchanged by the code stage.
+	afterDesign, err := os.ReadFile(designCanvas)
+	if err != nil {
+		t.Fatalf("design canvas missing after code stage: %v", err)
+	}
+	if string(beforeDesign) != string(afterDesign) {
+		t.Fatalf("code stage mutated design canvas:\nbefore: %q\nafter: %q", beforeDesign, afterDesign)
+	}
+
+	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update code")
+	for _, want := range []string{
+		"work: update code",
+		"MoE-Document: code",
+		"MoE-Run: per-stage-code",
+		"MoE-Workflow: sdlc",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("commit log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+// runCode refuses — both interactive and headless — when the run has
+// no design canvas yet. The precheck fires before any session work, so
+// the run dir gets no code/ subdirectory and no `work: update code`
+// commit lands.
+func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele", "No design"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+
+	for _, args := range [][]string{
+		{"tele", "no-design"},
+		{"--one-shot", "tele", "no-design"},
+	} {
+		out.Reset()
+		errb.Reset()
+		if code := runCode(args, &out, &errb); code == 0 {
+			t.Fatalf("expected refusal exit for %v, got 0; stdout=%q stderr=%q", args, out.String(), errb.String())
+		}
+		if !strings.Contains(errb.String(), "design canvas missing") {
+			t.Fatalf("expected design-canvas error for %v, got stderr=%q", args, errb.String())
+		}
+		if !strings.Contains(errb.String(), "moe workflow sdlc design tele no-design") {
+			t.Fatalf("expected guidance to run design first for %v, got stderr=%q", args, errb.String())
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "no-design", "documents", "code")); !os.IsNotExist(err) {
+		t.Fatalf("code dir should not exist after refusals: err=%v", err)
+	}
+	if log := gitLog(t, root, "--format=%s", "--grep=^work: update code"); strings.TrimSpace(log) != "" {
+		t.Fatalf("no code commit should land on refusal; got:\n%s", log)
+	}
+}
+
