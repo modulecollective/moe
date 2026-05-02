@@ -628,5 +628,3 @@ func TestPromptNextStageOfferOneShot(t *testing.T) {
 		})
 	}
 }
-
-
