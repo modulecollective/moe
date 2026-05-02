@@ -167,39 +167,162 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	}
 }
 
-// TestPushMergeFFRejectedWhenDefaultMoved: if origin/main advanced
-// past the merge-base, the FF push fails and the run stays
-// in_progress — no partial cleanup.
-func TestPushMergeFFRejectedWhenDefaultMoved(t *testing.T) {
+// TestPushRebasesAndMergesWhenDefaultMovedCleanly: when origin/main
+// has advanced past the merge-base but the divergent commits don't
+// conflict with moe/<run>, the pre-push hook rebases the run branch
+// onto origin/main and the ff-merge proceeds. The original
+// "default moved" path used to bail with a manual-rebase nudge — the
+// hook is the bail's replacement.
+func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	f := newPushFixture(t)
 
-	// Advance origin/main independently so it's no longer a merge-base.
+	// Advance origin/main independently so the run branch is behind it.
+	// The divergent file (`other.txt`) doesn't overlap with `feature.txt`
+	// so the rebase is clean.
 	work := t.TempDir()
 	mustGit(t, "", "clone", "-b", "main", f.origin, work)
 	writeFile(t, filepath.Join(work, "other.txt"), "other\n")
 	mustGit(t, work, "add", "other.txt")
 	mustGit(t, work, "commit", "-m", "divergent")
 	mustGit(t, work, "push", "origin", "main")
+	movedBaseSHA := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
+
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "rebasing "+f.branch+" onto origin/main") {
+		t.Fatalf("expected rebase status line in stdout, got:\n%s", stdout)
+	}
+
+	// origin/main now contains both the divergent commit and the run's
+	// `feature.txt` commit, in that order. We don't pin the exact tip
+	// SHA — the rebase rewrote the run commit — but we do assert the
+	// merge happened (run flipped to merged, sandbox gone, branch deleted)
+	// and the divergent commit is still in origin's history.
+	headOut := strings.TrimSpace(mustGitOutput(t, "", "-C", f.origin, "rev-parse", "main"))
+	if headOut == movedBaseSHA {
+		t.Fatalf("origin/main should have advanced past the divergent commit after the rebased ff-push, still at %s", movedBaseSHA)
+	}
+	if anc := exec.Command("git", "-C", f.origin, "merge-base", "--is-ancestor", movedBaseSHA, "main"); anc.Run() != nil {
+		t.Fatalf("origin/main should still contain the divergent commit %s", movedBaseSHA)
+	}
+	if f.originHasRef("refs/heads/" + f.branch) {
+		t.Fatalf("expected %s deleted on origin", f.branch)
+	}
+	if sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("expected sandbox removed")
+	}
+	if md := f.reloadRun(); md.Status != run.StatusMerged {
+		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
+	}
+}
+
+// TestPushRebaseConflictOpensCodeSession: when the pre-push rebase
+// hits real conflicts (origin's divergent commit touches the same
+// file), push aborts the rebase, hands control to the chain-back
+// (a fresh code session), and exits non-zero. Origin is untouched
+// and the run stays in_progress so the operator's re-run after
+// the agent commits the resolution is the merge-trigger.
+func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
+	f := newPushFixture(t)
+
+	// Advance origin/main with a commit that touches the SAME file
+	// the run branch added — guarantees a rebase conflict.
+	work := t.TempDir()
+	mustGit(t, "", "clone", "-b", "main", f.origin, work)
+	writeFile(t, filepath.Join(work, "feature.txt"), "from-default\n")
+	mustGit(t, work, "add", "feature.txt")
+	mustGit(t, work, "commit", "-m", "default-side feature")
+	mustGit(t, work, "push", "origin", "main")
 	movedHead := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
 
-	_, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	// Stub the chain-back: capture the conflict context, do not actually
+	// launch Claude (the test process has no terminal/agent).
+	var captured *rebaseConflictError
+	var capturedRun *run.Metadata
+	prev := openCodeSessionForRebaseConflict
+	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *rebaseConflictError, _, _ io.Writer) int {
+		capturedRun = md
+		captured = c
+		return 1
+	}
+	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
+
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
 	if code == 0 {
-		t.Fatalf("expected non-zero on FF rejection; stderr=%s", stderr)
+		t.Fatalf("expected non-zero exit on rebase conflict; stdout=%s stderr=%s", stdout, stderr)
+	}
+	if captured == nil {
+		t.Fatal("expected chain-back to be invoked with conflict context")
+	}
+	if capturedRun == nil || capturedRun.ID != f.runID {
+		t.Fatalf("chain-back run.Metadata: want id=%s, got %#v", f.runID, capturedRun)
+	}
+	if captured.branch != f.branch || captured.defaultBranch != "main" {
+		t.Fatalf("chain-back conflict context: branch=%q default=%q", captured.branch, captured.defaultBranch)
+	}
+	if len(captured.conflicts) == 0 {
+		t.Fatalf("chain-back conflict list should name at least one path; got empty")
+	}
+	foundFeature := false
+	for _, p := range captured.conflicts {
+		if p == "feature.txt" {
+			foundFeature = true
+			break
+		}
+	}
+	if !foundFeature {
+		t.Fatalf("expected feature.txt in conflict list, got %v", captured.conflicts)
 	}
 
-	// Origin/main untouched, branch still around, sandbox still there,
-	// run still in_progress. Failure is all-or-nothing.
+	// Origin untouched — operator must re-run push after resolution.
 	if got := f.originHead(); got != movedHead {
-		t.Fatalf("origin/main shouldn't have moved: want %s, got %s", movedHead, got)
-	}
-	if !f.originHasRef("refs/heads/" + f.branch) {
-		t.Fatalf("%s shouldn't be deleted on origin after failed merge", f.branch)
+		t.Fatalf("origin/main must not advance on rebase conflict: want %s, got %s", movedHead, got)
 	}
 	if !sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("sandbox shouldn't be removed after failed merge")
+		t.Fatalf("sandbox must remain on rebase conflict so the agent can resolve")
 	}
 	if md := f.reloadRun(); md.Status != run.StatusInProgress {
-		t.Fatalf("status should remain in_progress after FF rejection, got %s", md.Status)
+		t.Fatalf("status should remain in_progress on rebase conflict, got %s", md.Status)
+	}
+
+	// Sandbox should be back to a clean working tree (rebase was --abort'd).
+	entries, err := git.Status(f.clonePath)
+	if err != nil {
+		t.Fatalf("git status sandbox: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("sandbox should be clean after rebase --abort, got %d entries", len(entries))
+	}
+
+	// Kickoff prompt should name the conflicting file and the target branch.
+	kickoff := buildRebaseConflictKickoff(captured)
+	if !strings.Contains(kickoff, "feature.txt") {
+		t.Fatalf("kickoff prompt missing feature.txt: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "origin/main") {
+		t.Fatalf("kickoff prompt missing origin/main: %s", kickoff)
+	}
+}
+
+// TestPushNoRebaseNeededFastPath: when origin/main hasn't moved past
+// the run branch's merge-base, the pre-push hook short-circuits with
+// no rebase and the merge proceeds as before. Asserts no rebase was
+// attempted (no "rebasing ..." line in stdout) so the fast path stays
+// fast.
+func TestPushNoRebaseNeededFastPath(t *testing.T) {
+	f := newPushFixture(t)
+
+	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "rebasing ") {
+		t.Fatalf("expected no rebase when origin hasn't moved, got:\n%s", stdout)
+	}
+	if got := f.originHead(); got != f.tipSHA {
+		t.Fatalf("origin/main: want %s, got %s", f.tipSHA, got)
 	}
 }
 

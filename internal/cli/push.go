@@ -120,7 +120,26 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := pushBranch(clonePath, branch, pj.Remote, stdout, stderr); err != nil {
+	if err := syncBranchBeforePush(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
+		var conflict *rebaseConflictError
+		if errors.As(err, &conflict) {
+			moePrintf(stderr, "%v\n", conflict)
+			return openCodeSessionForRebaseConflict(md, conflict, stdout, stderr)
+		}
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	// When origin already has moe/<run> (a prior `--pr` cycle, or a
+	// re-run after an agent-side rebase resolved a conflict), the
+	// upcoming push may not be a fast-forward — the local branch's
+	// history could differ from origin's. Force-with-lease is harmless
+	// when the two match and refuses to overwrite a concurrent update
+	// when they don't. Skip when origin has no copy of the branch:
+	// the first push is a plain push with -u to establish tracking.
+	force := originHasBranch(clonePath, branch)
+
+	if err := pushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -133,10 +152,18 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 
 // pushBranch pushes moe/<run> to origin with -u so a fresh branch
 // gets tracking set. Streams stdout/stderr so credential prompts and
-// progress stay visible.
-func pushBranch(clonePath, branch, remote string, stdout, stderr io.Writer) error {
+// progress stay visible. force=true switches to --force-with-lease for
+// the case where origin already has the branch and the local copy may
+// have been rewritten (rebased) since the previous push; the lease
+// still refuses to overwrite a concurrent third-party update.
+func pushBranch(clonePath, branch, remote string, force bool, stdout, stderr io.Writer) error {
 	moePrintf(stdout, "pushing %s to %s...\n", branch, remote)
-	cmd := exec.Command("git", "-C", clonePath, "push", "-u", "origin", branch)
+	args := []string{"-C", clonePath, "push", "-u"}
+	if force {
+		args = append(args, "--force-with-lease")
+	}
+	args = append(args, "origin", branch)
+	cmd := exec.Command("git", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -144,6 +171,149 @@ func pushBranch(clonePath, branch, remote string, stdout, stderr io.Writer) erro
 		return fmt.Errorf("push: git push: %w", err)
 	}
 	return nil
+}
+
+// rebaseConflictError carries the failed rebase's diagnostic context
+// from syncBranchBeforePush up to runPush, where it triggers the
+// chain-back to a fresh code session.
+type rebaseConflictError struct {
+	branch        string
+	defaultBranch string
+	conflicts     []string
+}
+
+func (e *rebaseConflictError) Error() string {
+	return fmt.Sprintf("push: rebase %s onto origin/%s hit conflicts in %d file(s); aborted",
+		e.branch, e.defaultBranch, len(e.conflicts))
+}
+
+// syncBranchBeforePush fetches origin's default branch, then rebases
+// moe/<run> onto it if origin has moved past the merge-base. Returns
+// nil when the branch was already up to date or after a clean rebase,
+// and *rebaseConflictError on a rebase conflict (the rebase is aborted
+// before returning so the clone is left clean for the chain-back).
+func syncBranchBeforePush(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
+	moePrintf(stdout, "fetching origin/%s...\n", defaultBranch)
+	if out, err := git.Combined(clonePath, "fetch", "origin", defaultBranch); err != nil {
+		return fmt.Errorf("push: fetch origin/%s: %w (%s)", defaultBranch, err, out)
+	}
+
+	originRef := "refs/remotes/origin/" + defaultBranch
+	originSHA, err := git.RevParse(clonePath, originRef)
+	if err != nil {
+		return fmt.Errorf("push: resolve %s: %w", originRef, err)
+	}
+	branchSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("push: resolve %s: %w", branch, err)
+	}
+
+	// origin/<default> already an ancestor of moe/<run> means the run
+	// branch already includes everything on default — no rebase needed.
+	if _, err := git.Combined(clonePath, "merge-base", "--is-ancestor", originSHA, branchSHA); err == nil {
+		return nil
+	}
+
+	moePrintf(stdout, "rebasing %s onto origin/%s...\n", branch, defaultBranch)
+	out, err := git.Combined(clonePath, "rebase", originRef)
+	if err != nil {
+		// Capture the conflict file list before the abort discards the
+		// rebase state, so the kickoff prompt can name them.
+		conflicts := unmergedPaths(clonePath)
+		if _, abortErr := git.Combined(clonePath, "rebase", "--abort"); abortErr != nil {
+			// If --abort itself fails the clone is in a bad state and the
+			// operator needs to look — surface that specifically.
+			return fmt.Errorf("push: rebase %s onto origin/%s failed and --abort also failed: %w (%s)",
+				branch, defaultBranch, abortErr, out)
+		}
+		return &rebaseConflictError{
+			branch:        branch,
+			defaultBranch: defaultBranch,
+			conflicts:     conflicts,
+		}
+	}
+	moePrintf(stdout, "rebased %s onto origin/%s\n", branch, defaultBranch)
+	return nil
+}
+
+// originHasBranch returns true when origin currently advertises
+// refs/heads/<branch> — i.e. a prior `--pr` cycle already pushed this
+// branch and the upcoming push needs --force-with-lease (when paired
+// with a rebase). Uses `git ls-remote` because the clone may not have
+// a remote-tracking ref for moe/<run>.
+func originHasBranch(clonePath, branch string) bool {
+	out, err := git.Output(clonePath, "ls-remote", "--heads", "origin", branch)
+	if err != nil {
+		// Treat ls-remote failure as "unknown" → fall back to plain push.
+		// A real network failure will surface again on the actual push.
+		return false
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+// unmergedPaths reports the files git left in a conflicted (UU/AA/...)
+// state — the same set `git status -s` would show with U/A markers. Used
+// to name conflicting paths in the chain-back kickoff.
+func unmergedPaths(clonePath string) []string {
+	entries, err := git.Status(clonePath)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		// XY codes: UU/AA/DD/AU/UA/DU/UD all indicate unmerged state.
+		if e.XY[0] == 'U' || e.XY[1] == 'U' || e.XY == "AA" || e.XY == "DD" {
+			out = append(out, e.Path)
+		}
+	}
+	return out
+}
+
+// openCodeSessionForRebaseConflict is the chain-back: spawn a fresh
+// interactive code session against the same run with a kickoff prompt
+// that names the conflicting paths and the target branch, then exit
+// non-zero so the operator knows to re-run `push` after the agent
+// resolves and commits.
+//
+// Overridable in tests; the default invokes runStageSession directly
+// with docID="code", same as `moe wf <wf> code` would.
+var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseConflictError, stdout, stderr io.Writer) int {
+	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts, commit, then re-run push")
+	kickoff := buildRebaseConflictKickoff(conflict)
+	_ = runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+		NeedsSandbox:  true,
+		InitialPrompt: kickoff,
+		// SkipNextStage so the post-turn prompt doesn't offer to chain
+		// straight into push — the operator needs to re-run push by
+		// hand once the conflict is resolved and committed.
+		SkipNextStage: true,
+	}, stdout, stderr)
+	// Always exit non-zero from push — the merge didn't happen, and the
+	// operator's next invocation should be `moe wf <wf> push` again.
+	return 1
+}
+
+// buildRebaseConflictKickoff is the agent-facing kickoff prompt for a
+// chain-back code session. Names the target branch, lists the
+// conflicting paths (when git left any), and tells the agent what
+// "done" looks like — resolve, commit, exit so the operator can re-run
+// push.
+func buildRebaseConflictKickoff(c *rebaseConflictError) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "`moe workflow ... push` just tried to rebase %s onto origin/%s and hit conflicts. ",
+		c.branch, c.defaultBranch)
+	b.WriteString("The rebase has been aborted, so the working tree is clean and the branch is back at its pre-rebase tip — you are starting from the conflict state, not mid-rebase.\n\n")
+	if len(c.conflicts) > 0 {
+		b.WriteString("Files git flagged as conflicting on the abandoned rebase:\n")
+		for _, p := range c.conflicts {
+			fmt.Fprintf(&b, "  - %s\n", p)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "Re-run the rebase yourself (`git rebase origin/%s` from the sandbox), resolve the conflicts, ",
+		c.defaultBranch)
+	b.WriteString("verify the result still does what the design intended, and commit. Then exit the session and tell the operator to re-run `moe wf <wf> push` to ship.\n")
+	return b.String()
 }
 
 // openPRPath is the --pr behavior: open (or re-use) a PR for the
@@ -247,7 +417,8 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
 		}
 		moePrintf(stderr, "%v\n", err)
-		moePrintf(stderr, "       default may have moved past the merge-base — rebase inside the sandbox or retry with --pr\n")
+		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe workflow %s push %s %s`\n",
+			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
 		return 1
 	}
 
