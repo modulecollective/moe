@@ -23,18 +23,19 @@ func init() {
 	})
 	quick.Register(pushCmd, "code")
 	RegisterWorkflow(quick)
+	Register(quick.Command())
 }
 
 func runQuickCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("quick code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow quick code <project> <run>")
+		moePrintln(stderr, "usage: moe quick code <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. There is")
 		moePrintln(stderr, "no design stage in this workflow — the canvas is the brief. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
-		moePrintln(stderr, "from other activity until `moe workflow quick push` ships it.")
+		moePrintln(stderr, "from other activity until `moe quick push` ships it.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

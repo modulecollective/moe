@@ -78,53 +78,6 @@ func TestIdeaRegistered(t *testing.T) {
 	}
 }
 
-// TestIdeaExposedViaWorkflowDispatcher confirms the idea verbs are
-// reachable through `moe workflow idea <verb>` as well as the short
-// top-level form. Guards the dual-registration wiring in idea.go's
-// init() from silently reverting.
-func TestIdeaExposedViaWorkflowDispatcher(t *testing.T) {
-	wf, err := LookupWorkflow("idea")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !wf.ExposedViaCLI {
-		t.Fatal("idea workflow should be exposed via `moe workflow`")
-	}
-
-	// `moe workflow idea` usage lists the four verbs.
-	var out, errb bytes.Buffer
-	if code := Run([]string{"workflow", "idea"}, &out, &errb); code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	for _, want := range []string{"new", "edit", "close", "list", "cat"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("workflow idea usage missing verb %q: %q", want, out.String())
-		}
-	}
-
-	// `moe workflow idea list` and `moe wf idea list` both dispatch to
-	// the same handler, on a project with no open ideas (exits 0, no
-	// lines printed) — enough to prove wiring without needing full
-	// fixtures.
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	for _, verb := range []string{"workflow", "wf"} {
-		out.Reset()
-		errb.Reset()
-		code := Run([]string{verb, "idea", "list", "tele"}, &out, &errb)
-		if code != 0 {
-			t.Fatalf("%s idea list: exit=%d stderr=%q", verb, code, errb.String())
-		}
-		if out.Len() != 0 {
-			t.Fatalf("%s idea list (empty project): expected no stdout, got %q", verb, out.String())
-		}
-	}
-}
-
 func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)

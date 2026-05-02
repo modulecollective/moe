@@ -18,7 +18,7 @@ func TestWorkflowNoArgsPrintsUsage(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "usage: moe workflow wf <subcommand>") {
+	if !strings.Contains(got, "usage: moe wf <subcommand>") {
 		t.Fatalf("missing usage header: %q", got)
 	}
 	for _, want := range []string{"alpha", "beta", "A", "B"} {
@@ -41,7 +41,7 @@ func TestWorkflowHelpFlags(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("%s: exit=%d stderr=%q", arg, code, errb.String())
 		}
-		if !strings.Contains(out.String(), "usage: moe workflow wf <subcommand>") {
+		if !strings.Contains(out.String(), "usage: moe wf <subcommand>") {
 			t.Fatalf("%s: expected usage in stdout, got %q", arg, out.String())
 		}
 	}
@@ -101,28 +101,41 @@ func TestWorkflowRegisterPanicsOnDuplicate(t *testing.T) {
 }
 
 // TestSDLCRegistered verifies the init() in sdlc.go actually wired the
-// sdlc workflow into the registry and exposed it via `moe workflow`.
-// Guards against a future refactor silently dropping the registration.
+// sdlc workflow into the registry and exposed it as the top-level
+// `moe sdlc` command. Guards against a future refactor silently
+// dropping either registration.
 func TestSDLCRegistered(t *testing.T) {
 	wf, err := LookupWorkflow("sdlc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !wf.ExposedViaCLI {
-		t.Fatal("sdlc workflow should be exposed via `moe workflow`")
-	}
 	if wf.Summary == "" {
 		t.Fatal("sdlc workflow summary should not be empty")
 	}
 	var out, errb bytes.Buffer
-	// `moe workflow sdlc` (no subcommand) should print sub-usage and exit 0.
-	code := Run([]string{"workflow", "sdlc"}, &out, &errb)
+	// `moe sdlc` (no subcommand) should print sub-usage and exit 0.
+	code := Run([]string{"sdlc"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	for _, want := range []string{"new", "design", "code", "push"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("sdlc usage missing subcommand %q: %q", want, out.String())
+		}
+	}
+}
+
+// TestStageWorkflowsRegisteredAsTopLevel guards the dual-registration
+// contract: every stage-laddered workflow installs a top-level `moe
+// <name>` Command alongside RegisterWorkflow. A future refactor that
+// silently drops the Register(wf.Command()) call would break the only
+// way operators invoke these workflows. Mirror image of the old "all
+// workflows reachable under moe workflow" test that lived in the
+// dispatcher.
+func TestStageWorkflowsRegisteredAsTopLevel(t *testing.T) {
+	for _, name := range []string{"sdlc", "kb", "quick", "twin"} {
+		if _, ok := commands[name]; !ok {
+			t.Fatalf("expected top-level command %q to be registered", name)
 		}
 	}
 }

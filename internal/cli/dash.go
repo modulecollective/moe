@@ -420,7 +420,7 @@ func buildTwinRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.Time) string {
 	det, err := wiki.DetectUnrecordedEdits(cfg)
 	if err == nil && len(det.UnrecordedDocs) > 0 {
-		return fmt.Sprintf("unrecorded edits to %s — run `moe workflow twin claim %s`",
+		return fmt.Sprintf("unrecorded edits to %s — run `moe twin claim %s`",
 			strings.Join(det.UnrecordedDocs, ", "), cfg.Project)
 	}
 	cp, ok, err := wiki.ReadCheckpoint(cfg.ContentDir)
@@ -428,7 +428,7 @@ func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.T
 		return ""
 	}
 	if !ok || cp.LastIngestAt == "" {
-		return fmt.Sprintf("never reflected — run `moe workflow twin reflect %s`", cfg.Project)
+		return fmt.Sprintf("never reflected — run `moe twin reflect %s`", cfg.Project)
 	}
 	last, err := time.Parse(time.RFC3339, cp.LastIngestAt)
 	if err != nil {

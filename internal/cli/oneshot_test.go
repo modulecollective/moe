@@ -128,7 +128,7 @@ func TestRunNewOneShotChainsDesignAndCode(t *testing.T) {
 	// Chain hands off to promptNextStage; suppressNextStagePrompt
 	// pins stdin to a non-tty so it falls through to the `next: …`
 	// hint instead of the interactive [N/m/p] ship prompt.
-	if !strings.Contains(out.String(), "next: moe workflow sdlc push tele test-feature") {
+	if !strings.Contains(out.String(), "next: moe sdlc push tele test-feature") {
 		t.Fatalf("expected post-chain next-stage hint in stdout, got: %q", out.String())
 	}
 }
@@ -547,7 +547,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		if !strings.Contains(errb.String(), "design canvas missing") {
 			t.Fatalf("expected design-canvas error for %v, got stderr=%q", args, errb.String())
 		}
-		if !strings.Contains(errb.String(), "moe workflow sdlc design tele no-design") {
+		if !strings.Contains(errb.String(), "moe sdlc design tele no-design") {
 			t.Fatalf("expected guidance to run design first for %v, got stderr=%q", args, errb.String())
 		}
 	}
@@ -607,7 +607,7 @@ func TestPromptNextStageOfferOneShot(t *testing.T) {
 			t.Cleanup(func() { os.Stdin = oldStdin })
 
 			var stdout, stderr bytes.Buffer
-			if code := promptStageNextStage(next, md, "moe workflow "+tc.workflow+" code tele fix-it", &stdout, &stderr); code != 0 {
+			if code := promptStageNextStage(next, md, "moe "+tc.workflow+" code tele fix-it", &stdout, &stderr); code != 0 {
 				t.Fatalf("promptStageNextStage exit=%d stderr=%q", code, stderr.String())
 			}
 			if !strings.Contains(stdout.String(), tc.wantLabel) {

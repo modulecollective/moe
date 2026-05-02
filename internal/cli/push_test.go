@@ -143,7 +143,7 @@ func (f *pushFixture) runInRoot(args ...string) (string, string, int) {
 func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -188,7 +188,7 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	mustGit(t, work, "push", "origin", "main")
 	movedBaseSHA := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -250,7 +250,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on rebase conflict; stdout=%s stderr=%s", stdout, stderr)
 	}
@@ -297,13 +297,17 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 		t.Fatalf("sandbox should be clean after rebase --abort, got %d entries", len(entries))
 	}
 
-	// Kickoff prompt should name the conflicting file and the target branch.
-	kickoff := buildRebaseConflictKickoff(captured)
+	// Kickoff prompt should name the conflicting file, the target branch,
+	// and the actual workflow verb the operator should re-run.
+	kickoff := buildRebaseConflictKickoff("sdlc", captured)
 	if !strings.Contains(kickoff, "feature.txt") {
 		t.Fatalf("kickoff prompt missing feature.txt: %s", kickoff)
 	}
 	if !strings.Contains(kickoff, "origin/main") {
 		t.Fatalf("kickoff prompt missing origin/main: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "moe sdlc push") {
+		t.Fatalf("kickoff prompt missing `moe sdlc push`: %s", kickoff)
 	}
 }
 
@@ -315,7 +319,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 func TestPushNoRebaseNeededFastPath(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -349,7 +353,7 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 
 	mainBefore := f.originHead()
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", "--pr", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -403,13 +407,13 @@ func addInsteadOfRewrite(t *testing.T, fake, real string) {
 func TestPushIdempotentOnMergedRun(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("first push: exit=%d stderr=%s", code, stderr)
 	}
 	_ = stdout
 
-	stdout, stderr, code = f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -435,7 +439,7 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	mustGit(t, f.root, "add", filepath.Join("projects", f.projectID, "runs", f.runID, "run.json"))
 	mustGit(t, f.root, "commit", "-m", "sync: close\n\nMoE-Run: "+f.runID+"\nMoE-Closed: https://example.com/pr/1\n")
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -528,7 +532,7 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	code := promptPushNextStage(next, md, "moe workflow sdlc push tele fix-it", &stdout, &stderr)
+	code := promptPushNextStage(next, md, "moe sdlc push tele fix-it", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("promptPushNextStage exit=%d stderr=%s", code, stderr.String())
 	}
@@ -576,7 +580,7 @@ func TestPushRunsProjectHooksBeforeBuiltins(t *testing.T) {
 `, canary)
 	writeHookScript(t, f.root, f.projectID, "pre-push", "10-canary.sh", body)
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -630,7 +634,7 @@ exit 7
 	t.Cleanup(func() { openCodeSessionForHookFailure = prev })
 
 	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on hook failure; stdout=%s stderr=%s", stdout, stderr)
 	}
@@ -660,12 +664,15 @@ exit 7
 		t.Fatalf("status should remain in_progress on hook failure, got %s", md.Status)
 	}
 
-	kickoff := buildHookFailureKickoff(captured)
+	kickoff := buildHookFailureKickoff("sdlc", captured)
 	if !strings.Contains(kickoff, "10-fail.sh") {
 		t.Fatalf("kickoff missing script name: %s", kickoff)
 	}
 	if !strings.Contains(kickoff, "intentional hook output") {
 		t.Fatalf("kickoff missing captured output: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "moe sdlc push") {
+		t.Fatalf("kickoff missing `moe sdlc push`: %s", kickoff)
 	}
 }
 
@@ -680,7 +687,7 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 		t.Fatalf("fixture should not have a hooks dir; stat err=%v", err)
 	}
 
-	stdout, stderr, code := f.runInRoot("workflow", "sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}

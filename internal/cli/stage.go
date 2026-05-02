@@ -48,7 +48,7 @@ type stageSessionOpts struct {
 	// terminal (no stdin), the workflow's oneshot.md fragment is
 	// appended to the system prompt, and transcript mirroring is
 	// skipped (the canvas + per-turn commit are the durable
-	// artifacts). Set by `moe wf sdlc new --one-shot`.
+	// artifacts). Set by `moe sdlc new --one-shot`.
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by one-shot, which composes its own
@@ -175,7 +175,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 
 			// Headless mode has no operator on stdin to type the seed
 			// prompt, so default it to the run title — the same shape
-			// `moe wf sdlc new --one-shot` has been seeding by hand.
+			// `moe sdlc new --one-shot` has been seeding by hand.
 			// Callers that pass an explicit InitialPrompt keep theirs.
 			initialPrompt := opts.InitialPrompt
 			if opts.Headless && initialPrompt == "" {
@@ -539,7 +539,7 @@ func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) in
 	if kind != NextKindStage || next == nil {
 		return 0
 	}
-	hint := fmt.Sprintf("moe workflow %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
+	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
 		return 0
@@ -583,7 +583,7 @@ func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, 
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
-// (`moe workflow <wf> push`), or PR (`moe workflow <wf> push --pr`).
+// (`moe <wf> push`), or PR (`moe <wf> push --pr`).
 // Parsing is case-insensitive; the label capitalization just signals
 // the default. N-as-default is load-bearing — a reflex Enter must
 // never ship.

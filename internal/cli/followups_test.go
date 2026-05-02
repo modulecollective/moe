@@ -113,7 +113,7 @@ func TestSDLCCloseHarvestsFollowups(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -180,7 +180,7 @@ func TestSDLCCloseAutoDisambiguatesSlugCollision(t *testing.T) {
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `foo` — Foo follow-up\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -205,7 +205,7 @@ func TestSDLCCloseAbortsOnMalformedFollowup(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on malformed followup, stdout=%q", out.String())
 	}
@@ -236,7 +236,7 @@ func TestSDLCCloseSkipsAlreadyCheckedLines(t *testing.T) {
 	}, "\n")+"\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -258,7 +258,7 @@ func TestSDLCCloseEmptyFollowupsIsClean(t *testing.T) {
 	// No followups.md on disk; --no-edit means we don't scaffold or open
 	// the editor — close should succeed with no harvest side-effects.
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -279,7 +279,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 
 	// First close: followups.md is dirty/untracked — should still succeed.
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("expected harvest to tolerate untracked followups.md, got exit=%d stderr=%q", code, errb.String())
 	}
@@ -292,7 +292,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 	}
 	out.Reset()
 	errb.Reset()
-	code = Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ship-it-2"}, &out, &errb)
+	code = Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it-2"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected close to refuse on unrelated dirty file, stdout=%q", out.String())
 	}

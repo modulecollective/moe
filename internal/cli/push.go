@@ -42,7 +42,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow <wf> push [--pr] <project> <run>")
+		moePrintln(stderr, "usage: moe <wf> push [--pr] <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
@@ -304,10 +304,10 @@ func unmergedPaths(clonePath string) []string {
 // resolves and commits.
 //
 // Overridable in tests; the default invokes runStageSession directly
-// with docID="code", same as `moe wf <wf> code` would.
+// with docID="code", same as `moe <wf> code` would.
 var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseConflictError, stdout, stderr io.Writer) int {
 	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts, commit, then re-run push")
-	kickoff := buildRebaseConflictKickoff(conflict)
+	kickoff := buildRebaseConflictKickoff(md.Workflow, conflict)
 	_ = runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
 		InitialPrompt: kickoff,
@@ -317,7 +317,7 @@ var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseCo
 		SkipNextStage: true,
 	}, stdout, stderr)
 	// Always exit non-zero from push — the merge didn't happen, and the
-	// operator's next invocation should be `moe wf <wf> push` again.
+	// operator's next invocation should be `moe <wf> push` again.
 	return 1
 }
 
@@ -326,10 +326,10 @@ var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseCo
 // conflicting paths (when git left any), and tells the agent what
 // "done" looks like — resolve, commit, exit so the operator can re-run
 // push.
-func buildRebaseConflictKickoff(c *rebaseConflictError) string {
+func buildRebaseConflictKickoff(workflow string, c *rebaseConflictError) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "`moe workflow ... push` just tried to rebase %s onto origin/%s and hit conflicts. ",
-		c.branch, c.defaultBranch)
+	fmt.Fprintf(&b, "`moe %s push` just tried to rebase %s onto origin/%s and hit conflicts. ",
+		workflow, c.branch, c.defaultBranch)
 	b.WriteString("The rebase has been aborted, so the working tree is clean and the branch is back at its pre-rebase tip — you are starting from the conflict state, not mid-rebase.\n\n")
 	if len(c.conflicts) > 0 {
 		b.WriteString("Files git flagged as conflicting on the abandoned rebase:\n")
@@ -340,14 +340,14 @@ func buildRebaseConflictKickoff(c *rebaseConflictError) string {
 	}
 	fmt.Fprintf(&b, "Re-run the rebase yourself (`git rebase origin/%s` from the sandbox), resolve the conflicts, ",
 		c.defaultBranch)
-	b.WriteString("verify the result still does what the design intended, and commit. Then exit the session and tell the operator to re-run `moe wf <wf> push` to ship.\n")
+	fmt.Fprintf(&b, "verify the result still does what the design intended, and commit. Then exit the session and tell the operator to re-run `moe %s push` to ship.\n", workflow)
 	return b.String()
 }
 
 // openPRPath is the --pr behavior: open (or re-use) a PR for the
 // already-pushed branch and record the first push's state. The
 // sandbox is intentionally left in place — iteration via
-// `moe workflow <wf> code` stays a one-liner until the PR merges.
+// `moe <wf> code` stays a one-liner until the PR merges.
 func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
 	ghRepo, err := ghRepoSpec(pj.Remote)
 	if err != nil {
@@ -445,7 +445,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
 		}
 		moePrintf(stderr, "%v\n", err)
-		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe workflow %s push %s %s`\n",
+		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe %s push %s %s`\n",
 			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
 		return 1
 	}
@@ -546,19 +546,19 @@ func checkCodeContent(root string, md *run.Metadata) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe workflow %s code %s %s` first", md.Workflow, md.Project, md.ID)
+			return fmt.Errorf("push: code document not written yet; run `moe %s code %s %s` first", md.Workflow, md.Project, md.ID)
 		}
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe workflow %s code %s %s` and produce a PR body first", md.Workflow, md.Project, md.ID)
+		return fmt.Errorf("push: code document is empty; run `moe %s code %s %s` and produce a PR body first", md.Workflow, md.Project, md.ID)
 	}
 	return nil
 }
 
 func sandboxClonePath(root string, md *run.Metadata) (string, error) {
 	if !sandbox.Exists(root, md.Project, md.ID) {
-		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe workflow %s code %s %s` first", md.Project, md.ID, md.Workflow, md.Project, md.ID)
+		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe %s code %s %s` first", md.Project, md.ID, md.Workflow, md.Project, md.ID)
 	}
 	return sandbox.Ensure(root, md.Project, md.ID)
 }
@@ -578,7 +578,7 @@ func checkCleanWorkTree(clonePath string) error {
 	}
 	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
        sandbox: %s
-       re-run `+"`moe workflow <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath)
+       re-run `+"`moe <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath)
 }
 
 // checkBranchHasCommits confirms the sandbox clone has branch `branch`
@@ -588,7 +588,7 @@ func checkBranchHasCommits(clonePath, branch, base string) error {
 	// First, does the branch exist?
 	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe workflow <wf> code` and have the agent commit", branch)
+		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe <wf> code` and have the agent commit", branch)
 	}
 	// Then, is it ahead of base? Use `git rev-list --count base..branch`.
 	// If base isn't a known ref, skip this check — we can't tell, but the

@@ -11,20 +11,17 @@ import (
 
 // TestKBRegistered is the partner to TestSDLCRegistered: it guards
 // against init() ordering / registration drift silently dropping the
-// kb workflow from the dispatcher.
+// kb workflow's top-level entry.
 func TestKBRegistered(t *testing.T) {
 	wf, err := LookupWorkflow("kb")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !wf.ExposedViaCLI {
-		t.Fatal("kb workflow should be exposed via `moe workflow`")
-	}
 	if wf.Summary == "" {
 		t.Fatal("kb workflow summary should not be empty")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "kb"}, &out, &errb)
+	code := Run([]string{"kb"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -62,11 +59,11 @@ func TestKBLintIsFacadeNotStage(t *testing.T) {
 // arguments are missing.
 func TestKBLintRequiresProjectArg(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "kb", "lint"}, &out, &errb)
+	code := Run([]string{"kb", "lint"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on missing project arg, got 0\nstderr: %s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "usage: moe workflow kb lint <project>") {
+	if !strings.Contains(errb.String(), "usage: moe kb lint <project>") {
 		t.Fatalf("missing usage line in stderr:\n%s", errb.String())
 	}
 }

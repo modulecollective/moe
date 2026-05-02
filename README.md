@@ -72,14 +72,14 @@ The current workflows are:
 | `kb`      | `research` → `summarize`              | knowledge-base articles              |
 
 Each stage is a subcommand that opens a Claude Code session on that
-stage's document. All workflow verbs live under `moe workflow <name>
-…` (or `moe wf …` for short). For example:
+stage's document. Each workflow is its own top-level verb — `moe sdlc`,
+`moe kb`, `moe quick`, `moe twin`. For example:
 
 ```sh
-moe workflow sdlc new "add batch support"   # open a new run
-moe workflow sdlc design                    # threaded chat on design/content.md
-moe workflow sdlc code                      # agent codes inside a sandbox clone
-moe workflow sdlc push --pr                 # open a PR against the target repo
+moe sdlc new "add batch support"   # open a new run
+moe sdlc design                    # threaded chat on design/content.md
+moe sdlc code                      # agent codes inside a sandbox clone
+moe sdlc push --pr                 # open a PR against the target repo
 ```
 
 `moe dash` shows your open runs and backlog. `moe idea` captures

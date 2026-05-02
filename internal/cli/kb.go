@@ -72,6 +72,7 @@ func init() {
 	// shape.
 	kb.RegisterFacade(lintCommand("kb", kbLintWikiBuilder))
 	RegisterWorkflow(kb)
+	Register(kb.Command())
 }
 
 // kbLintWikiBuilder is the (root, projectID) → *wiki.Config adapter
@@ -87,7 +88,7 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb research", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow kb research <project> <run>")
+		moePrintln(stderr, "usage: moe kb research <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the research bibliography.")
 		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
@@ -112,7 +113,7 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb summarize", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workflow kb summarize <project> <run>")
+		moePrintln(stderr, "usage: moe kb summarize <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
 		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")

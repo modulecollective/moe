@@ -52,7 +52,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "abandon-me"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "abandon-me"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -99,7 +99,7 @@ func TestSDLCCloseWithoutSandboxIsFine(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "never-opened"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "never-opened"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -128,7 +128,7 @@ func TestSDLCCloseRefusesPushed(t *testing.T) {
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 			var out, errb bytes.Buffer
-			code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "done-" + tc.name}, &out, &errb)
+			code := Run([]string{"sdlc", "close", "--no-edit", "tele", "done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -168,7 +168,7 @@ func TestSDLCCloseWorkflowMismatch(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "not-sdlc"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "not-sdlc"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on workflow mismatch, stdout=%q", out.String())
 	}
@@ -187,7 +187,7 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "sdlc", "close", "--no-edit", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
 	}
@@ -204,7 +204,7 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "kb", "close", "--no-edit", "tele", "dead-end"}, &out, &errb)
+	code := Run([]string{"kb", "close", "--no-edit", "tele", "dead-end"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -250,7 +250,7 @@ func TestKBCloseLeavesUnrelatedPathsAlone(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "kb", "close", "--no-edit", "tele", "kb-run"}, &out, &errb)
+	code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-run"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -278,7 +278,7 @@ func TestKBCloseRefusesTerminal(t *testing.T) {
 
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 			var out, errb bytes.Buffer
-			code := Run([]string{"workflow", "kb", "close", "--no-edit", "tele", "kb-done-" + tc.name}, &out, &errb)
+			code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -294,12 +294,11 @@ func TestKBCloseRefusesTerminal(t *testing.T) {
 }
 
 // TestSDLCCloseRegisteredInUsage: the dispatcher's usage listing is
-// what an operator discovers via `moe workflow sdlc`; a wiring
-// regression should show up here even if the command itself still
-// works.
+// what an operator discovers via `moe sdlc`; a wiring regression
+// should show up here even if the command itself still works.
 func TestSDLCCloseRegisteredInUsage(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workflow", "sdlc"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "close") {
@@ -309,7 +308,7 @@ func TestSDLCCloseRegisteredInUsage(t *testing.T) {
 
 func TestKBCloseRegisteredInUsage(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workflow", "kb"}, &out, &errb); code != 0 {
+	if code := Run([]string{"kb"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "close") {

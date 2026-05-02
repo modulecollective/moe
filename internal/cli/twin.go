@@ -96,4 +96,5 @@ func init() {
 	twin.RegisterFacade(lintCommand("twin", twinWikiBuilder))
 	twin.RegisterFacade(claimCommand("twin", twinWikiBuilder))
 	RegisterWorkflow(twin)
+	Register(twin.Command())
 }

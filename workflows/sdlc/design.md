@@ -55,8 +55,8 @@ Design is ready to hand back when:
    first few implementation steps are obvious.
 2. Known unknowns are written down as open questions the operator can
    triage.
-3. The operator has what they need to move on to `moe workflow sdlc
-   code` — or to say "not yet, because X."
+3. The operator has what they need to move on to `moe sdlc code` —
+   or to say "not yet, because X."
 
 If you're polishing prose, you're done. Stop and hand it over.
 

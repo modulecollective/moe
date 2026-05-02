@@ -142,7 +142,7 @@ func Execute(r Request) error {
 // (system prompt + add-dirs + sandbox settings + positional user
 // prompt), but no session id, no REPL, no transcript mirroring: the
 // agent gets one turn, produces its work directly on disk, and exits.
-// Used by `moe workflow sdlc new --one-shot` to chain stage turns
+// Used by `moe sdlc new --one-shot` to chain stage turns
 // without putting the operator on stdin.
 type OneShotRequest struct {
 	// Root is the bureaucracy repo root. Passed as --add-dir so the

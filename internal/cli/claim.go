@@ -35,7 +35,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 	fs := flag.NewFlagSet(workflow+" claim", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe workflow %s claim <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s claim <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Record context for decided edits the operator made directly to managed docs.")
 		moePrintln(stderr, "Out-of-band relative to runs (no stage, no canvas, no run.json — surfaces")

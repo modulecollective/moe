@@ -162,10 +162,10 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 // see openCodeSessionForRebaseConflict.
 //
 // Overridable in tests; the default invokes runStageSession with
-// docID="code", same as `moe wf <wf> code` would.
+// docID="code", same as `moe <wf> code` would.
 var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, stdout, stderr io.Writer) int {
 	moePrintln(stderr, "       opening a fresh code session — fix the hook failure, commit, then re-run push")
-	kickoff := buildHookFailureKickoff(fail)
+	kickoff := buildHookFailureKickoff(md.Workflow, fail)
 	_ = runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
 		InitialPrompt: kickoff,
@@ -181,9 +181,9 @@ var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, st
 // hook failure. Names the event and script, dumps the captured output
 // verbatim, and tells the agent what "done" looks like — fix, commit,
 // exit so the operator can re-run push.
-func buildHookFailureKickoff(f *hookFailure) string {
+func buildHookFailureKickoff(workflow string, f *hookFailure) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "`moe workflow ... push` ran the %s hook `%s` and it exited non-zero.\n\n", f.event, f.script)
+	fmt.Fprintf(&b, "`moe %s push` ran the %s hook `%s` and it exited non-zero.\n\n", workflow, f.event, f.script)
 	if strings.TrimSpace(f.output) != "" {
 		b.WriteString("Output:\n\n")
 		b.WriteString(f.output)
@@ -196,6 +196,6 @@ func buildHookFailureKickoff(f *hookFailure) string {
 	}
 	b.WriteString("This needs to be fixed before we can continue. Investigate the failure, ")
 	b.WriteString("apply the fix in the sandbox, commit, and exit the session. Then tell the ")
-	b.WriteString("operator to re-run `moe wf <wf> push` to ship.\n")
+	fmt.Fprintf(&b, "operator to re-run `moe %s push` to ship.\n", workflow)
 	return b.String()
 }

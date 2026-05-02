@@ -15,8 +15,8 @@ import (
 )
 
 // newRunCommand returns a Command suitable for registering under a
-// workflow as its `new` entry point (e.g., `moe workflow sdlc new`,
-// `moe workflow kb new`). The workflow name is baked into the closure
+// workflow as its `new` entry point (e.g., `moe sdlc new`,
+// `moe kb new`). The workflow name is baked into the closure
 // so each facade is a thin wrapper — all the real work (slug
 // derivation, collision suffixing, git commit, next-stage hint) lives
 // in runNew.
@@ -35,8 +35,8 @@ func newRunCommand(workflowName string) *Command {
 // the run, commits it, and prints the first stage's invocation so the
 // operator can move straight into work. The workflow is baked in via
 // the caller — there is no --workflow flag here, because the workflow
-// is implicit in which workflow the operator typed (`moe workflow sdlc
-// new` vs `moe workflow kb new`).
+// is implicit in which workflow the operator typed (`moe sdlc new`
+// vs `moe kb new`).
 //
 // --from-idea=<slug> promotes an idea run into a fresh run in the
 // target workflow: the idea's title and canvas seed the new run's
@@ -57,7 +57,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// reject it for non-sdlc workflows below before doing any work.
 	oneShot := fs.Bool("one-shot", false, "(sdlc only) after opening, drive design then code headlessly via `claude -p`; skip the next-stage prompt")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe workflow %s new [--id <slug>] [--from-idea <slug>] [--one-shot] <project> [\"title\"]\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--one-shot] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
@@ -175,7 +175,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	return promptNextStage(root, md, stdout, stderr)
 }
 
-// runOneShotChain drives `moe wf sdlc new --one-shot`: design then code,
+// runOneShotChain drives `moe sdlc new --one-shot`: design then code,
 // each one `claude -p` turn against the run's per-stage canvas. Chains
 // only on a zero exit from the prior stage — commitTurn's
 // canvas-existence assertion already refuses an empty design turn, so a

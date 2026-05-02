@@ -3,7 +3,7 @@
 You are at the quick-workflow code stage. There is no design doc for
 this run — the run's code canvas (`content.md`) is the brief, usually a
 short problem statement, often promoted from a captured idea. Your job
-is to produce the smallest diff that resolves it. `moe workflow quick push` is
+is to produce the smallest diff that resolves it. `moe quick push` is
 the gate that ships this branch to the target repo and opens the PR (or
 fast-forwards the default branch).
 
@@ -61,7 +61,7 @@ their guidance; only the framing of "what's the contract" differs.
 ## Committing
 
 You're working in a sandbox clone on the `moe/<request>` branch. **Your
-edits don't ship until you commit them in this clone.** `moe workflow quick push`
+edits don't ship until you commit them in this clone.** `moe quick push`
 reads committed history, not the working tree — anything left uncommitted is
 silently dropped.
 
@@ -82,7 +82,7 @@ The code stage is ready to hand back when:
 3. A draft PR title and body exist, including anything reviewers need to
    know that isn't obvious from the diff.
 4. **Everything is committed in the sandbox** — `git status` is clean.
-5. The operator has what they need to run `moe workflow quick push` — or to say
+5. The operator has what they need to run `moe quick push` — or to say
    "not yet, because X."
 
 If you're polishing prose in the PR body past the point of clarity, you're

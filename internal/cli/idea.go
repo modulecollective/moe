@@ -23,12 +23,11 @@ import (
 // sdlc/kb/quick. The distinguishing discipline: `moe idea` verbs never
 // launch Claude unless --chat is passed — capture stays cheap.
 //
-// The idea workflow is reachable two ways: the short `moe idea <verb>`
-// top-level command keeps capture cheap, and the same verbs also hang
-// off `moe workflow idea <verb>` so the workflow namespace is complete.
-// Both doors land on the same runIdeaNew/Edit/Close/List handlers —
-// the short form stays canonical; the workflow form is there so
-// `moe workflow` listings don't have a hole.
+// idea is reached one way — `moe idea <verb>` — same as every other
+// workflow's top-level form. The Workflow registration is a separate
+// concern (run.Load, dash lookup, `--from-idea` resolution all key off
+// it); the operator-facing dispatch table is the top-level Command
+// registered here.
 
 // ideaWorkflow is the workflow name written to run.json's `workflow`
 // field for idea runs. Kept as a constant so the few places that
@@ -47,11 +46,10 @@ func init() {
 	})
 
 	// Register the idea workflow so run.Load, dash lookup, and
-	// --from-idea's wf.Stages() all resolve it — and expose its verbs
-	// under `moe workflow idea` as facades pointing at the same
-	// handlers the top-level `moe idea` uses. The single stage is kept
-	// as a defensive stub; the real operator-facing verbs are the
-	// facades below.
+	// --from-idea's wf.Stages() all resolve it. The single stage is
+	// kept as a defensive stub; the operator-facing verbs are the
+	// runIdea* handlers wired into the top-level `moe idea` Command
+	// above.
 	wf := NewWorkflow(ideaWorkflow, "lightweight backlog: capture and list ideas")
 	wf.Register(&Command{
 		Name:    ideaDocID,

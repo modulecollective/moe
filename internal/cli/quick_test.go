@@ -13,21 +13,17 @@ import (
 
 // TestQuickRegistered partners with TestSDLCRegistered and
 // TestKBRegistered: init() ordering or registration drift silently
-// dropping the quick workflow would break the whole workflow at
-// dispatch.
+// dropping the quick workflow would break dispatch.
 func TestQuickRegistered(t *testing.T) {
 	wf, err := LookupWorkflow("quick")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !wf.ExposedViaCLI {
-		t.Fatal("quick workflow should be exposed via `moe workflow`")
-	}
 	if wf.Summary == "" {
 		t.Fatal("quick workflow summary should not be empty")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"workflow", "quick"}, &out, &errb)
+	code := Run([]string{"quick"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

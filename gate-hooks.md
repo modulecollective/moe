@@ -69,7 +69,7 @@ Hook fails:
 
 1. Print the captured output to stderr, prefixed with the hook name.
 2. Print a retry hint matching the existing `promptNextStage` shape:
-   `retry: moe workflow <wf> <stage> <project> <run>`.
+   `retry: moe <wf> <stage> <project> <run>`.
 3. Write the failure record to
    `<root>/.moe/runs/<project>/<run>/<doc>.last-hook-failure`.
    Already gitignored (`.moe/` is). Single record per (project, run,

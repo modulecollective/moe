@@ -35,7 +35,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 	fs := flag.NewFlagSet(workflow+" lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe workflow %s lint <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s lint <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code lint session on the project's wiki.")
 		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json — the")

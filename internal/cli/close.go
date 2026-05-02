@@ -47,14 +47,11 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	// already on disk, so operators driving close from scripts/CI can
 	// trim the file ahead of time and keep close non-interactive.
 	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
-	// Idea runs are driven by the top-level `moe idea` command, so
-	// their usage line is the short form. Every other workflow's close
-	// is dispatched via `moe workflow <wf> close`.
 	fs.Usage = func() {
 		if workflow == ideaWorkflow {
 			moePrintf(stderr, "usage: moe idea close <project> <run>\n")
 		} else {
-			moePrintf(stderr, "usage: moe workflow %s close [--no-edit] <project> <run>\n", workflow)
+			moePrintf(stderr, "usage: moe %s close [--no-edit] <project> <run>\n", workflow)
 		}
 		fs.PrintDefaults()
 	}
@@ -191,7 +188,7 @@ func twinReflectNudge(root, projectID, runID, workflow string) string {
 	}
 	if !ok || cp.LastIngestAt == "" {
 		return fmt.Sprintf(
-			"twin never reflected — consider `moe workflow twin reflect %s` when you have a moment\n",
+			"twin never reflected — consider `moe twin reflect %s` when you have a moment\n",
 			projectID,
 		)
 	}
@@ -207,7 +204,7 @@ func twinReflectNudge(root, projectID, runID, workflow string) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"twin not reflected since %s — consider `moe workflow twin reflect %s` when you have a moment\n",
+		"twin not reflected since %s — consider `moe twin reflect %s` when you have a moment\n",
 		last.Format("2006-01-02"), projectID,
 	)
 }
@@ -217,7 +214,7 @@ func twinReflectNudge(root, projectID, runID, workflow string) string {
 // state-guard catches the pushed case above), so sandbox.Remove is
 // the single step that takes both branch and worktree with it.
 // Idempotent: a never-opened sandbox (operator abandoned before
-// `moe workflow sdlc code`) is a no-op.
+// `moe sdlc code`) is a no-op.
 func sdlcCloseCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
 		return fmt.Errorf("remove sandbox: %w", err)
