@@ -313,3 +313,72 @@ exit 0
 		t.Fatalf("expected 2 prompts captured (design + code), got %d", got)
 	}
 }
+
+// One-shot has no operator on stdin, so claude has to be invoked with
+// --permission-mode bypassPermissions or write/edit/bash tool calls
+// silently deny. Belt-and-suspenders against the flag being dropped in
+// a future refactor: capture argv from a fake claude and assert the
+// pair appears for both stages.
+func TestRunNewOneShotPassesBypassPermissionsFlag(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	argvFile := filepath.Join(t.TempDir(), "argv.txt")
+	t.Setenv("MOE_TEST_ARGV_DUMP", argvFile)
+	fakeClaudeOnPath(t, `#!/bin/sh
+prompt=
+next=0
+for a in "$@"; do
+  printf '%s\n' "$a" >> "$MOE_TEST_ARGV_DUMP"
+  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
+  case "$a" in --append-system-prompt) next=1 ;; esac
+done
+printf -- '--END-ARGV--\n' >> "$MOE_TEST_ARGV_DUMP"
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+if [ -n "$canvas" ]; then printf 'fake-claude wrote canvas\n' >> "$canvas"; fi
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"--one-shot", "tele", "Bypass flag"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	dump, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("argv dump missing: %v", err)
+	}
+	invocations := strings.Split(string(dump), "--END-ARGV--")
+	// design + code = two non-empty argv captures.
+	got := 0
+	for _, inv := range invocations {
+		if strings.TrimSpace(inv) == "" {
+			continue
+		}
+		got++
+		args := strings.Split(strings.TrimSpace(inv), "\n")
+		// Find --permission-mode and assert its value is bypassPermissions.
+		// Fail loudly with full argv on mismatch — this is the exact flag
+		// the bug fix turns on, so a regression should be obvious.
+		idx := -1
+		for i, a := range args {
+			if a == "--permission-mode" {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			t.Fatalf("invocation missing --permission-mode flag:\n%s", inv)
+		}
+		if idx+1 >= len(args) || args[idx+1] != "bypassPermissions" {
+			t.Fatalf("--permission-mode value should be bypassPermissions, got %q in:\n%s", args[idx+1:], inv)
+		}
+	}
+	if got != 2 {
+		t.Fatalf("expected 2 argv captures (design + code), got %d", got)
+	}
+}

@@ -202,8 +202,16 @@ func ExecuteOneShot(r OneShotRequest) error {
 	// flag set matches the design's recommendation so future progress
 	// vocabulary (token counts, thinking) can layer on without
 	// re-plumbing claude's output mode.
+	//
+	// --permission-mode bypassPermissions: one-shot has no operator on
+	// stdin to approve per-call write/edit/bash prompts, so the default
+	// "default" mode silently denies them and the agent's edits never
+	// land. Bypass mode skips the per-call prompt; safety still comes
+	// from --settings enabling the built-in sandbox plus --add-dir
+	// scoping filesystem reach to the worktree/clone.
 	args := []string{
 		"-p",
+		"--permission-mode", "bypassPermissions",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
