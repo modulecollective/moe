@@ -170,7 +170,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *oneShot {
-		return runOneShotChain(md, stdout, stderr)
+		return runOneShotChain(root, md, stdout, stderr)
 	}
 	return promptNextStage(root, md, stdout, stderr)
 }
@@ -180,9 +180,12 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 // only on a zero exit from the prior stage — commitTurn's
 // canvas-existence assertion already refuses an empty design turn, so a
 // silent refusal stops the chain without needing a second sentinel.
-// Push never runs from this path; the operator runs `moe wf sdlc push`
-// interactively when satisfied.
-func runOneShotChain(md *run.Metadata, stdout, stderr io.Writer) int {
+// After code lands, hand off to promptNextStage so an interactive
+// operator gets the same `[N/m/p]` ship prompt as the interactive code
+// stage; non-tty callers fall through to its `next: …` hint. Automatic
+// pushing is intentionally still off the table — the prompt's default-N
+// keeps a reflex Enter from shipping.
+func runOneShotChain(root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	moePrintf(stdout, "one-shot: design → code (headless)\n")
 	if code := runOneShotStage(md.Project, md.ID, "design", md.Title, false, stdout, stderr); code != 0 {
 		moePrintf(stderr, "one-shot: design stage exited %d; not chaining to code\n", code)
@@ -192,8 +195,7 @@ func runOneShotChain(md *run.Metadata, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "one-shot: code stage exited %d\n", code)
 		return code
 	}
-	moePrintf(stdout, "one-shot: design + code complete; run `moe workflow sdlc push %s %s` when ready\n", md.Project, md.ID)
-	return 0
+	return promptNextStage(root, md, stdout, stderr)
 }
 
 // runOneShotStage runs one stage of the sdlc one-shot chain. It's a

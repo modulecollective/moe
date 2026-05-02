@@ -122,9 +122,11 @@ func TestRunNewOneShotChainsDesignAndCode(t *testing.T) {
 		}
 	}
 
-	// Chain reports the next manual step (push) without invoking it.
-	if !strings.Contains(out.String(), "moe workflow sdlc push tele test-feature") {
-		t.Fatalf("expected post-chain push hint in stdout, got: %q", out.String())
+	// Chain hands off to promptNextStage; suppressNextStagePrompt
+	// pins stdin to a non-tty so it falls through to the `next: …`
+	// hint instead of the interactive [N/m/p] ship prompt.
+	if !strings.Contains(out.String(), "next: moe workflow sdlc push tele test-feature") {
+		t.Fatalf("expected post-chain next-stage hint in stdout, got: %q", out.String())
 	}
 }
 
