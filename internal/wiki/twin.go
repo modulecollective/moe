@@ -47,7 +47,7 @@ func TwinReferenceSectionAt(root, projectID string) string {
 		return ""
 	}
 	// Empty dir → no twin to reference. (Bootstrapped twins always
-	// have at least the four managed docs on disk.)
+	// have the managed-doc set stubbed on disk.)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -84,6 +84,8 @@ substantive work:
 - patterns.md — named patterns and anti-patterns; the project's
   prose-form eval suite.
 - operations.md — how the project runs day-to-day.
+- roadmap.md — what's next: prioritized intent across near, mid,
+  long term, and parked.
 
 When your work would contradict a recorded decision in
 architecture.md, name the conflict before continuing. When you'd

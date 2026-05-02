@@ -203,6 +203,7 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"architecture.md",
 		"patterns.md",
 		"operations.md",
+		"roadmap.md",
 		"`moe twin claim`",
 	} {
 		if !strings.Contains(got, want) {

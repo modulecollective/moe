@@ -8,22 +8,26 @@ import (
 )
 
 // The twin workflow owns the closed-schema digital-twin lifecycle for
-// a project. Three operator-facing verbs:
+// a project. Four operator-facing verbs:
 //
-//   moe twin reflect <project>  — walk the four managed docs against
+//   moe twin reflect <project>  — walk the five managed docs against
 //                                 recent project activity
 //   moe twin lint <project>     — structural pre-scan
 //   moe twin claim <project>    — record context for decided edits
+//   moe twin plan <project>     — propose / re-propose the roadmap
+//                                 (interactive synthesis on roadmap.md)
 //
-// All three are out-of-band relative to runs (no canvas, no stage
+// All four are out-of-band relative to runs (no canvas, no stage
 // ladder) — twin is project-scoped, not run-scoped.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
-Four managed docs hold the durable layer: vision, architecture,
-patterns, and operations. The doc set is fixed; reflect updates the
-contents based on observed events. Decided edits (vision pivots,
-architectural intent) are authored, recorded via claim, not
-derived.`
+Five managed docs hold the durable layer: vision, architecture,
+patterns, operations, and roadmap. The doc set is fixed; reflect
+updates the contents based on observed events. Decided edits (vision
+pivots, architectural intent) are authored, recorded via claim, not
+derived. Roadmap entries are authored through ` + "`moe twin plan`" + ` —
+forward-looking synthesis against the other four docs and the idea
+backlog.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
 // project's twin gets. Names, titles, purposes, and per-doc reflect
@@ -68,6 +72,16 @@ var twinManagedDocs = []wiki.ManagedDoc{
 			"longer true? Update the runbook to match how the project " +
 			"actually runs.",
 	},
+	{
+		Filename: "roadmap.md",
+		Title:    "Roadmap",
+		Purpose:  "What's next — prioritized intent across near, mid, long term, and parked.",
+		ReflectPrompt: "Flag drift between recent work and the stated " +
+			"roadmap: near-term items that look done, near-term lists " +
+			"recent work landed nothing on, long-term items now an open " +
+			"run, parked items the project is quietly doing anyway. Do " +
+			"not rewrite the roadmap — that's the plan verb's job.",
+	},
 }
 
 // twinWikiBuilder is the (root, projectID) → *wiki.Config adapter
@@ -91,10 +105,11 @@ func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 }
 
 func init() {
-	twin := NewWorkflow("twin", "Digital twin: reflect, lint, claim")
+	twin := NewWorkflow("twin", "Digital twin: reflect, lint, claim, plan")
 	twin.RegisterFacade(reflectCommand("twin", twinWikiBuilder))
 	twin.RegisterFacade(lintCommand("twin", twinWikiBuilder))
 	twin.RegisterFacade(claimCommand("twin", twinWikiBuilder))
+	twin.RegisterFacade(planCommand("twin", twinWikiBuilder))
 	RegisterWorkflow(twin)
 	Register(twin.Command())
 }
