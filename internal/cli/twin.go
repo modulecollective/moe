@@ -12,7 +12,7 @@ import (
 //
 //   moe twin reflect <project>  — walk the four managed docs against
 //                                 recent project activity
-//   moe twin lint <project>     — structural + footnote pre-scan
+//   moe twin lint <project>     — structural pre-scan
 //   moe twin claim <project>    — record context for decided edits
 //
 // All three are out-of-band relative to runs (no canvas, no stage
@@ -47,9 +47,7 @@ var twinManagedDocs = []wiki.ManagedDoc{
 		Purpose:  "Components, boundaries, load-bearing decisions.",
 		ReflectPrompt: "Did recent work introduce, remove, or reshape a " +
 			"component or boundary? Did a decision recorded here get " +
-			"revisited? Update the structural shape and the decisions list. " +
-			"Footnote new or revised decisions with `[^run-id]` so the " +
-			"reader can click back to the run that drove them.",
+			"revisited? Update the structural shape and the decisions list.",
 	},
 	{
 		Filename: "patterns.md",
@@ -59,8 +57,7 @@ var twinManagedDocs = []wiki.ManagedDoc{
 			"to a named pattern (look for ~3 appearances before promoting)? " +
 			"Did it deviate from a recorded pattern in a way that's a " +
 			"deliberate choice vs. drift? Did anything get tried and " +
-			"rejected — that's a candidate anti-pattern. Footnote each " +
-			"new pattern with `[^run-id]`.",
+			"rejected — that's a candidate anti-pattern.",
 	},
 	{
 		Filename: "operations.md",
@@ -69,8 +66,7 @@ var twinManagedDocs = []wiki.ManagedDoc{
 		ReflectPrompt: "Did recent activity change a workflow, ritual, tool, " +
 			"or escalation path? Did anything documented here become no " +
 			"longer true? Update the runbook to match how the project " +
-			"actually runs. Footnote workflow / ritual / tool changes " +
-			"with `[^run-id]`.",
+			"actually runs.",
 	},
 }
 
