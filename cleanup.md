@@ -98,16 +98,6 @@ kickoff prompt. Soft cap (e.g. last 500) with a `(N earlier commits
 omitted)` footer protects prompt budget on first-pass for large
 projects.
 
-### Bootstrap failure cascades into a confusing finalize error
-
-`internal/cli/stage.go:330`. `wiki.EnsureManagedDocs` errors are
-logged to stderr but the session proceeds. Stub creation actually
-failing means `AssertModeInvariants` later fires "closed-schema
-missing managed doc <X>", which doesn't make it obvious that the
-bootstrap step was the root cause. Either fail fast on
-`EnsureManagedDocs` errors or add context to the invariant
-violation.
-
 ### Repolock corrupt-record path leaves `TimeoutError` empty
 
 `internal/repolock/repolock.go:163-203`. When `readRecord` fails

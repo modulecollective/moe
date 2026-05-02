@@ -15,6 +15,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // newTestBureaucracy initializes a throwaway git repo with scoped git config,
@@ -663,6 +664,72 @@ func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "no document changes") {
 		t.Errorf("stdout missing nothing-to-commit line: %q", stdout.String())
+	}
+}
+
+// TestRunWikiSessionFailsFastOnBootstrapError pins the contract this
+// run was opened to restore: when EnsureManagedDocs returns a real
+// error (here, the synchronous "closed-schema requires ManagedDocs to
+// be non-empty" guard at bootstrap.go:24), runWikiSession must surface
+// it as exit 1, tear the session worktree down via closeSess, and
+// never reach the executor / commit / finalize. Before the fix, the
+// error was logged to stderr and the session continued anyway, so the
+// operator saw a downstream invariant breach at finalize instead of
+// the bootstrap root cause.
+func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	var reachedAfterBootstrap bool
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "bootstrap-fail",
+		DocID:       "design",
+		LockPurpose: "stage",
+		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
+			// Closed-schema with empty ManagedDocs is the cleanest
+			// trigger: bootstrap returns the error before any I/O,
+			// so the test doesn't need permission games.
+			return &wiki.Config{
+				Name:            "twin",
+				Mode:            wiki.Closed,
+				ContentDir:      filepath.Join(canonicalRoot, "projects", "moe", "twin"),
+				BureaucracyPath: canonicalRoot,
+			}, nil
+		},
+		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			return wikiTurnSpec{
+				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+					reachedAfterBootstrap = true
+					return "", errors.New("BuildPrompt should not be reached after bootstrap failure")
+				},
+				CommitStager: func(workRoot, wikiRel string) error {
+					reachedAfterBootstrap = true
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWikiSession(root, in, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 on bootstrap failure (stderr=%q)", code, stderr.String())
+	}
+	if reachedAfterBootstrap {
+		t.Error("session continued past failed bootstrap; fail-fast didn't fire")
+	}
+	if !strings.Contains(stderr.String(), "ManagedDocs to be non-empty") {
+		t.Errorf("stderr missing bootstrap root cause: %q", stderr.String())
+	}
+	// closeSess should have torn the session worktree down — otherwise
+	// every aborted bootstrap leaks a worktree directory plus branch.
+	out, err := exec.Command("git", "-C", root, "worktree", "list").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git worktree list: %v\n%s", err, out)
+	}
+	branch := "session/moe/bootstrap-fail/design"
+	if strings.Contains(string(out), branch) {
+		t.Errorf("worktree for %s still present, closeSess did not run:\n%s", branch, out)
 	}
 }
 

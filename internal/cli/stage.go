@@ -345,9 +345,14 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			// Closed-schema bootstrap: create stubs for any managed
 			// doc that doesn't yet exist. Runs before EnsureOpsStash
 			// so the rest of the turn sees a populated content dir.
-			// Open-schema is a no-op.
+			// Open-schema is a no-op. Failures here are real I/O or
+			// config errors — bail before the executor runs so the
+			// operator sees the root cause instead of a downstream
+			// invariant breach at finalize.
 			if _, err := wiki.EnsureManagedDocs(*wikiCfg); err != nil {
 				moePrintf(stderr, "wiki: %v\n", err)
+				_ = closeSess()
+				return 1
 			}
 			// Seed the .wiki-ops stash so the agent has a fresh
 			// scratchpad. Failure is non-fatal — the log entry
