@@ -173,13 +173,22 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				newSession = tp == ""
 			}
 
+			// Headless mode has no operator on stdin to type the seed
+			// prompt, so default it to the run title — the same shape
+			// `moe wf sdlc new --one-shot` has been seeding by hand.
+			// Callers that pass an explicit InitialPrompt keep theirs.
+			initialPrompt := opts.InitialPrompt
+			if opts.Headless && initialPrompt == "" {
+				initialPrompt = md.Title
+			}
+
 			return wikiTurnSpec{
 				Metadata:         md,
 				DocID:            docID,
 				ClonePath:        clonePath,
 				SessionUUID:      doc.Session,
 				NewSession:       newSession,
-				InitialPrompt:    opts.InitialPrompt,
+				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,

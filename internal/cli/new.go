@@ -187,11 +187,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 // keeps a reflex Enter from shipping.
 func runOneShotChain(root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	moePrintf(stdout, "one-shot: design → code (headless)\n")
-	if code := runOneShotStage(md.Project, md.ID, "design", md.Title, false, stdout, stderr); code != 0 {
+	if code := runOneShotStage(md.Project, md.ID, "design", false, stdout, stderr); code != 0 {
 		moePrintf(stderr, "one-shot: design stage exited %d; not chaining to code\n", code)
 		return code
 	}
-	if code := runOneShotStage(md.Project, md.ID, "code", md.Title, true, stdout, stderr); code != 0 {
+	if code := runOneShotStage(md.Project, md.ID, "code", true, stdout, stderr); code != 0 {
 		moePrintf(stderr, "one-shot: code stage exited %d\n", code)
 		return code
 	}
@@ -200,14 +200,13 @@ func runOneShotChain(root string, md *run.Metadata, stdout, stderr io.Writer) in
 
 // runOneShotStage runs one stage of the sdlc one-shot chain. It's a
 // thin wrapper over runStageSession that flips the headless and
-// skip-next-stage knobs and seeds the user prompt from the run title
-// (per the design's "the seed user message is the run title").
-func runOneShotStage(projectID, runID, docID, title string, needsSandbox bool, stdout, stderr io.Writer) int {
+// skip-next-stage knobs; runStageSession seeds the user prompt from
+// the run title for any headless caller, so callers don't need to.
+func runOneShotStage(projectID, runID, docID string, needsSandbox bool, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, docID, stageSessionOpts{
 		NeedsSandbox:  needsSandbox,
 		Headless:      true,
 		SkipNextStage: true,
-		InitialPrompt: title,
 	}, stdout, stderr)
 }
 
