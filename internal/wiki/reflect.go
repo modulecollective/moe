@@ -39,18 +39,6 @@ Vision is asymmetric — flag drift between project state and the
 stated vision, but don't rewrite vision yourself. Vision changes
 are the operator's call (decided edits — see ` + "`moe twin claim`" + `).
 
-Footnote claims you introduce. When you write a non-trivial claim
-(an architectural decision in architecture.md, a named pattern in
-patterns.md, a runbook step in operations.md) that originates in a
-specific run, attach an inline footnote in the shape ` + "`[^run-id]`" + `
-and add a matching reference block at the bottom of the doc:
-
-    [^run-id]: Run <run-id>, YYYY-MM-DD. <one-line context>
-
-Lint validates that referenced run ids resolve to a real bureaucracy
-run; an unresolved id surfaces as a finding next time someone runs
-` + "`moe twin lint`" + `.
-
 Schema-evolution rules (closed-schema): the doc set is fixed.
 Do not create, rename, or delete managed docs.
 

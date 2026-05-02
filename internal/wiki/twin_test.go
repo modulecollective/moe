@@ -1,7 +1,6 @@
 package wiki
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,46 +49,6 @@ func TestScanClosedSchema(t *testing.T) {
 	}
 }
 
-func TestScanClosedSchemaFootnotes(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	// Reference one valid run (real dir) and one broken (no dir).
-	if err := os.MkdirAll(filepath.Join(root, "projects", "p", "runs", "real-run"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-	writeFile(t, filepath.Join(twinDir, "architecture.md"),
-		"# Architecture\n\nThe load-bearing decision[^real-run] still stands.\n"+
-			"An older claim[^missing-run] cited a run that no longer exists.\n\n"+
-			"[^real-run]: Run real-run, 2026-04-27.\n"+
-			"[^missing-run]: Run missing-run, 2026-04-20.\n")
-	writeFile(t, filepath.Join(twinDir, "patterns.md"), "# Patterns\n\nbody\n")
-	writeFile(t, filepath.Join(twinDir, "operations.md"), "# Operations\n\nbody\n")
-
-	cfg := Config{
-		Mode:            Closed,
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-			{Filename: "patterns.md", Title: "Patterns"},
-			{Filename: "operations.md", Title: "Operations"},
-		},
-	}
-	f, err := Scan(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.BrokenFootnotes) != 1 {
-		t.Fatalf("expected 1 broken footnote, got %+v", f.BrokenFootnotes)
-	}
-	if f.BrokenFootnotes[0].From != "architecture.md" || f.BrokenFootnotes[0].RunID != "missing-run" {
-		t.Errorf("BrokenFootnotes: got %+v", f.BrokenFootnotes)
-	}
-}
-
 func TestReflectPromptSectionRefusesOpen(t *testing.T) {
 	if _, err := ReflectPromptSection(Config{Mode: Open}); err == nil {
 		t.Fatal("ReflectPromptSection should refuse open-schema")
@@ -114,7 +73,6 @@ func TestReflectPromptSectionRendersClosed(t *testing.T) {
 		"vision.md — Vision",
 		"Reflect pass (closed-schema)",
 		"`moe twin claim`",
-		"[^run-id]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
