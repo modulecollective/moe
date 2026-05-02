@@ -71,7 +71,7 @@ func TestIdeaRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "edit", "close", "list"} {
+	for _, want := range []string{"new", "edit", "close", "list", "cat"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("idea usage missing subcommand %q: %q", want, out.String())
 		}
@@ -96,7 +96,7 @@ func TestIdeaExposedViaWorkflowDispatcher(t *testing.T) {
 	if code := Run([]string{"workflow", "idea"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "edit", "close", "list"} {
+	for _, want := range []string{"new", "edit", "close", "list", "cat"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("workflow idea usage missing verb %q: %q", want, out.String())
 		}
@@ -717,6 +717,118 @@ func TestIdeaCloseUsageErrorsOnMissingArgs(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "close", "tele"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected exit=2 on missing slug, got %d; stderr=%q", code, errb.String())
+	}
+}
+
+// TestIdeaCatPrintsCanvas: dump an idea's canvas verbatim to stdout.
+func TestIdeaCatPrintsCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Read me back"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "cat", "tele", "read-me-back"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if out.String() != "# Read me back\n" {
+		t.Fatalf("unexpected canvas dump: %q", out.String())
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("expected empty stderr, got: %q", errb.String())
+	}
+}
+
+// TestIdeaCatUnknownSlug: missing slug exits 1, names the missing slug.
+func TestIdeaCatUnknownSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "cat", "tele", "ghost"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on missing slug, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "does not exist") {
+		t.Fatalf("expected missing-idea error, got: %q", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected empty stdout on failure, got: %q", out.String())
+	}
+}
+
+// TestIdeaCatRefusesNonIdeaRun: pointing cat at a non-idea run errors
+// loud — same loadIdeaRun guard idea edit relies on.
+func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := runNew("sdlc", []string{"tele", "Real run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup run failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "cat", "tele", "real-run"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on wrong-workflow slug, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "not an idea") {
+		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaCatStatusAgnostic: cat works on closed ideas too — recall is
+// useful precisely after an idea has moved on.
+func TestIdeaCatStatusAgnostic(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Closed but cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if code := Run([]string{"idea", "close", "tele", "closed-but-cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup close failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "cat", "tele", "closed-but-cat-able"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "Closed but cat-able") {
+		t.Fatalf("expected canvas body in stdout, got: %q", out.String())
+	}
+}
+
+// TestIdeaCatUsageErrors: wrong arity exits 2.
+func TestIdeaCatUsageErrors(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "cat", "tele"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected exit=2 on missing slug, got %d; stderr=%q", code, errb.String())
 	}

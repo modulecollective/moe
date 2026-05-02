@@ -82,6 +82,11 @@ func init() {
 		Summary: "list this project's open ideas",
 		Run:     runIdeaList,
 	})
+	wf.RegisterFacade(&Command{
+		Name:    "cat",
+		Summary: "dump an idea's canvas to stdout",
+		Run:     runIdeaCat,
+	})
 	RegisterWorkflow(wf)
 }
 
@@ -102,6 +107,8 @@ func runIdea(args []string, stdout, stderr io.Writer) int {
 		return runIdeaClose(args[1:], stdout, stderr)
 	case "list":
 		return runIdeaList(args[1:], stdout, stderr)
+	case "cat":
+		return runIdeaCat(args[1:], stdout, stderr)
 	default:
 		moePrintf(stderr, "unknown idea subcommand %q\n", args[0])
 		printIdeaUsage(stderr)
@@ -117,6 +124,7 @@ func printIdeaUsage(w io.Writer) {
 	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea ($EDITOR, or --chat for Claude Code)")
 	moePrintf(w, "  %-14s  %s\n", "close", "close a captured idea without promoting (status → closed)")
 	moePrintf(w, "  %-14s  %s\n", "list", "list this project's open ideas")
+	moePrintf(w, "  %-14s  %s\n", "cat", "dump an idea's canvas to stdout")
 }
 
 func runIdeaNew(args []string, stdout, stderr io.Writer) int {
@@ -400,6 +408,52 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
 	for _, e := range entries {
 		fmt.Fprintf(stdout, "%s\t%s\n", e.slug, e.title)
+	}
+	return 0
+}
+
+// runIdeaCat dumps an idea's canvas to stdout. Read-only by definition:
+// no editor, no chat, no flags, no commit, no clean-tree gate. Slug
+// resolution still goes through loadIdeaRun so a typo or wrong-workflow
+// slug fails loud with the same message idea edit/close use.
+func runIdeaCat(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea cat", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea cat <project> <slug>\n")
+	}
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	projectID, slug := fs.Arg(0), fs.Arg(1)
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if _, err := loadIdeaRun(root, projectID, slug); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	abs := filepath.Join(root, run.ContentPath(projectID, slug, ideaDocID))
+	f, err := os.Open(abs)
+	if err != nil {
+		moePrintf(stderr, "idea: %v\n", err)
+		return 1
+	}
+	defer f.Close()
+	if _, err := io.Copy(stdout, f); err != nil {
+		moePrintf(stderr, "idea: %v\n", err)
+		return 1
 	}
 	return 0
 }
