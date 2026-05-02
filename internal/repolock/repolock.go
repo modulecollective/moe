@@ -51,6 +51,12 @@ const (
 	// declared stale and may be taken over. Four heartbeat intervals
 	// gives a missed heartbeat or two of slack.
 	StaleThreshold = 20 * time.Second
+	// corruptSettle is how long an unparseable record must persist
+	// before Acquire takes it over. Long enough that a reader who
+	// catches tryCreate between O_CREATE and Write doesn't steal a
+	// healthy live lock; short enough that a genuinely corrupt file
+	// resolves well inside DefaultBudget.
+	corruptSettle = 1 * time.Second
 )
 
 // Record is the on-disk JSON payload of .moe/lock. Exposed so callers
@@ -106,13 +112,20 @@ type Lock struct {
 
 // TimeoutError is returned by Acquire when the budget is exhausted and
 // someone else still holds the lock. Holder is the record read at the
-// moment of timeout.
+// moment of timeout. ParseErr is non-nil when the timeout fired while
+// the lock file was unparseable — Holder is the zero Record in that
+// case.
 type TimeoutError struct {
-	Path   string
-	Holder Record
+	Path     string
+	Holder   Record
+	ParseErr error
 }
 
 func (e *TimeoutError) Error() string {
+	if e.ParseErr != nil {
+		return fmt.Sprintf("repolock: timed out waiting for %s (unparseable: %v)",
+			e.Path, e.ParseErr)
+	}
 	age := ""
 	if !e.Holder.HeartbeatAt.IsZero() {
 		age = fmt.Sprintf(", heartbeat %s ago", time.Since(e.Holder.HeartbeatAt).Round(time.Second))
@@ -142,6 +155,7 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	lockPath := filepath.Join(moeDir, "lock")
 	deadline := opts.Now().Add(opts.Budget)
 	backoff := 50 * time.Millisecond
+	var firstBadAt time.Time
 
 	for {
 		now := opts.Now().UTC()
@@ -158,33 +172,51 @@ func Acquire(root string, opts Options) (*Lock, error) {
 			return nil, fmt.Errorf("repolock: open %s: %w", lockPath, err)
 		}
 
-		// Someone else holds it (or the file is stale). Read the record
-		// to decide between waiting and taking over.
+		// Someone else holds it (or the file is stale/corrupt). Read the
+		// record to decide between waiting and taking over.
 		existing, readErr := readRecord(lockPath)
-		if readErr != nil {
-			// File disappeared between ErrExist and read (holder
-			// released in the gap), or has an unparseable body mid-write.
-			// Either way, retry immediately — the blocker is gone.
-			if errors.Is(readErr, os.ErrNotExist) {
+		switch {
+		case readErr == nil:
+			firstBadAt = time.Time{}
+			if isStale(existing, now) {
+				fmt.Fprintf(opts.Logger,
+					"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
+					lockPath, existing.Owner, existing.Purpose,
+					now.Sub(existing.HeartbeatAt).Round(time.Second))
+				if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return nil, fmt.Errorf("repolock: remove stale lock: %w", err)
+				}
 				continue
 			}
-			// Treat an unparseable record as stale after a short settle
-			// window, so a genuinely corrupt file doesn't block forever.
-			// Until that window passes, back off and retry.
-		} else if isStale(existing, now) {
-			fmt.Fprintf(opts.Logger,
-				"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
-				lockPath, existing.Owner, existing.Purpose,
-				now.Sub(existing.HeartbeatAt).Round(time.Second))
-			if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("repolock: remove stale lock: %w", err)
-			}
+		case errors.Is(readErr, os.ErrNotExist):
+			// File disappeared between ErrExist and read (holder released
+			// in the gap). Retry immediately — the blocker is gone.
 			continue
+		default:
+			// Unparseable record. Treat as stale after a settle window so
+			// a genuinely corrupt file doesn't block forever, but tolerate
+			// the brief window between tryCreate's O_CREATE and Write.
+			if firstBadAt.IsZero() {
+				firstBadAt = now
+			}
+			if now.Sub(firstBadAt) > corruptSettle {
+				fmt.Fprintf(opts.Logger,
+					"repolock: taking over unparseable lock at %s (parse error: %v)\n",
+					lockPath, readErr)
+				if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return nil, fmt.Errorf("repolock: remove corrupt lock: %w", err)
+				}
+				firstBadAt = time.Time{}
+				continue
+			}
+			// Within the settle window: fall through to deadline check.
+			// If we time out here, ParseErr surfaces what blocked us.
 		}
 
-		// Live holder. Wait or give up.
+		// Live holder (or unparseable but still inside settle). Wait or
+		// give up.
 		if !opts.Now().Before(deadline) {
-			return nil, &TimeoutError{Path: lockPath, Holder: existing}
+			return nil, &TimeoutError{Path: lockPath, Holder: existing, ParseErr: readErr}
 		}
 		sleep := backoff
 		if remaining := deadline.Sub(opts.Now()); sleep > remaining {
