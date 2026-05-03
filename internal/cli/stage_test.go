@@ -623,7 +623,7 @@ func TestReportWikiSessionExitNonZeroOnFinalizeError(t *testing.T) {
 	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	finalizeErr := errors.New("wiki: closed-schema has unexpected top-level doc history-summary.md")
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, finalizeErr, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, nil, nil, finalizeErr, nil, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 on finalize error", code)
 	}
@@ -641,12 +641,36 @@ func TestReportWikiSessionExitNonZeroOnFinalizeError(t *testing.T) {
 func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
 	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, nil, nil, nil, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on clean run", code)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr non-empty on clean run: %q", stderr.String())
+	}
+}
+
+// TestReportWikiSessionExitGateBlocksWithoutCommit pins reflect's
+// post-flight gate contract: a non-nil gateErr forces exit 1, the
+// "no commit happened" branch fires (we deliberately skipped both
+// FinalizeIngest and CommitStager), and the misleading "committed
+// turn" line is suppressed. Catches a regression where a future
+// refactor wires the gate up but forgets to teach the exit reporter
+// that gateErr means "no commit was attempted" rather than "commit
+// succeeded."
+func TestReportWikiSessionExitGateBlocksWithoutCommit(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+	gateErr := errors.New("reflect: post-flight scan found 2 unresolved findings")
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, nil, nil, nil, nil, gateErr, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 when gate fires", code)
+	}
+	if strings.Contains(stdout.String(), "committed turn") {
+		t.Errorf("gate fired but stdout claims commit landed: %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "no document changes") {
+		t.Errorf("gate fired but stdout claims no-op: %q", stdout.String())
 	}
 }
 
@@ -658,7 +682,7 @@ func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
 func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, nil, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on nothing-to-commit", code)
 	}

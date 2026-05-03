@@ -11,21 +11,24 @@ import (
 )
 
 // LintPromptSection is the wiki-specific block appended to the system
-// prompt for a lint session. Sibling of IngestPromptSection: same
-// preamble (schema-config body, wiki header, on-disk shape), different
-// framing — a health-pass instead of an ingest.
-//
-// Mode-aware: open-schema lint may apply the same primitives ingest
-// does (split / merge / rename / retire). Closed-schema lint refuses
-// the same primitives closed-schema ingest does — the seam exists
-// here so the twin's lint inherits the rule when it lands.
+// prompt for an open-schema lint session. Sibling of
+// IngestPromptSection: same preamble (schema-config body, wiki
+// header, on-disk shape), different framing — a health pass instead
+// of an ingest. The closed-schema hygiene pass folded into
+// `moe twin reflect` (see ReflectPromptSection); this surface is
+// now open-schema only and panics on Closed so a misregistration is
+// loud rather than silent.
 func LintPromptSection(cfg Config) string {
+	if cfg.Mode != Open {
+		// Closed-schema hygiene runs inside reflect now. A registration
+		// that points lintCommand at a closed-schema builder is a bug —
+		// fail loud so the operator notices instead of getting an
+		// open-schema prompt against a twin.
+		panic(fmt.Sprintf("wiki: LintPromptSection is open-schema only (got %s)", cfg.Mode))
+	}
 	var b strings.Builder
 	b.WriteString(wikiPreamble(cfg))
-
-	switch cfg.Mode {
-	case Open:
-		b.WriteString(`Lint pass (open-schema):
+	b.WriteString(`Lint pass (open-schema):
 
 This is a health pass on the wiki, not fresh-source ingestion. There
 is no bibliography to work in. Walk the corpus with the operator and
@@ -61,40 +64,11 @@ Do not edit log.md or checkpoint.json — the engine writes those at
 session close, the same as during ingest.
 
 `)
-	case Closed:
-		b.WriteString(`Lint pass (closed-schema):
-
-This is a health pass on the wiki. The doc set is fixed: do not
-create, rename, or delete managed docs. Edits land inside the
-existing managed docs.
-
-Walk the corpus with the operator. The engine has pre-scanned the
-deterministic problems and seeded them in your kickoff prompt:
-
-- Missing managed docs (declared in the schema but absent on disk).
-- Empty or stub docs (zero meaningful content past the title).
-- Broken cross-links between managed docs.
-
-Beyond the structural pre-scan, surface semantic issues: drift
-between docs (e.g. patterns.md describes a pattern architecture.md
-doesn't reflect), managed docs whose content has wandered from
-their stated purpose.
-Apply fixes inline as you and the operator agree on them; raise
-candidates that need a decided edit (vision pivot, architectural
-intent) for the operator to handle via ` + "`moe twin claim`" + `.
-
-Schema-evolution rules (closed-schema): the doc set is fixed. Do
-not create, rename, or delete managed docs.
-
-`)
-	}
-
 	if len(cfg.AllowedPrimitives) > 0 {
 		fmt.Fprintf(&b, "Allowed primitives: %s.\n", strings.Join(cfg.AllowedPrimitives, ", "))
 	} else {
 		b.WriteString("Allowed primitives: (none — content edits only).\n")
 	}
-
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 

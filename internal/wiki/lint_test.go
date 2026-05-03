@@ -23,9 +23,6 @@ func TestLintPromptSectionOpenSchema(t *testing.T) {
 		"Lint pass (open-schema)",
 		"Structural",
 		"Semantic",
-		// Lint reuses the schema-evolution primitives and the same
-		// `[wiki-op]` tag convention as ingest — agents shouldn't
-		// have to learn a second vocabulary.
 		"[wiki-op] split",
 		"[wiki-op] retire",
 		"/some/path/projects/p/kb/.wiki-ops",
@@ -39,20 +36,15 @@ func TestLintPromptSectionOpenSchema(t *testing.T) {
 	}
 }
 
-func TestLintPromptSectionClosedSchema(t *testing.T) {
-	cfg := Config{Name: "twin", Mode: Closed}
-	got := LintPromptSection(cfg)
-	if !strings.Contains(got, "Lint pass (closed-schema)") {
-		t.Fatalf("closed-schema lint prompt missing label:\n%s", got)
-	}
-	// Closed-schema must refuse the same primitives closed-schema
-	// ingest does — the agent shouldn't think lint relaxes the rule.
-	if !strings.Contains(got, "doc set is fixed") {
-		t.Errorf("closed-schema lint prompt missing fixed-set rule:\n%s", got)
-	}
-	if strings.Contains(got, "[wiki-op] split") {
-		t.Errorf("closed-schema lint prompt should not advertise schema primitives:\n%s", got)
-	}
+// Closed-schema lint folded into reflect; LintPromptSection on a
+// closed-schema config is a misregistration and panics.
+func TestLintPromptSectionPanicsOnClosed(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("LintPromptSection should panic on closed-schema")
+		}
+	}()
+	LintPromptSection(Config{Name: "twin", Mode: Closed})
 }
 
 func TestScanCleanWiki(t *testing.T) {

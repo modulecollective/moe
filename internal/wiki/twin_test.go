@@ -183,6 +183,56 @@ func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
 	}
 }
 
+// TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit pins the
+// design promise behind collapsing plan and lint into reflect: when
+// the engine's commit lands at or before `last_ingest_at`, a back-
+// to-back reflect-on-reflect chain doesn't trip the unrecorded-edits
+// guardrail. The bug repro that motivated this fix was a 1-second
+// skew between FinalizeIngest and the per-turn commit causing the
+// next pass to mis-flag the engine's own commit. With plan / lint
+// gone, reflect is the only twin-mutating pass and `last_ingest_at`
+// recovers its single meaning ("events ingested through here") —
+// this test pins the no-skew path the guardrail must accept.
+func TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
+
+	// Engine's commit lands at the same instant as `last_ingest_at`.
+	// Both timestamps are RFC3339-second precision; equality is the
+	// happy case the guardrail must not flag.
+	t.Setenv("GIT_AUTHOR_DATE", "2026-05-02T12:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-05-02T12:00:00Z")
+	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
+	gitInRepo(t, root, "commit", "-m", "reflect updates vision")
+
+	cp := Checkpoint{
+		Version:       CheckpointVersion,
+		LastIngestAt:  "2026-05-02T12:00:00Z",
+		LastIngestRun: "reflect-prior",
+		Project:       "p",
+	}
+	if err := WriteCheckpoint(twinDir, cp); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	det, err := DetectUnrecordedEdits(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(det.UnrecordedDocs) != 0 {
+		t.Errorf("equal-time engine commit should not be flagged as unrecorded, got %v",
+			det.UnrecordedDocs)
+	}
+}
+
 func TestTwinReferenceSectionEmptyWithoutDir(t *testing.T) {
 	root := t.TempDir()
 	got := TwinReferenceSectionAt(root, "p")

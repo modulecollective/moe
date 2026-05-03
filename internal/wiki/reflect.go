@@ -15,9 +15,10 @@ import (
 
 // ReflectPromptSection is the wiki-specific block appended to the
 // system prompt for a closed-schema reflect session. Sibling of
-// IngestPromptSection / LintPromptSection: same preamble, different
+// IngestPromptSection / ClaimPromptSection: same preamble, different
 // framing — walk each managed doc against recent events and propose
-// updates.
+// updates, fold the roadmap forward, and clean up structural findings
+// before sealing the pass.
 //
 // Closed-schema only. Open-schema reflect (whether kb wants one) is
 // undecided; the seam exists, the implementation doesn't, so this
@@ -33,11 +34,29 @@ func ReflectPromptSection(cfg Config) (string, error) {
 Walk each managed doc against the events block. For each, decide:
 did anything happen that should change this doc? Propose updates
 with the operator before writing them. Apply fixes inline once
-agreed.
+agreed. Skim docs that look untouched and don't manufacture work —
+a quiet section is fine.
 
 Vision is asymmetric — flag drift between project state and the
 stated vision, but don't rewrite vision yourself. Vision changes
 are the operator's call (decided edits — see ` + "`moe twin claim`" + `).
+
+Roadmap convention: roadmap.md uses four ` + "`##`" + ` sections — Near
+term, Mid term, Long term, Parked. On a fresh roadmap.md (just
+` + "`# Roadmap`" + ` and nothing else), establish the four headings at
+this pass. On subsequent passes, walk the prior content with the
+operator and promote / demote / retire entries against the idea
+backlog and recent activity.
+
+Hygiene findings (orphans, broken cross-links, empty docs) are
+pre-scanned and surfaced in your kickoff. Walk them before the
+doc-by-doc pass so structural issues inform the synthesis. Apply
+fixes inline as you and the operator agree on them. Anything you
+can't auto-fix gets walked with the operator; if a finding genuinely
+can't be resolved this pass, capture it as a followup and remove
+the structural cause (e.g. retire the orphaned doc) before the pass
+closes — the engine re-scans at session-end and refuses to seal a
+reflect with leftover findings.
 
 Schema-evolution rules (closed-schema): the doc set is fixed.
 Do not create, rename, or delete managed docs.

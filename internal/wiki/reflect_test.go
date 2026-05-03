@@ -145,6 +145,39 @@ func TestEventsSinceCheckpointFirstReflectUnbounded(t *testing.T) {
 	}
 }
 
+// ReflectPromptSection now carries roadmap conventions and the
+// hygiene-walk framing that used to live in PlanPromptSection /
+// LintPromptSection. Pin those so a future trim doesn't silently
+// drop them.
+func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
+	got, err := ReflectPromptSection(Config{
+		Mode:        Closed,
+		Name:        "twin",
+		ContentDir:  "/x/projects/p/digital-twin",
+		ManagedDocs: []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Phrasing assertions are tolerant of the body's wrapped lines —
+	// check for tokens that survive the line wrap rather than long
+	// runs of prose.
+	for _, want := range []string{
+		"Reflect pass (closed-schema)",
+		"Roadmap convention",
+		"Mid term",
+		"Long term",
+		"Parked",
+		"Hygiene findings",
+		"refuses to seal",
+		"don't manufacture work",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestReadHistorySummaryMissingIsEmpty(t *testing.T) {
 	root := t.TempDir()
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")

@@ -362,7 +362,7 @@ type twinRow struct {
 // `<verb>-<timestamp>` slug recorded on commit trailers — so the
 // dashboard reads them straight off the journal.
 type twinRecent struct {
-	verb string    // "reflect" | "lint" | "claim" | "plan" — the slug prefix.
+	verb string    // "reflect" | "claim" — the slug prefix. Older history may also surface "plan" / "lint" verbs from before those commands were folded into reflect; the dash renders whatever prefix git returns.
 	when time.Time // commit time of the latest commit in this session.
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,10 +18,12 @@ import (
 
 // reflectCommand builds the `reflect` facade for a workflow. Reflect
 // is closed-schema only and out-of-band relative to the run ladder
-// (no per-run canvas, no stage). Mirrors the lint facade: it lives
-// alongside `new` / `close` as a workflow facade and reuses the
-// workflow's wiki builder so reflect and ingest sessions agree on the
-// wiki's identity and on-disk shape.
+// (no per-run canvas, no stage). It is the only twin-mutating pass
+// over closed-schema content: roadmap synthesis, doc-by-doc walk
+// against recent events, and structural hygiene cleanup all happen
+// in the same session — `last_ingest_at` recovers its single meaning
+// ("events ingested through here") with no partial-pass commands
+// left to skew the checkpoint.
 func reflectCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "reflect",
@@ -41,7 +45,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintln(stderr, "session surfaces under the dash's TWIN rail (`recent: …`), not in")
 		moePrintln(stderr, "ACTIVE/BACKLOG/COMPLETED.")
 		moePrintln(stderr, "Walks each managed doc against project commits and closed runs since the")
-		moePrintln(stderr, "last reflect, and applies updates the operator agrees to.")
+		moePrintln(stderr, "last reflect, folds the open idea backlog into the roadmap, and clears")
+		moePrintln(stderr, "structural hygiene findings. The engine re-scans at session-end and")
+		moePrintln(stderr, "refuses to seal a reflect with leftover findings.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -107,6 +113,21 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "wiki: history summary: %v\n", err)
 		return 1
 	}
+	ideas, err := loadIdeaBacklog(root, projectID)
+	if err != nil {
+		moePrintf(stderr, "wiki: ideas: %v\n", err)
+		return 1
+	}
+	// Pre-flight hygiene scan against the canonical wiki so the
+	// kickoff carries the same findings the post-flight gate will
+	// later check against. EnsureManagedDocs hasn't run yet — fresh
+	// twins surface as MissingManagedDocs here, which is the right
+	// signal for the agent.
+	findings, err := wiki.Scan(*canonical)
+	if err != nil {
+		moePrintf(stderr, "wiki scan: %v\n", err)
+		return 1
+	}
 
 	in := wikiSessionInputs{
 		Project:     projectID,
@@ -123,11 +144,14 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 				ClonePath:        "",
 				SessionUUID:      sessionUUID,
 				NewSession:       true,
-				InitialPrompt:    reflectKickoff(*canonical, historySummary, events),
+				InitialPrompt:    reflectKickoff(*canonical, historySummary, events, ideas, findings),
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: "Twin reflect pass",
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					return buildReflectSystemPrompt(worktreeWiki)
+				},
+				PreFinalizeGate: func(workRoot string, worktreeWiki *wiki.Config) error {
+					return reflectPostFlightGate(worktreeWiki, stderr)
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
 					return commitReflectTurn(workRoot, workflow, projectID, runSlug, wikiRel)
@@ -158,20 +182,63 @@ func buildReflectSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	return strings.Join(sections, "\n---\n\n"), nil
 }
 
+// reflectPostFlightGate re-runs the structural scan against the
+// worktree-rewritten wiki right before the engine seals the pass.
+// Non-empty findings print to stderr and return an error so
+// runWikiSession skips FinalizeIngest and the per-turn commit — no
+// log entry, no checkpoint bump, no commit. The agent's content
+// edits are left in the closed worktree and dropped; the operator
+// re-runs `moe twin reflect` to try again. Strict by design: the
+// gate is what makes the closing-discipline real (same shape as a
+// pre-push hook).
+func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
+	if worktreeWiki == nil {
+		return nil
+	}
+	findings, err := wiki.Scan(*worktreeWiki)
+	if err != nil {
+		return fmt.Errorf("reflect: post-flight scan: %w", err)
+	}
+	if findings.IsEmpty() {
+		return nil
+	}
+	moePrintln(stderr, "reflect: leftover hygiene findings — refusing to seal the pass.")
+	moePrintln(stderr, "         The session is closed; re-run `moe twin reflect` and walk the agent through the remaining items inline.")
+	moePrintln(stderr, "")
+	moePrintln(stderr, wiki.RenderFindings(findings))
+	return fmt.Errorf("reflect: post-flight scan found %d unresolved findings", findingsCount(findings))
+}
+
+// findingsCount sums the post-flight findings across all categories
+// for the gate's exit message. The breakdown lives in the rendered
+// block printed above; this is just the rolled-up number for the
+// terminal "found N unresolved findings" line.
+func findingsCount(f wiki.Findings) int {
+	return len(f.Orphans) + len(f.MissingFromIndex) + len(f.BrokenLinks) +
+		len(f.EmptyDocs) + len(f.MissingManagedDocs)
+}
+
 // reflectKickoff is the auto-sent first user message. It frames the
-// pass, lays out the per-doc reflect prompts, and inlines two
-// history segments: the rolling history summary (compressed memory of
-// everything before the checkpoint SHA) and the verbatim "events since
-// last reflect" block. Empty events → the agent walks the docs against
-// the last-known state without a prompted set of changes, which is fine.
-//
-// Either segment can be empty: a fresh wiki has no summary yet, and a
-// freshly-reflected wiki has no events.
-func reflectKickoff(cfg wiki.Config, historySummary, events string) string {
+// pass and lays out the session in the order the agent should walk
+// it: hygiene findings (structural cleanup informs synthesis), the
+// per-doc reflect prompts, the open idea backlog (drives roadmap
+// re-prioritisation), the rolling history summary, and the verbatim
+// "events since last reflect" tail. Empty inputs collapse to a
+// one-line placeholder — a quiet section is fine.
+func reflectKickoff(cfg wiki.Config, historySummary, events string, ideas []ideaSummary, findings wiki.Findings) string {
 	var b strings.Builder
 	b.WriteString("The operator just opened a twin reflect session. " +
-		"Walk each managed doc against recent project activity and propose updates " +
-		"the operator agrees to. Vision is drift-only — flag gaps, don't rewrite.\n\n")
+		"Walk each managed doc against recent project activity, fold the open " +
+		"idea backlog into the roadmap, and clear any structural hygiene " +
+		"findings. Vision is drift-only — flag gaps, don't rewrite.\n\n")
+
+	if !findings.IsEmpty() {
+		b.WriteString("## Hygiene findings\n\n")
+		b.WriteString("Walk these with the operator before the doc-by-doc pass — " +
+			"structural issues inform the synthesis. The engine re-scans at " +
+			"session-end and refuses to seal a reflect with leftover findings.\n\n")
+		b.WriteString(wiki.RenderFindings(findings))
+	}
 
 	b.WriteString("## Per-doc reflect prompts\n\n")
 	for _, d := range cfg.ManagedDocs {
@@ -182,6 +249,25 @@ func reflectKickoff(cfg wiki.Config, historySummary, events string) string {
 		}
 		b.WriteString(body)
 		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## Idea backlog\n\n")
+	if len(ideas) == 0 {
+		b.WriteString("(no open ideas captured for this project)\n\n")
+	} else {
+		b.WriteString("Each entry below is an open idea run (`moe idea list`). " +
+			"Decide which belong on the roadmap and at which horizon; the rest " +
+			"stay on the idea shelf or move to Parked with a reason.\n\n")
+		for _, idea := range ideas {
+			fmt.Fprintf(&b, "### %s — %s\n\n", idea.slug, idea.title)
+			body := strings.TrimSpace(idea.body)
+			if body == "" {
+				b.WriteString("(empty canvas)\n\n")
+				continue
+			}
+			b.WriteString(body)
+			b.WriteString("\n\n")
+		}
 	}
 
 	b.WriteString("## History summary\n\n")
@@ -201,7 +287,8 @@ func reflectKickoff(cfg wiki.Config, historySummary, events string) string {
 	}
 
 	b.WriteString("Acknowledge in one or two sentences which docs look most likely to need " +
-		"updates and propose how you'd walk through them with the operator. Then wait for " +
+		"updates and how you'd walk through them with the operator — name the hygiene " +
+		"findings you'd clear and the idea-backlog entries you'd promote. Then wait for " +
 		"the operator's go-ahead.\n\n")
 	b.WriteString("Before you finish the pass, propose an updated `history-summary.md` that " +
 		"folds in the events you just walked. The summary is the twin's compressed memory " +
@@ -231,7 +318,7 @@ MoE-Document: reflect
 }
 
 // unrecordedEditsRedirect formats the one-line redirect printed when
-// reflect/lint refuse to run because managed docs have been edited
+// reflect refuses to run because managed docs have been edited
 // outside a reflect pass. Names the docs and points the operator at
 // claim.
 func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
@@ -242,4 +329,45 @@ func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 	}
 	return fmt.Sprintf("unrecorded edits to %s since %s — run `moe %s claim <project>` first",
 		docs, since, workflow)
+}
+
+// ideaSummary captures the minimum needed to render an open idea
+// into the reflect kickoff: the slug, title, and verbatim canvas
+// body. The agent uses this to decide which ideas belong on the
+// roadmap (and at which horizon) versus which stay on the idea
+// shelf.
+type ideaSummary struct {
+	slug  string
+	title string
+	body  string
+}
+
+// loadIdeaBacklog enumerates every open idea run for projectID and
+// loads each canvas body. "Backlog" means StatusInProgress idea
+// runs: closed/promoted ideas have already been spent. Sorted by
+// slug for stable kickoff ordering across passes.
+func loadIdeaBacklog(root, projectID string) ([]ideaSummary, error) {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []ideaSummary
+	for _, md := range mds {
+		if md.Project != projectID {
+			continue
+		}
+		if md.Workflow != ideaWorkflow {
+			continue
+		}
+		if md.Status != run.StatusInProgress {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, ideaDocID)))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read idea %s/%s: %w", md.Project, md.ID, err)
+		}
+		out = append(out, ideaSummary{slug: md.ID, title: md.Title, body: string(body)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].slug < out[j].slug })
+	return out, nil
 }

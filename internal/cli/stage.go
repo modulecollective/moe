@@ -296,6 +296,15 @@ type wikiTurnSpec struct {
 	// Receives the worktree root and the worktree-rewritten wiki cfg
 	// (nil if the session has no wiki).
 	BuildPrompt func(workRoot string, worktreeWiki *wiki.Config) (string, error)
+	// PreFinalizeGate, when non-nil, runs after the executor returns
+	// and before FinalizeIngest. Returning a non-nil error skips
+	// FinalizeIngest *and* CommitStager (no log entry, no commit, no
+	// checkpoint bump) and forces a non-zero exit code. Used by
+	// reflect to enforce a clean post-execute hygiene scan before the
+	// engine seals the pass — same shape as a pre-push hook. The
+	// callback owns its own stderr formatting; runWikiSession only
+	// uses the error to decide whether to short-circuit.
+	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
 	// CommitStager runs after a successful FinalizeIngest. It
 	// receives the worktree root and the wiki dir's path relative to
 	// it (or "" if there is no wiki). It owns staging the
@@ -409,6 +418,16 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		})
 	}
 
+	// Pre-finalize gate (reflect's hygiene scan). Runs after the
+	// executor and before FinalizeIngest; a non-nil return short-
+	// circuits both FinalizeIngest and CommitStager so the pass
+	// produces no log entry, no commit, and no checkpoint bump —
+	// the operator re-runs the command to try again.
+	var gateErr error
+	if spec.PreFinalizeGate != nil {
+		gateErr = spec.PreFinalizeGate(workRoot, wikiCfg)
+	}
+
 	// Wiki finalize runs before the commit so its writes (log.md
 	// and checkpoint.json) ride along in the same per-turn commit
 	// as the agent's wiki edits. A no-change session is a no-op —
@@ -419,30 +438,31 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// drift quietly accumulating across reflect passes.
 	wikiRel := ""
 	var finalizeErr error
-	if wikiCfg != nil {
-		_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
-			RunID:    spec.FinalizeRunID,
-			RunTitle: spec.FinalizeRunTitle,
-			Claim:    spec.FinalizeClaim,
-		}, stderr)
-		if ferr != nil {
-			moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
-			moePrintln(stderr, "  agent edits will commit; checkpoint and "+
-				"log.md were NOT written. Re-run the session or fix the "+
-				"underlying issue before the next reflect.")
-			finalizeErr = ferr
-		}
-		if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
-			wikiRel = rel
-		}
-	}
-
-	// Commit any document changes even if Claude exited non-zero —
-	// the operator may have chosen to bail mid-edit but kept the
-	// edits.
 	var commitErr error
-	if spec.CommitStager != nil {
-		commitErr = spec.CommitStager(workRoot, wikiRel)
+	if gateErr == nil {
+		if wikiCfg != nil {
+			_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
+				RunID:    spec.FinalizeRunID,
+				RunTitle: spec.FinalizeRunTitle,
+				Claim:    spec.FinalizeClaim,
+			}, stderr)
+			if ferr != nil {
+				moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
+				moePrintln(stderr, "  agent edits will commit; checkpoint and "+
+					"log.md were NOT written. Re-run the session or fix the "+
+					"underlying issue before the next reflect.")
+				finalizeErr = ferr
+			}
+			if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
+				wikiRel = rel
+			}
+		}
+		// Commit any document changes even if Claude exited
+		// non-zero — the operator may have chosen to bail mid-edit
+		// but kept the edits.
+		if spec.CommitStager != nil {
+			commitErr = spec.CommitStager(workRoot, wikiRel)
+		}
 	}
 
 	// Close the session: land it on local main and tear the
@@ -450,7 +470,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// so a short budget and no heartbeat are fine.
 	closeErr := closeSess()
 
-	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, stdout, stderr)
+	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, gateErr, stdout, stderr)
 }
 
 // openWikiSession opens the session worktree under the repo lock and
@@ -487,18 +507,22 @@ func openWikiSession(root string, in wikiSessionInputs) (*session.Session, func(
 
 // reportWikiSessionExit prints the closing per-turn messages and
 // returns the exit code for runWikiSession. It is the one place that
-// decides how the four possible failures (claude run, commit, close,
-// finalize) compose into a single exit status. Run / finalize errors
-// each independently force a non-zero exit even when the per-turn
-// commit landed cleanly — finalize failure means checkpoint.json /
-// log.md weren't written, and a 0 exit there would let the operator
-// move on without noticing.
-func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr error, stdout, stderr io.Writer) int {
+// decides how the possible failures (claude run, gate, commit, close,
+// finalize) compose into a single exit status. Run / finalize / gate
+// errors each independently force a non-zero exit even when the
+// per-turn commit landed cleanly — finalize failure means
+// checkpoint.json / log.md weren't written, and a 0 exit there would
+// let the operator move on without noticing. Gate failure means we
+// deliberately skipped both finalize and commit; the gate's own
+// stderr block carries the explanation.
+func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr, gateErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
 		moePrintf(stderr, "claude exited: %v\n", runErr)
 		// Fall through to report commit result and exit non-zero.
 	}
 	switch {
+	case gateErr != nil:
+		// Gate already explained itself on stderr; no commit happened.
 	case errors.Is(commitErr, run.ErrNothingToCommit):
 		moePrintln(stdout, "no document changes; nothing committed")
 	case commitErr != nil:
@@ -511,7 +535,7 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		moePrintf(stderr, "session close: %v\n", closeErr)
 		return 1
 	}
-	if runErr != nil || finalizeErr != nil {
+	if runErr != nil || finalizeErr != nil || gateErr != nil {
 		return 1
 	}
 	return 0

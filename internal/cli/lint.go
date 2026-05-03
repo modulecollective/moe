@@ -14,13 +14,11 @@ import (
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
-// lintCommand builds the `lint` facade for a workflow. Lint is
-// out-of-band relative to the run ladder — there is no per-run
-// canvas, no stage, no prerequisite chain — so it lives alongside
-// `new` / `close` as a workflow facade rather than a stage. The
-// builder is the wiki-config factory the workflow uses for its
-// ingest stage; lint reuses it so the lint and ingest sessions agree
-// on the wiki's identity and on-disk shape.
+// lintCommand builds the `lint` facade for an open-schema workflow.
+// Lint is a standalone session — out-of-band relative to runs (no
+// canvas, no stage), keyed off the wiki's content directory. The
+// twin's hygiene sweep used to live here too; it now folds into
+// `moe twin reflect`, so this surface is open-schema only (kb).
 func lintCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "lint",
@@ -38,9 +36,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		moePrintf(stderr, "usage: moe %s lint <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code lint session on the project's wiki.")
-		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json — the")
-		moePrintln(stderr, "session surfaces under the dash's TWIN rail (`recent: …`), not in")
-		moePrintln(stderr, "ACTIVE/BACKLOG/COMPLETED.")
+		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json.")
 		moePrintln(stderr, "Findings (orphaned docs, broken cross-links, empty docs) are pre-scanned")
 		moePrintln(stderr, "and seeded into the kickoff prompt; the agent walks them with the operator")
 		moePrintln(stderr, "and applies fixes inline. The wiki diff is the artifact, recorded in")
@@ -70,23 +66,6 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		return 1
 	}
 
-	// Synthetic run id keys the session worktree branch and lands in
-	// the log.md entry header so lint passes are distinguishable from
-	// ingests at a glance. HHMMSS guarantees uniqueness even when the
-	// operator runs lint twice on the same day.
-	runSlug := "lint-" + time.Now().UTC().Format("2006-01-02-150405")
-	docID := "lint"
-
-	sessionUUID, err := run.NewSessionID()
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
-	// Findings are produced under the canonical bureaucracy root
-	// before the session worktree exists. They get spliced into the
-	// kickoff prompt verbatim — the worktree path differs but the
-	// findings (filenames under the wiki dir) remain valid.
 	canonical, err := builder(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "wiki: %v\n", err)
@@ -96,12 +75,21 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		moePrintf(stderr, "wiki: builder returned nil config; lint requires a registered wiki\n")
 		return 1
 	}
-	// Closed-schema guardrail: unrecorded managed-doc edits redirect
-	// to claim. Open-schema returns an empty result.
-	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
-		moePrintf(stderr, "%s\n", unrecordedEditsRedirect(workflow, det))
+	if canonical.Mode != wiki.Open {
+		moePrintf(stderr, "wiki: lint is open-schema only (%s is %s); closed-schema hygiene runs inside `moe twin reflect`\n",
+			workflow, canonical.Mode)
 		return 1
 	}
+
+	runSlug := "lint-" + time.Now().UTC().Format("2006-01-02-150405")
+	docID := "lint"
+
+	sessionUUID, err := run.NewSessionID()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
 	findings, err := wiki.Scan(*canonical)
 	if err != nil {
 		moePrintf(stderr, "wiki scan: %v\n", err)
@@ -118,9 +106,6 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		},
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
 			return wikiTurnSpec{
-				// No run metadata — lint sessions don't have a
-				// per-document thread.jsonl to mirror into. Executor
-				// skips the transcript copy when Metadata is nil.
 				Metadata:         nil,
 				DocID:            docID,
 				ClonePath:        "",
@@ -142,10 +127,6 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 	return runWikiSession(root, in, stdout, stderr)
 }
 
-// buildLintSystemPrompt assembles the lint session's
-// --append-system-prompt: soul + LintPromptSection. Run-scoped
-// extras (canvas, stage fragment, upstream banner) don't apply —
-// lint has no run, no stage, no prerequisites.
 func buildLintSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	if worktreeWiki == nil {
 		return "", fmt.Errorf("lint: missing wiki config")
@@ -161,11 +142,6 @@ func buildLintSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	return strings.Join(sections, "\n---\n\n"), nil
 }
 
-// lintKickoff is the auto-sent first user message for a lint
-// session. It frames the pass and inlines the structural pre-scan
-// (orphans, broken links, empty docs) so the agent doesn't have to
-// rediscover them. Semantic findings (overlap, breadth, taxonomy
-// drift) come from the agent walking the corpus during the session.
 func lintKickoff(findings wiki.Findings) string {
 	var b strings.Builder
 	b.WriteString("The operator just opened a wiki lint session. " +
@@ -186,12 +162,6 @@ func lintKickoff(findings wiki.Findings) string {
 	return b.String()
 }
 
-// commitLintTurn stages the wiki dir and commits the per-turn
-// changes with a lint-trailered message. No run.json, no doc dir —
-// lint sessions are out-of-band relative to runs.
-//
-// ErrNothingToCommit propagates so the caller can report "no changes"
-// without treating an untouched wiki as a failure.
 func commitLintTurn(workRoot, workflow, projectID, runSlug, wikiRel string) error {
 	if wikiRel == "" {
 		return run.ErrNothingToCommit
