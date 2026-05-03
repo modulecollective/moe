@@ -60,31 +60,6 @@ func init() {
 			return 2
 		},
 	})
-	wf.RegisterFacade(&Command{
-		Name:    "new",
-		Summary: "capture a new idea (opens $EDITOR, or --chat for Claude Code)",
-		Run:     runIdeaNew,
-	})
-	wf.RegisterFacade(&Command{
-		Name:    "edit",
-		Summary: "refine a captured idea ($EDITOR, or --chat for Claude Code)",
-		Run:     runIdeaEdit,
-	})
-	wf.RegisterFacade(&Command{
-		Name:    "close",
-		Summary: "close a captured idea without promoting (status → closed)",
-		Run:     runIdeaClose,
-	})
-	wf.RegisterFacade(&Command{
-		Name:    "list",
-		Summary: "list this project's open ideas",
-		Run:     runIdeaList,
-	})
-	wf.RegisterFacade(&Command{
-		Name:    "cat",
-		Summary: "dump an idea's canvas to stdout",
-		Run:     runIdeaCat,
-	})
 	RegisterWorkflow(wf)
 }
 
