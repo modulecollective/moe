@@ -104,7 +104,7 @@ func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 }
 
 func init() {
-	twin := NewWorkflow("twin", "Digital twin: reflect, claim")
+	twin := NewWorkflow("twin", "digital-twin workflow: reflect, claim")
 	twin.RegisterFacade(reflectCommand("twin", twinWikiBuilder))
 	twin.RegisterFacade(claimCommand("twin", twinWikiBuilder))
 	RegisterWorkflow(twin)

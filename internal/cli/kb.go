@@ -52,7 +52,7 @@ func kbWikiBuilder(root string, md *run.Metadata) (*wiki.Config, error) {
 }
 
 func init() {
-	kb := NewWorkflow("kb", "Knowledge base workflow: new, research, summarize")
+	kb := NewWorkflow("kb", "knowledge-base workflow: new, research, summarize")
 	kb.RegisterFacade(newRunCommand("kb"))
 	kb.Register(&Command{
 		Name:    "research",

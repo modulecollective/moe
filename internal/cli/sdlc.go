@@ -17,7 +17,7 @@ import (
 // point that creates a run in this workflow.
 
 func init() {
-	sdlc := NewWorkflow("sdlc", "SDLC workflow: new, design, code, push")
+	sdlc := NewWorkflow("sdlc", "sdlc workflow: new, design, code, push")
 	sdlc.RegisterFacade(newRunCommand("sdlc"))
 	sdlc.Register(&Command{
 		Name:    "design",

@@ -14,7 +14,7 @@ import (
 // workflow lives under projects/moe/runs/fix-workflow/.
 
 func init() {
-	quick := NewWorkflow("quick", "Quick-fix workflow: new, code, push")
+	quick := NewWorkflow("quick", "quick-fix workflow: new, code, push")
 	quick.RegisterFacade(newRunCommand("quick"))
 	quick.Register(&Command{
 		Name:    "code",

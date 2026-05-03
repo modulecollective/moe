@@ -41,7 +41,7 @@ const ideaDocID = "idea"
 func init() {
 	Register(&Command{
 		Name:    "idea",
-		Summary: "lightweight backlog: capture an idea or list ideas (no agent unless --chat)",
+		Summary: "idea workflow: new, edit, close, list, cat",
 		Run:     runIdea,
 	})
 
@@ -50,7 +50,7 @@ func init() {
 	// kept as a defensive stub; the operator-facing verbs are the
 	// runIdea* handlers wired into the top-level `moe idea` Command
 	// above.
-	wf := NewWorkflow(ideaWorkflow, "lightweight backlog: capture and list ideas")
+	wf := NewWorkflow(ideaWorkflow, "idea workflow: new, edit, close, list, cat")
 	wf.Register(&Command{
 		Name:    ideaDocID,
 		Summary: "idea canvas (use `moe idea edit` instead of invoking directly)",
