@@ -1,6 +1,7 @@
 package wiki
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,6 +230,68 @@ func TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit(t *testing.T) {
 	}
 	if len(det.UnrecordedDocs) != 0 {
 		t.Errorf("equal-time engine commit should not be flagged as unrecorded, got %v",
+			det.UnrecordedDocs)
+	}
+}
+
+// TestDetectUnrecordedEditsIgnoresNetNoopRevert pins the design
+// promise that a post-checkpoint commit reverted by a later commit
+// (so the doc's tree state at HEAD matches the checkpoint SHA) does
+// NOT trip the unrecorded-edits guardrail. Without this, every revert
+// of a managed-doc commit would force the operator through a claim
+// pass with nothing to actually record.
+func TestDetectUnrecordedEditsIgnoresNetNoopRevert(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
+
+	t.Setenv("GIT_AUTHOR_DATE", "2026-04-01T12:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-04-01T12:00:00Z")
+	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
+	gitInRepo(t, root, "commit", "-m", "seed twin")
+
+	revCmd := exec.Command("git", "rev-parse", "HEAD")
+	revCmd.Dir = root
+	revOut, err := revCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	checkpointSHA := strings.TrimSpace(string(revOut))
+
+	t.Setenv("GIT_AUTHOR_DATE", "2026-04-02T12:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-04-02T12:00:00Z")
+	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n\nedited\n")
+	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
+	gitInRepo(t, root, "commit", "-m", "edit vision")
+
+	t.Setenv("GIT_AUTHOR_DATE", "2026-04-03T12:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-04-03T12:00:00Z")
+	gitInRepo(t, root, "revert", "--no-edit", "HEAD")
+
+	cp := Checkpoint{
+		Version:        CheckpointVersion,
+		LastIngestAt:   "2026-04-01T18:00:00Z",
+		LastIngestRun:  "reflect-prior",
+		BureaucracySHA: &checkpointSHA,
+		Project:        "p",
+	}
+	if err := WriteCheckpoint(twinDir, cp); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	det, err := DetectUnrecordedEdits(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(det.UnrecordedDocs) != 0 {
+		t.Errorf("net-noop revert should not be flagged as unrecorded, got %v",
 			det.UnrecordedDocs)
 	}
 }

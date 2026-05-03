@@ -28,8 +28,12 @@ type DetectionResult struct {
 //
 // Implementation: for each managed doc, ask git for the timestamp of
 // its most recent commit; compare against checkpoint.last_ingest_at.
-// Cheap (one git log per doc); runs lazily at the start of
-// twin-touching commands.
+// When a post-checkpoint commit is found and the checkpoint records a
+// bureaucracy SHA, also confirm the doc's tree state at HEAD differs
+// from its tree state at that SHA — a revert that returns the doc to
+// its checkpoint state is a net no-op and shouldn't block the
+// operator. Cheap (one git log + at most one git diff per doc); runs
+// lazily at the start of twin-touching commands.
 func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 	if cfg.Mode != Closed {
 		return DetectionResult{}, nil
@@ -51,6 +55,11 @@ func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 		return DetectionResult{}, fmt.Errorf("wiki: parse last_ingest_at %q: %w", cp.LastIngestAt, err)
 	}
 
+	var checkpointSHA string
+	if cp.BureaucracySHA != nil {
+		checkpointSHA = *cp.BureaucracySHA
+	}
+
 	var unrecorded []string
 	for _, d := range cfg.ManagedDocs {
 		when, err := lastCommitTime(cfg, d.Filename)
@@ -60,12 +69,32 @@ func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 		if when.IsZero() {
 			continue
 		}
-		if when.After(since) {
-			unrecorded = append(unrecorded, d.Filename)
+		if !when.After(since) {
+			continue
 		}
+		if checkpointSHA != "" && docUnchangedSinceSHA(cfg, d.Filename, checkpointSHA) {
+			continue
+		}
+		unrecorded = append(unrecorded, d.Filename)
 	}
 	sort.Strings(unrecorded)
 	return DetectionResult{UnrecordedDocs: unrecorded, Since: since}, nil
+}
+
+// docUnchangedSinceSHA reports whether the managed doc's tree state at
+// HEAD matches its tree state at sha — i.e. all post-sha commits on
+// this path net to a no-op (typical case: the operator reverted a
+// plan/reflect pass that had touched the doc). Returns false on any
+// git error so the caller degrades to "treat as changed" rather than
+// silently swallow real edits.
+func docUnchangedSinceSHA(cfg Config, filename, sha string) bool {
+	rel := managedDocRelToBureaucracy(cfg, filename)
+	if rel == "" {
+		return false
+	}
+	cmd := exec.Command("git", "diff", "--quiet", sha, "HEAD", "--", rel)
+	cmd.Dir = cfg.BureaucracyPath
+	return cmd.Run() == nil
 }
 
 func lastCommitTime(cfg Config, filename string) (time.Time, error) {
