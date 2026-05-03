@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// todayDateSuffix returns the current UTC date in YYYY-MM-DD form — the
-// same suffix run.nextFreeDatedID appends on an IDBase collision.
+// todayDateSuffix returns the current local date in YYYY-MM-DD form —
+// the same suffix run.nextFreeDatedID appends on an IDBase collision.
 func todayDateSuffix() string {
-	return time.Now().UTC().Format("2006-01-02")
+	return time.Now().Local().Format("2006-01-02")
 }
 
 // captureIdea is a small wrapper around `moe idea new` for tests that

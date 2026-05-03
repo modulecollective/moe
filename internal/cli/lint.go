@@ -81,7 +81,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		return 1
 	}
 
-	runSlug := "lint-" + time.Now().UTC().Format("2006-01-02-150405")
+	runSlug := "lint-" + time.Now().Local().Format("2006-01-02-150405")
 	docID := "lint"
 
 	sessionUUID, err := run.NewSessionID()

@@ -11,7 +11,10 @@ import (
 )
 
 // fixedTime is injected into Register so Created is deterministic.
-func fixedTime() time.Time { return time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC) }
+// 09:00 UTC keeps the calendar day stable across CI runner zones —
+// Register formats Created with .Local(), and midnight UTC would flip
+// to the prior day in any westward zone.
+func fixedTime() time.Time { return time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC) }
 
 // makeRemote builds a tiny bare git repo with one commit on `main` and
 // returns its filesystem path, usable as a URL for ls-remote and submodule

@@ -101,7 +101,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 		return 1
 	}
 
-	runSlug := "claim-" + time.Now().UTC().Format("2006-01-02-150405")
+	runSlug := "claim-" + time.Now().Local().Format("2006-01-02-150405")
 	docID := "claim"
 
 	sessionUUID, err := run.NewSessionID()

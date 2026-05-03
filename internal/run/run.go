@@ -253,7 +253,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		Title:     title,
 		Status:    StatusInProgress,
 		Workflow:  opts.Workflow,
-		Created:   now().UTC().Format("2006-01-02"),
+		Created:   now().Local().Format("2006-01-02"),
 		Documents: map[string]*Document{},
 	}
 
@@ -666,10 +666,13 @@ func LastFileActivity(root, relPath string) (time.Time, error) {
 
 // nextFreeDatedID resolves an IDBase collision to base-YYYY-MM-DD. If
 // that's already taken (two promotes of the same idea-slug in one day),
-// it walks base-YYYY-MM-DD-2, base-YYYY-MM-DD-3, … Dates use UTC so the
-// slug doesn't flip around the operator's local midnight.
+// it walks base-YYYY-MM-DD-2, base-YYYY-MM-DD-3, … Dates use the
+// operator's local zone so the slug flips around the calendar the
+// operator reads. Tests that pin a fixed instant near UTC midnight must
+// construct it in time.Local (or the desired zone), not time.UTC, or
+// the assertion will drift in CI runners whose zone flips the date.
 func nextFreeDatedID(root, projectID, base string, now time.Time) (string, error) {
-	dated := base + "-" + now.UTC().Format("2006-01-02")
+	dated := base + "-" + now.Local().Format("2006-01-02")
 	taken, err := slugTaken(root, projectID, dated)
 	if err != nil {
 		return "", err

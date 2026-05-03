@@ -94,7 +94,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return 1
 	}
 
-	runSlug := "reflect-" + time.Now().UTC().Format("2006-01-02-150405")
+	runSlug := "reflect-" + time.Now().Local().Format("2006-01-02-150405")
 	docID := "reflect"
 
 	sessionUUID, err := run.NewSessionID()

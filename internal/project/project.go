@@ -104,7 +104,7 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 		Submodule:     submodulePath,
 		Remote:        normalizeRemote(url),
 		DefaultBranch: branch,
-		Created:       now().UTC().Format("2006-01-02"),
+		Created:       now().Local().Format("2006-01-02"),
 	}
 
 	if err := writeJSON(filepath.Join(root, projectJSONPath), md); err != nil {
