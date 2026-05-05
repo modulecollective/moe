@@ -757,6 +757,75 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	}
 }
 
+// TestRunWikiSessionRevealsCanvasUnderWorktree pins the contract this
+// run was opened against: post-worktree, the canvas lives at a per-
+// session UUID-bearing path under .moe/worktrees/, gitignored and
+// invisible to VS Code's explorer. runWikiSession must hand that
+// absolute path to revealInEditor right after the session is opened so
+// `code -r` can pop the tab. Without this, the operator has no way to
+// find the live file. Drives runWikiSession through to a deliberate
+// BuildSpec failure so the test doesn't depend on a real claude binary.
+func TestRunWikiSessionRevealsCanvasUnderWorktree(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	var got string
+	prev := revealInEditor
+	revealInEditor = func(path string, _ io.Writer) { got = path }
+	t.Cleanup(func() { revealInEditor = prev })
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "reveal-on-open",
+		DocID:       "design",
+		LockPurpose: "stage",
+		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			// Bail before the executor runs — the test is about the
+			// reveal call, not the agent loop.
+			return wikiTurnSpec{}, errors.New("stop after reveal")
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	_ = runWikiSession(root, in, &stdout, &stderr)
+
+	if got == "" {
+		t.Fatal("revealInEditor was not called")
+	}
+	want := run.ContentPath("moe", "reveal-on-open", "design")
+	if !strings.HasSuffix(got, string(filepath.Separator)+want) {
+		t.Errorf("revealed path = %q, want suffix %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("revealed path = %q is not absolute", got)
+	}
+	// The whole point of routing through the worktree is that the path
+	// is per-session — under .moe/worktrees/, not the canonical root.
+	// Use Contains rather than HasPrefix because macOS resolves /tmp
+	// to /private/tmp during worktree creation, so the literal root
+	// prefix does not survive.
+	worktreesFragment := string(filepath.Separator) + filepath.Join(".moe", "worktrees") + string(filepath.Separator)
+	if !strings.Contains(got, worktreesFragment) {
+		t.Errorf("revealed path = %q should sit under .moe/worktrees/", got)
+	}
+}
+
+// TestRevealInEditorMissingBinaryIsSilentNoOp pins the gate's contract:
+// operators without `code` on PATH (or with a different IDE entirely)
+// must not see a stderr nudge each session, and the helper must not
+// return an error or leak a process. Re-pointing PATH at an empty dir
+// is enough to make exec.LookPath fail; if some future refactor moves
+// the gate or drops it, this test goes red.
+func TestRevealInEditorMissingBinaryIsSilentNoOp(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	var stderr bytes.Buffer
+	revealInEditor(filepath.Join(t.TempDir(), "content.md"), &stderr)
+
+	if stderr.Len() != 0 {
+		t.Errorf("revealInEditor wrote to stderr when `code` is absent: %q", stderr.String())
+	}
+}
+
 // TestSessionDocCwdIsStableAcrossTurns is the regression for this run:
 // document-only stages must hand claude a cwd that's identical across
 // turns, so the encoded-cwd project dir under ~/.claude/projects/ stays

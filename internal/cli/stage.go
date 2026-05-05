@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -394,6 +395,14 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 	workRoot := sess.WorktreePath
+
+	// Pop the canvas tab in the operator's running VS Code window so
+	// they can watch the agent's edits stream in. Worktree paths are
+	// per-session (UUID-bearing, gitignored) and so don't surface in
+	// the explorer on their own — without this, the operator has no
+	// way to find the live file. Best-effort: silent no-op if `code`
+	// isn't on PATH.
+	revealInEditor(filepath.Join(workRoot, run.ContentPath(in.Project, in.RunSlug, in.DocID)), stderr)
 
 	// Caller's setup: load run metadata, configure sandbox, etc.
 	// Failures here mean we never reached the executor; close the
@@ -971,6 +980,31 @@ MoE-Session: %s
 		allPaths = append(allPaths, followupsRel)
 	}
 	return run.StageAndCommit(root, msg, allPaths...)
+}
+
+// revealInEditor pops the canvas tab in the operator's running VS Code
+// window via `code -r`. The flag reuses the existing window and reveals
+// the file as a tab; VS Code's native file watcher streams subsequent
+// edits straight in. Worktree canvas paths are gitignored and bear a
+// per-session UUID, so without this the operator has no way to find
+// the live file from VS Code's explorer.
+//
+// Best-effort and non-blocking: skip silently if `code` isn't on PATH
+// (the operator may not be a VS Code user; nudging every session would
+// be noise) or if Start fails. The goroutine reaps the child so it
+// doesn't linger as a zombie.
+//
+// Overridable in tests.
+var revealInEditor = func(path string, stderr io.Writer) {
+	bin, err := exec.LookPath("code")
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(bin, "-r", path)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
 }
 
 // sessionDocCwd is the cwd document-only stages hand to claude — a
