@@ -170,30 +170,63 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *oneShot {
-		return runOneShotChain(root, md, stdout, stderr)
+		return runOneShotChain(root, md, "design", stdout, stderr)
 	}
 	return promptNextStage(root, md, stdout, stderr)
 }
 
-// runOneShotChain drives `moe sdlc new --one-shot`: design then code,
-// each one `claude -p` turn against the run's per-stage canvas. Chains
-// only on a zero exit from the prior stage — commitTurn's
-// canvas-existence assertion already refuses an empty design turn, so a
-// silent refusal stops the chain without needing a second sentinel.
-// After code lands, hand off to promptNextStage so an interactive
-// operator gets the same `[N/m/p]` ship prompt as the interactive code
-// stage; non-tty callers fall through to its `next: …` hint. Automatic
-// pushing is intentionally still off the table — the prompt's default-N
-// keeps a reflex Enter from shipping.
-func runOneShotChain(root string, md *run.Metadata, stdout, stderr io.Writer) int {
-	moePrintf(stdout, "one-shot: design → code (headless)\n")
-	if code := runOneShotStage(md.Project, md.ID, "design", false, stdout, stderr); code != 0 {
-		moePrintf(stderr, "one-shot: design stage exited %d; not chaining to code\n", code)
-		return code
+// oneShotStages is sdlc's headless ladder: design then code. The list
+// is the source of truth for both runOneShotChain (start-from-stage
+// dispatch) and any future workflow that earns --one-shot.
+var oneShotStages = []struct {
+	name         string
+	needsSandbox bool
+}{
+	{name: "design", needsSandbox: false},
+	{name: "code", needsSandbox: true},
+}
+
+// runOneShotChain drives sdlc's headless ladder starting from the named
+// stage. `moe sdlc new --one-shot` passes "design" so design then code
+// run in sequence; `moe sdlc resume --one-shot` passes whichever of
+// design/code is still pending so an opened run can pick up where it
+// left off. A startStage that doesn't appear in the ladder (e.g.
+// "push") skips both stages and hands straight to promptNextStage.
+//
+// Chains only on a zero exit from the prior stage — commitTurn's
+// canvas-existence assertion already refuses an empty turn, so a silent
+// refusal stops the chain without needing a second sentinel. After the
+// last stage lands, hand off to promptNextStage so an interactive
+// operator gets the same `[N/m/p]` ship prompt; non-tty callers fall
+// through to its `next: …` hint. Automatic pushing is still off the
+// table — the prompt's default-N keeps a reflex Enter from shipping.
+func runOneShotChain(root string, md *run.Metadata, startStage string, stdout, stderr io.Writer) int {
+	var pending []string
+	skipping := startStage != ""
+	type step struct {
+		name         string
+		needsSandbox bool
 	}
-	if code := runOneShotStage(md.Project, md.ID, "code", true, stdout, stderr); code != 0 {
-		moePrintf(stderr, "one-shot: code stage exited %d\n", code)
-		return code
+	var toRun []step
+	for _, s := range oneShotStages {
+		if skipping {
+			if s.name == startStage {
+				skipping = false
+			} else {
+				continue
+			}
+		}
+		toRun = append(toRun, step{name: s.name, needsSandbox: s.needsSandbox})
+		pending = append(pending, s.name)
+	}
+	if len(toRun) > 0 {
+		moePrintf(stdout, "one-shot: %s (headless)\n", strings.Join(pending, " → "))
+	}
+	for _, s := range toRun {
+		if code := runOneShotStage(md.Project, md.ID, s.name, s.needsSandbox, stdout, stderr); code != 0 {
+			moePrintf(stderr, "one-shot: %s stage exited %d; not chaining further\n", s.name, code)
+			return code
+		}
 	}
 	return promptNextStage(root, md, stdout, stderr)
 }
@@ -208,6 +241,59 @@ func runOneShotStage(projectID, runID, docID string, needsSandbox bool, stdout, 
 		Headless:      true,
 		SkipNextStage: true,
 	}, stdout, stderr)
+}
+
+// promoteIdeaToSdlcRun opens a fresh sdlc run seeded by an idea's
+// canvas, marks the idea promoted, and returns the new run's metadata.
+// Mirrors the --from-idea path inside runNew without the --id /
+// title-override / one-shot-chain plumbing — the caller (queue add)
+// has no use for those today, and keeping this helper narrow makes the
+// shared promote semantics easy to reason about.
+func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, error) {
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		return nil, err
+	}
+	src, seed, err := loadIdeaForPromote(root, projectID, ideaSlug)
+	if err != nil {
+		return nil, err
+	}
+	stages := wf.Stages()
+	if len(stages) == 0 {
+		return nil, fmt.Errorf("workflow sdlc has no stages to seed from --from-idea")
+	}
+	opts := run.Options{
+		Workflow:      "sdlc",
+		SeedDocs:      map[string]string{stages[0]: seed},
+		SubjectFrom:   "idea " + ideaSlug,
+		ExtraTrailers: []string{"MoE-Idea: " + ideaSlug},
+		// Anchor the run slug to the idea's filename, not its (editable)
+		// H1. run.New will date-suffix on collision.
+		IDBase: ideaSlug,
+	}
+	var md *run.Metadata
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "run-new",
+		Run:     projectID,
+	}, func() error {
+		m, err := run.New(root, projectID, src.Title, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := markIdeaPromoted(root, src, md); err != nil {
+		// New run already opened. Surface the warning via the returned
+		// metadata + error pair so callers can decide whether to abort
+		// or continue (queue add chooses to continue: the run is open
+		// and queueable, the idea is just not yet flipped to promoted).
+		return md, fmt.Errorf("warning: could not mark idea %s/%s promoted: %w", src.Project, src.ID, err)
+	}
+	return md, nil
 }
 
 // loadIdeaForPromote returns the source idea run and its canvas body

@@ -31,6 +31,11 @@ func init() {
 	}, "design")
 	sdlc.Register(pushCmd, "code")
 	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", sdlcCloseCleanup))
+	sdlc.RegisterFacade(&Command{
+		Name:    "resume",
+		Summary: "drive any pending stages of an opened run headlessly, then prompt at the merge gate",
+		Run:     runResume,
+	})
 	RegisterWorkflow(sdlc)
 	Register(sdlc.Command())
 }
@@ -104,6 +109,102 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		"like to work on next. Then wait for their reply."
 	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
 		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
+}
+
+// runResume drives an already-opened sdlc run forward through whichever
+// of design/code is still pending and hands off to the merge-gate
+// prompt. Useful as a first-class operator verb (pick up an opened run
+// and ride it to the merge gate without typing two stage commands) and
+// as the per-item entry point for `moe queue run`.
+//
+// Two modes:
+//   - default (interactive): invoke the next pending stage interactively;
+//     the stage's existing [Y/n/o] / [N/m/p] chain prompt walks through
+//     the rest. Operator is in the loop at every Claude session.
+//   - --one-shot: drive each pending stage headlessly via `claude -p`,
+//     then hand off to the merge gate. Operator is in the loop only at
+//     the merge gate.
+//
+// Both modes refuse missing or terminal runs at the boundary so a
+// resume call against a dead run fails fast instead of spawning a session.
+func runResume(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sdlc resume", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	oneShot := fs.Bool("one-shot", false, "drive pending stages headlessly via `claude -p` (default: interactive)")
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe sdlc resume [--one-shot] <project> <run>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Picks up the run at its first pending stage and drives it forward.")
+		moePrintln(stderr, "Without --one-shot, opens the stage interactively (operator in the loop).")
+		moePrintln(stderr, "With --one-shot, chains pending stages headlessly and stops at the [N/m/p]")
+		moePrintln(stderr, "merge-gate prompt. Refuses runs that are missing or already terminal.")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	projectID, runID := fs.Arg(0), fs.Arg(1)
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "sdlc resume: %v\n", err)
+		return 1
+	}
+	if md.Workflow != "sdlc" {
+		moePrintf(stderr, "sdlc resume: %s/%s is a %s run, not sdlc\n", projectID, runID, md.Workflow)
+		return 1
+	}
+	switch md.Status {
+	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
+		moePrintf(stderr, "sdlc resume: %s/%s is %s; nothing to resume\n", projectID, runID, md.Status)
+		return 1
+	case run.StatusPushed:
+		moePrintf(stderr, "sdlc resume: %s/%s already pushed; resume cannot drive a pushed run\n", projectID, runID)
+		return 1
+	}
+
+	// Decide where to start. Workflow.Next returns the first
+	// unsatisfied stage — design, code, or push. NextKindDone
+	// (everything satisfied, but not terminal) means the run is sitting
+	// at the merge gate already; jump straight to promptNextStage.
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	if *oneShot {
+		// Headless chain. push (or NextKindDone) skips both stages and
+		// hands straight to the merge-gate prompt.
+		startStage := ""
+		if kind == NextKindStage && next != nil {
+			startStage = next.Name
+		}
+		return runOneShotChain(root, md, startStage, stdout, stderr)
+	}
+
+	// Interactive mode: invoke the next stage interactively. Its
+	// post-stage [Y/n/o] / [N/m/p] prompt drives the rest of the chain
+	// — same behaviour the operator gets today after a stage exits.
+	if kind != NextKindStage || next == nil {
+		// Nothing to invoke; show the next-stage hint (or merge prompt).
+		return promptNextStage(root, md, stdout, stderr)
+	}
+	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
 }
 
 // requireDesignCanvas refuses the code stage when the run's design
