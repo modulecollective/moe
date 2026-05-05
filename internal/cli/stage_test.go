@@ -757,6 +757,49 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	}
 }
 
+// TestSessionDocCwdIsStableAcrossTurns is the regression for this run:
+// document-only stages must hand claude a cwd that's identical across
+// turns, so the encoded-cwd project dir under ~/.claude/projects/ stays
+// the same and `--resume <sid>` finds the JSONL it wrote on turn 1. Two
+// calls with the same (root, project, run, doc) must return the same
+// path; the path must live under <root>/.moe/sessions/ rather than the
+// per-turn session worktree (which churns a UUID and was the source of
+// the bug). Drives the helper directly because the executor seam (real
+// `claude` subprocess) isn't available in tests — a stable helper plus
+// the field-threading edits in BuildSpec/Execute are the entire fix.
+func TestSessionDocCwdIsStableAcrossTurns(t *testing.T) {
+	root := t.TempDir()
+	turn1 := sessionDocCwd(root, "tele", "fix-it", "design")
+	turn2 := sessionDocCwd(root, "tele", "fix-it", "design")
+	if turn1 != turn2 {
+		t.Fatalf("session cwd not stable across turns: turn1=%q turn2=%q", turn1, turn2)
+	}
+	want := filepath.Join(root, ".moe", "sessions", "tele", "fix-it", "design")
+	if turn1 != want {
+		t.Fatalf("session cwd shape = %q, want %q", turn1, want)
+	}
+	if strings.Contains(turn1, filepath.Join(".moe", "worktrees")) {
+		t.Errorf("session cwd should not be under the per-turn worktree dir: %q", turn1)
+	}
+}
+
+// TestSessionDocCwdDistinguishesByDoc is the negative control: distinct
+// (project, run, doc) tuples must map to distinct cwds, otherwise two
+// concurrent design+code sessions on the same run would share an encoded
+// project dir and step on each other's `--resume` lookups.
+func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
+	root := t.TempDir()
+	design := sessionDocCwd(root, "tele", "fix-it", "design")
+	code := sessionDocCwd(root, "tele", "fix-it", "code")
+	if design == code {
+		t.Fatalf("doc id ignored in session cwd: %q == %q", design, code)
+	}
+	otherRun := sessionDocCwd(root, "tele", "other", "design")
+	if otherRun == design {
+		t.Fatalf("run id ignored in session cwd: %q == %q", otherRun, design)
+	}
+}
+
 // gitLogFormat runs `git log -n <n> --format=<fmt> <rev>` and returns
 // the trimmed stdout — small helper so each assertion doesn't
 // reimplement the exec.Command plumbing.

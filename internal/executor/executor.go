@@ -47,6 +47,11 @@ type Request struct {
 	// project's submodule, or "" for document-only runs. When set,
 	// claude runs with this as its working directory.
 	ClonePath string
+	// SessionCwd is the document-only fallback cwd: a stable per-document
+	// path whose only purpose is to keep claude's encoded-cwd project dir
+	// constant across turns so `--resume <sid>` finds its JSONL. Empty
+	// for code stages (ClonePath already gives them a stable cwd).
+	SessionCwd string
 	// InitialPrompt, if non-empty, is auto-sent as the first user message
 	// of the turn so the operator doesn't have to type anything to kick
 	// the session off. Stage handlers use it to have the agent greet the
@@ -103,9 +108,12 @@ func Execute(r Request) error {
 		args = append(args, r.InitialPrompt)
 	}
 	cmd := exec.Command(bin, args...)
-	if r.ClonePath != "" {
+	switch {
+	case r.ClonePath != "":
 		cmd.Dir = r.ClonePath
-	} else {
+	case r.SessionCwd != "":
+		cmd.Dir = r.SessionCwd
+	default:
 		cmd.Dir = r.Root
 	}
 	cmd.Stdin = r.Stdin

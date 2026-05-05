@@ -13,7 +13,6 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
-	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -161,17 +160,32 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				}
 			}
 
-			// mutated means EnsureDocument just minted the session
-			// UUID this turn, so the session is definitely new. Even
-			// when the document already existed, the local Claude
-			// Code session data may have been cleaned up (or moe is
-			// running on a different machine). Probe the transcript
-			// as a proxy: no transcript → nothing to --resume.
-			newSession := mutated
-			if !newSession {
-				tp, _ := claude.TranscriptPath(doc.Session)
-				newSession = tp == ""
+			// Document-only stages need a cwd that's stable across
+			// turns so claude's encoded-cwd project dir doesn't churn
+			// and `--resume <sid>` can find the JSONL it wrote on
+			// turn 1. The session worktree is per-turn (UUID), so
+			// using workRoot would re-break it. Code stages have
+			// ClonePath, which is already stable.
+			sessionCwd := ""
+			if clonePath == "" {
+				sessionCwd = sessionDocCwd(root, md.Project, md.ID, docID)
+				if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
+					return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
+				}
 			}
+
+			// mutated means EnsureDocument just minted the session
+			// UUID this turn, so the session is definitely new.
+			// Otherwise trust that the per-document JSONL is at the
+			// predictable path under sessionCwd's encoded project
+			// dir. If it isn't (operator wiped ~/.claude/projects/,
+			// or the run.json followed a clone to a fresh machine
+			// where no transcript exists), claude prints a clear
+			// "No conversation found" error and the operator re-runs
+			// — better than the previous heuristic, which used a
+			// global glob that would silently match an unrelated
+			// JSONL under an old worktree's encoded dir.
+			newSession := mutated
 
 			// Headless mode has no operator on stdin to type the seed
 			// prompt, so default it to the run title — the same shape
@@ -186,6 +200,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				Metadata:         md,
 				DocID:            docID,
 				ClonePath:        clonePath,
+				SessionCwd:       sessionCwd,
 				SessionUUID:      doc.Session,
 				NewSession:       newSession,
 				InitialPrompt:    initialPrompt,
@@ -269,6 +284,11 @@ type wikiTurnSpec struct {
 	// ClonePath is the sandbox clone working directory. Empty for
 	// document-only / lint sessions.
 	ClonePath string
+	// SessionCwd is the document-only fallback cwd — a stable
+	// per-document path under <root>/.moe/sessions/. Empty for code
+	// stages (ClonePath wins) and for run-less / lint sessions, which
+	// can keep using the worktree root since they don't `--resume`.
+	SessionCwd string
 	// SessionUUID is the Claude Code session id. Stage sessions reuse
 	// the per-document UUID stored in run.json; lint sessions mint a
 	// fresh one each invocation.
@@ -411,6 +431,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			NewSession:    spec.NewSession,
 			Prompt:        prompt,
 			ClonePath:     spec.ClonePath,
+			SessionCwd:    spec.SessionCwd,
 			InitialPrompt: spec.InitialPrompt,
 			Stdin:         os.Stdin,
 			Stdout:        os.Stdout,
@@ -888,6 +909,18 @@ MoE-Session: %s
 		allPaths = append(allPaths, followupsRel)
 	}
 	return run.StageAndCommit(root, msg, allPaths...)
+}
+
+// sessionDocCwd is the cwd document-only stages hand to claude — a
+// stable per-document path under <root>/.moe/sessions/<project>/<run>/<doc>/.
+// Stable across turns because the inputs are stable; that's the whole
+// point: claude encodes cwd into its on-disk project dir, so a churning
+// cwd (e.g. the per-turn worktree path) leaves `--resume <sid>` looking
+// in a fresh dir on every turn and reporting the session missing. The
+// dir itself stays empty — `--add-dir` is what actually scopes the
+// session to the worktree.
+func sessionDocCwd(root, projectID, runID, docID string) string {
+	return filepath.Join(root, ".moe", "sessions", projectID, runID, docID)
 }
 
 // stageableFollowups returns the run's followups.md path (relative to
