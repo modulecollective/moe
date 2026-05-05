@@ -5,12 +5,33 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// safeBuffer is a bytes.Buffer guarded by a mutex. Used by tests that
+// poll stdout from one goroutine while a helper writes it from another;
+// bytes.Buffer itself is not safe for concurrent Write/String.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func stageMetadata(project, id, workflow string) *run.Metadata {
 	return &run.Metadata{ID: id, Project: project, Workflow: workflow, Status: run.StatusInProgress}
@@ -175,16 +196,16 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr safeBuffer
 	exit := make(chan int, 1)
 	go func() {
 		exit <- promptStageNextStage(next, md, "moe sdlc code tele fix-it", &stdout, &stderr)
 	}()
 
 	// Wait for signal.Notify to install (the prompt prints its label
-	// synchronously before the helper enters select). Polling on
-	// stdout is racy; a small sleep is the same shape every other
-	// signal-aware test in the suite uses.
+	// synchronously before the helper enters select). safeBuffer
+	// guards the bytes.Buffer so this poll doesn't race the helper's
+	// concurrent Write.
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(stdout.String(), "[Y/n/o]") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -237,7 +258,7 @@ func TestPromptPushNextStageDeclinesOnSignal(t *testing.T) {
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr safeBuffer
 	exit := make(chan int, 1)
 	go func() {
 		exit <- promptPushNextStage(next, md, "moe sdlc push tele fix-it", &stdout, &stderr)
