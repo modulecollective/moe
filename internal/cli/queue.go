@@ -8,10 +8,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// queueCountdownSeconds is the dwell at the top of every dispatch — the
+// operator's predictable Ctrl-C window between items. Fixed at 3s per
+// design: long enough to land a keystroke, short enough not to feel
+// sluggish, no flag (per project no-config policy). Applies uniformly to
+// the first item too, so an unexpected queue head can be aborted before
+// any agent starts.
+const queueCountdownSeconds = 3
 
 // `moe queue` is the operator's playlist of opened runs to grind
 // through in one sitting. Items are structured (workflow, project, run)
@@ -475,8 +484,32 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	}
 	dispatchOpts := queueDispatchOpts{OneShot: *oneShot}
 
+	// Walker-scoped SIGINT handler. Catches Ctrl-C delivered at the
+	// stage prompt (where the prompt's own helper has already returned
+	// "decline" — but the walker still needs to know to stop the loop)
+	// and any other cooked-mode point during the loop's body. The
+	// countdown registers its own scoped channel below; Go's
+	// signal.Notify multiplexes a single SIGINT to every subscribed
+	// channel, so both fire on one Ctrl-C without conflict.
+	walkerSig, stopWalkerSig := installSigint()
+	defer stopWalkerSig()
+	var stopRequested atomic.Bool
+	walkerDone := make(chan struct{})
+	defer close(walkerDone)
+	go func() {
+		for {
+			select {
+			case <-walkerSig:
+				stopRequested.Store(true)
+			case <-walkerDone:
+				return
+			}
+		}
+	}()
+
 	for {
 		var head queueItem
+		var depth int
 		var empty bool
 		err = withRepoLock(root, repolock.Options{Purpose: "queue-peek"}, func() error {
 			items, err := loadQueue(root)
@@ -488,6 +521,7 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 				return nil
 			}
 			head = items[0]
+			depth = len(items)
 			return nil
 		})
 		if err != nil {
@@ -502,7 +536,9 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		// Liveness check is outside the lock — run.Load is read-only
 		// and the on-disk run.json doesn't need our protection. Drop
 		// dead items without invoking dispatch, identity-popping so
-		// concurrent edits don't shift the wrong item out.
+		// concurrent edits don't shift the wrong item out. Dropped
+		// items skip the countdown — the operator never sees a
+		// "starting" frame for an item we're about to discard.
 		liveness, reason := classifyQueueItem(root, head)
 		if liveness != queueLivenessReady {
 			moePrintf(stdout, "queue: dropping %s (%s)\n", head, reason)
@@ -513,7 +549,21 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 
-		moePrintf(stdout, "queue: starting %s\n", head)
+		// Countdown gates every dispatch, including the first. Scoped
+		// SIGINT channel lets `runCountdown` return cleanly on Ctrl-C
+		// instead of letting Go's default handler tear the process
+		// down. The walker-scoped handler also receives the same
+		// signal and flips stopRequested — redundant when the
+		// countdown caught it, load-bearing when SIGINT lands at the
+		// stage prompt later.
+		countdownSig, stopCountdownSig := installSigint()
+		stopped := runCountdown(queueCountdownSeconds, head.String(), stdout, countdownSig)
+		stopCountdownSig()
+		if stopped {
+			moePrintf(stdout, "queue: stopped — %s still at head (%d remaining)\n", head, depth)
+			return 0
+		}
+
 		code := dispatchQueueItem(head, dispatchOpts, stdout, stderr)
 		if code != 0 {
 			moePrintf(stderr, "queue: %s exited %d; leaving at head of queue\n", head, code)
@@ -522,6 +572,19 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		if err := queuePopIdentity(root, head); err != nil {
 			moePrintf(stderr, "queue: pop %s: %v\n", head, err)
 			return 1
+		}
+		// Catches Ctrl-C delivered at the stage prompt: the prompt's
+		// helper returned decline, the chained stage returned 0,
+		// dispatch returned 0 here — but the walker-scoped handler
+		// has flipped stopRequested. Honour it before grabbing the
+		// next head.
+		if stopRequested.Load() {
+			remaining := depth - 1
+			if remaining < 0 {
+				remaining = 0
+			}
+			moePrintf(stdout, "queue: stopped (%d remaining)\n", remaining)
+			return 0
 		}
 	}
 }

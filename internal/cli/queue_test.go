@@ -8,10 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// fastQueueCountdown shrinks the per-tick interval so a 3-tick
+// countdown takes ~3ms instead of ~3s. Tests that drive runQueueRun
+// through the new countdown pay the wait once per dispatched item, so
+// keeping the prod tick would slow the suite by a multiple. Restored
+// on cleanup.
+func fastQueueCountdown(t *testing.T) {
+	t.Helper()
+	old := queueCountdownTick
+	queueCountdownTick = 1 * time.Millisecond
+	t.Cleanup(func() { queueCountdownTick = old })
+}
 
 // markRunStatus rewrites run.json's status field directly. Test helper
 // for tests that need a "merged" or "closed" run without driving the
@@ -327,6 +341,7 @@ func TestQueueListMarksDeadItems(t *testing.T) {
 }
 
 func TestQueueRunEmptyExitsZero(t *testing.T) {
+	fastQueueCountdown(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -370,6 +385,7 @@ func stubDispatch(t *testing.T, exit func(it queueItem) int) *dispatchRecorder {
 }
 
 func TestQueueRunWalksItemsInOrder(t *testing.T) {
+	fastQueueCountdown(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -405,6 +421,7 @@ func TestQueueRunWalksItemsInOrder(t *testing.T) {
 }
 
 func TestQueueRunDropsDeadItem(t *testing.T) {
+	fastQueueCountdown(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -444,6 +461,7 @@ func TestQueueRunDropsDeadItem(t *testing.T) {
 }
 
 func TestQueueRunStopsOnFailure(t *testing.T) {
+	fastQueueCountdown(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -483,6 +501,7 @@ func TestQueueRunStopsOnFailure(t *testing.T) {
 }
 
 func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
+	fastQueueCountdown(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -533,5 +552,124 @@ func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
 	}
 	if len(rec.calls) < 1 || rec.calls[0].Run != first {
 		t.Fatalf("walker should have dispatched first, got %v", rec.calls)
+	}
+}
+
+// TestQueueRunCountdownPrecedesEveryDispatch is the design property:
+// the countdown gates every dispatch, including the first item. With
+// the per-tick interval shrunk to ~1ms by fastQueueCountdown, a 3-tick
+// countdown still fires its three "starting … in N…" frames before
+// dispatch is invoked. Catches a regression that skips the countdown
+// for the first item (the seed's "between items" framing nearly led
+// the design there).
+func TestQueueRunCountdownPrecedesEveryDispatch(t *testing.T) {
+	fastQueueCountdown(t)
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	slug := openSdlcRun(t, "tele", "First")
+
+	var out, errb bytes.Buffer
+	if code := runQueueAdd([]string{"sdlc", "tele", slug}, &out, &errb); code != 0 {
+		t.Fatalf("add: %d %q", code, errb.String())
+	}
+
+	rec := stubDispatch(t, nil)
+
+	out.Reset()
+	errb.Reset()
+	if code := runQueueRun(nil, &out, &errb); code != 0 {
+		t.Fatalf("walker exit=%d stderr=%q", code, errb.String())
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(rec.calls))
+	}
+	got := out.String()
+	for _, want := range []string{"starting sdlc tele/" + slug + " in 3", "in 2", "in 1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("countdown frame %q missing from stdout:\n%s", want, got)
+		}
+	}
+}
+
+// TestQueueRunStopsOnSignalDuringCountdown is the load-bearing case
+// for the design: SIGINT during the countdown returns 0 with the head
+// still at head and a "stopped" message. Drives the stop by overriding
+// dispatchQueueItem to never fire (it would only run after countdown
+// completed) and racing a real syscall.SIGINT into the process while
+// the walker is mid-countdown — the same path the operator's Ctrl-C
+// takes in production.
+func TestQueueRunStopsOnSignalDuringCountdown(t *testing.T) {
+	// Slow the tick down so the walker is reliably *inside* the
+	// countdown when we raise SIGINT — fastQueueCountdown's 1ms
+	// would race the test goroutine's signal-raise.
+	old := queueCountdownTick
+	queueCountdownTick = 200 * time.Millisecond
+	t.Cleanup(func() { queueCountdownTick = old })
+
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	first := openSdlcRun(t, "tele", "Stays at head")
+	second := openSdlcRun(t, "tele", "Never reached")
+
+	var out, errb bytes.Buffer
+	if code := runQueueAdd([]string{"sdlc", "tele", first}, &out, &errb); code != 0 {
+		t.Fatalf("add first: %d %q", code, errb.String())
+	}
+	if code := runQueueAdd([]string{"sdlc", "tele", second}, &out, &errb); code != 0 {
+		t.Fatalf("add second: %d %q", code, errb.String())
+	}
+
+	// Dispatch must not fire — the test's contract is "stopped during
+	// the first item's countdown." If it does, the test fails loudly
+	// rather than silently passing on the wrong path.
+	rec := stubDispatch(t, func(it queueItem) int {
+		t.Errorf("dispatch should not have fired; got %v", it)
+		return 0
+	})
+
+	walkerExit := make(chan int, 1)
+	walkerOut := &bytes.Buffer{}
+	walkerErr := &bytes.Buffer{}
+	go func() {
+		walkerExit <- runQueueRun(nil, walkerOut, walkerErr)
+	}()
+
+	// Give the walker time to enter the countdown's signal-listening
+	// select (signal.Notify must be installed before the kill, or the
+	// default handler tears the test process down). One tick interval
+	// is enough — the walker reaches the select on the very first tick.
+	time.Sleep(queueCountdownTick / 2)
+
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+
+	select {
+	case code := <-walkerExit:
+		if code != 0 {
+			t.Fatalf("walker exit=%d stderr=%q", code, walkerErr.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("walker did not exit within 5s of SIGINT")
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("dispatch should not have fired, got %v", rec.calls)
+	}
+	if !strings.Contains(walkerOut.String(), "queue: stopped") {
+		t.Errorf("expected stopped message, got: %q", walkerOut.String())
+	}
+	if !strings.Contains(walkerOut.String(), first) {
+		t.Errorf("expected stopped message to name head item, got: %q", walkerOut.String())
+	}
+	// Queue file must be untouched — head still at head, both items present.
+	items := readQueue(t, root)
+	if len(items) != 2 || items[0].Run != first || items[1].Run != second {
+		t.Fatalf("queue should be unchanged, got %v", items)
 	}
 }

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -657,7 +656,16 @@ func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, 
 		label = "[Y/n/o]"
 	}
 	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(os.Stdin, sig)
+	if interrupted {
+		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
+		// "decline" — safer default than guessing — and exit cleanly
+		// so the queue walker (or a standalone chain) can unwind.
+		moePrintln(stdout, "^C")
+		return 0
+	}
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
@@ -680,7 +688,15 @@ func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, 
 // never ship.
 func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(os.Stdin, sig)
+	if interrupted {
+		// N is already the default here; SIGINT collapses to the same
+		// safe sentinel and avoids the runtime trap.
+		moePrintln(stdout, "^C")
+		return 0
+	}
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
