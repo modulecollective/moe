@@ -9,31 +9,38 @@ import (
 )
 
 // DetectionResult is the outcome of DetectUnrecordedEdits — the list
-// of managed docs touched after the last log.md entry, plus the
-// timestamp the comparison was made against.
+// of managed docs touched outside a twin session, plus a display-only
+// timestamp framing when the comparison was anchored.
 type DetectionResult struct {
 	// UnrecordedDocs are the managed-doc filenames (relative to
 	// ContentDir) whose most recent commit in the bureaucracy repo
-	// is newer than the wiki's last_ingest_at. Sorted.
+	// lacks the `MoE-Workflow: twin` trailer (and isn't a net-noop
+	// revert to checkpoint state). Sorted.
 	UnrecordedDocs []string
-	// Since is the timestamp of the last_ingest_at comparison was
-	// made against. Zero when the wiki has no checkpoint yet.
+	// Since is checkpoint.last_ingest_at parsed — display-only,
+	// surfaced in operator-facing notes ("last reflected …"). Zero
+	// when the wiki has no checkpoint yet. No longer feeds detection.
 	Since time.Time
 }
 
-// DetectUnrecordedEdits flags managed docs that have been edited in
-// the bureaucracy repo since the wiki's last log entry. Closed-schema
-// only — open-schema's "decided edits" idea isn't load-bearing today,
-// so the open path returns an empty result.
+// DetectUnrecordedEdits flags managed docs whose latest commit wasn't
+// produced by a twin session (reflect / claim). Closed-schema only —
+// open-schema's "decided edits" idea isn't load-bearing today, so the
+// open path returns an empty result.
 //
-// Implementation: for each managed doc, ask git for the timestamp of
-// its most recent commit; compare against checkpoint.last_ingest_at.
-// When a post-checkpoint commit is found and the checkpoint records a
-// bureaucracy SHA, also confirm the doc's tree state at HEAD differs
-// from its tree state at that SHA — a revert that returns the doc to
-// its checkpoint state is a net no-op and shouldn't block the
-// operator. Cheap (one git log + at most one git diff per doc); runs
-// lazily at the start of twin-touching commands.
+// Implementation: for each managed doc, read the body of its most
+// recent commit and look for a `MoE-Workflow: twin` trailer. Commits
+// with the trailer are recorded by definition. Commits without it are
+// unrecorded unless the doc's tree state at HEAD matches the
+// checkpoint's bureaucracy SHA — a revert that returns the doc to its
+// checkpoint state is a net no-op and shouldn't block the operator.
+// Cheap (one git log + at most one git diff per doc); runs lazily at
+// the start of twin-touching commands.
+//
+// The `cp.LastIngestAt == ""` short-circuit stays: it's the only
+// signal we have that the twin has been initialised. Without it, a
+// fresh project's first non-engine commit would be flagged before any
+// baseline exists.
 func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 	if cfg.Mode != Closed {
 		return DetectionResult{}, nil
@@ -46,8 +53,8 @@ func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 		return DetectionResult{}, err
 	}
 	if !ok || cp.LastIngestAt == "" {
-		// No checkpoint → no comparison point. An unbootstrapped twin
-		// has no edits to claim; first reflect will set the baseline.
+		// No checkpoint → no baseline. An unbootstrapped twin has
+		// no edits to claim; first reflect will set the baseline.
 		return DetectionResult{}, nil
 	}
 	since, err := time.Parse(time.RFC3339, cp.LastIngestAt)
@@ -62,14 +69,15 @@ func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
 
 	var unrecorded []string
 	for _, d := range cfg.ManagedDocs {
-		when, err := lastCommitTime(cfg, d.Filename)
+		recorded, ok, err := lastCommitIsTwin(cfg, d.Filename)
 		if err != nil {
 			return DetectionResult{Since: since}, err
 		}
-		if when.IsZero() {
+		if !ok {
+			// No history for this doc → nothing to flag.
 			continue
 		}
-		if !when.After(since) {
+		if recorded {
 			continue
 		}
 		if checkpointSHA != "" && docUnchangedSinceSHA(cfg, d.Filename, checkpointSHA) {
@@ -97,24 +105,40 @@ func docUnchangedSinceSHA(cfg Config, filename, sha string) bool {
 	return cmd.Run() == nil
 }
 
-func lastCommitTime(cfg Config, filename string) (time.Time, error) {
+// lastCommitIsTwin reads the body of the most recent commit touching
+// filename and reports whether it carries `MoE-Workflow: twin`. The
+// second return is false when the doc has no history (untracked /
+// orphan path / mis-rooted config), in which case there's nothing to
+// flag and the caller should skip it. Parse shape mirrors
+// recentTwinSessions in dash.go: split on lines, look for the trailer
+// prefix.
+func lastCommitIsTwin(cfg Config, filename string) (bool, bool, error) {
 	rel := managedDocRelToBureaucracy(cfg, filename)
 	if rel == "" {
-		return time.Time{}, nil
+		return false, false, nil
 	}
-	cmd := exec.Command("git", "log", "-1", "--format=%cI", "--", rel)
+	cmd := exec.Command("git", "log", "-1", "--format=%B", "--", rel)
 	cmd.Dir = cfg.BureaucracyPath
 	out, err := cmd.Output()
 	if err != nil {
 		// Untracked / no history → degrade silently. The doc just
 		// looks unchanged from the bureaucracy's point of view.
-		return time.Time{}, nil
+		return false, false, nil
 	}
-	line := strings.TrimSpace(string(out))
-	if line == "" {
-		return time.Time{}, nil
+	body := string(out)
+	if strings.TrimSpace(body) == "" {
+		return false, false, nil
 	}
-	return time.Parse(time.RFC3339, line)
+	for _, line := range strings.Split(body, "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "MoE-Workflow:")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(v) == "twin" {
+			return true, true, nil
+		}
+	}
+	return false, true, nil
 }
 
 // managedDocRelToBureaucracy returns the doc's path relative to the

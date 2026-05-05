@@ -137,24 +137,16 @@ func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
 	writeFile(t, filepath.Join(twinDir, "architecture.md"), "# Architecture\n")
 
-	// First commit: both files seeded with deterministic timestamps so
-	// the last_ingest_at threshold can sit strictly between the two
-	// per-file edits.
-	t.Setenv("GIT_AUTHOR_DATE", "2026-04-01T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-04-01T12:00:00Z")
-	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md", "projects/p/digital-twin/architecture.md")
-	gitInRepo(t, root, "commit", "-m", "seed twin")
+	// architecture.md's latest commit carries a `MoE-Workflow: twin`
+	// trailer (recorded). vision.md's latest commit doesn't (operator
+	// edit → unrecorded). Trailer presence is the discriminator; commit
+	// times are irrelevant.
+	gitInRepo(t, root, "add", "projects/p/digital-twin/architecture.md")
+	gitInRepo(t, root, "commit", "-m", "reflect updates architecture\n\nMoE-Workflow: twin")
 
-	// Second commit: only vision.md edited, with a later timestamp.
-	t.Setenv("GIT_AUTHOR_DATE", "2026-04-02T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-04-02T12:00:00Z")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n\nupdated bet\n")
 	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
 	gitInRepo(t, root, "commit", "-m", "operator edits vision")
 
-	// Checkpoint sits between the two commits. architecture.md's last
-	// commit is at 2026-04-01 (before threshold → recorded); vision.md's
-	// at 2026-04-02 (after threshold → unrecorded).
 	cp := Checkpoint{
 		Version:       CheckpointVersion,
 		LastIngestAt:  "2026-04-01T18:00:00Z",
@@ -184,28 +176,25 @@ func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
 	}
 }
 
-// TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit pins the
-// design promise behind collapsing plan and lint into reflect: when
-// the engine's commit lands at or before `last_ingest_at`, a back-
-// to-back reflect-on-reflect chain doesn't trip the unrecorded-edits
-// guardrail. The bug repro that motivated this fix was a 1-second
-// skew between FinalizeIngest and the per-turn commit causing the
-// next pass to mis-flag the engine's own commit. With plan / lint
-// gone, reflect is the only twin-mutating pass and `last_ingest_at`
-// recovers its single meaning ("events ingested through here") —
-// this test pins the no-skew path the guardrail must accept.
-func TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit(t *testing.T) {
+// TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime pins the
+// production failure roadmap-edits diagnosed: FinalizeIngest stamps
+// `last_ingest_at = time.Now()`, the per-turn CommitStager that
+// follows lands ~1s later, and the next reflect mis-flags the engine's
+// own commit. Trailer-based attribution makes that race vanish — a
+// twin commit ahead of `last_ingest_at` is still recorded. This test
+// pins the override against the exact production failure.
+func TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime(t *testing.T) {
 	root := newGitRepo(t)
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
 
-	// Engine's commit lands at the same instant as `last_ingest_at`.
-	// Both timestamps are RFC3339-second precision; equality is the
-	// happy case the guardrail must not flag.
-	t.Setenv("GIT_AUTHOR_DATE", "2026-05-02T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-05-02T12:00:00Z")
+	// Engine's commit lands one second after `last_ingest_at`. Under
+	// the old timestamp comparison this would trip; the trailer says
+	// otherwise.
+	t.Setenv("GIT_AUTHOR_DATE", "2026-05-02T12:00:01Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-05-02T12:00:01Z")
 	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
-	gitInRepo(t, root, "commit", "-m", "reflect updates vision")
+	gitInRepo(t, root, "commit", "-m", "reflect updates vision\n\nMoE-Workflow: twin")
 
 	cp := Checkpoint{
 		Version:       CheckpointVersion,
@@ -229,7 +218,7 @@ func TestDetectUnrecordedEditsAfterFinalizePlusEqualTimeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(det.UnrecordedDocs) != 0 {
-		t.Errorf("equal-time engine commit should not be flagged as unrecorded, got %v",
+		t.Errorf("twin-trailered commit should not be flagged even when newer than last_ingest_at, got %v",
 			det.UnrecordedDocs)
 	}
 }
