@@ -33,12 +33,15 @@ func ConfigDir() string {
 
 // EncodeCwd returns the directory name Claude Code uses to bucket
 // per-session JSONLs under <ConfigDir>/projects. Claude encodes absCwd
-// by replacing path separators with `-`; an absolute POSIX path's
-// leading `/` becomes a leading `-`. The scheme has been stable across
-// recent versions; if it ever drifts, callers `Stat`ing the returned
-// path will see ErrNotExist and can fall back to a glob lookup.
+// by replacing both path separators (`/`) and `.` with `-`; an absolute
+// POSIX path's leading `/` becomes a leading `-`, and a `/.moe/` segment
+// collapses to `--moe-` (double dash, no literal dot). The scheme has
+// been stable across recent versions; if it ever drifts, callers
+// `Stat`ing the returned path will see ErrNotExist and can fall back
+// to a glob lookup.
 func EncodeCwd(absCwd string) string {
-	return strings.ReplaceAll(absCwd, string(os.PathSeparator), "-")
+	s := strings.ReplaceAll(absCwd, string(os.PathSeparator), "-")
+	return strings.ReplaceAll(s, ".", "-")
 }
 
 // CanonicalTranscriptPath is the path Claude Code reads when you pass

@@ -100,40 +100,39 @@ func TestCopyTranscriptOverwritesExisting(t *testing.T) {
 	}
 }
 
-func TestEncodeCwdReplacesSeparators(t *testing.T) {
-	got := EncodeCwd("/Users/foo/bar")
-	if got != "-Users-foo-bar" {
-		t.Fatalf("EncodeCwd(/Users/foo/bar) = %q, want -Users-foo-bar", got)
+func TestEncodeCwdReplacesSeparatorsAndDots(t *testing.T) {
+	// Pinned against observed real ~/.claude/projects/ dirs. Both `/` and
+	// `.` collapse to `-`, so a `/.moe/` segment becomes `--moe-` (double
+	// dash, no literal dot). If claude's encoding ever drifts again,
+	// CanonicalTranscriptPath's stat misses and the glob fallback in
+	// TranscriptPath covers us — but pin the rules we've actually seen.
+	cases := []struct{ in, want string }{
+		{"/Users/foo/bar", "-Users-foo-bar"},
+		{"/Users/x/projects/y/.moe/sessions/p/r/d",
+			"-Users-x-projects-y--moe-sessions-p-r-d"},
+	}
+	for _, c := range cases {
+		if got := EncodeCwd(c.in); got != c.want {
+			t.Errorf("EncodeCwd(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
 func TestCanonicalTranscriptPathMatchesClaudeLayout(t *testing.T) {
-	// Plant a JSONL at the canonical path and prove TranscriptPath's
-	// glob discovers the same location. If claude ever changes the
-	// encoding, both helpers move together or this test fails.
+	// Pin the canonical layout against a hard-coded expectation rather
+	// than asserting CanonicalTranscriptPath agrees with TranscriptPath's
+	// glob (which is circular — both helpers would drift together). The
+	// `/.moe/` segment must encode as `--moe-`.
 	cfg := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	cwd := "/some/abs/cwd"
+	cwd := "/Users/x/projects/y/.moe/sessions/p/r/d"
 	sid := "f0e1d2c3-b4a5-6789-0123-456789abcdef"
 
-	canonical := CanonicalTranscriptPath(cwd, sid)
-	want := filepath.Join(cfg, "projects", "-some-abs-cwd", sid+".jsonl")
-	if canonical != want {
-		t.Fatalf("CanonicalTranscriptPath = %q, want %q", canonical, want)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(canonical, []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := TranscriptPath(sid)
-	if err != nil {
-		t.Fatalf("TranscriptPath: %v", err)
-	}
-	if got != canonical {
-		t.Fatalf("TranscriptPath = %q, want %q (glob should hit the canonical layout)", got, canonical)
+	got := CanonicalTranscriptPath(cwd, sid)
+	want := filepath.Join(cfg, "projects",
+		"-Users-x-projects-y--moe-sessions-p-r-d", sid+".jsonl")
+	if got != want {
+		t.Fatalf("CanonicalTranscriptPath = %q, want %q", got, want)
 	}
 }
 
