@@ -13,6 +13,7 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -175,17 +176,62 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 			}
 
 			// mutated means EnsureDocument just minted the session
-			// UUID this turn, so the session is definitely new.
-			// Otherwise trust that the per-document JSONL is at the
-			// predictable path under sessionCwd's encoded project
-			// dir. If it isn't (operator wiped ~/.claude/projects/,
-			// or the run.json followed a clone to a fresh machine
-			// where no transcript exists), claude prints a clear
-			// "No conversation found" error and the operator re-runs
-			// — better than the previous heuristic, which used a
-			// global glob that would silently match an unrelated
-			// JSONL under an old worktree's encoded dir.
+			// UUID this turn — fresh session, nothing to validate.
+			// Otherwise stat the exact path claude will read for
+			// `--resume <sid>` and decide between three outcomes:
+			//   - JSONL at the canonical path → resume normally.
+			//   - JSONL elsewhere under ~/.claude/projects/ (pre-fix
+			//     run, or a stale encoded cwd) → copy it into the
+			//     canonical path and resume. Migration arm; tracked
+			//     as a followup to drop once pre-fix runs are closed.
+			//   - JSONL absent everywhere (cross-machine fresh
+			//     checkout, wiped cache) → re-mint the session id,
+			//     persist + commit run.json, and pass --session-id
+			//     instead of --resume. Chat history is gone but the
+			//     canvas on disk is intact; we warn on stderr.
+			// Pre-flighting beats letting claude error mid-run: the
+			// operator gets a clear stderr line, not a stuck run.
 			newSession := mutated
+			if !newSession && sessionCwd != "" {
+				canonical := claude.CanonicalTranscriptPath(sessionCwd, doc.Session)
+				if canonical != "" {
+					switch _, statErr := os.Stat(canonical); {
+					case statErr == nil:
+						// At the canonical path — normal --resume.
+					case errors.Is(statErr, fs.ErrNotExist):
+						orphan, err := claude.TranscriptPath(doc.Session)
+						if err != nil {
+							return wikiTurnSpec{}, err
+						}
+						switch {
+						case orphan != "":
+							if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+								return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", filepath.Dir(canonical), err)
+							}
+							if err := copyFile(orphan, canonical); err != nil {
+								return wikiTurnSpec{}, fmt.Errorf("session: migrate transcript: %w", err)
+							}
+							moePrintf(stderr, "migrated session transcript from %s\n", orphan)
+						default:
+							moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
+							sid, err := run.NewSessionID()
+							if err != nil {
+								return wikiTurnSpec{}, err
+							}
+							doc.Session = sid
+							if err := run.Save(workRoot, md); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							if err := commitSessionStart(workRoot, md, docID); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							newSession = true
+						}
+					default:
+						return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", statErr)
+					}
+				}
+			}
 
 			// Headless mode has no operator on stdin to type the seed
 			// prompt, so default it to the run title — the same shape
@@ -921,6 +967,35 @@ MoE-Session: %s
 // session to the worktree.
 func sessionDocCwd(root, projectID, runID, docID string) string {
 	return filepath.Join(root, ".moe", "sessions", projectID, runID, docID)
+}
+
+// copyFile copies src to dst byte-for-byte, creating dst's parent dir
+// and fsync'ing the destination before close. Used for the pre-resume
+// migration of an orphan transcript into its canonical encoded-cwd
+// path; we don't reuse claude.CopyTranscript because that helper signals
+// "absent → no-op", which is the wrong contract here.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // stageableFollowups returns the run's followups.md path (relative to

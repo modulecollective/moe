@@ -100,6 +100,53 @@ func TestCopyTranscriptOverwritesExisting(t *testing.T) {
 	}
 }
 
+func TestEncodeCwdReplacesSeparators(t *testing.T) {
+	got := EncodeCwd("/Users/foo/bar")
+	if got != "-Users-foo-bar" {
+		t.Fatalf("EncodeCwd(/Users/foo/bar) = %q, want -Users-foo-bar", got)
+	}
+}
+
+func TestCanonicalTranscriptPathMatchesClaudeLayout(t *testing.T) {
+	// Plant a JSONL at the canonical path and prove TranscriptPath's
+	// glob discovers the same location. If claude ever changes the
+	// encoding, both helpers move together or this test fails.
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	cwd := "/some/abs/cwd"
+	sid := "f0e1d2c3-b4a5-6789-0123-456789abcdef"
+
+	canonical := CanonicalTranscriptPath(cwd, sid)
+	want := filepath.Join(cfg, "projects", "-some-abs-cwd", sid+".jsonl")
+	if canonical != want {
+		t.Fatalf("CanonicalTranscriptPath = %q, want %q", canonical, want)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := TranscriptPath(sid)
+	if err != nil {
+		t.Fatalf("TranscriptPath: %v", err)
+	}
+	if got != canonical {
+		t.Fatalf("TranscriptPath = %q, want %q (glob should hit the canonical layout)", got, canonical)
+	}
+}
+
+func TestCanonicalTranscriptPathEmptyConfig(t *testing.T) {
+	// Hermetic env: no $CLAUDE_CONFIG_DIR and no $HOME → ConfigDir
+	// returns "". Canonical path follows.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HOME", "")
+	if got := CanonicalTranscriptPath("/cwd", "sid"); got != "" {
+		t.Fatalf("CanonicalTranscriptPath with empty ConfigDir = %q, want \"\"", got)
+	}
+}
+
 func TestConfigDirRespectsEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude")
 	if got := ConfigDir(); got != "/custom/claude" {
