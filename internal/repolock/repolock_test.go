@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -292,29 +291,6 @@ func TestAcquireRespectsBudgetZeroUsesDefault(t *testing.T) {
 	defer l.Release()
 }
 
-// fakeClock advances only when Sleep is called, so a test can run the
-// settle/backoff machinery without burning real wall time.
-type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{now: time.Now().UTC()}
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *fakeClock) Sleep(d time.Duration) {
-	c.mu.Lock()
-	c.now = c.now.Add(d)
-	c.mu.Unlock()
-}
-
 func TestCorruptRecordTakeover(t *testing.T) {
 	root := t.TempDir()
 	moeDir := filepath.Join(root, ".moe")
@@ -326,13 +302,7 @@ func TestCorruptRecordTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clock := newFakeClock()
-	opts := silentOpts("takeover-corrupt")
-	opts.Now = clock.Now
-	opts.Sleep = clock.Sleep
-	opts.Budget = 10 * time.Second // generous; takeover should land first
-
-	l, err := Acquire(root, opts)
+	l, err := Acquire(root, silentOpts("takeover-corrupt"))
 	if err != nil {
 		t.Fatalf("Acquire over corrupt: %v", err)
 	}
@@ -342,87 +312,110 @@ func TestCorruptRecordTakeover(t *testing.T) {
 	}
 }
 
-func TestCorruptRecordTimeoutBeforeSettle(t *testing.T) {
-	root := t.TempDir()
-	moeDir := filepath.Join(root, ".moe")
-	if err := os.MkdirAll(moeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(moeDir, "lock"), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	opts := silentOpts("waiter")
-	opts.Budget = 50 * time.Millisecond // far below corruptSettle
-
-	_, err := Acquire(root, opts)
-	if err == nil {
-		t.Fatal("expected TimeoutError, got nil")
-	}
-	var toErr *TimeoutError
-	if !errors.As(err, &toErr) {
-		t.Fatalf("error is not *TimeoutError: %v", err)
-	}
-	if toErr.ParseErr == nil {
-		t.Error("ParseErr is nil; expected non-nil for unparseable record")
-	}
-	if toErr.Holder != (Record{}) {
-		t.Errorf("Holder = %+v, want zero Record (parse failed)", toErr.Holder)
-	}
-	if !strings.Contains(err.Error(), "unparseable") {
-		t.Errorf("error message = %q, want it to mention 'unparseable'", err.Error())
-	}
-}
-
-func TestPartialWriteDoesNotStealLock(t *testing.T) {
+// TestTryCreateNoEmptyFileVisible churns Acquire/Release in parallel
+// while a reader scrutinises the lock path. Every read must yield
+// either ErrNotExist or a fully-parseable Record — never an empty or
+// truncated body. Regression guard for the atomic-create invariant.
+func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 	root := t.TempDir()
 	moeDir := filepath.Join(root, ".moe")
 	if err := os.MkdirAll(moeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	lockPath := filepath.Join(moeDir, "lock")
-	// Plant the mid-write state: the file exists but has no body yet.
-	if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
-		t.Fatal(err)
+
+	opts := silentOpts("race")
+	opts.Budget = 30 * time.Second
+	opts.BackoffCap = 5 * time.Millisecond
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				l, err := Acquire(root, opts)
+				if err != nil {
+					t.Errorf("Acquire: %v", err)
+					return
+				}
+				if err := l.Release(); err != nil {
+					t.Errorf("Release: %v", err)
+					return
+				}
+			}
+		}()
 	}
-	// A "creator" goroutine completes the write inside the settle window.
-	finishWrite := make(chan struct{})
+
+	var reads int64
+	wg.Add(1)
 	go func() {
-		time.Sleep(20 * time.Millisecond)
-		body, _ := marshalRecord(Record{
-			Owner:       "real-holder/1",
-			Purpose:     "real-holder",
-			AcquiredAt:  time.Now().UTC(),
-			HeartbeatAt: time.Now().UTC(),
-		})
-		_ = os.WriteFile(lockPath, body, 0o644)
-		close(finishWrite)
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			b, err := os.ReadFile(lockPath)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				t.Errorf("ReadFile: %v", err)
+				return
+			}
+			atomic.AddInt64(&reads, 1)
+			var rec Record
+			if uerr := json.Unmarshal(b, &rec); uerr != nil {
+				t.Errorf("unparseable lock file (%d bytes): %v\nbody=%q", len(b), uerr, b)
+				return
+			}
+		}
 	}()
 
-	opts := silentOpts("waiter")
-	opts.Budget = 200 * time.Millisecond // well under corruptSettle
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+	if reads == 0 {
+		t.Skip("reader never observed the lock file in the test window")
+	}
+}
 
-	_, err := Acquire(root, opts)
-	<-finishWrite
-	if err == nil {
-		t.Fatal("expected TimeoutError, got nil (did we steal the lock?)")
-	}
-	var toErr *TimeoutError
-	if !errors.As(err, &toErr) {
-		t.Fatalf("error is not *TimeoutError: %v", err)
-	}
-	if toErr.ParseErr != nil {
-		t.Errorf("ParseErr = %v, want nil after creator's write completed", toErr.ParseErr)
-	}
-	if toErr.Holder.Purpose != "real-holder" {
-		t.Errorf("Holder.Purpose = %q, want %q", toErr.Holder.Purpose, "real-holder")
-	}
-	// Lock file must still hold the creator's record — not removed by us.
-	rec, err := readRecord(lockPath)
+// TestTryCreateCleansUpTmpOnLoss verifies that a losing acquirer
+// removes its tmp file. After a contended Acquire that times out, the
+// only entries in <root>/.moe should be `lock` (held by the winner)
+// and `.gitignore`.
+func TestTryCreateCleansUpTmpOnLoss(t *testing.T) {
+	root := t.TempDir()
+	held, err := Acquire(root, silentOpts("holder"))
 	if err != nil {
-		t.Fatalf("readRecord after timeout: %v", err)
+		t.Fatalf("first Acquire: %v", err)
 	}
-	if rec.Owner != "real-holder/1" {
-		t.Errorf("disk owner = %q, want %q (we stole the live lock)", rec.Owner, "real-holder/1")
+	defer held.Release()
+
+	opts := silentOpts("waiter")
+	opts.Budget = 80 * time.Millisecond
+	opts.BackoffCap = 5 * time.Millisecond
+	if _, err := Acquire(root, opts); err == nil {
+		t.Fatal("expected TimeoutError, got nil")
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, ".moe"))
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name != "lock" && name != ".gitignore" {
+			t.Errorf(".moe contains unexpected entry %q (want only lock + .gitignore)", name)
+		}
 	}
 }

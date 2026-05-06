@@ -51,12 +51,6 @@ const (
 	// declared stale and may be taken over. Four heartbeat intervals
 	// gives a missed heartbeat or two of slack.
 	StaleThreshold = 20 * time.Second
-	// corruptSettle is how long an unparseable record must persist
-	// before Acquire takes it over. Long enough that a reader who
-	// catches tryCreate between O_CREATE and Write doesn't steal a
-	// healthy live lock; short enough that a genuinely corrupt file
-	// resolves well inside DefaultBudget.
-	corruptSettle = 1 * time.Second
 )
 
 // Record is the on-disk JSON payload of .moe/lock. Exposed so callers
@@ -112,20 +106,13 @@ type Lock struct {
 
 // TimeoutError is returned by Acquire when the budget is exhausted and
 // someone else still holds the lock. Holder is the record read at the
-// moment of timeout. ParseErr is non-nil when the timeout fired while
-// the lock file was unparseable — Holder is the zero Record in that
-// case.
+// moment of timeout.
 type TimeoutError struct {
-	Path     string
-	Holder   Record
-	ParseErr error
+	Path   string
+	Holder Record
 }
 
 func (e *TimeoutError) Error() string {
-	if e.ParseErr != nil {
-		return fmt.Sprintf("repolock: timed out waiting for %s (unparseable: %v)",
-			e.Path, e.ParseErr)
-	}
 	age := ""
 	if !e.Holder.HeartbeatAt.IsZero() {
 		age = fmt.Sprintf(", heartbeat %s ago", time.Since(e.Holder.HeartbeatAt).Round(time.Second))
@@ -155,7 +142,6 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	lockPath := filepath.Join(moeDir, "lock")
 	deadline := opts.Now().Add(opts.Budget)
 	backoff := 50 * time.Millisecond
-	var firstBadAt time.Time
 
 	for {
 		now := opts.Now().UTC()
@@ -177,7 +163,6 @@ func Acquire(root string, opts Options) (*Lock, error) {
 		existing, readErr := readRecord(lockPath)
 		switch {
 		case readErr == nil:
-			firstBadAt = time.Time{}
 			if isStale(existing, now) {
 				fmt.Fprintf(opts.Logger,
 					"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
@@ -193,30 +178,22 @@ func Acquire(root string, opts Options) (*Lock, error) {
 			// in the gap). Retry immediately — the blocker is gone.
 			continue
 		default:
-			// Unparseable record. Treat as stale after a settle window so
-			// a genuinely corrupt file doesn't block forever, but tolerate
-			// the brief window between tryCreate's O_CREATE and Write.
-			if firstBadAt.IsZero() {
-				firstBadAt = now
+			// Unparseable record. tryCreate writes atomically (tmp+link),
+			// so a partial mid-write file is impossible — anything we
+			// can't parse is real garbage and the right move is to take
+			// over immediately.
+			fmt.Fprintf(opts.Logger,
+				"repolock: taking over unparseable lock at %s (parse error: %v)\n",
+				lockPath, readErr)
+			if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("repolock: remove corrupt lock: %w", err)
 			}
-			if now.Sub(firstBadAt) > corruptSettle {
-				fmt.Fprintf(opts.Logger,
-					"repolock: taking over unparseable lock at %s (parse error: %v)\n",
-					lockPath, readErr)
-				if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return nil, fmt.Errorf("repolock: remove corrupt lock: %w", err)
-				}
-				firstBadAt = time.Time{}
-				continue
-			}
-			// Within the settle window: fall through to deadline check.
-			// If we time out here, ParseErr surfaces what blocked us.
+			continue
 		}
 
-		// Live holder (or unparseable but still inside settle). Wait or
-		// give up.
+		// Live holder. Wait or give up.
 		if !opts.Now().Before(deadline) {
-			return nil, &TimeoutError{Path: lockPath, Holder: existing, ParseErr: readErr}
+			return nil, &TimeoutError{Path: lockPath, Holder: existing}
 		}
 		sleep := backoff
 		if remaining := deadline.Sub(opts.Now()); sleep > remaining {
@@ -289,24 +266,35 @@ func applyDefaults(opts Options) Options {
 	return opts
 }
 
+// tryCreate materialises the lock file atomically: write a fully-formed
+// temp file in the same directory, then link it to the lock path.
+// link(2) refuses with EEXIST if the target exists, giving us the same
+// "someone else got there first" signal as O_CREATE|O_EXCL but without
+// the create-then-write window in which a peer could observe an empty
+// lock file. Returns os.ErrExist on contention so Acquire's existing
+// errors.Is branch keeps working.
 func tryCreate(path string, rec Record, opts Options) (*Lock, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	body, err := marshalRecord(rec)
 	if err != nil {
 		return nil, err
 	}
-	body, marshalErr := marshalRecord(rec)
-	if marshalErr != nil {
-		f.Close()
-		_ = os.Remove(path)
-		return nil, marshalErr
-	}
-	if _, err := f.Write(body); err != nil {
-		f.Close()
-		_ = os.Remove(path)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "lock.tmp.*")
+	if err != nil {
 		return nil, err
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // tmp pathname is disposable after link succeeds or fails
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil, os.ErrExist
+		}
 		return nil, err
 	}
 	l := &Lock{path: path, record: rec, opts: opts}
