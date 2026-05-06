@@ -611,6 +611,45 @@ func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
 	}
 }
 
+// TestCommitTurnNoOpTurnReturnsErrNothingToCommit pins the no-op
+// path: a second turn that doesn't touch the canvas, run.json, or
+// followups must return ErrNothingToCommit and leave HEAD untouched.
+// run.Save now runs unconditionally inside commitTurn (it used to be
+// gated behind a HasStagedChanges check); this guards the byte-stable
+// rewrite — an unchanged Metadata produces the same bytes, git add
+// finds no diff, and StageAndCommit's internal check refuses cleanly.
+func TestCommitTurnNoOpTurnReturnsErrNothingToCommit(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+	contentRel := run.ContentPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitTurn(root, md, "design"); err != nil {
+		t.Fatalf("first commitTurn: %v", err)
+	}
+
+	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
+	err := commitTurn(root, md, "design")
+	if !errors.Is(err, run.ErrNothingToCommit) {
+		t.Fatalf("commitTurn err = %v, want ErrNothingToCommit", err)
+	}
+	if headAfter := gitLogFormat(t, root, 1, "HEAD", "%H"); headBefore != headAfter {
+		t.Fatalf("no-op commitTurn advanced HEAD: %s -> %s", headBefore, headAfter)
+	}
+}
+
 // TestReportWikiSessionExitNonZeroOnFinalizeError pins the contract
 // the twin-dash-never-reflected-bug run was opened against: when
 // FinalizeIngest fails, the session exits non-zero so the operator

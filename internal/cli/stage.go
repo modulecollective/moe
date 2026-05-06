@@ -940,22 +940,11 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
-	stagePaths := append([]string{docDir}, extraPaths...)
-	// followups.md is sibling of run.json — stages append to it as
-	// they spot adjacent work to capture. Stage it conditionally so
-	// turns that touched neither the doc nor the followups file still
-	// trip ErrNothingToCommit cleanly.
-	if followupsRel, ok := stageableFollowups(root, md); ok {
-		stagePaths = append(stagePaths, followupsRel)
-	}
-	if err := run.Stage(root, stagePaths...); err != nil {
-		return err
-	}
-	// Guard against turns where the agent never wrote its canvas — or
-	// wrote it to a sibling path. thread.jsonl is mirrored every turn,
-	// so without this check the staging set is non-empty and the turn
-	// commits a transcript-only "successful" snapshot. See the design
-	// doc for the missing-canvas-doc run for the failure mode.
+	// Cheap os.Stat first so a missing-canvas turn fails before any
+	// git invocation and leaves the index untouched. thread.jsonl is
+	// mirrored every turn, so without this guard the staging set is
+	// non-empty and the turn would commit a transcript-only snapshot
+	// — the failure mode the missing-canvas-doc run was opened against.
 	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
 	switch info, err := os.Stat(canvas); {
 	case errors.Is(err, fs.ErrNotExist):
@@ -964,9 +953,6 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 		return fmt.Errorf("commit: stat canvas %s: %w", canvas, err)
 	case info.Size() == 0:
 		return fmt.Errorf("commit: canvas %s is empty", canvas)
-	}
-	if !run.HasStagedChanges(root) {
-		return run.ErrNothingToCommit
 	}
 
 	if err := run.Save(root, md); err != nil {
@@ -982,6 +968,10 @@ MoE-Document: %s
 MoE-Session: %s
 `, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
+	// followups.md is sibling of run.json — stages append to it as
+	// they spot adjacent work to capture. Stage it conditionally so
+	// turns that touched neither the doc nor the followups file still
+	// trip ErrNothingToCommit cleanly inside StageAndCommit.
 	if followupsRel, ok := stageableFollowups(root, md); ok {
 		allPaths = append(allPaths, followupsRel)
 	}
