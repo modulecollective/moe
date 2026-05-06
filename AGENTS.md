@@ -19,6 +19,11 @@ edits.** Not optional — not even for a one-line fix, not even if the
 tests already pass. If you're about to write "fixed it" or "done",
 you're about to run these two commands first.
 
+## Don't run moe itself
+
+It's easy to screw up state unless you configure things exactly right so
+let the human do manual testing. Do your testing through Go's tests only.
+
 ## Tools worth reaching for
 
 Go's off-putting CLIs are agent superpowers — the ergonomics that make
