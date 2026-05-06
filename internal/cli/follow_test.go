@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +55,11 @@ func TestPickFollowTargetParkedAtDesignNotACandidate(t *testing.T) {
 
 // TestPickFollowTargetLiveDesignSession: a run with an open session on
 // its design doc is the auto-pick candidate. Liveness is the only
-// signal that surfaces a run.
+// signal that surfaces a run, and the resolved path must point into
+// the session's worktree (where the agent writes), not into root
+// (where main holds the seeded stub until rebase). The suffix check
+// alone matches both checkouts — the prefix check is what catches the
+// "old doc" regression.
 func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -71,6 +77,10 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	}
 	if !strings.HasSuffix(path, "tele/runs/fix-it/documents/design/content.md") {
 		t.Fatalf("unexpected path %q", path)
+	}
+	if !strings.HasPrefix(path, sess.WorktreePath+string(filepath.Separator)) {
+		t.Fatalf("path %q must resolve under session worktree %q, not root %q",
+			path, sess.WorktreePath, root)
 	}
 }
 
@@ -221,6 +231,44 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 	}
 	if !strings.Contains(path, "/runs/beta/") {
 		t.Fatalf("expected pinned beta, got %q", path)
+	}
+}
+
+// TestPickFollowTargetRunFilterWithLiveSessionResolvesWorktree: pinning
+// to a run with an open design session resolves the canvas under the
+// session worktree, not under root. The pin overrides the liveness
+// gate but not *which* checkout holds the live bytes — main has the
+// pre-session stub, the worktree has whatever the agent has written.
+func TestPickFollowTargetRunFilterWithLiveSessionResolvesWorktree(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+
+	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "alpha", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	// Write a canvas only inside the worktree so the os.Stat existence
+	// check fails if the resolver still consults root. The write is
+	// deliberately not committed: agents typically pause for review
+	// between turns, and follow has to render the dirty working tree.
+	wtCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "alpha", "design"))
+	if err := os.MkdirAll(filepath.Dir(wtCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wtCanvas, []byte("# live in worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, _, err := pickFollowTarget(root, "alpha")
+	if err != nil {
+		t.Fatalf("pickFollowTarget: %v", err)
+	}
+	if !strings.HasPrefix(path, sess.WorktreePath+string(filepath.Separator)) {
+		t.Fatalf("path %q must resolve under session worktree %q, not root %q",
+			path, sess.WorktreePath, root)
 	}
 }
 

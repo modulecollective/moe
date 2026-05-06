@@ -179,10 +179,17 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 	// session.List is read-only; a worktree-list error shouldn't
 	// suppress the idle-screen summary, so swallow and proceed with no
 	// liveness signal — auto-pick will simply find no candidates.
-	sessionDocsByRun := make(map[string][]string)
+	// We index by run id, keeping only design sessions: the resolver
+	// needs the session's WorktreePath (the live canvas lives on the
+	// session branch in the worktree, not on main under root) and the
+	// per-run "is design live?" check collapses to a map presence test.
+	designSessionByRun := make(map[string]*session.Session)
 	if ss, err := session.List(root); err == nil {
 		for _, s := range ss {
-			sessionDocsByRun[s.Run] = append(sessionDocsByRun[s.Run], s.Doc)
+			if s.Doc != "design" {
+				continue
+			}
+			designSessionByRun[s.Run] = s
 		}
 	}
 	summary := buildFollowSummary(root, mds, idx)
@@ -192,7 +199,17 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 			if md.ID != runFilter {
 				continue
 			}
-			path := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
+			// A pin overrides liveness, but when a design session *is*
+			// open the live bytes are in the worktree, not on main —
+			// resolve against WorktreePath so the operator sees what
+			// the agent has actually written. Parked-at-design pins
+			// (no session) fall back to root, which holds the seeded
+			// stub or the most recently merged content.
+			base := root
+			if sess, ok := designSessionByRun[md.ID]; ok {
+				base = sess.WorktreePath
+			}
+			path := filepath.Join(base, run.ContentPath(md.Project, md.ID, "design"))
 			if _, err := os.Stat(path); err == nil {
 				return path, summary, nil
 			}
@@ -210,18 +227,15 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 		if md.Status != run.StatusInProgress {
 			continue
 		}
-		live := false
-		for _, doc := range sessionDocsByRun[md.ID] {
-			if doc == "design" {
-				live = true
-				break
-			}
-		}
+		sess, live := designSessionByRun[md.ID]
 		if !live {
 			continue
 		}
+		// Auto-pick liveness gate guarantees a session here, so the
+		// canvas resolves against the session's worktree — main holds
+		// the pre-session stub until the session closes and rebases.
 		cands = append(cands, cand{
-			path: filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")),
+			path: filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, "design")),
 			when: idx.LastActivity[md.ID],
 		})
 	}
