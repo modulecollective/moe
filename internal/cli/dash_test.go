@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -1135,6 +1137,290 @@ func TestDashTwinRecentScopedToProject(t *testing.T) {
 	tail := recentLine(got)
 	if !strings.Contains(tail, "reflect ") {
 		t.Fatalf("expected alpha's recent line to mention reflect, got %q", tail)
+	}
+}
+
+// TestDashQueuedRunGetsMarker: with two active runs, only the one in
+// .moe/queue.json picks up the "[queued]" suffix on its note column.
+func TestDashQueuedRunGetsMarker(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "queued-one", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "tele", "loose-one", "sdlc", run.StatusInProgress)
+	if err := saveQueue(root, []queueItem{
+		{Workflow: "sdlc", Project: "tele", Run: "queued-one"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "sdlc:design [queued]") {
+		t.Fatalf("expected 'sdlc:design [queued]' on the queued row, got:\n%s", got)
+	}
+	// The non-queued row's note should be plain "sdlc:design" — find
+	// the row line and assert no "[queued]" appears on it.
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "loose-one") && strings.Contains(line, "[queued]") {
+			t.Fatalf("non-queued row should not be marked, got line: %q", line)
+		}
+	}
+}
+
+// TestDashMissingQueueFileNoError: an absent .moe/queue.json is the
+// common case (no queue ever used) and must produce no markers and no
+// error printed to stderr.
+func TestDashMissingQueueFileNoError(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("expected silent stderr with missing queue.json, got: %q", errb.String())
+	}
+	if strings.Contains(out.String(), "[queued]") {
+		t.Fatalf("expected no markers when queue.json is missing, got:\n%s", out.String())
+	}
+}
+
+// TestDashCorruptQueueFileSilent: a corrupt queue.json is best-effort
+// — dash drops the marker pass and renders the rest of the output
+// without printing an error. Loud handling of a corrupt queue belongs
+// in `moe queue add/list/run`, where the operator can act.
+func TestDashCorruptQueueFileSilent(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuePath(root), []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("expected silent stderr with corrupt queue.json, got: %q", errb.String())
+	}
+	if !strings.Contains(out.String(), "ACTIVE (1)") {
+		t.Fatalf("expected dash to render despite corrupt queue.json, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "[queued]") {
+		t.Fatalf("expected no markers when queue.json is corrupt, got:\n%s", out.String())
+	}
+}
+
+// TestBuildFactoryArtEmpty: no backlog, no active, no completed →
+// single-line dotted field, no rail and no smoke. Pinned because the
+// dash's first-day state hits this exact shape.
+func TestBuildFactoryArtEmpty(t *testing.T) {
+	state := factoryState{}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line for empty state, got %d: %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "·") {
+		t.Fatalf("expected dotted empty-state field, got %q", lines[0])
+	}
+	for _, banned := range []string{"▦", "▣", "[", "▶", "━"} {
+		if strings.Contains(lines[0], banned) {
+			t.Fatalf("expected no rail glyph %q in empty state, got %q", banned, lines[0])
+		}
+	}
+}
+
+// TestBuildFactoryArtPopulatedShape: a mixed state (backlog, active
+// runs of mixed stages, completed) renders two lines whose rail
+// carries the expected zone glyphs in zone order.
+func TestBuildFactoryArtPopulatedShape(t *testing.T) {
+	state := factoryState{
+		BacklogCount:   2,
+		ActiveStages:   []string{"design", "code", "awaiting merge"},
+		CompletedCount: 3,
+	}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines (smoke + rail), got %d: %q", len(lines), lines)
+	}
+	rail := lines[1]
+	// Zones must appear in order: input → stations → output. Use the
+	// first occurrence of each zone-distinguishing glyph as a proxy.
+	idxIn := strings.Index(rail, "▦")
+	idxDesign := strings.Index(rail, "⚒")
+	idxCode := strings.Index(rail, "⚙")
+	idxShip := strings.Index(rail, "[▶]")
+	idxOut := strings.Index(rail, "▣")
+	if idxIn < 0 || idxDesign < 0 || idxCode < 0 || idxShip < 0 || idxOut < 0 {
+		t.Fatalf("missing zone glyph (in=%d design=%d code=%d ship=%d out=%d) in:\n%q",
+			idxIn, idxDesign, idxCode, idxShip, idxOut, rail)
+	}
+	if !(idxIn < idxDesign && idxDesign < idxCode && idxCode < idxShip && idxShip < idxOut) {
+		t.Fatalf("zones not in order in rail:\n%q", rail)
+	}
+	// The feed arrow follows the input zone when backlog is non-empty.
+	if !strings.Contains(rail, "▦▦ ▶") {
+		t.Fatalf("expected '▦▦ ▶' feed arrow after input glyphs, got rail:\n%q", rail)
+	}
+}
+
+// TestBuildFactoryArtOverflow: counts past their caps render `+N` tags
+// rather than widening the line beyond budget.
+func TestBuildFactoryArtOverflow(t *testing.T) {
+	state := factoryState{
+		BacklogCount:   inputCap + 3,
+		ActiveStages:   []string{"design", "code", "design", "code", "code", "design"}, // stationCap=4 + 2 over
+		CompletedCount: outputCap + 7,
+	}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	rail := lines[1]
+	for _, want := range []string{"+3", "+2", "+7"} {
+		if !strings.Contains(rail, want) {
+			t.Fatalf("expected overflow tag %q in rail:\n%q", want, rail)
+		}
+	}
+	// Bracketed stations capped: exactly stationCap "[" should appear
+	// before the "+2" station overflow tag.
+	stationsRegion := rail
+	if i := strings.Index(rail, "+2"); i >= 0 {
+		stationsRegion = rail[:i]
+	}
+	if got, want := strings.Count(stationsRegion, "["), stationCap; got != want {
+		t.Fatalf("expected exactly %d bracketed stations before overflow, got %d in:\n%q",
+			want, got, rail)
+	}
+}
+
+// TestBuildFactoryArtUnknownStageFallsBack: an unrecognised stage
+// (e.g. a future workflow) renders with the generic boiler glyph,
+// not nothing. Single source of truth for the "new workflow doesn't
+// silently disappear" guarantee.
+func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
+	state := factoryState{ActiveStages: []string{"unknown-stage"}}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	rail := lines[1]
+	if !strings.Contains(rail, "[◉]") {
+		t.Fatalf("expected fallback boiler glyph '[◉]', got rail:\n%q", rail)
+	}
+}
+
+// TestBuildFactoryArtSmokeOnlyAboveInProgress: stations whose stage is
+// "awaiting merge" don't smoke — the work is shipped. With only such a
+// station and no backlog, the smoke line is all spaces.
+func TestBuildFactoryArtSmokeOnlyAboveInProgress(t *testing.T) {
+	state := factoryState{ActiveStages: []string{"awaiting merge"}}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Fatalf("expected blank smoke above shipping-only station, got %q", lines[0])
+	}
+}
+
+// TestBuildFactoryArtWidth: every line is padded to at least artWidth
+// runes so the art row stands alone above the section table. Lines
+// can exceed the budget under extreme overflow (e.g. backlog=99) —
+// the caps + "+N" tags hold the layout to the budget for normal
+// counts, and the extreme cases are rare enough that line-wrap on a
+// narrow terminal is acceptable.
+func TestBuildFactoryArtWidth(t *testing.T) {
+	cases := []factoryState{
+		{},
+		{BacklogCount: 1},
+		{ActiveStages: []string{"design"}},
+		{CompletedCount: 1},
+		{BacklogCount: 3, ActiveStages: []string{"design", "code"}, CompletedCount: 4},
+	}
+	for i, st := range cases {
+		r := rand.New(rand.NewSource(int64(i + 1)))
+		for j, line := range buildFactoryArt(st, artWidth, r) {
+			n := utf8.RuneCountInString(line)
+			if n < artWidth {
+				t.Errorf("case %d line %d: width=%d want ≥ %d, line=%q", i, j, n, artWidth, line)
+			}
+		}
+	}
+}
+
+// TestBuildFactoryArtSmokeContainsOnlyPaletteRunes: every non-space
+// rune on the smoke line must come from the smoke palette. Pins that
+// the smoke ribbon never accidentally pulls a rune from the rail.
+func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
+	state := factoryState{
+		BacklogCount: 3,
+		ActiveStages: []string{"design", "code", "design", "code"},
+	}
+	allowed := make(map[rune]struct{}, len(smokeGlyphs)+1)
+	allowed[' '] = struct{}{}
+	for _, g := range smokeGlyphs {
+		allowed[g] = struct{}{}
+	}
+	// Iterate seeds so we explore the RNG; any seed that produces a
+	// non-palette rune fails the test.
+	for seed := int64(1); seed <= 8; seed++ {
+		r := rand.New(rand.NewSource(seed))
+		lines := buildFactoryArt(state, artWidth, r)
+		for _, ru := range lines[0] {
+			if _, ok := allowed[ru]; !ok {
+				t.Fatalf("seed %d: smoke line contains non-palette rune %q in %q", seed, ru, lines[0])
+			}
+		}
+	}
+}
+
+// TestDashRendersFactoryArt: dash output between the title line and
+// the ACTIVE section carries the factory art (one or two lines), not
+// just a blank gap. Pinned at the empty-bureaucracy state because
+// it's the easiest deterministic shape (dotted line, no RNG drift on
+// stations).
+func TestDashRendersFactoryArt(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	titleIdx := strings.Index(got, "Ministry of Everything")
+	activeIdx := strings.Index(got, "ACTIVE (")
+	if titleIdx < 0 || activeIdx < 0 {
+		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
+	}
+	header := got[titleIdx:activeIdx]
+	if !strings.Contains(header, "·") {
+		t.Fatalf("expected dotted empty-state art between title and ACTIVE, got:\n%q", header)
 	}
 }
 

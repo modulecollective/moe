@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,7 @@ type dashRow struct {
 	project string
 	run     string
 	note    string    // for runs: next stage name, or "done"; for backlog: idea title.
+	stage   string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Drives the factory art's station glyph.
 	when    time.Time // sort key within the section; most recent first.
 	bucket  bucket
 }
@@ -110,7 +112,17 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 
 	now := time.Now().UTC()
-	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow)
+	// Queue membership is best-effort decoration: a corrupt or missing
+	// queue.json silently yields no markers and the dash still renders.
+	// Loud errors on bad queue state belong in queue add/list/run, where
+	// the operator can act.
+	queuedSet := make(map[queueItem]struct{})
+	if items, err := loadQueue(root); err == nil {
+		for _, it := range items {
+			queuedSet[it] = struct{}{}
+		}
+	}
+	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow, queuedSet)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -141,8 +153,29 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	renderDash(stdout, now, rows, twinRows, projectCount, activeCount, *all)
+	state := factoryStateFromRows(rows)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	renderDash(stdout, now, rows, twinRows, projectCount, activeCount, *all, state, r)
 	return 0
+}
+
+// factoryStateFromRows folds dashboard rows into the data the art
+// reads. Active stages come straight off the rows in their existing
+// recency-sorted order; backlog and completed counts are simple
+// bucket totals. Pure over rows so the art renderer stays testable.
+func factoryStateFromRows(rows []dashRow) factoryState {
+	var state factoryState
+	for _, r := range rows {
+		switch r.bucket {
+		case bucketActiveRuns:
+			state.ActiveStages = append(state.ActiveStages, r.stage)
+		case bucketBacklog:
+			state.BacklogCount++
+		case bucketCompletedRuns:
+			state.CompletedCount++
+		}
+	}
+	return state
 }
 
 // buildDashRows maps scanned metadata to dashboard rows. Per-run
@@ -154,7 +187,10 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 // projectFilter and workflowFilter narrow the view; empty string means
 // no filter. Last-activity for each run is read from acts (built once by
 // the caller via run.LastActivityMap) instead of forking git per row.
-func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string) ([]dashRow, error) {
+// queuedSet marks active runs that sit on the operator's playlist —
+// rows whose (workflow, project, run) identity is in the set get a
+// "[queued]" suffix on the note column.
+func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string, queuedSet map[queueItem]struct{}) ([]dashRow, error) {
 	// byRunKey lets the promoted-idea branch resolve a successor run's
 	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
 	// without a second disk scan.
@@ -171,17 +207,23 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 			continue
 		}
 		last := acts[md.ID]
-		b, note, err := classify(root, md, last, now, includeDormant, byRunKey)
+		b, note, stage, err := classify(root, md, last, now, includeDormant, byRunKey)
 		if err != nil {
 			return nil, err
 		}
 		if b == bucketNone {
 			continue
 		}
+		if b == bucketActiveRuns {
+			if _, ok := queuedSet[queueItem{Workflow: md.Workflow, Project: md.Project, Run: md.ID}]; ok {
+				note += " [queued]"
+			}
+		}
 		rows = append(rows, dashRow{
 			project: md.Project,
 			run:     md.ID,
 			note:    note,
+			stage:   stage,
 			when:    last,
 			bucket:  b,
 		})
@@ -197,15 +239,16 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 	return rows, nil
 }
 
-// classify decides which section a run lands in and what note to
-// render. In-progress runs with more work to do land in ACTIVE;
-// pushed runs land in ACTIVE too with "awaiting merge: #<n>" since
-// the operator still owes a click on GitHub; merged and closed runs
-// land in COMPLETED. Dormant runs are dropped unless the caller asked
-// for --all.
-func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata) (bucket, string, error) {
+// classify decides which section a run lands in, what note to render,
+// and (for active runs) the bare next-stage name the factory art uses
+// to pick a station glyph. In-progress runs with more work to do land
+// in ACTIVE; pushed runs land in ACTIVE too with "awaiting merge: #<n>"
+// since the operator still owes a click on GitHub; merged and closed
+// runs land in COMPLETED. Dormant runs are dropped unless the caller
+// asked for --all.
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata) (bucket, string, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
-		return bucketNone, "", nil
+		return bucketNone, "", "", nil
 	}
 	// Every note is prefixed with the workflow name so the dashboard
 	// says "where" a run lives, not just "what's next". Two workflows
@@ -218,17 +261,17 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if md.Workflow == ideaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return bucketBacklog, prefix + "capture", nil
+			return bucketBacklog, prefix + "capture", "", nil
 		case run.StatusPromoted:
 			note := prefix + "promoted"
 			if slug, ok := promotedToRun(root, md.ID, byRunKey); ok {
 				note += " → " + slug
 			}
-			return bucketCompletedRuns, note, nil
+			return bucketCompletedRuns, note, "", nil
 		case run.StatusClosed:
-			return bucketCompletedRuns, prefix + "closed", nil
+			return bucketCompletedRuns, prefix + "closed", "", nil
 		}
-		return bucketNone, "", nil
+		return bucketNone, "", "", nil
 	}
 	switch md.Status {
 	case run.StatusPushed:
@@ -236,39 +279,39 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		if n, ok := prNumberForRun(root, md.ID); ok {
 			note = fmt.Sprintf("awaiting merge: #%s", n)
 		}
-		return bucketActiveRuns, prefix + note, nil
+		return bucketActiveRuns, prefix + note, "awaiting merge", nil
 	case run.StatusMerged:
-		return bucketCompletedRuns, prefix + "merged", nil
+		return bucketCompletedRuns, prefix + "merged", "", nil
 	case run.StatusClosed:
-		return bucketCompletedRuns, prefix + "closed", nil
+		return bucketCompletedRuns, prefix + "closed", "", nil
 	case run.StatusPromoted:
 		// Non-idea runs shouldn't wear StatusPromoted, but if one
 		// ever does (future --from-run promotion), surface it as
 		// completed with the same label as the idea case.
-		return bucketCompletedRuns, prefix + "promoted", nil
+		return bucketCompletedRuns, prefix + "promoted", "", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
 		// `moe scrap` lands). Leave them off the dashboard rather than
 		// guess a label — they'll surface via `moe history` when that
 		// ships.
-		return bucketNone, "", nil
+		return bucketNone, "", "", nil
 	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	if kind == NextKindDone {
 		// Terminal stage satisfied but no push transition — e.g. KB
 		// workflow, which ends at `summarize` and has no push. Treat
 		// the same as StatusPushed for dashboard purposes.
-		return bucketCompletedRuns, prefix + "done", nil
+		return bucketCompletedRuns, prefix + "done", "", nil
 	}
-	return bucketActiveRuns, prefix + next.Name, nil
+	return bucketActiveRuns, prefix + next.Name, next.Name, nil
 }
 
 // promotedToRun returns the slug (run ID) of the successor run recorded
@@ -560,8 +603,12 @@ func formatRecents(now time.Time, recents []twinRecent) string {
 	return "recent: " + strings.Join(parts, ", ")
 }
 
-func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, projectCount, activeCount int, showAll bool) {
-	moePrintf(w, "Ministry of Everything %38s\n\n", now.Format("2006-01-02  15:04"))
+func renderDash(w io.Writer, now time.Time, rows []dashRow, twinRows []twinRow, projectCount, activeCount int, showAll bool, state factoryState, r *rand.Rand) {
+	moePrintf(w, "Ministry of Everything %38s\n", now.Format("2006-01-02  15:04"))
+	for _, line := range buildFactoryArt(state, artWidth, r) {
+		fmt.Fprintln(w, line)
+	}
+	fmt.Fprintln(w)
 
 	var active, backlog, completed []dashRow
 	for _, r := range rows {
