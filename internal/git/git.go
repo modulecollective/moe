@@ -1,30 +1,29 @@
 // Package git wraps the small set of `git` shell-outs the bureaucracy
 // CLI does at runtime. Three execution helpers cover the real shapes:
-// Run streams stdio to the terminal so credential helpers can prompt;
-// Output captures stdout for programmatic use; Combined captures
-// stdout+stderr together for forwarding git's own error prose.
+// Run discards output on success and folds it into the error on
+// failure; Output captures stdout for programmatic use; Combined
+// captures stdout+stderr together for forwarding git's own error prose.
 package git
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
 
-// Run invokes git with stdio wired to the user's terminal so credential
-// helpers and SSH prompts can complete. Capturing stderr would hide
-// those prompts and make the command appear to hang.
+// Run invokes git in dir. Stdout and stderr are captured together; on
+// success they are discarded, on failure they are folded into the
+// returned error — same shape as Output. No caller today needs
+// terminal passthrough; the interactive `git push` path in cli/push.go
+// shells out directly with its own writers.
 func Run(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
