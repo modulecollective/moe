@@ -158,6 +158,21 @@ func TestDeadPIDStaleness(t *testing.T) {
 	defer l.Release()
 }
 
+// TestProcessAliveEPERMTreatedAsAlive guards the EPERM-as-alive
+// branch. Pid 1 (launchd on macOS, init/systemd on linux) always
+// exists; signalling it from a non-root uid yields EPERM, which
+// processAlive must read as "alive." Skipped when the test runs as
+// root because Signal(0) on pid 1 returns nil there and exercises
+// the existing happy path instead.
+func TestProcessAliveEPERMTreatedAsAlive(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root — Signal(0) on pid 1 returns nil, not EPERM")
+	}
+	if !processAlive(1) {
+		t.Errorf("processAlive(1) = false; want true (pid 1 exists, Signal(0) returns EPERM for non-root)")
+	}
+}
+
 func TestOtherHostWithFreshHeartbeatIsNotStale(t *testing.T) {
 	// Even if the PID is unknown-dead, a different host means we can't
 	// test liveness — treat as live until heartbeat goes stale.

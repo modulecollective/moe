@@ -425,7 +425,11 @@ func parseOwner(owner string) (host string, pid int, ok bool) {
 }
 
 // processAlive tests whether pid exists on this host. Signal 0 is the
-// portable "is this pid a thing?" probe; no signal is delivered.
+// portable "is this pid a thing?" probe; no signal is delivered. Only
+// ESRCH proves the pid is gone: EPERM (different uid) means the
+// process exists but we can't signal it, and any other errno is
+// ambiguous. Treating ambiguity as alive costs at worst a wait/timeout
+// for a real dead pid; treating it as dead would steal a live lock.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -434,7 +438,11 @@ func processAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return p.Signal(syscall.Signal(0)) == nil
+	err = p.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	return !errors.Is(err, syscall.ESRCH)
 }
 
 // ownerString is what we write as Owner in a fresh record: <hostname>/<pid>.
