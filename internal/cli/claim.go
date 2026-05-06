@@ -240,7 +240,7 @@ func loadRecentRunContext(root, projectID string) (*run.Metadata, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	acts, err := run.LastActivityMap(root)
+	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		return nil, "", err
 	}
@@ -258,7 +258,7 @@ func loadRecentRunContext(root, projectID string) (*run.Metadata, string, error)
 		default:
 			continue
 		}
-		when := acts[md.ID]
+		when := idx.LastActivity[md.ID]
 		if when.IsZero() {
 			continue
 		}

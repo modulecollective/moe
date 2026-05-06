@@ -600,19 +600,43 @@ func LastActivity(root, runID string) (time.Time, error) {
 	return time.Unix(epoch, 0).UTC(), nil
 }
 
-// LastActivityMap returns one committer time per run slug, keyed by
-// `MoE-Run` trailer value. One batched `git log` covers every run, so
-// callers that need activity for all runs (moe dash) avoid the
-// N×fork+exec cost of calling LastActivity in a loop. Slugs with no
-// reachable commit are absent from the map; callers should treat that
-// as the zero time, the same convention LastActivity uses.
+// JournalIndex is the precomputed in-memory view of MoE-trailer
+// signals dash reads from the bureaucracy journal. One batched
+// `git log` builds it (BuildJournalIndex); downstream callers do map
+// lookups instead of forking git per run, dropping dash's hot-path
+// invocation count from ~99 to ~3.
 //
-// For each slug we keep the *first* commit encountered in the log walk —
-// the one `git log -1 --grep "MoE-Run: <slug>"` would have returned —
-// so the result matches LastActivity exactly. That is HEAD-side topo
-// order, not strictly the newest committer date, which is the same
-// distinction LastActivity makes today.
-func LastActivityMap(root string) (map[string]time.Time, error) {
+// All maps are keyed by run slug (MoE-Run trailer value) and follow
+// the same "first commit encountered wins" rule LastActivity uses —
+// that is HEAD-side topo order, not strictly the newest committer
+// date. Missing slugs read as the zero value (zero time, "") so
+// callers don't need to branch on presence.
+type JournalIndex struct {
+	// LastActivity maps run slug → committer time of the latest
+	// reachable commit carrying MoE-Run: <slug>. Same contract as
+	// LastActivity for any single slug.
+	LastActivity map[string]time.Time
+	// PromotedTo maps run slug → MoE-Promoted-To trailer value
+	// (`<project>/<runID>`) recorded on the most recent commit
+	// scoped to the slug. Replaces a per-row trailerValue fork.
+	PromotedTo map[string]string
+	// PRURL maps run slug → MoE-PR trailer value recorded on the
+	// most recent commit scoped to the slug. Replaces a per-row
+	// trailerValue fork.
+	PRURL map[string]string
+}
+
+// BuildJournalIndex walks `git log` once and indexes every MoE-Run
+// trailer, plus the MoE-Promoted-To and MoE-PR trailers carried on
+// the same run-scoped commits. One fork+exec replaces the per-run
+// trailerValue + LastActivity + LastActivityMap calls dash used to
+// make on the hot path.
+//
+// HEAD-only walk: a run only reaches the dash via run.json on disk,
+// and run.json lands on main as part of the opening commit, so any
+// MoE-Run-tagged commit dash cares about is reachable from HEAD.
+// Mirrors the scope LastActivityMap walked.
+func BuildJournalIndex(root string) (*JournalIndex, error) {
 	cmd := exec.Command("git",
 		"log",
 		"--grep", "^MoE-Run: ",
@@ -623,7 +647,11 @@ func LastActivityMap(root string) (map[string]time.Time, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run: git log: %w", err)
 	}
-	result := make(map[string]time.Time)
+	idx := &JournalIndex{
+		LastActivity: make(map[string]time.Time),
+		PromotedTo:   make(map[string]string),
+		PRURL:        make(map[string]string),
+	}
 	for _, record := range strings.Split(string(out), "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
@@ -639,22 +667,46 @@ func LastActivityMap(root string) (map[string]time.Time, error) {
 		}
 		body := record[nul+1:]
 		slug := ""
+		var promotedTo, prURL string
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
-				slug = strings.TrimSpace(v)
-				break
+				if slug == "" {
+					slug = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Promoted-To:"); ok {
+				if promotedTo == "" {
+					promotedTo = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-PR:"); ok {
+				if prURL == "" {
+					prURL = strings.TrimSpace(v)
+				}
+				continue
 			}
 		}
 		if slug == "" {
 			continue
 		}
-		if _, ok := result[slug]; ok {
-			continue
+		if _, ok := idx.LastActivity[slug]; !ok {
+			idx.LastActivity[slug] = time.Unix(epoch, 0).UTC()
 		}
-		result[slug] = time.Unix(epoch, 0).UTC()
+		if promotedTo != "" {
+			if _, ok := idx.PromotedTo[slug]; !ok {
+				idx.PromotedTo[slug] = promotedTo
+			}
+		}
+		if prURL != "" {
+			if _, ok := idx.PRURL[slug]; !ok {
+				idx.PRURL[slug] = prURL
+			}
+		}
 	}
-	return result, nil
+	return idx, nil
 }
 
 // LastFileActivity returns the committer time of the most recent commit

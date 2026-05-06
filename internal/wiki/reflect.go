@@ -216,8 +216,9 @@ func projectCommitTotal(repoPath string) (int, error) {
 // closedRunsSince lists the project's terminal runs (closed, merged,
 // or promoted) whose last MoE-Run-trailered commit post-dates the
 // reflect checkpoint. Mirrors cli/dash.go:closedRunsSinceCount —
-// `run.Scan` for metadata and `run.LastActivityMap` for the activity
-// time, both rooted in git history rather than filesystem mtime.
+// `run.Scan` for metadata and `run.BuildJournalIndex` for the
+// activity time, both rooted in git history rather than filesystem
+// mtime.
 //
 // On first reflect (no checkpoint) the threshold is zero and every
 // terminal run lands; the agent folds them into history-summary.md
@@ -228,9 +229,9 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	if err != nil {
 		return nil, fmt.Errorf("wiki: scan runs: %w", err)
 	}
-	acts, err := run.LastActivityMap(root)
+	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
-		return nil, fmt.Errorf("wiki: last-activity map: %w", err)
+		return nil, fmt.Errorf("wiki: journal index: %w", err)
 	}
 	var threshold time.Time
 	if hasCheckpoint && cp.LastIngestAt != "" {
@@ -252,7 +253,7 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 		default:
 			continue
 		}
-		when := acts[md.ID]
+		when := idx.LastActivity[md.ID]
 		if when.IsZero() {
 			continue
 		}

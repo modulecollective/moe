@@ -104,10 +104,11 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	// One batched git log covers every run's last activity. The map
-	// then threads through buildDashRows and buildTwinRows so per-run
-	// and per-project paths reuse it instead of forking git per run.
-	acts, err := run.LastActivityMap(root)
+	// One batched git log covers every run's last activity plus the
+	// MoE-Promoted-To and MoE-PR trailers classify reads. The index
+	// threads through buildDashRows and buildTwinRows so per-run and
+	// per-project paths reuse it instead of forking git per run.
+	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -137,7 +138,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			sessionDocsByRun[s.Run] = append(sessionDocsByRun[s.Run], s.Doc)
 		}
 	}
-	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow, queuedSet, sessionDocsByRun)
+	rows, err := buildDashRows(root, mds, idx, now, *all, *project, *workflow, queuedSet, sessionDocsByRun)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -152,7 +153,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	// Twin status — per-project freshness and unrecorded-edits
 	// banner. Filtered by --project (matches the workflow filter
 	// behavior: empty projectFilter shows every project's twin).
-	twinRows, err := buildTwinRows(root, mds, acts, *project)
+	twinRows, err := buildTwinRows(root, mds, idx, *project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -205,15 +206,16 @@ func factoryStateFromRows(rows []dashRow) factoryState {
 // separate scan of a markdown-file shelf.
 //
 // projectFilter and workflowFilter narrow the view; empty string means
-// no filter. Last-activity for each run is read from acts (built once by
-// the caller via run.LastActivityMap) instead of forking git per row.
-// queuedSet marks active runs that sit on the operator's playlist —
-// rows whose (workflow, project, run) identity is in the set get a
-// "[queued]" suffix on the note column. sessionDocsByRun is the
-// per-run list of documents with an open stage session; classify
-// renders that as a "[running]" / "[<doc> running]" suffix in front
-// of "[queued]" so the liveness signal lands first when both apply.
-func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string, queuedSet map[queueItem]struct{}, sessionDocsByRun map[string][]string) ([]dashRow, error) {
+// no filter. Last-activity, MoE-Promoted-To and MoE-PR trailers are all
+// read from idx (built once by the caller via run.BuildJournalIndex)
+// instead of forking git per row. queuedSet marks active runs that sit
+// on the operator's playlist — rows whose (workflow, project, run)
+// identity is in the set get a "[queued]" suffix on the note column.
+// sessionDocsByRun is the per-run list of documents with an open stage
+// session; classify renders that as a "[running]" / "[<doc> running]"
+// suffix in front of "[queued]" so the liveness signal lands first when
+// both apply.
+func buildDashRows(root string, mds []*run.Metadata, idx *run.JournalIndex, now time.Time, includeDormant bool, projectFilter, workflowFilter string, queuedSet map[queueItem]struct{}, sessionDocsByRun map[string][]string) ([]dashRow, error) {
 	// byRunKey lets the promoted-idea branch resolve a successor run's
 	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
 	// without a second disk scan.
@@ -229,8 +231,8 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 		if workflowFilter != "" && md.Workflow != workflowFilter {
 			continue
 		}
-		last := acts[md.ID]
-		b, note, stage, runningDoc, err := classify(root, md, last, now, includeDormant, byRunKey, sessionDocsByRun[md.ID])
+		last := idx.LastActivity[md.ID]
+		b, note, stage, runningDoc, err := classify(root, md, last, now, includeDormant, byRunKey, idx, sessionDocsByRun[md.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -271,7 +273,7 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 // "awaiting merge: #<n>" since the operator still owes a click on
 // GitHub; merged and closed runs land in COMPLETED. Dormant runs are
 // dropped unless the caller asked for --all.
-func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, openSessionDocs []string) (bucket, string, string, string, error) {
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string) (bucket, string, string, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", "", "", nil
 	}
@@ -289,7 +291,7 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 			return bucketBacklog, prefix + "capture", "", "", nil
 		case run.StatusPromoted:
 			note := prefix + "promoted"
-			if slug, ok := promotedToRun(root, md.ID, byRunKey); ok {
+			if slug, ok := promotedToRun(idx, md.ID, byRunKey); ok {
 				note += " → " + slug
 			}
 			return bucketCompletedRuns, note, "", "", nil
@@ -301,7 +303,7 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	switch md.Status {
 	case run.StatusPushed:
 		note := "awaiting merge"
-		if n, ok := prNumberForRun(root, md.ID); ok {
+		if n, ok := prNumberForRun(idx, md.ID); ok {
 			note = fmt.Sprintf("awaiting merge: #%s", n)
 		}
 		// Pushed runs have no parked doc — the prefix names a state,
@@ -391,8 +393,8 @@ func openSessionMarker(runningDoc, parkedDoc string) string {
 // destination run is no longer in the scanned set — caller falls back
 // to the bare "promoted" label so the arrow only appears when we can
 // name where it went.
-func promotedToRun(root, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
-	v := trailerValue(root, runID, "MoE-Promoted-To")
+func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
+	v := idx.PromotedTo[runID]
 	if v == "" {
 		return "", false
 	}
@@ -407,8 +409,8 @@ func promotedToRun(root, runID string, byRunKey map[string]*run.Metadata) (strin
 // the MoE-PR URL from commit trailers and reading the number off the
 // end. Returns ("", false) when no MoE-PR trailer is on record — dash
 // then falls back to an unnumbered "awaiting merge" label.
-func prNumberForRun(root, runID string) (string, bool) {
-	url := trailerValue(root, runID, "MoE-PR")
+func prNumberForRun(idx *run.JournalIndex, runID string) (string, bool) {
+	url := idx.PRURL[runID]
 	if url == "" {
 		return "", false
 	}
@@ -488,10 +490,10 @@ type twinRecent struct {
 // the operator about a feature they haven't opted into.
 //
 // projectFilter narrows the view to a single project (empty = all).
-// mds and acts are the cached scan + last-activity map produced once in
+// mds and idx are the cached scan + journal index produced once in
 // runDash; buildTwinRows threads them into twinStatusNote so the twin
 // path doesn't re-scan or re-query git per project.
-func buildTwinRows(root string, mds []*run.Metadata, acts map[string]time.Time, projectFilter string) ([]twinRow, error) {
+func buildTwinRows(root string, mds []*run.Metadata, idx *run.JournalIndex, projectFilter string) ([]twinRow, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "project.json"))
 	if err != nil {
 		return nil, fmt.Errorf("dash: glob projects: %w", err)
@@ -517,7 +519,7 @@ func buildTwinRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 		// Best-effort on recents: a git log error shouldn't suppress
 		// the row. Mirrors closedRunsSinceCount's silent-fallback shape.
 		recents, _ := recentTwinSessions(root, projectID, twinRecentCap)
-		note := twinStatusNote(*cfg, mds, acts)
+		note := twinStatusNote(*cfg, mds, idx)
 		if note == "" && len(recents) == 0 {
 			continue
 		}
@@ -531,7 +533,7 @@ func buildTwinRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 // state and returns the line to render (or "" to suppress the row
 // entirely when the twin is fresh and has no decided edits pending).
 // Priority: unrecorded edits > never-reflected > stale > fresh.
-func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.Time) string {
+func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, idx *run.JournalIndex) string {
 	det, err := wiki.DetectUnrecordedEdits(cfg)
 	if err == nil && len(det.UnrecordedDocs) > 0 {
 		return fmt.Sprintf("unrecorded edits to %s — run `moe twin claim %s`",
@@ -548,7 +550,7 @@ func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.T
 	if err != nil {
 		return ""
 	}
-	since := closedRunsSinceCount(mds, acts, cfg.Project, last)
+	since := closedRunsSinceCount(mds, idx, cfg.Project, last)
 	if since == 0 {
 		return ""
 	}
@@ -564,8 +566,8 @@ func twinStatusNote(cfg wiki.Config, mds []*run.Metadata, acts map[string]time.T
 // runs whose last activity post-dates threshold. Used by the dash
 // twin row to surface freshness in operator-meaningful units ("3
 // closed runs since reflect" reads better than "23 days since"). Pure
-// over the cached metadata + activity map — both come from runDash.
-func closedRunsSinceCount(mds []*run.Metadata, acts map[string]time.Time, projectID string, threshold time.Time) int {
+// over the cached metadata + journal index — both come from runDash.
+func closedRunsSinceCount(mds []*run.Metadata, idx *run.JournalIndex, projectID string, threshold time.Time) int {
 	count := 0
 	for _, md := range mds {
 		if md.Project != projectID {
@@ -576,7 +578,7 @@ func closedRunsSinceCount(mds []*run.Metadata, acts map[string]time.Time, projec
 		default:
 			continue
 		}
-		when := acts[md.ID]
+		when := idx.LastActivity[md.ID]
 		if when.IsZero() {
 			continue
 		}

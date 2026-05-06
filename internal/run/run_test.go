@@ -310,16 +310,16 @@ func TestLoadRequiresWorkflow(t *testing.T) {
 	}
 }
 
-// TestLastActivityMapMatchesLastActivity is the load-bearing equivalence
-// check: the batched map and the per-slug git log must agree for every
-// run on disk. moe dash relies on that — replacing N×LastActivity with
-// one map lookup is only safe if both return the same answer.
-func TestLastActivityMapMatchesLastActivity(t *testing.T) {
+// TestJournalIndexLastActivityMatchesLastActivity is the load-bearing
+// equivalence check: the batched index and the per-slug git log must
+// agree for every run on disk. moe dash relies on that — replacing
+// N×LastActivity with one map lookup is only safe if both return the
+// same answer.
+func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 	root := newTestRoot(t)
-	commitWith := func(subject, runID string, when time.Time) {
+	commitWith := func(subject, body string, when time.Time) {
 		t.Helper()
-		msg := subject + "\n\nMoE-Run: " + runID + "\n"
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 		cmd.Dir = root
 		if !when.IsZero() {
 			stamp := when.Format(time.RFC3339)
@@ -334,28 +334,92 @@ func TestLastActivityMapMatchesLastActivity(t *testing.T) {
 	}
 	// Two slugs, multiple commits each, including a backdated commit on
 	// HEAD — that's the case `git log -1 --grep` resolves topologically
-	// rather than by committer date, and the map has to agree.
-	commitWith("Open run x/alpha", "alpha", time.Time{})
-	commitWith("Open run x/beta", "beta", time.Time{})
-	commitWith("work on alpha", "alpha", time.Now().Add(-2*time.Hour))
-	commitWith("work on beta backdated", "beta",
+	// rather than by committer date, and the index has to agree.
+	commitWith("Open run x/alpha", "MoE-Run: alpha\n", time.Time{})
+	commitWith("Open run x/beta", "MoE-Run: beta\n", time.Time{})
+	commitWith("work on alpha", "MoE-Run: alpha\n", time.Now().Add(-2*time.Hour))
+	commitWith("work on beta backdated", "MoE-Run: beta\n",
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 
-	got, err := LastActivityMap(root)
+	idx, err := BuildJournalIndex(root)
 	if err != nil {
-		t.Fatalf("LastActivityMap: %v", err)
+		t.Fatalf("BuildJournalIndex: %v", err)
 	}
 	for _, slug := range []string{"alpha", "beta"} {
 		want, err := LastActivity(root, slug)
 		if err != nil {
 			t.Fatalf("LastActivity %q: %v", slug, err)
 		}
-		if !got[slug].Equal(want) {
-			t.Errorf("slug %q: map=%v LastActivity=%v", slug, got[slug], want)
+		if !idx.LastActivity[slug].Equal(want) {
+			t.Errorf("slug %q: index=%v LastActivity=%v", slug, idx.LastActivity[slug], want)
 		}
 	}
 	// Slugs not present in any commit are absent (zero time on lookup).
-	if v, ok := got["never"]; ok {
+	if v, ok := idx.LastActivity["never"]; ok {
 		t.Errorf("expected unknown slug to be absent, got %v", v)
+	}
+}
+
+// TestJournalIndexCapturesPromotedToAndPRURL pins the multi-trailer
+// extraction: PromotedTo/PRURL on a run-scoped commit must surface in
+// the index without a second git log walk. Replaces N trailerValue
+// forks dash used to do per row.
+func TestJournalIndexCapturesPromotedToAndPRURL(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	// idea promoted to a run; the promotion commit carries both trailers.
+	commitWith("Promote idea p/idea-x → p/run-y",
+		"MoE-Run: idea-x\nMoE-Project: p\nMoE-Workflow: idea\nMoE-Promoted-To: p/run-y\n")
+	// run pushed; the push commit carries MoE-PR alongside MoE-Run.
+	commitWith("push: shipped",
+		"MoE-Run: run-y\nMoE-PR: https://example.com/pr/42\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.PromotedTo["idea-x"]; got != "p/run-y" {
+		t.Errorf("PromotedTo[idea-x] = %q, want %q", got, "p/run-y")
+	}
+	if got := idx.PRURL["run-y"]; got != "https://example.com/pr/42" {
+		t.Errorf("PRURL[run-y] = %q, want %q", got, "https://example.com/pr/42")
+	}
+	// Unrelated slugs read as the zero value, so callers don't need
+	// presence checks.
+	if got := idx.PromotedTo["never"]; got != "" {
+		t.Errorf("PromotedTo[never] = %q, want \"\"", got)
+	}
+}
+
+// TestJournalIndexPicksMostRecentTrailerValue: when a slug shows up
+// on multiple commits each carrying a different MoE-PR (the closed →
+// reopened case), the most recent value wins — same answer the
+// per-row trailerValue used to give.
+func TestJournalIndexPicksMostRecentTrailerValue(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	commitWith("push: first attempt", "MoE-Run: r\nMoE-PR: https://example.com/pr/1\n")
+	commitWith("push: re-pushed after close", "MoE-Run: r\nMoE-PR: https://example.com/pr/2\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.PRURL["r"]; got != "https://example.com/pr/2" {
+		t.Errorf("PRURL[r] = %q, want %q (most recent wins)", got, "https://example.com/pr/2")
 	}
 }
