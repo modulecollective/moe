@@ -184,38 +184,49 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 			// mutated means EnsureDocument just minted the session
 			// UUID this turn — fresh session, nothing to validate.
 			// Otherwise stat the exact path claude will read for
-			// `--resume <sid>` and decide between two outcomes:
+			// `--resume <sid>` from the cwd it'll run in (clonePath
+			// for code stages, sessionCwd for document-only — the
+			// same precedence the executor uses for cmd.Dir) and
+			// decide between two outcomes:
 			//   - JSONL at the canonical path → resume normally.
 			//   - JSONL absent (cross-machine fresh checkout, wiped
-			//     cache) → re-mint the session id, persist + commit
-			//     run.json, and pass --session-id instead of --resume.
-			//     Chat history is gone but the canvas on disk is
-			//     intact; we warn on stderr.
+			//     cache, dirty exit before claude wrote turn 1, or
+			//     a prior --one-shot turn which doesn't honor moe's
+			//     --session-id) → re-mint the session id, persist +
+			//     commit run.json, and pass --session-id instead of
+			//     --resume. Chat history is gone but the canvas on
+			//     disk is intact; we warn on stderr.
 			// Pre-flighting beats letting claude error mid-run: the
 			// operator gets a clear stderr line, not a stuck run.
 			newSession := mutated
-			if !newSession && sessionCwd != "" {
-				canonical := claude.CanonicalTranscriptPath(sessionCwd, doc.Session)
-				if canonical != "" {
-					switch _, statErr := os.Stat(canonical); {
-					case statErr == nil:
-						// At the canonical path — normal --resume.
-					case errors.Is(statErr, fs.ErrNotExist):
-						moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
-						sid, err := run.NewSessionID()
-						if err != nil {
-							return wikiTurnSpec{}, err
+			if !newSession {
+				resumeCwd := clonePath
+				if resumeCwd == "" {
+					resumeCwd = sessionCwd
+				}
+				if resumeCwd != "" {
+					canonical := claude.CanonicalTranscriptPath(resumeCwd, doc.Session)
+					if canonical != "" {
+						switch _, statErr := os.Stat(canonical); {
+						case statErr == nil:
+							// At the canonical path — normal --resume.
+						case errors.Is(statErr, fs.ErrNotExist):
+							moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
+							sid, err := run.NewSessionID()
+							if err != nil {
+								return wikiTurnSpec{}, err
+							}
+							doc.Session = sid
+							if err := run.Save(workRoot, md); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							if err := commitSessionStart(workRoot, md, docID); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							newSession = true
+						default:
+							return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", statErr)
 						}
-						doc.Session = sid
-						if err := run.Save(workRoot, md); err != nil {
-							return wikiTurnSpec{}, err
-						}
-						if err := commitSessionStart(workRoot, md, docID); err != nil {
-							return wikiTurnSpec{}, err
-						}
-						newSession = true
-					default:
-						return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", statErr)
 					}
 				}
 			}
