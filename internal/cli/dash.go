@@ -16,6 +16,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -122,7 +123,20 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			queuedSet[it] = struct{}{}
 		}
 	}
-	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow, queuedSet)
+	// Open-session liveness is best-effort the same way: a `git worktree
+	// list` failure silently yields no markers. The signal closes the
+	// gap between "what the parking rule says is next" (correct for
+	// resume) and "what's actually running right now" (the operator's
+	// off-screen claude session). session.List captures that window
+	// because Open registers the worktree at session start and Close
+	// tears it down at session end.
+	sessionDocsByRun := make(map[string][]string)
+	if ss, err := session.List(root); err == nil {
+		for _, s := range ss {
+			sessionDocsByRun[s.Run] = append(sessionDocsByRun[s.Run], s.Doc)
+		}
+	}
+	rows, err := buildDashRows(root, mds, acts, now, *all, *project, *workflow, queuedSet, sessionDocsByRun)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -189,8 +203,11 @@ func factoryStateFromRows(rows []dashRow) factoryState {
 // the caller via run.LastActivityMap) instead of forking git per row.
 // queuedSet marks active runs that sit on the operator's playlist —
 // rows whose (workflow, project, run) identity is in the set get a
-// "[queued]" suffix on the note column.
-func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string, queuedSet map[queueItem]struct{}) ([]dashRow, error) {
+// "[queued]" suffix on the note column. sessionDocsByRun is the
+// per-run list of documents with an open stage session; classify
+// renders that as a "[running]" / "[<doc> running]" suffix in front
+// of "[queued]" so the liveness signal lands first when both apply.
+func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, now time.Time, includeDormant bool, projectFilter, workflowFilter string, queuedSet map[queueItem]struct{}, sessionDocsByRun map[string][]string) ([]dashRow, error) {
 	// byRunKey lets the promoted-idea branch resolve a successor run's
 	// workflow from its MoE-Promoted-To trailer (`<project>/<id>`)
 	// without a second disk scan.
@@ -207,7 +224,7 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 			continue
 		}
 		last := acts[md.ID]
-		b, note, stage, err := classify(root, md, last, now, includeDormant, byRunKey)
+		b, note, stage, err := classify(root, md, last, now, includeDormant, byRunKey, sessionDocsByRun[md.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +263,7 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 // since the operator still owes a click on GitHub; merged and closed
 // runs land in COMPLETED. Dormant runs are dropped unless the caller
 // asked for --all.
-func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata) (bucket, string, string, error) {
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, openSessionDocs []string) (bucket, string, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
 		return bucketNone, "", "", nil
 	}
@@ -279,7 +296,10 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		if n, ok := prNumberForRun(root, md.ID); ok {
 			note = fmt.Sprintf("awaiting merge: #%s", n)
 		}
-		return bucketActiveRuns, prefix + note, "awaiting merge", nil
+		// Pushed runs have no parked doc — the prefix names a state,
+		// not a stage — so any open session is "different doc" by
+		// construction and renders as "[<doc> running]".
+		return bucketActiveRuns, prefix + note + openSessionMarker(openSessionDocs, ""), "awaiting merge", nil
 	case run.StatusMerged:
 		return bucketCompletedRuns, prefix + "merged", "", nil
 	case run.StatusClosed:
@@ -311,7 +331,30 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		// the same as StatusPushed for dashboard purposes.
 		return bucketCompletedRuns, prefix + "done", "", nil
 	}
-	return bucketActiveRuns, prefix + next.Name, next.Name, nil
+	return bucketActiveRuns, prefix + next.Name + openSessionMarker(openSessionDocs, next.Name), next.Name, nil
+}
+
+// openSessionMarker returns the " [running]" suffix the dash glues onto
+// an active-run note when a stage session is open against the run.
+// parkedDoc is the docID the parking rule reports as next ("" for
+// pushed runs, where the prefix names a state rather than a stage).
+//
+// A session on a different doc than the parked one wins front position:
+// it's the more interesting signal, since the operator is mid-edit on a
+// document the parking rule won't surface until the session commits.
+// Multiple open sessions on one run are unexpected (sessions are
+// sequential by design) — when they do show up, the same "non-parked
+// wins" rule applies, since the parked one is implicit in the prefix.
+func openSessionMarker(openDocs []string, parkedDoc string) string {
+	if len(openDocs) == 0 {
+		return ""
+	}
+	for _, d := range openDocs {
+		if d != parkedDoc {
+			return " [" + d + " running]"
+		}
+	}
+	return " [running]"
 }
 
 // promotedToRun returns the slug (run ID) of the successor run recorded

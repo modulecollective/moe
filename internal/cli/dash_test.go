@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -1230,6 +1231,122 @@ func TestDashCorruptQueueFileSilent(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "[queued]") {
 		t.Fatalf("expected no markers when queue.json is corrupt, got:\n%s", out.String())
+	}
+}
+
+// TestDashOpenSessionSameDocMarksRunning: a stage session whose doc
+// matches the run's parked stage gets a terse "[running]" suffix —
+// the parked-stage prefix already names the doc, so a "[code running]"
+// repeat would buy nothing.
+func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
+	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	// design + code signed: parked at code under the forward-walking rule.
+	sess, err := session.Open(root, "tele", "fix-it", "code")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "sdlc:code [running]") {
+		t.Fatalf("expected 'sdlc:code [running]' on the active row, got:\n%s", out.String())
+	}
+}
+
+// TestDashOpenSessionDifferentDocMarksDocRunning: a code session open
+// on a run still parked at design — the case that motivates this rail
+// — renders "sdlc:design [code running]". Without the marker the dash
+// would say "design" while the operator knows code is in flight off
+// the dashboard.
+func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// Fresh run with no work turns: parked at design.
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "code")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "sdlc:design [code running]") {
+		t.Fatalf("expected 'sdlc:design [code running]' on the active row, got:\n%s", out.String())
+	}
+}
+
+// TestDashOpenSessionAndQueuedStackInOrder: when a run is both queued
+// and has an open session on a different doc, both markers render and
+// the liveness signal lands in front — "[code running]" before
+// "[queued]" — so the "what's happening now" answer arrives ahead of
+// the playlist membership.
+func TestDashOpenSessionAndQueuedStackInOrder(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	if err := saveQueue(root, []queueItem{
+		{Workflow: "sdlc", Project: "tele", Run: "fix-it"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := session.Open(root, "tele", "fix-it", "code")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "sdlc:design [code running] [queued]") {
+		t.Fatalf("expected '[code running]' before '[queued]', got:\n%s", out.String())
+	}
+}
+
+// TestDashNoOpenSessionLeavesNoteUnchanged: with no session worktrees
+// open, the active-run note carries no "[running]" suffix — the dash's
+// behaviour before this rail. Pins the no-marker default so a future
+// change can't smuggle a marker into the no-session case.
+func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if strings.Contains(out.String(), "running]") {
+		t.Fatalf("expected no '[running]' marker without an open session, got:\n%s", out.String())
 	}
 }
 
