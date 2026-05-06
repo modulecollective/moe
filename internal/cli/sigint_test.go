@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -105,6 +106,15 @@ func TestReadLineWithSignalReturnsOnSignal(t *testing.T) {
 	}
 }
 
+// queueCountdownLine is the production line shape queue's countdown
+// renders. Tests reuse it so an assertion drift is caught here, not in
+// the production format string.
+func queueCountdownLine(label string) func(n int) string {
+	return func(n int) string {
+		return fmt.Sprintf("queue: starting %s in %d…  (Ctrl-C to stop)", label, n)
+	}
+}
+
 // TestRunCountdownTicksThenReturnsFalse is the happy path: the
 // countdown runs to completion and reports stopped=false. With the
 // per-tick interval shrunk to 1ms, three ticks complete in milliseconds.
@@ -115,7 +125,7 @@ func TestRunCountdownTicksThenReturnsFalse(t *testing.T) {
 
 	sig := make(chan os.Signal, 1)
 	var buf bytes.Buffer
-	stopped := runCountdown(3, "tele/x", &buf, sig)
+	stopped := runCountdown(3, queueCountdownLine("tele/x"), &buf, sig)
 	if stopped {
 		t.Fatalf("expected stopped=false on completed countdown")
 	}
@@ -139,7 +149,7 @@ func TestRunCountdownReturnsTrueOnSignal(t *testing.T) {
 	var buf bytes.Buffer
 	out := make(chan bool, 1)
 	go func() {
-		out <- runCountdown(3, "tele/x", &buf, sig)
+		out <- runCountdown(3, queueCountdownLine("tele/x"), &buf, sig)
 	}()
 	// Let the countdown print its first frame and enter the select.
 	time.Sleep(50 * time.Millisecond)

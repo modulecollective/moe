@@ -17,24 +17,31 @@ import (
 )
 
 // `moe follow` keeps the design doc in play in front of the operator.
-// It resolves which file deserves the screen — most recent run with an
-// open design session, else most recent run parked at the design stage
-// — and execs a pager. When the pager exits, follow re-evaluates and
-// either spawns a fresh pager (different design surfaced, or the same
-// run still wants reading) or drops to a single-line idle screen and
-// re-checks every --interval. It is read-only by construction: the
-// canvas is opened for read, no `$EDITOR` path.
+// Auto-pick surfaces the most recent run with an *open session* on its
+// design doc and execs a pager. Parked-at-design runs (work-to-do, not
+// work-being-done) are deliberately invisible to auto-pick — `dash` is
+// the surface for those. `--run <id>` is the explicit pin escape hatch
+// and ignores liveness. When the pager exits, follow waits out a 3s
+// countdown (Ctrl-C exits cleanly) so the operator can break the
+// relaunch loop, then re-evaluates and either spawns a fresh pager or
+// drops to a single-line idle screen polled every --interval. Read-
+// only by construction: the canvas is opened for read, no `$EDITOR`
+// path.
 //
-// Pieces are deliberately reused from `dash`: same Scan, same journal
-// index, same session.List for liveness, same workflow.Next for the
-// parked stage. follow is the across-runs counterpart to dash's
-// within-run liveness picker.
+// Pieces reused from `dash`: same Scan, same journal index, same
+// session.List for liveness. follow is the across-runs counterpart to
+// dash's within-run liveness picker.
 
 // followIdleInterval is the default poll cadence between idle ticks.
 // 5s is the design's chosen cadence: long enough that the operator's
 // terminal isn't busy, short enough that a freshly-opened design lands
 // in the pager within one breath.
 const followIdleInterval = 5 * time.Second
+
+// followCountdownSeconds is the dwell after a pager exit before the
+// next auto-pick fires — long enough for a Ctrl-C to land cleanly,
+// short enough not to feel sluggish. Mirrors queueCountdownSeconds.
+const followCountdownSeconds = 3
 
 // defaultPager is the fallback when MOE_PAGER is unset. `+F` is the
 // only universally-available follow mode; `-R` passes ANSI through;
@@ -58,10 +65,11 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe follow [--interval <duration>] [--run <id>]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Pages the design doc most worth watching: most recent run with an open")
-		moePrintln(stderr, "design session, else most recent run parked at the design stage. When")
-		moePrintln(stderr, "the pager exits, follow re-evaluates. With no design in play, prints a")
-		moePrintln(stderr, "single-line idle status and re-checks every --interval. Ctrl-C exits.")
+		moePrintln(stderr, "Pages the design doc most worth watching: the most recent run with an")
+		moePrintln(stderr, "open session on its design doc. When the pager exits, follow waits 3s")
+		moePrintln(stderr, "(Ctrl-C to exit cleanly), then re-evaluates. With no live design, prints")
+		moePrintln(stderr, "a single-line idle status and re-checks every --interval. --run <id>")
+		moePrintln(stderr, "pins to a specific run regardless of session liveness.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Pager is ${MOE_PAGER:-less +F -R -M}.")
 		fs.PrintDefaults()
@@ -103,6 +111,23 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 			drainSignal(sigCh)
+			// Countdown after the pager exits is the operator's escape
+			// hatch from the relaunch loop: without it, a fresh pager
+			// re-spawns immediately and the only way out is timing a
+			// Ctrl-C through that brief window. The first pager open
+			// isn't delayed — the operator just typed `moe follow`
+			// and asked for it; the dwell only sits between exits.
+			// Scoped sigint subscription mirrors queue's pattern so
+			// the countdown's signal handling doesn't clash with the
+			// outer sigCh used by the idle-screen branch.
+			countdownSig, stopCountdownSig := installSigint()
+			stopped := runCountdown(followCountdownSeconds, func(n int) string {
+				return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
+			}, stdout, countdownSig)
+			stopCountdownSig()
+			if stopped {
+				return 0
+			}
 			continue
 		}
 		// Idle screen: clear-and-print on the same line each tick so
@@ -135,11 +160,11 @@ type followLast struct {
 // idle-screen summary for when no doc is in play. Returns ("", summary, nil)
 // when no design candidate exists; the caller renders the summary instead.
 //
-// A design candidate is a run that is either (a) parked at the design
-// stage under its workflow's parking rule, or (b) has an open session
-// on its design document. Tier (b) beats (a); within a tier the most
-// recent activity wins. runFilter, when non-empty, locks to that run id
-// — the operator's pin overrides the usual selection, and a not-yet-
+// A design candidate is an in-progress run with an open session on its
+// design document — work-being-done. Parked-at-design runs (work-to-do
+// but untouched) deliberately don't surface here; that's `dash`'s job.
+// Most recent activity wins. runFilter, when non-empty, locks to that
+// run id — the operator's pin overrides liveness, and a not-yet-
 // existent design canvas falls through to the idle screen so follow
 // keeps polling until the file appears.
 func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
@@ -151,9 +176,9 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 	if err != nil {
 		return "", followSummary{}, err
 	}
-	// session.List is read-only; a worktree-list error shouldn't suppress
-	// the dash's parking-rule pick, so swallow and proceed without
-	// liveness signal — same shape dash uses for the [running] marker.
+	// session.List is read-only; a worktree-list error shouldn't
+	// suppress the idle-screen summary, so swallow and proceed with no
+	// liveness signal — auto-pick will simply find no candidates.
 	sessionDocsByRun := make(map[string][]string)
 	if ss, err := session.List(root); err == nil {
 		for _, s := range ss {
@@ -179,7 +204,6 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 	type cand struct {
 		path string
 		when time.Time
-		live bool
 	}
 	var cands []cand
 	for _, md := range mds {
@@ -193,32 +217,18 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 				break
 			}
 		}
-		parked := false
-		if wf, lerr := LookupWorkflow(md.Workflow); lerr == nil {
-			next, kind, nerr := wf.Next(root, md)
-			if nerr != nil {
-				return "", summary, nerr
-			}
-			if kind == NextKindStage && next != nil && next.Name == "design" {
-				parked = true
-			}
-		}
-		if !live && !parked {
+		if !live {
 			continue
 		}
 		cands = append(cands, cand{
 			path: filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")),
 			when: idx.LastActivity[md.ID],
-			live: live,
 		})
 	}
 	if len(cands) == 0 {
 		return "", summary, nil
 	}
 	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].live != cands[j].live {
-			return cands[i].live
-		}
 		return cands[i].when.After(cands[j].when)
 	})
 	return cands[0].path, summary, nil

@@ -28,14 +28,42 @@ func TestPickFollowTargetEmpty(t *testing.T) {
 	}
 }
 
-// TestPickFollowTargetParkedAtDesign: a fresh sdlc run is parked at
-// design under the parking rule, so its design canvas is the natural
-// candidate. The candidate path is the run's design content.md.
-func TestPickFollowTargetParkedAtDesign(t *testing.T) {
+// TestPickFollowTargetParkedAtDesignNotACandidate: a fresh sdlc run is
+// parked at design under the parking rule, but with no open session on
+// the design doc it is *not* a follow auto-pick candidate. Parked-only
+// runs are work-to-do, not work-being-done — `dash` is the surface for
+// those. Auto-pick returns no path; the operator sees the idle screen.
+func TestPickFollowTargetParkedAtDesignNotACandidate(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	path, sum, err := pickFollowTarget(root, "")
+	if err != nil {
+		t.Fatalf("pickFollowTarget: %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected idle (parked-only is not a candidate), got %q", path)
+	}
+	if sum.activeCount != 1 {
+		t.Fatalf("expected the parked run to count as active, got %d", sum.activeCount)
+	}
+}
+
+// TestPickFollowTargetLiveDesignSession: a run with an open session on
+// its design doc is the auto-pick candidate. Liveness is the only
+// signal that surfaces a run.
+func TestPickFollowTargetLiveDesignSession(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
 
 	path, _, err := pickFollowTarget(root, "")
 	if err != nil {
@@ -99,15 +127,15 @@ func TestPickFollowTargetSessionOnDesignBeatsParkedElsewhere(t *testing.T) {
 	}
 }
 
-// TestPickFollowTargetSessionTierBeatsParkedTier: two runs are
-// candidates — one with an open design session, one merely parked at
-// design with newer activity. The session-open one wins; the more-
-// recent parked-only run does not get to outrank a live session.
-func TestPickFollowTargetSessionTierBeatsParkedTier(t *testing.T) {
+// TestPickFollowTargetLiveOnly: two runs — one with an open design
+// session, one merely parked at design with newer activity. The live
+// run is the only candidate; parked-only runs are invisible to
+// auto-pick regardless of recency.
+func TestPickFollowTargetLiveOnly(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	// Live tier: design committed (parked at code), open session on design.
+	// Live: design committed (parked at code), open session on design.
 	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "tele", "alpha", "sdlc", "design", t0)
@@ -117,8 +145,8 @@ func TestPickFollowTargetSessionTierBeatsParkedTier(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
-	// Parked-only tier: fresh run, more recent activity than alpha's
-	// design commit but no open session.
+	// Parked-only: fresh run, more recent activity than alpha's design
+	// commit but no open session — must not surface.
 	seedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
 	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(2*time.Hour))
@@ -128,17 +156,17 @@ func TestPickFollowTargetSessionTierBeatsParkedTier(t *testing.T) {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
 	if !strings.Contains(path, "/runs/alpha/") {
-		t.Fatalf("expected alpha (live tier) to win, got %q", path)
+		t.Fatalf("expected alpha (live) to win, got %q", path)
 	}
 }
 
-// TestPickFollowTargetMostRecentParked: two parked-at-design runs in
-// the same tier — the more-recently-active one wins. We backdate both
-// runs' latest MoE-Run commit so the journal index's topological-walk
-// "first encountered" picks up the controlled timestamps rather than
-// the seedRun open commits at real-time-now (which would otherwise
-// tie within the same second of wall-clock).
-func TestPickFollowTargetMostRecentParked(t *testing.T) {
+// TestPickFollowTargetMostRecentLiveWins: two runs each with an open
+// design session — the more-recently-active one wins. We backdate
+// both runs' latest MoE-Run commit so the journal index's
+// topological-walk "first encountered" picks up the controlled
+// timestamps rather than the seedRun open commits at real-time-now
+// (which would otherwise tie within the same second of wall-clock).
+func TestPickFollowTargetMostRecentLiveWins(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
@@ -149,12 +177,23 @@ func TestPickFollowTargetMostRecentParked(t *testing.T) {
 	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(time.Hour))
 
+	sessA, err := session.Open(root, "tele", "alpha", "design")
+	if err != nil {
+		t.Fatalf("session.Open alpha: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessA) })
+	sessB, err := session.Open(root, "tele", "beta", "design")
+	if err != nil {
+		t.Fatalf("session.Open beta: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessB) })
+
 	path, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
 	if !strings.Contains(path, "/runs/beta/") {
-		t.Fatalf("expected beta (more recent) to win, got %q", path)
+		t.Fatalf("expected beta (more recent live) to win, got %q", path)
 	}
 }
 

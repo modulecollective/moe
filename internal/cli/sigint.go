@@ -104,16 +104,22 @@ var (
 // milliseconds; production stays at one second.
 var queueCountdownTick = 1 * time.Second
 
-// runCountdown prints a "starting <label> in N…" line and ticks down
-// to zero. Returns true if sigCh fired during the wait (caller stops),
-// false if the countdown ran to completion (caller dispatches).
+// runCountdown ticks a counter from `seconds` down to zero, repainting
+// the line returned by `lineFn(n)` on each tick. Returns true if sigCh
+// fired during the wait (caller stops), false if the countdown ran to
+// completion (caller proceeds).
 //
 // Each tick rewrites the same line in place via \r so the countdown
 // collapses to one visible line. On signal or completion a final
 // newline is emitted so any subsequent output starts cleanly.
-func runCountdown(seconds int, label string, stdout io.Writer, sigCh <-chan os.Signal) bool {
+//
+// `lineFn` owns the surrounding text — queue passes
+// `"queue: starting <head> in N…  (Ctrl-C to stop)"`, follow passes
+// `"follow: re-checking in N…  (Ctrl-C to exit)"`. Both shapes share
+// this dwell+ticker but their prefixes and trailers differ.
+func runCountdown(seconds int, lineFn func(n int) string, stdout io.Writer, sigCh <-chan os.Signal) bool {
 	for n := seconds; n > 0; n-- {
-		moePrintf(stdout, "\rqueue: starting %s in %d…  (Ctrl-C to stop)", label, n)
+		moePrintf(stdout, "\r%s", lineFn(n))
 		select {
 		case <-sigCh:
 			moePrintln(stdout, "")

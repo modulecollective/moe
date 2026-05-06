@@ -557,7 +557,9 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		// countdown caught it, load-bearing when SIGINT lands at the
 		// stage prompt later.
 		countdownSig, stopCountdownSig := installSigint()
-		stopped := runCountdown(queueCountdownSeconds, head.String(), stdout, countdownSig)
+		stopped := runCountdown(queueCountdownSeconds, func(n int) string {
+			return fmt.Sprintf("queue: starting %s in %d…  (Ctrl-C to stop)", head, n)
+		}, stdout, countdownSig)
 		stopCountdownSig()
 		if stopped {
 			moePrintf(stdout, "queue: stopped — %s still at head (%d remaining)\n", head, depth)
