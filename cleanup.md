@@ -98,10 +98,6 @@ worth a comment acknowledging it or
   separator collides with the body. Each section currently ends
   with `\n` by convention; assert it via a test or normalise via a
   helper.
-- **`promptNextStage` allocates a fresh `bufio.NewReader(os.Stdin)`
-  each call.** Only matters if invoked twice in one process (current
-  paths don't, but the chain rule could grow). Use one reader at the
-  dispatcher level if it ever becomes a problem.
 - **`hostname() == "unknown"` collisions** in
   `repolock.ownerString`. If `os.Hostname` fails, multiple machines
   all become `unknown/<pid>` and can spuriously look like the "same

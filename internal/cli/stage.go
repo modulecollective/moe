@@ -673,7 +673,7 @@ func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, 
 	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readLineWithSignal(os.Stdin, sig)
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
@@ -705,7 +705,7 @@ func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, s
 	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readLineWithSignal(os.Stdin, sig)
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.

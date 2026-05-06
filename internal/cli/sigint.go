@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 )
 
@@ -35,19 +36,24 @@ func installSigint() (<-chan os.Signal, func()) {
 // or interrupted=true if sigCh fires first.
 //
 // Caller owns sigCh's lifecycle — typically `installSigint()` paired
-// with a deferred unregister, or a test-supplied channel.
+// with a deferred unregister, or a test-supplied channel. The caller
+// also owns r's buffering: passing a `*bufio.Reader` (rather than a
+// raw `io.Reader`) is load-bearing so consecutive prompts in one
+// process can share a single read-ahead buffer via stdinSharedReader
+// — wrapping a fresh bufio.Reader inside this helper would silently
+// drop type-ahead bytes between calls.
 //
 // On interrupt the reader goroutine remains blocked on r until r
 // produces or closes; that orphan is fine for moe's lifecycle (the
 // process exits shortly after, and r is os.Stdin, which the OS reaps).
-func readLineWithSignal(r io.Reader, sigCh <-chan os.Signal) (line string, interrupted bool, err error) {
+func readLineWithSignal(r *bufio.Reader, sigCh <-chan os.Signal) (line string, interrupted bool, err error) {
 	type result struct {
 		line string
 		err  error
 	}
 	ch := make(chan result, 1)
 	go func() {
-		s, e := bufio.NewReader(r).ReadString('\n')
+		s, e := r.ReadString('\n')
 		ch <- result{line: s, err: e}
 	}()
 	select {
@@ -57,6 +63,41 @@ func readLineWithSignal(r io.Reader, sigCh <-chan os.Signal) (line string, inter
 		return "", true, nil
 	}
 }
+
+// stdinSharedReader returns a *bufio.Reader bound to os.Stdin, cached
+// so consecutive prompts in one process share the same read-ahead
+// buffer. Without sharing, type-ahead or multi-line paste bytes that
+// land past the newline get garbage-collected with the previous
+// reader and lost; the next prompt would read past them from a fresh
+// bufio.
+//
+// Identity-keyed on os.Stdin so tests that swap os.Stdin (oldStdin :=
+// os.Stdin; os.Stdin = r; t.Cleanup(...)) get a fresh reader bound to
+// the new pipe on the next call. A sync.Once-style cache would lock
+// in the first-seen os.Stdin and break those tests.
+//
+// Concurrency caveat: bufio.Reader is not safe for concurrent reads.
+// If a SIGINT-orphaned read goroutine is still blocked on the cached
+// reader when a second prompt fires, the two ReadString calls would
+// race on the same buffer and split operator input. moe's flow
+// collapses SIGINT to a fast process exit on every path today, so
+// this never triggers — but a future change that keeps prompting
+// after SIGINT must rebind, not reuse.
+func stdinSharedReader() *bufio.Reader {
+	stdinReaderMu.Lock()
+	defer stdinReaderMu.Unlock()
+	if stdinReaderCached == nil || stdinReaderBound != os.Stdin {
+		stdinReaderCached = bufio.NewReader(os.Stdin)
+		stdinReaderBound = os.Stdin
+	}
+	return stdinReaderCached
+}
+
+var (
+	stdinReaderMu     sync.Mutex
+	stdinReaderCached *bufio.Reader
+	stdinReaderBound  *os.File
+)
 
 // queueCountdownTick is the per-tick interval the walker uses between
 // countdown frames. var rather than const so tests can speed it up to

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"os"
@@ -47,7 +48,7 @@ func raiseSIGINT() error {
 // TestReadLineWithSignalReturnsLine is the happy path: the reader
 // produces a line and the helper returns it, no interruption.
 func TestReadLineWithSignalReturnsLine(t *testing.T) {
-	r := strings.NewReader("yes\n")
+	r := bufio.NewReader(strings.NewReader("yes\n"))
 	sig := make(chan os.Signal, 1) // never written; helper must not select it
 	line, interrupted, err := readLineWithSignal(r, sig)
 	if err != nil && err != io.EOF {
@@ -69,7 +70,7 @@ func TestReadLineWithSignalReturnsOnSignal(t *testing.T) {
 	// blockingReader stays blocked until the test closes done. Mirrors
 	// os.Stdin sitting at a `[Y/n]` prompt with no operator input.
 	done := make(chan struct{})
-	r := &blockingReader{done: done}
+	r := bufio.NewReader(&blockingReader{done: done})
 	defer close(done)
 
 	sig := make(chan os.Signal, 1)
@@ -154,6 +155,45 @@ func TestRunCountdownReturnsTrueOnSignal(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "tele/x") {
 		t.Errorf("expected label in output:\n%s", buf.String())
+	}
+}
+
+// TestStdinSharedReaderCachesPerStdin pins the cache identity rule:
+// consecutive calls return the same *bufio.Reader while os.Stdin
+// holds steady, but a fresh reader after os.Stdin is swapped — the
+// pattern tests use to point the helper at a pipe. Without the swap
+// branch, tests that bind os.Stdin to a new pipe per case would read
+// from the previous run's bufio buffer.
+func TestStdinSharedReaderCachesPerStdin(t *testing.T) {
+	r1, w1, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r1.Close()
+	defer w1.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r1
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	first := stdinSharedReader()
+	if again := stdinSharedReader(); again != first {
+		t.Fatalf("expected cached reader to be reused while os.Stdin is unchanged")
+	}
+
+	r2, w2, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	defer w2.Close()
+	os.Stdin = r2
+
+	rebound := stdinSharedReader()
+	if rebound == first {
+		t.Fatalf("expected fresh reader after os.Stdin swap, got cached")
+	}
+	if again := stdinSharedReader(); again != rebound {
+		t.Fatalf("expected new reader to be cached on subsequent calls")
 	}
 }
 
