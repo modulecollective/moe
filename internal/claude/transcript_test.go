@@ -103,9 +103,7 @@ func TestCopyTranscriptOverwritesExisting(t *testing.T) {
 func TestEncodeCwdReplacesSeparatorsAndDots(t *testing.T) {
 	// Pinned against observed real ~/.claude/projects/ dirs. Both `/` and
 	// `.` collapse to `-`, so a `/.moe/` segment becomes `--moe-` (double
-	// dash, no literal dot). If claude's encoding ever drifts again,
-	// CanonicalTranscriptPath's stat misses and the glob fallback in
-	// TranscriptPath covers us — but pin the rules we've actually seen.
+	// dash, no literal dot).
 	cases := []struct{ in, want string }{
 		{"/Users/foo/bar", "-Users-foo-bar"},
 		{"/Users/x/projects/y/.moe/sessions/p/r/d",

@@ -60,10 +60,10 @@ func CanonicalTranscriptPath(cwd, sessionID string) string {
 
 // TranscriptPath returns the filesystem path of Claude Code's session log
 // for sessionID, or "" if no log has been written yet. The lookup globs
-// <config>/projects/*/<sessionID>.jsonl because sessionID is a UUID — which
-// dir it lands under depends on Claude Code's cwd-encoding scheme, and a
-// glob covers orphan transcripts written under a now-stale encoded cwd
-// (e.g. a per-turn worktree path before stage sessions stabilized cwd).
+// <config>/projects/*/<sessionID>.jsonl rather than reconstructing the
+// encoded-cwd path: sessionID is a UUID so collisions across project
+// dirs are impossible, and the glob keeps the per-turn save into
+// thread.jsonl resilient to any drift in claude's cwd-encoding scheme.
 func TranscriptPath(sessionID string) (string, error) {
 	root := ConfigDir()
 	if root == "" {
