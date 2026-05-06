@@ -1375,8 +1375,12 @@ func TestBuildFactoryArtEmpty(t *testing.T) {
 // carries the expected zone glyphs in zone order.
 func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 	state := factoryState{
-		BacklogCount:   2,
-		ActiveStages:   []string{"design", "code", "awaiting merge"},
+		BacklogCount: 2,
+		ActiveStages: []activeStation{
+			{Stage: "design"},
+			{Stage: "code"},
+			{Stage: "awaiting merge"},
+		},
 		CompletedCount: 3,
 	}
 	r := rand.New(rand.NewSource(1))
@@ -1409,8 +1413,15 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 // rather than widening the line beyond budget.
 func TestBuildFactoryArtOverflow(t *testing.T) {
 	state := factoryState{
-		BacklogCount:   inputCap + 3,
-		ActiveStages:   []string{"design", "code", "design", "code", "code", "design"}, // stationCap=4 + 2 over
+		BacklogCount: inputCap + 3,
+		ActiveStages: []activeStation{ // stationCap=4 + 2 over
+			{Stage: "design"},
+			{Stage: "code"},
+			{Stage: "design"},
+			{Stage: "code"},
+			{Stage: "code"},
+			{Stage: "design"},
+		},
 		CompletedCount: outputCap + 7,
 	}
 	r := rand.New(rand.NewSource(1))
@@ -1438,7 +1449,7 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 // not nothing. Single source of truth for the "new workflow doesn't
 // silently disappear" guarantee.
 func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
-	state := factoryState{ActiveStages: []string{"unknown-stage"}}
+	state := factoryState{ActiveStages: []activeStation{{Stage: "unknown-stage"}}}
 	r := rand.New(rand.NewSource(1))
 	lines := buildFactoryArt(state, artWidth, r)
 	rail := lines[1]
@@ -1447,18 +1458,28 @@ func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
 	}
 }
 
-// TestBuildFactoryArtSmokeOnlyAboveInProgress: stations whose stage is
-// "awaiting merge" don't smoke — the work is shipped. With only such a
-// station and no backlog, the smoke line is all spaces.
-func TestBuildFactoryArtSmokeOnlyAboveInProgress(t *testing.T) {
-	state := factoryState{ActiveStages: []string{"awaiting merge"}}
-	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d", len(lines))
-	}
-	if strings.TrimSpace(lines[0]) != "" {
-		t.Fatalf("expected blank smoke above shipping-only station, got %q", lines[0])
+// TestBuildFactoryArtNoSmokeWithoutSession: smoke is the liveness
+// signal — stations whose run has no open session never smoke,
+// whatever their parked stage. Pins the no-session-no-smoke invariant
+// across design / code / awaiting-merge so a future change can't
+// quietly resurrect stage-shaped smoke decoration.
+func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
+	state := factoryState{ActiveStages: []activeStation{
+		{Stage: "design"},
+		{Stage: "code"},
+		{Stage: "awaiting merge"},
+	}}
+	// Sweep seeds so we exercise the RNG; any seed that paints a
+	// fleck above a parked station fails the test.
+	for seed := int64(1); seed <= 16; seed++ {
+		r := rand.New(rand.NewSource(seed))
+		lines := buildFactoryArt(state, artWidth, r)
+		if len(lines) != 2 {
+			t.Fatalf("seed %d: expected 2 lines, got %d", seed, len(lines))
+		}
+		if strings.TrimSpace(lines[0]) != "" {
+			t.Fatalf("seed %d: expected blank smoke above parked-only stations, got %q", seed, lines[0])
+		}
 	}
 }
 
@@ -1472,9 +1493,9 @@ func TestBuildFactoryArtWidth(t *testing.T) {
 	cases := []factoryState{
 		{},
 		{BacklogCount: 1},
-		{ActiveStages: []string{"design"}},
+		{ActiveStages: []activeStation{{Stage: "design"}}},
 		{CompletedCount: 1},
-		{BacklogCount: 3, ActiveStages: []string{"design", "code"}, CompletedCount: 4},
+		{BacklogCount: 3, ActiveStages: []activeStation{{Stage: "design"}, {Stage: "code"}}, CompletedCount: 4},
 	}
 	for i, st := range cases {
 		r := rand.New(rand.NewSource(int64(i + 1)))
@@ -1490,10 +1511,17 @@ func TestBuildFactoryArtWidth(t *testing.T) {
 // TestBuildFactoryArtSmokeContainsOnlyPaletteRunes: every non-space
 // rune on the smoke line must come from the smoke palette. Pins that
 // the smoke ribbon never accidentally pulls a rune from the rail.
+// Stations carry a runningDoc so the smoke path actually fires —
+// otherwise the palette assertion is vacuous.
 func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 	state := factoryState{
 		BacklogCount: 3,
-		ActiveStages: []string{"design", "code", "design", "code"},
+		ActiveStages: []activeStation{
+			{Stage: "design", RunningDoc: "design"},
+			{Stage: "code", RunningDoc: "code"},
+			{Stage: "design", RunningDoc: "design"},
+			{Stage: "code", RunningDoc: "code"},
+		},
 	}
 	allowed := make(map[rune]struct{}, len(smokeGlyphs)+1)
 	allowed[' '] = struct{}{}
@@ -1510,6 +1538,100 @@ func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 				t.Fatalf("seed %d: smoke line contains non-palette rune %q in %q", seed, ru, lines[0])
 			}
 		}
+	}
+}
+
+// TestBuildFactoryArtRunningDocOverridesParkedGlyph: a station whose
+// run is parked at design but has an open code session shows the code
+// glyph (⚙), not the design glyph (⚒). The art names what's live; the
+// dashboard rows below carry the parked stage. Mirrors the text-side
+// "[code running]" marker that motivates this rail.
+func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
+	state := factoryState{ActiveStages: []activeStation{
+		{Stage: "design", RunningDoc: "code"},
+	}}
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	rail := lines[1]
+	if !strings.Contains(rail, "[⚙]") {
+		t.Fatalf("expected running-doc glyph '[⚙]' on parked-design station, got rail:\n%q", rail)
+	}
+	if strings.Contains(rail, "[⚒]") {
+		t.Fatalf("expected no parked-stage glyph '[⚒]' when running doc differs, got rail:\n%q", rail)
+	}
+}
+
+// TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph: an
+// awaiting-merge station with an open session swaps to the running
+// doc's glyph and earns smoke. Pre-rail awaiting-merge was always
+// non-smoking; under liveness-as-smoke the rule is "smoke iff session,"
+// so a session against a pushed run reads as work, not as shipped.
+func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
+	state := factoryState{ActiveStages: []activeStation{
+		{Stage: "awaiting merge", RunningDoc: "code"},
+	}}
+	// Glyph swap is deterministic.
+	r := rand.New(rand.NewSource(1))
+	lines := buildFactoryArt(state, artWidth, r)
+	rail := lines[1]
+	if !strings.Contains(rail, "[⚙]") {
+		t.Fatalf("expected running-doc glyph '[⚙]' on awaiting-merge station, got rail:\n%q", rail)
+	}
+	if strings.Contains(rail, "[▶]") {
+		t.Fatalf("expected no parked '[▶]' glyph on running awaiting-merge station, got rail:\n%q", rail)
+	}
+	// Smoke fires probabilistically; sweep seeds and demand at least
+	// one fleck across the window so a future change can't quietly
+	// drop awaiting-merge from the smoke set.
+	smokedAt := int64(-1)
+	for seed := int64(1); seed <= 16; seed++ {
+		r := rand.New(rand.NewSource(seed))
+		ls := buildFactoryArt(state, artWidth, r)
+		if strings.TrimSpace(ls[0]) != "" {
+			smokedAt = seed
+			break
+		}
+	}
+	if smokedAt < 0 {
+		t.Fatal("expected smoke above running awaiting-merge station for at least one seed in [1,16], saw none")
+	}
+}
+
+// TestDashOpenSessionSwapsArtGlyph: end-to-end check that an open
+// session on a different doc threads through factoryStateFromRows and
+// lands a running-doc glyph in the dash's rail. Pins the wiring
+// classify → dashRow.runningDoc → factoryState → buildRail.
+func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// Fresh sdlc run: parked at design.
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "code")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	titleIdx := strings.Index(got, "Ministry of Everything")
+	activeIdx := strings.Index(got, "ACTIVE (")
+	if titleIdx < 0 || activeIdx < 0 {
+		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
+	}
+	header := got[titleIdx:activeIdx]
+	if !strings.Contains(header, "[⚙]") {
+		t.Fatalf("expected '[⚙]' (running code) in art header, got:\n%q", header)
+	}
+	if strings.Contains(header, "[⚒]") {
+		t.Fatalf("expected no '[⚒]' (parked design) glyph in art header when code session is open, got:\n%q", header)
 	}
 }
 

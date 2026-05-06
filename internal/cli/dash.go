@@ -62,12 +62,13 @@ const (
 // render it without further computation — all the state machinery
 // runs up front in buildDashRows.
 type dashRow struct {
-	project string
-	run     string
-	note    string    // for runs: next stage name, or "done"; for backlog: idea title.
-	stage   string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Drives the factory art's station glyph.
-	when    time.Time // sort key within the section; most recent first.
-	bucket  bucket
+	project    string
+	run        string
+	note       string    // for runs: next stage name, or "done"; for backlog: idea title.
+	stage      string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Drives the factory art's station glyph.
+	runningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
+	when       time.Time // sort key within the section; most recent first.
+	bucket     bucket
 }
 
 func runDash(args []string, stdout, stderr io.Writer) int {
@@ -174,15 +175,20 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 }
 
 // factoryStateFromRows folds dashboard rows into the data the art
-// reads. Active stages come straight off the rows in their existing
-// recency-sorted order; backlog and completed counts are simple
-// bucket totals. Pure over rows so the art renderer stays testable.
+// reads. Active stations come straight off the rows in their existing
+// recency-sorted order, carrying both the parked stage and (when a
+// stage session is open) the live doc; backlog and completed counts
+// are simple bucket totals. Pure over rows so the art renderer stays
+// testable.
 func factoryStateFromRows(rows []dashRow) factoryState {
 	var state factoryState
 	for _, r := range rows {
 		switch r.bucket {
 		case bucketActiveRuns:
-			state.ActiveStages = append(state.ActiveStages, r.stage)
+			state.ActiveStages = append(state.ActiveStages, activeStation{
+				Stage:      r.stage,
+				RunningDoc: r.runningDoc,
+			})
 		case bucketBacklog:
 			state.BacklogCount++
 		case bucketCompletedRuns:
@@ -224,7 +230,7 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 			continue
 		}
 		last := acts[md.ID]
-		b, note, stage, err := classify(root, md, last, now, includeDormant, byRunKey, sessionDocsByRun[md.ID])
+		b, note, stage, runningDoc, err := classify(root, md, last, now, includeDormant, byRunKey, sessionDocsByRun[md.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -237,12 +243,13 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 			}
 		}
 		rows = append(rows, dashRow{
-			project: md.Project,
-			run:     md.ID,
-			note:    note,
-			stage:   stage,
-			when:    last,
-			bucket:  b,
+			project:    md.Project,
+			run:        md.ID,
+			note:       note,
+			stage:      stage,
+			runningDoc: runningDoc,
+			when:       last,
+			bucket:     b,
 		})
 	}
 	// Within a section, most-recent activity first. Secondary sort on
@@ -257,15 +264,16 @@ func buildDashRows(root string, mds []*run.Metadata, acts map[string]time.Time, 
 }
 
 // classify decides which section a run lands in, what note to render,
-// and (for active runs) the bare next-stage name the factory art uses
-// to pick a station glyph. In-progress runs with more work to do land
-// in ACTIVE; pushed runs land in ACTIVE too with "awaiting merge: #<n>"
-// since the operator still owes a click on GitHub; merged and closed
-// runs land in COMPLETED. Dormant runs are dropped unless the caller
-// asked for --all.
-func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, openSessionDocs []string) (bucket, string, string, error) {
+// the bare next-stage name the factory art uses to pick a station
+// glyph, and the doc with an open session that "wins" the liveness
+// slot ("" when no session is open). In-progress runs with more work
+// to do land in ACTIVE; pushed runs land in ACTIVE too with
+// "awaiting merge: #<n>" since the operator still owes a click on
+// GitHub; merged and closed runs land in COMPLETED. Dormant runs are
+// dropped unless the caller asked for --all.
+func classify(root string, md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, openSessionDocs []string) (bucket, string, string, string, error) {
 	if !includeDormant && !last.IsZero() && now.Sub(last) > dormantCutoff {
-		return bucketNone, "", "", nil
+		return bucketNone, "", "", "", nil
 	}
 	// Every note is prefixed with the workflow name so the dashboard
 	// says "where" a run lives, not just "what's next". Two workflows
@@ -278,17 +286,17 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 	if md.Workflow == ideaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return bucketBacklog, prefix + "capture", "", nil
+			return bucketBacklog, prefix + "capture", "", "", nil
 		case run.StatusPromoted:
 			note := prefix + "promoted"
 			if slug, ok := promotedToRun(root, md.ID, byRunKey); ok {
 				note += " → " + slug
 			}
-			return bucketCompletedRuns, note, "", nil
+			return bucketCompletedRuns, note, "", "", nil
 		case run.StatusClosed:
-			return bucketCompletedRuns, prefix + "closed", "", nil
+			return bucketCompletedRuns, prefix + "closed", "", "", nil
 		}
-		return bucketNone, "", "", nil
+		return bucketNone, "", "", "", nil
 	}
 	switch md.Status {
 	case run.StatusPushed:
@@ -299,60 +307,80 @@ func classify(root string, md *run.Metadata, last, now time.Time, includeDormant
 		// Pushed runs have no parked doc — the prefix names a state,
 		// not a stage — so any open session is "different doc" by
 		// construction and renders as "[<doc> running]".
-		return bucketActiveRuns, prefix + note + openSessionMarker(openSessionDocs, ""), "awaiting merge", nil
+		runningDoc := winningRunningDoc(openSessionDocs, "")
+		return bucketActiveRuns, prefix + note + openSessionMarker(runningDoc, ""), "awaiting merge", runningDoc, nil
 	case run.StatusMerged:
-		return bucketCompletedRuns, prefix + "merged", "", nil
+		return bucketCompletedRuns, prefix + "merged", "", "", nil
 	case run.StatusClosed:
-		return bucketCompletedRuns, prefix + "closed", "", nil
+		return bucketCompletedRuns, prefix + "closed", "", "", nil
 	case run.StatusPromoted:
 		// Non-idea runs shouldn't wear StatusPromoted, but if one
 		// ever does (future --from-run promotion), surface it as
 		// completed with the same label as the idea case.
-		return bucketCompletedRuns, prefix + "promoted", "", nil
+		return bucketCompletedRuns, prefix + "promoted", "", "", nil
 	}
 	if md.Status != run.StatusInProgress {
 		// Unknown/future status values (e.g., a "scrapped" lane once
 		// `moe scrap` lands). Leave them off the dashboard rather than
 		// guess a label — they'll surface via `moe history` when that
 		// ships.
-		return bucketNone, "", "", nil
+		return bucketNone, "", "", "", nil
 	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", "", err
 	}
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", "", err
 	}
 	if kind == NextKindDone {
 		// Terminal stage satisfied but no push transition — e.g. KB
 		// workflow, which ends at `summarize` and has no push. Treat
 		// the same as StatusPushed for dashboard purposes.
-		return bucketCompletedRuns, prefix + "done", "", nil
+		return bucketCompletedRuns, prefix + "done", "", "", nil
 	}
-	return bucketActiveRuns, prefix + next.Name + openSessionMarker(openSessionDocs, next.Name), next.Name, nil
+	runningDoc := winningRunningDoc(openSessionDocs, next.Name)
+	return bucketActiveRuns, prefix + next.Name + openSessionMarker(runningDoc, next.Name), next.Name, runningDoc, nil
 }
 
-// openSessionMarker returns the " [running]" suffix the dash glues onto
-// an active-run note when a stage session is open against the run.
-// parkedDoc is the docID the parking rule reports as next ("" for
-// pushed runs, where the prefix names a state rather than a stage).
+// winningRunningDoc picks the open-session doc that "wins" the row's
+// liveness slot — the doc whose name the dash will surface as either a
+// "[<doc> running]" marker (text) or a station glyph (art). parkedDoc
+// is the docID the parking rule reports as next ("" for pushed runs,
+// where the prefix names a state rather than a stage). Returns "" when
+// the run has no open session.
 //
-// A session on a different doc than the parked one wins front position:
-// it's the more interesting signal, since the operator is mid-edit on a
-// document the parking rule won't surface until the session commits.
-// Multiple open sessions on one run are unexpected (sessions are
-// sequential by design) — when they do show up, the same "non-parked
-// wins" rule applies, since the parked one is implicit in the prefix.
-func openSessionMarker(openDocs []string, parkedDoc string) string {
+// A session on a different doc than the parked one wins: it's the more
+// interesting signal, since the operator is mid-edit on a document the
+// parking rule won't surface until the session commits. Multiple open
+// sessions on one run are unexpected (sessions are sequential by
+// design) — when they do show up, the same "non-parked wins" rule
+// applies, since the parked one is implicit in the prefix.
+func winningRunningDoc(openDocs []string, parkedDoc string) string {
 	if len(openDocs) == 0 {
 		return ""
 	}
 	for _, d := range openDocs {
 		if d != parkedDoc {
-			return " [" + d + " running]"
+			return d
 		}
+	}
+	return parkedDoc
+}
+
+// openSessionMarker renders the " [running]" / " [<doc> running]"
+// suffix the dash glues onto an active-run note. runningDoc is the
+// pre-resolved winner from winningRunningDoc; parkedDoc is the same
+// parking-rule doc passed in there. When the running doc matches the
+// parked one the prefix already names it, so the marker collapses to
+// the terse "[running]" form.
+func openSessionMarker(runningDoc, parkedDoc string) string {
+	if runningDoc == "" {
+		return ""
+	}
+	if runningDoc != parkedDoc {
+		return " [" + runningDoc + " running]"
 	}
 	return " [running]"
 }
