@@ -222,6 +222,71 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPromptSectionsEndWithNewline pins the load-bearing
+// invariant of the section join in buildSystemPrompt: every section
+// must end with "\n", or the "\n---\n\n" separator collides with the
+// section's last byte and renders mid-line instead of as a section
+// break. Today the convention holds, but nothing in the type system
+// enforces it — this test is the tripwire. Every existing optional
+// section is wired in (soul, stage, twin reference, operational core,
+// wiki ingest); the upstream-change banner has its own dedicated
+// tests above and would require a prereq+prior-turn fixture to fire
+// here for marginal coverage.
+func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	// digital-twin/<project>/ with one managed doc on disk →
+	// TwinReferenceSectionAt returns a non-empty section.
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Closed-schema wiki config → IngestPromptSection fires. Closed
+	// requires a non-empty ManagedDocs set; the contents don't matter
+	// for this test, only that the section is emitted.
+	wikiCfg := &wiki.Config{
+		Name:            "twin",
+		Mode:            wiki.Closed,
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: root,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision", Purpose: "what this is."},
+		},
+	}
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	got, err := buildSystemPrompt(root, md, "code", "", wikiCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Five sections expected: soul, stage, twin reference, operational
+	// core, wiki ingest. A floor (>= 5) so a future section addition
+	// surfaces this test without making a count drift the failure mode
+	// — the per-chunk newline check below is the actual contract.
+	chunks := strings.Split(got, "\n---\n\n")
+	if len(chunks) < 5 {
+		t.Fatalf("expected at least 5 sections joined by separator, got %d in:\n%s", len(chunks), got)
+	}
+	for i, chunk := range chunks {
+		if chunk == "" {
+			continue
+		}
+		if !strings.HasSuffix(chunk, "\n") {
+			tail := chunk
+			if len(tail) > 48 {
+				tail = "..." + tail[len(tail)-48:]
+			}
+			t.Errorf("section %d missing trailing newline; tail = %q", i, tail)
+		}
+	}
+}
+
 func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	root := newTestBureaucracy(t)
 
