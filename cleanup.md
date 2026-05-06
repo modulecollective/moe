@@ -74,15 +74,6 @@ owner/purpose/heartbeat fields and the message reads
 Either re-read on next iteration or treat unparseable as a
 stale-after-settle case explicitly.
 
-### `repolock.processAlive` treats EPERM as dead
-
-`internal/repolock/repolock.go:417`. `Signal(0)` to a process owned
-by a different user returns EPERM, and the code only counts `nil`
-as alive. So if two users on the same host run `moe`, one can take
-over the other's live lock. Niche (single-operator design), but
-worth a comment acknowledging it or
-`if errors.Is(err, syscall.EPERM) { return true }`.
-
 ## Smaller things
 
 - **`commitTurn` stages twice per turn.** `stage.go:740` then
