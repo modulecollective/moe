@@ -49,7 +49,7 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "server in advance and reusing it across runs.")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 
