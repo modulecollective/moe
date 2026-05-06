@@ -21,6 +21,8 @@
 package repolock
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,10 @@ import (
 	"syscall"
 	"time"
 )
+
+// hostnameFunc is os.Hostname indirected so tests can drive the
+// hostname-failure path without the kernel's cooperation.
+var hostnameFunc = os.Hostname
 
 // Default timing knobs. Short numbers on purpose: anything longer than
 // a few seconds is a bug we want to surface fast.
@@ -140,13 +146,14 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	}
 
 	lockPath := filepath.Join(moeDir, "lock")
+	localHost := hostHandle(moeDir)
 	deadline := opts.Now().Add(opts.Budget)
 	backoff := 50 * time.Millisecond
 
 	for {
 		now := opts.Now().UTC()
 		rec := Record{
-			Owner:       ownerString(),
+			Owner:       ownerString(localHost),
 			Run:         opts.Run,
 			Purpose:     opts.Purpose,
 			AcquiredAt:  now,
@@ -163,7 +170,7 @@ func Acquire(root string, opts Options) (*Lock, error) {
 		existing, readErr := readRecord(lockPath)
 		switch {
 		case readErr == nil:
-			if isStale(existing, now) {
+			if isStale(existing, now, localHost) {
 				fmt.Fprintf(opts.Logger,
 					"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
 					lockPath, existing.Owner, existing.Purpose,
@@ -390,7 +397,10 @@ func readRecord(path string) (Record, error) {
 // isStale returns true when rec was abandoned and another caller may
 // safely take over. Two cheap signals: heartbeat age past threshold,
 // and — if owner names a pid on this host — the pid no longer existing.
-func isStale(rec Record, now time.Time) bool {
+// localHost is the caller's host handle (see hostHandle); passing it in
+// avoids a re-lookup per iteration and keeps the comparison stable
+// across the Acquire loop.
+func isStale(rec Record, now time.Time, localHost string) bool {
 	if rec.HeartbeatAt.IsZero() {
 		// No heartbeat recorded at all — treat as stale only if the
 		// acquisition time is also old, so a racing partial-write
@@ -404,7 +414,7 @@ func isStale(rec Record, now time.Time) bool {
 	if !ok {
 		return false
 	}
-	if host != hostname() {
+	if host != localHost {
 		return false
 	}
 	return !processAlive(pid)
@@ -445,17 +455,82 @@ func processAlive(pid int) bool {
 	return !errors.Is(err, syscall.ESRCH)
 }
 
-// ownerString is what we write as Owner in a fresh record: <hostname>/<pid>.
-func ownerString() string {
-	return fmt.Sprintf("%s/%d", hostname(), os.Getpid())
+// ownerString is what we write as Owner in a fresh record: <host>/<pid>.
+// host is the caller's hostHandle output, supplied by Acquire so the
+// owner string and the isStale comparison stay in agreement.
+func ownerString(host string) string {
+	return fmt.Sprintf("%s/%d", host, os.Getpid())
 }
 
-func hostname() string {
-	h, err := os.Hostname()
-	if err != nil || h == "" {
-		return "unknown"
+// hostHandle returns a stable identifier for the host running this
+// process. Prefers os.Hostname; on failure falls back to a per-checkout
+// random ID cached at <moeDir>/instance-id so two boxes with broken
+// hostname lookups don't both serialise to "unknown" and confuse the
+// same-host pid-alive shortcut in isStale. Final "unknown" is only
+// returned when the cache write also fails (e.g. read-only .moe/),
+// preserving the prior semantics for that genuinely-unidentifiable case.
+func hostHandle(moeDir string) string {
+	h, err := hostnameFunc()
+	if err == nil && h != "" {
+		return h
 	}
-	return h
+	if id, err := instanceID(moeDir); err == nil && id != "" {
+		return id
+	}
+	return "unknown"
+}
+
+// instanceID returns a per-checkout random identifier persisted at
+// <moeDir>/instance-id. First call generates 16 bytes from crypto/rand
+// and atomically links the file into place; subsequent calls re-read
+// it. Concurrent first callers race via os.Link — losers re-read the
+// winner's file. Mirrors the tmp+link pattern in tryCreate so a
+// half-written file is never visible to a peer.
+func instanceID(moeDir string) (string, error) {
+	p := filepath.Join(moeDir, "instance-id")
+	if id, err := readInstanceID(p); err == nil {
+		return id, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("repolock: instance-id rand: %w", err)
+	}
+	id := hex.EncodeToString(buf[:])
+	tmp, err := os.CreateTemp(moeDir, "instance-id.tmp.*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write([]byte(id + "\n")); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Link(tmpPath, p); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			// Lost the race; another caller created it first.
+			return readInstanceID(p)
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+func readInstanceID(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(b))
+	if id == "" {
+		return "", fmt.Errorf("repolock: empty instance-id at %s", path)
+	}
+	return id, nil
 }
 
 // ensureGitignore drops `*` into <dir>/.gitignore so `.moe/`'s contents

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -136,10 +137,11 @@ func TestDeadPIDStaleness(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fresh heartbeat but owner is us-as-pid-1 (actually dead pid on this host).
-	// Pid 999999 is almost certainly not alive; hostname matches ours so the
+	// Pid 999999 is almost certainly not alive; host matches ours so the
 	// same-host + dead-pid check fires even though heartbeat is fresh.
+	localHost := hostHandle(moeDir)
 	rec := Record{
-		Owner:       fmt.Sprintf("%s/%d", hostname(), 999_999),
+		Owner:       fmt.Sprintf("%s/%d", localHost, 999_999),
 		Purpose:     "crashed",
 		AcquiredAt:  time.Now().UTC(),
 		HeartbeatAt: time.Now().UTC(), // fresh heartbeat
@@ -148,7 +150,7 @@ func TestDeadPIDStaleness(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moeDir, "lock"), append(body, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !isStale(rec, time.Now().UTC()) {
+	if !isStale(rec, time.Now().UTC(), localHost) {
 		t.Skip("pid 999999 happens to exist on this host; skipping")
 	}
 	l, err := Acquire(root, silentOpts("takeover"))
@@ -182,7 +184,7 @@ func TestOtherHostWithFreshHeartbeatIsNotStale(t *testing.T) {
 		AcquiredAt:  time.Now().UTC(),
 		HeartbeatAt: time.Now().UTC(),
 	}
-	if isStale(rec, time.Now().UTC()) {
+	if isStale(rec, time.Now().UTC(), "this-host") {
 		t.Error("remote-host record with fresh heartbeat incorrectly flagged stale")
 	}
 }
@@ -401,6 +403,113 @@ func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 	wg.Wait()
 	if reads == 0 {
 		t.Skip("reader never observed the lock file in the test window")
+	}
+}
+
+// TestInstanceIDCreatesFileWhenMissing exercises the first-call path:
+// no instance-id on disk, instanceID generates and persists a fresh
+// random hex value.
+func TestInstanceIDCreatesFileWhenMissing(t *testing.T) {
+	moeDir := t.TempDir()
+	id, err := instanceID(moeDir)
+	if err != nil {
+		t.Fatalf("instanceID: %v", err)
+	}
+	if id == "" {
+		t.Fatal("instanceID returned empty string")
+	}
+	if len(id) != 32 {
+		t.Errorf("id length = %d, want 32 hex chars", len(id))
+	}
+	b, err := os.ReadFile(filepath.Join(moeDir, "instance-id"))
+	if err != nil {
+		t.Fatalf("read instance-id: %v", err)
+	}
+	if got := strings.TrimSpace(string(b)); got != id {
+		t.Errorf("on-disk id = %q, want %q", got, id)
+	}
+}
+
+// TestInstanceIDReusesExistingFile exercises the read-existing path:
+// a pre-written id is returned verbatim and the file is not rewritten.
+func TestInstanceIDReusesExistingFile(t *testing.T) {
+	moeDir := t.TempDir()
+	want := "deadbeefdeadbeefdeadbeefdeadbeef"
+	if err := os.WriteFile(filepath.Join(moeDir, "instance-id"), []byte(want+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := instanceID(moeDir)
+	if err != nil {
+		t.Fatalf("instanceID: %v", err)
+	}
+	if got != want {
+		t.Errorf("id = %q, want %q", got, want)
+	}
+}
+
+// TestInstanceIDConcurrentCreate races N goroutines on a fresh dir.
+// All must observe the same id and exactly one instance-id file must
+// remain on disk (no leaked tmp files).
+func TestInstanceIDConcurrentCreate(t *testing.T) {
+	moeDir := t.TempDir()
+	const n = 16
+	ids := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			ids[i], errs[i] = instanceID(moeDir)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+	}
+	for i := 1; i < n; i++ {
+		if ids[i] != ids[0] {
+			t.Fatalf("ids diverged: %q vs %q", ids[0], ids[i])
+		}
+	}
+	entries, err := os.ReadDir(moeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "instance-id" {
+			t.Errorf("leftover entry %q (want only instance-id)", e.Name())
+		}
+	}
+}
+
+// TestAcquireWithFailingHostnameUsesInstanceID forces the hostname
+// failure path and asserts the recorded Owner is keyed off the cached
+// instance-id rather than the literal "unknown" string.
+func TestAcquireWithFailingHostnameUsesInstanceID(t *testing.T) {
+	prev := hostnameFunc
+	hostnameFunc = func() (string, error) { return "", errors.New("hostname unavailable") }
+	t.Cleanup(func() { hostnameFunc = prev })
+
+	root := t.TempDir()
+	l, err := Acquire(root, silentOpts("hostless"))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer l.Release()
+
+	id, err := readInstanceID(filepath.Join(root, ".moe", "instance-id"))
+	if err != nil {
+		t.Fatalf("readInstanceID: %v", err)
+	}
+	wantPrefix := id + "/"
+	if !strings.HasPrefix(l.Record().Owner, wantPrefix) {
+		t.Errorf("Owner = %q, want prefix %q", l.Record().Owner, wantPrefix)
+	}
+	if strings.HasPrefix(l.Record().Owner, "unknown/") {
+		t.Error("Owner still uses literal 'unknown' fallback")
 	}
 }
 

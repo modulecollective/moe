@@ -89,12 +89,6 @@ stale-after-settle case explicitly.
   separator collides with the body. Each section currently ends
   with `\n` by convention; assert it via a test or normalise via a
   helper.
-- **`hostname() == "unknown"` collisions** in
-  `repolock.ownerString`. If `os.Hostname` fails, multiple machines
-  all become `unknown/<pid>` and can spuriously look like the "same
-  host" for pid-alive checks. A UUID fallback cached in
-  `.moe/instance-id` would make ownership unambiguous. Likely never
-  triggers.
 - **`launchEditor` shells through `sh -c` with `EDITOR`
   interpolated.** Conventional and correct (honors
   `EDITOR="vim -X"`). Path is properly passed via `$1` rather than
