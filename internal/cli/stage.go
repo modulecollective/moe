@@ -17,7 +17,6 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -149,22 +148,21 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, doc.Session, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
 			}
 
-			// Code sandbox — still keyed off the canonical bureaucracy
+			// Code workspace — still keyed off the canonical bureaucracy
 			// root so per-run sandbox persistence works across turns.
-			// design=false never sees a clone; code=true insists on
-			// one and pre-positions it on the moe/<run-id> branch so
-			// the agent's commits (and any later `moe sdlc push`)
-			// land on a branch we own.
+			// design=false never sees a clone; code=true insists on one
+			// and pre-positions it on the moe/<run-id> branch so the
+			// agent's commits (and any later `moe sdlc push`) land on a
+			// branch we own. attachRunWorkspace routes per-run sandbox
+			// vs named workspace based on md.Workspace; the callers
+			// here don't need to know which.
 			clonePath := ""
 			if opts.NeedsSandbox {
 				if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
 					return wikiTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
 				}
-				clonePath, err = sandbox.Ensure(root, md.Project, md.ID)
+				clonePath, err = attachRunWorkspace(root, md, branchPrefix+md.ID)
 				if err != nil {
-					return wikiTurnSpec{}, err
-				}
-				if err := sandbox.CheckoutBranch(clonePath, branchPrefix+md.ID); err != nil {
 					return wikiTurnSpec{}, err
 				}
 			}

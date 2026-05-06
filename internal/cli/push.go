@@ -17,7 +17,6 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 var pushCmd = &Command{
@@ -467,8 +466,8 @@ MoE-Merged: %s
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
-		if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
-			moePrintf(stderr, "warning: remove sandbox: %v\n", err)
+		if err := releaseRunWorkspace(root, md); err != nil {
+			moePrintf(stderr, "warning: release workspace: %v\n", err)
 		}
 		return run.StageAndCommit(root, msg, paths...)
 	})
@@ -557,10 +556,11 @@ func checkCodeContent(root string, md *run.Metadata) error {
 }
 
 func sandboxClonePath(root string, md *run.Metadata) (string, error) {
-	if !sandbox.Exists(root, md.Project, md.ID) {
-		return "", fmt.Errorf("push: no sandbox clone for %s/%s; run `moe %s code %s %s` first", md.Project, md.ID, md.Workflow, md.Project, md.ID)
+	wp, err := resolveRunWorkspacePath(root, md)
+	if err != nil {
+		return "", fmt.Errorf("push: %w", err)
 	}
-	return sandbox.Ensure(root, md.Project, md.ID)
+	return wp, nil
 }
 
 // checkCleanWorkTree refuses to push when the sandbox has uncommitted

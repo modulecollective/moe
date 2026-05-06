@@ -54,12 +54,20 @@ const (
 
 // Metadata is the on-disk shape of projects/<project>/runs/<id>/run.json.
 type Metadata struct {
-	ID        string               `json:"id"`
-	Project   string               `json:"project"`
-	Title     string               `json:"title"`
-	Status    string               `json:"status"`
-	Workflow  string               `json:"workflow"`
-	Created   string               `json:"created"`
+	ID       string `json:"id"`
+	Project  string `json:"project"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Workflow string `json:"workflow"`
+	Created  string `json:"created"`
+	// Workspace, when non-empty, names the persistent named workspace
+	// this run is attached to (under .moe/named/<project>/<name>/).
+	// Empty means the run uses a per-run sandbox (.moe/clones/...).
+	// Set at run-open time via `--workspace <name>` on the new verb;
+	// every later verb (stage session, push, close, sync, shell)
+	// routes off it. omitempty keeps run.json bodies of pre-workspace
+	// runs unchanged so diffs and tests stay clean.
+	Workspace string               `json:"workspace,omitempty"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -112,6 +120,16 @@ type Options struct {
 	// `MoE-Idea: <slug>`). Standard MoE-Run / MoE-Project trailers
 	// are always written first.
 	ExtraTrailers []string
+
+	// Workspace, when non-empty, attaches this run to a named
+	// per-project workspace instead of giving it a fresh per-run
+	// sandbox. Persisted to Metadata.Workspace so every later verb
+	// routes off the same flag. The shared `runNew` validates the
+	// name (lower-kebab, see workspace.ValidateName) and refuses to
+	// open a second run against an already-claimed name; the
+	// workspace itself is materialised lazily on first attach
+	// (sdlc code) or shell drop-in.
+	Workspace string
 
 	// AllowDirty bypasses the working-tree-clean precondition. The
 	// guardrail is there so a stray edit doesn't ride along on the
@@ -254,6 +272,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		Status:    StatusInProgress,
 		Workflow:  opts.Workflow,
 		Created:   now().Local().Format("2006-01-02"),
+		Workspace: opts.Workspace,
 		Documents: map[string]*Document{},
 	}
 

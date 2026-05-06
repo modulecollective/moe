@@ -46,6 +46,16 @@ func gitDirPath(root, projectID, runID string) string {
 // returns its absolute path. First call clones projects/<projectID>/src/;
 // subsequent calls are a stat.
 func Ensure(root, projectID, runID string) (string, error) {
+	return EnsureAt(root, projectID, Path(root, projectID, runID), gitDirPath(root, projectID, runID))
+}
+
+// EnsureAt is the path-parameterised version of Ensure: it clones the
+// project's submodule to dst (with dstGitDir as the sibling gitdir
+// mirror when the source is a gitfile-style submodule), instead of
+// deriving those paths from a runID. Used by the workspace package so
+// named workspaces share the clone-and-fixup mechanic without
+// duplicating it. Callers own dst's parent directory layout.
+func EnsureAt(root, projectID, dst, dstGitDir string) (string, error) {
 	src := filepath.Join(root, "projects", projectID, "src")
 	info, err := os.Stat(src)
 	if err != nil {
@@ -55,7 +65,6 @@ func Ensure(root, projectID, runID string) (string, error) {
 		return "", fmt.Errorf("sandbox: source submodule %s is not a directory", src)
 	}
 
-	dst := Path(root, projectID, runID)
 	if _, err := os.Stat(dst); err == nil {
 		return absPath(dst)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -79,7 +88,7 @@ func Ensure(root, projectID, runID string) (string, error) {
 	}
 
 	if gitIsFile {
-		if err := cloneGitDir(dst, srcGitDir, root, projectID, runID); err != nil {
+		if err := cloneGitDir(dst, srcGitDir, dstGitDir); err != nil {
 			// Roll back the worktree clone so Ensure is retryable.
 			_ = os.RemoveAll(dst)
 			return "", err
@@ -91,8 +100,7 @@ func Ensure(root, projectID, runID string) (string, error) {
 
 // cloneGitDir clones the submodule's real gitdir alongside the worktree
 // clone and repoints the clone's gitfile and core.worktree at it.
-func cloneGitDir(worktreeClone, srcGitDir, root, projectID, runID string) error {
-	dstGitDir := gitDirPath(root, projectID, runID)
+func cloneGitDir(worktreeClone, srcGitDir, dstGitDir string) error {
 	if err := os.MkdirAll(filepath.Dir(dstGitDir), 0o755); err != nil {
 		return fmt.Errorf("sandbox: mkdir %s: %w", filepath.Dir(dstGitDir), err)
 	}

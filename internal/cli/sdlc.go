@@ -30,6 +30,11 @@ func init() {
 		Run:     runCode,
 	}, "design")
 	sdlc.Register(pushCmd, "code")
+	sdlc.RegisterFacade(&Command{
+		Name:    "shell",
+		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
+		Run:     runShell,
+	})
 	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", sdlcCloseCleanup))
 	sdlc.RegisterFacade(&Command{
 		Name:    "resume",

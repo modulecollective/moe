@@ -18,7 +18,6 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 func init() {
@@ -537,8 +536,8 @@ func finalizePushedRun(root string, md *run.Metadata, status, trailer, value str
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
 	}
-	if err := sandbox.Remove(root, md.Project, md.ID); err != nil {
-		moePrintf(stderr, "warning: %s/%s: remove sandbox: %v\n", md.Project, md.ID, err)
+	if err := releaseRunWorkspace(root, md); err != nil {
+		moePrintf(stderr, "warning: %s/%s: release workspace: %v\n", md.Project, md.ID, err)
 	}
 	msg := fmt.Sprintf(`sync: %s/%s %s
 

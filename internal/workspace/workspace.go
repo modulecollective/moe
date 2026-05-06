@@ -1,0 +1,294 @@
+// Package workspace owns named per-project workspaces — reusable
+// clones of a project's submodule that successive runs check their
+// branch out into. Unlike per-run sandboxes (internal/sandbox), a
+// named workspace persists across runs so working-tree state (build
+// cache, node_modules, a running dev server) survives the branch
+// switch.
+//
+// Lifecycle:
+//
+//   - Lazily created on first use, by either `moe sdlc new
+//     --workspace <name>` or `moe sdlc shell <project> --workspace
+//     <name>`. The clone reuses sandbox.EnsureAt's mechanic — APFS
+//     clonefile on macOS, recursive copy elsewhere, with the same
+//     gitfile + core.worktree fixup for submodules.
+//   - Claimed by the run that's currently using it. The claim file
+//     (claim.json inside the workspace dir) names the holding run;
+//     a second run that names the same workspace while it's claimed
+//     is refused at sdlc-new time with a pointer to the holder.
+//   - Branch handoff is "switch via the project's default branch":
+//     when a new run's branch is created, Attach checks out the
+//     base branch first so the new branch isn't anchored to the
+//     previous run's tip. Refuses if the working tree is dirty,
+//     same fail-loud invariant as the rest of the engine.
+//   - Released at terminal status (close / merge / sync-finalize).
+//     The directory stays — the next run reuses it.
+package workspace
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/sandbox"
+)
+
+// namePattern bounds workspace names to the same lower-kebab shape
+// run/project IDs use, so a workspace name can never break out of its
+// parent dir or collide with shell metacharacters when echoed in
+// errors. The pattern is stricter than strictly necessary (no slashes,
+// no dots) on purpose: a workspace name lands in a path the operator
+// will type and read repeatedly, and the cheapest way to keep it
+// honest is to refuse anything that doesn't look like a slug.
+var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// Path returns the workspace directory for (root, projectID, name).
+// The path is returned whether or not it currently exists.
+func Path(root, projectID, name string) string {
+	return filepath.Join(root, ".moe", "named", projectID, name)
+}
+
+// gitDirPath returns the sibling gitdir for a named workspace, mirroring
+// the .moe/clones/<project>/.git-modules/<run>/ shape sandbox uses.
+// Submodules with a gitfile-style .git pointer need a private gitdir
+// that lives outside the working tree; keeping ours alongside the
+// workspace dir keeps cleanup symmetric with sandbox.
+func gitDirPath(root, projectID, name string) string {
+	return filepath.Join(root, ".moe", "named", projectID, ".git-modules", name)
+}
+
+// claimPath is where a workspace's current owner is recorded. The file
+// lives inside the workspace dir so a workspace that doesn't exist on
+// disk is, by definition, unclaimed.
+func claimPath(workspacePath string) string {
+	return filepath.Join(workspacePath, "claim.json")
+}
+
+// ValidateName reports whether name is a usable workspace identifier.
+// Exposed so callers can reject bad input before doing any work
+// (writing project state, opening a run).
+func ValidateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("workspace: name is required")
+	}
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("workspace: name %q must match %s", name, namePattern)
+	}
+	return nil
+}
+
+// Exists reports whether a workspace directory currently exists for
+// (projectID, name).
+func Exists(root, projectID, name string) bool {
+	_, err := os.Stat(Path(root, projectID, name))
+	return err == nil
+}
+
+// Claim is the on-disk record of which run currently owns a workspace.
+// Rendered in errors and read by ReadClaim; written by Acquire.
+type Claim struct {
+	Project string `json:"project"`
+	Name    string `json:"name"`
+	// Run is "<projectID>/<runID>" — same shape repolock uses for its
+	// Run field, so error messages can quote it directly.
+	Run string `json:"run"`
+}
+
+// ErrAlreadyClaimed is returned by Acquire when the workspace is
+// already claimed by a different run. Wrapped with the holding claim's
+// details so callers can render a useful message and (eventually) so
+// tests can errors.As on the condition.
+var ErrAlreadyClaimed = errors.New("workspace: already claimed")
+
+// AlreadyClaimedError carries the conflicting claim alongside
+// ErrAlreadyClaimed. Returned by Acquire.
+type AlreadyClaimedError struct {
+	Holder Claim
+}
+
+func (e *AlreadyClaimedError) Error() string {
+	return fmt.Sprintf("workspace %q for project %q is claimed by run %s",
+		e.Holder.Name, e.Holder.Project, e.Holder.Run)
+}
+
+func (e *AlreadyClaimedError) Unwrap() error { return ErrAlreadyClaimed }
+
+// ReadClaim returns the workspace's current claim, or (nil, nil) if no
+// workspace exists or if the workspace exists but carries no claim
+// (e.g. created via `moe sdlc shell --workspace`).
+func ReadClaim(root, projectID, name string) (*Claim, error) {
+	wp := Path(root, projectID, name)
+	if _, err := os.Stat(wp); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("workspace: stat %s: %w", wp, err)
+	}
+	return readClaim(wp)
+}
+
+// readClaim is the workspace-path-keyed sibling of ReadClaim, used
+// internally where the workspace path has already been resolved.
+func readClaim(workspacePath string) (*Claim, error) {
+	b, err := os.ReadFile(claimPath(workspacePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("workspace: read claim: %w", err)
+	}
+	var c Claim
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("workspace: parse claim: %w", err)
+	}
+	return &c, nil
+}
+
+// Acquire ensures the workspace exists and claims it for runRef
+// ("<project>/<runID>"). A workspace already claimed by a different
+// run is refused with *AlreadyClaimedError; one already claimed by
+// runRef is a no-op (re-acquire is idempotent — second `sdlc code`
+// turn against the same run reaches this path).
+//
+// Acquire does NOT switch branches or touch the working tree — that is
+// Attach's job. Splitting them lets `sdlc shell --workspace` create
+// the workspace without needing a run to claim it (Acquire isn't
+// called in that path) while still presenting one entry point per
+// concern.
+func Acquire(root, projectID, name, runRef string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	wp, err := Ensure(root, projectID, name)
+	if err != nil {
+		return "", err
+	}
+	existing, err := readClaim(wp)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil && existing.Run != runRef {
+		return "", &AlreadyClaimedError{Holder: *existing}
+	}
+	c := Claim{Project: projectID, Name: name, Run: runRef}
+	if err := writeClaim(wp, c); err != nil {
+		return "", err
+	}
+	return wp, nil
+}
+
+// Release drops the claim on the workspace. Idempotent — releasing a
+// workspace that doesn't exist or carries no claim is a no-op. The
+// directory and its working tree are left intact: the next run reuses
+// the warm clone.
+func Release(root, projectID, name string) error {
+	wp := Path(root, projectID, name)
+	if _, err := os.Stat(wp); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("workspace: stat %s: %w", wp, err)
+	}
+	if err := os.Remove(claimPath(wp)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("workspace: remove claim: %w", err)
+	}
+	return nil
+}
+
+// Ensure makes sure the workspace directory exists and returns its
+// absolute path. First call clones the project's submodule via
+// sandbox.EnsureAt; subsequent calls are a stat. Used by Acquire and
+// directly by the standalone `sdlc shell --workspace` path.
+func Ensure(root, projectID, name string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	wp := Path(root, projectID, name)
+	gd := gitDirPath(root, projectID, name)
+	return sandbox.EnsureAt(root, projectID, wp, gd)
+}
+
+// Attach prepares the workspace for branch:
+//
+//   - Refuses if the working tree carries any uncommitted changes
+//     (staged, unstaged, or untracked). The previous run is expected
+//     to have committed before exiting; failing loud at handoff time
+//     keeps a stray edit from being silently lost on the upcoming
+//     branch switch.
+//   - If branch already exists, checks it out (no-op if already on it).
+//   - If branch doesn't exist and baseBranch is non-empty, checks
+//     out baseBranch first so the new branch is anchored to a known
+//     starting point instead of the previously-checked-out branch's
+//     tip. Then creates branch off HEAD.
+//   - If branch doesn't exist and baseBranch is empty, creates branch
+//     off whatever HEAD currently is. Useful for callers that have
+//     already positioned the workspace.
+//
+// Returns the workspacePath unchanged for caller convenience.
+func Attach(workspacePath, branch, baseBranch string) error {
+	if err := refuseDirty(workspacePath); err != nil {
+		return err
+	}
+	if branchExists(workspacePath, branch) {
+		return checkout(workspacePath, branch)
+	}
+	if baseBranch != "" {
+		if err := checkout(workspacePath, baseBranch); err != nil {
+			return err
+		}
+	}
+	return checkoutNew(workspacePath, branch)
+}
+
+// refuseDirty returns a fail-loud error when the workspace has any
+// uncommitted change. Same shape as the close-time clean-tree gate
+// elsewhere in the engine, scoped to the workspace path so callers can
+// surface the actual location in their error messages.
+func refuseDirty(workspacePath string) error {
+	entries, err := git.Status(workspacePath)
+	if err != nil {
+		return fmt.Errorf("workspace: git status in %s: %w", workspacePath, err)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		files = append(files, e.Path)
+	}
+	return fmt.Errorf("workspace %s has %d uncommitted file(s) — commit or revert in the workspace before re-using it: %s",
+		workspacePath, len(entries), strings.Join(files, ", "))
+}
+
+func branchExists(workspacePath, branch string) bool {
+	return git.Run(workspacePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) == nil
+}
+
+func checkout(workspacePath, branch string) error {
+	if err := git.Run(workspacePath, "checkout", branch); err != nil {
+		return fmt.Errorf("workspace: checkout %s: %w", branch, err)
+	}
+	return nil
+}
+
+func checkoutNew(workspacePath, branch string) error {
+	if err := git.Run(workspacePath, "checkout", "-b", branch); err != nil {
+		return fmt.Errorf("workspace: checkout -b %s: %w", branch, err)
+	}
+	return nil
+}
+
+func writeClaim(workspacePath string, c Claim) error {
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("workspace: marshal claim: %w", err)
+	}
+	b = append(b, '\n')
+	if err := os.WriteFile(claimPath(workspacePath), b, 0o644); err != nil {
+		return fmt.Errorf("workspace: write claim: %w", err)
+	}
+	return nil
+}

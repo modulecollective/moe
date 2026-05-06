@@ -12,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // newRunCommand returns a Command suitable for registering under a
@@ -56,8 +57,12 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// parses on every workflow's `new` (one shared facade) but we
 	// reject it for non-sdlc workflows below before doing any work.
 	oneShot := fs.Bool("one-shot", false, "(sdlc only) after opening, drive design then code headlessly via `claude -p`; skip the next-stage prompt")
+	// --workspace is sdlc-only for the same reason: only the code
+	// stage uses a sandbox / workspace at all. Same parse-then-reject
+	// pattern.
+	workspaceName := fs.String("workspace", "", "(sdlc only) attach this run to the named per-project workspace at .moe/named/<project>/<name>/ instead of a fresh per-run sandbox")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--one-shot] <project> [\"title\"]\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--one-shot] [--workspace <name>] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -72,6 +77,16 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	if *oneShot && workflowName != "sdlc" {
 		moePrintf(stderr, "--one-shot: only sdlc supports headless stage chaining\n")
 		return 2
+	}
+	if *workspaceName != "" {
+		if workflowName != "sdlc" {
+			moePrintf(stderr, "--workspace: only sdlc has a code stage that uses a workspace\n")
+			return 2
+		}
+		if err := workspace.ValidateName(*workspaceName); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	project := fs.Arg(0)
 	title := strings.Join(fs.Args()[1:], " ")
@@ -99,8 +114,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	opts := run.Options{
-		ID:       *idOverride,
-		Workflow: workflowName,
+		ID:        *idOverride,
+		Workflow:  workflowName,
+		Workspace: *workspaceName,
 	}
 
 	// Keep a handle on the source idea run so we can bump its status
@@ -133,6 +149,27 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		// H1. run.New will date-suffix on collision.
 		opts.IDBase = *fromIdea
 		sourceIdea = src
+	}
+
+	if *workspaceName != "" {
+		// Pre-flight: refuse to open a run against a workspace that is
+		// already claimed. The actual claim is taken at first attach
+		// (sdlc code), but checking here gives the operator a fail-fast
+		// signal at the verb they actually typed instead of a confusing
+		// error several commands later. Stale claims (a run that crashed
+		// or was force-closed) can be cleared with `rm`; we don't paper
+		// over them automatically.
+		holder, herr := workspace.ReadClaim(root, project, *workspaceName)
+		if herr != nil {
+			moePrintf(stderr, "%v\n", herr)
+			return 1
+		}
+		if holder != nil {
+			moePrintf(stderr,
+				"workspace %q for project %q is claimed by run %s; close that run first or pick a different workspace\n",
+				*workspaceName, project, holder.Run)
+			return 1
+		}
 	}
 
 	// Run-identifier for the lock record is advisory — use the
