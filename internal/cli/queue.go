@@ -34,10 +34,10 @@ const queueCountdownSeconds = 3
 // load-modify-save windows of peek and pop — never during the in-flight
 // per-item dispatch. That keeps `queue add` from another terminal from
 // blocking while a stage session is running, and lets identity-matched
-// pop survive a concurrent add/rm of any item.
+// pop survive a concurrent add/remove of any item.
 
 // queueWorkflowSDLC names the only workflow queueable in v1. The CLI
-// takes it as a positional on add/rm so adding a second workflow later
+// takes it as a positional on add/remove so adding a second workflow later
 // (when one earns --one-shot) doesn't reshape the verb.
 const queueWorkflowSDLC = "sdlc"
 
@@ -56,7 +56,7 @@ func (q queueItem) String() string {
 func init() {
 	Register(&Command{
 		Name:    "queue",
-		Summary: "queue workflow: add, rm, list, run — walk a curated playlist of opened runs",
+		Summary: "queue workflow: add, remove, list, run — walk a curated playlist of opened runs",
 		Run:     runQueue,
 	})
 }
@@ -72,8 +72,8 @@ func runQueue(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "add":
 		return runQueueAdd(args[1:], stdout, stderr)
-	case "rm":
-		return runQueueRm(args[1:], stdout, stderr)
+	case "remove":
+		return runQueueRemove(args[1:], stdout, stderr)
 	case "list":
 		return runQueueList(args[1:], stdout, stderr)
 	case "run":
@@ -90,7 +90,7 @@ func printQueueUsage(w io.Writer) {
 	moePrintln(w, "")
 	moePrintln(w, "subcommands:")
 	moePrintf(w, "  %-14s  %s\n", "add", "queue an opened run, or promote-and-queue an idea")
-	moePrintf(w, "  %-14s  %s\n", "rm", "remove a queued run by identity")
+	moePrintf(w, "  %-14s  %s\n", "remove", "remove a queued run by identity")
 	moePrintf(w, "  %-14s  %s\n", "list", "show the queue with each item's next stage (or drop reason)")
 	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue, pausing at each merge gate")
 }
@@ -257,11 +257,11 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runQueueRm(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("queue rm", flag.ContinueOnError)
+func runQueueRemove(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("queue remove", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe queue rm sdlc <project> <run>")
+		moePrintln(stderr, "usage: moe queue remove sdlc <project> <run>")
 	}
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -272,7 +272,7 @@ func runQueueRm(args []string, stdout, stderr io.Writer) int {
 	}
 	workflow := fs.Arg(0)
 	if workflow != queueWorkflowSDLC {
-		moePrintf(stderr, "queue rm: workflow %q not supported (only %q today)\n", workflow, queueWorkflowSDLC)
+		moePrintf(stderr, "queue remove: workflow %q not supported (only %q today)\n", workflow, queueWorkflowSDLC)
 		return 2
 	}
 	projectID, runID := fs.Arg(1), fs.Arg(2)
@@ -285,7 +285,7 @@ func runQueueRm(args []string, stdout, stderr io.Writer) int {
 	target := queueItem{Workflow: workflow, Project: projectID, Run: runID}
 	var removed bool
 	err = withRepoLock(root, repolock.Options{
-		Purpose: "queue-rm",
+		Purpose: "queue-remove",
 		Run:     projectID + "/" + runID,
 	}, func() error {
 		items, err := loadQueue(root)
@@ -306,11 +306,11 @@ func runQueueRm(args []string, stdout, stderr io.Writer) int {
 		return saveQueue(root, out)
 	})
 	if err != nil {
-		moePrintf(stderr, "queue rm: %v\n", err)
+		moePrintf(stderr, "queue remove: %v\n", err)
 		return 1
 	}
 	if !removed {
-		moePrintf(stderr, "queue rm: %s not in queue\n", target)
+		moePrintf(stderr, "queue remove: %s not in queue\n", target)
 		return 1
 	}
 	moePrintf(stdout, "unqueued %s\n", target)
@@ -591,10 +591,10 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 
 // queuePopIdentity removes target from .moe/queue.json by identity
 // (workflow+project+run), under the repo lock. No-op when target is no
-// longer in the queue (e.g. the operator `queue rm`'d it from another
+// longer in the queue (e.g. the operator `queue remove`'d it from another
 // terminal while dispatch was in flight). The identity match — rather
 // than a positional pop — is the contract that makes concurrent
-// add/rm safe against an in-flight walker.
+// add/remove safe against an in-flight walker.
 func queuePopIdentity(root string, target queueItem) error {
 	return withRepoLock(root, repolock.Options{
 		Purpose: "queue-pop",

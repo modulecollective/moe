@@ -87,7 +87,7 @@ func TestQueueRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"add", "rm", "list", "run"} {
+	for _, want := range []string{"add", "remove", "list", "run"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("queue usage missing subcommand %q: %q", want, out.String())
 		}
@@ -242,7 +242,7 @@ func TestQueueAddFront(t *testing.T) {
 	}
 }
 
-func TestQueueRmRemoves(t *testing.T) {
+func TestQueueRemove(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -256,8 +256,8 @@ func TestQueueRmRemoves(t *testing.T) {
 	}
 	out.Reset()
 	errb.Reset()
-	if code := runQueueRm([]string{"sdlc", "tele", slug}, &out, &errb); code != 0 {
-		t.Fatalf("rm: exit=%d stderr=%q", code, errb.String())
+	if code := runQueueRemove([]string{"sdlc", "tele", slug}, &out, &errb); code != 0 {
+		t.Fatalf("remove: exit=%d stderr=%q", code, errb.String())
 	}
 	if items := readQueue(t, root); len(items) != 0 {
 		t.Fatalf("expected empty queue, got %v", items)
@@ -265,8 +265,8 @@ func TestQueueRmRemoves(t *testing.T) {
 	// Removing again is non-zero with a clear message.
 	out.Reset()
 	errb.Reset()
-	if code := runQueueRm([]string{"sdlc", "tele", slug}, &out, &errb); code == 0 {
-		t.Fatalf("expected non-zero on no-op rm; stderr=%q", errb.String())
+	if code := runQueueRemove([]string{"sdlc", "tele", slug}, &out, &errb); code == 0 {
+		t.Fatalf("expected non-zero on no-op remove; stderr=%q", errb.String())
 	}
 }
 
