@@ -29,16 +29,6 @@ Fix: switch every site to `--porcelain=v1 -z` and split on NUL. A
 small `internal/git` helper is the natural home so the parsing
 logic exists once.
 
-### `closedRunsSince` keys on filesystem `mtime` instead of git history
-
-`internal/wiki/reflect.go:217`. Comment says "LastFileActivity
-stand-in: stat the run dir." But mtime reflects whatever last touched
-it — `git checkout`, `cp -p`, `mv`, file-watcher tools. The package
-already has `run.LastActivity`/`run.LastFileActivity` (both
-git-log-based, authoritative). Reflect should use those. As-is the
-"events since last reflect" block can both miss runs and falsely
-surface old ones.
-
 ### `reorderFlags` silently breaks `--flag value` form
 
 `internal/cli/args.go:14`. Token-by-token classification has no idea
