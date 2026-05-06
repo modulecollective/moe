@@ -99,9 +99,12 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	}
 }
 
-// TestDashReadyToPushShowsPushStage: design + code turns are in, no
-// push turn yet. dash should render the run with next stage "push".
-func TestDashReadyToPushShowsPushStage(t *testing.T) {
+// TestDashAfterCodeShowsCodeStage: design + code turns are in, no
+// push turn yet. Under the forward-walking rule the run is parked at
+// code (push has no successor turn after code's), so dash renders
+// "sdlc:code". The operator either re-runs code, which fires the push
+// chain prompt again, or types `moe sdlc push` directly to ship.
+func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -125,14 +128,17 @@ func TestDashReadyToPushShowsPushStage(t *testing.T) {
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:push") {
-		t.Fatalf("expected run row with stage 'sdlc:push', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:code") {
+		t.Fatalf("expected run row with stage 'sdlc:code' (parked), got:\n%s", got)
 	}
 }
 
-// TestDashPrereqReworkedShowsCodeStage: design is re-signed after the
-// code turn, so Next() points back at code. dash should show "code".
-func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
+// TestDashPrereqReworkedShowsDesignStage: design is re-signed after
+// the code turn. Under the forward-walking rule, design's latest turn
+// is now newer than code's so design is parked. dash should show
+// "design"; the previous backward-walking rule would have shown "code"
+// (code stale because prereq newer).
+func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -155,8 +161,8 @@ func TestDashPrereqReworkedShowsCodeStage(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:code") {
-		t.Fatalf("expected run row with stage 'sdlc:code', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
+		t.Fatalf("expected run row with stage 'sdlc:design', got:\n%s", got)
 	}
 }
 
@@ -301,10 +307,12 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	}
 }
 
-// TestDashKBRunAfterResearchShowsSummarizePending is the mirror-image
-// check: research is written but summarize isn't yet. Next() returns
-// summarize, so the dash renders `kb:summarize` under ACTIVE.
-func TestDashKBRunAfterResearchShowsSummarizePending(t *testing.T) {
+// TestDashKBRunAfterResearchShowsResearchParked is the mirror-image
+// check: research is written but summarize isn't yet. Under the
+// forward-walking rule research has no successor turn after it, so
+// the run is parked at research and dash renders `kb:research` under
+// ACTIVE — same intuition as the sdlc parked-at-stage cases above.
+func TestDashKBRunAfterResearchShowsResearchParked(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -320,8 +328,8 @@ func TestDashKBRunAfterResearchShowsSummarizePending(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !containsRunRow(got, "tele", "lookup", "kb:summarize") {
-		t.Fatalf("expected KB run row with stage 'kb:summarize', got:\n%s", got)
+	if !containsRunRow(got, "tele", "lookup", "kb:research") {
+		t.Fatalf("expected KB run row with stage 'kb:research' (parked), got:\n%s", got)
 	}
 }
 

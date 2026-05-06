@@ -60,7 +60,12 @@ func TestSdlcResumeFromDesign(t *testing.T) {
 	}
 }
 
-func TestSdlcResumeFromCode(t *testing.T) {
+// TestSdlcResumeRerunsParkedDesignAndAdvances: under the
+// forward-walking rule a committed design turn with no later code
+// turn parks the run at design. resume re-enters design and then
+// chains code, so the operator who walked away after a one-shot
+// design run picks up the rest of the ladder by typing one verb.
+func TestSdlcResumeRerunsParkedDesignAndAdvances(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -74,13 +79,9 @@ func TestSdlcResumeFromCode(t *testing.T) {
 	if code := runNew("sdlc", []string{"tele", "Resume from code"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
-	// Land design first; resume should not re-run it.
+	// Land design first; the run is now parked at design (no code
+	// turn yet, so design's only successor has no later turn).
 	runOneShotStageDirect(t, "tele", "resume-from-code", "design", false)
-
-	designBefore, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-code", "documents", "design", "content.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	out.Reset()
 	errb.Reset()
@@ -88,28 +89,30 @@ func TestSdlcResumeFromCode(t *testing.T) {
 		t.Fatalf("resume exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
-	// Code canvas now exists.
+	// Code canvas now exists — chain advanced past the parked design
+	// stage and ran code.
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "resume-from-code", "documents", "code", "content.md")); err != nil {
 		t.Fatalf("code canvas should exist: %v", err)
 	}
-	// Design canvas was not re-run (no second append).
-	designAfter, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-code", "documents", "design", "content.md"))
-	if err != nil {
-		t.Fatal(err)
+	// Banner mentions both stages — resume re-enters the parked stage
+	// rather than skipping it.
+	if !strings.Contains(out.String(), "one-shot: design → code") {
+		t.Fatalf("expected one-shot: design → code banner, got: %q", out.String())
 	}
-	if !bytes.Equal(designBefore, designAfter) {
-		t.Fatalf("design canvas changed during code-resume:\nbefore: %q\nafter:  %q", designBefore, designAfter)
-	}
-	// Banner should mention only code, not design.
-	if !strings.Contains(out.String(), "one-shot: code") {
-		t.Fatalf("expected one-shot: code banner, got: %q", out.String())
-	}
-	if strings.Contains(out.String(), "design → code") {
-		t.Fatalf("did not expect design→code banner on resume-from-code: %q", out.String())
+	// Push hint surfaces at the end via the chain prompt's successor
+	// lookup off the last stage we ran.
+	if !strings.Contains(out.String(), "next: moe sdlc push tele resume-from-code") {
+		t.Fatalf("expected push hint, got: %q", out.String())
 	}
 }
 
-func TestSdlcResumeFromPush(t *testing.T) {
+// TestSdlcResumeRerunsParkedCode: design + code committed, no push
+// yet. Push has no work-turn commit shape, so under the
+// forward-walking rule code stays parked until the run hits a
+// terminal status. resume re-enters code and surfaces the push hint
+// at the end via the successor lookup. Design is not re-run because
+// it satisfies — code's later turn is the successor it needs.
+func TestSdlcResumeRerunsParkedCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -130,39 +133,31 @@ func TestSdlcResumeFromPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codeSnap, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-push", "documents", "code", "content.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	out.Reset()
 	errb.Reset()
 	if code := runResume([]string{"--one-shot", "tele", "resume-from-push"}, &out, &errb); code != 0 {
 		t.Fatalf("resume exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
-	// No "one-shot:" banner — both stages were already done.
-	if strings.Contains(out.String(), "one-shot:") {
-		t.Fatalf("did not expect one-shot banner on resume-from-push: %q", out.String())
+	// Banner names code only — design satisfies (its successor's turn
+	// is later), so the chain skips it.
+	if !strings.Contains(out.String(), "one-shot: code") {
+		t.Fatalf("expected one-shot: code banner, got: %q", out.String())
 	}
-	// Push hint surfaces.
+	if strings.Contains(out.String(), "design → code") {
+		t.Fatalf("did not expect design→code banner on parked-code resume: %q", out.String())
+	}
+	// Push hint surfaces at the end.
 	if !strings.Contains(out.String(), "next: moe sdlc push tele resume-from-push") {
 		t.Fatalf("expected push hint, got: %q", out.String())
 	}
-	// Neither canvas was touched.
-	for _, want := range []struct {
-		path string
-		want []byte
-	}{
-		{filepath.Join(root, "projects", "tele", "runs", "resume-from-push", "documents", "design", "content.md"), designSnap},
-		{filepath.Join(root, "projects", "tele", "runs", "resume-from-push", "documents", "code", "content.md"), codeSnap},
-	} {
-		got, err := os.ReadFile(want.path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, want.want) {
-			t.Fatalf("%s mutated unexpectedly", want.path)
-		}
+	// Design canvas was not touched — its successor is satisfied.
+	designAfter, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-push", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(designAfter, designSnap) {
+		t.Fatalf("design canvas mutated unexpectedly:\nbefore: %q\nafter:  %q", designSnap, designAfter)
 	}
 }
 

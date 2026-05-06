@@ -99,6 +99,11 @@ func TestKBWorkflowStageOrder(t *testing.T) {
 
 // TestKBWorkflowNextWalksStages mirrors TestWorkflowNextWalksStages
 // for the kb ladder: no turns → research → summarize → done.
+//
+// Under the forward-walking rule, research with no later summarize
+// turn parks the run at research; once summarize commits, research
+// satisfies (successor newer) and summarize — the terminal stage with
+// no successor of its own — also satisfies. Next then reports done.
 func TestKBWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("kb")
@@ -121,8 +126,8 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "summarize" {
-		t.Fatalf("after research: expected stage summarize, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next.Name != "research" {
+		t.Fatalf("after research (no summarize yet): expected stage research (parked), got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))

@@ -59,7 +59,12 @@ func TestQuickWorkflowStageOrder(t *testing.T) {
 }
 
 // TestQuickWorkflowNextWalksStages mirrors the sdlc/kb next-walk:
-// no turns → code → push → done after push status.
+// no turns → code (parked) → done once status flips to merged.
+//
+// Under the forward-walking rule a code turn with no later push turn
+// parks the run at code; push doesn't land a `work: update push`
+// commit (it lands `push: <p>/<r>` and flips run status), so the only
+// way past code is a status flip to a terminal value.
 func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("quick")
@@ -82,8 +87,8 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "push" {
-		t.Fatalf("after code: expected stage push, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next.Name != "code" {
+		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
 	// Push is terminal via status flip, not a work turn — mirror runPush.

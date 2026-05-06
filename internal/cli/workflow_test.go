@@ -11,6 +11,14 @@ import (
 // TestWorkflowNextWalksStages exercises the satisfaction logic in the
 // exact sequence a happy-path sdlc run takes: no turns → design → code
 // → push. Then we flip status to pushed and confirm we're done.
+//
+// Under the forward-walking rule, a stage with a committed turn but
+// no successor turn after it stays parked at that stage. So after
+// each stage's first commit Next reports the just-finished stage as
+// the parked one — dash and resume see "next: design" right after
+// design committed, "next: code" right after code committed — and the
+// run only progresses past it when either the next stage commits a
+// fresher turn or the run reaches a terminal status.
 func TestWorkflowNextWalksStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("sdlc")
@@ -33,8 +41,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("after design: expected stage code, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next.Name != "design" {
+		t.Fatalf("after design (no code yet): expected stage design (parked), got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
@@ -42,8 +50,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "push" {
-		t.Fatalf("after code: expected stage push, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next.Name != "code" {
+		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%v", kind, nameOrNil(next))
 	}
 
 	for _, terminal := range []string{run.StatusPushed, run.StatusMerged, run.StatusClosed} {
@@ -58,10 +66,17 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	}
 }
 
-// TestWorkflowNextReopensStaleStage reproduces the readyToShip
-// staleness rule: a design turn landing after the last code turn
-// should kick Next back to "code" so the operator reconciles before
-// the push stage can be satisfied.
+// TestWorkflowNextReopensStaleStage covers the re-open case: a fresh
+// design turn after code has already committed.
+//
+// Under the forward-walking rule, design's latest turn is now newer
+// than code's, so design's "successor has a newer turn" check fails
+// and design is unsatisfied — Next returns design. The previous
+// backward-walking rule would have flipped Next to code (because code's
+// prereq became newer); the new rule expresses the same staleness
+// in the forward direction. Either way, the operator can't reach push
+// without reconciling: re-running design parks the run at design until
+// a fresh code turn lands.
 func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf, err := LookupWorkflow("sdlc")
@@ -73,15 +88,27 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
 	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
-	// Design reworked after the code turn: code becomes stale.
+	// Design reworked after the code turn — design becomes parked
+	// again, awaiting a fresh code turn.
 	commitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0.Add(2*time.Hour))
 
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if kind != NextKindStage || next.Name != "design" {
+		t.Fatalf("re-opened design: expected stage design, got kind=%v name=%v", kind, nameOrNil(next))
+	}
+
+	// Land a fresh code turn — design's successor is now newer than
+	// design, so design satisfies and code becomes the parked stage.
+	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(3*time.Hour))
+	next, kind, err = wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("stale code: expected stage code, got kind=%v name=%v", kind, nameOrNil(next))
+		t.Fatalf("re-coded after re-design: expected stage code, got kind=%v name=%v", kind, nameOrNil(next))
 	}
 }
 
@@ -174,6 +201,39 @@ func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	}
 	if kind != NextKindStage || next.Name != "code" {
 		t.Fatalf("session-start alone must not satisfy code, got kind=%v name=%v", kind, nameOrNil(next))
+	}
+}
+
+// TestWorkflowSuccessor covers the pure DAG lookup the chain prompt
+// uses to ask "what's next after the stage I just finished?". The
+// answer is decoupled from Next() — under the forward-walking rule
+// Next() reports the just-finished stage as parked, which is the
+// wrong answer for the chain prompt.
+func TestWorkflowSuccessor(t *testing.T) {
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		stage string
+		want  string // "" means nil (no successor, or unknown stage)
+	}{
+		{"design", "code"},
+		{"code", "push"},
+		{"push", ""}, // terminal stage
+		{"bogus", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		got := wf.Successor(tc.stage)
+		switch {
+		case tc.want == "" && got != nil:
+			t.Errorf("Successor(%q) = %q, want nil", tc.stage, got.Name)
+		case tc.want != "" && got == nil:
+			t.Errorf("Successor(%q) = nil, want %q", tc.stage, tc.want)
+		case tc.want != "" && got.Name != tc.want:
+			t.Errorf("Successor(%q) = %q, want %q", tc.stage, got.Name, tc.want)
+		}
 	}
 }
 
