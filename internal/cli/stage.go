@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -147,7 +146,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 				if err := commitSessionStart(workRoot, md, docID); err != nil {
 					return wikiTurnSpec{}, err
 				}
-				moePrintf(stderr, "opened %s canvas (session %s)\n", docID, doc.Session)
+				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, doc.Session, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
 			}
 
 			// Code sandbox — still keyed off the canonical bureaucracy
@@ -462,15 +461,6 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 				moePrintf(stderr, "wiki: %v\n", err)
 			}
 		}
-	}
-
-	// Pop the design canvas tab in the operator's running VS Code window.
-	// design is the one stage where having the doc visible while
-	// iterating is load-bearing; every other stage skips the reveal so
-	// the operator isn't fighting tabs they didn't ask for. Best-effort:
-	// silent no-op if `code` isn't on PATH.
-	if in.DocID == "design" {
-		revealInEditor(filepath.Join(workRoot, run.ContentPath(in.Project, in.RunSlug, in.DocID)), stderr)
 	}
 
 	// Prompt paths point at the session worktree, where Claude's
@@ -1017,33 +1007,6 @@ MoE-Session: %s
 		allPaths = append(allPaths, followupsRel)
 	}
 	return run.StageAndCommit(root, msg, allPaths...)
-}
-
-// revealInEditor pops the supplied path as a tab in the operator's
-// running VS Code window via `code -r`. The flag reuses the existing
-// window and reveals the file; VS Code's native file watcher streams
-// subsequent edits straight in. Called from runWikiSession only when
-// the session is driving the design canvas.
-//
-// Best-effort and non-blocking: skip silently if `code` isn't on PATH
-// (the operator may not be a VS Code user; nudging every session would
-// be noise), if the path is empty, or if Start fails. The goroutine
-// reaps the child so it doesn't linger as a zombie.
-//
-// Overridable in tests.
-var revealInEditor = func(path string, stderr io.Writer) {
-	if path == "" {
-		return
-	}
-	bin, err := exec.LookPath("code")
-	if err != nil {
-		return
-	}
-	cmd := exec.Command(bin, "-r", path)
-	if err := cmd.Start(); err != nil {
-		return
-	}
-	go func() { _ = cmd.Wait() }()
 }
 
 // sessionDocCwd is the cwd document-only stages hand to claude — a
