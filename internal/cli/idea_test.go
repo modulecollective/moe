@@ -78,6 +78,18 @@ func TestIdeaRegistered(t *testing.T) {
 	}
 }
 
+// TestBuildIdeaChatPromptSectionsEndWithNewline pins the same
+// trailing-newline contract as TestBuildSystemPromptSectionsEndWithNewline,
+// but for buildIdeaChatPrompt's three-section join (soul, idea stage
+// fragment, inline operational core). The idea builder is the odd
+// one of the five — no *wiki.Config and an inline core literal — so
+// a regression in the literal would silently drop the trailing
+// newline; this test is the tripwire.
+func TestBuildIdeaChatPromptSectionsEndWithNewline(t *testing.T) {
+	got := buildIdeaChatPrompt("/tmp/canvas.md", "capture")
+	assertPromptSectionsEndWithNewline(t, got, 3)
+}
+
 func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)

@@ -583,7 +583,8 @@ Your canvas is the single file:
 
 Edit the file directly — do not propose a diff. When the idea is
 captured (or the operator says they're done refining), stop. Do not
-design, plan, or open follow-ups.`, abs))
+design, plan, or open follow-ups.
+`, abs))
 	return strings.Join(sections, "\n---\n\n")
 }
 

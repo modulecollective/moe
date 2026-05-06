@@ -222,16 +222,45 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	}
 }
 
-// TestBuildSystemPromptSectionsEndWithNewline pins the load-bearing
-// invariant of the section join in buildSystemPrompt: every section
-// must end with "\n", or the "\n---\n\n" separator collides with the
-// section's last byte and renders mid-line instead of as a section
-// break. Today the convention holds, but nothing in the type system
-// enforces it — this test is the tripwire. Every existing optional
-// section is wired in (soul, stage, twin reference, operational core,
-// wiki ingest); the upstream-change banner has its own dedicated
-// tests above and would require a prereq+prior-turn fixture to fire
-// here for marginal coverage.
+// assertPromptSectionsEndWithNewline pins the load-bearing invariant
+// of every "\n---\n\n" section join across the cli package: every
+// non-empty section must end with "\n", or the separator collides
+// with the section's last byte and renders mid-line instead of as a
+// section break. Five builders share the same join idiom
+// (buildSystemPrompt + claim/reflect/idea/lint); this is the
+// shared assertion they all call into.
+//
+// minSections is the floor of expected chunks after splitting on the
+// separator. A floor (rather than an exact count) lets a future
+// section addition surface here without making count drift the
+// failure mode — the per-chunk newline check is the actual contract.
+func assertPromptSectionsEndWithNewline(t *testing.T, got string, minSections int) {
+	t.Helper()
+	chunks := strings.Split(got, "\n---\n\n")
+	if len(chunks) < minSections {
+		t.Fatalf("expected at least %d sections joined by separator, got %d in:\n%s",
+			minSections, len(chunks), got)
+	}
+	for i, chunk := range chunks {
+		if chunk == "" {
+			continue
+		}
+		if !strings.HasSuffix(chunk, "\n") {
+			tail := chunk
+			if len(tail) > 48 {
+				tail = "..." + tail[len(tail)-48:]
+			}
+			t.Errorf("section %d missing trailing newline; tail = %q", i, tail)
+		}
+	}
+}
+
+// TestBuildSystemPromptSectionsEndWithNewline is the originating
+// caller of assertPromptSectionsEndWithNewline. Every existing
+// optional section is wired in (soul, stage, twin reference,
+// operational core, wiki ingest); the upstream-change banner has its
+// own dedicated tests above and would require a prereq+prior-turn
+// fixture to fire here for marginal coverage.
 func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 	root := newTestBureaucracy(t)
 
@@ -266,25 +295,8 @@ func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 	}
 
 	// Five sections expected: soul, stage, twin reference, operational
-	// core, wiki ingest. A floor (>= 5) so a future section addition
-	// surfaces this test without making a count drift the failure mode
-	// — the per-chunk newline check below is the actual contract.
-	chunks := strings.Split(got, "\n---\n\n")
-	if len(chunks) < 5 {
-		t.Fatalf("expected at least 5 sections joined by separator, got %d in:\n%s", len(chunks), got)
-	}
-	for i, chunk := range chunks {
-		if chunk == "" {
-			continue
-		}
-		if !strings.HasSuffix(chunk, "\n") {
-			tail := chunk
-			if len(tail) > 48 {
-				tail = "..." + tail[len(tail)-48:]
-			}
-			t.Errorf("section %d missing trailing newline; tail = %q", i, tail)
-		}
-	}
+	// core, wiki ingest.
+	assertPromptSectionsEndWithNewline(t, got, 5)
 }
 
 func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
