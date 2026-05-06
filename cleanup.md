@@ -62,15 +62,6 @@ bureaucracy; latency on every dash render as the run count grows.
 Cache `[]Metadata` and a last-activity map at the top of `runDash`
 and pass them down.
 
-### First-reflect events block is unbounded
-
-`internal/wiki/reflect.go:142`. `git log --no-merges --format=%h %s`
-with no rev range when there's no checkpoint SHA. For a project
-with thousands of commits this dumps the whole history into the
-kickoff prompt. Soft cap (e.g. last 500) with a `(N earlier commits
-omitted)` footer protects prompt budget on first-pass for large
-projects.
-
 ### Repolock corrupt-record path leaves `TimeoutError` empty
 
 `internal/repolock/repolock.go:163-203`. When `readRecord` fails
