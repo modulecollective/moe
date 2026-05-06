@@ -62,6 +62,15 @@ type stageSessionOpts struct {
 	// the resolved root rather than asking callers to discover it
 	// themselves — runStageSession owns root discovery.
 	WikiBuilder func(root string, md *run.Metadata) (*wiki.Config, error)
+	// ExtraStagePaths, when non-nil, runs after the agent session
+	// ends and before commitTurn. It receives the session worktree
+	// root and the run metadata; it may write files inside the
+	// worktree (e.g. publish a synthesized artifact) and returns
+	// extra path specs (relative to workRoot) to stage in the same
+	// per-turn commit. Used by meta-moe to copy the report canvas to
+	// projects/<p>/meta-moe.md so the project-root snapshot rides
+	// alongside the per-pass canvas in one commit.
+	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
 }
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
@@ -269,6 +278,13 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 					var extras []string
 					if wikiRel != "" {
 						extras = append(extras, wikiRel)
+					}
+					if opts.ExtraStagePaths != nil {
+						more, err := opts.ExtraStagePaths(workRoot, md)
+						if err != nil {
+							return err
+						}
+						extras = append(extras, more...)
 					}
 					return commitTurn(workRoot, md, docID, extras...)
 				},
