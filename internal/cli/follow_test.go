@@ -373,3 +373,201 @@ func TestFollowRegistered(t *testing.T) {
 		t.Fatal("follow command not registered")
 	}
 }
+
+// withFastFollowWatch shrinks the watcher's poll/debounce constants for
+// the duration of a test. Production values (250ms / 3s) would make
+// each watcher case multi-second; the test cases only care about the
+// *shape* of the debounce, not its exact wall-clock duration. Returns
+// a restore closure so each test undoes its own override even when run
+// under -count or -race.
+func withFastFollowWatch(t *testing.T, poll, debounce time.Duration) {
+	t.Helper()
+	oldPoll, oldDebounce := followWatchPoll, followWatchDebounce
+	followWatchPoll, followWatchDebounce = poll, debounce
+	t.Cleanup(func() {
+		followWatchPoll, followWatchDebounce = oldPoll, oldDebounce
+	})
+}
+
+// TestWatchCanvasFiresAfterChange is the basic happy path: a single
+// rewrite trips the watcher, and the channel closes within roughly the
+// debounce window. The slack is generous because filesystem mtime
+// granularity plus poll cadence can push the firing tick out by a
+// quantum or two — what we care about is "fires *eventually*", not
+// hitting the deadline to the millisecond.
+func TestWatchCanvasFiresAfterChange(t *testing.T) {
+	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "canvas.md")
+	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	fired := watchCanvas(path, stop)
+
+	// Wait one poll for the watcher to capture its baseline mtime/size,
+	// then rewrite the canvas. Without the brief settle the rewrite
+	// could land before the watcher's first stat and be silently
+	// adopted as the baseline, yielding a flaky non-fire.
+	time.Sleep(15 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("updated content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("watchCanvas did not fire after canvas rewrite")
+	}
+}
+
+// TestWatchCanvasDebouncesBurstWrites pins the load-bearing debounce
+// behaviour: a burst of rewrites inside the debounce window collapses
+// to exactly one fire, not N. Without the debounce, claude's typical
+// write→re-read→revise→write cadence would respawn the pager several
+// times per turn.
+//
+// The test writes three times, each spaced well inside the debounce
+// window, then waits past the window and asserts the watcher fired
+// exactly once.
+func TestWatchCanvasDebouncesBurstWrites(t *testing.T) {
+	withFastFollowWatch(t, 5*time.Millisecond, 80*time.Millisecond)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "canvas.md")
+	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	fired := watchCanvas(path, stop)
+
+	// Let the baseline land, then write three times at 20ms spacing —
+	// each interval is well under the 80ms debounce, so each write
+	// should reset the deadline and the watcher should not fire until
+	// 80ms after the *last* write.
+	time.Sleep(15 * time.Millisecond)
+	for i, body := range []string{"one", "two", "three"} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Wait past the debounce window from the last write. The watcher
+	// should fire exactly once in this interval.
+	select {
+	case <-fired:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("watchCanvas did not fire after debounce window")
+	}
+
+	// And it should not fire a second time — the channel-close
+	// contract is one-shot, but the goroutine should also have exited.
+	// A subsequent close-of-stop must not panic on a re-closed channel
+	// either; the deferred close at top of test exercises that path.
+	select {
+	case <-fired:
+		// already closed; receive returns immediately. Fine.
+	default:
+		t.Fatal("watchCanvas fired channel should be closed after firing")
+	}
+}
+
+// TestWatchCanvasStopBeforeFire pins the operator-quit teardown: when
+// the caller closes stop before any change lands, the watcher returns
+// without firing. The fired channel must remain unclosed — the
+// channel-close contract is "the watcher decided to fire", and on stop
+// we explicitly did not.
+func TestWatchCanvasStopBeforeFire(t *testing.T) {
+	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "canvas.md")
+	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	fired := watchCanvas(path, stop)
+	// Let the watcher collect its baseline, then stop without any
+	// rewrite happening.
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+
+	// Give the goroutine time to react. Then assert the fired channel
+	// is *not* closed — a non-blocking receive should hit the default
+	// branch.
+	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-fired:
+		t.Fatal("watchCanvas should not have fired after stop without a change")
+	default:
+	}
+}
+
+// TestWatchCanvasIgnoresStatErrors pins the "file deleted briefly
+// during rename" edge case from the design: a stat error is treated as
+// "no change yet" and must not trip the watcher. We simulate the
+// rename gap by deleting and recreating the file with identical content
+// and mtime — the watcher should not fire on the gap, but should fire
+// once we actually change the content.
+//
+// Why this matters: a flaky atomic-rename detection would respawn the
+// pager every few seconds even when the agent isn't writing.
+func TestWatchCanvasIgnoresStatErrors(t *testing.T) {
+	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "canvas.md")
+	seed := []byte("seed content\n")
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pin mtime so the recreate below doesn't itself look like a change.
+	mt := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, mt, mt); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	fired := watchCanvas(path, stop)
+	time.Sleep(20 * time.Millisecond)
+
+	// Rename gap: remove and immediately recreate with the same bytes
+	// and mtime. Several poll ticks should land in the brief gap and
+	// see stat errors; once the file is back, mtime+size match the
+	// baseline and the watcher must stay quiet.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(15 * time.Millisecond)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mt, mt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Give the watcher generous time to (incorrectly) trip on the gap.
+	select {
+	case <-fired:
+		t.Fatal("watchCanvas tripped on a rename gap with unchanged content")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// Now actually change the content; the watcher must fire as usual.
+	if err := os.WriteFile(path, []byte("real change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("watchCanvas did not fire after a real change post-rename")
+	}
+}

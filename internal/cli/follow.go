@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -43,11 +44,36 @@ const followIdleInterval = 5 * time.Second
 // short enough not to feel sluggish. Mirrors queueCountdownSeconds.
 const followCountdownSeconds = 3
 
-// defaultPager is the fallback when MOE_PAGER is unset. `+F` is the
-// only universally-available follow mode; `-R` passes ANSI through;
-// `-M` shows the long prompt so the file path lands on the status
-// line — that's how the operator knows *which* design they're reading.
-const defaultPager = "less +F -R -M"
+// defaultPager is the fallback when MOE_PAGER is unset. moe owns the
+// follow loop now (watchCanvas + kill-and-respawn), so the pager runs
+// in plain mode: `-R` passes ANSI through; `-M` shows the long prompt
+// so the file path stays on the status line — no `Waiting for data…`
+// banner stealing that real estate. Dropping `+F` also unlocks normal
+// scroll keys (`j`/`k`/`g`/`G`/`/`) without operator-quit gymnastics.
+const defaultPager = "less -R -M"
+
+// followWatchPoll is the cadence at which watchCanvas stats the canvas
+// for change. Cheap (one stat per tick) and well below the debounce
+// window so a change can't slip through unseen. var rather than const
+// so tests can dial it down to milliseconds; production stays at 250ms.
+var followWatchPoll = 250 * time.Millisecond
+
+// followWatchDebounce is the quiet window watchCanvas waits for after
+// the last detected change before signalling a respawn. 3s collapses a
+// burst of mid-turn rewrites (claude commonly writes → re-reads →
+// revises → writes again over a few seconds) into one respawn, while
+// staying short enough that the operator perceives the new content
+// within one breath of the agent settling. Mirrors followCountdown-
+// Seconds as a side benefit — one dwell number to reason about.
+var followWatchDebounce = 3 * time.Second
+
+// followKillGrace is how long we wait between SIGTERM and SIGKILL
+// when respawning the pager. less catches SIGTERM and restores the
+// terminal cleanly within milliseconds; 200ms is comfortably enough
+// without making the respawn feel sluggish. The SIGKILL fallback
+// covers the rare pager that ignores SIGTERM — terminal state may
+// then be left in raw mode, but we don't deadlock on a wedged pager.
+var followKillGrace = 200 * time.Millisecond
 
 func init() {
 	Register(&Command{
@@ -71,7 +97,7 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "a single-line idle status and re-checks every --interval. --run <id>")
 		moePrintln(stderr, "pins to a specific run regardless of session liveness.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Pager is ${MOE_PAGER:-less +F -R -M}.")
+		moePrintln(stderr, "Pager is ${MOE_PAGER:-less -R -M}; moe respawns it when the canvas changes.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -98,34 +124,12 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if path != "" {
-			// Drain anything queued before the pager takes the tty —
-			// a Ctrl-C just before the spawn shouldn't race the pager
-			// for the signal. While the pager runs, SIGINT is the
-			// pager's to handle (less consumes it; +F drops to normal
-			// less and re-exposes the path) — we just don't read from
-			// sigCh, so the buffered notify intercept keeps the
-			// default tear-down from firing on moe.
-			drainSignal(sigCh)
-			if err := spawnPager(path); err != nil {
-				moePrintf(stderr, "%v\n", err)
-				return 1
-			}
-			drainSignal(sigCh)
-			// Countdown after the pager exits is the operator's escape
-			// hatch from the relaunch loop: without it, a fresh pager
-			// re-spawns immediately and the only way out is timing a
-			// Ctrl-C through that brief window. The first pager open
-			// isn't delayed — the operator just typed `moe follow`
-			// and asked for it; the dwell only sits between exits.
-			// Scoped sigint subscription mirrors queue's pattern so
-			// the countdown's signal handling doesn't clash with the
-			// outer sigCh used by the idle-screen branch.
-			countdownSig, stopCountdownSig := installSigint()
-			stopped := runCountdown(followCountdownSeconds, func(n int) string {
-				return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
-			}, stdout, countdownSig)
-			stopCountdownSig()
-			if stopped {
+			// Inner loop: respawn on the same path while the watcher
+			// keeps tripping on canvas rewrites. Re-evaluation (back
+			// to pickFollowTarget) only runs on operator-quit, same
+			// rule as today — the operator is reading *this* canvas;
+			// a file change doesn't mean a different run is in play.
+			if quit := followPath(path, sigCh, stdout, stderr); quit {
 				return 0
 			}
 			continue
@@ -334,13 +338,117 @@ func drainSignal(ch <-chan os.Signal) {
 	}
 }
 
-// spawnPager runs ${MOE_PAGER:-less +F -R -M} with path appended as
-// the final argument. Stdin/stdout/stderr are wired to the operator's
-// terminal so the pager owns the screen for its lifetime. The command
-// is run via `sh -c` so a pager string with embedded flags
-// (`MOE_PAGER='less +F -R'`, `MOE_PAGER='glow -p'`) parses the way the
-// operator wrote it without us reimplementing shell word-splitting.
-func spawnPager(path string) error {
+// followPath drives one path's lifetime: spawn pager, watch the canvas
+// for rewrites, and respawn the pager whenever the watcher fires.
+// Returns true when the operator asked to exit (Ctrl-C through the
+// post-quit countdown), false when the caller should re-evaluate via
+// pickFollowTarget.
+//
+// The inner respawn loop exists because of the design's "Re-spawn keeps
+// the same path" rule: a canvas rewrite isn't a signal that a different
+// run is in play, just that *this* run's agent wrote bytes — so we
+// reopen against the same path with no countdown. Operator-quit (`q`)
+// or a pager crash falls through to the outer countdown + re-evaluate
+// path, same as before the watcher existed.
+func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
+	for {
+		// Drain anything queued before the pager takes the tty — a
+		// Ctrl-C just before the spawn shouldn't race the pager for
+		// the signal. While the pager runs, SIGINT is the pager's to
+		// handle (less consumes it; the operator's `q` is the clean
+		// exit) — we just don't read from sigCh, so the buffered
+		// notify intercept keeps the default tear-down from firing on
+		// moe.
+		drainSignal(sigCh)
+		cmd, err := startPager(path)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return true
+		}
+
+		watchStop := make(chan struct{})
+		watchFired := watchCanvas(path, watchStop)
+		waitErr := make(chan error, 1)
+		go func() { waitErr <- cmd.Wait() }()
+
+		var respawnRequested bool
+		select {
+		case <-waitErr:
+			// Pager exited on its own — operator quit or crashed.
+			// Tell the watcher to stop; it may have already returned
+			// (close-fired race), in which case the send-to-stop
+			// channel just closes a channel nobody reads. Safe.
+			close(watchStop)
+		case <-watchFired:
+			// Canvas changed and quiesced; kill the pager so we can
+			// respawn against the fresh inode. SIGTERM the process
+			// *group* so we reach the inner pager, not just the `sh
+			// -c` wrapper — Setpgid:true on startPager makes
+			// cmd.Process.Pid the pgid leader.
+			respawnRequested = true
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			select {
+			case <-waitErr:
+			case <-time.After(followKillGrace):
+				// Pager ignored SIGTERM (rare). Last-resort SIGKILL;
+				// terminal may be left in raw mode but at least we
+				// don't deadlock on a wedged pager.
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-waitErr
+			}
+		}
+		drainSignal(sigCh)
+
+		// Distinguish kill-from-respawn vs. operator-quit using the
+		// pager's exit code. less exits 0 on a clean `q`; SIGTERM-
+		// killed less exits non-zero (signal-terminated). The exit-
+		// code check is load-bearing for the q-and-watcher-fire race:
+		// without it, every near-simultaneous `q` would leave a stray
+		// respawn the operator has to dismiss.
+		exitCode := 0
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		if respawnRequested && exitCode != 0 {
+			// We killed it; respawn immediately on the same path —
+			// the operator didn't ask to exit, they shouldn't have to
+			// press Ctrl-C through a countdown to stay in the follow.
+			continue
+		}
+
+		// exit 0 (clean q), or non-zero with no respawn flag (pager
+		// crash / external signal). Both fall through to the dwell.
+		// Countdown after the pager exits is the operator's escape
+		// hatch from the relaunch loop: without it, a fresh pager
+		// re-spawns immediately and the only way out is timing a
+		// Ctrl-C through that brief window. The first pager open
+		// isn't delayed — the operator just typed `moe follow` and
+		// asked for it; the dwell only sits between exits. Scoped
+		// sigint subscription mirrors queue's pattern so the
+		// countdown's signal handling doesn't clash with the outer
+		// sigCh used by the idle-screen branch.
+		countdownSig, stopCountdownSig := installSigint()
+		stopped := runCountdown(followCountdownSeconds, func(n int) string {
+			return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
+		}, stdout, countdownSig)
+		stopCountdownSig()
+		return stopped
+	}
+}
+
+// startPager launches ${MOE_PAGER:-less -R -M} with path appended as
+// the final argument and returns the running *exec.Cmd. Stdin/stdout/
+// stderr are wired to the operator's terminal so the pager owns the
+// screen for its lifetime. The command is run via `sh -c` so a pager
+// string with embedded flags (`MOE_PAGER='less -R'`,
+// `MOE_PAGER='glow -p'`) parses the way the operator wrote it without
+// us reimplementing shell word-splitting.
+//
+// Setpgid:true puts sh and the inner pager in their own process group
+// rooted at cmd.Process.Pid. The watcher-respawn path needs to signal
+// the inner pager (not just the sh wrapper); `syscall.Kill(-pgid, …)`
+// fans out to every member of the group.
+func startPager(path string) (*exec.Cmd, error) {
 	pager := os.Getenv("MOE_PAGER")
 	if pager == "" {
 		pager = defaultPager
@@ -349,8 +457,88 @@ func spawnPager(path string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("follow: pager %q exited %w", pager, err)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("follow: pager %q failed to start: %w", pager, err)
 	}
-	return nil
+	return cmd, nil
+}
+
+// watchCanvas polls path every followWatchPoll and signals via the
+// returned channel once the canvas has been quiet for followWatchDebounce
+// after a detected change. The returned channel is closed exactly once,
+// then the goroutine exits; callers reading from it should treat the
+// close as the respawn trigger.
+//
+// `stop` is the operator-quit teardown: closing it makes the watcher
+// return without firing. The watcher polls (`os.Stat`) rather than
+// reaching for fsnotify per moe-follow.md's locked stdlib-only stance;
+// 250ms is cheap enough that no one notices.
+//
+// Edge cases the design calls out:
+//
+//   - **File mid-rewrite when watcher reads.** A truncate-then-write
+//     can catch us reading at zero size between calls. The next stat
+//     (one tick later) sees the post-write size, the debounce timer
+//     resets, and the eventual respawn opens the finished file. Worst
+//     case is one extra respawn cycle — the price of stat-polling.
+//   - **File deleted briefly during rename.** os.Stat returns an error
+//     during the gap. We treat stat-error as "no change yet" and don't
+//     trip — the next successful stat sees the new inode's mtime/size
+//     and trips normally.
+func watchCanvas(path string, stop <-chan struct{}) <-chan struct{} {
+	// Snapshot the tunables in the calling goroutine so a test that
+	// flips them via t.Cleanup doesn't race the still-running watcher
+	// (which would otherwise read the globals from the spawned
+	// goroutine without synchronization).
+	poll := followWatchPoll
+	debounce := followWatchDebounce
+	fired := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+
+		var lastMtime time.Time
+		var lastSize int64
+		var haveLast bool
+		// pendingDeadline / hasPending implements the debounce as a
+		// time-of-deadline check rather than a separate timer. Avoids
+		// the time.Timer.Reset/drain dance and folds naturally into
+		// the same per-tick wakeup.
+		var pendingDeadline time.Time
+		var hasPending bool
+
+		for {
+			select {
+			case <-stop:
+				// Caller asked us to tear down (operator quit). Exit
+				// without closing fired — the channel-close contract
+				// is "the watcher decided to fire", and on stop we
+				// did not.
+				return
+			case <-ticker.C:
+				if fi, err := os.Stat(path); err == nil {
+					switch {
+					case !haveLast:
+						lastMtime = fi.ModTime()
+						lastSize = fi.Size()
+						haveLast = true
+					case !fi.ModTime().Equal(lastMtime) || fi.Size() != lastSize:
+						lastMtime = fi.ModTime()
+						lastSize = fi.Size()
+						pendingDeadline = time.Now().Add(debounce)
+						hasPending = true
+					}
+				}
+				// Stat errors are intentionally ignored — see the
+				// "file deleted briefly during rename" edge case
+				// above. The next successful stat resyncs.
+				if hasPending && !time.Now().Before(pendingDeadline) {
+					close(fired)
+					return
+				}
+			}
+		}
+	}()
+	return fired
 }
