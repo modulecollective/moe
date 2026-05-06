@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"flag"
+	"io"
 	"reflect"
 	"testing"
 )
@@ -51,15 +53,49 @@ func TestReorderFlagsMovesFlagsAhead(t *testing.T) {
 			in:   []string{"a", "--", "--x", "b"},
 			want: []string{"--", "a", "--x", "b"},
 		},
+		{
+			name: "value-taking flag in space form keeps pair adjacent",
+			in:   []string{"--id", "foo", "pos"},
+			want: []string{"--id", "foo", "pos"},
+		},
+		{
+			name: "value-taking flag pair moves ahead of positional together",
+			in:   []string{"pos", "--id", "foo"},
+			want: []string{"--id", "foo", "pos"},
+		},
+		{
+			name: "bool flag does not swallow next token",
+			in:   []string{"pos", "--bool", "more"},
+			want: []string{"--bool", "pos", "more"},
+		},
+		{
+			name: "unknown flag does not swallow next token",
+			in:   []string{"pos", "--unknown", "foo"},
+			want: []string{"--unknown", "pos", "foo"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := reorderFlags(tc.in)
+			fs := newReorderTestFlagSet()
+			got := reorderFlags(fs, tc.in)
 			if !equalStringSlices(got, tc.want) {
 				t.Fatalf("reorderFlags(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}
+}
+
+// newReorderTestFlagSet builds the minimum FlagSet the cases need:
+// `--id` (value-taking) and `--bool` (bool). The legacy bare flags
+// (`--a`, `--flag`, `-c`, `--x`, …) are intentionally left
+// undeclared — they exercise the unknown-flag branch, which doesn't
+// swallow a following token, preserving the pre-FlagSet-aware output.
+func newReorderTestFlagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("reorder-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.String("id", "", "")
+	fs.Bool("bool", false, "")
+	return fs
 }
 
 func equalStringSlices(a, b []string) bool {

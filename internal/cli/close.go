@@ -55,7 +55,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		}
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {

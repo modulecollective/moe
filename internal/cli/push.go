@@ -48,7 +48,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
 		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {

@@ -109,7 +109,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "usage: moe idea new [--id <slug>] [--chat] <project> \"title\"\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() < 2 {
@@ -267,7 +267,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "usage: moe idea edit [--chat] <project> <slug>\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
@@ -355,7 +355,7 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe idea list <project>")
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
@@ -395,7 +395,7 @@ func runIdeaCat(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe idea cat <project> <slug>\n")
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {

@@ -60,7 +60,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--one-shot] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	// Title is required normally, optional when --from-idea is set

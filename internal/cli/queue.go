@@ -166,7 +166,7 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "       moe queue add [--front] sdlc --from-idea=<slug> <project>")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() < 1 {
@@ -263,7 +263,7 @@ func runQueueRemove(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe queue remove sdlc <project> <run>")
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 3 {
@@ -323,7 +323,7 @@ func runQueueList(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe queue list")
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -471,7 +471,7 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "headlessly so the operator only stops at [N/m/p].")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {

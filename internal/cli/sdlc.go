@@ -51,7 +51,7 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
@@ -87,7 +87,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
@@ -140,7 +140,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "merge-gate prompt. Refuses runs that are missing or already terminal.")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
