@@ -17,6 +17,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 var pushCmd = &Command{
@@ -381,14 +382,14 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 			return 1
 		}
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-		msg := fmt.Sprintf(`push: %s/%s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: push
-MoE-PR: %s
-`, md.Project, md.ID, md.ID, md.Project, md.Workflow, url)
+		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
+			trailers.Block{
+				Run:      md.ID,
+				Project:  md.Project,
+				Workflow: md.Workflow,
+				Document: "push",
+				PR:       url,
+			}.String()
 		err := withRepoLock(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
@@ -455,14 +456,14 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
-	msg := fmt.Sprintf(`push: %s/%s merged
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: push
-MoE-Merged: %s
-`, md.Project, md.ID, md.ID, md.Project, md.Workflow, tipSHA)
+	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: "push",
+			Merged:   tipSHA,
+		}.String()
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,

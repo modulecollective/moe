@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // Document is the machine-readable slice of a single document's state.
@@ -115,11 +116,12 @@ type Options struct {
 	// rather than the default `Open run p/r: T`.
 	SubjectFrom string
 
-	// ExtraTrailers, when non-empty, appends additional trailers to
-	// the open commit's message body (one per entry, e.g.
-	// `MoE-Idea: <slug>`). Standard MoE-Run / MoE-Project trailers
-	// are always written first.
-	ExtraTrailers []string
+	// Trailers carries optional MoE-* trailers to attach to the open
+	// commit alongside the always-emitted MoE-Run / MoE-Project. The
+	// caller leaves the Run/Project fields zero — New fills them in
+	// canonical order. Today only MoE-Idea (--from-idea) and
+	// MoE-From-Run (followups harvest) are populated by callers.
+	Trailers trailers.Block
 
 	// Workspace, when non-empty, attaches this run to a named
 	// per-project workspace instead of giving it a fresh per-run
@@ -310,13 +312,10 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	}
 	subject += ": " + title
 
-	var trailers strings.Builder
-	fmt.Fprintf(&trailers, "MoE-Run: %s\nMoE-Project: %s\n", id, projectID)
-	for _, t := range opts.ExtraTrailers {
-		trailers.WriteString(t)
-		trailers.WriteString("\n")
-	}
-	msg := subject + "\n\n" + trailers.String()
+	tr := opts.Trailers
+	tr.Run = id
+	tr.Project = projectID
+	msg := subject + "\n\n" + tr.String()
 	if err := git.Run(root, "commit", "-m", msg); err != nil {
 		return nil, fmt.Errorf("run: git commit: %w", err)
 	}

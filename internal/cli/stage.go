@@ -18,6 +18,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -923,14 +924,14 @@ run is pushed.
 // there's no work to do and no reason to fail the turn.
 func commitSessionStart(root string, md *run.Metadata, docID string) error {
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf(`work: start session for %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: %s
-MoE-Session: %s
-`, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
+	msg := fmt.Sprintf("work: start session for %s\n\n", docID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: docID,
+			Session:  md.Documents[docID].Session,
+		}.String()
 	err := run.StageAndCommit(root, msg, runJSON)
 	if errors.Is(err, run.ErrNothingToCommit) {
 		return nil
@@ -970,14 +971,14 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 		return err
 	}
 
-	msg := fmt.Sprintf(`work: update %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: %s
-MoE-Session: %s
-`, docID, md.ID, md.Project, md.Workflow, docID, md.Documents[docID].Session)
+	msg := fmt.Sprintf("work: update %s\n\n", docID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: docID,
+			Session:  md.Documents[docID].Session,
+		}.String()
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
 	// followups.md is sibling of run.json — stages append to it as
 	// they spot adjacent work to capture. Stage it conditionally so

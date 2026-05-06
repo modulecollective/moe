@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -127,12 +128,12 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	msg := fmt.Sprintf(subject+`
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-`, projectID, runID, runID, projectID, workflow)
+	msg := fmt.Sprintf(subject+"\n\n", projectID, runID) +
+		trailers.Block{
+			Run:      runID,
+			Project:  projectID,
+			Workflow: workflow,
+		}.String()
 	err = withRepoLock(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,

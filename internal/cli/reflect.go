@@ -13,6 +13,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -307,13 +308,13 @@ func commitReflectTurn(workRoot, workflow, projectID, runSlug, wikiRel string) e
 	if !run.HasStagedChanges(workRoot) {
 		return run.ErrNothingToCommit
 	}
-	msg := fmt.Sprintf(`work: reflect pass %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: reflect
-`, runSlug, runSlug, projectID, workflow)
+	msg := fmt.Sprintf("work: reflect pass %s\n\n", runSlug) +
+		trailers.Block{
+			Run:      runSlug,
+			Project:  projectID,
+			Workflow: workflow,
+			Document: "reflect",
+		}.String()
 	return run.StageAndCommit(workRoot, msg, wikiRel)
 }
 

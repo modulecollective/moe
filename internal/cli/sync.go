@@ -18,6 +18,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 func init() {
@@ -474,7 +475,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
 			return nil
 		}
-		ok, err := finalizePushedRun(root, md, run.StatusMerged, "MoE-Merged", mergeSHA, stderr)
+		ok, err := finalizePushedRun(root, md, run.StatusMerged, trailers.Block{Merged: mergeSHA}, stderr)
 		if err != nil {
 			return err
 		}
@@ -482,7 +483,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, git.ShortSHA(mergeSHA))
 		}
 	case "CLOSED":
-		ok, err := finalizePushedRun(root, md, run.StatusClosed, "MoE-Closed", prURL, stderr)
+		ok, err := finalizePushedRun(root, md, run.StatusClosed, trailers.Block{Closed: prURL}, stderr)
 		if err != nil {
 			return err
 		}
@@ -527,7 +528,7 @@ func ghPRState(prURL string) (*prViewState, error) {
 // `pushed`, prints a one-line warning, and returns (false, nil) so
 // reconcile can continue with other runs and the next `moe sync`
 // retries. Returns (true, nil) when the transition committed.
-func finalizePushedRun(root string, md *run.Metadata, status, trailer, value string, stderr io.Writer) (bool, error) {
+func finalizePushedRun(root string, md *run.Metadata, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
 	paths, err := enterTerminal(root, md, status, true)
 	if err != nil {
 		moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", md.Project, md.ID, err)
@@ -539,13 +540,11 @@ func finalizePushedRun(root string, md *run.Metadata, status, trailer, value str
 	if err := releaseRunWorkspace(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: release workspace: %v\n", md.Project, md.ID, err)
 	}
-	msg := fmt.Sprintf(`sync: %s/%s %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Document: push
-%s: %s
-`, md.Project, md.ID, strings.ToLower(status), md.ID, md.Project, trailer, value)
+	extra.Run = md.ID
+	extra.Project = md.Project
+	extra.Document = "push"
+	msg := fmt.Sprintf("sync: %s/%s %s\n\n", md.Project, md.ID, strings.ToLower(status)) +
+		extra.String()
 	if err := run.StageAndCommit(root, msg, paths...); err != nil {
 		return false, fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
 	}

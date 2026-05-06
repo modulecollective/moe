@@ -12,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
@@ -144,7 +145,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		}
 		opts.SeedDocs = map[string]string{stages[0]: seed}
 		opts.SubjectFrom = "idea " + *fromIdea
-		opts.ExtraTrailers = []string{"MoE-Idea: " + *fromIdea}
+		opts.Trailers = trailers.Block{Idea: *fromIdea}
 		// Anchor the run slug to the idea's filename, not its (editable)
 		// H1. run.New will date-suffix on collision.
 		opts.IDBase = *fromIdea
@@ -312,10 +313,10 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, erro
 		return nil, fmt.Errorf("workflow sdlc has no stages to seed from --from-idea")
 	}
 	opts := run.Options{
-		Workflow:      "sdlc",
-		SeedDocs:      map[string]string{stages[0]: seed},
-		SubjectFrom:   "idea " + ideaSlug,
-		ExtraTrailers: []string{"MoE-Idea: " + ideaSlug},
+		Workflow:    "sdlc",
+		SeedDocs:    map[string]string{stages[0]: seed},
+		SubjectFrom: "idea " + ideaSlug,
+		Trailers:    trailers.Block{Idea: ideaSlug},
 		// Anchor the run slug to the idea's filename, not its (editable)
 		// H1. run.New will date-suffix on collision.
 		IDBase: ideaSlug,
@@ -381,13 +382,13 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf(`Promote idea %s/%s → %s/%s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Promoted-To: %s/%s
-`, md.Project, md.ID, dest.Project, dest.ID, md.ID, md.Project, ideaWorkflow, dest.Project, dest.ID)
+	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
+		trailers.Block{
+			Run:        md.ID,
+			Project:    md.Project,
+			Workflow:   ideaWorkflow,
+			PromotedTo: dest.Project + "/" + dest.ID,
+		}.String()
 	return withRepoLock(root, repolock.Options{
 		Purpose: "idea-promote",
 		Run:     md.Project + "/" + md.ID,

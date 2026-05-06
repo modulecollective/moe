@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // followups.md is the run-scoped scratch file harvested at close into
@@ -145,10 +146,10 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 		return nil
 	}
 
-	trailers := []string{fmt.Sprintf("MoE-From-Run: %s/%s", projectID, runID)}
+	openTrailers := trailers.Block{FromRun: projectID + "/" + runID}
 
 	for hi, fu := range todo {
-		md, ierr := createIdea(root, projectID, fu.slug, fu.title, "", trailers)
+		md, ierr := createIdea(root, projectID, fu.slug, fu.title, "", openTrailers)
 		if ierr != nil {
 			// If we already harvested some entries, persist their
 			// `- [x]` rewrites as a standalone bookkeeping commit so
@@ -219,12 +220,12 @@ func commitHarvestProgress(root, projectID, runID, workflow, relPath string, lin
 		return fmt.Errorf("write progress %s: %w", relPath, err)
 	}
 	subject := fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID)
-	msg := fmt.Sprintf(`%s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-`, subject, runID, projectID, workflow)
+	msg := subject + "\n\n" +
+		trailers.Block{
+			Run:      runID,
+			Project:  projectID,
+			Workflow: workflow,
+		}.String()
 	return run.StageAndCommit(root, msg, relPath)
 }
 

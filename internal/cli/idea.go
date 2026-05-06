@@ -14,6 +14,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // `moe idea` is the backlog surface: a shelf of thoughts-worth-capturing
@@ -199,7 +200,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 			Purpose: "idea-new",
 			Run:     projectID,
 		}, func() error {
-			m, err := createIdea(root, projectID, run.Slugify(title), title, string(body), nil)
+			m, err := createIdea(root, projectID, run.Slugify(title), title, string(body), trailers.Block{})
 			if err != nil {
 				return err
 			}
@@ -223,11 +224,11 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 // repolock acquisition (e.g. the harvest loop inside runClose).
 //
 // body is the seed canvas body ("# Title\n" is fine for bare follow-ups;
-// idea new threads the operator's edited body in instead). trailers are
-// extra MoE-* lines appended to the open commit (e.g. MoE-From-Run for
-// harvested ideas). Returns the opened run's metadata so callers can
+// idea new threads the operator's edited body in instead). extra carries
+// optional trailers riding along on the open commit (e.g. MoE-From-Run
+// for harvested ideas). Returns the opened run's metadata so callers can
 // see the resolved slug.
-func createIdea(root, projectID, slugBase, title, body string, trailers []string) (*run.Metadata, error) {
+func createIdea(root, projectID, slugBase, title, body string, extra trailers.Block) (*run.Metadata, error) {
 	if slugBase == "" {
 		return nil, fmt.Errorf("idea: cannot derive slug from title %q", title)
 	}
@@ -237,10 +238,10 @@ func createIdea(root, projectID, slugBase, title, body string, trailers []string
 	candidate := slugBase
 	for n := 2; ; n++ {
 		opts := run.Options{
-			ID:            candidate,
-			Workflow:      ideaWorkflow,
-			SeedDocs:      map[string]string{ideaDocID: body},
-			ExtraTrailers: trailers,
+			ID:       candidate,
+			Workflow: ideaWorkflow,
+			SeedDocs: map[string]string{ideaDocID: body},
+			Trailers: extra,
 			// Callers (idea new, harvest) gate on dirty state above.
 			// The harvester in particular runs while followups.md is
 			// dirty by design — let those modifications stand and
@@ -316,13 +317,13 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	}
 
 	docDir := run.DocDir(projectID, slug, ideaDocID)
-	msg := fmt.Sprintf(`work: update %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: %s
-`, ideaDocID, slug, projectID, ideaWorkflow, ideaDocID)
+	msg := fmt.Sprintf("work: update %s\n\n", ideaDocID) +
+		trailers.Block{
+			Run:      slug,
+			Project:  projectID,
+			Workflow: ideaWorkflow,
+			Document: ideaDocID,
+		}.String()
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,

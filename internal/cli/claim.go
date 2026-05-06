@@ -13,6 +13,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -220,13 +221,13 @@ func commitClaimTurn(workRoot, workflow, projectID, runSlug, wikiRel string) err
 	if !run.HasStagedChanges(workRoot) {
 		return run.ErrNothingToCommit
 	}
-	msg := fmt.Sprintf(`work: claim pass %s
-
-MoE-Run: %s
-MoE-Project: %s
-MoE-Workflow: %s
-MoE-Document: claim
-`, runSlug, runSlug, projectID, workflow)
+	msg := fmt.Sprintf("work: claim pass %s\n\n", runSlug) +
+		trailers.Block{
+			Run:      runSlug,
+			Project:  projectID,
+			Workflow: workflow,
+			Document: "claim",
+		}.String()
 	return run.StageAndCommit(workRoot, msg, wikiRel)
 }
 
