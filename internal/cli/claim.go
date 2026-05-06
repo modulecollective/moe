@@ -240,6 +240,10 @@ func loadRecentRunContext(root, projectID string) (*run.Metadata, string, error)
 	if err != nil {
 		return nil, "", err
 	}
+	acts, err := run.LastActivityMap(root)
+	if err != nil {
+		return nil, "", err
+	}
 	type candidate struct {
 		md   *run.Metadata
 		when time.Time
@@ -254,7 +258,10 @@ func loadRecentRunContext(root, projectID string) (*run.Metadata, string, error)
 		default:
 			continue
 		}
-		when, _ := run.LastActivity(root, md.ID)
+		when := acts[md.ID]
+		if when.IsZero() {
+			continue
+		}
 		cands = append(cands, candidate{md: md, when: when})
 	}
 	if len(cands) == 0 {
