@@ -151,6 +151,68 @@ func TestEventsSinceCheckpointFirstReflectUnbounded(t *testing.T) {
 	}
 }
 
+// TestEventsSinceCheckpointFirstReflectCommitCap covers the soft cap
+// on the first-reflect path: with no checkpoint and a project repo
+// well past the cap, the rendered block must list the newest 500 and
+// finish with an "(N earlier commits omitted)" footer. The 500-row
+// cap and footer wording are part of the surface the agent reads, so
+// pin both the boundary subjects and the footer text here.
+func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// newGitRepo seeds a single empty commit; layer 600 content
+	// commits on top so total non-merge commits = 601 and we cap
+	// 101 of them.
+	projectRepo := newGitRepo(t)
+	const content = 600
+	for i := 0; i < content; i++ {
+		path := filepath.Join(projectRepo, fmt.Sprintf("file-%03d.txt", i))
+		writeFile(t, path, "x\n")
+		gitInRepo(t, projectRepo, "add", filepath.Base(path))
+		gitInRepo(t, projectRepo, "commit", "-m", fmt.Sprintf("commit %03d", i))
+	}
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ProjectRepoPath: projectRepo,
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	got, err := EventsSinceCheckpoint(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Newest commit is in; cap-edge (commit 100, the 500th-newest) is
+	// in; everything older than the cap is out.
+	for _, want := range []string{"commit 599", "commit 100"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in events block:\n%s", want, got)
+		}
+	}
+	for i := 0; i < 100; i++ {
+		bad := fmt.Sprintf("commit %03d", i)
+		if strings.Contains(got, bad) {
+			t.Errorf("commit %q is older than cap and should be omitted:\n%s", bad, got)
+			break
+		}
+	}
+	if !strings.Contains(got, "(101 earlier commits omitted)") {
+		t.Errorf("expected omitted-count footer in events block:\n%s", got)
+	}
+	// Vocabulary regression guard: the old per-category windowing used
+	// "more truncated"; the new footer uses "earlier commits omitted".
+	if strings.Contains(got, "more truncated") {
+		t.Errorf("events block should not use the legacy truncation phrasing:\n%s", got)
+	}
+}
+
 // ReflectPromptSection now carries roadmap conventions and the
 // hygiene-walk framing that used to live in PlanPromptSection /
 // LintPromptSection. Pin those so a future trim doesn't silently

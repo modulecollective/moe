@@ -5,12 +5,23 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// firstReflectCommitCap caps the verbatim commit list rendered into
+// the events block when there's no prior checkpoint SHA. Large
+// projects can have thousands of commits at first reflect; the cap
+// keeps the kickoff prompt bounded. Beyond the cap, an
+// "(N earlier commits omitted)" footer makes the truncation visible
+// to the agent so the seeded history-summary.md can call out that
+// older history is in git, not in this prompt. The SHA..HEAD branch
+// stays uncapped — its window is already bounded by reflect cadence.
+const firstReflectCommitCap = 500
 
 // ReflectPromptSection is the wiki-specific block appended to the
 // system prompt for a closed-schema reflect session. Sibling of
@@ -92,7 +103,7 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 		return "", err
 	}
 
-	commits, err := projectCommitsSince(cfg, cp, ok)
+	commits, omitted, err := projectCommitsSince(cfg, cp, ok)
 	if err != nil {
 		return "", err
 	}
@@ -109,8 +120,9 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 	b.WriteString("## Events since last reflect\n\n")
 	if !ok {
 		b.WriteString("No prior checkpoint — this is the twin's first reflect pass. " +
-			"Listing the full project commit history and every closed run; the " +
-			"agent will seed history-summary.md from this pass.\n\n")
+			"Listing the project commit history and every closed run; on very " +
+			"large projects the commit list is capped — see the footer if any. " +
+			"The agent will seed history-summary.md from this pass.\n\n")
 	}
 
 	if len(commits) > 0 {
@@ -121,6 +133,9 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 		b.WriteString(":\n")
 		for _, c := range commits {
 			fmt.Fprintf(&b, "- %s\n", c)
+		}
+		if omitted > 0 {
+			fmt.Fprintf(&b, "- _(%d earlier commits omitted)_\n", omitted)
 		}
 		b.WriteString("\n")
 	}
@@ -139,28 +154,35 @@ func EventsSinceCheckpoint(cfg Config) (string, error) {
 	return b.String(), nil
 }
 
-func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, error) {
+// projectCommitsSince returns the project-repo commit lines since the
+// reflect checkpoint, plus an omitted-count for the first-reflect cap.
+// The omitted count is always 0 on the SHA..HEAD branch and on the
+// no-cap-fired first-reflect case; it's positive only when the cap
+// fired and we successfully read the total commit count.
+func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, int, error) {
 	if cfg.ProjectRepoPath == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if _, err := os.Stat(cfg.ProjectRepoPath); err != nil {
 		// Best-effort — a missing project repo just means no commits to list.
-		return nil, nil
+		return nil, 0, nil
 	}
+	incremental := hasCheckpoint && cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != ""
 	args := []string{"log", "--no-merges", "--format=%h %s"}
-	if hasCheckpoint && cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != "" {
+	if incremental {
 		args = append(args, fmt.Sprintf("%s..HEAD", *cp.ProjectRepoSHA))
+	} else {
+		// First reflect: read at most cap+1 rows so we can detect
+		// whether the cap fired without paying for a full traversal.
+		args = append(args, fmt.Sprintf("-n%d", firstReflectCommitCap+1))
 	}
-	// First reflect (no checkpoint SHA): unbounded `git log`. The
-	// agent folds the full history into history-summary.md at the end
-	// of the pass, so subsequent reflects only walk the tail.
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cfg.ProjectRepoPath
 	out, err := cmd.Output()
 	if err != nil {
 		// Git can fail if the SHA is unreachable (history rewrite,
 		// shallow clone). Degrade silently rather than block reflect.
-		return nil, nil
+		return nil, 0, nil
 	}
 	var commits []string
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
@@ -169,7 +191,26 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 		}
 		commits = append(commits, line)
 	}
-	return commits, nil
+	if incremental || len(commits) <= firstReflectCommitCap {
+		return commits, 0, nil
+	}
+	total, err := projectCommitTotal(cfg.ProjectRepoPath)
+	if err != nil {
+		// Degrade: render the capped slice with no footer rather than
+		// block reflect on a count failure.
+		return commits[:firstReflectCommitCap], 0, nil
+	}
+	return commits[:firstReflectCommitCap], total - firstReflectCommitCap, nil
+}
+
+func projectCommitTotal(repoPath string) (int, error) {
+	cmd := exec.Command("git", "rev-list", "--count", "--no-merges", "HEAD")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(out)))
 }
 
 // closedRunsSince lists the project's terminal runs (closed, merged,
