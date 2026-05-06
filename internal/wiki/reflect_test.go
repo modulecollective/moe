@@ -45,7 +45,9 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 	}
 
 	// Closed runs: write 10 run.json files under the project's runs/
-	// dir, all with status=closed.
+	// dir, all with status=closed, and one MoE-Run-trailered commit
+	// per run dated after the checkpoint so LastActivityMap surfaces
+	// each as "since reflect."
 	runsRoot := filepath.Join(root, "projects", "p", "runs")
 	const runCount = 10
 	for i := 0; i < runCount; i++ {
@@ -55,13 +57,17 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(map[string]string{
-			"id":     runID,
-			"title":  "title " + runID,
-			"status": "closed",
+			"id":       runID,
+			"project":  "p",
+			"title":    "title " + runID,
+			"status":   "closed",
+			"workflow": "sdlc",
 		})
 		if err := os.WriteFile(filepath.Join(runDir, "run.json"), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
+		commitWithRunTrailer(t, root, "Open run p/"+runID, runID,
+			fmt.Sprintf("2026-04-02T%02d:00:00Z", i%24))
 	}
 
 	cp := Checkpoint{
@@ -175,6 +181,96 @@ func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+// TestEventsSinceCheckpointClosedRunsKeyOnGitHistory pins the design
+// fix: closed-run inclusion is decided by the latest MoE-Run-trailered
+// commit's committer time, not by the run dir's filesystem mtime. Two
+// runs, one committed before the checkpoint and one after; the
+// pre-checkpoint run's dir mtime is bumped to "now" by writing a stray
+// file inside it. The mtime-based predecessor would surface the old
+// run as new; the git-history one excludes it.
+func TestEventsSinceCheckpointClosedRunsKeyOnGitHistory(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runsRoot := filepath.Join(root, "projects", "p", "runs")
+	for _, r := range []struct {
+		id     string
+		commit string
+	}{
+		{id: "old-run", commit: "2026-03-15T10:00:00Z"},   // before checkpoint
+		{id: "fresh-run", commit: "2026-04-15T10:00:00Z"}, // after checkpoint
+	} {
+		runDir := filepath.Join(runsRoot, r.id)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]string{
+			"id":       r.id,
+			"project":  "p",
+			"title":    "title " + r.id,
+			"status":   "closed",
+			"workflow": "sdlc",
+		})
+		if err := os.WriteFile(filepath.Join(runDir, "run.json"), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		commitWithRunTrailer(t, root, "Open run p/"+r.id, r.id, r.commit)
+	}
+	// Bump the old run's dir mtime to "now" by writing a stray file
+	// inside it. The mtime-based code would surface this as new; the
+	// git-history code must not.
+	writeFile(t, filepath.Join(runsRoot, "old-run", "stray.txt"), "touch\n")
+
+	cp := Checkpoint{
+		Version:       CheckpointVersion,
+		LastIngestAt:  "2026-04-01T12:00:00Z",
+		LastIngestRun: "prior-reflect",
+		Project:       "p",
+	}
+	if err := WriteCheckpoint(twinDir, cp); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	got, err := EventsSinceCheckpoint(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "fresh-run") {
+		t.Errorf("expected post-checkpoint run in events block:\n%s", got)
+	}
+	if strings.Contains(got, "old-run") {
+		t.Errorf("pre-checkpoint run should not appear despite bumped dir mtime:\n%s", got)
+	}
+}
+
+// commitWithRunTrailer creates an empty bureaucracy commit carrying a
+// MoE-Run trailer for runID, dated when (RFC3339). The trailer is what
+// run.LastActivityMap keys on, so reflect tests use this to give a run
+// a real activity time without writing files.
+func commitWithRunTrailer(t *testing.T, root, subject, runID, when string) {
+	t.Helper()
+	msg := subject + "\n\nMoE-Run: " + runID + "\n"
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE="+when,
+		"GIT_COMMITTER_DATE="+when,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit %s: %v\n%s", runID, err, out)
 	}
 }
 

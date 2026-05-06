@@ -1,16 +1,15 @@
 package wiki
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // ReflectPromptSection is the wiki-specific block appended to the
@@ -173,69 +172,57 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 	return commits, nil
 }
 
+// closedRunsSince lists the project's terminal runs (closed, merged,
+// or promoted) whose last MoE-Run-trailered commit post-dates the
+// reflect checkpoint. Mirrors cli/dash.go:closedRunsSinceCount —
+// `run.Scan` for metadata and `run.LastActivityMap` for the activity
+// time, both rooted in git history rather than filesystem mtime.
+//
+// On first reflect (no checkpoint) the threshold is zero and every
+// terminal run lands; the agent folds them into history-summary.md
+// at pass-end and subsequent reflects only walk the tail.
 func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, error) {
-	projectsRoot := filepath.Join(cfg.BureaucracyPath, "projects", cfg.Project, "runs")
-	entries, err := os.ReadDir(projectsRoot)
+	root := cfg.BureaucracyPath
+	mds, err := run.Scan(root)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("wiki: read %s: %w", projectsRoot, err)
+		return nil, fmt.Errorf("wiki: scan runs: %w", err)
+	}
+	acts, err := run.LastActivityMap(root)
+	if err != nil {
+		return nil, fmt.Errorf("wiki: last-activity map: %w", err)
 	}
 	var threshold time.Time
 	if hasCheckpoint && cp.LastIngestAt != "" {
-		t, err := time.Parse(time.RFC3339, cp.LastIngestAt)
-		if err == nil {
+		if t, err := time.Parse(time.RFC3339, cp.LastIngestAt); err == nil {
 			threshold = t
 		}
 	}
-
-	type closedRun struct {
-		id    string
-		title string
-		when  time.Time
+	type entry struct {
+		id, title string
+		when      time.Time
 	}
-	var runs []closedRun
-	for _, e := range entries {
-		if !e.IsDir() {
+	var rows []entry
+	for _, md := range mds {
+		if md.Project != cfg.Project {
 			continue
 		}
-		runJSON := filepath.Join(projectsRoot, e.Name(), "run.json")
-		body, err := os.ReadFile(runJSON)
-		if err != nil {
-			continue
-		}
-		var md struct {
-			ID      string `json:"id"`
-			Title   string `json:"title"`
-			Status  string `json:"status"`
-			Created string `json:"created"`
-		}
-		if err := json.Unmarshal(body, &md); err != nil {
-			continue
-		}
-		// "Closed" here means terminal — merged, closed (not pushed),
-		// or promoted. Ideas in flight, in-progress runs, and pushed
-		// runs aren't yet load-bearing for reflect.
 		switch md.Status {
-		case "closed", "merged", "promoted":
+		case run.StatusClosed, run.StatusMerged, run.StatusPromoted:
 		default:
 			continue
 		}
-		// LastFileActivity stand-in: stat the run dir.
-		info, err := os.Stat(filepath.Join(projectsRoot, e.Name()))
-		if err != nil {
+		when := acts[md.ID]
+		if when.IsZero() {
 			continue
 		}
-		when := info.ModTime().UTC()
 		if !threshold.IsZero() && !when.After(threshold) {
 			continue
 		}
-		runs = append(runs, closedRun{id: md.ID, title: md.Title, when: when})
+		rows = append(rows, entry{id: md.ID, title: md.Title, when: when})
 	}
-	sort.Slice(runs, func(i, j int) bool { return runs[i].when.After(runs[j].when) })
-	out := make([]string, 0, len(runs))
-	for _, r := range runs {
+	sort.Slice(rows, func(i, j int) bool { return rows[i].when.After(rows[j].when) })
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
 		title := r.title
 		if title == "" {
 			title = r.id
