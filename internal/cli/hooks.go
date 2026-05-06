@@ -19,6 +19,12 @@ import (
 // only pre-push is wired up.
 type hookEvent string
 
+// hookEventPrePush fires after the built-in rebase-onto-default check
+// and before the actual `git push`. "Pre-push, post-rebase": project
+// scripts see the tree that's about to be pushed, not the pre-rebase
+// tree the operator was editing. That's load-bearing — running gofmt /
+// vet / etc. against the pre-rebase tree is exactly how a concurrent
+// edit to the same surface slips past local hooks and breaks CI.
 const hookEventPrePush hookEvent = "pre-push"
 
 // hookFailure is the dispatcher's "a hook said no" error. Project
@@ -60,10 +66,11 @@ func (e hookEnv) envVars() []string {
 }
 
 // builtinHook is a Go-side gate registered against a hook event.
-// Built-ins run after project scripts. Returning a non-nil error
-// halts the chain; richer error types (e.g. *rebaseConflictError)
-// flow through unchanged so the caller can errors.As on them and
-// drive a custom chain-back.
+// Built-ins run before project scripts so the scripts see the tree
+// the rebase produced. Returning a non-nil error halts the chain;
+// richer error types (e.g. *rebaseConflictError) flow through
+// unchanged so the caller can errors.As on them and drive a custom
+// chain-back.
 type builtinHook struct {
 	Name string
 	Run  func(env hookEnv, stdout, stderr io.Writer) error
@@ -77,20 +84,20 @@ func registerBuiltinHook(event hookEvent, h builtinHook) {
 	builtinHooks[event] = append(builtinHooks[event], h)
 }
 
-// runHooks dispatches the project drop-in directory for event, then
-// the registered built-ins. Returns nil on success, *hookFailure when
-// a project script exits non-zero, or whatever error type a built-in
-// chooses to return. A missing or empty hooks dir is a no-op.
+// runHooks dispatches the registered built-ins for event, then the
+// project drop-in directory. Built-ins run first so project scripts
+// vet the post-rebase tree (the one about to be pushed) instead of
+// the pre-rebase tree the operator was editing — see hookEventPrePush.
+// Returns nil on success, *hookFailure when a project script exits
+// non-zero, or whatever error type a built-in chooses to return. A
+// missing or empty hooks dir is a no-op.
 func runHooks(root string, event hookEvent, env hookEnv, stdout, stderr io.Writer) error {
-	if err := runProjectHookScripts(root, event, env, stdout, stderr); err != nil {
-		return err
-	}
 	for _, b := range builtinHooks[event] {
 		if err := b.Run(env, stdout, stderr); err != nil {
 			return err
 		}
 	}
-	return nil
+	return runProjectHookScripts(root, event, env, stdout, stderr)
 }
 
 // runProjectHookScripts walks projects/<p>/hooks/<event>.d in lex

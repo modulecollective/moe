@@ -557,12 +557,12 @@ func writeHookScript(t *testing.T, root, projectID, event, name, body string) st
 	return path
 }
 
-// TestPushRunsProjectHooksBeforeBuiltins drops a pre-push.d script
+// TestPushProjectHookSeesSandboxAndEnv drops a pre-push.d script
 // that snapshots its CWD-evidence and key MOE_* env vars, then runs
 // push. The canary file confirms the script ran with CWD = sandbox
 // clone (it observes feature.txt, the run-branch's only added file)
 // and the dispatcher exported the documented env contract.
-func TestPushRunsProjectHooksBeforeBuiltins(t *testing.T) {
+func TestPushProjectHookSeesSandboxAndEnv(t *testing.T) {
 	f := newPushFixture(t)
 
 	canary := filepath.Join(t.TempDir(), "canary.txt")
@@ -608,6 +608,58 @@ func TestPushRunsProjectHooksBeforeBuiltins(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "running pre-push hook ") {
 		t.Errorf("stdout missing 'running pre-push hook' notice:\n%s", stdout)
+	}
+}
+
+// TestPushRunsBuiltinsBeforeProjectHooks pins the post-rebase ordering:
+// built-ins fire first, then project scripts. The motivating bug — a
+// concurrent edit to reorderFlags's signature passing local `go vet`
+// against the pre-rebase tree, then breaking CI on the post-rebase one
+// — only stays fixed if scripts vet what's about to be pushed.
+//
+// Both kinds of hook append a tag to the same file; the tag order is
+// the assertion.
+func TestPushRunsBuiltinsBeforeProjectHooks(t *testing.T) {
+	f := newPushFixture(t)
+
+	orderFile := filepath.Join(t.TempDir(), "order.txt")
+
+	prev := builtinHooks[hookEventPrePush]
+	tracker := builtinHook{
+		Name: "test-tracker",
+		Run: func(_ hookEnv, _, _ io.Writer) error {
+			fh, err := os.OpenFile(orderFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
+				return err
+			}
+			defer fh.Close()
+			_, err = fh.WriteString("builtin\n")
+			return err
+		},
+	}
+	// Prepend so the tracker fires before the real rebase built-in. We
+	// only need to record one builtin tag — the assertion is "any
+	// builtin before any script."
+	builtinHooks[hookEventPrePush] = append([]builtinHook{tracker}, prev...)
+	t.Cleanup(func() { builtinHooks[hookEventPrePush] = prev })
+
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-tracker.sh", fmt.Sprintf(`#!/bin/sh
+echo "script" >> %q
+`, orderFile))
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+
+	contents, err := os.ReadFile(orderFile)
+	if err != nil {
+		t.Fatalf("read order file: %v", err)
+	}
+	got := strings.TrimSpace(string(contents))
+	want := "builtin\nscript"
+	if got != want {
+		t.Fatalf("hook order: want %q, got %q", want, got)
 	}
 }
 

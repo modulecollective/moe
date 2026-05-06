@@ -187,9 +187,10 @@ func pushBranch(clonePath, branch, remote string, force bool, stdout, stderr io.
 }
 
 // init registers the rebase-onto-default check as the first pre-push
-// built-in. Project scripts (in pre-push.d/) run before built-ins per
-// the design, so an operator script can refuse the push before the
-// rebase even fires.
+// built-in. Built-ins run before project scripts (in pre-push.d/) so
+// the scripts see the tree the rebase produced — the one about to be
+// pushed. Vetting the pre-rebase tree is how a stale call site against
+// a sibling branch's API change slips past local hooks and breaks CI.
 func init() {
 	registerBuiltinHook(hookEventPrePush, builtinHook{
 		Name: "rebase-onto-default",
