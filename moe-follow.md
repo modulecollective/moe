@@ -44,17 +44,28 @@ multiplexer handles layout; the pager handles redraws.
    only. `kb/research` is the obvious candidate to add — same
    exploratory shape, same "read along while it drafts" use. Punt
    until requested.
-2. **Default pager.** `${MOE_PAGER:-less +F -R}`. `less +F` is the only
-   universally-available follow-mode pager; `-R` passes ANSI through
-   so a pre-rendered file works. Operators who want rendered markdown
-   set `MOE_PAGER='glow -p'` and accept manual reload.
+2. **Default pager.** `${MOE_PAGER:-less +F -R -M}`. `less +F` is the
+   only universally-available follow-mode pager; `-R` passes ANSI
+   through so a pre-rendered file works; `-M` turns on the long
+   prompt so the file path is visible on the status line, which is
+   how the operator knows *which* design they're reading. Operators
+   who want rendered markdown set `MOE_PAGER='glow -p'` and accept
+   manual reload.
+
+   Wart: in `+F` follow mode the very bottom line reads `Waiting for
+   data...`, which can hide the `-M` status line on short terminals.
+   Ctrl-C drops back to normal `less` and the path reappears, and the
+   status redraws whenever new data arrives. Acceptable; the path is
+   always one keystroke away.
 3. **Tie-break when multiple designs are in play.** Reuse `dash`'s
    order: open session beats parked-only; within a tier, most-recent
    activity wins. `--run <id>` to lock.
 4. **Idle screen.** One terse line — `(no design in play · 2 active ·
    last: <project>/<run> awaiting merge)` — then sleep `--interval`
    (default 5s) and re-check. Clear-and-print each tick; no
-   tabwriter, no art. Ctrl-C exits.
+   tabwriter, no art. Ctrl-C exits. (No header needed in the
+   active-design view — `less -M` shows the path. The idle screen is
+   the only thing moe ever prints itself.)
 5. **Name.** `moe follow`. Bikesheddable.
 
 ## Non-goals
