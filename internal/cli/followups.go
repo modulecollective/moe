@@ -198,6 +198,7 @@ func launchEditorOrFail(path string) error {
 	if editor == "" {
 		return fmt.Errorf("no $EDITOR or $VISUAL set; pass --no-edit to skip the editor step")
 	}
+	// $1 (not string interp) keeps paths with spaces/quotes/`;` shell-safe — don't collapse.
 	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

@@ -595,6 +595,7 @@ func launchEditor(path string, stdout, stderr io.Writer) int {
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
 	}
+	// $1 (not string interp) keeps paths with spaces/quotes/`;` shell-safe — don't collapse.
 	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
