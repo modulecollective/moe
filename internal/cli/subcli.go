@@ -35,16 +35,24 @@ type Workflow struct {
 	// walks it to compute the next incomplete stage.
 	stageOrder []string
 	prereqs    map[string][]string
+	// successors is the inverse of prereqs, computed at Register time.
+	// A stage's successor is any stage that names it as a prereq;
+	// stageSatisfied uses this to walk forward (a stage stays "parked"
+	// until something downstream commits a fresher turn). The chain
+	// prompt asks Successor(stage) for the DAG-level "what's next?"
+	// answer, decoupled from Next()'s git-derived satisfaction walk.
+	successors map[string][]string
 }
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
 // Register and then hand the workflow to RegisterWorkflow.
 func NewWorkflow(name, summary string) *Workflow {
 	return &Workflow{
-		Name:     name,
-		Summary:  summary,
-		commands: map[string]*Command{},
-		prereqs:  map[string][]string{},
+		Name:       name,
+		Summary:    summary,
+		commands:   map[string]*Command{},
+		prereqs:    map[string][]string{},
+		successors: map[string][]string{},
 	}
 }
 
@@ -61,6 +69,9 @@ func (w *Workflow) Register(c *Command, prereqs ...string) {
 	w.stageOrder = append(w.stageOrder, c.Name)
 	if len(prereqs) > 0 {
 		w.prereqs[c.Name] = append([]string(nil), prereqs...)
+		for _, p := range prereqs {
+			w.successors[p] = append(w.successors[p], c.Name)
+		}
 	}
 }
 
@@ -88,6 +99,27 @@ func (w *Workflow) Stages() []string {
 // none (or isn't part of this workflow).
 func (w *Workflow) Prereqs(stage string) []string {
 	return w.prereqs[stage]
+}
+
+// Successor returns the registered Command that names stage as a
+// prereq, or nil for unknown stages and stages with no successor (the
+// terminal stage in a linear ladder). Pure DAG lookup — no git
+// involved. The chain prompt uses this to ask "what's next after the
+// stage I just finished?" without going through Next()'s satisfaction
+// walk, which under the new forward-walking rule reports the
+// just-finished stage as parked.
+//
+// Today every workflow's DAG is linear (one successor per stage), so
+// the first registered successor is the right answer; the
+// implementation returns nil if none exist. If a future workflow adds
+// a fan-out, callers will need to choose between successors — surface
+// the design question then rather than inventing one here.
+func (w *Workflow) Successor(stage string) *Command {
+	succs := w.successors[stage]
+	if len(succs) == 0 {
+		return nil
+	}
+	return w.commands[succs[0]]
 }
 
 // Command returns the workflow as a top-level Command — same shape as

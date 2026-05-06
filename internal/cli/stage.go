@@ -299,7 +299,7 @@ func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdo
 	if opts.SkipNextStage {
 		return 0
 	}
-	return promptNextStage(root, md, stdout, stderr)
+	return promptNextStage(root, md, docID, stdout, stderr)
 }
 
 // wikiSessionInputs is everything runWikiSession needs to drive a
@@ -640,19 +640,39 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 // other stages keep the Y-default yes/no prompt. Returns the exit
 // code to bubble up from the current stage: 0 on skip/decline/successful
 // chain, the inner command's exit code if the chained stage fails.
-func promptNextStage(root string, md *run.Metadata, stdout, stderr io.Writer) int {
+//
+// justFinished, when non-empty, names the stage whose session just
+// committed a work turn — typically the docID a runStageSession
+// closure passes through. The chain prompt asks about that stage's
+// successor in the workflow DAG (a pure data lookup), decoupled from
+// Next()'s satisfaction walk: under the forward-walking rule, Next()
+// reports the just-finished stage as still parked, which is the wrong
+// answer for "want to advance?". Empty justFinished falls back to
+// Next() — the right answer for fresh runs (where the workflow's
+// first stage is the next thing to run) and for entry points that
+// don't know which stage just landed (resume hitting the merge gate).
+func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	next, kind, err := wf.Next(root, md)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if kind != NextKindStage || next == nil {
-		return 0
+	var next *Command
+	if justFinished != "" {
+		next = wf.Successor(justFinished)
+		if next == nil {
+			return 0
+		}
+	} else {
+		n, kind, err := wf.Next(root, md)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		if kind != NextKindStage || n == nil {
+			return 0
+		}
+		next = n
 	}
 	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {

@@ -172,10 +172,12 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Decide where to start. Workflow.Next returns the first
-	// unsatisfied stage — design, code, or push. NextKindDone
-	// (everything satisfied, but not terminal) means the run is sitting
-	// at the merge gate already; jump straight to promptNextStage.
+	// Decide where to start. Workflow.Next returns the parked stage
+	// for any in_progress sdlc run — design, code, or push — under
+	// the forward-walking satisfaction rule. NextKindDone is reserved
+	// for terminal statuses and runs whose workflow has no stages,
+	// neither of which can reach this point (resume refuses terminal
+	// above; sdlc has three stages).
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -201,8 +203,14 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	// post-stage [Y/n/o] / [N/m/p] prompt drives the rest of the chain
 	// — same behaviour the operator gets today after a stage exits.
 	if kind != NextKindStage || next == nil {
-		// Nothing to invoke; show the next-stage hint (or merge prompt).
-		return promptNextStage(root, md, stdout, stderr)
+		// Defensive: under the forward-walking satisfaction rule,
+		// Next() returns the parked stage rather than NextKindDone for
+		// any non-terminal in_progress run, and resume already refuses
+		// terminal statuses above. In practice this branch isn't
+		// reachable from a healthy run today; kept as a no-op safety
+		// net so an unforeseen edge case (a bare-metadata run with no
+		// turns at all and a workflow with no stages) doesn't panic.
+		return promptNextStage(root, md, "", stdout, stderr)
 	}
 	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
 }

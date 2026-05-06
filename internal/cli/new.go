@@ -172,7 +172,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	if *oneShot {
 		return runOneShotChain(root, md, "design", stdout, stderr)
 	}
-	return promptNextStage(root, md, stdout, stderr)
+	// Fresh run — no stage has just finished, so promptNextStage falls
+	// back to Next() and offers the workflow's first incomplete stage.
+	return promptNextStage(root, md, "", stdout, stderr)
 }
 
 // oneShotStages is sdlc's headless ladder: design then code. The list
@@ -228,7 +230,17 @@ func runOneShotChain(root string, md *run.Metadata, startStage string, stdout, s
 			return code
 		}
 	}
-	return promptNextStage(root, md, stdout, stderr)
+	// Hand off using the last stage we ran as justFinished so the chain
+	// prompt asks about its successor (push), not whatever Next()
+	// reports — under the forward-walking rule Next() parks at the
+	// just-finished stage. When toRun was empty (resume from a state
+	// where neither one-shot stage applies), we have no anchor; fall
+	// back to Next() so the merge-gate hint still surfaces.
+	justFinished := ""
+	if len(toRun) > 0 {
+		justFinished = toRun[len(toRun)-1].name
+	}
+	return promptNextStage(root, md, justFinished, stdout, stderr)
 }
 
 // runOneShotStage runs one stage of the sdlc one-shot chain. It's a

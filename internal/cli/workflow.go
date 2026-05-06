@@ -19,14 +19,23 @@ const (
 )
 
 // Next reports what the run should do next. A stage is "satisfied"
-// when its most recent work turn is newer than every prereq's most
-// recent work turn. The first unsatisfied stage is returned with
-// NextKindStage. Once every stage is satisfied, Next returns
-// NextKindDone. Terminal statuses (merged, closed) short-circuit to
-// NextKindDone regardless of stage state. StatusPushed does too —
-// there's no next stage for moe to run, even though the run is still
-// "active" in the sense that a human owes the PR a click; dash
-// surfaces that distinction separately.
+// when it has a work-turn AND either has no successors or some
+// successor has a turn newer than its own. The first unsatisfied
+// stage is returned with NextKindStage. Once every stage is satisfied,
+// Next returns NextKindDone. Terminal statuses (merged, closed)
+// short-circuit to NextKindDone regardless of stage state.
+// StatusPushed does too — there's no next stage for moe to run, even
+// though the run is still "active" in the sense that a human owes the
+// PR a click; dash surfaces that distinction separately.
+//
+// The satisfaction rule walks forward (successors) rather than
+// backward (prereqs): a committed turn whose successor has not also
+// committed stays "parked" at that stage. This matches the operator's
+// intuition that declining the post-stage chain prompt should leave
+// the run at the just-finished stage, instead of silently advancing
+// to the next one. Re-opens (a fresh design turn after code) still
+// flip the run back to the affected stage by the same rule, since
+// the stale stage now has a successor whose turn is older.
 func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, error) {
 	switch md.Status {
 	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:
@@ -52,16 +61,30 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (
 	if stageWhen.IsZero() {
 		return false, nil
 	}
-	for _, dep := range w.prereqs[stage] {
-		_, depWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, dep)
+	succs := w.successors[stage]
+	if len(succs) == 0 {
+		return true, nil
+	}
+	for _, succ := range succs {
+		_, succWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, succ)
 		if err != nil {
 			return false, err
 		}
-		if !depWhen.IsZero() && depWhen.After(stageWhen) {
-			return false, nil
+		// Forward progression counts when the successor's turn is at
+		// least as recent as the stage's. Strict After would flake on
+		// same-second commits — the design→code one-shot chain lands
+		// both turns inside one tick of git's second-resolution
+		// committer time, and we want that case satisfied. The old
+		// backward-walking rule had the same precision limit on the
+		// re-open side (a same-second design re-commit didn't
+		// invalidate code), so we're not regressing the re-open
+		// detection — that path requires a strictly later timestamp
+		// either way, which a human-driven re-open always produces.
+		if !succWhen.IsZero() && !succWhen.Before(stageWhen) {
+			return true, nil
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 var workflows = map[string]*Workflow{}
