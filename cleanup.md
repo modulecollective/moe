@@ -29,23 +29,6 @@ Fix: switch every site to `--porcelain=v1 -z` and split on NUL. A
 small `internal/git` helper is the natural home so the parsing
 logic exists once.
 
-### `reorderFlags` silently breaks `--flag value` form
-
-`internal/cli/args.go:14`. Token-by-token classification has no idea
-which flags take values. `moe idea new project --id foo "title"`
-reorders to `--id project "title" foo`, and `flag.Parse` consumes
-`project` as `--id`'s value.
-
-`args_test.go` only covers `--bool` flags and `--flag=value`. The
-codebase relies on the convention that values always use `=`, but
-that's not documented user-facing and `fs.PrintDefaults()` prints
-the space form as if it works.
-
-Options: (a) commit to `=` and emit usage that signals it; (b) hand
-the FlagSet a list of value-taking flag names so reorder can pair
-them; (c) move to a CLI parser. (a) is the lowest-cost fix for an
-stdlib-only project.
-
 ### Three duplicated session-cleanup blocks in `runWikiSession`
 
 `internal/cli/stage.go:296`, `:313`, `:349`. Same
