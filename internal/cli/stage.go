@@ -464,13 +464,14 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		}
 	}
 
-	// Pop the operator's editor tabs for this session — what to reveal
-	// depends on which of the three session shapes the engine is
-	// driving (canvas-primary, wiki-primary closed-schema, code-primary).
-	// revealPathsForSession derives that from spec.ClonePath and
-	// wikiCfg, both already populated above. Best-effort: silent no-op
-	// if `code` isn't on PATH.
-	revealInEditor(revealPathsForSession(workRoot, in, spec.ClonePath, wikiCfg), stderr)
+	// Pop the design canvas tab in the operator's running VS Code window.
+	// design is the one stage where having the doc visible while
+	// iterating is load-bearing; every other stage skips the reveal so
+	// the operator isn't fighting tabs they didn't ask for. Best-effort:
+	// silent no-op if `code` isn't on PATH.
+	if in.DocID == "design" {
+		revealInEditor(filepath.Join(workRoot, run.ContentPath(in.Project, in.RunSlug, in.DocID)), stderr)
+	}
 
 	// Prompt paths point at the session worktree, where Claude's
 	// edits land. When the session closes, those edits rebase +
@@ -1018,67 +1019,31 @@ MoE-Session: %s
 	return run.StageAndCommit(root, msg, allPaths...)
 }
 
-// revealInEditor pops one tab per supplied path in the operator's
+// revealInEditor pops the supplied path as a tab in the operator's
 // running VS Code window via `code -r`. The flag reuses the existing
-// window and reveals each file as a tab; VS Code's native file watcher
-// streams subsequent edits straight in. The signal-derived dispatch in
-// runWikiSession (see revealPathsForSession) picks what to pass: the
-// canvas for canvas-primary shapes, the closed-schema managed docs for
-// twin-style passes, or nothing for code-primary stages.
+// window and reveals the file; VS Code's native file watcher streams
+// subsequent edits straight in. Called from runWikiSession only when
+// the session is driving the design canvas.
 //
 // Best-effort and non-blocking: skip silently if `code` isn't on PATH
 // (the operator may not be a VS Code user; nudging every session would
-// be noise) or if Start fails. The goroutine reaps the child so it
-// doesn't linger as a zombie.
+// be noise), if the path is empty, or if Start fails. The goroutine
+// reaps the child so it doesn't linger as a zombie.
 //
 // Overridable in tests.
-var revealInEditor = func(paths []string, stderr io.Writer) {
-	if len(paths) == 0 {
+var revealInEditor = func(path string, stderr io.Writer) {
+	if path == "" {
 		return
 	}
 	bin, err := exec.LookPath("code")
 	if err != nil {
 		return
 	}
-	for _, p := range paths {
-		cmd := exec.Command(bin, "-r", p)
-		if err := cmd.Start(); err != nil {
-			continue
-		}
-		go func() { _ = cmd.Wait() }()
+	cmd := exec.Command(bin, "-r", path)
+	if err := cmd.Start(); err != nil {
+		return
 	}
-}
-
-// revealPathsForSession picks which files runWikiSession asks
-// revealInEditor to pop, based on the three session shapes the engine
-// supports:
-//
-//   - code-primary (spec.ClonePath != ""): nothing. The canvas stays
-//     empty until the agent drafts the PR body late in the session, and
-//     the sandbox clone is a separate worktree the operator opens
-//     directly. Surfacing the empty canvas at session start was a
-//     stale tab the operator had to close.
-//   - wiki-primary closed-schema (wikiCfg with ManagedDocs): one tab
-//     per managed doc, in declared order. Twin reflect / claim walk
-//     these five; the run's own canvas is a synthetic stub the agent
-//     never edits, so popping it instead is the "fake reflect.md" the
-//     operator kept seeing.
-//   - everything else (canvas-primary, plus wiki-primary open-schema):
-//     the canvas. kb summarize / kb lint fall through here because
-//     their content dir holds an unbounded set of topic docs;
-//     enumerating them is out of scope for this pass.
-func revealPathsForSession(workRoot string, in wikiSessionInputs, clonePath string, wikiCfg *wiki.Config) []string {
-	if clonePath != "" {
-		return nil
-	}
-	if wikiCfg != nil && len(wikiCfg.ManagedDocs) > 0 {
-		paths := make([]string, 0, len(wikiCfg.ManagedDocs))
-		for _, d := range wikiCfg.ManagedDocs {
-			paths = append(paths, filepath.Join(wikiCfg.ContentDir, d.Filename))
-		}
-		return paths
-	}
-	return []string{filepath.Join(workRoot, run.ContentPath(in.Project, in.RunSlug, in.DocID))}
+	go func() { _ = cmd.Wait() }()
 }
 
 // sessionDocCwd is the cwd document-only stages hand to claude — a

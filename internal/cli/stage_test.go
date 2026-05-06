@@ -757,20 +757,21 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	}
 }
 
-// TestRunWikiSessionRevealsCanvasUnderWorktree pins the contract this
-// run was opened against: post-worktree, the canvas lives at a per-
-// session UUID-bearing path under .moe/worktrees/, gitignored and
-// invisible to VS Code's explorer. For canvas-primary shapes (sdlc
-// design, kb research, idea capture/refine) runWikiSession must hand
-// that absolute path to revealInEditor so `code -r` can pop the tab.
-// Drives runWikiSession through to a deliberate BuildSpec failure so
-// the test doesn't depend on a real claude binary.
-func TestRunWikiSessionRevealsCanvasUnderWorktree(t *testing.T) {
+// TestRunWikiSessionRevealsDesignCanvas pins the one place runWikiSession
+// pops a VS Code tab: when DocID is "design", reveal the canvas at its
+// per-session UUID-bearing path under .moe/worktrees/. Drives
+// runWikiSession through to a deliberate BuildPrompt failure so the test
+// doesn't depend on a real claude binary.
+func TestRunWikiSessionRevealsDesignCanvas(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	var got []string
+	var got string
+	var called bool
 	prev := revealInEditor
-	revealInEditor = func(paths []string, _ io.Writer) { got = paths }
+	revealInEditor = func(path string, _ io.Writer) {
+		called = true
+		got = path
+	}
 	t.Cleanup(func() { revealInEditor = prev })
 
 	in := wikiSessionInputs{
@@ -779,139 +780,7 @@ func TestRunWikiSessionRevealsCanvasUnderWorktree(t *testing.T) {
 		DocID:       "design",
 		LockPurpose: "stage",
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			// Reveal fires after BuildSpec succeeds (it needs
-			// spec.ClonePath to classify the session shape). Bail at
-			// BuildPrompt so the test never reaches the executor.
 			return wikiTurnSpec{
-				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					return "", errors.New("stop after reveal")
-				},
-			}, nil
-		},
-	}
-
-	var stdout, stderr bytes.Buffer
-	_ = runWikiSession(root, in, &stdout, &stderr)
-
-	if len(got) != 1 {
-		t.Fatalf("revealInEditor got %d paths, want 1: %v", len(got), got)
-	}
-	want := run.ContentPath("moe", "reveal-on-open", "design")
-	if !strings.HasSuffix(got[0], string(filepath.Separator)+want) {
-		t.Errorf("revealed path = %q, want suffix %q", got[0], want)
-	}
-	if !filepath.IsAbs(got[0]) {
-		t.Errorf("revealed path = %q is not absolute", got[0])
-	}
-	// The whole point of routing through the worktree is that the path
-	// is per-session — under .moe/worktrees/, not the canonical root.
-	// Use Contains rather than HasPrefix because macOS resolves /tmp
-	// to /private/tmp during worktree creation, so the literal root
-	// prefix does not survive.
-	worktreesFragment := string(filepath.Separator) + filepath.Join(".moe", "worktrees") + string(filepath.Separator)
-	if !strings.Contains(got[0], worktreesFragment) {
-		t.Errorf("revealed path = %q should sit under .moe/worktrees/", got[0])
-	}
-}
-
-// TestRunWikiSessionRevealsManagedDocsForClosedSchema pins the wiki-
-// primary closed-schema branch: when wikiCfg has ManagedDocs (twin
-// reflect / claim), runWikiSession must reveal one tab per managed
-// doc, in declared order, instead of the synthetic run canvas the
-// agent never edits. That canvas is the "fake reflect.md" tab the
-// operator was seeing before this fix. Bails before the executor runs.
-func TestRunWikiSessionRevealsManagedDocsForClosedSchema(t *testing.T) {
-	root := newTestBureaucracy(t)
-
-	var got []string
-	prev := revealInEditor
-	revealInEditor = func(paths []string, _ io.Writer) { got = paths }
-	t.Cleanup(func() { revealInEditor = prev })
-
-	managedDocs := []wiki.ManagedDoc{
-		{Filename: "vision.md", Title: "Vision"},
-		{Filename: "architecture.md", Title: "Architecture"},
-		{Filename: "patterns.md", Title: "Patterns"},
-	}
-	contentDir := filepath.Join(root, "projects", "moe", "twin")
-
-	in := wikiSessionInputs{
-		Project:     "moe",
-		RunSlug:     "reveal-managed",
-		DocID:       "reflect",
-		LockPurpose: "stage",
-		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			return &wiki.Config{
-				Name:            "twin",
-				Mode:            wiki.Closed,
-				ContentDir:      contentDir,
-				BureaucracyPath: canonicalRoot,
-				ManagedDocs:     managedDocs,
-			}, nil
-		},
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			return wikiTurnSpec{
-				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					return "", errors.New("stop after reveal")
-				},
-			}, nil
-		},
-	}
-
-	var stdout, stderr bytes.Buffer
-	_ = runWikiSession(root, in, &stdout, &stderr)
-
-	if len(got) != len(managedDocs) {
-		t.Fatalf("revealInEditor got %d paths, want %d: %v", len(got), len(managedDocs), got)
-	}
-	// ContentDir gets rewritten to the session worktree; rather than
-	// re-deriving the worktree path, just check the suffix per doc.
-	for i, d := range managedDocs {
-		wantSuffix := string(filepath.Separator) + filepath.Join("twin", d.Filename)
-		if !strings.HasSuffix(got[i], wantSuffix) {
-			t.Errorf("path %d = %q, want suffix %q", i, got[i], wantSuffix)
-		}
-		if !filepath.IsAbs(got[i]) {
-			t.Errorf("path %d = %q is not absolute", i, got[i])
-		}
-	}
-	// Synthetic run canvas (documents/<run>/reflect/content.md) must
-	// NOT appear — that was the "fake reflect.md" the fix removes.
-	canvasSuffix := string(filepath.Separator) + run.ContentPath("moe", "reveal-managed", "reflect")
-	for _, p := range got {
-		if strings.HasSuffix(p, canvasSuffix) {
-			t.Errorf("revealed paths include the synthetic run canvas %q; closed-schema should reveal managed docs only", p)
-		}
-	}
-}
-
-// TestRunWikiSessionRevealsNothingForCodePrimary pins the code-primary
-// branch: when spec.ClonePath is non-empty (sdlc code), the canvas
-// sits empty until late in the session, so revealInEditor receives an
-// empty list and no tab pops. The test bails before the executor.
-func TestRunWikiSessionRevealsNothingForCodePrimary(t *testing.T) {
-	root := newTestBureaucracy(t)
-
-	var called bool
-	var got []string
-	prev := revealInEditor
-	revealInEditor = func(paths []string, _ io.Writer) {
-		called = true
-		got = paths
-	}
-	t.Cleanup(func() { revealInEditor = prev })
-
-	in := wikiSessionInputs{
-		Project:     "moe",
-		RunSlug:     "reveal-code",
-		DocID:       "code",
-		LockPurpose: "stage",
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			// Non-empty ClonePath is what classifies the session as
-			// code-primary. Reveal fires after BuildSpec; BuildPrompt
-			// bails so the test never reaches the executor.
-			return wikiTurnSpec{
-				ClonePath: filepath.Join(t.TempDir(), "clone"),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					return "", errors.New("stop after reveal")
 				},
@@ -923,10 +792,58 @@ func TestRunWikiSessionRevealsNothingForCodePrimary(t *testing.T) {
 	_ = runWikiSession(root, in, &stdout, &stderr)
 
 	if !called {
-		t.Fatal("revealInEditor was not invoked; expected an explicit empty-paths call")
+		t.Fatal("revealInEditor was not invoked for a design session")
 	}
-	if len(got) != 0 {
-		t.Errorf("code-primary should reveal no paths, got %v", got)
+	want := run.ContentPath("moe", "reveal-on-open", "design")
+	if !strings.HasSuffix(got, string(filepath.Separator)+want) {
+		t.Errorf("revealed path = %q, want suffix %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("revealed path = %q is not absolute", got)
+	}
+	// The whole point of routing through the worktree is that the path
+	// is per-session — under .moe/worktrees/, not the canonical root.
+	// Use Contains rather than HasPrefix because macOS resolves /tmp
+	// to /private/tmp during worktree creation, so the literal root
+	// prefix does not survive.
+	worktreesFragment := string(filepath.Separator) + filepath.Join(".moe", "worktrees") + string(filepath.Separator)
+	if !strings.Contains(got, worktreesFragment) {
+		t.Errorf("revealed path = %q should sit under .moe/worktrees/", got)
+	}
+}
+
+// TestRunWikiSessionDoesNotRevealForNonDesign is the negative control
+// for the design-only gate: every other stage (code, kb research /
+// summarize / lint, twin reflect / claim, idea, meta-moe report) must
+// skip the reveal entirely so the operator isn't fighting tabs they
+// didn't ask for. Probes with docID "research" as a representative.
+func TestRunWikiSessionDoesNotRevealForNonDesign(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	var called bool
+	prev := revealInEditor
+	revealInEditor = func(path string, _ io.Writer) { called = true }
+	t.Cleanup(func() { revealInEditor = prev })
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "no-reveal",
+		DocID:       "research",
+		LockPurpose: "stage",
+		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			return wikiTurnSpec{
+				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+					return "", errors.New("stop after reveal check")
+				},
+			}, nil
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	_ = runWikiSession(root, in, &stdout, &stderr)
+
+	if called {
+		t.Error("revealInEditor was invoked for a non-design doc; gate did not fire")
 	}
 }
 
@@ -940,23 +857,22 @@ func TestRevealInEditorMissingBinaryIsSilentNoOp(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	var stderr bytes.Buffer
-	revealInEditor([]string{filepath.Join(t.TempDir(), "content.md")}, &stderr)
+	revealInEditor(filepath.Join(t.TempDir(), "content.md"), &stderr)
 
 	if stderr.Len() != 0 {
 		t.Errorf("revealInEditor wrote to stderr when `code` is absent: %q", stderr.String())
 	}
 }
 
-// TestRevealInEditorEmptyPathsIsSilentNoOp pins the code-primary
-// guard: an empty paths slice must short-circuit before exec.LookPath
-// runs, so the helper does no work and writes nothing.
-func TestRevealInEditorEmptyPathsIsSilentNoOp(t *testing.T) {
+// TestRevealInEditorEmptyPathIsSilentNoOp pins the empty-string guard:
+// an empty path must short-circuit before exec.LookPath runs, so the
+// helper does no work and writes nothing.
+func TestRevealInEditorEmptyPathIsSilentNoOp(t *testing.T) {
 	var stderr bytes.Buffer
-	revealInEditor(nil, &stderr)
-	revealInEditor([]string{}, &stderr)
+	revealInEditor("", &stderr)
 
 	if stderr.Len() != 0 {
-		t.Errorf("revealInEditor wrote to stderr on empty paths: %q", stderr.String())
+		t.Errorf("revealInEditor wrote to stderr on empty path: %q", stderr.String())
 	}
 }
 
