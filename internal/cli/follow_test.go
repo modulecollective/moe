@@ -3,11 +3,11 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -18,48 +18,45 @@ func TestPickFollowTargetEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	path, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected no candidate, got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected no candidate, got %+v", target)
 	}
 	if sum.activeCount != 0 || sum.last != nil {
 		t.Fatalf("expected empty summary, got %+v", sum)
 	}
 }
 
-// TestPickFollowTargetParkedAtDesignNotACandidate: a fresh sdlc run is
-// parked at design under the parking rule, but with no open session on
-// the design doc it is *not* a follow auto-pick candidate. Parked-only
-// runs are work-to-do, not work-being-done — `dash` is the surface for
-// those. Auto-pick returns no path; the operator sees the idle screen.
-func TestPickFollowTargetParkedAtDesignNotACandidate(t *testing.T) {
+// TestPickFollowTargetParkedNotACandidate: a fresh sdlc run is parked
+// at design under the parking rule, but with no open stage session it
+// is *not* a follow auto-pick candidate. Parked-only runs are work-to-
+// do, not work-being-done — `dash` is the surface for those. Auto-pick
+// returns no path; the operator sees the idle screen.
+func TestPickFollowTargetParkedNotACandidate(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
-	path, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected idle (parked-only is not a candidate), got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected idle (parked-only is not a candidate), got %+v", target)
 	}
 	if sum.activeCount != 1 {
 		t.Fatalf("expected the parked run to count as active, got %d", sum.activeCount)
 	}
 }
 
-// TestPickFollowTargetLiveDesignSession: a run with an open session on
-// its design doc is the auto-pick candidate. Liveness is the only
-// signal that surfaces a run, and the resolved path must point into
-// the session's worktree (where the agent writes), not into root
-// (where main holds the seeded stub until rebase). The suffix check
-// alone matches both checkouts — the prefix check is what catches the
-// "old doc" regression.
+// TestPickFollowTargetLiveDesignSession: a run with an open design
+// session resolves to (worktree, "main"). Bureaucracy worktree is
+// where the agent's edits live until the session rebases onto main at
+// close.
 func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -70,69 +67,82 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
-	seedWorktreeCanvas(t, sess, "tele", "fix-it", "design")
 
-	path, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if !strings.HasSuffix(path, "tele/runs/fix-it/documents/design/content.md") {
-		t.Fatalf("unexpected path %q", path)
+	if target.Dir != sess.WorktreePath {
+		t.Fatalf("dir = %q, want session worktree %q", target.Dir, sess.WorktreePath)
 	}
-	if !strings.HasPrefix(path, sess.WorktreePath+string(filepath.Separator)) {
-		t.Fatalf("path %q must resolve under session worktree %q, not root %q",
-			path, sess.WorktreePath, root)
+	if target.Base != "main" {
+		t.Fatalf("base = %q, want main", target.Base)
 	}
 }
 
-// TestPickFollowTargetLiveSessionWithMissingCanvasIdles: a run with an
-// open design session whose worktree canvas hasn't been written yet
-// must not surface — auto-pick stats the resolved path and treats a
-// missing file as not-a-candidate. Without this, a stale or freshly-
-// opened session yields instant-pager-error → countdown loop the
-// operator can only escape by timing a Ctrl-C through the gap.
-func TestPickFollowTargetLiveSessionWithMissingCanvasIdles(t *testing.T) {
+// TestPickFollowTargetLiveCodeSession: a run with an open code session
+// resolves to (sandbox dir, project default branch). Code sessions
+// edit files inside the sandbox clone, not the bureaucracy worktree —
+// the bureaucracy worktree's only artifact during code is the canvas
+// summary written near the end, which the merge-decision prompt
+// surfaces separately.
+func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	sess, err := session.Open(root, "tele", "fix-it", "design")
+	writeProjectJSONWithDefaults(t, root, "tele", "develop")
+	// session.Open opens a code session worktree under bureaucracy;
+	// the sandbox clone itself is created by attachRunWorkspace at
+	// stage time, but pickFollowTarget only stat's the dir, so
+	// faking the dir here is enough.
+	sess, err := session.Open(root, "tele", "fix-it", "code")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+	sandboxDir := sandbox.Path(root, "tele", "fix-it")
+	if err := os.MkdirAll(sandboxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	target, _, err := pickFollowTarget(root, "")
+	if err != nil {
+		t.Fatalf("pickFollowTarget: %v", err)
+	}
+	if target.Dir != sandboxDir {
+		t.Fatalf("dir = %q, want sandbox %q", target.Dir, sandboxDir)
+	}
+	if target.Base != "develop" {
+		t.Fatalf("base = %q, want project default branch %q", target.Base, "develop")
+	}
+}
+
+// TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles: an open code
+// session whose sandbox clone hasn't materialised yet must idle rather
+// than hand hunk a non-existent cwd. Stat-skip is defense-in-depth: in
+// production the sandbox always exists by the time the agent is
+// committing, but a botched code-stage open could leave a session
+// without a clone.
+func TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	writeProjectJSONWithDefaults(t, root, "tele", "main")
+	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
-	// Deliberately do NOT seed a canvas in the worktree. The session
-	// is live; the file is not. Auto-pick must fall through to idle.
-	path, _, err := pickFollowTarget(root, "")
+	// No sandbox dir.
+	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected idle (canvas missing in worktree), got %q", path)
-	}
-}
-
-// TestPickFollowTargetIgnoresParkedAtCode: a run parked at code shouldn't
-// surface as a follow candidate — code stages are deliberately excluded
-// from `moe follow`. Under the forward-walking parking rule a run is
-// only parked at code once both design and code work turns are in,
-// with code's no older than design's.
-func TestPickFollowTargetIgnoresParkedAtCode(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
-
-	path, _, err := pickFollowTarget(root, "")
-	if err != nil {
-		t.Fatalf("pickFollowTarget: %v", err)
-	}
-	if path != "" {
-		t.Fatalf("expected no candidate (parked at code), got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected idle (sandbox missing), got %+v", target)
 	}
 }
 
@@ -149,21 +159,20 @@ func TestPickFollowTargetSessionOnDesignBeatsParkedElsewhere(t *testing.T) {
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
-	// Parked at code now; open a session on the design doc to flip
-	// the pick back.
+	// Parked at code; open a design session — design's worktree wins
+	// over the parked-at-code state.
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
-	seedWorktreeCanvas(t, sess, "tele", "fix-it", "design")
 
-	path, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if !strings.HasSuffix(path, "tele/runs/fix-it/documents/design/content.md") {
-		t.Fatalf("expected design path, got %q", path)
+	if target.Dir != sess.WorktreePath {
+		t.Fatalf("dir = %q, want design worktree %q", target.Dir, sess.WorktreePath)
 	}
 }
 
@@ -179,12 +188,11 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	commitWorkTurnAt(t, root, "tele", "alpha", "sdlc", "design", t0)
-	sess, err := session.Open(root, "tele", "alpha", "design")
+	sessA, err := session.Open(root, "tele", "alpha", "design")
 	if err != nil {
-		t.Fatalf("session.Open: %v", err)
+		t.Fatalf("session.Open alpha: %v", err)
 	}
-	t.Cleanup(func() { _ = session.Abandon(sess) })
-	seedWorktreeCanvas(t, sess, "tele", "alpha", "design")
+	t.Cleanup(func() { _ = session.Abandon(sessA) })
 
 	// Parked-only: fresh run, more recent activity than alpha's design
 	// commit but no open session — must not surface.
@@ -192,12 +200,12 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(2*time.Hour))
 
-	path, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if !strings.Contains(path, "/runs/alpha/") {
-		t.Fatalf("expected alpha (live) to win, got %q", path)
+	if target.Dir != sessA.WorktreePath {
+		t.Fatalf("dir = %q, want alpha worktree %q", target.Dir, sessA.WorktreePath)
 	}
 }
 
@@ -223,27 +231,25 @@ func TestPickFollowTargetMostRecentLiveWins(t *testing.T) {
 		t.Fatalf("session.Open alpha: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessA) })
-	seedWorktreeCanvas(t, sessA, "tele", "alpha", "design")
 	sessB, err := session.Open(root, "tele", "beta", "design")
 	if err != nil {
 		t.Fatalf("session.Open beta: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessB) })
-	seedWorktreeCanvas(t, sessB, "tele", "beta", "design")
 
-	path, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if !strings.Contains(path, "/runs/beta/") {
-		t.Fatalf("expected beta (more recent live) to win, got %q", path)
+	if target.Dir != sessB.WorktreePath {
+		t.Fatalf("dir = %q, want beta worktree %q", target.Dir, sessB.WorktreePath)
 	}
 }
 
 // TestPickFollowTargetRunFilterPinsSpecificRun: --run locks to the
 // named run, even when another run would otherwise outrank it under
-// the tier rules. Pin behaviour is the design's stated escape hatch
-// for "I know which design I want to watch."
+// recency. Pin behaviour is the design's stated escape hatch for
+// "I know which run I want to watch."
 func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -251,77 +257,47 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 	seedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	// Make alpha the natural winner under tier rules…
+	// alpha is the natural recency winner …
+	sessA, err := session.Open(root, "tele", "alpha", "design")
+	if err != nil {
+		t.Fatalf("session.Open alpha: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessA) })
 	commitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele",
 		t0.Add(time.Hour))
-	// …but pin to beta. Seed a content.md so the os.Stat check passes;
-	// the pin is for an existing-on-disk canvas.
-	writeContent(t, root, "tele", "beta", "design", "# beta design\n")
+	// … but pin to beta. Beta needs an open session for the pin to
+	// land — pin overrides recency, not liveness.
+	sessB, err := session.Open(root, "tele", "beta", "design")
+	if err != nil {
+		t.Fatalf("session.Open beta: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessB) })
 
-	path, _, err := pickFollowTarget(root, "beta")
+	target, _, err := pickFollowTarget(root, "beta")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if !strings.Contains(path, "/runs/beta/") {
-		t.Fatalf("expected pinned beta, got %q", path)
+	if target.Dir != sessB.WorktreePath {
+		t.Fatalf("dir = %q, want beta worktree %q", target.Dir, sessB.WorktreePath)
 	}
 }
 
-// TestPickFollowTargetRunFilterWithLiveSessionResolvesWorktree: pinning
-// to a run with an open design session resolves the canvas under the
-// session worktree, not under root. The pin overrides the liveness
-// gate but not *which* checkout holds the live bytes — main has the
-// pre-session stub, the worktree has whatever the agent has written.
-func TestPickFollowTargetRunFilterWithLiveSessionResolvesWorktree(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
-	sess, err := session.Open(root, "tele", "alpha", "design")
-	if err != nil {
-		t.Fatalf("session.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Abandon(sess) })
-
-	// Write a canvas only inside the worktree so the os.Stat existence
-	// check fails if the resolver still consults root. The write is
-	// deliberately not committed: agents typically pause for review
-	// between turns, and follow has to render the dirty working tree.
-	wtCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "alpha", "design"))
-	if err := os.MkdirAll(filepath.Dir(wtCanvas), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(wtCanvas, []byte("# live in worktree\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	path, _, err := pickFollowTarget(root, "alpha")
-	if err != nil {
-		t.Fatalf("pickFollowTarget: %v", err)
-	}
-	if !strings.HasPrefix(path, sess.WorktreePath+string(filepath.Separator)) {
-		t.Fatalf("path %q must resolve under session worktree %q, not root %q",
-			path, sess.WorktreePath, root)
-	}
-}
-
-// TestPickFollowTargetRunFilterMissingCanvasIdles: pinning to a run
-// whose design canvas isn't on disk yet falls through to the idle
-// screen — follow keeps polling so the operator can pin pre-emptively
-// and have the pager spawn the moment the canvas materialises.
-func TestPickFollowTargetRunFilterMissingCanvasIdles(t *testing.T) {
+// TestPickFollowTargetRunFilterWithoutLiveSessionIdles: pinning to a
+// run with no open session falls through to the idle screen — pin
+// overrides recency but not liveness, so the operator can pin pre-
+// emptively and have hunk spawn the moment a session opens.
+func TestPickFollowTargetRunFilterWithoutLiveSessionIdles(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 
-	// No content.md was ever written for alpha's design doc.
-	path, _, err := pickFollowTarget(root, "alpha")
+	target, _, err := pickFollowTarget(root, "alpha")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected idle (no canvas yet), got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected idle (no live session), got %+v", target)
 	}
 }
 
@@ -337,12 +313,12 @@ func TestPickFollowTargetSkipsTerminalAndPushed(t *testing.T) {
 	seedRun(t, root, "tele", "merged-one", "sdlc", run.StatusMerged)
 	seedRun(t, root, "tele", "shipped", "sdlc", run.StatusPushed)
 
-	path, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected no candidate, got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected no candidate, got %+v", target)
 	}
 	if sum.activeCount != 1 {
 		t.Fatalf("expected 1 active (the pushed run), got %d", sum.activeCount)
@@ -353,23 +329,37 @@ func TestPickFollowTargetSkipsTerminalAndPushed(t *testing.T) {
 }
 
 // TestPickFollowTargetIdeaRunsExcluded: idea runs (workflow=idea) are
-// backlog, not active. They neither surface as design candidates nor
-// inflate the activeCount.
+// backlog, not active. They neither surface as candidates nor inflate
+// the activeCount.
 func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "captured", "idea", run.StatusInProgress)
 
-	path, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
-	if path != "" {
-		t.Fatalf("expected no candidate from idea workflow, got %q", path)
+	if target.Dir != "" {
+		t.Fatalf("expected no candidate from idea workflow, got %+v", target)
 	}
 	if sum.activeCount != 0 {
 		t.Fatalf("expected idea runs to skip activeCount, got %d", sum.activeCount)
+	}
+}
+
+// TestStageRankPrefersCodeOverDesign pins the per-run
+// session-disambiguation rule. A run normally has at most one open
+// session at a time, but if a botched close leaves an orphan, code
+// should win over design (closer to the run's likely live workspace),
+// and both should win over an arbitrary other doc.
+func TestStageRankPrefersCodeOverDesign(t *testing.T) {
+	if stageRank("code") >= stageRank("design") {
+		t.Errorf("code rank %d should be < design rank %d", stageRank("code"), stageRank("design"))
+	}
+	if stageRank("design") >= stageRank("kb") {
+		t.Errorf("design rank %d should be < other-stage rank %d", stageRank("design"), stageRank("kb"))
 	}
 }
 
@@ -378,7 +368,7 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 // without a phantom pointer.
 func TestIdleLineEmpty(t *testing.T) {
 	got := idleLine(followSummary{})
-	want := "(no design in play · 0 active)"
+	want := "(no run in play · 0 active)"
 	if got != want {
 		t.Fatalf("idleLine(): got %q want %q", got, want)
 	}
@@ -392,7 +382,7 @@ func TestIdleLineWithLast(t *testing.T) {
 		activeCount: 2,
 		last:        &followLast{project: "tele", run: "fix-it", state: "awaiting merge"},
 	})
-	want := "(no design in play · 2 active · last: tele/fix-it awaiting merge)"
+	want := "(no run in play · 2 active · last: tele/fix-it awaiting merge)"
 	if got != want {
 		t.Fatalf("idleLine(): got %q want %q", got, want)
 	}
@@ -407,216 +397,19 @@ func TestFollowRegistered(t *testing.T) {
 	}
 }
 
-// seedWorktreeCanvas writes a tiny content.md inside a session's
-// worktree so the auto-pick Stat-skip lets the candidate through. The
-// production code treats a missing on-disk canvas as "not a candidate
-// yet"; tests that want a live session to surface need to seed the
-// file the agent would have written.
-func seedWorktreeCanvas(t *testing.T, sess *session.Session, projectID, runID, docID string) {
+// writeProjectJSONWithDefaults rewrites the minimal seedRun project
+// stub with the fields project.Load requires (Remote non-empty) plus
+// a chosen default branch. The code-stage routing reads
+// DefaultBranch off project.json, so tests that exercise that path
+// need a populated record.
+func writeProjectJSONWithDefaults(t *testing.T, root, projectID, defaultBranch string) {
 	t.Helper()
-	p := filepath.Join(sess.WorktreePath, run.ContentPath(projectID, runID, docID))
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	body := `{"id":"` + projectID + `","status":"incubating",` +
+		`"submodule":"projects/` + projectID + `/src",` +
+		`"remote":"https://example.invalid/` + projectID + `.git",` +
+		`"default_branch":"` + defaultBranch + `","created":"2026-04-01"}`
+	path := filepath.Join(root, "projects", projectID, "project.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte("# "+runID+" "+docID+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// withFastFollowWatch shrinks the watcher's poll/debounce constants for
-// the duration of a test. Production values (250ms / 3s) would make
-// each watcher case multi-second; the test cases only care about the
-// *shape* of the debounce, not its exact wall-clock duration. Returns
-// a restore closure so each test undoes its own override even when run
-// under -count or -race.
-func withFastFollowWatch(t *testing.T, poll, debounce time.Duration) {
-	t.Helper()
-	oldPoll, oldDebounce := followWatchPoll, followWatchDebounce
-	followWatchPoll, followWatchDebounce = poll, debounce
-	t.Cleanup(func() {
-		followWatchPoll, followWatchDebounce = oldPoll, oldDebounce
-	})
-}
-
-// TestWatchCanvasFiresAfterChange is the basic happy path: a single
-// rewrite trips the watcher, and the channel closes within roughly the
-// debounce window. The slack is generous because filesystem mtime
-// granularity plus poll cadence can push the firing tick out by a
-// quantum or two — what we care about is "fires *eventually*", not
-// hitting the deadline to the millisecond.
-func TestWatchCanvasFiresAfterChange(t *testing.T) {
-	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "canvas.md")
-	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stop := make(chan struct{})
-	defer close(stop)
-	fired := watchCanvas(path, stop)
-
-	// Wait one poll for the watcher to capture its baseline mtime/size,
-	// then rewrite the canvas. Without the brief settle the rewrite
-	// could land before the watcher's first stat and be silently
-	// adopted as the baseline, yielding a flaky non-fire.
-	time.Sleep(15 * time.Millisecond)
-	if err := os.WriteFile(path, []byte("updated content\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-fired:
-	case <-time.After(time.Second):
-		t.Fatal("watchCanvas did not fire after canvas rewrite")
-	}
-}
-
-// TestWatchCanvasDebouncesBurstWrites pins the load-bearing debounce
-// behaviour: a burst of rewrites inside the debounce window collapses
-// to exactly one fire, not N. Without the debounce, claude's typical
-// write→re-read→revise→write cadence would respawn the pager several
-// times per turn.
-//
-// The test writes three times, each spaced well inside the debounce
-// window, then waits past the window and asserts the watcher fired
-// exactly once.
-func TestWatchCanvasDebouncesBurstWrites(t *testing.T) {
-	withFastFollowWatch(t, 5*time.Millisecond, 80*time.Millisecond)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "canvas.md")
-	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stop := make(chan struct{})
-	defer close(stop)
-	fired := watchCanvas(path, stop)
-
-	// Let the baseline land, then write three times at 20ms spacing —
-	// each interval is well under the 80ms debounce, so each write
-	// should reset the deadline and the watcher should not fire until
-	// 80ms after the *last* write.
-	time.Sleep(15 * time.Millisecond)
-	for i, body := range []string{"one", "two", "three"} {
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %d: %v", i, err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	// Wait past the debounce window from the last write. The watcher
-	// should fire exactly once in this interval.
-	select {
-	case <-fired:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("watchCanvas did not fire after debounce window")
-	}
-
-	// And it should not fire a second time — the channel-close
-	// contract is one-shot, but the goroutine should also have exited.
-	// A subsequent close-of-stop must not panic on a re-closed channel
-	// either; the deferred close at top of test exercises that path.
-	select {
-	case <-fired:
-		// already closed; receive returns immediately. Fine.
-	default:
-		t.Fatal("watchCanvas fired channel should be closed after firing")
-	}
-}
-
-// TestWatchCanvasStopBeforeFire pins the operator-quit teardown: when
-// the caller closes stop before any change lands, the watcher returns
-// without firing. The fired channel must remain unclosed — the
-// channel-close contract is "the watcher decided to fire", and on stop
-// we explicitly did not.
-func TestWatchCanvasStopBeforeFire(t *testing.T) {
-	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "canvas.md")
-	if err := os.WriteFile(path, []byte("seed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stop := make(chan struct{})
-	fired := watchCanvas(path, stop)
-	// Let the watcher collect its baseline, then stop without any
-	// rewrite happening.
-	time.Sleep(20 * time.Millisecond)
-	close(stop)
-
-	// Give the goroutine time to react. Then assert the fired channel
-	// is *not* closed — a non-blocking receive should hit the default
-	// branch.
-	time.Sleep(30 * time.Millisecond)
-	select {
-	case <-fired:
-		t.Fatal("watchCanvas should not have fired after stop without a change")
-	default:
-	}
-}
-
-// TestWatchCanvasIgnoresStatErrors pins the "file deleted briefly
-// during rename" edge case from the design: a stat error is treated as
-// "no change yet" and must not trip the watcher. We simulate the
-// rename gap by deleting and recreating the file with identical content
-// and mtime — the watcher should not fire on the gap, but should fire
-// once we actually change the content.
-//
-// Why this matters: a flaky atomic-rename detection would respawn the
-// pager every few seconds even when the agent isn't writing.
-func TestWatchCanvasIgnoresStatErrors(t *testing.T) {
-	withFastFollowWatch(t, 5*time.Millisecond, 50*time.Millisecond)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "canvas.md")
-	seed := []byte("seed content\n")
-	if err := os.WriteFile(path, seed, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Pin mtime so the recreate below doesn't itself look like a change.
-	mt := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(path, mt, mt); err != nil {
-		t.Fatal(err)
-	}
-
-	stop := make(chan struct{})
-	defer close(stop)
-	fired := watchCanvas(path, stop)
-	time.Sleep(20 * time.Millisecond)
-
-	// Rename gap: remove and immediately recreate with the same bytes
-	// and mtime. Several poll ticks should land in the brief gap and
-	// see stat errors; once the file is back, mtime+size match the
-	// baseline and the watcher must stay quiet.
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(15 * time.Millisecond)
-	if err := os.WriteFile(path, seed, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, mt, mt); err != nil {
-		t.Fatal(err)
-	}
-
-	// Give the watcher generous time to (incorrectly) trip on the gap.
-	select {
-	case <-fired:
-		t.Fatal("watchCanvas tripped on a rename gap with unchanged content")
-	case <-time.After(150 * time.Millisecond):
-	}
-
-	// Now actually change the content; the watcher must fire as usual.
-	if err := os.WriteFile(path, []byte("real change\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-fired:
-	case <-time.After(time.Second):
-		t.Fatal("watchCanvas did not fire after a real change post-rename")
 	}
 }

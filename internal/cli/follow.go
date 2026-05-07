@@ -1,33 +1,39 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
 )
 
-// `moe follow` keeps the design doc in play in front of the operator.
-// Auto-pick surfaces the most recent run with an *open session* on its
-// design doc and execs a pager. Parked-at-design runs (work-to-do, not
-// work-being-done) are deliberately invisible to auto-pick — `dash` is
-// the surface for those. `--run <id>` is the explicit pin escape hatch
-// and ignores liveness. When the pager exits, follow waits out a 3s
-// countdown (Ctrl-C exits cleanly) so the operator can break the
-// relaunch loop, then re-evaluates and either spawns a fresh pager or
+// `moe follow` keeps the run currently in play in front of the operator.
+// Auto-pick surfaces the most recent run with an *open stage session* and
+// drives `hunk diff --watch` against the workspace that session is
+// mutating: a code session resolves to the run's sandbox clone diffed
+// against the project's default branch; every other stage resolves to
+// the session's bureaucracy worktree diffed against main. Parked runs
+// (work-to-do, not work-being-done) are deliberately invisible to
+// auto-pick — `dash` is the surface for those. `--run <id>` is the
+// explicit pin escape hatch and ignores liveness, but a pinned run with
+// no open session still falls through to idle.
+//
+// hunk owns its own tty and watcher: when it exits, follow waits out a
+// 3s countdown (Ctrl-C exits cleanly) so the operator can break the
+// relaunch loop, then re-evaluates and either spawns a fresh hunk or
 // drops to a single-line idle screen polled every --interval. Read-
-// only by construction: the canvas is opened for read, no `$EDITOR`
-// path.
+// only by construction: hunk is a viewer.
 //
 // Pieces reused from `dash`: same Scan, same journal index, same
 // session.List for liveness. follow is the across-runs counterpart to
@@ -40,46 +46,15 @@ import (
 // window between ticks where ^C felt unresponsive.
 const followIdleInterval = 1 * time.Second
 
-// followCountdownSeconds is the dwell after a pager exit before the
-// next auto-pick fires — long enough for a Ctrl-C to land cleanly,
-// short enough not to feel sluggish. Mirrors queueCountdownSeconds.
+// followCountdownSeconds is the dwell after hunk exits before the next
+// auto-pick fires — long enough for a Ctrl-C to land cleanly, short
+// enough not to feel sluggish. Mirrors queueCountdownSeconds.
 const followCountdownSeconds = 3
-
-// defaultPager is the fallback when MOE_PAGER is unset. moe owns the
-// follow loop now (watchCanvas + kill-and-respawn), so the pager runs
-// in plain mode: `-R` passes ANSI through; `-M` shows the long prompt
-// so the file path stays on the status line — no `Waiting for data…`
-// banner stealing that real estate. Dropping `+F` also unlocks normal
-// scroll keys (`j`/`k`/`g`/`G`/`/`) without operator-quit gymnastics.
-const defaultPager = "less -R -M"
-
-// followWatchPoll is the cadence at which watchCanvas stats the canvas
-// for change. Cheap (one stat per tick) and well below the debounce
-// window so a change can't slip through unseen. var rather than const
-// so tests can dial it down to milliseconds; production stays at 250ms.
-var followWatchPoll = 250 * time.Millisecond
-
-// followWatchDebounce is the quiet window watchCanvas waits for after
-// the last detected change before signalling a respawn. 3s collapses a
-// burst of mid-turn rewrites (claude commonly writes → re-reads →
-// revises → writes again over a few seconds) into one respawn, while
-// staying short enough that the operator perceives the new content
-// within one breath of the agent settling. Mirrors followCountdown-
-// Seconds as a side benefit — one dwell number to reason about.
-var followWatchDebounce = 3 * time.Second
-
-// followKillGrace is how long we wait between SIGTERM and SIGKILL
-// when respawning the pager. less catches SIGTERM and restores the
-// terminal cleanly within milliseconds; 200ms is comfortably enough
-// without making the respawn feel sluggish. The SIGKILL fallback
-// covers the rare pager that ignores SIGTERM — terminal state may
-// then be left in raw mode, but we don't deadlock on a wedged pager.
-var followKillGrace = 200 * time.Millisecond
 
 func init() {
 	Register(&Command{
 		Name:    "follow",
-		Summary: "page the design doc currently in play; idle when none",
+		Summary: "page diffs of the run currently in play; idle when none",
 		Run:     runFollow,
 	})
 }
@@ -87,18 +62,19 @@ func init() {
 func runFollow(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("follow", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	interval := fs.Duration("interval", followIdleInterval, "polling interval when no design is in play")
+	interval := fs.Duration("interval", followIdleInterval, "polling interval when no run is in play")
 	runFilter := fs.String("run", "", "lock follow to a specific run id (matches across projects)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe follow [--interval <duration>] [--run <id>]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Pages the design doc most worth watching: the most recent run with an")
-		moePrintln(stderr, "open session on its design doc. When the pager exits, follow waits 3s")
-		moePrintln(stderr, "(Ctrl-C to exit cleanly), then re-evaluates. With no live design, prints")
-		moePrintln(stderr, "a single-line idle status and re-checks every --interval. --run <id>")
-		moePrintln(stderr, "pins to a specific run regardless of session liveness.")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Pager is ${MOE_PAGER:-less -R -M}; moe respawns it when the canvas changes.")
+		moePrintln(stderr, "Drives `hunk diff --watch` against the run most worth watching: the most")
+		moePrintln(stderr, "recent in-progress run with an open stage session. Code sessions resolve")
+		moePrintln(stderr, "to the run's sandbox clone diffed against the project's default branch;")
+		moePrintln(stderr, "every other stage resolves to the session's bureaucracy worktree diffed")
+		moePrintln(stderr, "against main. When hunk exits, follow waits 3s (Ctrl-C to exit cleanly),")
+		moePrintln(stderr, "then re-evaluates. With no live session, prints a single-line idle status")
+		moePrintln(stderr, "and re-checks every --interval. --run <id> pins to a specific run; with")
+		moePrintln(stderr, "no live session for the pinned run, follow stays idle and keeps polling.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -109,6 +85,16 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Fail fast with a clear install hint if hunk isn't installed —
+	// otherwise the first auto-pick would tear down the idle screen,
+	// fail to exec, and bounce back through the countdown on every
+	// tick. One up-front check is cheaper to reason about.
+	if _, err := exec.LookPath("hunk"); err != nil {
+		moePrintln(stderr, "moe follow: hunk is not on PATH")
+		moePrintln(stderr, "  install: https://github.com/modem-dev/hunk")
+		return 1
+	}
+
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
@@ -117,26 +103,15 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 	defer signal.Stop(sigCh)
-	// Ignoring SIGTTOU is load-bearing for the pager-foreground
-	// handover: tcsetpgrp moves the tty's foreground PG to the pager,
-	// and the kernel's reciprocal-stop default would otherwise stop
-	// moe at that exact ioctl. We never want to stop on a tty write,
-	// so leave it ignored for the lifetime of the process.
-	signal.Ignore(syscall.SIGTTOU)
 
 	for {
-		path, summary, err := pickFollowTarget(root, *runFilter)
+		target, summary, err := pickFollowTarget(root, *runFilter)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		if path != "" {
-			// Inner loop: respawn on the same path while the watcher
-			// keeps tripping on canvas rewrites. Re-evaluation (back
-			// to pickFollowTarget) only runs on operator-quit, same
-			// rule as today — the operator is reading *this* canvas;
-			// a file change doesn't mean a different run is in play.
-			if quit := followPath(path, sigCh, stdout, stderr); quit {
+		if target.Dir != "" {
+			if quit := followTargetRun(target, sigCh, stdout, stderr); quit {
 				return 0
 			}
 			continue
@@ -156,6 +131,13 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// followTarget is the (workspace dir, diff base) tuple hunk runs
+// against. Empty Dir means no candidate — the caller renders idle.
+type followTarget struct {
+	Dir  string
+	Base string
+}
+
 // followSummary captures the figures the idle screen reports: total
 // active run count and the single most-recently-active run, when any.
 type followSummary struct {
@@ -167,40 +149,35 @@ type followLast struct {
 	project, run, state string
 }
 
-// pickFollowTarget resolves the design doc moe should page, plus the
-// idle-screen summary for when no doc is in play. Returns ("", summary, nil)
-// when no design candidate exists; the caller renders the summary instead.
+// pickFollowTarget resolves the workspace hunk should diff, plus the
+// idle-screen summary for when no run is in play. Returns an empty
+// followTarget when no candidate exists; the caller renders the
+// summary instead.
 //
-// A design candidate is an in-progress run with an open session on its
-// design document — work-being-done. Parked-at-design runs (work-to-do
-// but untouched) deliberately don't surface here; that's `dash`'s job.
-// Most recent activity wins. runFilter, when non-empty, locks to that
-// run id — the operator's pin overrides liveness, and a not-yet-
-// existent design canvas falls through to the idle screen so follow
-// keeps polling until the file appears.
-func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
+// A candidate is an in-progress run with an open stage session — work-
+// being-done. Parked runs (work-to-do but untouched) deliberately
+// don't surface here; that's `dash`'s job. Most-recent journal
+// activity wins. runFilter, when non-empty, locks to that run id —
+// the operator's pin overrides liveness, but a pinned run with no
+// open session still falls through to idle so follow keeps polling
+// until the operator (or a queued chain) opens one.
+func pickFollowTarget(root, runFilter string) (followTarget, followSummary, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
-		return "", followSummary{}, err
+		return followTarget{}, followSummary{}, err
 	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
-		return "", followSummary{}, err
+		return followTarget{}, followSummary{}, err
 	}
 	// session.List is read-only; a worktree-list error shouldn't
 	// suppress the idle-screen summary, so swallow and proceed with no
 	// liveness signal — auto-pick will simply find no candidates.
-	// We index by run id, keeping only design sessions: the resolver
-	// needs the session's WorktreePath (the live canvas lives on the
-	// session branch in the worktree, not on main under root) and the
-	// per-run "is design live?" check collapses to a map presence test.
-	designSessionByRun := make(map[string]*session.Session)
+	// We index by run id; resolveFollowTarget routes per-doc.
+	sessionsByRun := make(map[string][]*session.Session)
 	if ss, err := session.List(root); err == nil {
 		for _, s := range ss {
-			if s.Doc != "design" {
-				continue
-			}
-			designSessionByRun[s.Run] = s
+			sessionsByRun[s.Run] = append(sessionsByRun[s.Run], s)
 		}
 	}
 	summary := buildFollowSummary(root, mds, idx)
@@ -210,61 +187,112 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 			if md.ID != runFilter {
 				continue
 			}
-			// A pin overrides liveness, but when a design session *is*
-			// open the live bytes are in the worktree, not on main —
-			// resolve against WorktreePath so the operator sees what
-			// the agent has actually written. Parked-at-design pins
-			// (no session) fall back to root, which holds the seeded
-			// stub or the most recently merged content.
-			base := root
-			if sess, ok := designSessionByRun[md.ID]; ok {
-				base = sess.WorktreePath
+			sess := pickSessionForRun(sessionsByRun[md.ID])
+			if sess == nil {
+				return followTarget{}, summary, nil
 			}
-			path := filepath.Join(base, run.ContentPath(md.Project, md.ID, "design"))
-			if _, err := os.Stat(path); err == nil {
-				return path, summary, nil
+			target, err := resolveFollowTarget(root, md, sess)
+			if err != nil {
+				return followTarget{}, summary, err
 			}
-			return "", summary, nil
+			return target, summary, nil
 		}
-		return "", summary, nil
+		return followTarget{}, summary, nil
 	}
 
 	type cand struct {
-		path string
-		when time.Time
+		target followTarget
+		when   time.Time
 	}
 	var cands []cand
 	for _, md := range mds {
 		if md.Status != run.StatusInProgress {
 			continue
 		}
-		sess, live := designSessionByRun[md.ID]
-		if !live {
+		sess := pickSessionForRun(sessionsByRun[md.ID])
+		if sess == nil {
 			continue
 		}
-		// Auto-pick liveness gate guarantees a session here, so the
-		// canvas resolves against the session's worktree — main holds
-		// the pre-session stub until the session closes and rebases.
-		// Stat the resolved path before adding it as a candidate: an
-		// orphaned worktree (session metadata exists, content.md
-		// doesn't) would otherwise yield instant-less-error →
-		// countdown loop the operator can't escape.
-		path := filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, "design"))
-		if _, err := os.Stat(path); err != nil {
+		target, err := resolveFollowTarget(root, md, sess)
+		if err != nil {
+			return followTarget{}, summary, err
+		}
+		if target.Dir == "" {
 			continue
 		}
 		cands = append(cands, cand{
-			path: path,
-			when: idx.LastActivity[md.ID],
+			target: target,
+			when:   idx.LastActivity[md.ID],
 		})
 	}
 	if len(cands) == 0 {
-		return "", summary, nil
+		return followTarget{}, summary, nil
 	}
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].when.After(cands[j].when)
 	})
-	return cands[0].path, summary, nil
+	return cands[0].target, summary, nil
+}
+
+// pickSessionForRun chooses a single session per run when more than
+// one happens to be open. A run normally has at most one open session
+// at a time, but a botched close could leave an orphan around;
+// preferring code over design over alphabetical produces a
+// deterministic answer that biases toward the workspace nearest the
+// run's likely live stage.
+func pickSessionForRun(sessions []*session.Session) *session.Session {
+	if len(sessions) == 0 {
+		return nil
+	}
+	if len(sessions) == 1 {
+		return sessions[0]
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		ri, rj := stageRank(sessions[i].Doc), stageRank(sessions[j].Doc)
+		if ri != rj {
+			return ri < rj
+		}
+		return sessions[i].Doc < sessions[j].Doc
+	})
+	return sessions[0]
+}
+
+// stageRank biases pickSessionForRun toward the doc most likely to be
+// the live workspace. Lower wins.
+func stageRank(doc string) int {
+	switch doc {
+	case "code":
+		return 0
+	case "design":
+		return 1
+	default:
+		return 2
+	}
+}
+
+// resolveFollowTarget routes a session to the workspace tuple hunk
+// runs in. Code sessions diff the run's sandbox clone against the
+// project's recorded default branch; every other stage diffs the
+// session's bureaucracy worktree against main. The dir is stat'd as
+// defense-in-depth so an orphaned session record (worktree dir gone,
+// or sandbox not yet cloned) idles instead of feeding hunk a
+// non-existent cwd.
+func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (followTarget, error) {
+	if sess.Doc == "code" {
+		dir := sandbox.Path(root, md.Project, md.ID)
+		if _, err := os.Stat(dir); err != nil {
+			return followTarget{}, nil
+		}
+		proj, err := project.Load(root, md.Project)
+		if err != nil {
+			return followTarget{}, err
+		}
+		return followTarget{Dir: dir, Base: proj.DefaultBranch}, nil
+	}
+	if _, err := os.Stat(sess.WorktreePath); err != nil {
+		return followTarget{}, nil
+	}
+	return followTarget{Dir: sess.WorktreePath, Base: "main"}, nil
 }
 
 // buildFollowSummary rolls scanned metadata into the figures the idle
@@ -325,15 +353,15 @@ func stateForActive(root string, md *run.Metadata) string {
 	return md.Workflow + ":" + next.Name
 }
 
-// idleLine renders the single line moe prints when no design is in
-// play. Mirrors the design doc's example shape:
+// idleLine renders the single line moe prints when no run is in play.
+// Mirrors the design doc's example shape:
 //
-//	(no design in play · 2 active · last: tele/fix-it awaiting merge)
+//	(no run in play · 2 active · last: tele/fix-it awaiting merge)
 //
 // With no active runs, the trailing "last:" segment drops.
 func idleLine(s followSummary) string {
 	parts := []string{
-		"no design in play",
+		"no run in play",
 		fmt.Sprintf("%d active", s.activeCount),
 	}
 	if s.last != nil {
@@ -343,6 +371,9 @@ func idleLine(s followSummary) string {
 	return "(" + strings.Join(parts, " · ") + ")"
 }
 
+// drainSignal empties any queued ^C deliveries on ch without blocking.
+// Used between hunk runs and the countdown so a stale signal from the
+// idle screen doesn't pre-trip the next select.
 func drainSignal(ch <-chan os.Signal) {
 	for {
 		select {
@@ -353,304 +384,70 @@ func drainSignal(ch <-chan os.Signal) {
 	}
 }
 
-// followPath drives one path's lifetime: spawn pager, watch the canvas
-// for rewrites, and respawn the pager whenever the watcher fires.
-// Returns true when the operator asked to exit (Ctrl-C through the
-// post-quit countdown), false when the caller should re-evaluate via
+// followTargetRun spawns `hunk diff --watch <base>` rooted at
+// target.Dir and waits for it to exit. Returns true when the operator
+// asked to exit (Ctrl-C in countdown, or Ctrl-C while hunk was
+// running), false when the caller should re-evaluate via
 // pickFollowTarget.
 //
-// The inner respawn loop exists because of the design's "Re-spawn keeps
-// the same path" rule: a canvas rewrite isn't a signal that a different
-// run is in play, just that *this* run's agent wrote bytes — so we
-// reopen against the same path with no countdown. Operator-quit (`q`)
-// or a pager crash falls through to the outer countdown + re-evaluate
-// path, same as before the watcher existed.
-func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
-	for {
-		// Drain anything queued before the pager takes the tty — a
-		// Ctrl-C just before the spawn shouldn't race the pager for
-		// the signal. The pager-wait select below *does* consume
-		// sigCh now (belt-and-suspenders for the SIGTTIN trap and
-		// any pager that wedges off-tty), so the drain here is what
-		// keeps a stale ^C from the idle screen out of that select.
-		drainSignal(sigCh)
-		sess, err := startPager(path)
-		if err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return true
-		}
-		cmd := sess.cmd
-
-		watchStop := make(chan struct{})
-		watchFired := watchCanvas(path, watchStop)
-		waitErr := make(chan error, 1)
-		go func() { waitErr <- cmd.Wait() }()
-
-		killPager := func() {
-			// SIGTERM the process *group* so we reach the inner
-			// pager, not just the `sh -c` wrapper — Setpgid:true on
-			// startPager makes cmd.Process.Pid the pgid leader.
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			select {
-			case <-waitErr:
-			case <-time.After(followKillGrace):
-				// Pager ignored SIGTERM (rare). Last-resort SIGKILL;
-				// less had no chance to restore termios, so put the
-				// tty back into the cooked state we snapshot before
-				// spawning.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-				<-waitErr
-				sess.restoreTermios()
-			}
-		}
-
-		var (
-			respawnRequested bool
-			operatorQuit     bool
-		)
-		select {
-		case <-waitErr:
-			// Pager exited on its own — operator quit or crashed.
-			// Tell the watcher to stop; it may have already returned
-			// (close-fired race), in which case the send-to-stop
-			// channel just closes a channel nobody reads. Safe.
-			close(watchStop)
-		case <-watchFired:
-			// Canvas changed and quiesced; kill the pager so we can
-			// respawn against the fresh inode.
-			respawnRequested = true
-			killPager()
-		case <-sigCh:
-			// Operator hit ^C while the pager was running. With the
-			// foreground-PG handover in place this is the rare path:
-			// less is normally foreground and consumes ^C itself.
-			// We get here when stdin isn't a tty (no handover
-			// happened) or the pager wedged off-tty. Tear down the
-			// pager and exit; the watcher hasn't fired so close stop
-			// to let it return.
-			operatorQuit = true
-			killPager()
-			close(watchStop)
-		}
-		// Hand the tty's foreground PG back before draining stray
-		// signals or running the countdown — prompt visibility
-		// matters more than overlapping a few microseconds of
-		// signal-drain work.
-		sess.restoreForeground()
-		drainSignal(sigCh)
-
-		if operatorQuit {
-			return true
-		}
-
-		// Distinguish kill-from-respawn vs. operator-quit using the
-		// pager's exit code. less exits 0 on a clean `q`; SIGTERM-
-		// killed less exits non-zero (signal-terminated). The exit-
-		// code check is load-bearing for the q-and-watcher-fire race:
-		// without it, every near-simultaneous `q` would leave a stray
-		// respawn the operator has to dismiss.
-		exitCode := 0
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
-		}
-		if respawnRequested && exitCode != 0 {
-			// We killed it; respawn immediately on the same path —
-			// the operator didn't ask to exit, they shouldn't have to
-			// press Ctrl-C through a countdown to stay in the follow.
-			continue
-		}
-
-		// exit 0 (clean q), or non-zero with no respawn flag (pager
-		// crash / external signal). Both fall through to the dwell.
-		// Countdown after the pager exits is the operator's escape
-		// hatch from the relaunch loop: without it, a fresh pager
-		// re-spawns immediately and the only way out is timing a
-		// Ctrl-C through that brief window. The first pager open
-		// isn't delayed — the operator just typed `moe follow` and
-		// asked for it; the dwell only sits between exits. Scoped
-		// sigint subscription mirrors queue's pattern so the
-		// countdown's signal handling doesn't clash with the outer
-		// sigCh used by the idle-screen branch.
-		countdownSig, stopCountdownSig := installSigint()
-		stopped := runCountdown(followCountdownSeconds, func(n int) string {
-			return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
-		}, stdout, countdownSig)
-		stopCountdownSig()
-		return stopped
-	}
-}
-
-// pagerSession bundles the running pager with the tty state moe must
-// restore when the pager exits. ttyFd is -1 when stdin isn't a tty (no
-// handover happened, nothing to restore); otherwise prevPgid is the
-// foreground PG to hand back, and savedTermios is the pre-spawn
-// termios snapshot for the SIGKILL recovery path.
-type pagerSession struct {
-	cmd          *exec.Cmd
-	ttyFd        int
-	prevPgid     int
-	savedTermios *syscall.Termios
-}
-
-// restoreForeground hands the tty's foreground PG back to whoever
-// owned it before the pager spawned. Idempotent and safe to defer.
-func (p *pagerSession) restoreForeground() {
-	if p.ttyFd < 0 || p.prevPgid == 0 {
-		return
-	}
-	_ = tcsetpgrp(p.ttyFd, p.prevPgid)
-}
-
-// restoreTermios puts the tty back into the cooked state we snapshot
-// before spawning. Only used on the SIGKILL path — clean exit and
-// SIGTERM both leave less time to restore termios itself.
-func (p *pagerSession) restoreTermios() {
-	if p.ttyFd < 0 || p.savedTermios == nil {
-		return
-	}
-	_ = setTermios(p.ttyFd, p.savedTermios)
-}
-
-// startPager launches ${MOE_PAGER:-less -R -M} with path appended as
-// the final argument and returns the running session. Stdin/stdout/
-// stderr are wired to the operator's terminal so the pager owns the
-// screen for its lifetime. The command is run via `sh -c` so a pager
-// string with embedded flags (`MOE_PAGER='less -R'`,
-// `MOE_PAGER='glow -p'`) parses the way the operator wrote it without
-// us reimplementing shell word-splitting.
-//
-// Setpgid:true puts sh and the inner pager in their own process group
-// rooted at cmd.Process.Pid. The watcher-respawn path needs to signal
-// the inner pager (not just the sh wrapper); `syscall.Kill(-pgid, …)`
-// fans out to every member of the group.
-//
-// Setpgid alone isn't enough though: the kernel still routes tty input
-// to moe's PG and the pager would stop on SIGTTIN at first read. We
-// also tcsetpgrp(tty, child_pgid) so the pager actually owns the tty.
-// The parent-side syscall.Setpgid is the standard race-safe idiom —
-// either the parent or the child gets there first; the other gets
-// EACCES and we ignore it.
-func startPager(path string) (*pagerSession, error) {
-	pager := os.Getenv("MOE_PAGER")
-	if pager == "" {
-		pager = defaultPager
-	}
-
-	sess := &pagerSession{ttyFd: -1}
-	fd := int(os.Stdin.Fd())
-	prev, gerr := tcgetpgrp(fd)
-	if gerr == nil {
-		// We have a controlling tty. Snapshot state we'll need to
-		// restore on exit; saving termios *before* spawn captures the
-		// cooked state less is about to overwrite with raw mode.
-		sess.ttyFd = fd
-		sess.prevPgid = prev
-		if t, err := getTermios(fd); err == nil {
-			sess.savedTermios = t
-		}
-	}
-
-	cmd := exec.Command("sh", "-c", pager+` "$@"`, "moe-follow", path)
+// hunk owns its own tty: it inherits stdin/stdout/stderr, stays in
+// moe's process group, and handles its own raw-mode setup, watcher,
+// and SIGINT. moe just waits for it to exit. A Ctrl-C from the
+// operator while hunk is running reaches both processes (shared PG):
+// hunk tears itself down, moe sees sigCh fire, and we return true so
+// follow exits without pulling the operator through a countdown they
+// didn't ask for.
+func followTargetRun(target followTarget, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
+	drainSignal(sigCh)
+	cmd := exec.Command("hunk", "diff", "--watch", target.Base)
+	cmd.Dir = target.Dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("follow: pager %q failed to start: %w", pager, err)
-	}
-	sess.cmd = cmd
-
-	if sess.ttyFd >= 0 {
-		// Race-safe parent-side setpgid: SysProcAttr ran in the child,
-		// and the parent's view of the child's pgid may not yet be
-		// updated. EACCES means the child already exec'd — pgid is
-		// already correct, so swallow it.
-		_ = syscall.Setpgid(cmd.Process.Pid, cmd.Process.Pid)
-		// Hand the tty's foreground PG to the pager. If this fails
-		// (rare — e.g. the tty was closed under us), degrade
-		// gracefully: the pager runs, the SIGTTIN-trap bug returns
-		// for this spawn, but we don't deadlock the spawn.
-		_ = tcsetpgrp(fd, cmd.Process.Pid)
-	}
-
-	return sess, nil
-}
-
-// watchCanvas polls path every followWatchPoll and signals via the
-// returned channel once the canvas has been quiet for followWatchDebounce
-// after a detected change. The returned channel is closed exactly once,
-// then the goroutine exits; callers reading from it should treat the
-// close as the respawn trigger.
-//
-// `stop` is the operator-quit teardown: closing it makes the watcher
-// return without firing. The watcher polls (`os.Stat`) rather than
-// reaching for fsnotify per moe-follow.md's locked stdlib-only stance;
-// 250ms is cheap enough that no one notices.
-//
-// Edge cases the design calls out:
-//
-//   - **File mid-rewrite when watcher reads.** A truncate-then-write
-//     can catch us reading at zero size between calls. The next stat
-//     (one tick later) sees the post-write size, the debounce timer
-//     resets, and the eventual respawn opens the finished file. Worst
-//     case is one extra respawn cycle — the price of stat-polling.
-//   - **File deleted briefly during rename.** os.Stat returns an error
-//     during the gap. We treat stat-error as "no change yet" and don't
-//     trip — the next successful stat sees the new inode's mtime/size
-//     and trips normally.
-func watchCanvas(path string, stop <-chan struct{}) <-chan struct{} {
-	// Snapshot the tunables in the calling goroutine so a test that
-	// flips them via t.Cleanup doesn't race the still-running watcher
-	// (which would otherwise read the globals from the spawned
-	// goroutine without synchronization).
-	poll := followWatchPoll
-	debounce := followWatchDebounce
-	fired := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(poll)
-		defer ticker.Stop()
-
-		var lastMtime time.Time
-		var lastSize int64
-		var haveLast bool
-		// pendingDeadline / hasPending implements the debounce as a
-		// time-of-deadline check rather than a separate timer. Avoids
-		// the time.Timer.Reset/drain dance and folds naturally into
-		// the same per-tick wakeup.
-		var pendingDeadline time.Time
-		var hasPending bool
-
-		for {
-			select {
-			case <-stop:
-				// Caller asked us to tear down (operator quit). Exit
-				// without closing fired — the channel-close contract
-				// is "the watcher decided to fire", and on stop we
-				// did not.
-				return
-			case <-ticker.C:
-				if fi, err := os.Stat(path); err == nil {
-					switch {
-					case !haveLast:
-						lastMtime = fi.ModTime()
-						lastSize = fi.Size()
-						haveLast = true
-					case !fi.ModTime().Equal(lastMtime) || fi.Size() != lastSize:
-						lastMtime = fi.ModTime()
-						lastSize = fi.Size()
-						pendingDeadline = time.Now().Add(debounce)
-						hasPending = true
-					}
-				}
-				// Stat errors are intentionally ignored — see the
-				// "file deleted briefly during rename" edge case
-				// above. The next successful stat resyncs.
-				if hasPending && !time.Now().Before(pendingDeadline) {
-					close(fired)
-					return
-				}
-			}
+		moePrintf(stderr, "follow: hunk failed to start: %v\n", err)
+		// exec.ErrNotFound here is recoverable in principle (operator
+		// installs hunk and re-runs), but during the loop we'd just
+		// bounce; the up-front LookPath check has already caught the
+		// no-binary case, so a Start failure now is a real I/O error
+		// — exit follow rather than spin.
+		if errors.Is(err, exec.ErrNotFound) {
+			moePrintln(stderr, "  install: https://github.com/modem-dev/hunk")
 		}
-	}()
-	return fired
+		return true
+	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	operatorQuit := false
+	select {
+	case <-waitErr:
+		// hunk exited on its own — `q`, internal Ctrl-C, or a crash.
+		// Drop to the post-exit countdown.
+	case <-sigCh:
+		// Operator hit ^C; the kernel delivered the same SIGINT to
+		// hunk. Wait for it to tear down so the terminal's mode is
+		// restored before we touch stdout.
+		operatorQuit = true
+		<-waitErr
+	}
+	drainSignal(sigCh)
+	if operatorQuit {
+		return true
+	}
+
+	// Countdown after hunk exits is the operator's escape hatch from
+	// the relaunch loop: without it, a fresh hunk re-spawns
+	// immediately and the only way out is timing a Ctrl-C through
+	// that brief window. The first hunk open isn't delayed — the
+	// operator just typed `moe follow` and asked for it; the dwell
+	// only sits between exits. Scoped sigint subscription mirrors
+	// queue's pattern so the countdown's signal handling doesn't
+	// clash with the outer sigCh used by the idle-screen branch.
+	countdownSig, stopCountdownSig := installSigint()
+	stopped := runCountdown(followCountdownSeconds, func(n int) string {
+		return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
+	}, stdout, countdownSig)
+	stopCountdownSig()
+	return stopped
 }
