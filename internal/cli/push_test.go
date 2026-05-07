@@ -494,6 +494,144 @@ func TestPromptPushNextStageBlankDeclines(t *testing.T) {
 	}
 }
 
+// TestPromptPushNextStagePrintsCodeCanvas: when the code canvas
+// exists on disk, its bytes appear above the [N/m/p] prompt verbatim
+// (no header, no decoration). follow no longer surfaces the code
+// canvas during the code stage, so this is the canvas's one chance
+// to land in front of the operator at the merge decision.
+func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	root := t.TempDir()
+	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "code"))
+	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const body = "## What changed\n\nReplaced the canvas pager with hunk.\n"
+	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, body) {
+		t.Errorf("canvas body not printed verbatim:\n%s", got)
+	}
+	if i, j := strings.Index(got, body), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
+		t.Errorf("canvas should appear above the prompt label; canvas=%d prompt=%d", i, j)
+	}
+}
+
+// TestPromptPushNextStageMissingCanvasFallsThrough: a missing canvas
+// is silent — no header, no error, just the bare prompt. Robust
+// against runs that reach the merge gate without a code stage having
+// committed (the run was opened against an old layout, or the agent
+// truly produced no canvas).
+func TestPromptPushNextStageMissingCanvasFallsThrough(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.HasPrefix(strings.TrimLeft(got, "\n"), "next: ") {
+		t.Errorf("expected the bare prompt to be the only output; got:\n%s", got)
+	}
+}
+
+// TestPromptPushNextStageWhitespaceCanvasFallsThrough: a canvas with
+// only whitespace is treated the same as missing — the agent didn't
+// say anything worth surfacing, so don't decorate the prompt with
+// blank lines.
+func TestPromptPushNextStageWhitespaceCanvasFallsThrough(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	root := t.TempDir()
+	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "code"))
+	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvas, []byte("\n\n   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if strings.HasPrefix(got, "\n") {
+		t.Errorf("whitespace canvas should not pad the prompt with blank lines; got:\n%q", got)
+	}
+}
+
 // promptDispatchRecord captures whether promptPushNextStage invoked
 // next.Run and with what args.
 type promptDispatchRecord struct {
@@ -532,7 +670,10 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	code := promptPushNextStage(next, md, "moe sdlc push tele fix-it", &stdout, &stderr)
+	// Empty root → no code canvas on disk → the prompt skips the cat
+	// and falls through to the bare [N/m/p] line, which is what the
+	// dispatch-shape assertions below expect.
+	code := promptPushNextStage(next, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("promptPushNextStage exit=%d stderr=%s", code, stderr.String())
 	}

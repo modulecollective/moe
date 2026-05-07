@@ -663,7 +663,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	}
 	switch next.Name {
 	case "push":
-		return promptPushNextStage(next, md, hint, stdout, stderr)
+		return promptPushNextStage(next, root, md, hint, stdout, stderr)
 	}
 	return promptStageNextStage(next, md, hint, stdout, stderr)
 }
@@ -713,7 +713,25 @@ func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, 
 // Parsing is case-insensitive; the label capitalization just signals
 // the default. N-as-default is load-bearing — a reflex Enter must
 // never ship.
-func promptPushNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+//
+// The code canvas is printed above the prompt so the operator reads
+// the agent's pre-push framing at the exact moment they're deciding
+// whether to ship. follow no longer surfaces the code canvas during
+// the code stage (it shows the sandbox diff instead), so this is the
+// canvas's one chance to land in front of the operator. By the time
+// promptNextStage fires, session.Close has already rebased the code
+// session onto main, so root is the right base for the read.
+// Whitespace-only or missing canvas falls through to the bare prompt:
+// no header or decoration — the canvas is markdown the agent wrote
+// for the operator, printed as written.
+func promptPushNextStage(next *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
+	if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
+		fmt.Fprint(stdout, string(body))
+		if !strings.HasSuffix(string(body), "\n") {
+			fmt.Fprintln(stdout)
+		}
+	}
 	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
 	sig, stopSig := installSigint()
 	defer stopSig()
