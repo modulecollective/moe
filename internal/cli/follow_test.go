@@ -70,6 +70,7 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
+	seedWorktreeCanvas(t, sess, "tele", "fix-it", "design")
 
 	path, _, err := pickFollowTarget(root, "")
 	if err != nil {
@@ -81,6 +82,34 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	if !strings.HasPrefix(path, sess.WorktreePath+string(filepath.Separator)) {
 		t.Fatalf("path %q must resolve under session worktree %q, not root %q",
 			path, sess.WorktreePath, root)
+	}
+}
+
+// TestPickFollowTargetLiveSessionWithMissingCanvasIdles: a run with an
+// open design session whose worktree canvas hasn't been written yet
+// must not surface — auto-pick stats the resolved path and treats a
+// missing file as not-a-candidate. Without this, a stale or freshly-
+// opened session yields instant-pager-error → countdown loop the
+// operator can only escape by timing a Ctrl-C through the gap.
+func TestPickFollowTargetLiveSessionWithMissingCanvasIdles(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	// Deliberately do NOT seed a canvas in the worktree. The session
+	// is live; the file is not. Auto-pick must fall through to idle.
+	path, _, err := pickFollowTarget(root, "")
+	if err != nil {
+		t.Fatalf("pickFollowTarget: %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected idle (canvas missing in worktree), got %q", path)
 	}
 }
 
@@ -127,6 +156,7 @@ func TestPickFollowTargetSessionOnDesignBeatsParkedElsewhere(t *testing.T) {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
+	seedWorktreeCanvas(t, sess, "tele", "fix-it", "design")
 
 	path, _, err := pickFollowTarget(root, "")
 	if err != nil {
@@ -154,6 +184,7 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
+	seedWorktreeCanvas(t, sess, "tele", "alpha", "design")
 
 	// Parked-only: fresh run, more recent activity than alpha's design
 	// commit but no open session — must not surface.
@@ -192,11 +223,13 @@ func TestPickFollowTargetMostRecentLiveWins(t *testing.T) {
 		t.Fatalf("session.Open alpha: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessA) })
+	seedWorktreeCanvas(t, sessA, "tele", "alpha", "design")
 	sessB, err := session.Open(root, "tele", "beta", "design")
 	if err != nil {
 		t.Fatalf("session.Open beta: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessB) })
+	seedWorktreeCanvas(t, sessB, "tele", "beta", "design")
 
 	path, _, err := pickFollowTarget(root, "")
 	if err != nil {
@@ -371,6 +404,22 @@ func TestIdleLineWithLast(t *testing.T) {
 func TestFollowRegistered(t *testing.T) {
 	if _, ok := commands["follow"]; !ok {
 		t.Fatal("follow command not registered")
+	}
+}
+
+// seedWorktreeCanvas writes a tiny content.md inside a session's
+// worktree so the auto-pick Stat-skip lets the candidate through. The
+// production code treats a missing on-disk canvas as "not a candidate
+// yet"; tests that want a live session to surface need to seed the
+// file the agent would have written.
+func seedWorktreeCanvas(t *testing.T, sess *session.Session, projectID, runID, docID string) {
+	t.Helper()
+	p := filepath.Join(sess.WorktreePath, run.ContentPath(projectID, runID, docID))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("# "+runID+" "+docID+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
