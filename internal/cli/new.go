@@ -226,28 +226,27 @@ var oneShotStages = []struct {
 	{name: "code", needsSandbox: true},
 }
 
-// runOneShotChain drives sdlc's headless ladder starting from the named
-// stage. `moe sdlc new --one-shot` passes "design" so design then code
-// run in sequence; `moe sdlc resume --one-shot` passes whichever of
-// design/code is still pending so an opened run can pick up where it
-// left off. A startStage that doesn't appear in the ladder (e.g.
-// "push") skips both stages and hands straight to promptNextStage.
+// runOneShotChain runs the first applicable stage of sdlc's headless
+// ladder and hands off to runStageSession's post-turn `[Y/n/o]` chain
+// prompt — that prompt's `o` branch re-enters this function for the
+// next stage by calling `next.Run(["--one-shot", ...])`. The cascade
+// is the prompt's, not ours: stopping after one stage gives the
+// operator a checkpoint between design and code where today's
+// straight-through behaviour gave none.
 //
-// Chains only on a zero exit from the prior stage — commitTurn's
-// canvas-existence assertion already refuses an empty turn, so a silent
-// refusal stops the chain without needing a second sentinel. After the
-// last stage lands, hand off to promptNextStage so an interactive
-// operator gets the same `[N/m/p]` ship prompt; non-tty callers fall
-// through to its `next: …` hint. Automatic pushing is still off the
-// table — the prompt's default-N keeps a reflex Enter from shipping.
+// `moe sdlc new --one-shot` passes "design" so the chain starts at the
+// top; `moe sdlc resume --one-shot` passes whichever of design/code is
+// pending so an opened run picks up where it left off. A startStage
+// that doesn't appear in the ladder (e.g. "push") skips straight to
+// the merge-gate prompt — same behaviour as before, just no inner
+// stage to run.
+//
+// commitTurn's canvas-existence assertion already refuses an empty
+// turn, so a silent refusal stops here without needing a sentinel.
+// Automatic pushing is still off the table: the merge-gate prompt's
+// default-N keeps a reflex Enter from shipping.
 func runOneShotChain(root string, md *run.Metadata, startStage string, stdout, stderr io.Writer) int {
-	var pending []string
 	skipping := startStage != ""
-	type step struct {
-		name         string
-		needsSandbox bool
-	}
-	var toRun []step
 	for _, s := range oneShotStages {
 		if skipping {
 			if s.name == startStage {
@@ -256,40 +255,25 @@ func runOneShotChain(root string, md *run.Metadata, startStage string, stdout, s
 				continue
 			}
 		}
-		toRun = append(toRun, step{name: s.name, needsSandbox: s.needsSandbox})
-		pending = append(pending, s.name)
+		moePrintf(stdout, "one-shot: %s (headless)\n", s.name)
+		return runOneShotStage(md.Project, md.ID, s.name, s.needsSandbox, stdout, stderr)
 	}
-	if len(toRun) > 0 {
-		moePrintf(stdout, "one-shot: %s (headless)\n", strings.Join(pending, " → "))
-	}
-	for _, s := range toRun {
-		if code := runOneShotStage(md.Project, md.ID, s.name, s.needsSandbox, stdout, stderr); code != 0 {
-			moePrintf(stderr, "one-shot: %s stage exited %d; not chaining further\n", s.name, code)
-			return code
-		}
-	}
-	// Hand off using the last stage we ran as justFinished so the chain
-	// prompt asks about its successor (push), not whatever Next()
-	// reports — under the forward-walking rule Next() parks at the
-	// just-finished stage. When toRun was empty (resume from a state
-	// where neither one-shot stage applies), we have no anchor; fall
-	// back to Next() so the merge-gate hint still surfaces.
-	justFinished := ""
-	if len(toRun) > 0 {
-		justFinished = toRun[len(toRun)-1].name
-	}
-	return promptNextStage(root, md, justFinished, stdout, stderr)
+	// No matching one-shot stage (e.g. resume from a state where Next()
+	// is push). Fall through to promptNextStage with empty
+	// justFinished so it falls back to Next() — the merge-gate hint
+	// surfaces the same way today's resume hits it.
+	return promptNextStage(root, md, "", stdout, stderr)
 }
 
 // runOneShotStage runs one stage of the sdlc one-shot chain. It's a
-// thin wrapper over runStageSession that flips the headless and
-// skip-next-stage knobs; runStageSession seeds the user prompt from
-// the run title for any headless caller, so callers don't need to.
+// thin wrapper over runStageSession that flips the headless knob;
+// runStageSession seeds the user prompt from the run title for any
+// headless caller and fires its own `[Y/n/o]` chain prompt after the
+// turn, so callers don't drive either piece by hand.
 func runOneShotStage(projectID, runID, docID string, needsSandbox bool, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, docID, stageSessionOpts{
-		NeedsSandbox:  needsSandbox,
-		Headless:      true,
-		SkipNextStage: true,
+		NeedsSandbox: needsSandbox,
+		Headless:     true,
 	}, stdout, stderr)
 }
 

@@ -82,7 +82,15 @@ esac
 `
 }
 
-func TestRunNewOneShotChainsDesignAndCode(t *testing.T) {
+// TestRunNewOneShotRunsDesignAndPromptsForCode pins the post-tweak
+// behaviour: --one-shot drives the *first* pending stage (design)
+// headlessly, lands the canvas + commit, then hands off to the
+// chain-prompt-per-stage `[Y/n/o]` between design and code. Without
+// the prompt the operator never gets a checkpoint to spot-check the
+// design before code runs against it. Non-tty stdin (the suppress
+// helper) collapses the prompt to its `next: …` hint, so the test
+// asserts on the hint rather than driving the prompt.
+func TestRunNewOneShotRunsDesignAndPromptsForCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -98,25 +106,25 @@ func TestRunNewOneShotChainsDesignAndCode(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
-	// Both stage canvases exist with the fake claude marker.
-	for _, doc := range []string{"design", "code"} {
-		body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "test-feature", "documents", doc, "content.md"))
-		if err != nil {
-			t.Fatalf("%s canvas missing: %v", doc, err)
-		}
-		if !strings.Contains(string(body), "written by fake claude") {
-			t.Fatalf("%s canvas missing fake-claude marker: %q", doc, body)
-		}
+	// Design canvas landed.
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "test-feature", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("design canvas missing: %v", err)
+	}
+	if !strings.Contains(string(body), "written by fake claude") {
+		t.Fatalf("design canvas missing fake-claude marker: %q", body)
+	}
+	// Code stage was *not* auto-run — the chain prompt now stops here
+	// for the operator to type `o` (or to walk away and review with
+	// `moe review`).
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "test-feature", "documents", "code")); !os.IsNotExist(err) {
+		t.Fatalf("code dir should not exist on chain-prompt stop: err=%v", err)
 	}
 
-	// Two `work: update` commits land — one per stage — each with the
-	// MoE-Document trailer keyed to the right doc.
 	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update")
 	for _, want := range []string{
 		"work: update design",
-		"work: update code",
 		"MoE-Document: design",
-		"MoE-Document: code",
 		"MoE-Run: test-feature",
 		"MoE-Workflow: sdlc",
 	} {
@@ -124,15 +132,24 @@ func TestRunNewOneShotChainsDesignAndCode(t *testing.T) {
 			t.Fatalf("commit log missing %q:\n%s", want, log)
 		}
 	}
+	if strings.Contains(log, "work: update code") {
+		t.Fatalf("code stage should not have committed:\n%s", log)
+	}
 
-	// Chain hands off to promptNextStage; suppressNextStagePrompt
-	// pins stdin to a non-tty so it falls through to the `next: …`
-	// hint instead of the interactive [N/m/p] ship prompt.
-	if !strings.Contains(out.String(), "next: moe sdlc push tele test-feature") {
-		t.Fatalf("expected post-chain next-stage hint in stdout, got: %q", out.String())
+	// Chain prompt's non-tty fallback prints the next-stage hint —
+	// pointing at the code stage, not push, because the chain stopped
+	// after design.
+	if !strings.Contains(out.String(), "next: moe sdlc code tele test-feature") {
+		t.Fatalf("expected post-design next-stage hint in stdout, got: %q", out.String())
 	}
 }
 
+// TestRunNewOneShotComposesWithFromIdea: --from-idea seeds the design
+// canvas and --one-shot lands the agent's edit on top of that seed.
+// The design-then-code chain stops at the chain prompt now — same
+// shape as TestRunNewOneShotRunsDesignAndPromptsForCode — so we
+// assert the seed survived plus the next-stage hint, not that code
+// auto-ran.
 func TestRunNewOneShotComposesWithFromIdea(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -157,18 +174,18 @@ func TestRunNewOneShotComposesWithFromIdea(t *testing.T) {
 		t.Fatalf("design canvas missing: %v", err)
 	}
 	got := string(body)
-	// Idea seed + one-shot agent's append both land on disk — the
-	// design's "code stage runs against the seeded design" guarantee
-	// is the agent saw the seed.
 	if !strings.Contains(got, "# Cross-project search") {
 		t.Fatalf("design canvas should retain idea seed:\n%s", got)
 	}
 	if !strings.Contains(got, "fake-claude refined") {
 		t.Fatalf("design canvas should carry agent edit:\n%s", got)
 	}
-	// Code stage ran (chain proceeded past design).
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "code", "content.md")); err != nil {
-		t.Fatalf("code canvas missing — chain did not advance: %v", err)
+	// Code dir should not exist — chain stops at the prompt.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "code")); !os.IsNotExist(err) {
+		t.Fatalf("code dir should not exist on chain-prompt stop: err=%v", err)
+	}
+	if !strings.Contains(out.String(), "next: moe sdlc code tele "+dated) {
+		t.Fatalf("expected post-design next-stage hint in stdout, got: %q", out.String())
 	}
 }
 
@@ -204,43 +221,6 @@ exit 0
 	}
 	if log := gitLog(t, root, "--format=%s", "--grep=^work: update code"); strings.TrimSpace(log) != "" {
 		t.Fatalf("code stage should not have committed; got log:\n%s", log)
-	}
-}
-
-func TestRunNewOneShotCodeFailureLeavesRunWithoutPush(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedSdlcOneShotProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubEditor(t)
-	suppressNextStagePrompt(t)
-
-	// Design succeeds (writes its canvas, exit 0); code exits non-zero
-	// without writing. The chain returns the code stage's exit status,
-	// the run is left where it is, and push is not invoked from the
-	// chain (SkipNextStage suppresses the next-stage prompt).
-	fakeOneShotClaude(t, "code", 7, "design only")
-
-	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--one-shot", "tele", "Half done"}, &out, &errb)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit when code stage fails; stdout=%q stderr=%q", out.String(), errb.String())
-	}
-
-	// Design canvas + commit landed.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "half-done", "documents", "design", "content.md")); err != nil {
-		t.Fatalf("design canvas should exist: %v", err)
-	}
-	// Code canvas absent (claude exited before writing).
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "half-done", "documents", "code", "content.md")); !os.IsNotExist(err) {
-		t.Fatalf("code canvas should not exist: err=%v", err)
-	}
-	// No push commit / merge / PR — the chain stops at code.
-	for _, forbidden := range []string{"sdlc: ship", "sdlc: open PR for", "Merge branch"} {
-		if log := gitLog(t, root, "--format=%s", "-1"); strings.Contains(log, forbidden) {
-			t.Fatalf("did not expect post-code action %q in HEAD: %q", forbidden, log)
-		}
 	}
 }
 
@@ -298,7 +278,8 @@ exit 0
 		t.Fatalf("prompt dump missing: %v", err)
 	}
 	prompts := strings.Split(string(dump), "--END-PROMPT--")
-	// design + code = two non-empty prompt captures.
+	// design = one non-empty prompt capture; the chain prompts the
+	// operator before code rather than auto-running it.
 	got := 0
 	for _, p := range prompts {
 		if strings.TrimSpace(p) == "" {
@@ -312,8 +293,8 @@ exit 0
 			t.Fatalf("captured prompt is missing one-shot body:\n%s", p)
 		}
 	}
-	if got != 2 {
-		t.Fatalf("expected 2 prompts captured (design + code), got %d", got)
+	if got != 1 {
+		t.Fatalf("expected 1 prompt captured (design only — chain stops here), got %d", got)
 	}
 }
 
@@ -356,7 +337,8 @@ exit 0
 		t.Fatalf("argv dump missing: %v", err)
 	}
 	invocations := strings.Split(string(dump), "--END-ARGV--")
-	// design + code = two non-empty argv captures.
+	// design = one non-empty argv capture; chain stops at the prompt
+	// before code, so we only see the design invocation here.
 	got := 0
 	for _, inv := range invocations {
 		if strings.TrimSpace(inv) == "" {
@@ -381,8 +363,8 @@ exit 0
 			t.Fatalf("--permission-mode value should be bypassPermissions, got %q in:\n%s", args[idx+1:], inv)
 		}
 	}
-	if got != 2 {
-		t.Fatalf("expected 2 argv captures (design + code), got %d", got)
+	if got != 1 {
+		t.Fatalf("expected 1 argv capture (design only — chain stops here), got %d", got)
 	}
 }
 

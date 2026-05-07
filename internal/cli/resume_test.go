@@ -46,26 +46,30 @@ func TestSdlcResumeFromDesign(t *testing.T) {
 		t.Fatalf("resume exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
-	for _, doc := range []string{"design", "code"} {
-		body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-design", "documents", doc, "content.md"))
-		if err != nil {
-			t.Fatalf("%s canvas missing: %v", doc, err)
-		}
-		if !strings.Contains(string(body), "fake claude resume") {
-			t.Fatalf("%s canvas missing fake-claude marker: %q", doc, body)
-		}
+	// Design ran headlessly; the chain prompt-per-stage stops here so
+	// the operator can spot-check before code runs.
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-design", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("design canvas missing: %v", err)
 	}
-	if !strings.Contains(out.String(), "next: moe sdlc push tele resume-from-design") {
-		t.Fatalf("expected push hint at end, got: %q", out.String())
+	if !strings.Contains(string(body), "fake claude resume") {
+		t.Fatalf("design canvas missing fake-claude marker: %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "resume-from-design", "documents", "code")); !os.IsNotExist(err) {
+		t.Fatalf("code dir should not exist after one-shot design — chain stops at prompt: err=%v", err)
+	}
+	if !strings.Contains(out.String(), "next: moe sdlc code tele resume-from-design") {
+		t.Fatalf("expected post-design code hint, got: %q", out.String())
 	}
 }
 
-// TestSdlcResumeRerunsParkedDesignAndAdvances: under the
-// forward-walking rule a committed design turn with no later code
-// turn parks the run at design. resume re-enters design and then
-// chains code, so the operator who walked away after a one-shot
-// design run picks up the rest of the ladder by typing one verb.
-func TestSdlcResumeRerunsParkedDesignAndAdvances(t *testing.T) {
+// TestSdlcResumeRerunsParkedDesign: under the forward-walking rule a
+// committed design turn with no later code turn parks the run at
+// design. resume re-enters design (re-running it on the parked
+// canvas) and then stops at the chain prompt for code — same shape
+// as TestSdlcResumeFromDesign but starting from a populated canvas
+// rather than a blank one.
+func TestSdlcResumeRerunsParkedDesign(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -89,20 +93,21 @@ func TestSdlcResumeRerunsParkedDesignAndAdvances(t *testing.T) {
 		t.Fatalf("resume exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
-	// Code canvas now exists — chain advanced past the parked design
-	// stage and ran code.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "resume-from-code", "documents", "code", "content.md")); err != nil {
-		t.Fatalf("code canvas should exist: %v", err)
+	// Banner names design only — chain runs the first applicable
+	// stage and stops at the prompt before code.
+	if !strings.Contains(out.String(), "one-shot: design (headless)") {
+		t.Fatalf("expected one-shot: design banner, got: %q", out.String())
 	}
-	// Banner mentions both stages — resume re-enters the parked stage
-	// rather than skipping it.
-	if !strings.Contains(out.String(), "one-shot: design → code") {
-		t.Fatalf("expected one-shot: design → code banner, got: %q", out.String())
+	if strings.Contains(out.String(), "design → code") {
+		t.Fatalf("did not expect design→code banner — chain runs one stage at a time now: %q", out.String())
 	}
-	// Push hint surfaces at the end via the chain prompt's successor
-	// lookup off the last stage we ran.
-	if !strings.Contains(out.String(), "next: moe sdlc push tele resume-from-code") {
-		t.Fatalf("expected push hint, got: %q", out.String())
+	// Code dir absent — chain stopped at the prompt before code ran.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "resume-from-code", "documents", "code")); !os.IsNotExist(err) {
+		t.Fatalf("code dir should not exist on chain-prompt stop: err=%v", err)
+	}
+	// Code hint surfaces via the chain prompt's non-tty fallback.
+	if !strings.Contains(out.String(), "next: moe sdlc code tele resume-from-code") {
+		t.Fatalf("expected code hint, got: %q", out.String())
 	}
 }
 

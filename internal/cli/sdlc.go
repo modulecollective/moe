@@ -141,8 +141,11 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Picks up the run at its first pending stage and drives it forward.")
 		moePrintln(stderr, "Without --one-shot, opens the stage interactively (operator in the loop).")
-		moePrintln(stderr, "With --one-shot, chains pending stages headlessly and stops at the [N/m/p]")
-		moePrintln(stderr, "merge-gate prompt. Refuses runs that are missing or already terminal.")
+		moePrintln(stderr, "With --one-shot, drives the pending stage headlessly and prompts")
+		moePrintln(stderr, "[Y/n/o] before chaining to the next — operator can spot-check the")
+		moePrintln(stderr, "design before letting code run. The final stage hands off to the")
+		moePrintln(stderr, "[N/m/p] merge-gate prompt. Refuses runs that are missing or already")
+		moePrintln(stderr, "terminal.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
