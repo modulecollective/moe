@@ -34,10 +34,11 @@ import (
 // dash's within-run liveness picker.
 
 // followIdleInterval is the default poll cadence between idle ticks.
-// 5s is the design's chosen cadence: long enough that the operator's
-// terminal isn't busy, short enough that a freshly-opened design lands
-// in the pager within one breath.
-const followIdleInterval = 5 * time.Second
+// pickFollowTarget runs in roughly half a second on a populated tree;
+// a 1s tick keeps the idle screen feeling live without the "is it
+// hung?" smell of a longer dwell, and shrinks the operator-quit
+// window between ticks where ^C felt unresponsive.
+const followIdleInterval = 1 * time.Second
 
 // followCountdownSeconds is the dwell after a pager exit before the
 // next auto-pick fires — long enough for a Ctrl-C to land cleanly,
@@ -116,6 +117,12 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 	defer signal.Stop(sigCh)
+	// Ignoring SIGTTOU is load-bearing for the pager-foreground
+	// handover: tcsetpgrp moves the tty's foreground PG to the pager,
+	// and the kernel's reciprocal-stop default would otherwise stop
+	// moe at that exact ioctl. We never want to stop on a tty write,
+	// so leave it ignored for the lifetime of the process.
+	signal.Ignore(syscall.SIGTTOU)
 
 	for {
 		path, summary, err := pickFollowTarget(root, *runFilter)
@@ -238,8 +245,16 @@ func pickFollowTarget(root, runFilter string) (string, followSummary, error) {
 		// Auto-pick liveness gate guarantees a session here, so the
 		// canvas resolves against the session's worktree — main holds
 		// the pre-session stub until the session closes and rebases.
+		// Stat the resolved path before adding it as a candidate: an
+		// orphaned worktree (session metadata exists, content.md
+		// doesn't) would otherwise yield instant-less-error →
+		// countdown loop the operator can't escape.
+		path := filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, "design"))
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
 		cands = append(cands, cand{
-			path: filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, "design")),
+			path: path,
 			when: idx.LastActivity[md.ID],
 		})
 	}
@@ -354,24 +369,45 @@ func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) b
 	for {
 		// Drain anything queued before the pager takes the tty — a
 		// Ctrl-C just before the spawn shouldn't race the pager for
-		// the signal. While the pager runs, SIGINT is the pager's to
-		// handle (less consumes it; the operator's `q` is the clean
-		// exit) — we just don't read from sigCh, so the buffered
-		// notify intercept keeps the default tear-down from firing on
-		// moe.
+		// the signal. The pager-wait select below *does* consume
+		// sigCh now (belt-and-suspenders for the SIGTTIN trap and
+		// any pager that wedges off-tty), so the drain here is what
+		// keeps a stale ^C from the idle screen out of that select.
 		drainSignal(sigCh)
-		cmd, err := startPager(path)
+		sess, err := startPager(path)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return true
 		}
+		cmd := sess.cmd
 
 		watchStop := make(chan struct{})
 		watchFired := watchCanvas(path, watchStop)
 		waitErr := make(chan error, 1)
 		go func() { waitErr <- cmd.Wait() }()
 
-		var respawnRequested bool
+		killPager := func() {
+			// SIGTERM the process *group* so we reach the inner
+			// pager, not just the `sh -c` wrapper — Setpgid:true on
+			// startPager makes cmd.Process.Pid the pgid leader.
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			select {
+			case <-waitErr:
+			case <-time.After(followKillGrace):
+				// Pager ignored SIGTERM (rare). Last-resort SIGKILL;
+				// less had no chance to restore termios, so put the
+				// tty back into the cooked state we snapshot before
+				// spawning.
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-waitErr
+				sess.restoreTermios()
+			}
+		}
+
+		var (
+			respawnRequested bool
+			operatorQuit     bool
+		)
 		select {
 		case <-waitErr:
 			// Pager exited on its own — operator quit or crashed.
@@ -381,23 +417,31 @@ func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) b
 			close(watchStop)
 		case <-watchFired:
 			// Canvas changed and quiesced; kill the pager so we can
-			// respawn against the fresh inode. SIGTERM the process
-			// *group* so we reach the inner pager, not just the `sh
-			// -c` wrapper — Setpgid:true on startPager makes
-			// cmd.Process.Pid the pgid leader.
+			// respawn against the fresh inode.
 			respawnRequested = true
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			select {
-			case <-waitErr:
-			case <-time.After(followKillGrace):
-				// Pager ignored SIGTERM (rare). Last-resort SIGKILL;
-				// terminal may be left in raw mode but at least we
-				// don't deadlock on a wedged pager.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-				<-waitErr
-			}
+			killPager()
+		case <-sigCh:
+			// Operator hit ^C while the pager was running. With the
+			// foreground-PG handover in place this is the rare path:
+			// less is normally foreground and consumes ^C itself.
+			// We get here when stdin isn't a tty (no handover
+			// happened) or the pager wedged off-tty. Tear down the
+			// pager and exit; the watcher hasn't fired so close stop
+			// to let it return.
+			operatorQuit = true
+			killPager()
+			close(watchStop)
 		}
+		// Hand the tty's foreground PG back before draining stray
+		// signals or running the countdown — prompt visibility
+		// matters more than overlapping a few microseconds of
+		// signal-drain work.
+		sess.restoreForeground()
 		drainSignal(sigCh)
+
+		if operatorQuit {
+			return true
+		}
 
 		// Distinguish kill-from-respawn vs. operator-quit using the
 		// pager's exit code. less exits 0 on a clean `q`; SIGTERM-
@@ -436,8 +480,39 @@ func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) b
 	}
 }
 
+// pagerSession bundles the running pager with the tty state moe must
+// restore when the pager exits. ttyFd is -1 when stdin isn't a tty (no
+// handover happened, nothing to restore); otherwise prevPgid is the
+// foreground PG to hand back, and savedTermios is the pre-spawn
+// termios snapshot for the SIGKILL recovery path.
+type pagerSession struct {
+	cmd          *exec.Cmd
+	ttyFd        int
+	prevPgid     int
+	savedTermios *syscall.Termios
+}
+
+// restoreForeground hands the tty's foreground PG back to whoever
+// owned it before the pager spawned. Idempotent and safe to defer.
+func (p *pagerSession) restoreForeground() {
+	if p.ttyFd < 0 || p.prevPgid == 0 {
+		return
+	}
+	_ = tcsetpgrp(p.ttyFd, p.prevPgid)
+}
+
+// restoreTermios puts the tty back into the cooked state we snapshot
+// before spawning. Only used on the SIGKILL path — clean exit and
+// SIGTERM both leave less time to restore termios itself.
+func (p *pagerSession) restoreTermios() {
+	if p.ttyFd < 0 || p.savedTermios == nil {
+		return
+	}
+	_ = setTermios(p.ttyFd, p.savedTermios)
+}
+
 // startPager launches ${MOE_PAGER:-less -R -M} with path appended as
-// the final argument and returns the running *exec.Cmd. Stdin/stdout/
+// the final argument and returns the running session. Stdin/stdout/
 // stderr are wired to the operator's terminal so the pager owns the
 // screen for its lifetime. The command is run via `sh -c` so a pager
 // string with embedded flags (`MOE_PAGER='less -R'`,
@@ -448,11 +523,33 @@ func followPath(path string, sigCh <-chan os.Signal, stdout, stderr io.Writer) b
 // rooted at cmd.Process.Pid. The watcher-respawn path needs to signal
 // the inner pager (not just the sh wrapper); `syscall.Kill(-pgid, …)`
 // fans out to every member of the group.
-func startPager(path string) (*exec.Cmd, error) {
+//
+// Setpgid alone isn't enough though: the kernel still routes tty input
+// to moe's PG and the pager would stop on SIGTTIN at first read. We
+// also tcsetpgrp(tty, child_pgid) so the pager actually owns the tty.
+// The parent-side syscall.Setpgid is the standard race-safe idiom —
+// either the parent or the child gets there first; the other gets
+// EACCES and we ignore it.
+func startPager(path string) (*pagerSession, error) {
 	pager := os.Getenv("MOE_PAGER")
 	if pager == "" {
 		pager = defaultPager
 	}
+
+	sess := &pagerSession{ttyFd: -1}
+	fd := int(os.Stdin.Fd())
+	prev, gerr := tcgetpgrp(fd)
+	if gerr == nil {
+		// We have a controlling tty. Snapshot state we'll need to
+		// restore on exit; saving termios *before* spawn captures the
+		// cooked state less is about to overwrite with raw mode.
+		sess.ttyFd = fd
+		sess.prevPgid = prev
+		if t, err := getTermios(fd); err == nil {
+			sess.savedTermios = t
+		}
+	}
+
 	cmd := exec.Command("sh", "-c", pager+` "$@"`, "moe-follow", path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -461,7 +558,22 @@ func startPager(path string) (*exec.Cmd, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("follow: pager %q failed to start: %w", pager, err)
 	}
-	return cmd, nil
+	sess.cmd = cmd
+
+	if sess.ttyFd >= 0 {
+		// Race-safe parent-side setpgid: SysProcAttr ran in the child,
+		// and the parent's view of the child's pgid may not yet be
+		// updated. EACCES means the child already exec'd — pgid is
+		// already correct, so swallow it.
+		_ = syscall.Setpgid(cmd.Process.Pid, cmd.Process.Pid)
+		// Hand the tty's foreground PG to the pager. If this fails
+		// (rare — e.g. the tty was closed under us), degrade
+		// gracefully: the pager runs, the SIGTTIN-trap bug returns
+		// for this spawn, but we don't deadlock the spawn.
+		_ = tcsetpgrp(fd, cmd.Process.Pid)
+	}
+
+	return sess, nil
 }
 
 // watchCanvas polls path every followWatchPoll and signals via the
