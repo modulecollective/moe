@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync/atomic"
+	"time"
 
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -21,6 +21,12 @@ import (
 // the first item too, so an unexpected queue head can be aborted before
 // any agent starts.
 const queueCountdownSeconds = 3
+
+// queueIdleInterval is the cadence at which the empty-queue idle loop
+// re-peeks under the lock. Mirrors followIdleInterval — the same
+// "responsive without polling tightly" tradeoff. var rather than const
+// so tests can dial it down to milliseconds; production stays at 1s.
+var queueIdleInterval = 1 * time.Second
 
 // `moe queue` is the operator's playlist of opened runs to grind
 // through in one sitting. Items are structured (workflow, project, run)
@@ -92,7 +98,7 @@ func printQueueUsage(w io.Writer) {
 	moePrintf(w, "  %-14s  %s\n", "add", "queue an opened run, or promote-and-queue an idea")
 	moePrintf(w, "  %-14s  %s\n", "remove", "remove a queued run by identity")
 	moePrintf(w, "  %-14s  %s\n", "list", "show the queue with each item's next stage (or drop reason)")
-	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue, pausing at each merge gate")
+	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue, idling when empty so adds in another terminal land")
 }
 
 // queuePath is the on-disk JSON file. Lives under .moe/ alongside
@@ -467,8 +473,12 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "usage: moe queue run [--one-shot]")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Walks the queue, pausing at each merge gate. Default opens an")
-		moePrintln(stderr, "interactive session per pending stage; --one-shot drives stages")
-		moePrintln(stderr, "headlessly so the operator only stops at [N/m/p].")
+		moePrintln(stderr, "interactive session per pending stage; --one-shot drives each stage")
+		moePrintln(stderr, "headlessly and prompts [Y/n/o] before chaining to the next.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "When the queue drains the walker idles instead of exiting, so an")
+		moePrintln(stderr, "operator adding items from another terminal doesn't have to relaunch.")
+		moePrintln(stderr, "Ctrl-C exits the idle.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -484,28 +494,17 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	}
 	dispatchOpts := queueDispatchOpts{OneShot: *oneShot}
 
-	// Walker-scoped SIGINT handler. Catches Ctrl-C delivered at the
-	// stage prompt (where the prompt's own helper has already returned
-	// "decline" — but the walker still needs to know to stop the loop)
-	// and any other cooked-mode point during the loop's body. The
-	// countdown registers its own scoped channel below; Go's
-	// signal.Notify multiplexes a single SIGINT to every subscribed
-	// channel, so both fire on one Ctrl-C without conflict.
+	// Walker-scoped SIGINT subscription. Catches Ctrl-C delivered at
+	// the stage prompt (where the prompt's own helper has already
+	// returned "decline" — but the walker still needs to know to stop
+	// the loop) and during the empty-queue idle wait. The countdown
+	// registers its own scoped channel below; Go's signal.Notify
+	// multiplexes a single SIGINT to every subscribed channel, so both
+	// fire on one Ctrl-C without conflict. Buffered size 1 — one
+	// observed delivery is enough to stop, extra ones during dispatch
+	// drop and we exit on the first.
 	walkerSig, stopWalkerSig := installSigint()
 	defer stopWalkerSig()
-	var stopRequested atomic.Bool
-	walkerDone := make(chan struct{})
-	defer close(walkerDone)
-	go func() {
-		for {
-			select {
-			case <-walkerSig:
-				stopRequested.Store(true)
-			case <-walkerDone:
-				return
-			}
-		}
-	}()
 
 	for {
 		var head queueItem
@@ -529,8 +528,19 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if empty {
-			moePrintln(stdout, "queue: empty")
-			return 0
+			// Idle screen: clear-and-print on the same line each tick
+			// so the status doesn't scroll. \r returns the cursor;
+			// \033[K clears to end-of-line so a shorter tail from a
+			// prior frame doesn't show through. Same trick follow's
+			// idle loop uses.
+			fmt.Fprint(stdout, "\r\033[K(queue: empty · waiting · Ctrl-C to exit)")
+			select {
+			case <-walkerSig:
+				fmt.Fprintln(stdout)
+				return 0
+			case <-time.After(queueIdleInterval):
+				continue
+			}
 		}
 
 		// Liveness check is outside the lock — run.Load is read-only
@@ -552,10 +562,10 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		// Countdown gates every dispatch, including the first. Scoped
 		// SIGINT channel lets `runCountdown` return cleanly on Ctrl-C
 		// instead of letting Go's default handler tear the process
-		// down. The walker-scoped handler also receives the same
-		// signal and flips stopRequested — redundant when the
-		// countdown caught it, load-bearing when SIGINT lands at the
-		// stage prompt later.
+		// down. The walker-scoped channel also receives the same
+		// signal — redundant when the countdown caught it,
+		// load-bearing for the post-dispatch drain when SIGINT lands
+		// at the stage prompt instead.
 		countdownSig, stopCountdownSig := installSigint()
 		stopped := runCountdown(queueCountdownSeconds, func(n int) string {
 			return fmt.Sprintf("queue: starting %s in %d…  (Ctrl-C to stop)", head, n)
@@ -577,16 +587,19 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		}
 		// Catches Ctrl-C delivered at the stage prompt: the prompt's
 		// helper returned decline, the chained stage returned 0,
-		// dispatch returned 0 here — but the walker-scoped handler
-		// has flipped stopRequested. Honour it before grabbing the
+		// dispatch returned 0 here — but signal.Notify also fanned
+		// the SIGINT into walkerSig and it is sitting in the buffer.
+		// Non-blocking drain so we honour it before grabbing the
 		// next head.
-		if stopRequested.Load() {
+		select {
+		case <-walkerSig:
 			remaining := depth - 1
 			if remaining < 0 {
 				remaining = 0
 			}
 			moePrintf(stdout, "queue: stopped (%d remaining)\n", remaining)
 			return 0
+		default:
 		}
 	}
 }

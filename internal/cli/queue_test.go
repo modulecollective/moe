@@ -27,6 +27,17 @@ func fastQueueCountdown(t *testing.T) {
 	t.Cleanup(func() { queueCountdownTick = old })
 }
 
+// fastQueueIdle shrinks the empty-queue idle interval the same way
+// fastQueueCountdown does for the countdown. Without this an
+// idle-driven test waits a full second per re-peek; tests want
+// millisecond-scale cycles.
+func fastQueueIdle(t *testing.T) {
+	t.Helper()
+	old := queueIdleInterval
+	queueIdleInterval = 1 * time.Millisecond
+	t.Cleanup(func() { queueIdleInterval = old })
+}
+
 // markRunStatus rewrites run.json's status field directly. Test helper
 // for tests that need a "merged" or "closed" run without driving the
 // full close path; the queue's drop logic only reads run.json's status.
@@ -340,19 +351,115 @@ func TestQueueListMarksDeadItems(t *testing.T) {
 	}
 }
 
-func TestQueueRunEmptyExitsZero(t *testing.T) {
+// TestQueueRunIdlesOnEmptyUntilSignal pins the design's "idle when
+// empty" property: the walker prints the idle line and waits instead
+// of exiting, and a SIGINT exits 0 cleanly. Without this an operator
+// adding items from another terminal has to relaunch every drain.
+func TestQueueRunIdlesOnEmptyUntilSignal(t *testing.T) {
 	fastQueueCountdown(t)
+	fastQueueIdle(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	var out, errb bytes.Buffer
-	if code := runQueueRun(nil, &out, &errb); code != 0 {
-		t.Fatalf("expected 0 exit on empty queue, got %d (stderr=%q)", code, errb.String())
+	walkerExit := make(chan int, 1)
+	walkerOut := &safeBuffer{}
+	walkerErr := &safeBuffer{}
+	go func() {
+		walkerExit <- runQueueRun(nil, walkerOut, walkerErr)
+	}()
+
+	// Wait for the idle line to land so signal.Notify is reliably
+	// installed before we raise SIGINT.
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(walkerOut.String(), "queue: empty") && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
 	}
-	if !strings.Contains(out.String(), "queue: empty") {
-		t.Fatalf("expected 'queue: empty' line: %q", out.String())
+	if !strings.Contains(walkerOut.String(), "queue: empty · waiting") {
+		t.Fatalf("idle line never printed: %q", walkerOut.String())
+	}
+
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+	select {
+	case code := <-walkerExit:
+		if code != 0 {
+			t.Fatalf("walker exit=%d stderr=%q", code, walkerErr.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("walker did not exit within 2s of SIGINT")
+	}
+}
+
+// TestQueueRunPicksUpItemAddedDuringIdle is the load-bearing case:
+// the walker sits idle on an empty queue, an `add` from another
+// goroutine lands while it's waiting, and the next idle tick picks
+// it up and dispatches. Without this property, adding while idling
+// would never advance and the operator would have to relaunch.
+func TestQueueRunPicksUpItemAddedDuringIdle(t *testing.T) {
+	fastQueueCountdown(t)
+	fastQueueIdle(t)
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	slug := openSdlcRun(t, "tele", "Lands during idle")
+
+	dispatched := make(chan struct{}, 1)
+	rec := stubDispatch(t, func(it queueItem) int {
+		select {
+		case dispatched <- struct{}{}:
+		default:
+		}
+		return 0
+	})
+
+	walkerExit := make(chan int, 1)
+	walkerOut := &safeBuffer{}
+	walkerErr := &safeBuffer{}
+	go func() {
+		walkerExit <- runQueueRun(nil, walkerOut, walkerErr)
+	}()
+
+	// Wait until the walker is parked on the idle line — proves the
+	// peek under lock returned empty before the add races in.
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(walkerOut.String(), "queue: empty · waiting") && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !strings.Contains(walkerOut.String(), "queue: empty · waiting") {
+		t.Fatalf("idle line never printed: %q", walkerOut.String())
+	}
+
+	addOut := &bytes.Buffer{}
+	addErr := &bytes.Buffer{}
+	if code := runQueueAdd([]string{"sdlc", "tele", slug}, addOut, addErr); code != 0 {
+		t.Fatalf("add during idle: code=%d stderr=%q", code, addErr.String())
+	}
+
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("walker did not dispatch the added item within 2s")
+	}
+
+	// SIGINT exits the post-dispatch idle so the test doesn't hang.
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+	select {
+	case code := <-walkerExit:
+		if code != 0 {
+			t.Fatalf("walker exit=%d stderr=%q", code, walkerErr.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("walker did not exit within 2s of SIGINT")
+	}
+	if len(rec.calls) != 1 || rec.calls[0].Run != slug {
+		t.Fatalf("expected one dispatch of %q, got %v", slug, rec.calls)
 	}
 }
 
@@ -373,6 +480,52 @@ func (r *dispatchRecorder) record(it queueItem, _ queueDispatchOpts, _, _ io.Wri
 		return r.exit(it)
 	}
 	return 0
+}
+
+// runWalkerExpectingDrain spawns runQueueRun in a goroutine, waits for
+// the recorder to log `expected` dispatches (or a hard timeout), and
+// raises SIGINT to break the walker out of the post-drain idle. Tests
+// that pre-tweak relied on runQueueRun returning the moment the queue
+// emptied use this so they don't have to coordinate the new
+// idle-then-signal handshake by hand.
+func runWalkerExpectingDrain(t *testing.T, rec *dispatchRecorder, expected int) (int, string, string) {
+	t.Helper()
+	fastQueueIdle(t)
+	walkerOut := &safeBuffer{}
+	walkerErr := &safeBuffer{}
+	walkerExit := make(chan int, 1)
+	go func() {
+		walkerExit <- runQueueRun(nil, walkerOut, walkerErr)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		rec.mu.Lock()
+		c := len(rec.calls)
+		rec.mu.Unlock()
+		if c >= expected {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	// Give the walker a moment to land in its post-dispatch select
+	// (or, on a non-zero-count walk that returned early, to be
+	// already done) before raising SIGINT.
+	time.Sleep(5 * time.Millisecond)
+	select {
+	case code := <-walkerExit:
+		return code, walkerOut.String(), walkerErr.String()
+	default:
+	}
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+	select {
+	case code := <-walkerExit:
+		return code, walkerOut.String(), walkerErr.String()
+	case <-time.After(5 * time.Second):
+		t.Fatal("walker did not exit within 5s of SIGINT")
+		return 0, "", ""
+	}
 }
 
 func stubDispatch(t *testing.T, exit func(it queueItem) int) *dispatchRecorder {
@@ -404,10 +557,9 @@ func TestQueueRunWalksItemsInOrder(t *testing.T) {
 
 	rec := stubDispatch(t, nil)
 
-	out.Reset()
-	errb.Reset()
-	if code := runQueueRun(nil, &out, &errb); code != 0 {
-		t.Fatalf("walker exit=%d stderr=%q", code, errb.String())
+	code, _, errOut := runWalkerExpectingDrain(t, rec, 2)
+	if code != 0 {
+		t.Fatalf("walker exit=%d stderr=%q", code, errOut)
 	}
 	if len(rec.calls) != 2 {
 		t.Fatalf("expected 2 dispatches, got %d: %v", len(rec.calls), rec.calls)
@@ -441,10 +593,9 @@ func TestQueueRunDropsDeadItem(t *testing.T) {
 
 	rec := stubDispatch(t, nil)
 
-	out.Reset()
-	errb.Reset()
-	if code := runQueueRun(nil, &out, &errb); code != 0 {
-		t.Fatalf("walker exit=%d stderr=%q", code, errb.String())
+	code, walkerOut, walkerErr := runWalkerExpectingDrain(t, rec, 1)
+	if code != 0 {
+		t.Fatalf("walker exit=%d stderr=%q", code, walkerErr)
 	}
 	if len(rec.calls) != 1 {
 		t.Fatalf("expected 1 dispatch (live only), got %d: %v", len(rec.calls), rec.calls)
@@ -452,8 +603,8 @@ func TestQueueRunDropsDeadItem(t *testing.T) {
 	if rec.calls[0].Run != live {
 		t.Fatalf("expected live dispatch, got: %v", rec.calls[0])
 	}
-	if !strings.Contains(out.String(), "dropping sdlc tele/"+dead) {
-		t.Fatalf("expected drop log line: %q", out.String())
+	if !strings.Contains(walkerOut, "dropping sdlc tele/"+dead) {
+		t.Fatalf("expected drop log line: %q", walkerOut)
 	}
 	if items := readQueue(t, root); len(items) != 0 {
 		t.Fatalf("queue should be drained, got %v", items)
@@ -502,6 +653,7 @@ func TestQueueRunStopsOnFailure(t *testing.T) {
 
 func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
 	fastQueueCountdown(t)
+	fastQueueIdle(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -531,8 +683,8 @@ func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
 	})
 
 	walkerExit := make(chan int, 1)
-	walkerOut := &bytes.Buffer{}
-	walkerErr := &bytes.Buffer{}
+	walkerOut := &safeBuffer{}
+	walkerErr := &safeBuffer{}
 	go func() {
 		walkerExit <- runQueueRun(nil, walkerOut, walkerErr)
 	}()
@@ -547,6 +699,21 @@ func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
 		t.Fatalf("concurrent add blocked or failed: code=%d stderr=%q", code, addErr.String())
 	}
 	close(proceed)
+	// Wait for both dispatches to land, then SIGINT to break out of
+	// the post-drain idle.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		rec.mu.Lock()
+		c := len(rec.calls)
+		rec.mu.Unlock()
+		if c >= 2 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
 	if code := <-walkerExit; code != 0 {
 		t.Fatalf("walker exit=%d stderr=%q", code, walkerErr.String())
 	}
@@ -578,18 +745,16 @@ func TestQueueRunCountdownPrecedesEveryDispatch(t *testing.T) {
 
 	rec := stubDispatch(t, nil)
 
-	out.Reset()
-	errb.Reset()
-	if code := runQueueRun(nil, &out, &errb); code != 0 {
-		t.Fatalf("walker exit=%d stderr=%q", code, errb.String())
+	code, walkerOut, walkerErr := runWalkerExpectingDrain(t, rec, 1)
+	if code != 0 {
+		t.Fatalf("walker exit=%d stderr=%q", code, walkerErr)
 	}
 	if len(rec.calls) != 1 {
 		t.Fatalf("expected 1 dispatch, got %d", len(rec.calls))
 	}
-	got := out.String()
 	for _, want := range []string{"starting sdlc tele/" + slug + " in 3", "in 2", "in 1"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("countdown frame %q missing from stdout:\n%s", want, got)
+		if !strings.Contains(walkerOut, want) {
+			t.Errorf("countdown frame %q missing from stdout:\n%s", want, walkerOut)
 		}
 	}
 }
