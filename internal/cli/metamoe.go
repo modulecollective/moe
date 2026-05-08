@@ -40,6 +40,11 @@ func init() {
 		Summary: "open a Claude Code session on the run's report canvas; publishes to projects/<p>/meta-moe.md on commit",
 		Run:     runMetaMoeReport,
 	})
+	// meta-moe has no workspace, no sandbox clone, and no moe/<run>
+	// branch (NeedsSandbox: false below), so the shared close skeleton
+	// has nothing to clean up — pass nil and ride the standard
+	// state-guard / harvest / status-flip path.
+	wf.RegisterFacade(closeCommand(metaMoeWorkflow, "Close meta-moe run %s/%s", nil))
 	RegisterWorkflow(wf)
 	Register(wf.Command())
 }
