@@ -402,17 +402,18 @@ func drainSignal(ch <-chan os.Signal) {
 
 // followTargetRun spawns `hunk diff --watch <base>` rooted at
 // target.Dir and waits for it to exit. Returns true when the operator
-// asked to exit (Ctrl-C in countdown, or Ctrl-C while hunk was
-// running), false when the caller should re-evaluate via
-// pickFollowTarget.
+// asked to exit (Ctrl-C in the post-exit countdown), false when the
+// caller should re-evaluate via pickFollowTarget.
 //
 // hunk owns its own tty: it inherits stdin/stdout/stderr, stays in
 // moe's process group, and handles its own raw-mode setup, watcher,
 // and SIGINT. moe just waits for it to exit. A Ctrl-C from the
 // operator while hunk is running reaches both processes (shared PG):
-// hunk tears itself down, moe sees sigCh fire, and we return true so
-// follow exits without pulling the operator through a countdown they
-// didn't ask for.
+// hunk tears itself down, moe waits for it, then drops into the
+// post-exit countdown — same as `q` or a hunk crash. ^C while hunk
+// is up means "stop watching this target", not "exit follow"; the
+// operator's escape hatch is a second ^C in the countdown, which
+// runCountdown's scoped sigint handler catches.
 //
 // A watcher goroutine runs alongside cmd.Wait, polling pickFollowTarget
 // at the same cadence as the idle screen. When the followTarget the
@@ -487,30 +488,28 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		}
 	}()
 
-	operatorQuit := false
 	rotated := false
 	select {
 	case <-waitErr:
 		// hunk exited — `q`, internal Ctrl-C, a crash, or our SIGINT
-		// for state-change rotation. The rotateCh probe disambiguates.
+		// for state-change rotation. rotateCh disambiguates rotation;
+		// every other exit falls through to the countdown.
 		select {
 		case <-rotateCh:
 			rotated = true
 		default:
 		}
 	case <-sigCh:
-		// Operator hit ^C; the kernel delivered the same SIGINT to
-		// hunk. Wait for it to tear down so the terminal's mode is
-		// restored before we touch stdout.
-		operatorQuit = true
+		// Operator ^C; the kernel delivered the same SIGINT to hunk
+		// via the shared PG. Wait for hunk to tear down so the
+		// terminal's mode is restored before we touch stdout, then
+		// fall through to the countdown — see followTargetRun's doc
+		// comment.
 		<-waitErr
 	}
 	close(stopWatcher)
 	<-watcherDone
 	drainSignal(sigCh)
-	if operatorQuit {
-		return true
-	}
 	if rotated {
 		// State changed under us; the operator didn't ask to bail.
 		// Skip the countdown so the loop re-picks immediately against
