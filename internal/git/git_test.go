@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestStatus_SpacesAndRename pins down two facts that the project
@@ -80,6 +82,86 @@ func TestStatus_PathsScope(t *testing.T) {
 	if len(entries) != 1 || entries[0].Path != "sub/in.txt" {
 		t.Fatalf("scoped Status got %#v, want only sub/in.txt", entries)
 	}
+}
+
+// TestRun_RetriesIndexLockUntilCleared confirms Run waits out a busy
+// index.lock and succeeds once another process releases it — the
+// steady-state half of the moe/hunk worktree contention fix.
+func TestRun_RetriesIndexLockUntilCleared(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	// Shrink the retry envelope so the test stays sub-second. The
+	// production cap (2s) is policy, not behaviour we want to assert
+	// here — we only need to prove the retry/clear/succeed path.
+	withIndexLockTiming(t, 500*time.Millisecond, 10*time.Millisecond)
+
+	lock := filepath.Join(dir, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+
+	// Clear the lock partway through Run's retry loop. 80ms is well
+	// inside the 500ms budget but past several 10ms ticks, so we know
+	// the success came from a retry (not the first attempt).
+	cleared := make(chan struct{})
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		_ = os.Remove(lock)
+		close(cleared)
+	}()
+
+	if err := Run(dir, "commit", "--allow-empty", "-m", "after-lock"); err != nil {
+		t.Fatalf("Run after lock cleared: %v", err)
+	}
+	<-cleared
+}
+
+// TestRun_IndexLockExhaustsCap confirms Run gives up at the cap and
+// surfaces git's verbatim stderr — the operator-facing half of the
+// fix, so a genuinely stuck lock from a crashed prior run doesn't
+// disappear behind a synthetic error message.
+func TestRun_IndexLockExhaustsCap(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	withIndexLockTiming(t, 80*time.Millisecond, 10*time.Millisecond)
+
+	lock := filepath.Join(dir, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(lock) })
+
+	start := time.Now()
+	err := Run(dir, "commit", "--allow-empty", "-m", "should-fail")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("Run with persistent lock should fail")
+	}
+	if !strings.Contains(err.Error(), indexLockSubstr) {
+		t.Fatalf("error should preserve git's verbatim stderr: %v", err)
+	}
+	// At least one retry tick elapsed: cap (80ms) — proof the loop
+	// actually retried before giving up. Upper bound is loose; CI
+	// jitter shouldn't cause flakes.
+	if elapsed < 80*time.Millisecond {
+		t.Fatalf("Run returned in %v, expected to wait out cap", elapsed)
+	}
+}
+
+// withIndexLockTiming swaps in test-friendly retry bounds and restores
+// the production values when the test ends.
+func withIndexLockTiming(t *testing.T, cap, step time.Duration) {
+	t.Helper()
+	prevCap, prevStep := indexLockRetryCap, indexLockRetryStep
+	indexLockRetryCap = cap
+	indexLockRetryStep = step
+	t.Cleanup(func() {
+		indexLockRetryCap = prevCap
+		indexLockRetryStep = prevStep
+	})
 }
 
 func newTempRepo(t *testing.T) string {

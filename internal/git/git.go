@@ -11,21 +11,55 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// indexLockRetryCap and indexLockRetryStep bound the retry loop in Run
+// when git fails with the worktree-shared `index.lock: File exists`
+// race. Vars rather than consts so tests can shrink them; production
+// values are 2s wall-time, 50ms increments. The cap exists so a real
+// stuck lock (crashed git from a prior run) still surfaces a clear
+// terminal error rather than spinning forever.
+var (
+	indexLockRetryCap  = 2 * time.Second
+	indexLockRetryStep = 50 * time.Millisecond
+)
+
+// indexLockSubstr is the stderr fragment git emits when another
+// process holds the worktree index lock. Both the bare-repo and
+// linked-worktree paths produce this same suffix, so a substring
+// match catches every shape — no need to anchor on the directory
+// portion.
+const indexLockSubstr = "index.lock': File exists"
 
 // Run invokes git in dir. Stdout and stderr are captured together; on
 // success they are discarded, on failure they are folded into the
 // returned error — same shape as Output. No caller today needs
 // terminal passthrough; the interactive `git push` path in cli/push.go
 // shells out directly with its own writers.
+//
+// Worktree-shared `index.lock` contention (another moe process or a
+// `hunk diff --watch` poll racing this one) is retried inside the
+// indexLockRetryCap budget. Any other error is returned on the first
+// attempt — the retry only fires when stderr contains the lock-file
+// substring git itself prints, so unrelated failures pass through
+// untouched.
 func Run(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	deadline := time.Now().Add(indexLockRetryCap)
+	for {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		stderr := strings.TrimSpace(string(out))
+		if strings.Contains(stderr, indexLockSubstr) && time.Now().Before(deadline) {
+			time.Sleep(indexLockRetryStep)
+			continue
+		}
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, stderr)
 	}
-	return nil
 }
 
 // Output runs git in dir capturing stdout. On failure, stderr is folded
