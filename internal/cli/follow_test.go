@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +22,7 @@ func TestPickFollowTargetEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	target, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestPickFollowTargetParkedNotACandidate(t *testing.T) {
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
-	target, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 		t.Fatalf("rev-parse session HEAD: %v", err)
 	}
 
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -129,7 +131,7 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 
 // TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles: an open code
 // session whose sandbox clone hasn't materialised yet must idle rather
-// than hand hunk a non-existent cwd. Stat-skip is defense-in-depth: in
+// than resolve to a non-existent cwd. Stat-skip is defense-in-depth: in
 // production the sandbox always exists by the time the agent is
 // committing, but a botched code-stage open could leave a session
 // without a clone.
@@ -146,7 +148,7 @@ func TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles(t *testing.T) {
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
 	// No sandbox dir.
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestPickFollowTargetSessionOnDesignBeatsParkedElsewhere(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -209,7 +211,7 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(2*time.Hour))
 
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -246,7 +248,7 @@ func TestPickFollowTargetMostRecentLiveWins(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessB) })
 
-	target, _, err := pickFollowTarget(root, "")
+	target, _, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -282,7 +284,7 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessB) })
 
-	target, _, err := pickFollowTarget(root, "beta")
+	target, _, err := pickFollowTarget(root, "", "beta")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -294,14 +296,14 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 // TestPickFollowTargetRunFilterWithoutLiveSessionIdles: pinning to a
 // run with no open session falls through to the idle screen — pin
 // overrides recency but not liveness, so the operator can pin pre-
-// emptively and have hunk spawn the moment a session opens.
+// emptively and the wrapper loop will resolve once a session opens.
 func TestPickFollowTargetRunFilterWithoutLiveSessionIdles(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 
-	target, _, err := pickFollowTarget(root, "alpha")
+	target, _, err := pickFollowTarget(root, "", "alpha")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -322,7 +324,7 @@ func TestPickFollowTargetSkipsTerminalAndPushed(t *testing.T) {
 	seedRun(t, root, "tele", "merged-one", "sdlc", run.StatusMerged)
 	seedRun(t, root, "tele", "shipped", "sdlc", run.StatusPushed)
 
-	target, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -346,7 +348,7 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 
 	seedRun(t, root, "tele", "captured", "idea", run.StatusInProgress)
 
-	target, sum, err := pickFollowTarget(root, "")
+	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
 	}
@@ -358,6 +360,43 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 	}
 }
 
+// TestPickFollowTargetProjectFilterNarrowsCandidates: --project drops
+// candidates from other projects so the operator can pin attention to
+// one project's runs without naming an individual run id. The natural
+// recency winner is in project "other" here; with --project tele the
+// resolver must skip it and pick alpha (tele's only live candidate).
+func TestPickFollowTargetProjectFilterNarrowsCandidates(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+
+	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "other", "beta", "sdlc", run.StatusInProgress)
+	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	// alpha first, beta later → beta is the natural recency winner.
+	commitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele", t0)
+	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: other",
+		t0.Add(time.Hour))
+
+	sessA, err := session.Open(root, "tele", "alpha", "design")
+	if err != nil {
+		t.Fatalf("session.Open alpha: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessA) })
+	sessB, err := session.Open(root, "other", "beta", "design")
+	if err != nil {
+		t.Fatalf("session.Open beta: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sessB) })
+
+	target, _, err := pickFollowTarget(root, "tele", "")
+	if err != nil {
+		t.Fatalf("pickFollowTarget: %v", err)
+	}
+	if target.Dir != sessA.WorktreePath {
+		t.Fatalf("dir = %q, want tele/alpha worktree %q", target.Dir, sessA.WorktreePath)
+	}
+}
+
 // TestResolveFollowTargetUsesMergeBaseForNonCode: hunk's base for a
 // non-code session is `merge-base(HEAD, main)` resolved inside the
 // session worktree — the commit at which the session branch diverged
@@ -366,8 +405,8 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 // resume, and the merge base moves with it), so unrelated runs that
 // landed on main between turns stay below the base and out of the
 // diff. The followTarget also carries identity (workflow, stage,
-// project, run) for the OSC title write — a live target without
-// those fields would render an anonymous title.
+// project, run) for the human/shell printers — a live target without
+// those fields would render anonymous output.
 func TestResolveFollowTargetUsesMergeBaseForNonCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -451,49 +490,281 @@ func TestIdleLineWithLast(t *testing.T) {
 	}
 }
 
-// TestFollowTitle pins the OSC title format. Pager chrome strips most
-// in-pane identity hints; the operator's "what am I watching right
-// now?" answer comes from the window/tab/pane label this string sets.
-func TestFollowTitle(t *testing.T) {
-	got := followTitle(followTarget{
-		Workflow: "sdlc", Stage: "code",
-		Project: "moe", Run: "hunk-is-touchy-2026-05-09",
-	})
-	want := "moe follow - sdlc:code - moe/hunk-is-touchy-2026-05-09"
-	if got != want {
-		t.Fatalf("followTitle: got %q want %q", got, want)
-	}
-}
-
-// TestWriteTerminalTitleEmitsOSC0: the bytes have to be exactly
-// `ESC ] 0 ; <title> BEL` for terminal emulators (and tmux with
-// set-titles on) to recognise it. Drift in this sequence is silent —
-// the title just stops updating — so pin the wire format.
-func TestWriteTerminalTitleEmitsOSC0(t *testing.T) {
-	var buf bytes.Buffer
-	writeTerminalTitle(&buf, "hello")
-	if got, want := buf.String(), "\x1b]0;hello\x07"; got != want {
-		t.Fatalf("writeTerminalTitle: got %q want %q", got, want)
-	}
-}
-
-// TestWriteTerminalTitleEmptyClears: an empty title is the restore
-// signal — followTargetRun's defer relies on this writing the bytes
-// that put the terminal back to its default label.
-func TestWriteTerminalTitleEmptyClears(t *testing.T) {
-	var buf bytes.Buffer
-	writeTerminalTitle(&buf, "")
-	if got, want := buf.String(), "\x1b]0;\x07"; got != want {
-		t.Fatalf("writeTerminalTitle empty: got %q want %q", got, want)
-	}
-}
-
 // TestFollowRegistered: smoke check that `moe follow` is dispatchable
 // — reaching this point at all means the init() registration didn't
 // duplicate-panic against another command's name.
 func TestFollowRegistered(t *testing.T) {
 	if _, ok := commands["follow"]; !ok {
 		t.Fatal("follow command not registered")
+	}
+}
+
+// TestRunFollowDefaultHumanForm: the no-flags form prints the
+// multi-line summary on stdout and exits 0. Pins the four-line shape
+// the design's example sets — workflow:stage header, canvas/base/dir
+// rows — so a future drift here breaks loudly. We assert on
+// substrings rather than full byte-for-byte: the order is fixed but
+// the line-by-line ordering of "canvas:" / "base:" / "dir:" is the
+// stable contract, not the prefix punctuation.
+func TestRunFollowDefaultHumanForm(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow(nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	got := stdout.String()
+	wantContent := filepath.Join(root, run.ContentPath("tele", "fix-it", "design"))
+	for _, want := range []string{
+		"tele/fix-it · sdlc:design",
+		"canvas: " + wantContent,
+		"dir:    " + sess.WorktreePath,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
+// TestRunFollowPathOnly: --path prints exactly the absolute canvas
+// path on stdout, no other lines. The output must be safe inside
+// $(moe follow --path) — a single \n-terminated line.
+func TestRunFollowPathOnly(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--path"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	want := filepath.Join(root, run.ContentPath("tele", "fix-it", "design")) + "\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("--path stdout = %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(strings.TrimSpace(stdout.String())) {
+		t.Fatalf("--path must be absolute, got %q", stdout.String())
+	}
+}
+
+// TestRunFollowBaseOnly: --base prints exactly the diff base SHA, one
+// line. For a non-code stage that's the worktree's
+// merge-base(HEAD, main).
+func TestRunFollowBaseOnly(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	wantBase, err := git.RevParse(sess.WorktreePath, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--base"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); got != wantBase+"\n" {
+		t.Fatalf("--base stdout = %q, want %q", got, wantBase+"\n")
+	}
+}
+
+// TestRunFollowDirOnly: --dir prints exactly the absolute workspace
+// dir, one line. For a design session that's the bureaucracy worktree
+// path.
+func TestRunFollowDirOnly(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--dir"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); got != sess.WorktreePath+"\n" {
+		t.Fatalf("--dir stdout = %q, want %q", got, sess.WorktreePath+"\n")
+	}
+}
+
+// TestRunFollowShellEvalsCleanly: --shell output must round-trip
+// through `bash -c 'eval "$1"; echo "$MOE_FOLLOW_PATH"' _ "$out"`
+// against a fixture path containing both a space and an apostrophe.
+// The escape regression we're guarding against is the standard POSIX
+// dance for an apostrophe inside a single-quoted string — close,
+// backslash-quote, reopen — without which a naive double-quote wrap
+// would leak the apostrophe and break eval. This test is the
+// wire-format guarantee that wrappers can rely on.
+//
+// We can't easily inject an apostrophe into a real run id (slug
+// characters are constrained), so we exercise shellQuote directly
+// against the awkward fixture and assert eval-roundtrip semantics.
+// The end-to-end --shell test below covers the full pipe.
+func TestRunFollowShellEvalsCleanly(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	awkward := "/tmp/has space/and 'quote'/file.md"
+	script := `eval "$1"; printf '%s' "$VAR"`
+	got, err := exec.Command("bash", "-c", script, "_", "VAR="+shellQuote(awkward)).Output()
+	if err != nil {
+		t.Fatalf("bash eval: %v", err)
+	}
+	if string(got) != awkward {
+		t.Fatalf("eval round-trip: got %q want %q", string(got), awkward)
+	}
+}
+
+// TestRunFollowShell: --shell emits all seven MOE_FOLLOW_*
+// assignments, one per line, and the values are eval-safe. Pipe the
+// output through bash -c 'eval' and assert MOE_FOLLOW_PATH comes back
+// matching the canvas path.
+func TestRunFollowShell(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--shell"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{
+		"MOE_FOLLOW_PATH=",
+		"MOE_FOLLOW_BASE=",
+		"MOE_FOLLOW_DIR=",
+		"MOE_FOLLOW_PROJECT=",
+		"MOE_FOLLOW_RUN=",
+		"MOE_FOLLOW_STAGE=",
+		"MOE_FOLLOW_WORKFLOW=",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q in --shell output:\n%s", want, stdout.String())
+		}
+	}
+
+	// End-to-end: pipe through eval and confirm MOE_FOLLOW_PATH.
+	script := `eval "$1"; printf '%s' "$MOE_FOLLOW_PATH"`
+	out, err := exec.Command("bash", "-c", script, "_", stdout.String()).Output()
+	if err != nil {
+		t.Fatalf("bash eval: %v", err)
+	}
+	want := filepath.Join(root, run.ContentPath("tele", "fix-it", "design"))
+	if string(out) != want {
+		t.Fatalf("eval MOE_FOLLOW_PATH = %q, want %q", string(out), want)
+	}
+}
+
+// TestRunFollowIdleNonZeroExit: with nothing live, the idle line
+// lands on stderr and exit code is 1 so a `while p=$(moe follow
+// --path); do …` shell loop terminates. Stdout must be empty so a
+// caller using --path doesn't accidentally feed an idle-status
+// sentence into less.
+func TestRunFollowIdleNonZeroExit(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--path"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout should be empty on idle, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no run in play") {
+		t.Fatalf("idle line missing from stderr: %q", stderr.String())
+	}
+}
+
+// TestRunFollowMutuallyExclusiveFlags: --path/--base/--dir/--shell
+// can't combine. The CLI rejects with exit 2 and a usage error; this
+// keeps the contract that a single invocation produces one output
+// shape, so wrapper scripts don't have to defensively pick.
+func TestRunFollowMutuallyExclusiveFlags(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--path", "--base"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Fatalf("expected 'mutually exclusive' in stderr, got %q", stderr.String())
+	}
+}
+
+// TestShellQuoteRoundTrips pins the POSIX single-quote escape contract
+// directly. Belt-and-braces alongside TestRunFollowShellEvalsCleanly:
+// even without bash on PATH, the shape of the escape (no spaces, no
+// double-quote tricks, just the close / backslash-quote / reopen
+// dance from shellQuote) is the wire format.
+func TestShellQuoteRoundTrips(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"plain", `'plain'`},
+		{"with space", `'with space'`},
+		{"it's mine", `'it'\''s mine'`},
+		{"", `''`},
+	}
+	for _, c := range cases {
+		if got := shellQuote(c.in); got != c.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

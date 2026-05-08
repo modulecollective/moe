@@ -23,9 +23,11 @@ import (
 const queueCountdownSeconds = 3
 
 // queueIdleInterval is the cadence at which the empty-queue idle loop
-// re-peeks under the lock. Mirrors followIdleInterval — the same
-// "responsive without polling tightly" tradeoff. var rather than const
-// so tests can dial it down to milliseconds; production stays at 1s.
+// re-peeks under the lock. 1s is the "responsive without polling
+// tightly" point — operators expect Ctrl-C to land within a tick, and
+// the lock acquire / loadQueue / save round-trip is cheap enough that
+// 1s isn't a contention worry. var rather than const so tests can
+// dial it down to milliseconds; production stays at 1s.
 var queueIdleInterval = 1 * time.Second
 
 // `moe queue` is the operator's playlist of opened runs to grind
@@ -529,10 +531,10 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		}
 		if empty {
 			// Idle screen: clear-and-print on the same line each tick
-			// so the status doesn't scroll. \r returns the cursor;
-			// \033[K clears to end-of-line so a shorter tail from a
-			// prior frame doesn't show through. Same trick follow's
-			// idle loop uses.
+			// so the status doesn't scroll. \r returns the cursor to
+			// column 0; \033[K (CSI K) erases from the cursor to
+			// end-of-line so a shorter tail from a prior frame
+			// doesn't show through.
 			fmt.Fprint(stdout, "\r\033[K(queue: empty · waiting · Ctrl-C to exit)")
 			select {
 			case <-walkerSig:
