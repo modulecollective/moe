@@ -240,6 +240,10 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	// Canvas commit so Close gets past the empty-canvas gate and into
+	// the rebase path the test actually exercises.
+	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md",
+		"# Design\n", "work: update design")
 	// Session branch edits shared.txt.
 	commitInWorktree(t, s.WorktreePath, "shared.txt", "session-edit\n", "session: touch shared")
 
@@ -317,6 +321,63 @@ func TestListIncludesOpenSessions(t *testing.T) {
 	}
 	if !branches["session/moe/r1/design"] || !branches["session/moe/r2/code"] {
 		t.Errorf("missing expected branches: %v", branches)
+	}
+}
+
+// TestSessionCloseRefusesEmptyCanvas: a session that committed
+// non-canvas paths (e.g. unrelated edits) but never landed a canvas
+// turn must refuse Close. Gate 1 mirrors commitTurn at the seal point
+// — the silent empty fast-forward this run was opened against would
+// otherwise tear the worktree down without leaving a trace.
+func TestSessionCloseRefusesEmptyCanvas(t *testing.T) {
+	root := newTestRoot(t)
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Commit something other than the canvas so the branch has at
+	// least one commit but no canvas blob in its tree.
+	commitInWorktree(t, s.WorktreePath, "scratch.txt", "scratch\n", "session: scratch")
+
+	err = Close(s)
+	if err == nil {
+		t.Fatal("expected refusal, got nil")
+	}
+	if !strings.Contains(err.Error(), "canvas projects/moe/runs/r1/documents/design/content.md") {
+		t.Errorf("error should name the canvas path: %v", err)
+	}
+	if !strings.Contains(err.Error(), "moe session abandon") {
+		t.Errorf("error should point at abandon: %v", err)
+	}
+	// Worktree and branch must remain so the operator can recover.
+	if _, err := os.Stat(s.WorktreePath); err != nil {
+		t.Errorf("worktree missing after refusal: %v", err)
+	}
+	if !branchExists(root, s.Branch) {
+		t.Errorf("branch missing after refusal")
+	}
+}
+
+// TestSessionCloseSilentlyAbandonsZeroCommitSession: a session that
+// hit a bootstrap failure (or any pre-first-turn bail) has no commits
+// past main and nothing to land. Close treats it as Abandon and tears
+// the worktree down silently — the canvas gate is for the
+// "commits-exist-but-canvas-isn't-among-them" case, not for
+// literally-no-work.
+func TestSessionCloseSilentlyAbandonsZeroCommitSession(t *testing.T) {
+	root := newTestRoot(t)
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := Close(s); err != nil {
+		t.Fatalf("Close on zero-commit session should silently abandon, got: %v", err)
+	}
+	if _, err := os.Stat(s.WorktreePath); !os.IsNotExist(err) {
+		t.Errorf("worktree still present after silent abandon: err=%v", err)
+	}
+	if branchExists(root, s.Branch) {
+		t.Errorf("branch %s still present after silent abandon", s.Branch)
 	}
 }
 

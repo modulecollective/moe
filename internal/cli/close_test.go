@@ -454,3 +454,196 @@ func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
 		}
 	}
 }
+
+// addDocEntryAndCommit registers a document on the run's metadata and
+// optionally seeds its canvas, then commits so the close clean-tree
+// check passes. body == "" leaves the canvas absent — the
+// missing-write case gate 2 has to refuse the same way as zero-byte.
+func addDocEntryAndCommit(t *testing.T, root, projectID, runID, docID, body string) {
+	t.Helper()
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		t.Fatalf("run.Load: %v", err)
+	}
+	if md.Documents == nil {
+		md.Documents = map[string]*run.Document{}
+	}
+	md.Documents[docID] = &run.Document{Session: "00000000-0000-4000-8000-000000000000"}
+	if err := run.Save(root, md); err != nil {
+		t.Fatalf("run.Save: %v", err)
+	}
+	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
+	addArgs := []string{"-C", root, "add", runJSONRel}
+	if body != "" {
+		canvasRel := run.ContentPath(projectID, runID, docID)
+		canvasAbs := filepath.Join(root, canvasRel)
+		if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(canvasAbs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		addArgs = append(addArgs, canvasRel)
+	}
+	if out, err := exec.Command("git", addArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit := exec.Command("git", "-C", root, "commit", "-m", "register "+docID+" on "+runID)
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+
+// TestSDLCCloseRefusesEmptyDesignCanvas: a registered design document
+// with an absent canvas must refuse close. Gate 2's reason for being
+// — the silent empty fast-forward this run was opened against would
+// land here on disk, and runClose has to catch it before the trailered
+// close commit goes in.
+func TestSDLCCloseRefusesEmptyDesignCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "empty-design", "sdlc", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "empty-design", "design", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	beforeHead := gitLog(t, root, "-1", "--format=%H")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "empty-design"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "canvas projects/tele/runs/empty-design/documents/design/content.md is empty") {
+		t.Fatalf("missing canvas-empty error: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe sdlc design tele empty-design") {
+		t.Fatalf("missing reopen hint: %q", errb.String())
+	}
+	if afterHead := gitLog(t, root, "-1", "--format=%H"); beforeHead != afterHead {
+		t.Fatalf("refused close created a commit:\nbefore=%safter=%s", beforeHead, afterHead)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "empty-design", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"status": "in_progress"`) {
+		t.Fatalf("status mutated under refusal:\n%s", body)
+	}
+}
+
+// TestSDLCCloseRefusesEmptyCodeCanvas: design canvas is fine, code is
+// the zero-byte one. The walk has to keep checking past the first OK
+// document — a regression that bailed early on the first non-empty
+// canvas would let this through.
+func TestSDLCCloseRefusesEmptyCodeCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "empty-code", "sdlc", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "empty-code", "design", "# Design\n")
+	addDocEntryAndCommit(t, root, "tele", "empty-code", "code", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "empty-code"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "documents/code/content.md is empty") {
+		t.Fatalf("error should name the code canvas: %q", errb.String())
+	}
+}
+
+// TestSDLCCloseAllowsNeverStartedCode: design canvas non-empty and the
+// code stage was never opened (no entry in md.Documents). Close
+// succeeds — the satisfaction model says an unopened doc has no
+// canvas-existence obligation.
+func TestSDLCCloseAllowsNeverStartedCode(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "design-only", "sdlc", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "design-only", "design", "# Design\n")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "design-only"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "closed sdlc tele/design-only") {
+		t.Fatalf("missing close confirmation: %q", out.String())
+	}
+}
+
+// TestKBCloseRefusesEmptyCanvas: the gate is shared across workflows;
+// kb gets the same refusal, with the kb-shaped reopen hint.
+func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "kb-empty", "kb", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "kb-empty", "research", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-empty"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "documents/research/content.md is empty") {
+		t.Fatalf("kb refusal should name research canvas: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe kb research tele kb-empty") {
+		t.Fatalf("kb refusal should suggest the kb verb: %q", errb.String())
+	}
+}
+
+// TestQuickCloseRefusesEmptyCanvas: parallel coverage for the quick
+// workflow, which also goes through runClose.
+func TestQuickCloseRefusesEmptyCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "quick-empty", "quick", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "quick-empty", "code", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"quick", "close", "--no-edit", "tele", "quick-empty"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "documents/code/content.md is empty") {
+		t.Fatalf("quick refusal should name code canvas: %q", errb.String())
+	}
+}
+
+// TestMetaMoeCloseRefusesEmptyCanvas: meta-moe close registration
+// landed recently; the inherited gate must hold there too.
+func TestMetaMoeCloseRefusesEmptyCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "mm-empty", "meta-moe", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "mm-empty", "scan", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"meta-moe", "close", "--no-edit", "tele", "mm-empty"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "documents/scan/content.md is empty") {
+		t.Fatalf("meta-moe refusal should name scan canvas: %q", errb.String())
+	}
+}
+
+// TestIdeaCloseStillAllowsEmpty: idea is exempt — its content.md is
+// the operator's free-form capture, and an empty idea on close is
+// operator intent. Regression canary for the workflow != ideaWorkflow
+// branch.
+func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "idea-empty", "idea", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "idea-empty", "idea", "")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "close", "tele", "idea-empty"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "closed idea tele/idea-empty") {
+		t.Fatalf("missing close confirmation: %q", out.String())
+	}
+}

@@ -26,9 +26,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // Session identifies one active stage session.
@@ -130,6 +132,42 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 // are left intact, and the error names both so the operator can
 // resolve by hand or run `moe session abandon`.
 func Close(s *Session) error {
+	// A session that never produced a commit (open + early bail before
+	// the first turn — bootstrap error, executor refused, etc.) has
+	// nothing to land. Tear it down silently rather than running the
+	// canvas gate against a branch tip that's literally still at main.
+	// The gate is for the silent-empty-fast-forward case where commits
+	// exist but the canvas isn't among them; a zero-commit branch is
+	// the no-work case, and Abandon is the right semantics.
+	count, err := newCommitsPastMain(s.Root, s.Branch)
+	if err != nil {
+		return fmt.Errorf("session close: count commits on %s: %w", s.Branch, err)
+	}
+	if count == 0 {
+		return Abandon(s)
+	}
+
+	// Mirror commitTurn's per-turn predicate at the seal point: refuse
+	// to land a session whose canvas at the branch tip is empty (or
+	// absent from the tree). commitTurn is the only producer of
+	// session-branch commits and refuses to commit an empty canvas, so
+	// a non-empty blob here means at least one work turn landed. The
+	// branch-tip read (rather than the worktree) is the direct mirror
+	// of "what would actually merge" — the worktree can disagree
+	// (post-commit edits, a seed canvas the session never touched),
+	// and only what's committed can fast-forward main.
+	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
+	switch out, err := git.Combined(s.WorktreePath, "show", s.Branch+":"+canvasRel); {
+	case err != nil, len(strings.TrimRight(out, "\n")) == 0:
+		return fmt.Errorf(
+			"session close: canvas %s at %s is empty — no commitTurn landed this session\n"+
+				"  worktree: %s\n"+
+				"  branch:   %s\n"+
+				"  resolve by writing to the canvas and re-closing,\n"+
+				"  or drop it: moe session abandon %s",
+			canvasRel, s.Branch, s.WorktreePath, s.Branch, s.Branch)
+	}
+
 	// Rebase inside the worktree. We don't fetch origin first —
 	// bureaucracy pushes happen through `moe sync`, which holds the
 	// same repo lock. Under the lock, local main is the source of truth.
@@ -340,6 +378,18 @@ func findWorktreeForBranch(root, branch string) (string, error) {
 func branchExists(root, branch string) bool {
 	_, err := git.Output(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	return err == nil
+}
+
+// newCommitsPastMain returns how many commits branch carries beyond
+// main. Used by Close to distinguish "session never produced anything,
+// silently tear down" (zero) from "session has commits, run the canvas
+// gate against them" (non-zero).
+func newCommitsPastMain(root, branch string) (int, error) {
+	out, err := git.Output(root, "rev-list", "--count", "main.."+branch)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(out))
 }
 
 func newUUID() (string, error) {

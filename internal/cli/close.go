@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/modulecollective/moe/internal/repolock"
@@ -126,6 +128,40 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	default:
 		moePrintf(stderr, "%s %s/%s has unexpected status %q\n", workflow, projectID, runID, md.Status)
 		return 1
+	}
+
+	// Mirror commitTurn's per-turn predicate at the close seal: every
+	// document the run reached must have a non-empty canvas on disk.
+	// This is the post-merge belt to gate-1's pre-merge braces — it
+	// catches a canvas hand-edited or `git rm`'d to zero bytes after
+	// the session merged. Idea is exempt: its content.md is the
+	// operator's free-form capture written at open time, and an empty
+	// idea on close is operator intent, not a missed write.
+	//
+	// The walk is over md.Documents, which only carries entries for
+	// documents the run actually opened (EnsureDocument populates it
+	// from the stage session). A run that never reached `code` has no
+	// `code` entry to verify — same satisfaction model Workflow.Next
+	// uses.
+	if workflow != ideaWorkflow {
+		docIDs := make([]string, 0, len(md.Documents))
+		for docID := range md.Documents {
+			docIDs = append(docIDs, docID)
+		}
+		sort.Strings(docIDs)
+		for _, docID := range docIDs {
+			canvasRel := run.ContentPath(md.Project, md.ID, docID)
+			info, err := os.Stat(filepath.Join(root, canvasRel))
+			if err != nil || info.Size() == 0 {
+				moePrintf(stderr,
+					"%s %s/%s: canvas %s is empty\n"+
+						"  reopen the session (`moe %s %s %s %s`) and write to the canvas,\n"+
+						"  or restore the file from git history\n",
+					workflow, projectID, runID, canvasRel,
+					workflow, docID, projectID, runID)
+				return 1
+			}
+		}
 	}
 
 	msg := fmt.Sprintf(subject+"\n\n", projectID, runID) +
