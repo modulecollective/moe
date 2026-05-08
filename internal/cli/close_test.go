@@ -315,3 +315,72 @@ func TestKBCloseRegisteredInUsage(t *testing.T) {
 		t.Fatalf("kb usage missing 'close':\n%s", out.String())
 	}
 }
+
+func TestQuickCloseRegisteredInUsage(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := Run([]string{"quick"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "close") {
+		t.Fatalf("quick usage missing 'close':\n%s", out.String())
+	}
+}
+
+// TestQuickCloseRemovesSandboxAndCommits parallels
+// TestSDLCCloseRemovesSandboxAndCommits: quick code runs in a per-run
+// sandbox just like sdlc code, so close must release that workspace
+// rather than leave a dead clone on disk. Asserts the same three
+// post-conditions: sandbox gone, status flipped, trailered commit on
+// HEAD with the quick-flavoured subject.
+func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "abandon-quick", "quick", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	sandboxPath := sandbox.Path(root, "tele", "abandon-quick")
+	gitDirPath := filepath.Join(root, ".moe", "clones", "tele", ".git-modules", "abandon-quick")
+	if err := os.MkdirAll(sandboxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(gitDirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"quick", "close", "--no-edit", "tele", "abandon-quick"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "closed quick tele/abandon-quick") {
+		t.Fatalf("missing close confirmation: %q", out.String())
+	}
+
+	if _, err := os.Stat(sandboxPath); !os.IsNotExist(err) {
+		t.Fatalf("expected sandbox gone, stat err=%v", err)
+	}
+	if _, err := os.Stat(gitDirPath); !os.IsNotExist(err) {
+		t.Fatalf("expected sandbox gitdir gone, stat err=%v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "abandon-quick", "run.json"))
+	if err != nil {
+		t.Fatalf("run.json missing: %v", err)
+	}
+	if !strings.Contains(string(body), `"status": "closed"`) {
+		t.Fatalf("run.json status not flipped:\n%s", body)
+	}
+
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "Close quick run tele/abandon-quick") {
+		t.Fatalf("commit subject wrong:\n%s", head)
+	}
+	for _, want := range []string{
+		"MoE-Run: abandon-quick",
+		"MoE-Project: tele",
+		"MoE-Workflow: quick",
+	} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("commit missing trailer %q:\n%s", want, head)
+		}
+	}
+}

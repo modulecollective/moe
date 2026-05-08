@@ -22,6 +22,7 @@ func init() {
 		Run:     runQuickCode,
 	})
 	quick.Register(pushCmd, "code")
+	quick.RegisterFacade(closeCommand("quick", "Close quick run %s/%s", releaseWorkspaceCleanup))
 	RegisterWorkflow(quick)
 	Register(quick.Command())
 }

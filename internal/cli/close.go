@@ -209,16 +209,20 @@ func twinReflectNudge(root, projectID, runID, workflow string) string {
 	)
 }
 
-// sdlcCloseCleanup releases the run's hold on its workspace. For a
-// per-run sandbox that means removing the clone (the moe/<run> branch
-// lives only inside that clone — push hasn't happened, the
+// releaseWorkspaceCleanup releases the run's hold on its workspace.
+// For a per-run sandbox that means removing the clone (the moe/<run>
+// branch lives only inside that clone — push hasn't happened, the
 // state-guard above catches the pushed case — so the worktree
 // removal also takes the branch with it). For a named workspace it
 // means dropping the claim file and leaving the directory in place
 // for the next run to reuse, which is the whole point of named
 // workspaces. Idempotent: a never-opened workspace (operator
-// abandoned before `moe sdlc code`) is a no-op either way.
-func sdlcCloseCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+// abandoned before the code stage) is a no-op either way.
+//
+// Used by both sdlc close and quick close — both stages run code in a
+// per-run sandbox, so neither can be allowed to leave a dead clone
+// behind.
+func releaseWorkspaceCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 	if err := releaseRunWorkspace(root, md); err != nil {
 		return fmt.Errorf("release workspace: %w", err)
 	}

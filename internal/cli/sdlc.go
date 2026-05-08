@@ -35,7 +35,7 @@ func init() {
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
 		Run:     runShell,
 	})
-	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", sdlcCloseCleanup))
+	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", releaseWorkspaceCleanup))
 	sdlc.RegisterFacade(&Command{
 		Name:    "resume",
 		Summary: "drive any pending stages of an opened run headlessly, then prompt at the merge gate",

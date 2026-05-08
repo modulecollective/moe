@@ -27,7 +27,7 @@ func TestQuickRegistered(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "code", "push"} {
+	for _, want := range []string{"new", "code", "push", "close"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("quick usage missing subcommand %q: %q", want, out.String())
 		}
