@@ -619,7 +619,6 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		}
 	}
 
-
 	// Countdown after hunk exits is the operator's escape hatch from
 	// the relaunch loop: without it, a fresh hunk re-spawns
 	// immediately and the only way out is timing a Ctrl-C through
