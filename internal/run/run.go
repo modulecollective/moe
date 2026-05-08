@@ -68,17 +68,8 @@ type Metadata struct {
 	// every later verb (stage session, push, close, sync, shell)
 	// routes off it. omitempty keeps run.json bodies of pre-workspace
 	// runs unchanged so diffs and tests stay clean.
-	Workspace string `json:"workspace,omitempty"`
-	// OpenedFrom is the SHA of the bureaucracy commit this run branches
-	// from — i.e., the parent of the open commit. `moe follow` uses it
-	// as hunk's diff base for non-code stages so the pane shows "this
-	// run's contribution since open" rather than "this run vs main",
-	// which would hide a --from-idea seed already merged on main between
-	// the open commit and the first follow tick. Captured at run-open
-	// time and never updated. Empty on runs opened before the field
-	// existed; readers fall back to "main".
-	OpenedFrom string               `json:"opened_from,omitempty"`
-	Documents  map[string]*Document `json:"documents"`
+	Workspace string               `json:"workspace,omitempty"`
+	Documents map[string]*Document `json:"documents"`
 }
 
 // Options carries user-supplied fields for New. Workflow is required;
@@ -276,24 +267,15 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		}
 	}
 
-	// Capture HEAD before the open commit lands. This is the parent
-	// commit the run branches from; moe follow uses it as hunk's diff
-	// base so the pane shows the run's contribution since open.
-	openedFrom, err := git.RevParse(root, "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("run: rev-parse HEAD: %w", err)
-	}
-
 	md := &Metadata{
-		ID:         id,
-		Project:    projectID,
-		Title:      title,
-		Status:     StatusInProgress,
-		Workflow:   opts.Workflow,
-		Created:    now().Local().Format("2006-01-02"),
-		Workspace:  opts.Workspace,
-		OpenedFrom: openedFrom,
-		Documents:  map[string]*Document{},
+		ID:        id,
+		Project:   projectID,
+		Title:     title,
+		Status:    StatusInProgress,
+		Workflow:  opts.Workflow,
+		Created:   now().Local().Format("2006-01-02"),
+		Workspace: opts.Workspace,
+		Documents: map[string]*Document{},
 	}
 
 	runJSONRel := filepath.Join(runDirRel, "run.json")

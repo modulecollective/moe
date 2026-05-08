@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -292,14 +293,16 @@ func stageRank(doc string) int {
 // resolveFollowTarget routes a session to the workspace tuple hunk
 // runs in. Code sessions diff the run's sandbox clone against the
 // project's recorded default branch; every other stage diffs the
-// session's bureaucracy worktree against the run's OpenedFrom (the
-// commit the run branched from), falling back to "main" when the run
-// pre-dates the field. The OpenedFrom anchor means hunk's pane shows
-// the run's contribution since open — including any --from-idea seed
-// that landed on main as part of the open commit. The dir is stat'd
-// as defense-in-depth so an orphaned session record (worktree dir
-// gone, or sandbox not yet cloned) idles instead of feeding hunk a
-// non-existent cwd.
+// session's bureaucracy worktree against `merge-base(HEAD, main)` —
+// the commit at which the session branch diverged from main. That
+// anchor moves with the session: on a fresh first turn it sits on
+// the open commit (so the diff shows the session-start commit plus
+// the agent's edits); on a resumed turn it sits on whatever main's
+// HEAD was when the worktree was re-created (so unrelated runs that
+// landed on main between turns are excluded — they're below the
+// merge base). The dir is stat'd as defense-in-depth so an orphaned
+// session record (worktree dir gone, or sandbox not yet cloned)
+// idles instead of feeding hunk a non-existent cwd.
 func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (followTarget, error) {
 	if sess.Doc == "code" {
 		dir := sandbox.Path(root, md.Project, md.ID)
@@ -322,10 +325,11 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 	if _, err := os.Stat(sess.WorktreePath); err != nil {
 		return followTarget{}, nil
 	}
-	base := md.OpenedFrom
-	if base == "" {
-		base = "main"
+	out, err := git.Output(sess.WorktreePath, "merge-base", "HEAD", "main")
+	if err != nil {
+		return followTarget{}, fmt.Errorf("follow: merge-base: %w", err)
 	}
+	base := strings.TrimSpace(out)
 	return followTarget{
 		Dir:      sess.WorktreePath,
 		Base:     base,

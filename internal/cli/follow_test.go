@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
@@ -55,9 +56,11 @@ func TestPickFollowTargetParkedNotACandidate(t *testing.T) {
 }
 
 // TestPickFollowTargetLiveDesignSession: a run with an open design
-// session resolves to (worktree, "main"). Bureaucracy worktree is
-// where the agent's edits live until the session rebases onto main at
-// close.
+// session resolves to (worktree, merge-base(HEAD, main)). Bureaucracy
+// worktree is where the agent's edits live until the session rebases
+// onto main at close; the merge-base anchors the diff at the
+// divergence point so unrelated runs that landed on main between
+// turns stay below the base.
 func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -69,6 +72,11 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
+	wantBase, err := git.RevParse(sess.WorktreePath, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse session HEAD: %v", err)
+	}
+
 	target, _, err := pickFollowTarget(root, "")
 	if err != nil {
 		t.Fatalf("pickFollowTarget: %v", err)
@@ -76,8 +84,8 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	if target.Dir != sess.WorktreePath {
 		t.Fatalf("dir = %q, want session worktree %q", target.Dir, sess.WorktreePath)
 	}
-	if target.Base != "main" {
-		t.Fatalf("base = %q, want main", target.Base)
+	if target.Base != wantBase {
+		t.Fatalf("base = %q, want merge-base %q", target.Base, wantBase)
 	}
 }
 
@@ -350,52 +358,57 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 	}
 }
 
-// TestResolveFollowTargetUsesOpenedFromForNonCode: with OpenedFrom
-// set, hunk's base must be that SHA — diff-since-open is the whole
-// reason the field exists, and it's how a --from-idea seed shows up
-// in the pane instead of being hidden by a "vs main" base that
-// already contains the seed. The followTarget also carries identity
-// (workflow, stage, project, run) for the OSC title write — a live
-// target without those fields would render an anonymous title.
-func TestResolveFollowTargetUsesOpenedFromForNonCode(t *testing.T) {
-	worktree := t.TempDir()
-	md := &run.Metadata{
-		Project: "tele", ID: "fix-it",
-		Workflow: "sdlc", OpenedFrom: "abc1234",
-	}
-	sess := &session.Session{Doc: "design", WorktreePath: worktree}
+// TestResolveFollowTargetUsesMergeBaseForNonCode: hunk's base for a
+// non-code session is `merge-base(HEAD, main)` resolved inside the
+// session worktree — the commit at which the session branch diverged
+// from main. That anchor is stable across the close→reopen boundary
+// resume relies on (the worktree is re-created off main HEAD on
+// resume, and the merge base moves with it), so unrelated runs that
+// landed on main between turns stay below the base and out of the
+// diff. The followTarget also carries identity (workflow, stage,
+// project, run) for the OSC title write — a live target without
+// those fields would render an anonymous title.
+func TestResolveFollowTargetUsesMergeBaseForNonCode(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
 
-	target, err := resolveFollowTarget(t.TempDir(), md, sess)
+	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	sess, err := session.Open(root, "tele", "fix-it", "design")
+	if err != nil {
+		t.Fatalf("session.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Abandon(sess) })
+
+	// Capture the divergence point — main's HEAD at the moment the
+	// session worktree was created off it. resolveFollowTarget must
+	// report this SHA, not main itself.
+	wantBase, err := git.RevParse(sess.WorktreePath, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse session HEAD: %v", err)
+	}
+
+	// Land an unrelated commit on main *after* the session opened.
+	// merge-base must stay anchored at the divergence point (not
+	// advance to the new main HEAD), so the unrelated commit doesn't
+	// retroactively appear in the diff base.
+	commitTrailer(t, root, "unrelated work on main", "MoE-Run: other\n", time.Time{})
+
+	md := &run.Metadata{
+		ID: "fix-it", Project: "tele", Workflow: "sdlc",
+	}
+	target, err := resolveFollowTarget(root, md, sess)
 	if err != nil {
 		t.Fatalf("resolveFollowTarget: %v", err)
 	}
-	if target.Dir != worktree {
-		t.Fatalf("dir = %q, want %q", target.Dir, worktree)
+	if target.Dir != sess.WorktreePath {
+		t.Fatalf("dir = %q, want %q", target.Dir, sess.WorktreePath)
 	}
-	if target.Base != "abc1234" {
-		t.Fatalf("base = %q, want OpenedFrom %q", target.Base, "abc1234")
+	if target.Base != wantBase {
+		t.Fatalf("base = %q, want merge-base %q", target.Base, wantBase)
 	}
 	if target.Workflow != "sdlc" || target.Stage != "design" ||
 		target.Project != "tele" || target.Run != "fix-it" {
 		t.Fatalf("identity = %+v, want sdlc/design/tele/fix-it", target)
-	}
-}
-
-// TestResolveFollowTargetFallsBackToMainWhenOpenedFromEmpty: runs
-// opened before the OpenedFrom field existed must keep working
-// against "main" — no migration is required, the behaviour just
-// degrades to the pre-feature default.
-func TestResolveFollowTargetFallsBackToMainWhenOpenedFromEmpty(t *testing.T) {
-	worktree := t.TempDir()
-	md := &run.Metadata{Project: "tele", ID: "fix-it"}
-	sess := &session.Session{Doc: "design", WorktreePath: worktree}
-
-	target, err := resolveFollowTarget(t.TempDir(), md, sess)
-	if err != nil {
-		t.Fatalf("resolveFollowTarget: %v", err)
-	}
-	if target.Base != "main" {
-		t.Fatalf("base = %q, want fallback %q", target.Base, "main")
 	}
 }
 

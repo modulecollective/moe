@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/modulecollective/moe/internal/git"
 )
 
 // fixedNow returns an Options.Now that always yields t — so tests that
@@ -277,47 +275,6 @@ func TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter(t *testing.T) {
 	}
 	if md.ID != "my-idea-slug-2026-04-22-2" {
 		t.Fatalf("id = %q, want %q", md.ID, "my-idea-slug-2026-04-22-2")
-	}
-}
-
-// TestNewRecordsOpenedFrom: New must capture HEAD before its open
-// commit lands and persist that SHA to run.json. moe follow uses the
-// field as hunk's diff base for non-code stages, so a missing or
-// stale value would silently break the seed-visible-in-pane case.
-func TestNewRecordsOpenedFrom(t *testing.T) {
-	root := newTestRoot(t)
-	seedProject(t, root, "tele")
-
-	parent, err := git.RevParse(root, "HEAD")
-	if err != nil {
-		t.Fatalf("rev-parse pre-open: %v", err)
-	}
-
-	md, err := New(root, "tele", "Fix it", Options{Workflow: "sdlc"})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if md.OpenedFrom != parent {
-		t.Errorf("returned OpenedFrom = %q, want HEAD pre-open %q", md.OpenedFrom, parent)
-	}
-
-	// Persisted on disk so resolveFollowTarget can read it after
-	// the operator restarts moe.
-	loaded, err := Load(root, "tele", md.ID)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if loaded.OpenedFrom != parent {
-		t.Errorf("persisted OpenedFrom = %q, want %q", loaded.OpenedFrom, parent)
-	}
-
-	// And it really is the parent of the open commit, not HEAD now.
-	headNow, err := git.RevParse(root, "HEAD")
-	if err != nil {
-		t.Fatalf("rev-parse post-open: %v", err)
-	}
-	if headNow == parent {
-		t.Fatal("open commit did not advance HEAD; test setup is wrong")
 	}
 }
 
