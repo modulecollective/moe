@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modulecollective/moe/internal/project"
@@ -34,6 +35,13 @@ import (
 // relaunch loop, then re-evaluates and either spawns a fresh hunk or
 // drops to a single-line idle screen polled every --interval. Read-
 // only by construction: hunk is a viewer.
+//
+// While hunk is running, a watcher polls pickFollowTarget on the same
+// idle cadence; if the followTarget the loop would now pick no longer
+// matches what hunk is rendering, the watcher SIGTERMs hunk so the
+// loop can re-spawn against the new target without waiting on the
+// operator's `q`. State-change rotations skip the post-exit countdown
+// because the operator didn't ask to bail.
 //
 // Pieces reused from `dash`: same Scan, same journal index, same
 // session.List for liveness. follow is the across-runs counterpart to
@@ -111,7 +119,7 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if target.Dir != "" {
-			if quit := followTargetRun(target, sigCh, stdout, stderr); quit {
+			if quit := followTargetRun(root, *runFilter, target, sigCh, stdout, stderr); quit {
 				return 0
 			}
 			continue
@@ -405,7 +413,16 @@ func drainSignal(ch <-chan os.Signal) {
 // hunk tears itself down, moe sees sigCh fire, and we return true so
 // follow exits without pulling the operator through a countdown they
 // didn't ask for.
-func followTargetRun(target followTarget, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
+//
+// A watcher goroutine runs alongside cmd.Wait, polling pickFollowTarget
+// at the same cadence as the idle screen. When the followTarget the
+// loop would now pick no longer matches the one hunk was launched
+// against — pinned run advanced a stage, ranking flipped, session
+// closed — the watcher SIGTERMs hunk so the loop can re-spawn against
+// the new target without waiting for the operator's `q`. State-change
+// rotations skip the post-exit countdown; operator-driven exits keep
+// it.
+func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
 	drainSignal(sigCh)
 	cmd := exec.Command("hunk", "diff", "--watch", target.Base)
 	cmd.Dir = target.Dir
@@ -427,11 +444,54 @@ func followTargetRun(target followTarget, sigCh <-chan os.Signal, stdout, stderr
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- cmd.Wait() }()
 
+	rotateCh := make(chan struct{}, 1)
+	stopWatcher := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		ticker := time.NewTicker(followIdleInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatcher:
+				return
+			case <-ticker.C:
+				fresh, _, err := pickFollowTarget(root, runFilter)
+				if err != nil {
+					// Same forgiveness pickFollowTarget extends to its
+					// own session.List failures: a transient I/O blip
+					// shouldn't yank the current hunk. Keep watching.
+					continue
+				}
+				if fresh == target {
+					continue
+				}
+				// SIGTERM is best-effort — if hunk has already exited
+				// (e.g. operator just hit `q`), the signal returns an
+				// error we don't care about. Either way, signal the
+				// caller that this exit is a state-change rotation so
+				// the countdown is skipped.
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+				select {
+				case rotateCh <- struct{}{}:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
 	operatorQuit := false
+	rotated := false
 	select {
 	case <-waitErr:
-		// hunk exited on its own — `q`, internal Ctrl-C, or a crash.
-		// Drop to the post-exit countdown.
+		// hunk exited — `q`, internal Ctrl-C, a crash, or our SIGTERM
+		// for state-change rotation. The rotateCh probe disambiguates.
+		select {
+		case <-rotateCh:
+			rotated = true
+		default:
+		}
 	case <-sigCh:
 		// Operator hit ^C; the kernel delivered the same SIGINT to
 		// hunk. Wait for it to tear down so the terminal's mode is
@@ -439,9 +499,17 @@ func followTargetRun(target followTarget, sigCh <-chan os.Signal, stdout, stderr
 		operatorQuit = true
 		<-waitErr
 	}
+	close(stopWatcher)
+	<-watcherDone
 	drainSignal(sigCh)
 	if operatorQuit {
 		return true
+	}
+	if rotated {
+		// State changed under us; the operator didn't ask to bail.
+		// Skip the countdown so the loop re-picks immediately against
+		// whatever's live now.
+		return false
 	}
 
 	// Countdown after hunk exits is the operator's escape hatch from
