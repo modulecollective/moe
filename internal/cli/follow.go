@@ -273,9 +273,13 @@ func stageRank(doc string) int {
 // resolveFollowTarget routes a session to the workspace tuple hunk
 // runs in. Code sessions diff the run's sandbox clone against the
 // project's recorded default branch; every other stage diffs the
-// session's bureaucracy worktree against main. The dir is stat'd as
-// defense-in-depth so an orphaned session record (worktree dir gone,
-// or sandbox not yet cloned) idles instead of feeding hunk a
+// session's bureaucracy worktree against the run's OpenedFrom (the
+// commit the run branched from), falling back to "main" when the run
+// pre-dates the field. The OpenedFrom anchor means hunk's pane shows
+// the run's contribution since open — including any --from-idea seed
+// that landed on main as part of the open commit. The dir is stat'd
+// as defense-in-depth so an orphaned session record (worktree dir
+// gone, or sandbox not yet cloned) idles instead of feeding hunk a
 // non-existent cwd.
 func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (followTarget, error) {
 	if sess.Doc == "code" {
@@ -292,7 +296,11 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 	if _, err := os.Stat(sess.WorktreePath); err != nil {
 		return followTarget{}, nil
 	}
-	return followTarget{Dir: sess.WorktreePath, Base: "main"}, nil
+	base := md.OpenedFrom
+	if base == "" {
+		base = "main"
+	}
+	return followTarget{Dir: sess.WorktreePath, Base: base}, nil
 }
 
 // buildFollowSummary rolls scanned metadata into the figures the idle

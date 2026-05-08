@@ -349,6 +349,46 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 	}
 }
 
+// TestResolveFollowTargetUsesOpenedFromForNonCode: with OpenedFrom
+// set, hunk's base must be that SHA — diff-since-open is the whole
+// reason the field exists, and it's how a --from-idea seed shows up
+// in the pane instead of being hidden by a "vs main" base that
+// already contains the seed.
+func TestResolveFollowTargetUsesOpenedFromForNonCode(t *testing.T) {
+	worktree := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it", OpenedFrom: "abc1234"}
+	sess := &session.Session{Doc: "design", WorktreePath: worktree}
+
+	target, err := resolveFollowTarget(t.TempDir(), md, sess)
+	if err != nil {
+		t.Fatalf("resolveFollowTarget: %v", err)
+	}
+	if target.Dir != worktree {
+		t.Fatalf("dir = %q, want %q", target.Dir, worktree)
+	}
+	if target.Base != "abc1234" {
+		t.Fatalf("base = %q, want OpenedFrom %q", target.Base, "abc1234")
+	}
+}
+
+// TestResolveFollowTargetFallsBackToMainWhenOpenedFromEmpty: runs
+// opened before the OpenedFrom field existed must keep working
+// against "main" — no migration is required, the behaviour just
+// degrades to the pre-feature default.
+func TestResolveFollowTargetFallsBackToMainWhenOpenedFromEmpty(t *testing.T) {
+	worktree := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	sess := &session.Session{Doc: "design", WorktreePath: worktree}
+
+	target, err := resolveFollowTarget(t.TempDir(), md, sess)
+	if err != nil {
+		t.Fatalf("resolveFollowTarget: %v", err)
+	}
+	if target.Base != "main" {
+		t.Fatalf("base = %q, want fallback %q", target.Base, "main")
+	}
+}
+
 // TestStageRankPrefersCodeOverDesign pins the per-run
 // session-disambiguation rule. A run normally has at most one open
 // session at a time, but if a botched close leaves an orphan, code
