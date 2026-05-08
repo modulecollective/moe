@@ -298,7 +298,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 
 	// Kickoff prompt should name the conflicting file, the target branch,
-	// and the actual workflow verb the operator should re-run.
+	// and the workflow verb the post-turn chain prompt will offer.
 	kickoff := buildRebaseConflictKickoff("sdlc", captured)
 	if !strings.Contains(kickoff, "feature.txt") {
 		t.Fatalf("kickoff prompt missing feature.txt: %s", kickoff)
@@ -308,6 +308,9 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 	if !strings.Contains(kickoff, "moe sdlc push") {
 		t.Fatalf("kickoff prompt missing `moe sdlc push`: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "chain prompt") {
+		t.Fatalf("kickoff prompt should point the agent at the post-turn chain prompt rather than asking the operator to re-run: %s", kickoff)
 	}
 }
 
@@ -866,6 +869,96 @@ exit 7
 	}
 	if !strings.Contains(kickoff, "moe sdlc push") {
 		t.Fatalf("kickoff missing `moe sdlc push`: %s", kickoff)
+	}
+	if !strings.Contains(kickoff, "chain prompt") {
+		t.Fatalf("kickoff should point the agent at the post-turn chain prompt rather than asking the operator to re-run: %s", kickoff)
+	}
+}
+
+// TestChainBackPropagatesStageExitAndChainsForward verifies the
+// design contract for both chain-backs: drop the inner runStageSession's
+// exit code straight through, and don't suppress the post-turn chain
+// prompt — so a clean fix-and-commit lets the workflow's `next: moe
+// <wf> push` prompt fire, the same way `moe <wf> code` already chains.
+//
+// Stubs runStageSession so the chain-back closures can be exercised
+// without spinning a real session worktree, and asserts the opts the
+// closure passes through (no SkipNextStage, docID="code", sandbox on).
+func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
+	cases := []struct {
+		name        string
+		invoke      func(md *run.Metadata) int
+		stubReturns int
+	}{
+		{
+			name: "hook failure",
+			invoke: func(md *run.Metadata) int {
+				return openCodeSessionForHookFailure(md, &hookFailure{
+					event:  hookEventPrePush,
+					script: "10-fail.sh",
+					output: "boom\n",
+				}, io.Discard, io.Discard)
+			},
+			stubReturns: 0,
+		},
+		{
+			name: "hook failure (inner non-zero)",
+			invoke: func(md *run.Metadata) int {
+				return openCodeSessionForHookFailure(md, &hookFailure{
+					event:  hookEventPrePush,
+					script: "10-fail.sh",
+					output: "boom\n",
+				}, io.Discard, io.Discard)
+			},
+			stubReturns: 1,
+		},
+		{
+			name: "rebase conflict",
+			invoke: func(md *run.Metadata) int {
+				return openCodeSessionForRebaseConflict(md, &rebaseConflictError{
+					branch:        "moe/fix-it",
+					defaultBranch: "main",
+					conflicts:     []string{"feature.txt"},
+				}, io.Discard, io.Discard)
+			},
+			stubReturns: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedDoc string
+			var capturedOpts stageSessionOpts
+			prev := runStageSession
+			runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+				capturedDoc = docID
+				capturedOpts = opts
+				return tc.stubReturns
+			}
+			t.Cleanup(func() { runStageSession = prev })
+
+			md := &run.Metadata{
+				ID:       "fix-it",
+				Project:  "tele",
+				Workflow: "sdlc",
+			}
+			got := tc.invoke(md)
+			if got != tc.stubReturns {
+				t.Fatalf("chain-back exit code: want propagated %d, got %d", tc.stubReturns, got)
+			}
+			if capturedDoc != "code" {
+				t.Fatalf("docID: want %q, got %q", "code", capturedDoc)
+			}
+			if !capturedOpts.NeedsSandbox {
+				t.Fatalf("NeedsSandbox: want true (chain-back is a code stage)")
+			}
+			if capturedOpts.SkipNextStage {
+				t.Fatalf("SkipNextStage must be false so the post-turn prompt offers push next")
+			}
+			if capturedOpts.InitialPrompt == "" {
+				t.Fatalf("InitialPrompt: want non-empty kickoff, got blank")
+			}
+		})
 	}
 }
 

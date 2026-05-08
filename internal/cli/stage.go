@@ -96,7 +96,11 @@ type stageSessionOpts struct {
 // non-nil, opts the stage into the wiki engine: an extra system-prompt
 // section, per-turn staging of the wiki dir, and FinalizeIngest at
 // session close.
-func runStageSession(projectID, runID, docID string, opts stageSessionOpts, stdout, stderr io.Writer) int {
+//
+// Declared as a var so the chain-back closures (hooks.go,
+// push.go) can be exercised end-to-end in tests without spinning a
+// real session worktree. Production callers see no difference.
+var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts, stdout, stderr io.Writer) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

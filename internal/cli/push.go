@@ -300,33 +300,27 @@ func unmergedPaths(clonePath string) []string {
 
 // openCodeSessionForRebaseConflict is the chain-back: spawn a fresh
 // interactive code session against the same run with a kickoff prompt
-// that names the conflicting paths and the target branch, then exit
-// non-zero so the operator knows to re-run `push` after the agent
-// resolves and commits.
+// that names the conflicting paths and the target branch, then propagate
+// that session's exit code so a clean resolve-and-commit lets the
+// workflow's chain prompt offer push next — same shape `moe <wf> code`
+// already produces.
 //
 // Overridable in tests; the default invokes runStageSession directly
 // with docID="code", same as `moe <wf> code` would.
 var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseConflictError, stdout, stderr io.Writer) int {
-	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts, commit, then re-run push")
+	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts and commit; the chain prompt will offer push next")
 	kickoff := buildRebaseConflictKickoff(md.Workflow, conflict)
-	_ = runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+	return runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
 		InitialPrompt: kickoff,
-		// SkipNextStage so the post-turn prompt doesn't offer to chain
-		// straight into push — the operator needs to re-run push by
-		// hand once the conflict is resolved and committed.
-		SkipNextStage: true,
 	}, stdout, stderr)
-	// Always exit non-zero from push — the merge didn't happen, and the
-	// operator's next invocation should be `moe <wf> push` again.
-	return 1
 }
 
 // buildRebaseConflictKickoff is the agent-facing kickoff prompt for a
 // chain-back code session. Names the target branch, lists the
 // conflicting paths (when git left any), and tells the agent what
-// "done" looks like — resolve, commit, exit so the operator can re-run
-// push.
+// "done" looks like — resolve, commit, exit; the post-turn chain
+// prompt will offer push.
 func buildRebaseConflictKickoff(workflow string, c *rebaseConflictError) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "`moe %s push` just tried to rebase %s onto origin/%s and hit conflicts. ",
@@ -341,7 +335,7 @@ func buildRebaseConflictKickoff(workflow string, c *rebaseConflictError) string 
 	}
 	fmt.Fprintf(&b, "Re-run the rebase yourself (`git rebase origin/%s` from the sandbox), resolve the conflicts, ",
 		c.defaultBranch)
-	fmt.Fprintf(&b, "verify the result still does what the design intended, and commit. Then exit the session and tell the operator to re-run `moe %s push` to ship.\n", workflow)
+	fmt.Fprintf(&b, "verify the result still does what the design intended, and commit. Then exit the session — the post-turn chain prompt will offer `moe %s push` next.\n", workflow)
 	return b.String()
 }
 
