@@ -105,15 +105,15 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 
 	switch {
 	case *pathOnly:
-		fmt.Fprintln(stdout, canvasPath(root, target))
+		fmt.Fprintln(stdout, target.Canvas)
 	case *baseOnly:
 		fmt.Fprintln(stdout, target.Base)
 	case *dirOnly:
 		fmt.Fprintln(stdout, target.Dir)
 	case *shellF:
-		printFollowShell(stdout, root, target)
+		printFollowShell(stdout, target)
 	default:
-		printFollowHuman(stdout, root, target)
+		printFollowHuman(stdout, target)
 	}
 	return 0
 }
@@ -129,10 +129,16 @@ func countTrue(bs ...bool) int {
 }
 
 // followTarget is the (workspace dir, diff base) tuple plus the
-// identity fields the human and shell printers need. Empty Dir means
-// no candidate — the caller renders idle.
+// identity fields the human and shell printers need. Canvas is the
+// absolute path of the content.md the stage session is editing — it
+// sits under the session worktree, not under the operator's
+// bureaucracy checkout, so code stages (where Dir is the sandbox
+// clone) still report a Canvas under the bureaucracy worktree where
+// the agent's edits actually land. Empty Dir means no candidate —
+// the caller renders idle.
 type followTarget struct {
 	Dir      string
+	Canvas   string
 	Base     string
 	Workflow string
 	Stage    string
@@ -303,6 +309,7 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		}
 		return followTarget{
 			Dir:      dir,
+			Canvas:   filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, sess.Doc)),
 			Base:     proj.DefaultBranch,
 			Workflow: md.Workflow,
 			Stage:    sess.Doc,
@@ -320,6 +327,7 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 	base := strings.TrimSpace(out)
 	return followTarget{
 		Dir:      sess.WorktreePath,
+		Canvas:   filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, sess.Doc)),
 		Base:     base,
 		Workflow: md.Workflow,
 		Stage:    sess.Doc,
@@ -404,22 +412,23 @@ func idleLine(s followSummary) string {
 	return "(" + strings.Join(parts, " · ") + ")"
 }
 
-// canvasPath returns the absolute path of the canvas the resolved
-// target's stage session is editing. Built from the run dir + stage
-// name so it composes without a session.Session in hand.
-func canvasPath(root string, t followTarget) string {
-	return filepath.Join(root, run.ContentPath(t.Project, t.Run, t.Stage))
-}
-
-// printFollowHuman emits the multi-line default form: workflow:stage,
-// canvas path, diff base, workspace dir. All paths are absolute so
-// the operator can copy a line and paste it into another shell
-// without thinking about cwd.
-func printFollowHuman(w io.Writer, root string, t followTarget) {
-	moePrintf(w, "%s/%s · %s:%s\n", t.Project, t.Run, t.Workflow, t.Stage)
-	moePrintf(w, "canvas: %s\n", canvasPath(root, t))
-	moePrintf(w, "base:   %s\n", t.Base)
-	moePrintf(w, "dir:    %s\n", t.Dir)
+// printFollowHuman emits the multi-line default form: one labeled
+// line per fact, every label padded to the longest (`workflow:`) so
+// values line up. All paths are absolute so the operator can copy a
+// line and paste it into another shell without thinking about cwd.
+func printFollowHuman(w io.Writer, t followTarget) {
+	rows := []struct{ label, value string }{
+		{"project", t.Project},
+		{"run", t.Run},
+		{"workflow", t.Workflow},
+		{"stage", t.Stage},
+		{"canvas", t.Canvas},
+		{"base", t.Base},
+		{"dir", t.Dir},
+	}
+	for _, r := range rows {
+		moePrintf(w, "%-9s %s\n", r.label+":", r.value)
+	}
 }
 
 // printFollowShell emits eval-able assignments so a wrapper can
@@ -431,9 +440,9 @@ func printFollowHuman(w io.Writer, root string, t followTarget) {
 // via the standard close-quote / backslash-quote / re-open-quote
 // dance (see shellQuote), so paths containing spaces or quotes
 // round-trip through `eval` cleanly.
-func printFollowShell(w io.Writer, root string, t followTarget) {
+func printFollowShell(w io.Writer, t followTarget) {
 	pairs := []struct{ k, v string }{
-		{"MOE_FOLLOW_PATH", canvasPath(root, t)},
+		{"MOE_FOLLOW_PATH", t.Canvas},
 		{"MOE_FOLLOW_BASE", t.Base},
 		{"MOE_FOLLOW_DIR", t.Dir},
 		{"MOE_FOLLOW_PROJECT", t.Project},

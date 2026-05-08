@@ -127,6 +127,15 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	if target.Base != "develop" {
 		t.Fatalf("base = %q, want project default branch %q", target.Base, "develop")
 	}
+	// Canvas points at the bureaucracy worktree where the canvas
+	// summary is edited, not the sandbox where source-code edits land.
+	wantCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "code"))
+	if target.Canvas != wantCanvas {
+		t.Fatalf("canvas = %q, want %q", target.Canvas, wantCanvas)
+	}
+	if strings.HasPrefix(target.Canvas, sandboxDir) {
+		t.Fatalf("canvas %q must not sit under sandbox %q", target.Canvas, sandboxDir)
+	}
 }
 
 // TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles: an open code
@@ -500,12 +509,10 @@ func TestFollowRegistered(t *testing.T) {
 }
 
 // TestRunFollowDefaultHumanForm: the no-flags form prints the
-// multi-line summary on stdout and exits 0. Pins the four-line shape
-// the design's example sets — workflow:stage header, canvas/base/dir
-// rows — so a future drift here breaks loudly. We assert on
-// substrings rather than full byte-for-byte: the order is fixed but
-// the line-by-line ordering of "canvas:" / "base:" / "dir:" is the
-// stable contract, not the prefix punctuation.
+// multi-line summary on stdout and exits 0. Pins the seven-line
+// labeled shape — one fact per row, all colons aligned to the longest
+// label (`workflow:`). The line-by-line ordering is the stable
+// contract, not byte-for-byte equality, so we assert on substrings.
 func TestRunFollowDefaultHumanForm(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -525,11 +532,15 @@ func TestRunFollowDefaultHumanForm(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 	got := stdout.String()
-	wantContent := filepath.Join(root, run.ContentPath("tele", "fix-it", "design"))
+	wantContent := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "design"))
 	for _, want := range []string{
-		"tele/fix-it · sdlc:design",
-		"canvas: " + wantContent,
-		"dir:    " + sess.WorktreePath,
+		"project:  tele",
+		"run:      fix-it",
+		"workflow: sdlc",
+		"stage:    design",
+		"canvas:   " + wantContent,
+		"base:     ",
+		"dir:      " + sess.WorktreePath,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in output:\n%s", want, got)
@@ -558,7 +569,7 @@ func TestRunFollowPathOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
-	want := filepath.Join(root, run.ContentPath("tele", "fix-it", "design")) + "\n"
+	want := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "design")) + "\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("--path stdout = %q, want %q", got, want)
 	}
@@ -697,7 +708,7 @@ func TestRunFollowShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash eval: %v", err)
 	}
-	want := filepath.Join(root, run.ContentPath("tele", "fix-it", "design"))
+	want := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "design"))
 	if string(out) != want {
 		t.Fatalf("eval MOE_FOLLOW_PATH = %q, want %q", string(out), want)
 	}
