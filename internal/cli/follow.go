@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -58,6 +60,19 @@ const followIdleInterval = 1 * time.Second
 // auto-pick fires — long enough for a Ctrl-C to land cleanly, short
 // enough not to feel sluggish. Mirrors queueCountdownSeconds.
 const followCountdownSeconds = 3
+
+// rotationLockDrainCap bounds how long the rotation cleanup waits for
+// the target worktree's index.lock to clear after SIGTERMing hunk's
+// process group. Belt-and-braces alongside git.Run's own retry: a
+// fresh hunk respawning into a still-locked worktree is a known race
+// and the goal is to avoid the first-tick failure ever happening in
+// the first place. Tighter than git.Run's cap on purpose — anything
+// past 100ms means git is genuinely stuck and the next hunk can
+// surface that itself.
+const rotationLockDrainCap = 100 * time.Millisecond
+
+// rotationLockDrainStep is the poll cadence inside rotationLockDrainCap.
+const rotationLockDrainStep = 10 * time.Millisecond
 
 func init() {
 	Register(&Command{
@@ -406,29 +421,46 @@ func drainSignal(ch <-chan os.Signal) {
 // running), false when the caller should re-evaluate via
 // pickFollowTarget.
 //
-// hunk owns its own tty: it inherits stdin/stdout/stderr, stays in
-// moe's process group, and handles its own raw-mode setup, watcher,
-// and SIGINT. moe just waits for it to exit. A Ctrl-C from the
-// operator while hunk is running reaches both processes (shared PG):
-// hunk tears itself down, moe sees sigCh fire, and we return true so
-// follow exits without pulling the operator through a countdown they
-// didn't ask for.
+// hunk owns its own tty: it inherits stdin/stdout/stderr, runs in its
+// own process group, and handles its own raw-mode setup, watcher, and
+// SIGINT. The detached PG is what makes rotation cleanup tractable:
+// SIGTERM-to-the-group reaches the leader and any in-flight git
+// children (every hunk tick shells out `git diff` / `git status`),
+// which would otherwise outlive their parent and keep the worktree's
+// index.lock held while a fresh hunk and the session both want it.
+// The cost is that the controlling tty's SIGINT no longer reaches
+// hunk for free — moe explicitly forwards each delivery via
+// forwardSignals.
 //
 // A watcher goroutine runs alongside cmd.Wait, polling pickFollowTarget
 // at the same cadence as the idle screen. When the followTarget the
 // loop would now pick no longer matches the one hunk was launched
 // against — pinned run advanced a stage, ranking flipped, session
-// closed — the watcher SIGTERMs hunk so the loop can re-spawn against
-// the new target without waiting for the operator's `q`. State-change
-// rotations skip the post-exit countdown; operator-driven exits keep
-// it.
+// closed — the watcher SIGTERMs hunk's PG so the loop can re-spawn
+// against the new target without waiting for the operator's `q`.
+// State-change rotations skip the post-exit countdown; operator-
+// driven exits keep it.
 func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
 	drainSignal(sigCh)
+	// Resolve the worktree's gitdir before spawning so the post-
+	// rotation lock drain knows where to look. Worktrees use a `.git`
+	// file pointing at <bureaucracy>/.git/worktrees/<uuid>/, so a
+	// naive filepath.Join(target.Dir, ".git", "index.lock") would
+	// stat the wrong path on every non-code stage. Failure here is
+	// non-fatal: the drain is best-effort defence behind A1's retry,
+	// and a missing gitdir means we just skip the wait.
+	gitDir := resolveGitDir(target.Dir)
+
 	cmd := exec.Command("hunk", "diff", "--watch", target.Base)
 	cmd.Dir = target.Dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// Setpgid puts hunk and every git child it forks in their own
+	// process group, so syscall.Kill(-pid, …) reaches the lot in one
+	// call. Without this, rotation SIGTERMs only the leader and the
+	// in-flight git pollers run to completion holding index.lock.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		moePrintf(stderr, "follow: hunk failed to start: %v\n", err)
 		// exec.ErrNotFound here is recoverable in principle (operator
@@ -441,6 +473,17 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		}
 		return true
 	}
+	hunkPid := cmd.Process.Pid
+
+	// With hunk detached from moe's PG, the controlling tty no longer
+	// delivers SIGINT to it for free. Subscribe to our own SIGINT
+	// channel and relay each delivery to hunk's PG so operator ^C
+	// still tears it down. The outer sigCh stays registered too —
+	// signal.Notify fans out to every channel — so the select below
+	// still observes the same signal for moe's own bookkeeping.
+	stopForward := forwardSignals(hunkPid)
+	defer stopForward()
+
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- cmd.Wait() }()
 
@@ -466,12 +509,15 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 				if fresh == target {
 					continue
 				}
-				// SIGTERM is best-effort — if hunk has already exited
-				// (e.g. operator just hit `q`), the signal returns an
-				// error we don't care about. Either way, signal the
-				// caller that this exit is a state-change rotation so
-				// the countdown is skipped.
-				_ = cmd.Process.Signal(syscall.SIGTERM)
+				// SIGTERM the whole PG — leader plus any in-flight git
+				// children — so an orphan poll doesn't keep
+				// index.lock held while the next hunk respawns. Best-
+				// effort: if hunk has already exited (e.g. operator
+				// just hit `q`), the kill returns an error we don't
+				// care about. Either way, signal the caller that this
+				// exit is a state-change rotation so the countdown is
+				// skipped.
+				_ = syscall.Kill(-hunkPid, syscall.SIGTERM)
 				select {
 				case rotateCh <- struct{}{}:
 				default:
@@ -493,9 +539,9 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		default:
 		}
 	case <-sigCh:
-		// Operator hit ^C; the kernel delivered the same SIGINT to
-		// hunk. Wait for it to tear down so the terminal's mode is
-		// restored before we touch stdout.
+		// Operator hit ^C; forwardSignals has already relayed it to
+		// hunk's PG. Wait for hunk to tear down so the terminal's
+		// mode is restored before we touch stdout.
 		operatorQuit = true
 		<-waitErr
 	}
@@ -507,8 +553,12 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 	}
 	if rotated {
 		// State changed under us; the operator didn't ask to bail.
-		// Skip the countdown so the loop re-picks immediately against
-		// whatever's live now.
+		// Wait briefly for any orphan git child to release the
+		// worktree's index.lock before the next hunk respawns —
+		// belt-and-braces behind A1's retry. Then skip the countdown
+		// so the loop re-picks immediately against whatever's live
+		// now.
+		waitForLockClear(gitDir)
 		return false
 	}
 
@@ -526,4 +576,77 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 	}, stdout, countdownSig)
 	stopCountdownSig()
 	return stopped
+}
+
+// forwardSignals relays operator SIGINT to a child process group
+// until stop is called. With hunk in its own PG, the controlling tty
+// no longer delivers ^C to it for free; this is the explicit forward.
+// signal.Notify fans out to every registered channel, so installing
+// our own here doesn't disturb the outer sigCh used by runFollow's
+// idle-screen branch.
+func forwardSignals(pid int) (stop func()) {
+	sigCh, deregister := installSigint()
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-sigCh:
+				// kill(-pid) on a dead PG is a harmless ESRCH; a
+				// signal racing the child's exit is exactly the
+				// scenario where we don't care about the return.
+				_ = syscall.Kill(-pid, syscall.SIGINT)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		deregister()
+	}
+}
+
+// resolveGitDir returns the absolute gitdir for dir, or "" on
+// failure. Code-stage targets are plain clones (gitdir = .git);
+// non-code stages are linked worktrees, where .git is a file pointing
+// at <bureaucracy>/.git/worktrees/<uuid>/. `git rev-parse --git-dir`
+// resolves both shapes — and crucially returns the *per-worktree*
+// gitdir for the linked case, which is where the index.lock we care
+// about actually lives (--git-common-dir would point at the parent
+// repo, the wrong place).
+func resolveGitDir(dir string) string {
+	out, err := git.Output(dir, "rev-parse", "--git-dir")
+	if err != nil {
+		return ""
+	}
+	got := strings.TrimSpace(out)
+	if got == "" {
+		return ""
+	}
+	if !filepath.IsAbs(got) {
+		got = filepath.Join(dir, got)
+	}
+	return got
+}
+
+// waitForLockClear polls gitDir/index.lock for absence up to
+// rotationLockDrainCap. No-op when gitDir is empty (resolution
+// failed) or the lock is already absent. Best-effort cleanup behind
+// A1's retry — if a lock survives this window, the next git invocation
+// will absorb it via the retry loop in git.Run.
+func waitForLockClear(gitDir string) {
+	if gitDir == "" {
+		return
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	deadline := time.Now().Add(rotationLockDrainCap)
+	for {
+		if _, err := os.Stat(lock); os.IsNotExist(err) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		time.Sleep(rotationLockDrainStep)
+	}
 }
