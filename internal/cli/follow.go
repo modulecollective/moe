@@ -443,60 +443,129 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		return true
 	}
 
+	// Install the countdown's signal subscriber up front, before the
+	// watcher and the wait-select. Any ^C the operator hits between
+	// here and runCountdown — including the ^C that closed hunk and
+	// the race window between waitErr/sigCh in the select below —
+	// lands in countdownSig. We drain the matching delivery for the
+	// ^C-that-closed-hunk before runCountdown so it doesn't pre-trip
+	// the first iteration; anything else stays queued and exits the
+	// countdown on the first select.
+	//
+	// Buffer 4 (vs installSigint's 1): signal.Notify is non-blocking,
+	// so a single-slot buffer would drop the operator's "exit follow"
+	// ^C if it lands while the ^C-that-closed-hunk is still queued.
+	// We need room for at least the close-^C + one exit-^C.
+	countdownSig := make(chan os.Signal, 4)
+	signal.Notify(countdownSig, os.Interrupt)
+	defer signal.Stop(countdownSig)
+
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- cmd.Wait() }()
 
 	rotateCh := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
-	watcherDone := make(chan struct{})
 	go func() {
-		defer close(watcherDone)
-		ticker := time.NewTicker(followIdleInterval)
+		// Two reasons to wake on this goroutine:
+		// (1) rotation — pickFollowTarget has changed under us and we
+		//     should signal hunk to exit so the loop re-picks. Polled
+		//     every followIdleInterval to keep up with state changes.
+		// (2) post-UI hang — hunk handles ^C by reading 0x03 from
+		//     stdin (raw mode), runs its UI cleanup (alt-screen exit
+		//     + termios restore), but doesn't always exit the
+		//     process. When that happens cmd.Wait blocks forever and
+		//     moe appears hung. We detect the cleanup having run by
+		//     watching for ICANON to flip from cleared (raw) back to
+		//     set (cooked); when it does, we send hunk a real SIGINT
+		//     to push its process the rest of the way out.
+		//
+		// Termios poll runs more often than rotation (200ms vs 1s) so
+		// the operator's ^C-on-hunk → "hunk reappears or follow shows
+		// the countdown" cycle stays snappy.
+		const tick = 200 * time.Millisecond
+		const pickEvery = 5 // 5 * 200ms = 1s, matches followIdleInterval
+		ticker := time.NewTicker(tick)
 		defer ticker.Stop()
+		ticks := 0
+		rawSeen := false
 		for {
 			select {
 			case <-stopWatcher:
 				return
 			case <-ticker.C:
-				fresh, _, err := pickFollowTarget(root, runFilter)
-				if err != nil {
-					// Same forgiveness pickFollowTarget extends to its
-					// own session.List failures: a transient I/O blip
-					// shouldn't yank the current hunk. Keep watching.
-					continue
-				}
-				if fresh == target {
-					continue
-				}
-				// SIGINT is best-effort — if hunk has already exited
-				// (e.g. operator just hit `q`), the signal returns an
-				// error we don't care about. Either way, signal the
-				// caller that this exit is a state-change rotation so
-				// the countdown is skipped.
-				//
-				// SIGINT (not SIGTERM): hunk's SIGINT handler runs the
-				// alt-screen exit + termios restore that the operator-^C
-				// path relies on; SIGTERM kills the process before that
-				// teardown runs and leaves the tty wedged.
-				_ = cmd.Process.Signal(syscall.SIGINT)
-				select {
-				case rotateCh <- struct{}{}:
-				default:
-				}
-				return
 			}
+
+			// Termios poll — see (2) above. ICANON cleared = hunk has
+			// switched the tty to raw mode (UI live); ICANON set after
+			// we've seen it cleared = hunk's UI cleanup has run, so the
+			// process is in the post-UI hang state and a SIGINT will
+			// push it out via its signal-driven exit path. Skip the
+			// poll silently if we're not on a tty (ENOTTY); rotation
+			// still works.
+			if attrs, err := getTermios(0); err == nil {
+				isRaw := attrs.Lflag&syscall.ICANON == 0
+				switch {
+				case !rawSeen && isRaw:
+					rawSeen = true
+				case rawSeen && !isRaw:
+					_ = cmd.Process.Signal(syscall.SIGINT)
+					return
+				}
+			}
+
+			ticks++
+			if ticks < pickEvery {
+				continue
+			}
+			ticks = 0
+
+			fresh, _, err := pickFollowTarget(root, runFilter)
+			if err != nil {
+				// Same forgiveness pickFollowTarget extends to its
+				// own session.List failures: a transient I/O blip
+				// shouldn't yank the current hunk. Keep watching.
+				continue
+			}
+			if fresh == target {
+				continue
+			}
+			// SIGINT is best-effort — if hunk has already exited
+			// (e.g. operator just hit `q`), the signal returns an
+			// error we don't care about. Either way, signal the
+			// caller that this exit is a state-change rotation so
+			// the countdown is skipped.
+			//
+			// SIGINT (not SIGTERM): hunk's SIGINT handler runs the
+			// alt-screen exit + termios restore that the operator-^C
+			// path relies on; SIGTERM kills the process before that
+			// teardown runs and leaves the tty wedged.
+			_ = cmd.Process.Signal(syscall.SIGINT)
+			select {
+			case rotateCh <- struct{}{}:
+			default:
+			}
+			return
 		}
 	}()
 
 	rotated := false
+	closedByOperator := false
 	select {
 	case <-waitErr:
-		// hunk exited — `q`, internal Ctrl-C, a crash, or our SIGINT
-		// for state-change rotation. rotateCh disambiguates rotation;
-		// every other exit falls through to the countdown.
+		// hunk exited — `q`, internal Ctrl-C, a crash, our SIGINT
+		// for state-change rotation, or operator ^C reaching hunk
+		// via the shared PG (and racing waitErr against sigCh).
 		select {
 		case <-rotateCh:
 			rotated = true
+		default:
+		}
+		// If operator ^C raced waitErr to win this select, the same
+		// SIGINT is sitting in sigCh; drain it so it doesn't mislead
+		// the next iteration, and remember that we did so.
+		select {
+		case <-sigCh:
+			closedByOperator = true
 		default:
 		}
 	case <-sigCh:
@@ -505,10 +574,31 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		// terminal's mode is restored before we touch stdout, then
 		// fall through to the countdown — see followTargetRun's doc
 		// comment.
-		<-waitErr
+		closedByOperator = true
+		// Bound the wait. Hunk's SIGINT teardown should be fast (alt-
+		// screen exit + termios restore + exit) but we've seen reports
+		// where the process visibly tears down its UI yet keeps the
+		// process alive long enough that moe appears hung. If hunk
+		// hasn't reaped in two seconds, force the issue with a kill so
+		// the loop can move on. Termios is already restored by hunk's
+		// own teardown; SIGKILL after that point doesn't leave the tty
+		// any worse off.
+		select {
+		case <-waitErr:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-waitErr
+		}
 	}
+	// Don't <-watcherDone — close(stopWatcher) signals the watcher to
+	// return on its next select iteration, but if it's currently mid-
+	// pickFollowTarget that adds up to a poll's worth of latency
+	// before the countdown can paint. Letting the watcher tail off in
+	// the background is safe: its rotateCh is unread by anyone after
+	// we return, its cmd.Process.Signal call on a dead hunk is a
+	// harmless no-op, and the next followTargetRun's watcher is fully
+	// independent (own ticker, own channels, own cmd).
 	close(stopWatcher)
-	<-watcherDone
 	drainSignal(sigCh)
 	if rotated {
 		// State changed under us; the operator didn't ask to bail.
@@ -517,18 +607,26 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 		return false
 	}
 
+	// Drain countdownSig's matching delivery for the ^C that closed
+	// hunk so it doesn't pre-trip the countdown's first iteration.
+	// Anything that arrived during the race window or the cleanup
+	// gap above stays queued — that's the operator's "exit follow"
+	// intent, and runCountdown's first select will catch it.
+	if closedByOperator {
+		select {
+		case <-countdownSig:
+		default:
+		}
+	}
+
+
 	// Countdown after hunk exits is the operator's escape hatch from
 	// the relaunch loop: without it, a fresh hunk re-spawns
 	// immediately and the only way out is timing a Ctrl-C through
 	// that brief window. The first hunk open isn't delayed — the
 	// operator just typed `moe follow` and asked for it; the dwell
-	// only sits between exits. Scoped sigint subscription mirrors
-	// queue's pattern so the countdown's signal handling doesn't
-	// clash with the outer sigCh used by the idle-screen branch.
-	countdownSig, stopCountdownSig := installSigint()
-	stopped := runCountdown(followCountdownSeconds, func(n int) string {
+	// only sits between exits.
+	return runCountdown(followCountdownSeconds, func(n int) string {
 		return fmt.Sprintf("follow: re-checking in %d…  (Ctrl-C to exit)", n)
 	}, stdout, countdownSig)
-	stopCountdownSig()
-	return stopped
 }
