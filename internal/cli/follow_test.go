@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -353,10 +354,15 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 // set, hunk's base must be that SHA — diff-since-open is the whole
 // reason the field exists, and it's how a --from-idea seed shows up
 // in the pane instead of being hidden by a "vs main" base that
-// already contains the seed.
+// already contains the seed. The followTarget also carries identity
+// (workflow, stage, project, run) for the OSC title write — a live
+// target without those fields would render an anonymous title.
 func TestResolveFollowTargetUsesOpenedFromForNonCode(t *testing.T) {
 	worktree := t.TempDir()
-	md := &run.Metadata{Project: "tele", ID: "fix-it", OpenedFrom: "abc1234"}
+	md := &run.Metadata{
+		Project: "tele", ID: "fix-it",
+		Workflow: "sdlc", OpenedFrom: "abc1234",
+	}
 	sess := &session.Session{Doc: "design", WorktreePath: worktree}
 
 	target, err := resolveFollowTarget(t.TempDir(), md, sess)
@@ -368,6 +374,10 @@ func TestResolveFollowTargetUsesOpenedFromForNonCode(t *testing.T) {
 	}
 	if target.Base != "abc1234" {
 		t.Fatalf("base = %q, want OpenedFrom %q", target.Base, "abc1234")
+	}
+	if target.Workflow != "sdlc" || target.Stage != "design" ||
+		target.Project != "tele" || target.Run != "fix-it" {
+		t.Fatalf("identity = %+v, want sdlc/design/tele/fix-it", target)
 	}
 }
 
@@ -425,6 +435,43 @@ func TestIdleLineWithLast(t *testing.T) {
 	want := "(no run in play · 2 active · last: tele/fix-it awaiting merge)"
 	if got != want {
 		t.Fatalf("idleLine(): got %q want %q", got, want)
+	}
+}
+
+// TestFollowTitle pins the OSC title format. Pager chrome strips most
+// in-pane identity hints; the operator's "what am I watching right
+// now?" answer comes from the window/tab/pane label this string sets.
+func TestFollowTitle(t *testing.T) {
+	got := followTitle(followTarget{
+		Workflow: "sdlc", Stage: "code",
+		Project: "moe", Run: "hunk-is-touchy-2026-05-09",
+	})
+	want := "moe follow - sdlc:code - moe/hunk-is-touchy-2026-05-09"
+	if got != want {
+		t.Fatalf("followTitle: got %q want %q", got, want)
+	}
+}
+
+// TestWriteTerminalTitleEmitsOSC0: the bytes have to be exactly
+// `ESC ] 0 ; <title> BEL` for terminal emulators (and tmux with
+// set-titles on) to recognise it. Drift in this sequence is silent —
+// the title just stops updating — so pin the wire format.
+func TestWriteTerminalTitleEmitsOSC0(t *testing.T) {
+	var buf bytes.Buffer
+	writeTerminalTitle(&buf, "hello")
+	if got, want := buf.String(), "\x1b]0;hello\x07"; got != want {
+		t.Fatalf("writeTerminalTitle: got %q want %q", got, want)
+	}
+}
+
+// TestWriteTerminalTitleEmptyClears: an empty title is the restore
+// signal — followTargetRun's defer relies on this writing the bytes
+// that put the terminal back to its default label.
+func TestWriteTerminalTitleEmptyClears(t *testing.T) {
+	var buf bytes.Buffer
+	writeTerminalTitle(&buf, "")
+	if got, want := buf.String(), "\x1b]0;\x07"; got != want {
+		t.Fatalf("writeTerminalTitle empty: got %q want %q", got, want)
 	}
 }
 

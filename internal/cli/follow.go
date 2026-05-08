@@ -140,10 +140,21 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 }
 
 // followTarget is the (workspace dir, diff base) tuple hunk runs
-// against. Empty Dir means no candidate — the caller renders idle.
+// against, plus the identity fields the OSC title write needs so the
+// terminal/pane label tracks what hunk is showing. Empty Dir means no
+// candidate — the caller renders idle. Identity fields are populated
+// only on live targets; an empty target carries empty strings.
 type followTarget struct {
 	Dir  string
 	Base string
+	// Workflow / Stage / Project / Run identify the run hunk is
+	// rendering. Pager mode's chrome drops most identity hints, so
+	// followTargetRun emits an OSC 0 escape with these fields before
+	// cmd.Start to retitle the terminal/pane.
+	Workflow string
+	Stage    string
+	Project  string
+	Run      string
 }
 
 // followSummary captures the figures the idle screen reports: total
@@ -299,7 +310,14 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		if err != nil {
 			return followTarget{}, err
 		}
-		return followTarget{Dir: dir, Base: proj.DefaultBranch}, nil
+		return followTarget{
+			Dir:      dir,
+			Base:     proj.DefaultBranch,
+			Workflow: md.Workflow,
+			Stage:    sess.Doc,
+			Project:  md.Project,
+			Run:      md.ID,
+		}, nil
 	}
 	if _, err := os.Stat(sess.WorktreePath); err != nil {
 		return followTarget{}, nil
@@ -308,7 +326,14 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 	if base == "" {
 		base = "main"
 	}
-	return followTarget{Dir: sess.WorktreePath, Base: base}, nil
+	return followTarget{
+		Dir:      sess.WorktreePath,
+		Base:     base,
+		Workflow: md.Workflow,
+		Stage:    sess.Doc,
+		Project:  md.Project,
+		Run:      md.ID,
+	}, nil
 }
 
 // buildFollowSummary rolls scanned metadata into the figures the idle
@@ -387,6 +412,30 @@ func idleLine(s followSummary) string {
 	return "(" + strings.Join(parts, " · ") + ")"
 }
 
+// followTitle renders the OSC 0 title for a live followTarget. Format:
+//
+//	moe follow - <workflow>:<stage> - <project>/<run>
+//
+// e.g. `moe follow - sdlc:code - moe/hunk-is-touchy-2026-05-09`. The
+// workflow:stage segment matters because the same run cycles through
+// design → code → reflect, and "what am I watching right now" is the
+// common operator question once pager chrome strips the in-pane hints.
+func followTitle(t followTarget) string {
+	return fmt.Sprintf("moe follow - %s:%s - %s/%s",
+		t.Workflow, t.Stage, t.Project, t.Run)
+}
+
+// writeTerminalTitle emits an OSC 0 (icon + window title) escape so the
+// terminal/pane label tracks what hunk is showing. Format is
+// `ESC ] 0 ; <title> BEL` — recognised by iTerm, Terminal.app,
+// Alacritty, kitty, wezterm, and (with `set-titles on`) tmux. An empty
+// title clears. No tty guard: the bytes are harmless on non-terminal
+// writers, and on the codepaths that reach here hunk itself requires
+// a tty anyway.
+func writeTerminalTitle(w io.Writer, title string) {
+	fmt.Fprintf(w, "\x1b]0;%s\x07", title)
+}
+
 // drainSignal empties any queued ^C deliveries on ch without blocking.
 // Used between hunk runs and the countdown so a stale signal from the
 // idle screen doesn't pre-trip the next select.
@@ -400,10 +449,20 @@ func drainSignal(ch <-chan os.Signal) {
 	}
 }
 
-// followTargetRun spawns `hunk diff --watch <base>` rooted at
+// followTargetRun spawns `hunk diff --pager --watch <base>` rooted at
 // target.Dir and waits for it to exit. Returns true when the operator
 // asked to exit (Ctrl-C in the post-exit countdown), false when the
 // caller should re-evaluate via pickFollowTarget.
+//
+// Pager mode swaps hunk's full TUI for less-style chrome: smaller raw-
+// mode surface, fewer widgets, no agent-context pane. We don't use the
+// dropped chrome from `moe follow` (it's a passive viewer), and the
+// reduced surface is the cheaper bet against a recurring mid-session
+// errno-5 that the full TUI was producing. The downside is anonymity —
+// pager chrome is so plain the operator can lose track of which run is
+// on screen — so moe writes an OSC 0 terminal-title escape just before
+// cmd.Start (and clears it on return) so the window/pane label carries
+// `<workflow>:<stage> - <project>/<run>`.
 //
 // hunk owns its own tty: it inherits stdin/stdout/stderr, stays in
 // moe's process group, and handles its own raw-mode setup, watcher,
@@ -425,7 +484,16 @@ func drainSignal(ch <-chan os.Signal) {
 // it.
 func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan os.Signal, stdout, stderr io.Writer) bool {
 	drainSignal(sigCh)
-	cmd := exec.Command("hunk", "diff", "--watch", target.Base)
+
+	// Title the terminal/pane before hunk takes over the screen. Defer
+	// the empty-title write so every return path — clean exit, ^C,
+	// rotation, Start failure — restores. The next iteration sets a
+	// fresh title (or leaves the window untitled when idle); brief
+	// flicker between rotations is acceptable.
+	writeTerminalTitle(stdout, followTitle(target))
+	defer writeTerminalTitle(stdout, "")
+
+	cmd := exec.Command("hunk", "diff", "--pager", "--watch", target.Base)
 	cmd.Dir = target.Dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
