@@ -467,12 +467,17 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 				if fresh == target {
 					continue
 				}
-				// SIGTERM is best-effort — if hunk has already exited
+				// SIGINT is best-effort — if hunk has already exited
 				// (e.g. operator just hit `q`), the signal returns an
 				// error we don't care about. Either way, signal the
 				// caller that this exit is a state-change rotation so
 				// the countdown is skipped.
-				_ = cmd.Process.Signal(syscall.SIGTERM)
+				//
+				// SIGINT (not SIGTERM): hunk's SIGINT handler runs the
+				// alt-screen exit + termios restore that the operator-^C
+				// path relies on; SIGTERM kills the process before that
+				// teardown runs and leaves the tty wedged.
+				_ = cmd.Process.Signal(syscall.SIGINT)
 				select {
 				case rotateCh <- struct{}{}:
 				default:
@@ -486,7 +491,7 @@ func followTargetRun(root, runFilter string, target followTarget, sigCh <-chan o
 	rotated := false
 	select {
 	case <-waitErr:
-		// hunk exited — `q`, internal Ctrl-C, a crash, or our SIGTERM
+		// hunk exited — `q`, internal Ctrl-C, a crash, or our SIGINT
 		// for state-change rotation. The rotateCh probe disambiguates.
 		select {
 		case <-rotateCh:
