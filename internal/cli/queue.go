@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -21,14 +20,6 @@ import (
 // the first item too, so an unexpected queue head can be aborted before
 // any agent starts.
 const queueCountdownSeconds = 3
-
-// queueIdleInterval is the cadence at which the empty-queue idle loop
-// re-peeks under the lock. 1s is the "responsive without polling
-// tightly" point — operators expect Ctrl-C to land within a tick, and
-// the lock acquire / loadQueue / save round-trip is cheap enough that
-// 1s isn't a contention worry. var rather than const so tests can
-// dial it down to milliseconds; production stays at 1s.
-var queueIdleInterval = 1 * time.Second
 
 // `moe queue` is the operator's playlist of opened runs to grind
 // through in one sitting. Items are structured (workflow, project, run)
@@ -100,7 +91,7 @@ func printQueueUsage(w io.Writer) {
 	moePrintf(w, "  %-14s  %s\n", "add", "queue an opened run, or promote-and-queue an idea")
 	moePrintf(w, "  %-14s  %s\n", "remove", "remove a queued run by identity")
 	moePrintf(w, "  %-14s  %s\n", "list", "show the queue with each item's next stage (or drop reason)")
-	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue, idling when empty so adds in another terminal land")
+	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue and exit when empty")
 }
 
 // queuePath is the on-disk JSON file. Lives under .moe/ alongside
@@ -478,9 +469,7 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "interactive session per pending stage; --one-shot drives each stage")
 		moePrintln(stderr, "headlessly and prompts [Y/n/o] before chaining to the next.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "When the queue drains the walker idles instead of exiting, so an")
-		moePrintln(stderr, "operator adding items from another terminal doesn't have to relaunch.")
-		moePrintln(stderr, "Ctrl-C exits the idle.")
+		moePrintln(stderr, "Exits when the queue is empty; relaunch after `queue add` to drain more.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -499,12 +488,11 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	// Walker-scoped SIGINT subscription. Catches Ctrl-C delivered at
 	// the stage prompt (where the prompt's own helper has already
 	// returned "decline" — but the walker still needs to know to stop
-	// the loop) and during the empty-queue idle wait. The countdown
-	// registers its own scoped channel below; Go's signal.Notify
-	// multiplexes a single SIGINT to every subscribed channel, so both
-	// fire on one Ctrl-C without conflict. Buffered size 1 — one
-	// observed delivery is enough to stop, extra ones during dispatch
-	// drop and we exit on the first.
+	// the loop). The countdown registers its own scoped channel below;
+	// Go's signal.Notify multiplexes a single SIGINT to every subscribed
+	// channel, so both fire on one Ctrl-C without conflict. Buffered
+	// size 1 — one observed delivery is enough to stop, extra ones
+	// during dispatch drop and we exit on the first.
 	walkerSig, stopWalkerSig := installSigint()
 	defer stopWalkerSig()
 
@@ -530,19 +518,8 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if empty {
-			// Idle screen: clear-and-print on the same line each tick
-			// so the status doesn't scroll. \r returns the cursor to
-			// column 0; \033[K (CSI K) erases from the cursor to
-			// end-of-line so a shorter tail from a prior frame
-			// doesn't show through.
-			fmt.Fprint(stdout, "\r\033[K(queue: empty · waiting · Ctrl-C to exit)")
-			select {
-			case <-walkerSig:
-				fmt.Fprintln(stdout)
-				return 0
-			case <-time.After(queueIdleInterval):
-				continue
-			}
+			moePrintln(stdout, "queue: empty")
+			return 0
 		}
 
 		// Liveness check is outside the lock — run.Load is read-only
