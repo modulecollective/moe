@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -454,7 +455,7 @@ type prViewState struct {
 }
 
 func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) error {
-	prURL := trailerValue(root, md.ID, "MoE-PR")
+	prURL := push.TrailerValue(root, md.ID, "MoE-PR")
 	if prURL == "" {
 		// No MoE-PR trailer on record despite StatusPushed. Flag and
 		// skip rather than guess — the operator can untangle by hand.
@@ -562,7 +563,7 @@ func deleteRemoteBranchForRun(root string, md *run.Metadata) error {
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
-	repo, err := ghRepoSpec(pj.Remote)
+	repo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -240,10 +241,10 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 
 	// Stub the chain-back: capture the conflict context, do not actually
 	// launch Claude (the test process has no terminal/agent).
-	var captured *rebaseConflictError
+	var captured *push.RebaseConflictError
 	var capturedRun *run.Metadata
 	prev := openCodeSessionForRebaseConflict
-	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *rebaseConflictError, _, _ io.Writer) int {
+	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *push.RebaseConflictError, _, _ io.Writer) int {
 		capturedRun = md
 		captured = c
 		return 1
@@ -260,21 +261,21 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	if capturedRun == nil || capturedRun.ID != f.runID {
 		t.Fatalf("chain-back run.Metadata: want id=%s, got %#v", f.runID, capturedRun)
 	}
-	if captured.branch != f.branch || captured.defaultBranch != "main" {
-		t.Fatalf("chain-back conflict context: branch=%q default=%q", captured.branch, captured.defaultBranch)
+	if captured.Branch != f.branch || captured.DefaultBranch != "main" {
+		t.Fatalf("chain-back conflict context: branch=%q default=%q", captured.Branch, captured.DefaultBranch)
 	}
-	if len(captured.conflicts) == 0 {
+	if len(captured.Conflicts) == 0 {
 		t.Fatalf("chain-back conflict list should name at least one path; got empty")
 	}
 	foundFeature := false
-	for _, p := range captured.conflicts {
+	for _, p := range captured.Conflicts {
 		if p == "feature.txt" {
 			foundFeature = true
 			break
 		}
 	}
 	if !foundFeature {
-		t.Fatalf("expected feature.txt in conflict list, got %v", captured.conflicts)
+		t.Fatalf("expected feature.txt in conflict list, got %v", captured.Conflicts)
 	}
 
 	// Origin untouched — operator must re-run push after resolution.
@@ -915,10 +916,10 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 		{
 			name: "rebase conflict",
 			invoke: func(md *run.Metadata) int {
-				return openCodeSessionForRebaseConflict(md, &rebaseConflictError{
-					branch:        "moe/fix-it",
-					defaultBranch: "main",
-					conflicts:     []string{"feature.txt"},
+				return openCodeSessionForRebaseConflict(md, &push.RebaseConflictError{
+					Branch:        "moe/fix-it",
+					DefaultBranch: "main",
+					Conflicts:     []string{"feature.txt"},
 				}, io.Discard, io.Discard)
 			},
 			stubReturns: 0,

@@ -1,20 +1,18 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -79,7 +77,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	// run is archived. Mirror today's "existing PR" idempotency.
 	switch md.Status {
 	case run.StatusMerged:
-		if sha := mergedSHA(root, md.ID); sha != "" {
+		if sha := push.MergedSHA(root, md.ID); sha != "" {
 			moePrintf(stdout, "already merged at %s\n", git.ShortSHA(sha))
 		} else {
 			moePrintln(stdout, "already merged")
@@ -107,15 +105,15 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	branch := branchPrefix + md.ID
-	if err := checkCleanWorkTree(clonePath); err != nil {
+	if err := push.CheckCleanWorkTree(clonePath); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if err := checkBranchHasCommits(clonePath, branch, pj.DefaultBranch); err != nil {
+	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if err := ensureOrigin(clonePath, pj.Remote); err != nil {
+	if err := push.EnsureOrigin(clonePath, pj.Remote); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -130,7 +128,7 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		TargetBranch: pj.DefaultBranch,
 	}
 	if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
-		var conflict *rebaseConflictError
+		var conflict *push.RebaseConflictError
 		if errors.As(err, &conflict) {
 			moePrintf(stderr, "%v\n", conflict)
 			return openCodeSessionForRebaseConflict(md, conflict, stdout, stderr)
@@ -151,9 +149,9 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 	// when the two match and refuses to overwrite a concurrent update
 	// when they don't. Skip when origin has no copy of the branch:
 	// the first push is a plain push with -u to establish tracking.
-	force := originHasBranch(clonePath, branch)
+	force := push.OriginHasBranch(clonePath, branch)
 
-	if err := pushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
+	if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -162,29 +160,6 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return openPRPath(root, md, pj, branch, stdout, stderr)
 	}
 	return mergePath(root, md, pj, clonePath, branch, stdout, stderr)
-}
-
-// pushBranch pushes moe/<run> to origin with -u so a fresh branch
-// gets tracking set. Streams stdout/stderr so credential prompts and
-// progress stay visible. force=true switches to --force-with-lease for
-// the case where origin already has the branch and the local copy may
-// have been rewritten (rebased) since the previous push; the lease
-// still refuses to overwrite a concurrent third-party update.
-func pushBranch(clonePath, branch, remote string, force bool, stdout, stderr io.Writer) error {
-	moePrintf(stdout, "pushing %s to %s...\n", branch, remote)
-	args := []string{"-C", clonePath, "push", "-u"}
-	if force {
-		args = append(args, "--force-with-lease")
-	}
-	args = append(args, "origin", branch)
-	cmd := exec.Command("git", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: git push: %w", err)
-	}
-	return nil
 }
 
 // init registers the rebase-onto-default check as the first pre-push
@@ -197,105 +172,9 @@ func init() {
 		Name: "rebase-onto-default",
 		Run: func(env hookEnv, stdout, stderr io.Writer) error {
 			branch := branchPrefix + env.Run
-			return syncBranchBeforePush(env.Sandbox, branch, env.TargetBranch, stdout, stderr)
+			return push.EnsureRebasedOntoDefault(env.Sandbox, branch, env.TargetBranch, stdout, stderr)
 		},
 	})
-}
-
-// rebaseConflictError carries the failed rebase's diagnostic context
-// from syncBranchBeforePush up to runPush, where it triggers the
-// chain-back to a fresh code session.
-type rebaseConflictError struct {
-	branch        string
-	defaultBranch string
-	conflicts     []string
-}
-
-func (e *rebaseConflictError) Error() string {
-	return fmt.Sprintf("push: rebase %s onto origin/%s hit conflicts in %d file(s); aborted",
-		e.branch, e.defaultBranch, len(e.conflicts))
-}
-
-// syncBranchBeforePush fetches origin's default branch, then rebases
-// moe/<run> onto it if origin has moved past the merge-base. Returns
-// nil when the branch was already up to date or after a clean rebase,
-// and *rebaseConflictError on a rebase conflict (the rebase is aborted
-// before returning so the clone is left clean for the chain-back).
-func syncBranchBeforePush(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
-	moePrintf(stdout, "fetching origin/%s...\n", defaultBranch)
-	if out, err := git.Combined(clonePath, "fetch", "origin", defaultBranch); err != nil {
-		return fmt.Errorf("push: fetch origin/%s: %w (%s)", defaultBranch, err, out)
-	}
-
-	originRef := "refs/remotes/origin/" + defaultBranch
-	originSHA, err := git.RevParse(clonePath, originRef)
-	if err != nil {
-		return fmt.Errorf("push: resolve %s: %w", originRef, err)
-	}
-	branchSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
-	if err != nil {
-		return fmt.Errorf("push: resolve %s: %w", branch, err)
-	}
-
-	// origin/<default> already an ancestor of moe/<run> means the run
-	// branch already includes everything on default — no rebase needed.
-	if _, err := git.Combined(clonePath, "merge-base", "--is-ancestor", originSHA, branchSHA); err == nil {
-		return nil
-	}
-
-	moePrintf(stdout, "rebasing %s onto origin/%s...\n", branch, defaultBranch)
-	out, err := git.Combined(clonePath, "rebase", originRef)
-	if err != nil {
-		// Capture the conflict file list before the abort discards the
-		// rebase state, so the kickoff prompt can name them.
-		conflicts := unmergedPaths(clonePath)
-		if _, abortErr := git.Combined(clonePath, "rebase", "--abort"); abortErr != nil {
-			// If --abort itself fails the clone is in a bad state and the
-			// operator needs to look — surface that specifically.
-			return fmt.Errorf("push: rebase %s onto origin/%s failed and --abort also failed: %w (%s)",
-				branch, defaultBranch, abortErr, out)
-		}
-		return &rebaseConflictError{
-			branch:        branch,
-			defaultBranch: defaultBranch,
-			conflicts:     conflicts,
-		}
-	}
-	moePrintf(stdout, "rebased %s onto origin/%s\n", branch, defaultBranch)
-	return nil
-}
-
-// originHasBranch returns true when origin currently advertises
-// refs/heads/<branch> — i.e. a prior `--pr` cycle already pushed this
-// branch and the upcoming push needs --force-with-lease (when paired
-// with a rebase). Uses `git ls-remote` because the clone may not have
-// a remote-tracking ref for moe/<run>.
-func originHasBranch(clonePath, branch string) bool {
-	out, err := git.Output(clonePath, "ls-remote", "--heads", "origin", branch)
-	if err != nil {
-		// Treat ls-remote failure as "unknown" → fall back to plain push.
-		// A real network failure will surface again on the actual push.
-		return false
-	}
-	return strings.TrimSpace(out) != ""
-}
-
-// unmergedPaths reports the files git left in a conflicted (UU/AA/...)
-// state — the same set `git status -s` would show with U/A markers. Used
-// to name conflicting paths in the chain-back kickoff.
-func unmergedPaths(clonePath string) []string {
-	entries, err := git.Status(clonePath)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		// XY codes: UU/AA/DD/AU/UA/DU/UD all indicate unmerged state.
-		if e.XY[0] == 'U' || e.XY[1] == 'U' || e.XY == "AA" || e.XY == "DD" {
-			out = append(out, e.Path)
-		}
-	}
-	return out
 }
 
 // openCodeSessionForRebaseConflict is the chain-back: spawn a fresh
@@ -307,7 +186,7 @@ func unmergedPaths(clonePath string) []string {
 //
 // Overridable in tests; the default invokes runStageSession directly
 // with docID="code", same as `moe <wf> code` would.
-var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseConflictError, stdout, stderr io.Writer) int {
+var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *push.RebaseConflictError, stdout, stderr io.Writer) int {
 	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts and commit; the chain prompt will offer push next")
 	kickoff := buildRebaseConflictKickoff(md.Workflow, conflict)
 	return runStageSession(md.Project, md.ID, "code", stageSessionOpts{
@@ -321,20 +200,20 @@ var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *rebaseCo
 // conflicting paths (when git left any), and tells the agent what
 // "done" looks like — resolve, commit, exit; the post-turn chain
 // prompt will offer push.
-func buildRebaseConflictKickoff(workflow string, c *rebaseConflictError) string {
+func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "`moe %s push` just tried to rebase %s onto origin/%s and hit conflicts. ",
-		workflow, c.branch, c.defaultBranch)
+		workflow, c.Branch, c.DefaultBranch)
 	b.WriteString("The rebase has been aborted, so the working tree is clean and the branch is back at its pre-rebase tip — you are starting from the conflict state, not mid-rebase.\n\n")
-	if len(c.conflicts) > 0 {
+	if len(c.Conflicts) > 0 {
 		b.WriteString("Files git flagged as conflicting on the abandoned rebase:\n")
-		for _, p := range c.conflicts {
+		for _, p := range c.Conflicts {
 			fmt.Fprintf(&b, "  - %s\n", p)
 		}
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "Re-run the rebase yourself (`git rebase origin/%s` from the sandbox), resolve the conflicts, ",
-		c.defaultBranch)
+		c.DefaultBranch)
 	fmt.Fprintf(&b, "verify the result still does what the design intended, and commit. Then exit the session — the post-turn chain prompt will offer `moe %s push` next.\n", workflow)
 	return b.String()
 }
@@ -344,13 +223,13 @@ func buildRebaseConflictKickoff(workflow string, c *rebaseConflictError) string 
 // sandbox is intentionally left in place — iteration via
 // `moe <wf> code` stays a one-liner until the PR merges.
 func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
-	ghRepo, err := ghRepoSpec(pj.Remote)
+	ghRepo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
-	url, existing, err := findOpenPR(ghRepo, branch)
+	url, existing, err := push.FindOpenPR(ghRepo, branch)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -359,7 +238,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		moePrintf(stdout, "existing PR: %s\n", url)
 	} else {
 		bodyPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
-		url, err = createPR(ghRepo, branch, pj.DefaultBranch, md.Title, bodyPath, stderr)
+		url, err = push.CreatePR(ghRepo, branch, pj.DefaultBranch, md.Title, bodyPath, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
@@ -412,8 +291,8 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 
 	// Harvest follow-ups and flip run.json to merged before the
 	// ff-push: harvest (and any per-idea slug failures) must be
-	// reversible, and ffPushToDefault is the point of no return for
-	// the merged transition. enterTerminal does the harvest under
+	// reversible, and FastForwardToDefault is the point of no return
+	// for the merged transition. enterTerminal does the harvest under
 	// lock so each createIdea sees a held bureaucracy lock.
 	priorStatus := md.Status
 	var paths []string
@@ -431,7 +310,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 
 	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
-	if err := ffPushToDefault(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
+	if err := push.FastForwardToDefault(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
 		// Roll back the status flip enterTerminal just wrote: the
 		// remote merge didn't happen, so the run shouldn't be
 		// "merged" on disk. Harvest commits and followups.md
@@ -445,7 +324,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1
 	}
 
-	if err := deleteRemoteBranch(clonePath, branch, stdout, stderr); err != nil {
+	if err := push.DeleteRemoteBranch(clonePath, branch, stdout, stderr); err != nil {
 		// Merge already landed; warn but don't fail the command.
 		moePrintf(stderr, "warning: %v\n", err)
 	}
@@ -475,67 +354,6 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	return 0
 }
 
-// ffPushToDefault fast-forwards the remote's default branch to the
-// tip of moe/<run> via `git push origin <branch>:<default>`. The push
-// is rejected server-side if it isn't a fast-forward — no --force, ever.
-func ffPushToDefault(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("git", "-C", clonePath, "push", "origin", branch+":"+defaultBranch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: ff-merge %s into %s: %w", branch, defaultBranch, err)
-	}
-	return nil
-}
-
-// deleteRemoteBranch removes moe/<run> from origin. Non-fatal on
-// failure — the merge has already landed; a stray remote branch is a
-// minor cleanup issue, not worth rolling back the run for.
-func deleteRemoteBranch(clonePath, branch string, stdout, stderr io.Writer) error {
-	moePrintf(stdout, "deleting %s on origin...\n", branch)
-	cmd := exec.Command("git", "-C", clonePath, "push", "origin", "--delete", branch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: delete remote branch %s: %w", branch, err)
-	}
-	return nil
-}
-
-// mergedSHA returns the merge SHA recorded in the most recent
-// MoE-Merged trailer for runID, or "" if none has been recorded.
-func mergedSHA(root, runID string) string {
-	return trailerValue(root, runID, "MoE-Merged")
-}
-
-// trailerValue pulls the value from the most recent `<trailer>:` line
-// in any commit that also carries `MoE-Run: <runID>`. Returns "" when
-// no such commit exists.
-func trailerValue(root, runID, trailer string) string {
-	cmd := exec.Command("git", "-C", root, "log",
-		"--all-match",
-		"--grep", "MoE-Run: "+runID,
-		"--grep", trailer+":",
-		"--format=%B", "-z",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	prefix := trailer + ":"
-	for _, body := range strings.Split(string(out), "\x00") {
-		for _, line := range strings.Split(body, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, prefix) {
-				return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-			}
-		}
-	}
-	return ""
-}
-
 func checkCodeContent(root string, md *run.Metadata) error {
 	path := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 	info, err := os.Stat(path)
@@ -557,154 +375,4 @@ func sandboxClonePath(root string, md *run.Metadata) (string, error) {
 		return "", fmt.Errorf("push: %w", err)
 	}
 	return wp, nil
-}
-
-// checkCleanWorkTree refuses to push when the sandbox has uncommitted
-// changes — staged, unstaged, or untracked. The agent is responsible for
-// committing inside the sandbox before exiting; if it didn't, the loose
-// edits would silently be left behind by the push and we'd ship a branch
-// that doesn't reflect the agent's actual work. Better to surface it.
-func checkCleanWorkTree(clonePath string) error {
-	entries, err := git.Status(clonePath)
-	if err != nil {
-		return fmt.Errorf("push: git status in sandbox: %w", err)
-	}
-	if len(entries) == 0 {
-		return nil
-	}
-	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
-       sandbox: %s
-       re-run `+"`moe <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath)
-}
-
-// checkBranchHasCommits confirms the sandbox clone has branch `branch`
-// and that it's ahead of `base`. A branch at zero commits-ahead means the
-// agent didn't actually commit anything.
-func checkBranchHasCommits(clonePath, branch, base string) error {
-	// First, does the branch exist?
-	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe <wf> code` and have the agent commit", branch)
-	}
-	// Then, is it ahead of base? Use `git rev-list --count base..branch`.
-	// If base isn't a known ref, skip this check — we can't tell, but the
-	// push itself will error clearly.
-	out, err := exec.Command("git", "-C", clonePath, "rev-list", "--count", base+".."+branch).Output()
-	if err != nil {
-		return nil
-	}
-	count := strings.TrimSpace(string(out))
-	if count == "0" {
-		return fmt.Errorf("push: branch %q has no commits ahead of %q; nothing to push", branch, base)
-	}
-	return nil
-}
-
-// ensureOrigin makes sure origin in the sandbox clone points at the
-// target project remote. Fresh clones have origin pointing at the local
-// submodule path (the clone source), which cannot be pushed to GitHub.
-func ensureOrigin(clonePath, remote string) error {
-	out, err := exec.Command("git", "-C", clonePath, "remote", "get-url", "origin").Output()
-	if err != nil {
-		// No origin at all — add one.
-		cmd := exec.Command("git", "-C", clonePath, "remote", "add", "origin", remote)
-		if combined, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("push: add origin: %w (%s)", err, strings.TrimSpace(string(combined)))
-		}
-		return nil
-	}
-	current := strings.TrimSpace(string(out))
-	if current == remote {
-		return nil
-	}
-	cmd := exec.Command("git", "-C", clonePath, "remote", "set-url", "origin", remote)
-	if combined, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("push: set-url origin: %w (%s)", err, strings.TrimSpace(string(combined)))
-	}
-	return nil
-}
-
-// ghRepoSpec derives the owner/repo spec that `gh --repo` wants from the
-// project's remote URL. Accepts HTTPS (https://github.com/owner/repo[.git])
-// and SSH (git@github.com:owner/repo[.git]) forms.
-func ghRepoSpec(remote string) (string, error) {
-	s := strings.TrimSuffix(remote, ".git")
-	// SSH form: git@host:owner/repo
-	if i := strings.Index(s, "@"); i >= 0 {
-		if j := strings.Index(s, ":"); j >= 0 && j > i {
-			return s[j+1:], nil
-		}
-	}
-	// HTTPS form: https://host/owner/repo
-	if idx := strings.Index(s, "://"); idx >= 0 {
-		after := s[idx+3:]
-		if slash := strings.Index(after, "/"); slash >= 0 {
-			return after[slash+1:], nil
-		}
-	}
-	return "", fmt.Errorf("push: cannot derive owner/repo from remote %q", remote)
-}
-
-// findOpenPR returns (url, exists, err) for an open PR on branch in repo.
-// Uses `gh pr list` rather than `gh pr view` because list returns an empty
-// array on no-match (exit 0) while view exits non-zero in the same case,
-// and distinguishing "no PR" from "gh failed" matters.
-func findOpenPR(repo, branch string) (string, bool, error) {
-	cmd := exec.Command("gh", "pr", "list",
-		"--repo", repo,
-		"--head", branch,
-		"--state", "open",
-		"--json", "url",
-		"--limit", "1",
-	)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return "", false, fmt.Errorf("push: gh CLI not found on PATH; install https://cli.github.com/")
-		}
-		return "", false, fmt.Errorf("push: gh pr list: %w", err)
-	}
-	var items []struct {
-		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &items); err != nil {
-		return "", false, fmt.Errorf("push: parse gh pr list output: %w", err)
-	}
-	if len(items) == 0 {
-		return "", false, nil
-	}
-	return items[0].URL, true, nil
-}
-
-// createPR shells out to `gh pr create` and returns the URL printed on
-// stdout. Errors from gh (auth, permissions, repo not found) propagate
-// with their stderr attached.
-func createPR(repo, head, base, title, bodyFile string, stderr io.Writer) (string, error) {
-	cmd := exec.Command("gh", "pr", "create",
-		"--repo", repo,
-		"--head", head,
-		"--base", base,
-		"--title", title,
-		"--body-file", bodyFile,
-	)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return "", fmt.Errorf("push: gh CLI not found on PATH; install https://cli.github.com/")
-		}
-		return "", fmt.Errorf("push: gh pr create: %w", err)
-	}
-	// gh prints the PR URL on stdout, plus sometimes extra lines. Grab the
-	// first https:// line.
-	for _, line := range strings.Split(out.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "https://") {
-			return line, nil
-		}
-	}
-	return "", fmt.Errorf("push: gh pr create succeeded but printed no URL: %q", out.String())
 }
