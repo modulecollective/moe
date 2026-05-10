@@ -2,6 +2,7 @@ package run
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -275,6 +276,29 @@ func TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter(t *testing.T) {
 	}
 	if md.ID != "my-idea-slug-2026-04-22-2" {
 		t.Fatalf("id = %q, want %q", md.ID, "my-idea-slug-2026-04-22-2")
+	}
+}
+
+// TestLoadMissingRunIsErrRunNotFound: a typo in the project or run id
+// must surface as ErrRunNotFound so callers can render a clean message
+// instead of leaking the per-turn worktree path through the raw os
+// error. The default %v formatting must include both ids and not the
+// path, since that path is what the operator actually sees on stderr.
+func TestLoadMissingRunIsErrRunNotFound(t *testing.T) {
+	root := newTestRoot(t)
+	_, err := Load(root, "ghost", "missing")
+	if err == nil {
+		t.Fatal("expected error loading nonexistent run, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("error should match ErrRunNotFound, got: %v", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ghost/missing") {
+		t.Fatalf("error should name the project/run pair, got: %v", err)
+	}
+	if strings.Contains(msg, root) {
+		t.Fatalf("error should not leak the on-disk path, got: %v", err)
 	}
 }
 

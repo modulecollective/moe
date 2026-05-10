@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,12 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/trailers"
 )
+
+// ErrRunNotFound is returned (wrapped) by Load when the run's run.json
+// is missing. Callers use errors.Is to render a clean "run not found"
+// message instead of leaking the per-turn worktree path through the
+// raw filesystem error a typo would otherwise produce.
+var ErrRunNotFound = errors.New("run not found")
 
 // Document is the machine-readable slice of a single document's state.
 // Documents themselves are just files on disk (content.md); this struct
@@ -531,6 +538,9 @@ func Load(root, projectID, id string) (*Metadata, error) {
 	path := filepath.Join(root, Dir(projectID, id), "run.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%s/%s: %w", projectID, id, ErrRunNotFound)
+		}
 		return nil, fmt.Errorf("run: read %s: %w", path, err)
 	}
 	md := &Metadata{}
