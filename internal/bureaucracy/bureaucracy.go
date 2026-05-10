@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -123,9 +122,7 @@ func Init(dir, remote string) error {
 		// doesn't spew "No such remote" to the operator's stderr. If origin
 		// already exists (git init is idempotent, so we might land on top of
 		// a pre-existing repo), repoint it; otherwise add it.
-		probe := exec.Command("git", "remote", "get-url", "origin")
-		probe.Dir = abs
-		if probe.Run() == nil {
+		if git.Probe(abs, "remote", "get-url", "origin") {
 			if err := git.Run(abs, "remote", "set-url", "origin", remote); err != nil {
 				return fmt.Errorf("bureaucracy: set remote: %w", err)
 			}

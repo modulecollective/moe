@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -167,26 +166,11 @@ func normalizeRemote(url string) string { return url }
 // detectDefaultBranch asks the remote which ref HEAD points at, so we don't
 // have to guess "main" vs "master" vs something else.
 func detectDefaultBranch(url string) (string, error) {
-	out, err := exec.Command("git", "ls-remote", "--symref", url, "HEAD").Output()
+	branch, err := git.LsRemoteDefault(url)
 	if err != nil {
-		return "", fmt.Errorf("project: ls-remote %s: %w", url, err)
+		return "", fmt.Errorf("project: %w", err)
 	}
-	// First line for a normal repo: "ref: refs/heads/<branch>\tHEAD"
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.HasPrefix(line, "ref: ") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		ref := fields[1]
-		const prefix = "refs/heads/"
-		if strings.HasPrefix(ref, prefix) {
-			return strings.TrimPrefix(ref, prefix), nil
-		}
-	}
-	return "", fmt.Errorf("project: no symbolic HEAD in ls-remote output for %s", url)
+	return branch, nil
 }
 
 // Unregister is the inverse of Register: remove the submodule, delete

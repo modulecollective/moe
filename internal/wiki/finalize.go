@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -393,16 +392,13 @@ func capturedSHA(repoPath string, checkDirty bool, stderr io.Writer, label strin
 			return nil
 		}
 	}
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = repoPath
-	out, err := cmd.Output()
+	sha, err := git.HEAD(repoPath)
 	if err != nil {
 		if stderr != nil {
 			fmt.Fprintf(stderr, "wiki: %s rev-parse failed (%v); recording sha=null\n", label, err)
 		}
 		return nil
 	}
-	sha := strings.TrimSpace(string(out))
 	if sha == "" {
 		return nil
 	}

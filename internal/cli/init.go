@@ -5,11 +5,11 @@ import (
 	"flag"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 )
 
 func init() {
@@ -72,11 +72,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stdout, "left staged; commit when ready.")
 		return 0
 	}
-	cmd := exec.Command("git", "commit", "-m", "Initialize bureaucracy")
-	cmd.Dir = abs
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := git.Stream(abs, stdout, stderr, "commit", "-m", "Initialize bureaucracy"); err != nil {
 		moePrintf(stderr, "git commit: %v\n", err)
 		return 1
 	}

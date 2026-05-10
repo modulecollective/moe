@@ -104,16 +104,12 @@ func EnsureRebasedOntoDefault(clonePath, branch, defaultBranch string, stdout, s
 // update.
 func PushBranch(clonePath, branch, remote string, force bool, stdout, stderr io.Writer) error {
 	cliout.Printf(stdout, "pushing %s to %s...\n", branch, remote)
-	args := []string{"-C", clonePath, "push", "-u"}
+	args := []string{"push", "-u"}
 	if force {
 		args = append(args, "--force-with-lease")
 	}
 	args = append(args, "origin", branch)
-	cmd := exec.Command("git", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := git.Stream(clonePath, stdout, stderr, args...); err != nil {
 		return fmt.Errorf("push: git push: %w", err)
 	}
 	return nil
@@ -139,11 +135,7 @@ func OriginHasBranch(clonePath, branch string) bool {
 // push is rejected server-side if it isn't a fast-forward — no
 // --force, ever.
 func FastForwardToDefault(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("git", "-C", clonePath, "push", "origin", branch+":"+defaultBranch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := git.Stream(clonePath, stdout, stderr, "push", "origin", branch+":"+defaultBranch); err != nil {
 		return fmt.Errorf("push: ff-merge %s into %s: %w", branch, defaultBranch, err)
 	}
 	return nil
@@ -154,11 +146,7 @@ func FastForwardToDefault(clonePath, branch, defaultBranch string, stdout, stder
 // warning because the merge has already landed by then.
 func DeleteRemoteBranch(clonePath, branch string, stdout, stderr io.Writer) error {
 	cliout.Printf(stdout, "deleting %s on origin...\n", branch)
-	cmd := exec.Command("git", "-C", clonePath, "push", "origin", "--delete", branch)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := git.Stream(clonePath, stdout, stderr, "push", "origin", "--delete", branch); err != nil {
 		return fmt.Errorf("push: delete remote branch %s: %w", branch, err)
 	}
 	return nil
@@ -186,18 +174,17 @@ func CheckCleanWorkTree(clonePath string) error {
 // that it's ahead of `base`. A branch at zero commits-ahead means the
 // agent didn't actually commit anything.
 func CheckBranchHasCommits(clonePath, branch, base string) error {
-	cmd := exec.Command("git", "-C", clonePath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if err := cmd.Run(); err != nil {
+	if !git.HasRef(clonePath, "refs/heads/"+branch) {
 		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe <wf> code` and have the agent commit", branch)
 	}
-	// Is it ahead of base? Use `git rev-list --count base..branch`. If
-	// base isn't a known ref, skip — the push itself will error clearly.
-	out, err := exec.Command("git", "-C", clonePath, "rev-list", "--count", base+".."+branch).Output()
+	// AheadOf swallows rev-list failures (returns 0, nil) so an unknown
+	// base ref just skips this check — the push itself surfaces a real
+	// error in that case.
+	n, err := git.AheadOf(clonePath, base, branch)
 	if err != nil {
 		return nil
 	}
-	count := strings.TrimSpace(string(out))
-	if count == "0" {
+	if n == 0 {
 		return fmt.Errorf("push: branch %q has no commits ahead of %q; nothing to push", branch, base)
 	}
 	return nil
@@ -207,21 +194,19 @@ func CheckBranchHasCommits(clonePath, branch, base string) error {
 // `remote`. Fresh clones have origin pointing at the local submodule
 // path (the clone source), which cannot be pushed to GitHub.
 func EnsureOrigin(clonePath, remote string) error {
-	out, err := exec.Command("git", "-C", clonePath, "remote", "get-url", "origin").Output()
+	out, err := git.Output(clonePath, "remote", "get-url", "origin")
 	if err != nil {
-		cmd := exec.Command("git", "-C", clonePath, "remote", "add", "origin", remote)
-		if combined, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("push: add origin: %w (%s)", err, strings.TrimSpace(string(combined)))
+		if combined, err := git.Combined(clonePath, "remote", "add", "origin", remote); err != nil {
+			return fmt.Errorf("push: add origin: %w (%s)", err, combined)
 		}
 		return nil
 	}
-	current := strings.TrimSpace(string(out))
+	current := strings.TrimSpace(out)
 	if current == remote {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", clonePath, "remote", "set-url", "origin", remote)
-	if combined, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("push: set-url origin: %w (%s)", err, strings.TrimSpace(string(combined)))
+	if combined, err := git.Combined(clonePath, "remote", "set-url", "origin", remote); err != nil {
+		return fmt.Errorf("push: set-url origin: %w (%s)", err, combined)
 	}
 	return nil
 }
@@ -320,18 +305,17 @@ func MergedSHA(root, runID string) string {
 // in any commit that also carries `MoE-Run: <runID>`. Returns "" when
 // no such commit exists.
 func TrailerValue(root, runID, trailer string) string {
-	cmd := exec.Command("git", "-C", root, "log",
+	out, err := git.Output(root, "log",
 		"--all-match",
 		"--grep", "MoE-Run: "+runID,
 		"--grep", trailer+":",
 		"--format=%B", "-z",
 	)
-	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	prefix := trailer + ":"
-	for _, body := range strings.Split(string(out), "\x00") {
+	for _, body := range strings.Split(out, "\x00") {
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, prefix) {

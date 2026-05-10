@@ -3,7 +3,6 @@ package wiki
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,16 +175,14 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 		// whether the cap fired without paying for a full traversal.
 		args = append(args, fmt.Sprintf("-n%d", firstReflectCommitCap+1))
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = cfg.ProjectRepoPath
-	out, err := cmd.Output()
+	out, err := git.Output(cfg.ProjectRepoPath, args...)
 	if err != nil {
 		// Git can fail if the SHA is unreachable (history rewrite,
 		// shallow clone). Degrade silently rather than block reflect.
 		return nil, 0, nil
 	}
 	var commits []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
@@ -204,13 +201,11 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 }
 
 func projectCommitTotal(repoPath string) (int, error) {
-	cmd := exec.Command("git", "rev-list", "--count", "--no-merges", "HEAD")
-	cmd.Dir = repoPath
-	out, err := cmd.Output()
+	out, err := git.Output(repoPath, "rev-list", "--count", "--no-merges", "HEAD")
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(out)))
+	return strconv.Atoi(strings.TrimSpace(out))
 }
 
 // closedRunsSince lists the project's terminal runs (closed, merged,

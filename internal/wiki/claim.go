@@ -2,10 +2,11 @@ package wiki
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git"
 )
 
 // DetectionResult is the outcome of DetectUnrecordedEdits — the list
@@ -100,9 +101,7 @@ func docUnchangedSinceSHA(cfg Config, filename, sha string) bool {
 	if rel == "" {
 		return false
 	}
-	cmd := exec.Command("git", "diff", "--quiet", sha, "HEAD", "--", rel)
-	cmd.Dir = cfg.BureaucracyPath
-	return cmd.Run() == nil
+	return git.Probe(cfg.BureaucracyPath, "diff", "--quiet", sha, "HEAD", "--", rel)
 }
 
 // lastCommitIsTwin reads the body of the most recent commit touching
@@ -117,15 +116,12 @@ func lastCommitIsTwin(cfg Config, filename string) (bool, bool, error) {
 	if rel == "" {
 		return false, false, nil
 	}
-	cmd := exec.Command("git", "log", "-1", "--format=%B", "--", rel)
-	cmd.Dir = cfg.BureaucracyPath
-	out, err := cmd.Output()
+	body, err := git.Output(cfg.BureaucracyPath, "log", "-1", "--format=%B", "--", rel)
 	if err != nil {
 		// Untracked / no history → degrade silently. The doc just
 		// looks unchanged from the bureaucracy's point of view.
 		return false, false, nil
 	}
-	body := string(out)
 	if strings.TrimSpace(body) == "" {
 		return false, false, nil
 	}
@@ -232,12 +228,9 @@ func UnrecordedDiff(cfg Config) (string, error) {
 	if rel == "" {
 		return "", nil
 	}
-	args := []string{"diff", *cp.BureaucracySHA + "..HEAD", "--", rel}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = cfg.BureaucracyPath
-	out, err := cmd.Output()
+	out, err := git.Output(cfg.BureaucracyPath, "diff", *cp.BureaucracySHA+"..HEAD", "--", rel)
 	if err != nil {
 		return "", nil
 	}
-	return string(out), nil
+	return out, nil
 }

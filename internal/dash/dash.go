@@ -17,7 +17,6 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/cliout"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -427,14 +427,13 @@ func RecentTwinSessions(root, projectID string, limit int) ([]TwinRecent, error)
 		return nil, nil
 	}
 	twinDir := filepath.Join("projects", projectID, wiki.TwinDirRel)
-	cmd := exec.Command("git", "-C", root, "log", "--all",
+	out, err := git.Output(root, "log", "--all",
 		"--all-match",
 		"--grep", "MoE-Workflow: twin",
 		"--grep", "MoE-Project: "+projectID,
 		"--format=%ct%x00%B%x1e",
 		"--", twinDir,
 	)
-	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("dash: git log twin sessions: %w", err)
 	}
@@ -443,7 +442,7 @@ func RecentTwinSessions(root, projectID string, limit int) ([]TwinRecent, error)
 		verb string
 	}
 	groups := make(map[string]group)
-	for _, record := range strings.Split(string(out), "\x1e") {
+	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
 			continue

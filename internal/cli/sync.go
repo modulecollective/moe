@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 
@@ -65,11 +64,7 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// --ff-only so a divergence surfaces instead of silently rebasing.
 	// Skipped on a brand-new branch with no upstream — nothing to pull from.
 	if sync.HasUpstream(root) {
-		pull := exec.Command("git", "pull", "--ff-only", "--recurse-submodules")
-		pull.Dir = root
-		pull.Stdout = stdout
-		pull.Stderr = stderr
-		if err := pull.Run(); err != nil {
+		if err := git.Stream(root, stdout, stderr, "pull", "--ff-only", "--recurse-submodules"); err != nil {
 			return fmt.Errorf("git pull: %w", err)
 		}
 	}
@@ -96,11 +91,7 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	if !sync.HasUpstream(root) {
 		pushArgs = []string{"push", "--recurse-submodules=on-demand", "-u", "origin", "HEAD"}
 	}
-	cmd := exec.Command("git", pushArgs...)
-	cmd.Dir = root
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := git.Stream(root, stdout, stderr, pushArgs...); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil

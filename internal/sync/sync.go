@@ -60,15 +60,11 @@ type PRState struct {
 
 // HasUpstream reports whether the branch checked out in dir has an
 // upstream configured. False on a brand-new branch with no @{u}, true
-// otherwise.
+// otherwise. Thin wrapper around git.Upstream that swallows the error
+// — any failure here means "no upstream" by convention.
 func HasUpstream(dir string) bool {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) != ""
+	u, _ := git.Upstream(dir)
+	return u != ""
 }
 
 // ParseGitmodules reads .gitmodules at path and returns one entry per
@@ -181,11 +177,11 @@ func HeadSHA(dir string) (string, error) {
 // GitlinkSHA reads the gitlink that bureaucracy's HEAD commit
 // records for the submodule at subPath.
 func GitlinkSHA(root, subPath string) (string, error) {
-	out, err := exec.Command("git", "-C", root, "ls-tree", "HEAD", subPath).Output()
+	out, err := git.Output(root, "ls-tree", "HEAD", subPath)
 	if err != nil {
 		return "", fmt.Errorf("git ls-tree HEAD %s: %w", subPath, err)
 	}
-	line := strings.TrimSpace(string(out))
+	line := strings.TrimSpace(out)
 	if line == "" {
 		return "", fmt.Errorf("no gitlink for %s", subPath)
 	}

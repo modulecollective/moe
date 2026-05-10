@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -484,11 +483,10 @@ func CommitAllowEmpty(root, msg string, pathspecs ...string) error {
 }
 
 func hasStagedChanges(root string) bool {
-	cmd := exec.Command("git", "diff", "--cached", "--quiet")
-	cmd.Dir = root
-	// --quiet: exit 1 if there are staged changes, 0 if not.
-	err := cmd.Run()
-	return err != nil
+	// `diff --cached --quiet` exits 0 if nothing is staged, 1 if there
+	// are staged changes — Probe returns true on exit 0, so a Probe of
+	// true means "no staged changes" and we negate it.
+	return !git.Probe(root, "diff", "--cached", "--quiet")
 }
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
@@ -504,7 +502,7 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 	// Doc IDs are [a-z0-9-]+ today, so QuoteMeta is belt-and-suspenders:
 	// nothing in that class is a BRE metacharacter, but escape anyway so
 	// a future looser validator can't turn a doc ID into a regex foot-gun.
-	cmd := exec.Command("git",
+	out, err := git.Output(root,
 		"log", "-1",
 		"--all-match",
 		"--grep", fmt.Sprintf("^work: update %s$", regexp.QuoteMeta(docID)),
@@ -513,12 +511,10 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
 		"--format=%H %ct",
 	)
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("run: git log: %w", err)
 	}
-	line := strings.TrimSpace(string(out))
+	line := strings.TrimSpace(out)
 	if line == "" {
 		return "", time.Time{}, nil
 	}
@@ -588,17 +584,15 @@ func Scan(root string) ([]*Metadata, error) {
 // reachable from HEAD, though that's unusual). Used by moe dash to sort
 // buckets and to distinguish dormant runs from live ones.
 func LastActivity(root, runID string) (time.Time, error) {
-	cmd := exec.Command("git",
+	out, err := git.Output(root,
 		"log", "-1",
 		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
 		"--format=%ct",
 	)
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("run: git log: %w", err)
 	}
-	line := strings.TrimSpace(string(out))
+	line := strings.TrimSpace(out)
 	if line == "" {
 		return time.Time{}, nil
 	}
@@ -646,13 +640,11 @@ type JournalIndex struct {
 // MoE-Run-tagged commit dash cares about is reachable from HEAD.
 // Mirrors the scope LastActivityMap walked.
 func BuildJournalIndex(root string) (*JournalIndex, error) {
-	cmd := exec.Command("git",
+	out, err := git.Output(root,
 		"log",
 		"--grep", "^MoE-Run: ",
 		"--format=%ct%x00%B%x1e",
 	)
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("run: git log: %w", err)
 	}
@@ -661,7 +653,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		PromotedTo:   make(map[string]string),
 		PRURL:        make(map[string]string),
 	}
-	for _, record := range strings.Split(string(out), "\x1e") {
+	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
 			continue
@@ -723,17 +715,15 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 // path has no git history. Scoped by path rather than by MoE-Run
 // trailer, but otherwise mirrors LastActivity.
 func LastFileActivity(root, relPath string) (time.Time, error) {
-	cmd := exec.Command("git",
+	out, err := git.Output(root,
 		"log", "-1",
 		"--format=%ct",
 		"--", relPath,
 	)
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("run: git log: %w", err)
 	}
-	line := strings.TrimSpace(string(out))
+	line := strings.TrimSpace(out)
 	if line == "" {
 		return time.Time{}, nil
 	}
@@ -809,19 +799,17 @@ func slugTaken(root, projectID, slug string) (bool, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("run: stat %s: %w", Dir(projectID, slug), err)
 	}
-	cmd := exec.Command("git",
+	out, err := git.Output(root,
 		"log", "-1",
 		"--all-match",
 		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
 		"--grep", fmt.Sprintf("MoE-Run: %s", slug),
 		"--format=%H",
 	)
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("run: git log: %w", err)
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	return strings.TrimSpace(out) != "", nil
 }
 
 func workingTreeDirty(root string) (bool, error) {
