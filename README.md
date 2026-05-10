@@ -1,4 +1,4 @@
-# Ministry of Everything (MoE)
+# Ministry of Everything (MoE).
 
 **A CLI-first agent harness for a single operator working with AI.**
 
