@@ -117,7 +117,12 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
-	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	// Relative to now so the work-turn timestamps stay inside the
+	// 30-day dormancy cutoff regardless of when the suite runs. The
+	// fixture used to use a hard-coded April 10 2026; once "now" was
+	// 30+ days past that, dash filtered the run out and the test
+	// failed for date-decay reasons unrelated to what it's checking.
+	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 
@@ -152,7 +157,12 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
-	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	// Relative to now so the work-turn timestamps stay inside the
+	// 30-day dormancy cutoff regardless of when the suite runs. The
+	// fixture used to use a hard-coded April 10 2026; once "now" was
+	// 30+ days past that, dash filtered the run out and the test
+	// failed for date-decay reasons unrelated to what it's checking.
+	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
@@ -1247,7 +1257,12 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	// Relative to now so the work-turn timestamps stay inside the
+	// 30-day dormancy cutoff regardless of when the suite runs. The
+	// fixture used to use a hard-coded April 10 2026; once "now" was
+	// 30+ days past that, dash filtered the run out and the test
+	// failed for date-decay reasons unrelated to what it's checking.
+	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
