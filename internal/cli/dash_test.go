@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -1354,9 +1355,9 @@ func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
 // single-line dotted field, no rail and no smoke. Pinned because the
 // dash's first-day state hits this exact shape.
 func TestBuildFactoryArtEmpty(t *testing.T) {
-	state := factoryState{}
+	state := dash.FactoryState{}
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line for empty state, got %d: %q", len(lines), lines)
 	}
@@ -1374,9 +1375,9 @@ func TestBuildFactoryArtEmpty(t *testing.T) {
 // runs of mixed stages, completed) renders two lines whose rail
 // carries the expected zone glyphs in zone order.
 func TestBuildFactoryArtPopulatedShape(t *testing.T) {
-	state := factoryState{
+	state := dash.FactoryState{
 		BacklogCount: 2,
-		ActiveStages: []activeStation{
+		ActiveStages: []dash.ActiveStation{
 			{Stage: "design"},
 			{Stage: "code"},
 			{Stage: "awaiting merge"},
@@ -1384,7 +1385,7 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 		CompletedCount: 3,
 	}
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines (smoke + rail), got %d: %q", len(lines), lines)
 	}
@@ -1412,9 +1413,9 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 // TestBuildFactoryArtOverflow: counts past their caps render `+N` tags
 // rather than widening the line beyond budget.
 func TestBuildFactoryArtOverflow(t *testing.T) {
-	state := factoryState{
-		BacklogCount: inputCap + 3,
-		ActiveStages: []activeStation{ // stationCap=4 + 2 over
+	state := dash.FactoryState{
+		BacklogCount: dash.InputCap + 3,
+		ActiveStages: []dash.ActiveStation{ // dash.StationCap=4 + 2 over
 			{Stage: "design"},
 			{Stage: "code"},
 			{Stage: "design"},
@@ -1422,23 +1423,23 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 			{Stage: "code"},
 			{Stage: "design"},
 		},
-		CompletedCount: outputCap + 7,
+		CompletedCount: dash.OutputCap + 7,
 	}
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	rail := lines[1]
 	for _, want := range []string{"+3", "+2", "+7"} {
 		if !strings.Contains(rail, want) {
 			t.Fatalf("expected overflow tag %q in rail:\n%q", want, rail)
 		}
 	}
-	// Bracketed stations capped: exactly stationCap "[" should appear
+	// Bracketed stations capped: exactly dash.StationCap "[" should appear
 	// before the "+2" station overflow tag.
 	stationsRegion := rail
 	if i := strings.Index(rail, "+2"); i >= 0 {
 		stationsRegion = rail[:i]
 	}
-	if got, want := strings.Count(stationsRegion, "["), stationCap; got != want {
+	if got, want := strings.Count(stationsRegion, "["), dash.StationCap; got != want {
 		t.Fatalf("expected exactly %d bracketed stations before overflow, got %d in:\n%q",
 			want, got, rail)
 	}
@@ -1449,9 +1450,9 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 // not nothing. Single source of truth for the "new workflow doesn't
 // silently disappear" guarantee.
 func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
-	state := factoryState{ActiveStages: []activeStation{{Stage: "unknown-stage"}}}
+	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{{Stage: "unknown-stage"}}}
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	rail := lines[1]
 	if !strings.Contains(rail, "[◉]") {
 		t.Fatalf("expected fallback boiler glyph '[◉]', got rail:\n%q", rail)
@@ -1464,7 +1465,7 @@ func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
 // across design / code / awaiting-merge so a future change can't
 // quietly resurrect stage-shaped smoke decoration.
 func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
-	state := factoryState{ActiveStages: []activeStation{
+	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
 		{Stage: "design"},
 		{Stage: "code"},
 		{Stage: "awaiting merge"},
@@ -1473,7 +1474,7 @@ func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
 	// fleck above a parked station fails the test.
 	for seed := int64(1); seed <= 16; seed++ {
 		r := rand.New(rand.NewSource(seed))
-		lines := buildFactoryArt(state, artWidth, r)
+		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 		if len(lines) != 2 {
 			t.Fatalf("seed %d: expected 2 lines, got %d", seed, len(lines))
 		}
@@ -1483,26 +1484,26 @@ func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
 	}
 }
 
-// TestBuildFactoryArtWidth: every line is padded to at least artWidth
+// TestBuildFactoryArtWidth: every line is padded to at least dash.ArtWidth
 // runes so the art row stands alone above the section table. Lines
 // can exceed the budget under extreme overflow (e.g. backlog=99) —
 // the caps + "+N" tags hold the layout to the budget for normal
 // counts, and the extreme cases are rare enough that line-wrap on a
 // narrow terminal is acceptable.
 func TestBuildFactoryArtWidth(t *testing.T) {
-	cases := []factoryState{
+	cases := []dash.FactoryState{
 		{},
 		{BacklogCount: 1},
-		{ActiveStages: []activeStation{{Stage: "design"}}},
+		{ActiveStages: []dash.ActiveStation{{Stage: "design"}}},
 		{CompletedCount: 1},
-		{BacklogCount: 3, ActiveStages: []activeStation{{Stage: "design"}, {Stage: "code"}}, CompletedCount: 4},
+		{BacklogCount: 3, ActiveStages: []dash.ActiveStation{{Stage: "design"}, {Stage: "code"}}, CompletedCount: 4},
 	}
 	for i, st := range cases {
 		r := rand.New(rand.NewSource(int64(i + 1)))
-		for j, line := range buildFactoryArt(st, artWidth, r) {
+		for j, line := range dash.BuildFactoryArt(st, dash.ArtWidth, r) {
 			n := utf8.RuneCountInString(line)
-			if n < artWidth {
-				t.Errorf("case %d line %d: width=%d want ≥ %d, line=%q", i, j, n, artWidth, line)
+			if n < dash.ArtWidth {
+				t.Errorf("case %d line %d: width=%d want ≥ %d, line=%q", i, j, n, dash.ArtWidth, line)
 			}
 		}
 	}
@@ -1514,25 +1515,25 @@ func TestBuildFactoryArtWidth(t *testing.T) {
 // Stations carry a runningDoc so the smoke path actually fires —
 // otherwise the palette assertion is vacuous.
 func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
-	state := factoryState{
+	state := dash.FactoryState{
 		BacklogCount: 3,
-		ActiveStages: []activeStation{
+		ActiveStages: []dash.ActiveStation{
 			{Stage: "design", RunningDoc: "design"},
 			{Stage: "code", RunningDoc: "code"},
 			{Stage: "design", RunningDoc: "design"},
 			{Stage: "code", RunningDoc: "code"},
 		},
 	}
-	allowed := make(map[rune]struct{}, len(smokeGlyphs)+1)
+	allowed := make(map[rune]struct{}, len(dash.SmokeGlyphs)+1)
 	allowed[' '] = struct{}{}
-	for _, g := range smokeGlyphs {
+	for _, g := range dash.SmokeGlyphs {
 		allowed[g] = struct{}{}
 	}
 	// Iterate seeds so we explore the RNG; any seed that produces a
 	// non-palette rune fails the test.
 	for seed := int64(1); seed <= 8; seed++ {
 		r := rand.New(rand.NewSource(seed))
-		lines := buildFactoryArt(state, artWidth, r)
+		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 		for _, ru := range lines[0] {
 			if _, ok := allowed[ru]; !ok {
 				t.Fatalf("seed %d: smoke line contains non-palette rune %q in %q", seed, ru, lines[0])
@@ -1547,11 +1548,11 @@ func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 // dashboard rows below carry the parked stage. Mirrors the text-side
 // "[code running]" marker that motivates this rail.
 func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
-	state := factoryState{ActiveStages: []activeStation{
+	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
 		{Stage: "design", RunningDoc: "code"},
 	}}
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	rail := lines[1]
 	if !strings.Contains(rail, "[⚙]") {
 		t.Fatalf("expected running-doc glyph '[⚙]' on parked-design station, got rail:\n%q", rail)
@@ -1567,12 +1568,12 @@ func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
 // non-smoking; under liveness-as-smoke the rule is "smoke iff session,"
 // so a session against a pushed run reads as work, not as shipped.
 func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
-	state := factoryState{ActiveStages: []activeStation{
+	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
 		{Stage: "awaiting merge", RunningDoc: "code"},
 	}}
 	// Glyph swap is deterministic.
 	r := rand.New(rand.NewSource(1))
-	lines := buildFactoryArt(state, artWidth, r)
+	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	rail := lines[1]
 	if !strings.Contains(rail, "[⚙]") {
 		t.Fatalf("expected running-doc glyph '[⚙]' on awaiting-merge station, got rail:\n%q", rail)
@@ -1586,7 +1587,7 @@ func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
 	smokedAt := int64(-1)
 	for seed := int64(1); seed <= 16; seed++ {
 		r := rand.New(rand.NewSource(seed))
-		ls := buildFactoryArt(state, artWidth, r)
+		ls := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 		if strings.TrimSpace(ls[0]) != "" {
 			smokedAt = seed
 			break
@@ -1598,9 +1599,9 @@ func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
 }
 
 // TestDashOpenSessionSwapsArtGlyph: end-to-end check that an open
-// session on a different doc threads through factoryStateFromRows and
+// session on a different doc threads through dash.FactoryStateFromRows and
 // lands a running-doc glyph in the dash's rail. Pins the wiring
-// classify → dashRow.runningDoc → factoryState → buildRail.
+// classify → dashRow.runningDoc → dash.FactoryState → buildRail.
 func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
