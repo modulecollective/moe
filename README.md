@@ -93,15 +93,17 @@ loose ideas without starting a run.
   concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
   fragments into a single `--append-system-prompt`. Every agent
   mistake becomes a fragment edit; the next invocation picks it up.
-- **Per-run sandbox clones.** Code work runs inside a copy-on-write
-  clone of the target repo at `.moe/clones/<project>/<run>/` (APFS
-  `clonefile(2)` on macOS, recursive copy elsewhere). Two runs on the
-  same project never touch each other's index, refs, or objects.
+- **Per-run sandbox worktrees.** Code work runs inside a private `git
+  worktree` of the target repo at `.moe/clones/<project>/<run>/`,
+  linked off the canonical submodule and pre-positioned on a
+  `moe/<run-id>` branch. Two runs on the same project get two
+  independent working trees and indexes; only the per-run branch is
+  shared with the canonical submodule's ref DB.
 - **Tool scoping via Claude Code.** Non-code documents get `Read`,
   `Grep`, `WebSearch`, and a scoped `Edit` — the worst a bad turn
   does is write a bad paragraph. The `code` document gets the
   dangerous permissions (`Edit`, `Write`, `Bash`), confined to its
-  sandbox clone. Enforcement is `--allowedTools`, not a custom
+  sandbox worktree. Enforcement is `--allowedTools`, not a custom
   sandbox.
 - **Backend is Claude Code headless.** `claude -p` as a subprocess —
   real CLI, real OAuth, one human driver. Scheduled or unattended

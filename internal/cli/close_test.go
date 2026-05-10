@@ -40,14 +40,10 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// sandbox.Remove just os.RemoveAll()s two paths — we fake a sandbox
-	// with plain dirs so the test doesn't need a live submodule.
+	// sandbox.Remove tears down the run's worktree directory; we fake
+	// it with a plain dir so the test doesn't need a live submodule.
 	sandboxPath := sandbox.Path(root, "tele", "abandon-me")
-	gitDirPath := filepath.Join(root, ".moe", "clones", "tele", ".git-modules", "abandon-me")
 	if err := os.MkdirAll(sandboxPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(gitDirPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,9 +58,6 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 
 	if _, err := os.Stat(sandboxPath); !os.IsNotExist(err) {
 		t.Fatalf("expected sandbox gone, stat err=%v", err)
-	}
-	if _, err := os.Stat(gitDirPath); !os.IsNotExist(err) {
-		t.Fatalf("expected sandbox gitdir gone, stat err=%v", err)
 	}
 
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "abandon-me", "run.json"))
@@ -408,11 +401,7 @@ func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	sandboxPath := sandbox.Path(root, "tele", "abandon-quick")
-	gitDirPath := filepath.Join(root, ".moe", "clones", "tele", ".git-modules", "abandon-quick")
 	if err := os.MkdirAll(sandboxPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(gitDirPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,9 +416,6 @@ func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
 
 	if _, err := os.Stat(sandboxPath); !os.IsNotExist(err) {
 		t.Fatalf("expected sandbox gone, stat err=%v", err)
-	}
-	if _, err := os.Stat(gitDirPath); !os.IsNotExist(err) {
-		t.Fatalf("expected sandbox gitdir gone, stat err=%v", err)
 	}
 
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "abandon-quick", "run.json"))

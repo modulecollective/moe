@@ -1,7 +1,7 @@
 // Package workspace owns named per-project workspaces — reusable
-// clones of a project's submodule that successive runs check their
-// branch out into. Unlike per-run sandboxes (internal/sandbox), a
-// named workspace persists across runs so working-tree state (build
+// working trees of a project's submodule that successive runs check
+// their branch out into. Unlike per-run sandboxes (internal/sandbox),
+// a named workspace persists across runs so working-tree state (build
 // cache, node_modules, a running dev server) survives the branch
 // switch.
 //
@@ -9,9 +9,9 @@
 //
 //   - Lazily created on first use, by either `moe sdlc new
 //     --workspace <name>` or `moe sdlc shell <project> --workspace
-//     <name>`. The clone reuses sandbox.EnsureAt's mechanic — APFS
-//     clonefile on macOS, recursive copy elsewhere, with the same
-//     gitfile + core.worktree fixup for submodules.
+//     <name>`. The working tree reuses sandbox.EnsureAt — a `git
+//     worktree` linked off the canonical submodule, with the auto-init
+//     pre-flight for fresh checkouts.
 //   - Claimed by the run that's currently using it. The claim file
 //     (claim.json inside the workspace dir) names the holding run;
 //     a second run that names the same workspace while it's claimed
@@ -51,15 +51,6 @@ var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // The path is returned whether or not it currently exists.
 func Path(root, projectID, name string) string {
 	return filepath.Join(root, ".moe", "named", projectID, name)
-}
-
-// gitDirPath returns the sibling gitdir for a named workspace, mirroring
-// the .moe/clones/<project>/.git-modules/<run>/ shape sandbox uses.
-// Submodules with a gitfile-style .git pointer need a private gitdir
-// that lives outside the working tree; keeping ours alongside the
-// workspace dir keeps cleanup symmetric with sandbox.
-func gitDirPath(root, projectID, name string) string {
-	return filepath.Join(root, ".moe", "named", projectID, ".git-modules", name)
 }
 
 // claimPath is where a workspace's current owner is recorded. The file
@@ -199,16 +190,15 @@ func Release(root, projectID, name string) error {
 }
 
 // Ensure makes sure the workspace directory exists and returns its
-// absolute path. First call clones the project's submodule via
-// sandbox.EnsureAt; subsequent calls are a stat. Used by Acquire and
-// directly by the standalone `sdlc shell --workspace` path.
+// absolute path. First call registers the project's submodule as a
+// worktree via sandbox.EnsureAt; subsequent calls are a no-op. Used by
+// Acquire and directly by the standalone `sdlc shell --workspace` path.
 func Ensure(root, projectID, name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
 	wp := Path(root, projectID, name)
-	gd := gitDirPath(root, projectID, name)
-	return sandbox.EnsureAt(root, projectID, wp, gd)
+	return sandbox.EnsureAt(root, projectID, wp)
 }
 
 // Attach prepares the workspace for branch:
@@ -219,10 +209,12 @@ func Ensure(root, projectID, name string) (string, error) {
 //     keeps a stray edit from being silently lost on the upcoming
 //     branch switch.
 //   - If branch already exists, checks it out (no-op if already on it).
-//   - If branch doesn't exist and baseBranch is non-empty, checks
-//     out baseBranch first so the new branch is anchored to a known
-//     starting point instead of the previously-checked-out branch's
-//     tip. Then creates branch off HEAD.
+//   - If branch doesn't exist and baseBranch is non-empty, creates
+//     branch off baseBranch's tip in one step. We don't check out
+//     baseBranch first because the workspace is a `git worktree` of
+//     the canonical submodule, which already has baseBranch checked
+//     out — and a branch can only be checked out in one worktree at
+//     a time.
 //   - If branch doesn't exist and baseBranch is empty, creates branch
 //     off whatever HEAD currently is. Useful for callers that have
 //     already positioned the workspace.
@@ -236,9 +228,7 @@ func Attach(workspacePath, branch, baseBranch string) error {
 		return checkout(workspacePath, branch)
 	}
 	if baseBranch != "" {
-		if err := checkout(workspacePath, baseBranch); err != nil {
-			return err
-		}
+		return checkoutNewFrom(workspacePath, branch, baseBranch)
 	}
 	return checkoutNew(workspacePath, branch)
 }
@@ -277,6 +267,13 @@ func checkout(workspacePath, branch string) error {
 func checkoutNew(workspacePath, branch string) error {
 	if err := git.Run(workspacePath, "checkout", "-b", branch); err != nil {
 		return fmt.Errorf("workspace: checkout -b %s: %w", branch, err)
+	}
+	return nil
+}
+
+func checkoutNewFrom(workspacePath, branch, base string) error {
+	if err := git.Run(workspacePath, "checkout", "-b", branch, base); err != nil {
+		return fmt.Errorf("workspace: checkout -b %s %s: %w", branch, base, err)
 	}
 	return nil
 }

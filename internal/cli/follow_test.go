@@ -92,29 +92,48 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 }
 
 // TestPickFollowTargetLiveCodeSession: a run with an open code session
-// resolves to (sandbox dir, project default branch). Code sessions
-// edit files inside the sandbox clone, not the bureaucracy worktree —
-// the bureaucracy worktree's only artifact during code is the canvas
-// summary written near the end, which the merge-decision prompt
-// surfaces separately.
+// resolves to (sandbox dir, merge-base(HEAD, default-branch)). Code
+// sessions edit files inside the sandbox worktree, not the
+// bureaucracy worktree — the bureaucracy worktree's only artifact
+// during code is the canvas summary written near the end, which the
+// merge-decision prompt surfaces separately. The merge-base anchors
+// the diff at the session-open commit so a moving default branch
+// (under the worktree primitive the sandbox shares the canonical's
+// ref DB) doesn't drag unrelated commits into the diff.
 func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeProjectJSONWithDefaults(t, root, "tele", "develop")
-	// session.Open opens a code session worktree under bureaucracy;
-	// the sandbox clone itself is created by attachRunWorkspace at
-	// stage time, but pickFollowTarget only stat's the dir, so
-	// faking the dir here is enough.
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
+	// Fake a real git repo at the sandbox path so merge-base resolves
+	// — production attaches a worktree here, but the follow path only
+	// runs git ops, not sandbox ops.
 	sandboxDir := sandbox.Path(root, "tele", "fix-it")
 	if err := os.MkdirAll(sandboxDir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-b", "develop"},
+		{"commit", "--allow-empty", "-m", "seed"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", sandboxDir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	wantBase, err := git.RevParse(sandboxDir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse sandbox HEAD: %v", err)
 	}
 
 	target, _, err := pickFollowTarget(root, "", "")
@@ -124,11 +143,9 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	if target.Dir != sandboxDir {
 		t.Fatalf("dir = %q, want sandbox %q", target.Dir, sandboxDir)
 	}
-	if target.Base != "develop" {
-		t.Fatalf("base = %q, want project default branch %q", target.Base, "develop")
+	if target.Base != wantBase {
+		t.Fatalf("base = %q, want merge-base %q", target.Base, wantBase)
 	}
-	// Canvas points at the bureaucracy worktree where the canvas
-	// summary is edited, not the sandbox where source-code edits land.
 	wantCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "code"))
 	if target.Canvas != wantCanvas {
 		t.Fatalf("canvas = %q, want %q", target.Canvas, wantCanvas)

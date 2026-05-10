@@ -285,18 +285,18 @@ func stageRank(doc string) int {
 }
 
 // resolveFollowTarget routes a session to the workspace tuple hunk
-// runs in. Code sessions diff the run's sandbox clone against the
-// project's recorded default branch; every other stage diffs the
-// session's bureaucracy worktree against `merge-base(HEAD, main)` —
-// the commit at which the session branch diverged from main. That
-// anchor moves with the session: on a fresh first turn it sits on
-// the open commit (so the diff shows the session-start commit plus
-// the agent's edits); on a resumed turn it sits on whatever main's
-// HEAD was when the worktree was re-created (so unrelated runs that
-// landed on main between turns are excluded — they're below the
-// merge base). The dir is stat'd as defense-in-depth so an orphaned
-// session record (worktree dir gone, or sandbox not yet cloned)
-// idles instead of resolving to a non-existent cwd.
+// runs in. Both code sessions (sandbox worktree) and document
+// sessions (bureaucracy worktree) diff against
+// `merge-base(HEAD, <default-branch>)` — the commit at which the
+// session branch diverged from the default branch. That anchor moves
+// with the session: on a fresh first turn it sits on the open commit
+// (so the diff shows the session-start commit plus the agent's
+// edits); on a resumed turn it sits on whatever the default-branch's
+// HEAD was when the session opened (so unrelated commits that landed
+// after open are excluded — they're below the merge base). The dir
+// is stat'd as defense-in-depth so an orphaned session record
+// (worktree dir gone, or sandbox not yet attached) idles instead of
+// resolving to a non-existent cwd.
 func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (followTarget, error) {
 	if sess.Doc == "code" {
 		dir := sandbox.Path(root, md.Project, md.ID)
@@ -307,10 +307,20 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		if err != nil {
 			return followTarget{}, err
 		}
+		// merge-base, not the default branch directly: under the
+		// worktree primitive the sandbox shares the canonical's ref
+		// DB, so a moving default-branch tip would otherwise drag
+		// unrelated commits into the diff. The merge base is fixed at
+		// session-open and stable across turns.
+		out, err := git.Output(dir, "merge-base", "HEAD", proj.DefaultBranch)
+		if err != nil {
+			return followTarget{}, fmt.Errorf("follow: merge-base: %w", err)
+		}
+		base := strings.TrimSpace(out)
 		return followTarget{
 			Dir:      dir,
 			Canvas:   filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, sess.Doc)),
-			Base:     proj.DefaultBranch,
+			Base:     base,
 			Workflow: md.Workflow,
 			Stage:    sess.Doc,
 			Project:  md.Project,

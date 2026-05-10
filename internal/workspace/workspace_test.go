@@ -313,8 +313,10 @@ func TestAttachReusesExistingBranch(t *testing.T) {
 	runGit(t, wp, "add", "x")
 	runGit(t, wp, "commit", "-m", "a")
 	want := runGitOut(t, wp, "rev-parse", "HEAD")
-	// Switch off, then re-attach on turn 2.
-	runGit(t, wp, "checkout", "main")
+	// Switch off the run-a branch, then re-attach on turn 2. We
+	// detach rather than `checkout main` because main is checked out
+	// in the canonical submodule and worktrees can't share a branch.
+	runGit(t, wp, "checkout", "--detach", "main")
 	if err := Attach(wp, "moe/run-a", "main"); err != nil {
 		t.Fatalf("Attach run-a (turn 2): %v", err)
 	}

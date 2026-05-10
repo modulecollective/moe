@@ -24,7 +24,7 @@ import (
 //
 //   - moe sdlc shell <project> --workspace <name>
 //     A named workspace directly, no run involved. Lazily creates the
-//     workspace on first use (same clonefile mechanic as `moe sdlc
+//     workspace on first use (same git-worktree mechanic as `moe sdlc
 //     code`'s first attach), then drops into the shell without
 //     touching branches or claims. Whatever's currently checked out
 //     is what the operator sees — exactly the warm-state property the
