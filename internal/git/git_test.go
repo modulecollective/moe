@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,16 +152,255 @@ func TestRun_IndexLockExhaustsCap(t *testing.T) {
 	}
 }
 
+// TestOutput_RetriesIndexLock proves read-side primitives also retry
+// when the index lock is contended — the split-cap design lives or
+// dies on this. Output uses the shorter read cap; we shrink both to
+// keep the test fast.
+func TestOutput_RetriesIndexLock(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	withIndexLockTiming(t, 500*time.Millisecond, 10*time.Millisecond)
+
+	lock := filepath.Join(dir, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		_ = os.Remove(lock)
+	}()
+
+	// `status` reaches for the index, so it races the lock just like a
+	// write would. Output is the primitive Status uses internally.
+	if _, err := Output(dir, "status", "--porcelain"); err != nil {
+		t.Fatalf("Output after lock cleared: %v", err)
+	}
+}
+
+// TestProbe_ExitCodeAnswer covers Probe's contract: exit 0 → true,
+// non-zero → false, output suppressed regardless.
+func TestProbe_ExitCodeAnswer(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	// HEAD exists → rev-parse --verify --quiet succeeds.
+	if !Probe(dir, "rev-parse", "--verify", "--quiet", "HEAD") {
+		t.Fatalf("Probe HEAD should be true")
+	}
+	// A bogus ref does not.
+	if Probe(dir, "rev-parse", "--verify", "--quiet", "refs/heads/does-not-exist") {
+		t.Fatalf("Probe missing ref should be false")
+	}
+}
+
+// TestHasRef wraps the same shape as TestProbe_ExitCodeAnswer but at
+// the typed-wrapper layer — pins the convenience surface callers will
+// actually use.
+func TestHasRef(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	if !HasRef(dir, "HEAD") {
+		t.Fatalf("HasRef HEAD should be true after init commit")
+	}
+	if HasRef(dir, "refs/heads/missing") {
+		t.Fatalf("HasRef missing branch should be false")
+	}
+}
+
+// TestUpstream_NoUpstreamReturnsEmpty confirms a fresh branch with no
+// @{u} returns "" rather than an error — the contract sync.HasUpstream
+// callers depend on.
+func TestUpstream_NoUpstreamReturnsEmpty(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	got, err := Upstream(dir)
+	if err != nil {
+		t.Fatalf("Upstream on fresh branch: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("Upstream = %q, want \"\"", got)
+	}
+}
+
+// TestUpstream_ReturnsConfiguredRef confirms a configured upstream
+// round-trips. We point at the same repo via a bare clone so the test
+// doesn't depend on the network.
+func TestUpstream_ReturnsConfiguredRef(t *testing.T) {
+	bare := t.TempDir()
+	gitMust(t, bare, "init", "--bare", "-q")
+
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	gitMust(t, dir, "remote", "add", "origin", bare)
+	gitMust(t, dir, "push", "-u", "origin", "HEAD")
+
+	got, err := Upstream(dir)
+	if err != nil {
+		t.Fatalf("Upstream: %v", err)
+	}
+	if !strings.HasPrefix(got, "origin/") {
+		t.Fatalf("Upstream = %q, want something under origin/", got)
+	}
+}
+
+// TestAheadOf_Counts confirms AheadOf returns the rev-list count when
+// base and head both exist.
+func TestAheadOf_Counts(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "base")
+	gitMust(t, dir, "checkout", "-b", "feat")
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "a")
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "b")
+
+	n, err := AheadOf(dir, "master", "feat")
+	if err != nil {
+		// Some git versions default to `main`; try that.
+		n, err = AheadOf(dir, "main", "feat")
+	}
+	if err != nil {
+		t.Fatalf("AheadOf: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("AheadOf = %d, want 2", n)
+	}
+}
+
+// TestAheadOf_UnknownBase confirms AheadOf swallows rev-list failures
+// and returns (0, nil) — the contract CheckBranchHasCommits depends on.
+func TestAheadOf_UnknownBase(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	n, err := AheadOf(dir, "refs/heads/does-not-exist", "HEAD")
+	if err != nil {
+		t.Fatalf("AheadOf with unknown base: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("AheadOf with unknown base = %d, want 0", n)
+	}
+}
+
+// TestLsRemoteDefault_BareRepo confirms LsRemoteDefault parses the
+// symbolic HEAD out of `ls-remote --symref`, using a bare local repo
+// as the URL so the test runs offline.
+func TestLsRemoteDefault_BareRepo(t *testing.T) {
+	src := newTempRepo(t)
+	gitMust(t, src, "commit", "--allow-empty", "-m", "init")
+
+	// Determine src's default branch (could be `main` or `master`
+	// depending on git defaults) and use it as the assertion target.
+	out, err := Output(src, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	want := strings.TrimSpace(out)
+
+	bare := t.TempDir()
+	gitMust(t, bare, "clone", "--bare", "-q", src, ".")
+
+	got, err := LsRemoteDefault(bare)
+	if err != nil {
+		t.Fatalf("LsRemoteDefault: %v", err)
+	}
+	if got != want {
+		t.Fatalf("LsRemoteDefault = %q, want %q", got, want)
+	}
+}
+
+// TestHEAD_Sugar confirms HEAD returns the same SHA as RevParse("HEAD").
+func TestHEAD_Sugar(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	want, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse HEAD: %v", err)
+	}
+	got, err := HEAD(dir)
+	if err != nil {
+		t.Fatalf("HEAD: %v", err)
+	}
+	if got != want {
+		t.Fatalf("HEAD = %q, RevParse = %q", got, want)
+	}
+}
+
+// TestStream_PassesThroughWriters confirms Stream's stdio reaches the
+// writers we hand it (the property the interactive push/pull callers
+// rely on).
+func TestStream_PassesThroughWriters(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	var stdout, stderr bytes.Buffer
+	if err := Stream(dir, &stdout, &stderr, "log", "-1", "--format=%s"); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "init") {
+		t.Fatalf("stdout = %q, want 'init' subject line", stdout.String())
+	}
+}
+
+// TestHook_FiresOnRunAndStream confirms Hook is invoked once per
+// underlying `exec.Command` attempt for both Run (capture path) and
+// Stream (passthrough path) — the test seam value the design bundles
+// in.
+func TestHook_FiresOnRunAndStream(t *testing.T) {
+	dir := newTempRepo(t)
+	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	type call struct {
+		args []string
+		err  error
+	}
+	var calls []call
+	prev := Hook
+	Hook = func(_ string, args []string, _ time.Duration, err error) {
+		calls = append(calls, call{args: append([]string(nil), args...), err: err})
+	}
+	t.Cleanup(func() { Hook = prev })
+
+	if err := Run(dir, "commit", "--allow-empty", "-m", "after"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := Stream(dir, &buf, &buf, "log", "-1", "--format=%H"); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("Hook fired %d times, want 2: %#v", len(calls), calls)
+	}
+	if calls[0].args[0] != "commit" {
+		t.Fatalf("Hook[0] args[0] = %q, want commit", calls[0].args[0])
+	}
+	if calls[1].args[0] != "log" {
+		t.Fatalf("Hook[1] args[0] = %q, want log", calls[1].args[0])
+	}
+	for i, c := range calls {
+		if c.err != nil {
+			t.Fatalf("Hook[%d] err = %v, want nil", i, c.err)
+		}
+	}
+}
+
 // withIndexLockTiming swaps in test-friendly retry bounds and restores
-// the production values when the test ends.
+// the production values when the test ends. Both write and read caps
+// move together: tests that exercise the retry loop care about the
+// budget regardless of which primitive they call.
 func withIndexLockTiming(t *testing.T, cap, step time.Duration) {
 	t.Helper()
-	prevCap, prevStep := indexLockRetryCap, indexLockRetryStep
-	indexLockRetryCap = cap
+	pw, pr, ps := writeRetryCap, readRetryCap, indexLockRetryStep
+	writeRetryCap = cap
+	readRetryCap = cap
 	indexLockRetryStep = step
 	t.Cleanup(func() {
-		indexLockRetryCap = prevCap
-		indexLockRetryStep = prevStep
+		writeRetryCap = pw
+		readRetryCap = pr
+		indexLockRetryStep = ps
 	})
 }
 

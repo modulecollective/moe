@@ -1,27 +1,67 @@
 // Package git wraps the small set of `git` shell-outs the bureaucracy
-// CLI does at runtime. Three execution helpers cover the real shapes:
-// Run discards output on success and folds it into the error on
-// failure; Output captures stdout for programmatic use; Combined
-// captures stdout+stderr together for forwarding git's own error prose.
+// CLI does at runtime. Three execution primitives cover the
+// fire-and-check / capture / interleave shapes — Run discards output
+// on success and folds it into the error on failure, Output captures
+// stdout for programmatic use, Combined returns stdout+stderr together
+// for diagnostics — and two more cover shapes the rest of the codebase
+// kept reaching past internal/git to get: Probe for silent exit-code
+// answers and Stream for live stdio passthrough on interactive ops
+// (push, pull) where progress and credential prompts need to reach the
+// operator.
+//
+// Every primitive except Stream funnels through one private execGit,
+// so the worktree-shared index.lock retry, the error shape, and the
+// tracing hook all live in exactly one place. Stream sits outside the
+// retry loop on purpose: an interactive run has already written prompts
+// and progress to the terminal by the time it fails, and a retry would
+// replay them.
+//
+// Convention: dir == "" leaves cmd.Dir unset, so the command runs in
+// the caller's cwd. That covers the one operation we do outside any
+// repo (LsRemoteDefault against a URL) without a separate signature.
+//
+// Probe returns bool — no error. A missing git binary or a corrupt
+// repo will surface at the next Run/Output call (which folds stderr
+// into a clear error). Current callers all run after a real-repo
+// invariant has been established, so the conflation doesn't bite.
+//
+// Anything in the rest of the codebase that shells out to `git`
+// directly is a bug — bypassing this package skips the index-lock
+// retry, drops out of the tracing hook, and reinvents the error shape.
+// A forbid lint enforces that; see `make check-git-boundary`.
 package git
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// indexLockRetryCap and indexLockRetryStep bound the retry loop in Run
-// when git fails with the worktree-shared `index.lock: File exists`
-// race. Vars rather than consts so tests can shrink them; production
-// values are 2s wall-time, 50ms increments. The cap exists so a real
-// stuck lock (crashed git from a prior run) still surfaces a clear
-// terminal error rather than spinning forever.
+// writeRetryCap, readRetryCap, and indexLockRetryStep bound the retry
+// loop on the worktree-shared `index.lock: File exists` race. Vars
+// rather than consts so tests can shrink them; production values are
+// 2s/500ms wall-time with 50ms steps. The split caps balance two
+// asymmetric needs:
+//
+//   - Run (writes) gets the longer cap because a stuck write lock from
+//     a crashed prior git invocation needs to eventually surface as a
+//     hard fail — a too-short cap would mask the real problem.
+//   - Output/Combined/Probe/typed wrappers (reads) get the shorter cap
+//     because they sit on hot polling paths (`hunk diff --watch`) where
+//     a UI stall longer than ~500ms is what the user notices. 10 ticks
+//     at 50ms catches the typical 50-200ms race comfortably.
+//
+// Stream has no retry at all — interactive ops have already painted
+// progress and prompts to the terminal by the time they fail.
 var (
-	indexLockRetryCap  = 2 * time.Second
+	writeRetryCap      = 2 * time.Second
+	readRetryCap       = 500 * time.Millisecond
 	indexLockRetryStep = 50 * time.Millisecond
 )
 
@@ -32,60 +72,131 @@ var (
 // portion.
 const indexLockSubstr = "index.lock': File exists"
 
-// Run invokes git in dir. Stdout and stderr are captured together; on
-// success they are discarded, on failure they are folded into the
-// returned error — same shape as Output. No caller today needs
-// terminal passthrough; the interactive `git push` path in cli/push.go
-// shells out directly with its own writers.
+// Hook, if set, is called after every git invocation that went through
+// this package — including each retry attempt and the final Stream
+// call. dir is the cmd.Dir we used (empty when we left it unset); args
+// is git's argv (sans the leading "git"); dur is wall-time for that
+// single attempt; err is the cmd.Run error (nil on success).
 //
-// Worktree-shared `index.lock` contention (another moe process or a
-// `hunk diff --watch` poll racing this one) is retried inside the
-// indexLockRetryCap budget. Any other error is returned on the first
-// attempt — the retry only fires when stderr contains the lock-file
-// substring git itself prints, so unrelated failures pass through
-// untouched.
+// Used as a test seam (intercept calls without subprocess mocking) and
+// as the entry point for MOE_GIT_TRACE=1 once that wiring lands.
+// Setting Hook from multiple goroutines without external coordination
+// is the caller's problem — production callers set it once at startup.
+var Hook func(dir string, args []string, dur time.Duration, err error)
+
+// Run invokes git in dir. Stdout and stderr are captured together; on
+// success they're discarded, on failure they're folded into the
+// returned error. For write operations (commit, add, fetch, push when
+// non-interactive); use Stream when stdio needs to reach the terminal.
+//
+// Worktree-shared `index.lock` contention is retried inside
+// writeRetryCap. Any other error is returned on the first attempt —
+// the retry only fires when stderr contains the lock-file substring
+// git itself prints, so unrelated failures pass through untouched.
 func Run(dir string, args ...string) error {
-	deadline := time.Now().Add(indexLockRetryCap)
-	for {
-		cmd := exec.Command("git", args...)
+	combined, _, err := execGit(dir, args, true, writeRetryCap)
+	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(combined)))
+	}
+	return nil
+}
+
+// Output runs git in dir capturing stdout. On failure, stderr is
+// folded into the returned error message. Index-lock retry uses the
+// shorter read cap.
+func Output(dir string, args ...string) (string, error) {
+	stdout, stderr, err := execGit(dir, args, false, readRetryCap)
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
+	}
+	return string(stdout), nil
+}
+
+// Combined runs git in dir capturing stdout+stderr in git's own write
+// order, trimmed, and returns the captured output even on error so
+// callers can include it verbatim in diagnostics. Index-lock retry
+// uses the shorter read cap.
+func Combined(dir string, args ...string) (string, error) {
+	out, _, err := execGit(dir, args, true, readRetryCap)
+	return strings.TrimSpace(string(out)), err
+}
+
+// Probe runs git in dir and reports whether it exited 0. All output is
+// suppressed — Probe is for the shape where exit code IS the answer
+// (`diff --quiet`, `rev-parse --verify --quiet`, `remote get-url`).
+// Index-lock retry uses the shorter read cap; the typed wrapper HasRef
+// is the most-common shape.
+func Probe(dir string, args ...string) bool {
+	_, _, err := execGit(dir, args, true, readRetryCap)
+	return err == nil
+}
+
+// Stream runs git in dir with stdin wired to os.Stdin and
+// stdout/stderr piped to the supplied writers. For interactive runs
+// (push, pull, anything that may prompt for credentials or paint
+// progress). No retry — interactive callers see errors directly and a
+// retry would replay prompts.
+func Stream(dir string, stdout, stderr io.Writer, args ...string) error {
+	start := time.Now()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
 		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			return nil
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	if Hook != nil {
+		Hook(dir, args, time.Since(start), err)
+	}
+	if err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// execGit is the one place git actually runs. combined==true shares
+// one buffer between stdout and stderr (preserving git's interleave
+// order, used by Run/Combined/Probe); combined==false captures them
+// separately (used by Output and typed wrappers that parse stdout).
+// retryCap bounds the index-lock retry loop; 0 disables retry.
+//
+// Hook (if set) fires once per attempt — retries are visible to a
+// tracer, not hidden inside this loop.
+func execGit(dir string, args []string, combined bool, retryCap time.Duration) (stdoutBuf, stderrBuf []byte, err error) {
+	deadline := time.Now().Add(retryCap)
+	for {
+		start := time.Now()
+		cmd := exec.Command("git", args...)
+		if dir != "" {
+			cmd.Dir = dir
 		}
-		stderr := strings.TrimSpace(string(out))
-		if strings.Contains(stderr, indexLockSubstr) && time.Now().Before(deadline) {
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		if combined {
+			cmd.Stderr = &outBuf
+		} else {
+			cmd.Stderr = &errBuf
+		}
+		err = cmd.Run()
+		if Hook != nil {
+			Hook(dir, args, time.Since(start), err)
+		}
+		if err == nil {
+			return outBuf.Bytes(), errBuf.Bytes(), nil
+		}
+		// Pick the buffer that actually carries git's stderr — when
+		// combined, it's the shared outBuf; otherwise errBuf.
+		check := errBuf.Bytes()
+		if combined {
+			check = outBuf.Bytes()
+		}
+		if retryCap > 0 && bytes.Contains(check, []byte(indexLockSubstr)) && time.Now().Before(deadline) {
 			time.Sleep(indexLockRetryStep)
 			continue
 		}
-		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, stderr)
+		return outBuf.Bytes(), errBuf.Bytes(), err
 	}
-}
-
-// Output runs git in dir capturing stdout. On failure, stderr is folded
-// into the returned error message.
-func Output(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return string(out), nil
-}
-
-// Combined runs git in dir capturing stdout+stderr together, trimmed,
-// and returns the captured output even on error so callers can include
-// it verbatim in diagnostics.
-func Combined(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
 }
 
 // RevParse returns the resolved SHA for ref in dir.
@@ -95,6 +206,83 @@ func RevParse(dir, ref string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// HEAD returns the SHA of dir's HEAD. Sugar over RevParse(dir, "HEAD").
+func HEAD(dir string) (string, error) {
+	return RevParse(dir, "HEAD")
+}
+
+// HasRef reports whether ref resolves in dir. Probe sugar for
+// `rev-parse --verify --quiet <ref>` — the most-common Probe shape and
+// worth naming so callers don't open-code the flags every time.
+func HasRef(dir, ref string) bool {
+	return Probe(dir, "rev-parse", "--verify", "--quiet", ref)
+}
+
+// Upstream returns the upstream ref name (e.g. "origin/main") for the
+// branch checked out in dir, or "" if no upstream is configured (or
+// HEAD is detached, or any other rev-parse @{u} failure). The "" case
+// is intentionally permissive: callers want a single check for "is
+// there an upstream to pull from / push to" and any failure here means
+// the answer is "no". A real repo problem (missing git, corrupt index)
+// will surface at the next Run/Output call.
+func Upstream(dir string) (string, error) {
+	stdout, _, err := execGit(dir,
+		[]string{"rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"},
+		false, readRetryCap)
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(string(stdout)), nil
+}
+
+// AheadOf returns the commit count of base..head — i.e. how many
+// commits head has that base doesn't. Returns (0, nil) on any rev-list
+// failure: the only current caller wants to skip the check when base
+// is an unknown ref, and the eventual push will surface a real error
+// itself. Wraps `rev-list --count <base>..<head>`.
+func AheadOf(dir, base, head string) (int, error) {
+	stdout, _, err := execGit(dir,
+		[]string{"rev-list", "--count", base + ".." + head},
+		false, readRetryCap)
+	if err != nil {
+		return 0, nil
+	}
+	n, parseErr := strconv.Atoi(strings.TrimSpace(string(stdout)))
+	if parseErr != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: parse %q: %w",
+			base, head, strings.TrimSpace(string(stdout)), parseErr)
+	}
+	return n, nil
+}
+
+// LsRemoteDefault returns the default-branch name advertised by url —
+// the "<branch>" of `ref: refs/heads/<branch>\tHEAD` in
+// `ls-remote --symref <url> HEAD` output. Pure URL operation: runs
+// outside any repo (dir == "").
+func LsRemoteDefault(url string) (string, error) {
+	stdout, stderr, err := execGit("",
+		[]string{"ls-remote", "--symref", url, "HEAD"},
+		false, readRetryCap)
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote --symref %s: %w (%s)",
+			url, err, strings.TrimSpace(string(stderr)))
+	}
+	for _, line := range strings.Split(string(stdout), "\n") {
+		if !strings.HasPrefix(line, "ref: ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		const prefix = "refs/heads/"
+		if strings.HasPrefix(fields[1], prefix) {
+			return strings.TrimPrefix(fields[1], prefix), nil
+		}
+	}
+	return "", fmt.Errorf("git ls-remote --symref %s: no symbolic HEAD in output", url)
 }
 
 // ShortSHA returns the 7-character short form of sha (git's default).
@@ -131,17 +319,15 @@ func Status(dir string, paths ...string) ([]StatusEntry, error) {
 		args = append(args, "--")
 		args = append(args, paths...)
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	stdout, stderr, err := execGit(dir, args, false, readRetryCap)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(exitErr.Stderr)))
+			return nil, fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
 		}
 		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return parseStatusZ(out)
+	return parseStatusZ(stdout)
 }
 
 func parseStatusZ(out []byte) ([]StatusEntry, error) {
