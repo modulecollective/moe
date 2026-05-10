@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/sync"
 )
 
 // syncFixture is a bureaucracy with one or more submodules mounted as
@@ -92,9 +93,9 @@ func (f *syncFixture) bureaucracyHead() string {
 
 func (f *syncFixture) gitlink(subPath string) string {
 	f.t.Helper()
-	sha, err := gitlinkSHA(f.root, subPath)
+	sha, err := sync.GitlinkSHA(f.root, subPath)
 	if err != nil {
-		f.t.Fatalf("gitlinkSHA: %v", err)
+		f.t.Fatalf("GitlinkSHA: %v", err)
 	}
 	return sha
 }
@@ -106,7 +107,7 @@ func (f *syncFixture) gitlink(subPath string) string {
 func (f *syncFixture) runBump() (string, string, error) {
 	f.t.Helper()
 	var stdout, stderr bytes.Buffer
-	err := bumpProjectPointers(f.root, &stdout, &stderr)
+	err := sync.BumpProjectPointers(f.root, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
 }
 
@@ -308,7 +309,7 @@ func TestBumpProjectPointersRecoversFromDetachedHead(t *testing.T) {
 	// this after a pull, and our algorithm needs to handle it rather
 	// than leaving a detached HEAD that git merge --ff-only refuses.
 	subAbs := filepath.Join(f.root, "projects/proj/src")
-	head, err := gitHeadSHA(subAbs)
+	head, err := sync.HeadSHA(subAbs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,48 +363,6 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("scratch.txt should still be staged, status=%v", entries)
-	}
-}
-
-func TestReadGitmoduleEntriesIncludesBranch(t *testing.T) {
-	dir := t.TempDir()
-	content := `[submodule "foo"]
-	path = projects/foo/src
-	url = https://example.com/foo.git
-	branch = trunk
-[submodule "bar"]
-	path = projects/bar/src
-	url = https://example.com/bar.git
-`
-	writeFile(t, filepath.Join(dir, ".gitmodules"), content)
-
-	got, err := readGitmoduleEntries(filepath.Join(dir, ".gitmodules"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 entries, got %d: %+v", len(got), got)
-	}
-	if got[0].branch != "trunk" {
-		t.Fatalf("foo branch: want trunk, got %q", got[0].branch)
-	}
-	if got[1].branch != "" {
-		t.Fatalf("bar branch: want empty (so resolver falls back to main), got %q", got[1].branch)
-	}
-}
-
-func TestProjectIDForSubmodulePath(t *testing.T) {
-	cases := map[string]string{
-		"projects/moe/src":     "moe",
-		"projects/foo-bar/src": "foo-bar",
-		"projects/moe":         "", // not the canonical shape
-		"vendor/thing":         "",
-		"":                     "",
-	}
-	for in, want := range cases {
-		if got := projectIDForSubmodulePath(in); got != want {
-			t.Errorf("projectIDForSubmodulePath(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
