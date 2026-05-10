@@ -354,7 +354,7 @@ func runQueueList(args []string, stdout, stderr io.Writer) int {
 // walker uses, so what list shows is what run will do.
 func queueItemPreview(root string, it queueItem) string {
 	md, err := run.Load(root, it.Project, it.Run)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, run.ErrRunNotFound) {
 		return "(will drop: run not found)"
 	}
 	if err != nil {
@@ -406,7 +406,7 @@ const (
 // classification but returns a typed verdict rather than a string.
 func classifyQueueItem(root string, it queueItem) (queueLiveness, string) {
 	md, err := run.Load(root, it.Project, it.Run)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, run.ErrRunNotFound) {
 		return queueLivenessDropMissing, "run not found"
 	}
 	if err != nil {

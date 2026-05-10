@@ -99,7 +99,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, run.ErrRunNotFound) {
 			moePrintf(stderr, "%s %s/%s does not exist\n", workflow, projectID, runID)
 			return 1
 		}

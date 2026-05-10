@@ -473,7 +473,7 @@ func scanOpenIdeas(root, projectID string) ([]ideaEntry, error) {
 func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, run.ErrRunNotFound) {
 			return nil, fmt.Errorf("idea %s/%s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
 		}
 		return nil, err

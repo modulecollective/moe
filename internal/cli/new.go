@@ -338,7 +338,7 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, erro
 func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, error) {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, run.ErrRunNotFound) {
 			return nil, "", fmt.Errorf("--from-idea: run %s/%s does not exist", projectID, slug)
 		}
 		return nil, "", fmt.Errorf("--from-idea: %w", err)
