@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -1152,7 +1153,7 @@ func TestDashQueuedRunGetsMarker(t *testing.T) {
 
 	seedRun(t, root, "tele", "queued-one", "sdlc", run.StatusInProgress)
 	seedRun(t, root, "tele", "loose-one", "sdlc", run.StatusInProgress)
-	if err := saveQueue(root, []queueItem{
+	if err := queue.Save(root, []queue.Item{
 		{Workflow: "sdlc", Project: "tele", Run: "queued-one"},
 	}); err != nil {
 		t.Fatal(err)
@@ -1215,7 +1216,7 @@ func TestDashCorruptQueueFileSilent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(queuePath(root), []byte("{not valid json"), 0o644); err != nil {
+	if err := os.WriteFile(queue.Path(root), []byte("{not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1308,7 +1309,7 @@ func TestDashOpenSessionAndQueuedStackInOrder(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	if err := saveQueue(root, []queueItem{
+	if err := queue.Save(root, []queue.Item{
 		{Workflow: "sdlc", Project: "tele", Run: "fix-it"},
 	}); err != nil {
 		t.Fatal(err)

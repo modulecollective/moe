@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -39,18 +36,6 @@ const queueCountdownSeconds = 3
 // takes it as a positional on add/remove so adding a second workflow later
 // (when one earns --one-shot) doesn't reshape the verb.
 const queueWorkflowSDLC = "sdlc"
-
-// queueItem is one entry in .moe/queue.json. workflow + project + run
-// is the identity used for duplicate refusal and identity-matched pop.
-type queueItem struct {
-	Workflow string `json:"workflow"`
-	Project  string `json:"project"`
-	Run      string `json:"run"`
-}
-
-func (q queueItem) String() string {
-	return fmt.Sprintf("%s %s/%s", q.Workflow, q.Project, q.Run)
-}
 
 func init() {
 	Register(&Command{
@@ -92,67 +77,6 @@ func printQueueUsage(w io.Writer) {
 	moePrintf(w, "  %-14s  %s\n", "remove", "remove a queued run by identity")
 	moePrintf(w, "  %-14s  %s\n", "list", "show the queue with each item's next stage (or drop reason)")
 	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue and exit when empty")
-}
-
-// queuePath is the on-disk JSON file. Lives under .moe/ alongside
-// clones/ and worktrees/ — operator-local, never committed.
-func queuePath(root string) string {
-	return filepath.Join(root, ".moe", "queue.json")
-}
-
-// loadQueue reads .moe/queue.json. A missing or empty file is a normal
-// state (no runs queued yet) and returns (nil, nil).
-func loadQueue(root string) ([]queueItem, error) {
-	p := queuePath(root)
-	b, err := os.ReadFile(p)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("queue: read %s: %w", p, err)
-	}
-	if len(b) == 0 {
-		return nil, nil
-	}
-	var items []queueItem
-	if err := json.Unmarshal(b, &items); err != nil {
-		return nil, fmt.Errorf("queue: parse %s: %w", p, err)
-	}
-	return items, nil
-}
-
-// saveQueue writes items to .moe/queue.json with a deterministic
-// indent. Always writes a JSON array — empty queue persists as `[]`
-// rather than a missing file so the caller can tell "explicitly empty"
-// from "never used."
-func saveQueue(root string, items []queueItem) error {
-	p := queuePath(root)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return fmt.Errorf("queue: mkdir %s: %w", filepath.Dir(p), err)
-	}
-	if items == nil {
-		items = []queueItem{}
-	}
-	b, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		return fmt.Errorf("queue: marshal: %w", err)
-	}
-	b = append(b, '\n')
-	if err := os.WriteFile(p, b, 0o644); err != nil {
-		return fmt.Errorf("queue: write %s: %w", p, err)
-	}
-	return nil
-}
-
-// queueIndexOf returns the 1-based position of an identity-matching
-// item, or 0 if not present.
-func queueIndexOf(items []queueItem, target queueItem) int {
-	for i, it := range items {
-		if it == target {
-			return i + 1
-		}
-	}
-	return 0
 }
 
 func runQueueAdd(args []string, stdout, stderr io.Writer) int {
@@ -229,24 +153,20 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	item := queueItem{Workflow: workflow, Project: projectID, Run: runID}
+	item := queue.Item{Workflow: workflow, Project: projectID, Run: runID}
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "queue-add",
 		Run:     projectID + "/" + runID,
 	}, func() error {
-		items, err := loadQueue(root)
+		items, err := queue.Load(root)
 		if err != nil {
 			return err
 		}
-		if pos := queueIndexOf(items, item); pos > 0 {
+		if pos := queue.IndexOf(items, item); pos > 0 {
 			return fmt.Errorf("already queued at position %d", pos)
 		}
-		if *front {
-			items = append([]queueItem{item}, items...)
-		} else {
-			items = append(items, item)
-		}
-		return saveQueue(root, items)
+		items = queue.AddItem(items, item, *front)
+		return queue.Save(root, items)
 	})
 	if err != nil {
 		moePrintf(stderr, "queue add: %v\n", err)
@@ -281,28 +201,22 @@ func runQueueRemove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	target := queueItem{Workflow: workflow, Project: projectID, Run: runID}
+	target := queue.Item{Workflow: workflow, Project: projectID, Run: runID}
 	var removed bool
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "queue-remove",
 		Run:     projectID + "/" + runID,
 	}, func() error {
-		items, err := loadQueue(root)
+		items, err := queue.Load(root)
 		if err != nil {
 			return err
 		}
-		out := items[:0]
-		for _, it := range items {
-			if !removed && it == target {
-				removed = true
-				continue
-			}
-			out = append(out, it)
-		}
-		if !removed {
+		out, ok := queue.RemoveFirst(items, target)
+		if !ok {
 			return nil
 		}
-		return saveQueue(root, out)
+		removed = true
+		return queue.Save(root, out)
 	})
 	if err != nil {
 		moePrintf(stderr, "queue remove: %v\n", err)
@@ -333,7 +247,7 @@ func runQueueList(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	items, err := loadQueue(root)
+	items, err := queue.Load(root)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -348,30 +262,19 @@ func runQueueList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// queueItemPreview returns the right-hand column of `queue list`: either
-// `next: <stage>` for a live item or `(will drop: <reason>)` for one
-// the walker would skip. Drives off the same liveness signals the
-// walker uses, so what list shows is what run will do.
-func queueItemPreview(root string, it queueItem) string {
-	md, err := run.Load(root, it.Project, it.Run)
-	if errors.Is(err, run.ErrRunNotFound) {
-		return "(will drop: run not found)"
+// queueItemPreview returns the right-hand column of `queue list`:
+// either `next: <stage>` for a live item or `(will drop: <reason>)`
+// for one the walker would skip. Stays in cli because it consults
+// the per-workflow registry; queue.Classify covers the dropped-state
+// half of the same shape.
+func queueItemPreview(root string, it queue.Item) string {
+	live, reason := queue.Classify(root, it)
+	if live != queue.LivenessReady {
+		return "(will drop: " + reason + ")"
 	}
+	md, err := run.Load(root, it.Project, it.Run)
 	if err != nil {
 		return fmt.Sprintf("(will drop: %v)", err)
-	}
-	if md.Workflow != it.Workflow {
-		return fmt.Sprintf("(will drop: workflow=%s)", md.Workflow)
-	}
-	switch md.Status {
-	case run.StatusMerged:
-		return "(will drop: status=merged)"
-	case run.StatusClosed:
-		return "(will drop: status=closed)"
-	case run.StatusPromoted:
-		return "(will drop: status=promoted)"
-	case run.StatusPushed:
-		return "(will drop: status=pushed)"
 	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -387,63 +290,26 @@ func queueItemPreview(root string, it queueItem) string {
 	return "next: " + next.Name
 }
 
-// queueDispatchResult is what dispatchQueueItem reports back to the
-// walker: the per-item entry's exit code plus whether the item was
-// dropped before dispatch (so the walker doesn't emit a misleading
-// "starting" line for a dead item).
-type queueLiveness int
-
-const (
-	queueLivenessReady queueLiveness = iota
-	queueLivenessDropMissing
-	queueLivenessDropTerminal
-	queueLivenessDropOther
-)
-
-// classifyQueueItem decides whether the walker should dispatch the
-// item or drop it. Returns the liveness verdict and a short reason
-// suitable for the walker's drop log line. Mirrors queueItemPreview's
-// classification but returns a typed verdict rather than a string.
-func classifyQueueItem(root string, it queueItem) (queueLiveness, string) {
-	md, err := run.Load(root, it.Project, it.Run)
-	if errors.Is(err, run.ErrRunNotFound) {
-		return queueLivenessDropMissing, "run not found"
-	}
-	if err != nil {
-		return queueLivenessDropOther, err.Error()
-	}
-	if md.Workflow != it.Workflow {
-		return queueLivenessDropOther, "workflow=" + md.Workflow
-	}
-	switch md.Status {
-	case run.StatusMerged, run.StatusClosed, run.StatusPromoted, run.StatusPushed:
-		return queueLivenessDropTerminal, "already " + md.Status
-	}
-	return queueLivenessReady, ""
-}
-
-// queueDispatchOpts controls how the walker drives each item. OneShot
-// flips per-item dispatch from interactive to headless — same shape as
-// `moe sdlc resume --one-shot` vs `moe sdlc resume` typed by hand.
+// queueDispatchOpts controls how the walker drives each item.
+// OneShot flips per-item dispatch from interactive to headless —
+// same shape as `moe sdlc resume --one-shot` vs `moe sdlc resume`
+// typed by hand.
 type queueDispatchOpts struct {
 	OneShot bool
 }
 
 // dispatchQueueItem invokes the per-item entry for one queue item.
-// Hot-pluggable so tests can swap in a deterministic stub that records
-// invocation order and exit codes without spawning Claude. The default
-// dispatches in-process — same address space as the walker — because
-// the walker is already running in `moe queue run`'s process and an
-// extra fork-exec adds latency without changing semantics.
+// Hot-pluggable so tests can swap in a deterministic stub that
+// records invocation order and exit codes without spawning Claude.
 //
-// Important: dispatch runs *outside* the queue's repolock. The walker
-// peeks under lock, releases, dispatches here, then re-acquires the
-// lock to identity-pop. That contract is what keeps a concurrent
-// `queue add` from another terminal unblocked while a stage session
-// is grinding away.
+// Important: dispatch runs *outside* the queue's repolock. The
+// walker peeks under lock, releases, dispatches here, then
+// re-acquires the lock to identity-pop. That contract is what keeps
+// a concurrent `queue add` from another terminal unblocked while a
+// stage session is grinding away.
 var dispatchQueueItem = defaultDispatchQueueItem
 
-func defaultDispatchQueueItem(it queueItem, opts queueDispatchOpts, stdout, stderr io.Writer) int {
+func defaultDispatchQueueItem(it queue.Item, opts queueDispatchOpts, stdout, stderr io.Writer) int {
 	switch it.Workflow {
 	case queueWorkflowSDLC:
 		var args []string
@@ -497,11 +363,11 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	defer stopWalkerSig()
 
 	for {
-		var head queueItem
+		var head queue.Item
 		var depth int
 		var empty bool
 		err = withRepoLock(root, repolock.Options{Purpose: "queue-peek"}, func() error {
-			items, err := loadQueue(root)
+			items, err := queue.Load(root)
 			if err != nil {
 				return err
 			}
@@ -528,8 +394,8 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 		// concurrent edits don't shift the wrong item out. Dropped
 		// items skip the countdown — the operator never sees a
 		// "starting" frame for an item we're about to discard.
-		liveness, reason := classifyQueueItem(root, head)
-		if liveness != queueLivenessReady {
+		live, reason := queue.Classify(root, head)
+		if live != queue.LivenessReady {
 			moePrintf(stdout, "queue: dropping %s (%s)\n", head, reason)
 			if err := queuePopIdentity(root, head); err != nil {
 				moePrintf(stderr, "queue: pop %s: %v\n", head, err)
@@ -584,32 +450,25 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 }
 
 // queuePopIdentity removes target from .moe/queue.json by identity
-// (workflow+project+run), under the repo lock. No-op when target is no
-// longer in the queue (e.g. the operator `queue remove`'d it from another
-// terminal while dispatch was in flight). The identity match — rather
-// than a positional pop — is the contract that makes concurrent
-// add/remove safe against an in-flight walker.
-func queuePopIdentity(root string, target queueItem) error {
+// (workflow+project+run), under the repo lock. No-op when target is
+// no longer in the queue (e.g. the operator `queue remove`'d it
+// from another terminal while dispatch was in flight). The identity
+// match — rather than a positional pop — is the contract that makes
+// concurrent add/remove safe against an in-flight walker.
+func queuePopIdentity(root string, target queue.Item) error {
 	return withRepoLock(root, repolock.Options{
 		Purpose: "queue-pop",
 		Run:     target.Project + "/" + target.Run,
 	}, func() error {
-		items, err := loadQueue(root)
+		items, err := queue.Load(root)
 		if err != nil {
 			return err
 		}
-		out := items[:0]
-		removed := false
-		for _, it := range items {
-			if !removed && it == target {
-				removed = true
-				continue
-			}
-			out = append(out, it)
-		}
+		out, removed := queue.RemoveFirst(items, target)
 		if !removed {
 			return nil
 		}
-		return saveQueue(root, out)
+		return queue.Save(root, out)
 	})
 }
+

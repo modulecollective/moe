@@ -11,6 +11,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -73,7 +74,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	// queue.json silently yields no markers and the dash still renders.
 	// Loud errors on bad queue state belong in queue add/list/run.
 	queuedSet := make(map[dash.QueueKey]struct{})
-	if items, err := loadQueue(root); err == nil {
+	if items, err := queue.Load(root); err == nil {
 		for _, it := range items {
 			queuedSet[dash.QueueKey{Workflow: it.Workflow, Project: it.Project, Run: it.Run}] = struct{}{}
 		}

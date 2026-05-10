@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -53,11 +54,11 @@ func markRunStatus(t *testing.T, root, projectID, runID, status string) {
 }
 
 // readQueue returns the on-disk queue. Empty/missing → nil.
-func readQueue(t *testing.T, root string) []queueItem {
+func readQueue(t *testing.T, root string) []queue.Item {
 	t.Helper()
-	items, err := loadQueue(root)
+	items, err := queue.Load(root)
 	if err != nil {
-		t.Fatalf("loadQueue: %v", err)
+		t.Fatalf("queue.Load: %v", err)
 	}
 	return items
 }
@@ -376,11 +377,11 @@ func TestQueueRunExitsOnEmpty(t *testing.T) {
 // global swap is safe.
 type dispatchRecorder struct {
 	mu    sync.Mutex
-	calls []queueItem
-	exit  func(it queueItem) int
+	calls []queue.Item
+	exit  func(it queue.Item) int
 }
 
-func (r *dispatchRecorder) record(it queueItem, _ queueDispatchOpts, _, _ io.Writer) int {
+func (r *dispatchRecorder) record(it queue.Item, _ queueDispatchOpts, _, _ io.Writer) int {
 	r.mu.Lock()
 	r.calls = append(r.calls, it)
 	r.mu.Unlock()
@@ -411,7 +412,7 @@ func runWalkerExpectingDrain(t *testing.T) (int, string, string) {
 	}
 }
 
-func stubDispatch(t *testing.T, exit func(it queueItem) int) *dispatchRecorder {
+func stubDispatch(t *testing.T, exit func(it queue.Item) int) *dispatchRecorder {
 	t.Helper()
 	rec := &dispatchRecorder{exit: exit}
 	old := dispatchQueueItem
@@ -512,7 +513,7 @@ func TestQueueRunStopsOnFailure(t *testing.T) {
 		t.Fatalf("add second: %d %q", code, errb.String())
 	}
 
-	rec := stubDispatch(t, func(it queueItem) int {
+	rec := stubDispatch(t, func(it queue.Item) int {
 		if it.Run == first {
 			return 7
 		}
@@ -552,7 +553,7 @@ func TestQueueRunReleasesLockDuringDispatch(t *testing.T) {
 	started := make(chan struct{})
 	proceed := make(chan struct{})
 	var once sync.Once
-	rec := stubDispatch(t, func(it queueItem) int {
+	rec := stubDispatch(t, func(it queue.Item) int {
 		// Only the first dispatch (the one we're racing against) signals
 		// + waits. Subsequent dispatches (the concurrently-added second
 		// item, picked up after the walker pops the first) just return
@@ -667,7 +668,7 @@ func TestQueueRunStopsOnSignalDuringCountdown(t *testing.T) {
 	// Dispatch must not fire — the test's contract is "stopped during
 	// the first item's countdown." If it does, the test fails loudly
 	// rather than silently passing on the wrong path.
-	rec := stubDispatch(t, func(it queueItem) int {
+	rec := stubDispatch(t, func(it queue.Item) int {
 		t.Errorf("dispatch should not have fired; got %v", it)
 		return 0
 	})
