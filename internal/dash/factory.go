@@ -11,8 +11,9 @@ import (
 // shape. Backlog ideas are raw materials on the inbound conveyor;
 // active runs are stations along the rail (glyph picked from stage);
 // recent completions are finished goods on the outbound side. The
-// art is always one or two lines beneath the title; section headers
-// below carry the precise counts.
+// art collapses to a single dotted line on an empty bureaucracy and
+// expands to a three-line plume-over-rail when populated; section
+// headers below carry the precise counts.
 
 // ArtWidth is the target column width for the factory art row, sized
 // to match the title line ("Ministry of Everything" plus the
@@ -50,10 +51,21 @@ var stageGlyphs = map[string]string{
 
 const otherStageGlyph = "◉"
 
-// SmokeGlyphs is the palette for the smoke ribbon above in-progress
-// stations. Picked per-glyph by RNG; deliberately sparse and
-// decorative. Exported so tests can inspect the alphabet.
-var SmokeGlyphs = []rune("˙˚°⋅✦✧⋆◦")
+// basePuff sits on the row immediately above the rail, anchored to a
+// running station's chimney column. Dense, rounded glyphs — these are
+// the "this station is alive" signal, drawn with p=1.0 per station.
+var basePuff = []rune("°◦∘⊙")
+
+// driftWisp sits one row higher than basePuff and drifts ±1 column
+// off the chimney. Sparser, decorative — fires probabilistically so
+// two consecutive renders aren't identical, but absence never hides
+// liveness (that's basePuff's job).
+var driftWisp = []rune("✦✧⋆◦∘")
+
+// SmokeGlyphs is the union of basePuff and driftWisp, exported so
+// tests can assert palette membership without caring which row a rune
+// landed on. Deduplicated.
+var SmokeGlyphs = []rune("°◦∘⊙✦✧⋆")
 
 // ActiveStation is one station's worth of factory-art state. Stage
 // is the parked next-stage name (drives the glyph when the run
@@ -74,17 +86,19 @@ type FactoryState struct {
 }
 
 // BuildFactoryArt renders the art beneath the title. Returns one
-// line for the empty state (a row of spaced dots) or two lines for
-// the populated case ([smoke, rail]). r drives the smoke ribbon's
-// decorative randomness; the rail itself is deterministic from
-// state.
+// line for the empty state (a row of spaced dots) or three lines for
+// the populated case ([driftWisp row, basePuff row, rail]). r drives
+// the smoke's decorative randomness; the rail itself and the basePuff
+// row are deterministic-in-shape from state (basePuff fires per
+// running station with p=1.0; only the glyph picked is randomised).
 func BuildFactoryArt(state FactoryState, width int, r *rand.Rand) []string {
 	if state.BacklogCount == 0 && len(state.ActiveStages) == 0 && state.CompletedCount == 0 {
 		return []string{padRight(emptyArt(width), width)}
 	}
 	rail, smokeCols := buildRail(state)
-	smoke := buildSmoke(rail, smokeCols, state.BacklogCount > 0, r)
-	return []string{padRight(smoke, width), padRight(rail, width)}
+	railWidth := utf8.RuneCountInString(rail)
+	top, base := buildPlumes(smokeCols, railWidth, state.BacklogCount > 0, r)
+	return []string{padRight(top, width), padRight(base, width), padRight(rail, width)}
 }
 
 func emptyArt(width int) string {
@@ -185,32 +199,37 @@ func glyphForStage(stage string) string {
 	return otherStageGlyph
 }
 
-func buildSmoke(rail string, smokeCols []int, hasBacklog bool, r *rand.Rand) string {
-	runes := []rune(rail)
-	line := make([]rune, len(runes))
-	for i := range line {
-		line[i] = ' '
+// buildPlumes paints the two smoke rows above the rail. The base row
+// is the load-bearing liveness signal: every running station gets a
+// basePuff glyph at its chimney column, no probability gate. The top
+// (drift) row is decorative — wisps fire per-station with p≈0.6 and
+// jitter ±1 column off the chimney, plus an optional backlog fleck
+// when raw material is queued. Collisions are skipped, not retried.
+func buildPlumes(smokeCols []int, width int, hasBacklog bool, r *rand.Rand) (top, base string) {
+	topRow := make([]rune, width)
+	baseRow := make([]rune, width)
+	for i := range topRow {
+		topRow[i] = ' '
+		baseRow[i] = ' '
 	}
 	for _, c := range smokeCols {
-		if r.Float64() >= 0.5 {
-			continue
+		if c >= 0 && c < width && baseRow[c] == ' ' {
+			baseRow[c] = basePuff[r.Intn(len(basePuff))]
 		}
-		col := c + r.Intn(5) - 2
-		if col < 0 || col >= len(line) {
-			continue
+		if r.Float64() < 0.6 {
+			col := c + r.Intn(3) - 1
+			if col >= 0 && col < width && topRow[col] == ' ' {
+				topRow[col] = driftWisp[r.Intn(len(driftWisp))]
+			}
 		}
-		if line[col] != ' ' {
-			continue
-		}
-		line[col] = SmokeGlyphs[r.Intn(len(SmokeGlyphs))]
 	}
 	if hasBacklog && r.Float64() < 0.5 {
 		col := 2 + r.Intn(4)
-		if col < len(line) && line[col] == ' ' {
-			line[col] = SmokeGlyphs[r.Intn(len(SmokeGlyphs))]
+		if col < width && topRow[col] == ' ' {
+			topRow[col] = driftWisp[r.Intn(len(driftWisp))]
 		}
 	}
-	return string(line)
+	return string(topRow), string(baseRow)
 }
 
 func padRight(s string, width int) string {

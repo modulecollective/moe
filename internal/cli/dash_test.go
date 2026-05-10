@@ -1388,8 +1388,8 @@ func TestBuildFactoryArtEmpty(t *testing.T) {
 }
 
 // TestBuildFactoryArtPopulatedShape: a mixed state (backlog, active
-// runs of mixed stages, completed) renders two lines whose rail
-// carries the expected zone glyphs in zone order.
+// runs of mixed stages, completed) renders three lines (drift, base,
+// rail) whose rail carries the expected zone glyphs in zone order.
 func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 	state := dash.FactoryState{
 		BacklogCount: 2,
@@ -1402,10 +1402,10 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 	}
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines (smoke + rail), got %d: %q", len(lines), lines)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines (drift + base + rail), got %d: %q", len(lines), lines)
 	}
-	rail := lines[1]
+	rail := lines[2]
 	// Zones must appear in order: input → stations → output. Use the
 	// first occurrence of each zone-distinguishing glyph as a proxy.
 	idxIn := strings.Index(rail, "▦")
@@ -1443,7 +1443,7 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 	}
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[1]
+	rail := lines[2]
 	for _, want := range []string{"+3", "+2", "+7"} {
 		if !strings.Contains(rail, want) {
 			t.Fatalf("expected overflow tag %q in rail:\n%q", want, rail)
@@ -1469,7 +1469,7 @@ func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
 	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{{Stage: "unknown-stage"}}}
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[1]
+	rail := lines[2]
 	if !strings.Contains(rail, "[◉]") {
 		t.Fatalf("expected fallback boiler glyph '[◉]', got rail:\n%q", rail)
 	}
@@ -1487,15 +1487,18 @@ func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
 		{Stage: "awaiting merge"},
 	}}
 	// Sweep seeds so we exercise the RNG; any seed that paints a
-	// fleck above a parked station fails the test.
+	// fleck above a parked station on either smoke row fails the test.
 	for seed := int64(1); seed <= 16; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		if len(lines) != 2 {
-			t.Fatalf("seed %d: expected 2 lines, got %d", seed, len(lines))
+		if len(lines) != 3 {
+			t.Fatalf("seed %d: expected 3 lines, got %d", seed, len(lines))
 		}
 		if strings.TrimSpace(lines[0]) != "" {
-			t.Fatalf("seed %d: expected blank smoke above parked-only stations, got %q", seed, lines[0])
+			t.Fatalf("seed %d: expected blank drift row above parked-only stations, got %q", seed, lines[0])
+		}
+		if strings.TrimSpace(lines[1]) != "" {
+			t.Fatalf("seed %d: expected blank base row above parked-only stations, got %q", seed, lines[1])
 		}
 	}
 }
@@ -1526,10 +1529,11 @@ func TestBuildFactoryArtWidth(t *testing.T) {
 }
 
 // TestBuildFactoryArtSmokeContainsOnlyPaletteRunes: every non-space
-// rune on the smoke line must come from the smoke palette. Pins that
-// the smoke ribbon never accidentally pulls a rune from the rail.
-// Stations carry a runningDoc so the smoke path actually fires —
-// otherwise the palette assertion is vacuous.
+// rune on either smoke row must come from the smoke palette. Pins
+// that neither the drift wisp nor the base puff ever accidentally
+// pulls a rune from the rail. Stations carry a runningDoc so the
+// smoke path actually fires — otherwise the palette assertion is
+// vacuous.
 func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 	state := dash.FactoryState{
 		BacklogCount: 3,
@@ -1546,13 +1550,55 @@ func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 		allowed[g] = struct{}{}
 	}
 	// Iterate seeds so we explore the RNG; any seed that produces a
-	// non-palette rune fails the test.
+	// non-palette rune on either smoke row fails the test.
 	for seed := int64(1); seed <= 8; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		for _, ru := range lines[0] {
-			if _, ok := allowed[ru]; !ok {
-				t.Fatalf("seed %d: smoke line contains non-palette rune %q in %q", seed, ru, lines[0])
+		for row, label := range []string{"drift", "base"} {
+			for _, ru := range lines[row] {
+				if _, ok := allowed[ru]; !ok {
+					t.Fatalf("seed %d: %s smoke row contains non-palette rune %q in %q", seed, label, ru, lines[row])
+				}
+			}
+		}
+	}
+}
+
+// TestBuildFactoryArtAlwaysSmokesWhenRunning: every running station
+// gets a non-space rune on the base smoke row in its chimney column,
+// for every seed. This is the p=1.0 base-puff guarantee — the
+// dash-cooler-smoke contract that liveness is a *reliable* peripheral
+// signal, not a flickering one. If a future change reintroduces a
+// probability gate on the base row, this test fires immediately.
+func TestBuildFactoryArtAlwaysSmokesWhenRunning(t *testing.T) {
+	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
+		{Stage: "design", RunningDoc: "design"},
+		{Stage: "code", RunningDoc: "code"},
+		{Stage: "awaiting merge", RunningDoc: "code"},
+	}}
+	for seed := int64(1); seed <= 32; seed++ {
+		r := rand.New(rand.NewSource(seed))
+		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
+		if len(lines) != 3 {
+			t.Fatalf("seed %d: expected 3 lines, got %d", seed, len(lines))
+		}
+		baseRunes := []rune(lines[1])
+		var chimneys []int
+		for i, ru := range []rune(lines[2]) {
+			if ru == '[' {
+				chimneys = append(chimneys, i+1)
+			}
+		}
+		if got, want := len(chimneys), len(state.ActiveStages); got != want {
+			t.Fatalf("seed %d: expected %d chimneys, found %d in rail %q", seed, want, got, lines[2])
+		}
+		for _, c := range chimneys {
+			if c >= len(baseRunes) {
+				t.Fatalf("seed %d: chimney col %d out of range for base row %q", seed, c, lines[1])
+			}
+			if baseRunes[c] == ' ' {
+				t.Fatalf("seed %d: expected non-space rune above chimney col %d on base row %q (rail %q)",
+					seed, c, lines[1], lines[2])
 			}
 		}
 	}
@@ -1569,7 +1615,7 @@ func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
 	}}
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[1]
+	rail := lines[2]
 	if !strings.Contains(rail, "[⚙]") {
 		t.Fatalf("expected running-doc glyph '[⚙]' on parked-design station, got rail:\n%q", rail)
 	}
@@ -1590,27 +1636,27 @@ func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
 	// Glyph swap is deterministic.
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[1]
+	rail := lines[2]
 	if !strings.Contains(rail, "[⚙]") {
 		t.Fatalf("expected running-doc glyph '[⚙]' on awaiting-merge station, got rail:\n%q", rail)
 	}
 	if strings.Contains(rail, "[▶]") {
 		t.Fatalf("expected no parked '[▶]' glyph on running awaiting-merge station, got rail:\n%q", rail)
 	}
-	// Smoke fires probabilistically; sweep seeds and demand at least
-	// one fleck across the window so a future change can't quietly
+	// Base puff is the load-bearing liveness signal (p=1.0). Sweep
+	// seeds anyway as a regression net so a future change can't quietly
 	// drop awaiting-merge from the smoke set.
 	smokedAt := int64(-1)
 	for seed := int64(1); seed <= 16; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		ls := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		if strings.TrimSpace(ls[0]) != "" {
+		if strings.TrimSpace(ls[1]) != "" {
 			smokedAt = seed
 			break
 		}
 	}
 	if smokedAt < 0 {
-		t.Fatal("expected smoke above running awaiting-merge station for at least one seed in [1,16], saw none")
+		t.Fatal("expected base puff above running awaiting-merge station for at least one seed in [1,16], saw none")
 	}
 }
 
