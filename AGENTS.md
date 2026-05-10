@@ -11,6 +11,13 @@ projects — those get their own guidance assembled from `soul.md` and
   `claude -p`, `git`, and the Go standard library. No YAML parser, no
   CLI framework, no DAG engine, no third-party dependency without a
   reason that survives review.
+- **All `git` calls go through `internal/git`.** That package owns
+  the index-lock retry, the error shape, and the tracing hook —
+  bypassing it skips all three. Reach for `git.Run` / `Output` /
+  `Combined` / `Probe` / `Stream`, or one of the typed wrappers
+  (`HEAD`, `HasRef`, `Upstream`, `AheadOf`, `LsRemoteDefault`,
+  `RevParse`, `Status`). Raw `exec.Command("git", …)` outside that
+  package fails CI.
 
 ## Before you say you're done
 
