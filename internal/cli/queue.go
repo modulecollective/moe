@@ -471,4 +471,3 @@ func queuePopIdentity(root string, target queue.Item) error {
 		return queue.Save(root, out)
 	})
 }
-
