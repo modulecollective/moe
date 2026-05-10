@@ -65,6 +65,12 @@ silently dropped.
 - Before you hand the session back to the operator, `git status` should be
   clean. If you've left work in progress on purpose, say so explicitly so
   the operator knows the session needs to resume before push.
+- **Write something to the canvas every turn.** The harness commits the
+  canvas dir on each turn and refuses an empty canvas — a turn that ships
+  code but leaves the canvas blank fails at the commit gate, and the only
+  recovery is re-running the stage. Even on a code-only turn, drop a
+  short note (what changed, what's next) into the canvas before handing
+  back.
 
 ## When you're done
 
