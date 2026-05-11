@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -23,7 +25,7 @@ func TestReflectKickoffRendersHistorySummary(t *testing.T) {
 		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
 	}
 	summary := "The twin was seeded in 2026-Q1; auth rewrite landed in 2026-Q2."
-	got := reflectKickoff(cfg, summary, "", nil, wiki.Findings{})
+	got := reflectKickoff(cfg, summary, "", nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
 	if !strings.Contains(got, "## History summary") {
 		t.Errorf("kickoff missing history summary heading:\n%s", got)
 	}
@@ -46,7 +48,7 @@ func TestReflectKickoffFreshSummaryFraming(t *testing.T) {
 		ContentDir:  "/x/projects/p/digital-twin",
 		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
 	}
-	got := reflectKickoff(cfg, "", "## Events since last reflect\n\n- abc1234 first commit\n", nil, wiki.Findings{})
+	got := reflectKickoff(cfg, "", "## Events since last reflect\n\n- abc1234 first commit\n", nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
 	if !strings.Contains(got, "## History summary") {
 		t.Errorf("kickoff missing history summary heading:\n%s", got)
 	}
@@ -77,7 +79,7 @@ func TestReflectKickoffRendersIdeaBacklog(t *testing.T) {
 		{slug: "fix-auth", title: "Fix auth race", body: "Auth tokens leak under load."},
 		{slug: "tidy-cli", title: "Tidy CLI errors", body: "Errors mention internals."},
 	}
-	got := reflectKickoff(cfg, "", "", ideas, wiki.Findings{})
+	got := reflectKickoff(cfg, "", "", ideas, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
 	for _, want := range []string{
 		"## Idea backlog",
 		"### fix-auth — Fix auth race",
@@ -101,7 +103,7 @@ func TestReflectKickoffRendersHygieneFindings(t *testing.T) {
 		EmptyDocs:          []string{"patterns.md"},
 		MissingManagedDocs: []string{"roadmap.md"},
 	}
-	got := reflectKickoff(cfg, "", "", nil, findings)
+	got := reflectKickoff(cfg, "", "", nil, findings, "projects/p/runs/r/documents/reflect/content.md")
 	for _, want := range []string{
 		"## Hygiene findings",
 		"refuses to seal a reflect with leftover findings",
@@ -123,9 +125,108 @@ func TestReflectKickoffOmitsEmptyHygieneSection(t *testing.T) {
 		ContentDir:  "/x/projects/p/digital-twin",
 		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
 	}
-	got := reflectKickoff(cfg, "", "", nil, wiki.Findings{})
+	got := reflectKickoff(cfg, "", "", nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
 	if strings.Contains(got, "## Hygiene findings") {
 		t.Errorf("kickoff should omit hygiene section when findings empty:\n%s", got)
+	}
+}
+
+// The canvas-write instruction is the load-bearing prompt change for
+// the "reflect-is-broken-by-checks" fix: the agent must know to write
+// the end-of-pass summary to the per-run canvas, and the path it sees
+// in the prompt is the same path commitReflectTurn stages and
+// session.Close reads at the branch tip.
+func TestReflectKickoffInstructsCanvasWrite(t *testing.T) {
+	cfg := wiki.Config{
+		Mode:        wiki.Closed,
+		Name:        "twin",
+		ContentDir:  "/x/projects/p/digital-twin",
+		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	canvasRel := "projects/tele/runs/reflect-2026-05-11-120000/documents/reflect/content.md"
+	got := reflectKickoff(cfg, "", "", nil, wiki.Findings{}, canvasRel)
+	for _, want := range []string{
+		"end-of-pass summary",
+		canvasRel,
+		"refuses to seal",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("kickoff missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// commitReflectTurn must stage both the twin content dir and the
+// per-run canvas in the same commit. Without the canvas hunk, the
+// session-close gate refuses to fast-forward main — the original
+// bug. Test runs against a real git tree to pin the staged paths.
+func TestCommitReflectTurnStagesCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n\nupdated.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runSlug := "reflect-2026-05-11-120000"
+	canvasRel := run.ContentPath("tele", runSlug, "reflect")
+	canvasPath := filepath.Join(root, canvasRel)
+	if err := os.MkdirAll(filepath.Dir(canvasPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvasPath, []byte("end-of-pass summary.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wikiRel, err := filepath.Rel(root, twinDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitReflectTurn(root, "twin", "tele", runSlug, wikiRel); err != nil {
+		t.Fatalf("commitReflectTurn: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", root, "show", "--name-only", "--pretty=", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	names := string(out)
+	for _, want := range []string{
+		canvasRel,
+		filepath.Join(wikiRel, "vision.md"),
+	} {
+		if !strings.Contains(names, want) {
+			t.Errorf("commit missing %q in:\n%s", want, names)
+		}
+	}
+}
+
+// If the agent skipped the canvas write, commitReflectTurn must still
+// land the twin edits — the close-time gate is what refuses an empty
+// canvas. Staging would error if we tried to add a missing path, so
+// the helper has to filter it out.
+func TestCommitReflectTurnTolerateMissingCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n\nupdated.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wikiRel, err := filepath.Rel(root, twinDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitReflectTurn(root, "twin", "tele", "reflect-2026-05-11-120000", wikiRel); err != nil {
+		t.Fatalf("commitReflectTurn with missing canvas: %v", err)
 	}
 }
 

@@ -145,7 +145,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 				ClonePath:        "",
 				SessionUUID:      sessionUUID,
 				NewSession:       true,
-				InitialPrompt:    reflectKickoff(*canonical, historySummary, events, ideas, findings),
+				InitialPrompt:    reflectKickoff(*canonical, historySummary, events, ideas, findings, run.ContentPath(projectID, runSlug, docID)),
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: "Twin reflect pass",
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
@@ -226,7 +226,7 @@ func findingsCount(f wiki.Findings) int {
 // re-prioritisation), the rolling history summary, and the verbatim
 // "events since last reflect" tail. Empty inputs collapse to a
 // one-line placeholder — a quiet section is fine.
-func reflectKickoff(cfg wiki.Config, historySummary, events string, ideas []ideaSummary, findings wiki.Findings) string {
+func reflectKickoff(cfg wiki.Config, historySummary, events string, ideas []ideaSummary, findings wiki.Findings, canvasRel string) string {
 	var b strings.Builder
 	b.WriteString("The operator just opened a twin reflect session. " +
 		"Walk each managed doc against recent project activity, fold the open " +
@@ -294,7 +294,12 @@ func reflectKickoff(cfg wiki.Config, historySummary, events string, ideas []idea
 	b.WriteString("Before you finish the pass, propose an updated `history-summary.md` that " +
 		"folds in the events you just walked. The summary is the twin's compressed memory " +
 		"of everything before the next checkpoint — keep it prose, keep it slow-growing, " +
-		"and don't drop signal that future reflects will need.\n")
+		"and don't drop signal that future reflects will need.\n\n")
+	fmt.Fprintf(&b, "When the pass is sealed and you're ready to hand control back, write "+
+		"your end-of-pass summary to `%s`. That summary is the durable per-pass artifact — "+
+		"the same kind of \"what changed and why\" you'd write in a PR description. Keep it "+
+		"terse; the twin diff itself is the detail. The session refuses to seal until that "+
+		"file is non-empty.\n", canvasRel)
 	return b.String()
 }
 
@@ -302,7 +307,18 @@ func commitReflectTurn(workRoot, workflow, projectID, runSlug, wikiRel string) e
 	if wikiRel == "" {
 		return run.ErrNothingToCommit
 	}
-	if err := run.Stage(workRoot, wikiRel); err != nil {
+	paths := []string{wikiRel}
+	// The agent is instructed (in reflectKickoff) to drop an end-of-pass
+	// summary at canvasRel. Stage it alongside the twin edits so both
+	// land in the same `work: reflect pass <runSlug>` commit and the
+	// session-close gate sees a non-empty canvas at the branch tip.
+	// `git add` errors on a missing path, so skip if the agent forgot —
+	// the close-time gate is the strict check that will refuse to seal.
+	canvasRel := run.ContentPath(projectID, runSlug, "reflect")
+	if _, err := os.Stat(filepath.Join(workRoot, canvasRel)); err == nil {
+		paths = append(paths, canvasRel)
+	}
+	if err := run.Stage(workRoot, paths...); err != nil {
 		return err
 	}
 	if !run.HasStagedChanges(workRoot) {
@@ -315,7 +331,7 @@ func commitReflectTurn(workRoot, workflow, projectID, runSlug, wikiRel string) e
 			Workflow: workflow,
 			Document: "reflect",
 		}.String()
-	return run.StageAndCommit(workRoot, msg, wikiRel)
+	return run.StageAndCommit(workRoot, msg, paths...)
 }
 
 // unrecordedEditsRedirect formats the one-line redirect printed when
