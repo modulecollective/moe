@@ -38,45 +38,28 @@ const queueCountdownSeconds = 3
 const queueWorkflowSDLC = "sdlc"
 
 func init() {
-	Register(&Command{
-		Name:    "queue",
-		Summary: "queue workflow: add, remove, list, run — walk a curated playlist of opened runs",
-		Run:     runQueue,
+	g := NewCommandGroup("queue", "queue verbs: add, remove, list, run — walk a curated playlist of opened runs")
+	g.Register(&Command{
+		Name:    "add",
+		Summary: "queue an opened run, or promote-and-queue an idea",
+		Run:     runQueueAdd,
 	})
-}
-
-func runQueue(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		printQueueUsage(stdout)
-		return 0
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		printQueueUsage(stdout)
-		return 0
-	case "add":
-		return runQueueAdd(args[1:], stdout, stderr)
-	case "remove":
-		return runQueueRemove(args[1:], stdout, stderr)
-	case "list":
-		return runQueueList(args[1:], stdout, stderr)
-	case "run":
-		return runQueueRun(args[1:], stdout, stderr)
-	default:
-		moePrintf(stderr, "unknown queue subcommand %q\n", args[0])
-		printQueueUsage(stderr)
-		return 1
-	}
-}
-
-func printQueueUsage(w io.Writer) {
-	moePrintln(w, "usage: moe queue <subcommand> [args...]")
-	moePrintln(w, "")
-	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "add", "queue an opened run, or promote-and-queue an idea")
-	moePrintf(w, "  %-14s  %s\n", "remove", "remove a queued run by identity")
-	moePrintf(w, "  %-14s  %s\n", "list", "show the queue with each item's next stage (or drop reason)")
-	moePrintf(w, "  %-14s  %s\n", "run", "walk the queue and exit when empty")
+	g.Register(&Command{
+		Name:    "remove",
+		Summary: "remove a queued run by identity",
+		Run:     runQueueRemove,
+	})
+	g.Register(&Command{
+		Name:    "list",
+		Summary: "show the queue with each item's next stage (or drop reason)",
+		Run:     runQueueList,
+	})
+	g.Register(&Command{
+		Name:    "run",
+		Summary: "walk the queue and exit when empty",
+		Run:     runQueueRun,
+	})
+	RegisterGroup(g)
 }
 
 func runQueueAdd(args []string, stdout, stderr io.Writer) int {

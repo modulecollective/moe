@@ -11,28 +11,18 @@ import (
 )
 
 func init() {
-	Register(&Command{
-		Name:    "project",
-		Summary: "manage projects (subcommands: add, remove)",
-		Run:     runProject,
+	g := NewCommandGroup("project", "manage projects (subcommands: add, remove)")
+	g.Register(&Command{
+		Name:    "add",
+		Summary: "register a project from a remote git URL",
+		Run:     runProjectAdd,
 	})
-}
-
-func runProject(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		moePrintln(stdout, "usage: moe project <subcommand> [args...]")
-		moePrintln(stdout, "subcommands: add, remove")
-		return 0
-	}
-	switch args[0] {
-	case "add":
-		return runProjectAdd(args[1:], stdout, stderr)
-	case "remove":
-		return runProjectRemove(args[1:], stdout, stderr)
-	default:
-		moePrintf(stderr, "unknown project subcommand %q\n", args[0])
-		return 2
-	}
+	g.Register(&Command{
+		Name:    "remove",
+		Summary: "unregister a project by id",
+		Run:     runProjectRemove,
+	})
+	RegisterGroup(g)
 }
 
 func runProjectAdd(args []string, stdout, stderr io.Writer) int {

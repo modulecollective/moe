@@ -70,7 +70,7 @@ func TestSessionListEmpty(t *testing.T) {
 	root := newSessionTestRoot(t)
 	var stdout, stderr bytes.Buffer
 	withCwd(t, root, func() {
-		if code := runSession([]string{"list"}, &stdout, &stderr); code != 0 {
+		if code := Run([]string{"session", "list"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 		}
 	})
@@ -88,7 +88,7 @@ func TestSessionListAndAbandon(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	withCwd(t, root, func() {
-		if code := runSession([]string{"list"}, &stdout, &stderr); code != 0 {
+		if code := Run([]string{"session", "list"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("list exit=%d stderr=%q", code, stderr.String())
 		}
 	})
@@ -99,7 +99,7 @@ func TestSessionListAndAbandon(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	withCwd(t, root, func() {
-		if code := runSession([]string{"abandon", s.Branch}, &stdout, &stderr); code != 0 {
+		if code := Run([]string{"session", "abandon", s.Branch}, &stdout, &stderr); code != 0 {
 			t.Fatalf("abandon exit=%d stderr=%q", code, stderr.String())
 		}
 	})
@@ -110,7 +110,7 @@ func TestSessionListAndAbandon(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	withCwd(t, root, func() {
-		if code := runSession([]string{"list"}, &stdout, &stderr); code != 0 {
+		if code := Run([]string{"session", "list"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("list-after exit=%d stderr=%q", code, stderr.String())
 		}
 	})
@@ -123,7 +123,7 @@ func TestSessionAbandonUnknownBranch(t *testing.T) {
 	root := newSessionTestRoot(t)
 	var stdout, stderr bytes.Buffer
 	withCwd(t, root, func() {
-		if code := runSession([]string{"abandon", "session/no/such/doc"}, &stdout, &stderr); code != 1 {
+		if code := Run([]string{"session", "abandon", "session/no/such/doc"}, &stdout, &stderr); code != 1 {
 			t.Fatalf("exit=%d, want 1; stderr=%q", code, stderr.String())
 		}
 	})

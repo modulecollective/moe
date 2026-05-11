@@ -17,42 +17,23 @@ import (
 // behind — these subcommands make it discoverable and actionable.
 
 func init() {
-	Register(&Command{
-		Name:    "session",
-		Summary: "list or clean up leftover stage-session worktrees and branches",
-		Run:     runSession,
+	g := NewCommandGroup("session", "list or clean up leftover stage-session worktrees and branches")
+	g.Register(&Command{
+		Name:    "list",
+		Summary: "list open stage-session worktrees and branches",
+		Run:     runSessionList,
 	})
-}
-
-func runSession(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		printSessionUsage(stdout)
-		return 0
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		printSessionUsage(stdout)
-		return 0
-	case "list":
-		return runSessionList(args[1:], stdout, stderr)
-	case "abandon":
-		return runSessionAbandon(args[1:], stdout, stderr)
-	case "resolve":
-		return runSessionResolve(args[1:], stdout, stderr)
-	default:
-		moePrintf(stderr, "unknown session subcommand %q\n", args[0])
-		printSessionUsage(stderr)
-		return 1
-	}
-}
-
-func printSessionUsage(w io.Writer) {
-	moePrintln(w, "usage: moe session <subcommand> [args...]")
-	moePrintln(w, "")
-	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "list", "list open stage-session worktrees and branches")
-	moePrintf(w, "  %-14s  %s\n", "abandon", "drop a session's worktree and branch without landing its commits")
-	moePrintf(w, "  %-14s  %s\n", "resolve", "retry rebase + ff-merge for a session whose close failed")
+	g.Register(&Command{
+		Name:    "abandon",
+		Summary: "drop a session's worktree and branch without landing its commits",
+		Run:     runSessionAbandon,
+	})
+	g.Register(&Command{
+		Name:    "resolve",
+		Summary: "retry rebase + ff-merge for a session whose close failed",
+		Run:     runSessionResolve,
+	})
+	RegisterGroup(g)
 }
 
 func runSessionList(args []string, stdout, stderr io.Writer) int {
