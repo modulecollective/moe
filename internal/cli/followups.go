@@ -19,12 +19,18 @@ import (
 //	# Follow-ups
 //
 //	- [ ] `cleanup-foo-helper` — Clean up foo helper
+//
+//	  Why: bar/baz reach into foo's internals; foo.go:42 is the
+//	  load-bearing assumption. Fix sketch: extract a tiny accessor.
+//
 //	- [x] `chase-zlib-upgrade` — Chase the zlib upgrade Q1 mentioned
 //
 // Each unchecked entry becomes one idea; the line is rewritten in
 // place as `- [x]` carrying the resolved (possibly auto-disambiguated)
-// slug. Already-checked lines are pass-through, which makes a retry
-// after a partial-failure idempotent.
+// slug. An optional indented body (two-space indent, blank lines
+// between paragraphs) rides into the new idea's seed canvas under the
+// title H1. Already-checked lines are pass-through, which makes a
+// retry after a partial-failure idempotent.
 
 // followupHeader is the stub a fresh editor session lands on when no
 // followups.md exists yet. Just a header — the operator (or agent) adds
@@ -55,6 +61,7 @@ type parsedFollowup struct {
 	lineIdx int    // zero-based index into the raw line slice
 	slug    string // operator-supplied base slug (pre-disambiguation)
 	title   string // title to embed in the new idea's H1
+	body    string // optional dedented body markdown; "" means no body
 }
 
 // parseFollowups scans body and returns the lines (split on '\n') plus
@@ -63,32 +70,103 @@ type parsedFollowup struct {
 // title is reported with a 1-based line number, and harvest does NOT
 // proceed. That keeps the partial-failure path bounded — once we start
 // creating ideas, every remaining input line has already passed.
+//
+// Body capture: lines indented two-or-more spaces, plus blank lines
+// inside an item, belong to the most recent open item's body. The
+// body is dedented two spaces, leading/trailing blanks trimmed, and
+// joined with '\n'. Bodies under checked (`[x]`) items are recognised
+// (so they don't attach to a prior open item) but discarded — the
+// idea has already been created on a past run.
 func parseFollowups(body []byte) (lines []string, todo []parsedFollowup, err error) {
 	lines = strings.Split(string(body), "\n")
 	seen := map[string]int{}
-	for i, line := range lines {
-		if !followupCheckboxRE.MatchString(line) {
-			continue
+
+	// openIdx >= 0 means we're inside an open item collecting body
+	// lines into bodyLines. A `[x]` item resets openIdx to -1 so its
+	// own body lines (if any) are silently consumed without attaching
+	// to the prior open item.
+	openIdx := -1
+	var bodyLines []string
+
+	finalize := func() {
+		if openIdx >= 0 {
+			todo[openIdx].body = trimAndDedentBody(bodyLines)
+			openIdx = -1
 		}
-		if followupDoneRE.MatchString(line) {
-			continue
-		}
-		m := followupOpenRE.FindStringSubmatch(line)
-		if m == nil {
-			return nil, nil, fmt.Errorf("line %d: malformed follow-up %q (expected: - [ ] `slug` — Title)", i+1, line)
-		}
-		slug := m[2]
-		title := strings.TrimSpace(m[3])
-		if title == "" {
-			return nil, nil, fmt.Errorf("line %d: follow-up title is empty", i+1)
-		}
-		if prev, dup := seen[slug]; dup {
-			return nil, nil, fmt.Errorf("line %d: follow-up slug %q duplicates line %d", i+1, slug, prev+1)
-		}
-		seen[slug] = i
-		todo = append(todo, parsedFollowup{lineIdx: i, slug: slug, title: title})
+		bodyLines = nil
 	}
+
+	for i, line := range lines {
+		if followupCheckboxRE.MatchString(line) {
+			finalize()
+			if followupDoneRE.MatchString(line) {
+				continue
+			}
+			m := followupOpenRE.FindStringSubmatch(line)
+			if m == nil {
+				return nil, nil, fmt.Errorf("line %d: malformed follow-up %q (expected: - [ ] `slug` — Title)", i+1, line)
+			}
+			slug := m[2]
+			title := strings.TrimSpace(m[3])
+			if title == "" {
+				return nil, nil, fmt.Errorf("line %d: follow-up title is empty", i+1)
+			}
+			if prev, dup := seen[slug]; dup {
+				return nil, nil, fmt.Errorf("line %d: follow-up slug %q duplicates line %d", i+1, slug, prev+1)
+			}
+			seen[slug] = i
+			todo = append(todo, parsedFollowup{lineIdx: i, slug: slug, title: title})
+			openIdx = len(todo) - 1
+			continue
+		}
+		if line == "" || isIndentedBody(line) {
+			if openIdx >= 0 {
+				bodyLines = append(bodyLines, line)
+			}
+			continue
+		}
+		// Non-blank, non-indented, non-checkbox line: closes the item.
+		finalize()
+	}
+	finalize()
 	return lines, todo, nil
+}
+
+// isIndentedBody reports whether line qualifies as body content for the
+// most recent item — two or more leading spaces. Tabs do not count;
+// followups.md is editor-flavor markdown and the agent prompt teaches
+// the two-space form explicitly.
+func isIndentedBody(line string) bool {
+	return len(line) >= 2 && line[0] == ' ' && line[1] == ' '
+}
+
+// trimAndDedentBody turns the raw body lines collected for one item
+// into the dedented markdown that rides into the idea's seed canvas.
+// Strips leading and trailing blank lines (the operator's blank-line
+// gap between title and first paragraph isn't body content) and dedents
+// every non-blank line by exactly two spaces (the bullet's content
+// column). Returns "" when there's nothing to keep.
+func trimAndDedentBody(body []string) string {
+	for len(body) > 0 && strings.TrimSpace(body[0]) == "" {
+		body = body[1:]
+	}
+	for len(body) > 0 && strings.TrimSpace(body[len(body)-1]) == "" {
+		body = body[:len(body)-1]
+	}
+	if len(body) == 0 {
+		return ""
+	}
+	out := make([]string, len(body))
+	for i, line := range body {
+		if line == "" {
+			out[i] = ""
+			continue
+		}
+		// isIndentedBody guaranteed ≥ 2 leading spaces for non-blanks
+		// that reached this slice.
+		out[i] = line[2:]
+	}
+	return strings.Join(out, "\n")
 }
 
 // markHarvested rewrites a `- [ ] `slug“ prefix into `- [x] `resolved“
@@ -149,7 +227,13 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 	openTrailers := trailers.Block{FromRun: projectID + "/" + runID}
 
 	for hi, fu := range todo {
-		md, ierr := createIdea(root, projectID, fu.slug, fu.title, "", openTrailers)
+		// Empty body falls through to createIdea's "# Title\n" default
+		// so there's one source of truth for the bare-line shape.
+		var canvasBody string
+		if fu.body != "" {
+			canvasBody = fmt.Sprintf("# %s\n\n%s\n", fu.title, fu.body)
+		}
+		md, ierr := createIdea(root, projectID, fu.slug, fu.title, canvasBody, openTrailers)
 		if ierr != nil {
 			// If we already harvested some entries, persist their
 			// `- [x]` rewrites as a standalone bookkeeping commit so

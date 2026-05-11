@@ -43,7 +43,7 @@ func TestParseFollowupsRoundtrip(t *testing.T) {
 		"",
 		"- [ ] `cleanup-foo-helper` — Clean up foo helper",
 		"- [x] `chase-zlib-upgrade` — Already harvested",
-		"  - [ ] `nested-not-allowed` — Should still parse",
+		"- [ ] `chase-it` — Chase it down",
 		"",
 	}, "\n"))
 	lines, todo, err := parseFollowups(body)
@@ -59,8 +59,141 @@ func TestParseFollowupsRoundtrip(t *testing.T) {
 	if todo[0].slug != "cleanup-foo-helper" || todo[0].title != "Clean up foo helper" {
 		t.Errorf("first entry wrong: %+v", todo[0])
 	}
-	if todo[1].slug != "nested-not-allowed" {
-		t.Errorf("indented entry not parsed: %+v", todo[1])
+	if todo[0].body != "" {
+		t.Errorf("first entry should have no body, got %q", todo[0].body)
+	}
+	if todo[1].slug != "chase-it" {
+		t.Errorf("second entry wrong: %+v", todo[1])
+	}
+}
+
+func TestParseFollowupsCapturesBody(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		"# Follow-ups",
+		"",
+		"- [ ] `cleanup-foo` — Clean up foo helper",
+		"",
+		"  Why: bar/baz both reach into foo's internals; foo.go:42 is",
+		"  the load-bearing assumption. Fix sketch: extract an accessor.",
+		"",
+		"- [ ] `chase-zlib` — Chase the zlib upgrade",
+		"",
+	}, "\n"))
+	_, todo, err := parseFollowups(body)
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(todo))
+	}
+	wantBody := "Why: bar/baz both reach into foo's internals; foo.go:42 is\n" +
+		"the load-bearing assumption. Fix sketch: extract an accessor."
+	if todo[0].body != wantBody {
+		t.Errorf("body not dedented or trimmed correctly:\nwant: %q\n got: %q", wantBody, todo[0].body)
+	}
+	if todo[1].body != "" {
+		t.Errorf("bare second entry should have empty body, got %q", todo[1].body)
+	}
+}
+
+func TestParseFollowupsCapturesMultiParagraphBody(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		"- [ ] `do-thing` — Do the thing",
+		"",
+		"  First paragraph.",
+		"",
+		"  Second paragraph with a `code-ish` token and an em-dash —.",
+		"",
+	}, "\n"))
+	_, todo, err := parseFollowups(body)
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(todo))
+	}
+	wantBody := "First paragraph.\n" +
+		"\n" +
+		"Second paragraph with a `code-ish` token and an em-dash —."
+	if todo[0].body != wantBody {
+		t.Errorf("multi-paragraph body wrong:\nwant: %q\n got: %q", wantBody, todo[0].body)
+	}
+}
+
+func TestParseFollowupsBodyDedentsExactlyTwoSpaces(t *testing.T) {
+	// A line indented four spaces should keep two spaces after the
+	// dedent — that's content inside the body, not metadata to strip.
+	body := []byte(strings.Join([]string{
+		"- [ ] `nested` — Nested example",
+		"",
+		"  Outer paragraph.",
+		"    inner-indented line",
+		"",
+	}, "\n"))
+	_, todo, err := parseFollowups(body)
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(todo))
+	}
+	wantBody := "Outer paragraph.\n  inner-indented line"
+	if todo[0].body != wantBody {
+		t.Errorf("indented body line under-dedented:\nwant: %q\n got: %q", wantBody, todo[0].body)
+	}
+}
+
+func TestParseFollowupsClosedItemAbsorbsItsOwnBody(t *testing.T) {
+	// A `[x]` item carries history that may include an indented body
+	// from a prior harvest. The parser must NOT attribute that body to
+	// the open item that came before it.
+	body := []byte(strings.Join([]string{
+		"- [ ] `live-one` — Live entry",
+		"- [x] `dead-one` — Already harvested",
+		"",
+		"  Stale body that should not land on live-one.",
+		"",
+		"- [ ] `another` — Another live entry",
+	}, "\n"))
+	_, todo, err := parseFollowups(body)
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(todo))
+	}
+	if todo[0].body != "" {
+		t.Errorf("live-one inherited closed item's body: %q", todo[0].body)
+	}
+	if todo[1].slug != "another" || todo[1].body != "" {
+		t.Errorf("second live entry wrong: %+v", todo[1])
+	}
+}
+
+func TestParseFollowupsHeaderClosesItem(t *testing.T) {
+	// A non-indented, non-checkbox line (header, prose, etc.) closes
+	// the current item — so a header below an open item is not body.
+	body := []byte(strings.Join([]string{
+		"- [ ] `first` — First",
+		"",
+		"  Body of first.",
+		"",
+		"## Some other section",
+		"",
+		"- [ ] `second` — Second",
+	}, "\n"))
+	_, todo, err := parseFollowups(body)
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(todo))
+	}
+	if todo[0].body != "Body of first." {
+		t.Errorf("first body wrong: %q", todo[0].body)
+	}
+	if todo[1].body != "" {
+		t.Errorf("second body should be empty, got %q", todo[1].body)
 	}
 }
 
@@ -96,6 +229,56 @@ func TestParseFollowupsRejectsDuplicateSlug(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicates line") {
 		t.Fatalf("expected duplicates-line error, got %q", err.Error())
+	}
+}
+
+// TestSDLCCloseHarvestsFollowupBodyIntoIdeaCanvas pins the new
+// title-plus-body shape of harvested ideas: an entry with an indented
+// body produces an idea whose seed canvas is "# <Title>\n\n<body>\n",
+// while a bodyless entry stays on the bare "# <Title>\n" default.
+func TestSDLCCloseHarvestsFollowupBodyIntoIdeaCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", strings.Join([]string{
+		"# Follow-ups",
+		"",
+		"- [ ] `cleanup-foo` — Clean up foo helper",
+		"",
+		"  Why: bar/baz reach into foo's internals; foo.go:42 is the",
+		"  load-bearing assumption. Fix sketch: extract an accessor.",
+		"",
+		"- [ ] `bare-line` — A bare entry without a body",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	bodyCanvas, err := os.ReadFile(filepath.Join(root,
+		"projects", "tele", "runs", "cleanup-foo", "documents", "idea", "content.md"))
+	if err != nil {
+		t.Fatalf("read body-bearing canvas: %v", err)
+	}
+	wantBodyCanvas := "# Clean up foo helper\n" +
+		"\n" +
+		"Why: bar/baz reach into foo's internals; foo.go:42 is the\n" +
+		"load-bearing assumption. Fix sketch: extract an accessor.\n"
+	if string(bodyCanvas) != wantBodyCanvas {
+		t.Errorf("body-bearing idea canvas wrong:\nwant: %q\n got: %q", wantBodyCanvas, string(bodyCanvas))
+	}
+
+	bareCanvas, err := os.ReadFile(filepath.Join(root,
+		"projects", "tele", "runs", "bare-line", "documents", "idea", "content.md"))
+	if err != nil {
+		t.Fatalf("read bare canvas: %v", err)
+	}
+	if string(bareCanvas) != "# A bare entry without a body\n" {
+		t.Errorf("bare idea canvas should fall through to default H1, got %q", string(bareCanvas))
 	}
 }
 

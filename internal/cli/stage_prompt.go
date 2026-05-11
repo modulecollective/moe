@@ -170,16 +170,32 @@ run is pushed.
 	}
 
 	// Capture-as-you-go: the close-time harvester turns each unchecked
-	// line of this file into an idea run. Worded so the agent appends
-	// rather than rewrites — the file accumulates across stages.
+	// entry of this file into an idea run, threading any indented body
+	// into the new idea's seed canvas. Worded so the agent appends
+	// rather than rewrites — the file accumulates across stages — and
+	// so the body steer is "only when it would save a future agent
+	// real work," to avoid replacing bare-line junk with body-padded
+	// junk.
 	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 	out += "\n" +
 		"If you notice something worth doing but out of scope for this cycle —\n" +
 		"adjacent cleanup, a deferred investigation, a reference to chase —\n" +
-		"append a line to:\n" +
+		"append an entry to:\n" +
 		"  " + followups + "\n" +
 		"Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,\n" +
-		"terse title, no body). The operator harvests unchecked entries into\n" +
-		"ideas at close.\n"
+		"terse title), optionally followed by an indented body of one or\n" +
+		"more paragraphs (two-space indent, blank lines between paragraphs):\n" +
+		"\n" +
+		"  - [ ] `cleanup-foo` — Clean up foo helper\n" +
+		"\n" +
+		"    Why: bar/baz both reach into foo's internals; foo.go:42 is\n" +
+		"    the load-bearing assumption. Fix sketch: <one sentence>.\n" +
+		"\n" +
+		"Use the body only when context would save a future agent real\n" +
+		"work — the *why*, file:line refs, or a one-sentence approach\n" +
+		"sketch. Skip the body when the title is self-explanatory. The\n" +
+		"operator reviews and prunes these at termination; unchecked\n" +
+		"entries become idea runs with the body carried into the seed\n" +
+		"canvas.\n"
 	return out
 }
