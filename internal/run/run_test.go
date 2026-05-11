@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // fixedNow returns an Options.Now that always yields t — so tests that
@@ -18,31 +20,17 @@ func fixedNow(t time.Time) func() time.Time {
 }
 
 // newTestRoot initializes a throwaway git repo with scoped config so
-// run.New can commit without touching ~/.gitconfig. Mirrors
-// cli/stage_test.go#newTestBureaucracy.
+// run.New can commit without touching ~/.gitconfig. The "-b main"
+// rename matches the production root layout — tests that assert on
+// branch names depend on it.
 func newTestRoot(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[user]\n\temail=t@example.com\n\tname=T\n[init]\n\tdefaultBranch=main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
 	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.InitAt(t, root)
+	// Production root names the trunk `main`; rename so tests that
+	// assert ref or upstream names match the live shape.
+	gittest.Run(t, root, "branch", "-m", "main")
+	gittest.Commit(t, root, "seed")
 	return root
 }
 
@@ -84,16 +72,8 @@ func seedProject(t *testing.T, root, projectID string) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"add", "--", rel},
-		{"commit", "-m", "register project " + projectID},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.Run(t, root, "add", "--", rel)
+	gittest.Run(t, root, "commit", "-m", "register project "+projectID)
 }
 
 // TestNewDerivedSlugAutoSuffixesPastHistory covers the delete-then-reopen
@@ -177,16 +157,8 @@ func TestNewSlugNotInOtherProject(t *testing.T) {
 // behind.
 func deleteRunDir(t *testing.T, root, projectID, id string) {
 	t.Helper()
-	for _, args := range [][]string{
-		{"rm", "-rf", "--", Dir(projectID, id)},
-		{"commit", "-m", "delete run " + projectID + "/" + id},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.Run(t, root, "rm", "-rf", "--", Dir(projectID, id))
+	gittest.Run(t, root, "commit", "-m", "delete run "+projectID+"/"+id)
 }
 
 // TestNewIDBaseFreeSlugNoSuffix covers the no-collision path through

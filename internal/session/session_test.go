@@ -2,12 +2,12 @@ package session
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // newTestRoot seeds a git repo with one commit on main so that worktree
@@ -15,49 +15,18 @@ import (
 // internal/run/run_test.go.
 func newTestRoot(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[user]\n\temail=t@example.com\n\tname=T\n[init]\n\tdefaultBranch=main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
 	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.InitAt(t, root)
+	// Production root names the trunk `main`; rename so tests that
+	// assert ref or upstream names match the live shape.
+	gittest.Run(t, root, "branch", "-m", "main")
+	gittest.Commit(t, root, "seed")
 	return root
 }
 
 func commitInWorktree(t *testing.T, worktreePath, relPath, body, msg string) {
 	t.Helper()
-	abs := filepath.Join(worktreePath, relPath)
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"add", relPath},
-		{"commit", "-m", msg},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = worktreePath
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.WriteAndCommit(t, worktreePath, relPath, body, msg)
 }
 
 func TestOpenCloseRoundtrip(t *testing.T) {
@@ -93,14 +62,9 @@ func TestOpenCloseRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rev-parse main: %v", err)
 	}
-	cmd := exec.Command("git", "cat-file", "-p",
+	out := gittest.Output(t, root, "cat-file", "-p",
 		mainHead+":projects/moe/runs/r1/documents/design/content.md")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("read landed file: %v", err)
-	}
-	if !strings.Contains(string(out), "hello") {
+	if !strings.Contains(out, "hello") {
 		t.Errorf("landed content missing expected body: %q", out)
 	}
 
@@ -126,31 +90,15 @@ func TestCloseWithSubmodule(t *testing.T) {
 	root := newTestRoot(t)
 
 	// Donor repo to serve as the submodule source.
-	donor := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "donor seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = donor
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("donor git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	donor := gittest.Init(t)
+	gittest.Run(t, donor, "branch", "-m", "main")
+	gittest.Commit(t, donor, "donor seed")
 
 	// Add the donor as a submodule. `protocol.file.allow=always` is
 	// needed since Git 2.38 (CVE-2022-39253) disabled file:// by default.
-	addCmd := exec.Command("git", "-c", "protocol.file.allow=always",
+	gittest.Run(t, root, "-c", "protocol.file.allow=always",
 		"submodule", "add", donor, "sub")
-	addCmd.Dir = root
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git submodule add: %v\n%s", err, out)
-	}
-	commitCmd := exec.Command("git", "commit", "-m", "add submodule")
-	commitCmd.Dir = root
-	if out, err := commitCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit submodule: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "commit", "-m", "add submodule")
 
 	s, err := Open(root, "moe", "r1", "design")
 	if err != nil {
@@ -162,12 +110,8 @@ func TestCloseWithSubmodule(t *testing.T) {
 	// Plain `git worktree remove` only refuses when the submodule is
 	// actually present on disk, so this step is what makes the test
 	// actually exercise the regression.
-	initCmd := exec.Command("git", "-c", "protocol.file.allow=always",
+	gittest.Run(t, s.WorktreePath, "-c", "protocol.file.allow=always",
 		"submodule", "update", "--init")
-	initCmd.Dir = s.WorktreePath
-	if out, err := initCmd.CombinedOutput(); err != nil {
-		t.Fatalf("submodule update --init: %v\n%s", err, out)
-	}
 
 	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md",
 		"# Design\n", "work: update design")
@@ -207,11 +151,7 @@ func TestOpenOrphanBranchErrors(t *testing.T) {
 	root := newTestRoot(t)
 	// Create a session branch without a worktree to simulate a busted
 	// close state.
-	cmd := exec.Command("git", "branch", "session/moe/r1/design")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git branch: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "branch", "session/moe/r1/design")
 	if _, err := Open(root, "moe", "r1", "design"); err == nil {
 		t.Fatal("expected error on orphan branch, got nil")
 	} else if !strings.Contains(err.Error(), "without a registered worktree") {
@@ -222,19 +162,7 @@ func TestOpenOrphanBranchErrors(t *testing.T) {
 func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	root := newTestRoot(t)
 	// Seed main with an initial file.
-	if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("v1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"add", "shared.txt"},
-		{"commit", "-m", "seed shared"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git: %v\n%s", err, out)
-		}
-	}
+	gittest.WriteAndCommit(t, root, "shared.txt", "v1\n", "seed shared")
 
 	s, err := Open(root, "moe", "r1", "design")
 	if err != nil {
@@ -251,16 +179,8 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "shared.txt"), []byte("main-edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"add", "shared.txt"},
-		{"commit", "-m", "main: touch shared"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git: %v\n%s", err, out)
-		}
-	}
+	gittest.Run(t, root, "add", "shared.txt")
+	gittest.Run(t, root, "commit", "-m", "main: touch shared")
 
 	err = Close(s)
 	if err == nil {
@@ -383,11 +303,7 @@ func TestSessionCloseSilentlyAbandonsZeroCommitSession(t *testing.T) {
 
 func TestFindByBranchOnOrphanReturnsSynthetic(t *testing.T) {
 	root := newTestRoot(t)
-	cmd := exec.Command("git", "branch", "session/moe/r1/design")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git branch: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "branch", "session/moe/r1/design")
 	s, err := FindByBranch(root, "session/moe/r1/design")
 	if err != nil {
 		t.Fatalf("FindByBranch: %v", err)
