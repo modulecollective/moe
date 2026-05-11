@@ -52,7 +52,7 @@ func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -93,7 +93,7 @@ func TestPromptStageNextStageMissingDesignCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -140,7 +140,7 @@ func TestPromptStageNextStageWhitespaceDesignCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -189,10 +189,165 @@ func TestPromptStageNextStageNonCodeStageSkipsCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, root, md, "moe sdlc design tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, root, md, "moe sdlc design tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if strings.Contains(stdout.String(), body) {
 		t.Errorf("canvas should not print for non-code stage; got:\n%s", stdout.String())
+	}
+}
+
+// TestPromptStageNextStageOffersBackWhenJustFinished: passing a non-nil
+// back command produces the [Y/n/o/b] label plus a legend that names
+// the back target, and `b\n` on stdin dispatches back.Run with
+// [project, run] (no --one-shot — back is an interactive correction).
+func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "code",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			rec.args = append([]string(nil), args...)
+			return 0
+		},
+	}
+	var backRan bool
+	var backArgs []string
+	back := &Command{
+		Name: "design",
+		Run: func(args []string, _, _ io.Writer) int {
+			backRan = true
+			backArgs = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "b\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, back, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/o/b]") {
+		t.Fatalf("expected [Y/n/o/b] label in prompt, got: %q", got)
+	}
+	if !strings.Contains(got, "Y=run · n=skip · o=run headless · b=back to design") {
+		t.Fatalf("expected legend with back target in prompt, got: %q", got)
+	}
+	if rec.ran {
+		t.Errorf("`b` must not dispatch next: rec.args=%v", rec.args)
+	}
+	if !backRan {
+		t.Fatalf("expected back to be dispatched, but it was not")
+	}
+	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+		t.Fatalf("back args = %q, want %q", got, want)
+	}
+}
+
+// TestPromptStageNextStageNoBackWhenNil: a nil back collapses the
+// label back to [Y/n/o] (no /b) and the legend omits the b row. Pins
+// the empty-justFinished path — fresh-run callers must not see a
+// back option that would dispatch nil.
+func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "code",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/o]") {
+		t.Fatalf("expected [Y/n/o] label without /b, got: %q", got)
+	}
+	if strings.Contains(got, "/b]") {
+		t.Fatalf("expected no /b in label, got: %q", got)
+	}
+	if strings.Contains(got, "b=back") {
+		t.Fatalf("expected legend without back entry, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageBackWithoutOneShot: a non-sdlc workflow with
+// a back target produces [Y/n/b] (no /o, but /b appended) and the
+// legend reads "Y=run · n=skip · b=back to <stage>".
+func TestPromptStageNextStageBackWithoutOneShot(t *testing.T) {
+	next := &Command{
+		Name: "ingest",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var backRan bool
+	back := &Command{
+		Name: "outline",
+		Run: func(_ []string, _, _ io.Writer) int {
+			backRan = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "b\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, back, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/b]") {
+		t.Fatalf("expected [Y/n/b] label, got: %q", got)
+	}
+	if strings.Contains(got, "/o/") || strings.Contains(got, "o=run headless") {
+		t.Fatalf("non-sdlc workflow must not offer one-shot, got: %q", got)
+	}
+	if !strings.Contains(got, "b=back to outline") {
+		t.Fatalf("expected legend naming back target, got: %q", got)
+	}
+	if !backRan {
+		t.Fatalf("expected back to dispatch on `b`")
 	}
 }

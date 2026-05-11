@@ -249,7 +249,7 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	var stdout, stderr safeBuffer
 	exit := make(chan int, 1)
 	go func() {
-		exit <- promptStageNextStage(next, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr)
+		exit <- promptStageNextStage(next, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr)
 	}()
 
 	// Wait for signal.Notify to install (the prompt prints its label
@@ -311,7 +311,7 @@ func TestPromptPushNextStageDeclinesOnSignal(t *testing.T) {
 	var stdout, stderr safeBuffer
 	exit := make(chan int, 1)
 	go func() {
-		exit <- promptPushNextStage(next, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
+		exit <- promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
 	}()
 
 	deadline := time.Now().Add(2 * time.Second)

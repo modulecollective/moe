@@ -29,6 +29,11 @@ import (
 // Next() — the right answer for fresh runs (where the workflow's
 // first stage is the next thing to run) and for entry points that
 // don't know which stage just landed (resume hitting the merge gate).
+//
+// justFinished also drives the "back" target offered at the prompt:
+// a non-empty justFinished resolves to back := g.Lookup(justFinished),
+// which the prompt offers as the `b` option so the operator can
+// re-open the stage whose canvas is sitting above the cursor.
 func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -65,6 +70,10 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 		moePrintf(stdout, "next: %s %s (no runnable command)\n", wf.Name, stage)
 		return 0
 	}
+	var back *Command
+	if justFinished != "" {
+		back = g.Lookup(justFinished)
+	}
 	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
@@ -72,19 +81,63 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	}
 	switch next.Name {
 	case "push":
-		return promptPushNextStage(next, root, md, hint, stdout, stderr)
+		return promptPushNextStage(next, back, root, md, hint, stdout, stderr)
 	}
-	return promptStageNextStage(next, root, md, hint, stdout, stderr)
+	return promptStageNextStage(next, back, root, md, hint, stdout, stderr)
+}
+
+// promptOption is one entry in a chain prompt's label/legend pair. key
+// is the single rune the operator types (uppercase for the default);
+// hint is the short verb shown in the legend. Two helpers turn a
+// []promptOption into the bracketed label and the indented legend
+// below it, so adding or reordering options stays a one-line edit at
+// the call site.
+type promptOption struct {
+	key  rune
+	hint string
+}
+
+// renderPromptLabel returns "[K1/K2/K3]" — bracketed, slash-separated
+// runes in slice order. The first option's case determines the default
+// (Y vs N today); the helper does not enforce it.
+func renderPromptLabel(opts []promptOption) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, o := range opts {
+		if i > 0 {
+			b.WriteByte('/')
+		}
+		b.WriteRune(o.key)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// renderPromptLegend returns the one-line legend printed below the
+// label: two-space indent, "K=hint" pairs joined with " · ". Lowercase
+// verbs read consistently across the three prompts.
+func renderPromptLegend(opts []promptOption) string {
+	var b strings.Builder
+	b.WriteString("  ")
+	for i, o := range opts {
+		if i > 0 {
+			b.WriteString(" · ")
+		}
+		fmt.Fprintf(&b, "%c=%s", o.key, o.hint)
+	}
+	return b.String()
 }
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for most
 // workflows, [Y/n/o] for sdlc non-push stages where headless one-shot
-// is supported. Y still defaults so a reflex Enter chains the next
-// stage interactively, the same as before. `o` invokes the next stage
-// with `--one-shot` prepended to its argv. Hardcoding the sdlc gate
-// keeps the prompt honest — no other workflow has --one-shot today,
-// and we'd rather widen deliberately than offer a flag that doesn't
-// exist.
+// is supported, and an optional /b suffix when back is non-nil so the
+// operator can re-open the just-finished stage. Y still defaults so a
+// reflex Enter chains the next stage interactively, the same as before.
+// `o` invokes the next stage with `--one-shot` prepended to its argv.
+// `b` re-invokes the just-finished stage interactively. Hardcoding the
+// sdlc gate keeps the prompt honest — no other workflow has --one-shot
+// today, and we'd rather widen deliberately than offer a flag that
+// doesn't exist.
 //
 // When the next stage is code, the just-finished design canvas is
 // printed above the prompt — same shape as promptPushNextStage prints
@@ -95,7 +148,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 // after a botched code run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
-func promptStageNextStage(next *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+func promptStageNextStage(next, back *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	if next.Name == "code" {
 		canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
 		if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
@@ -105,12 +158,20 @@ func promptStageNextStage(next *Command, root string, md *run.Metadata, hint str
 			}
 		}
 	}
-	offerOneShot := md.Workflow == "sdlc"
-	label := "[Y/n]"
-	if offerOneShot {
-		label = "[Y/n/o]"
+	opts := []promptOption{
+		{key: 'Y', hint: "run"},
+		{key: 'n', hint: "skip"},
 	}
-	moePrintf(stdout, "next: %s — run now? %s ", hint, label)
+	offerOneShot := md.Workflow == "sdlc"
+	if offerOneShot {
+		opts = append(opts, promptOption{key: 'o', hint: "run headless"})
+	}
+	if back != nil {
+		opts = append(opts, promptOption{key: 'b', hint: "back to " + back.Name})
+	}
+	label := renderPromptLabel(opts)
+	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
+	moePrintln(stdout, renderPromptLegend(opts))
 	sig, stopSig := installSigint()
 	defer stopSig()
 	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
@@ -129,6 +190,9 @@ func promptStageNextStage(next *Command, root string, md *run.Metadata, hint str
 	if offerOneShot && answer == "o" {
 		return next.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
 	}
+	if back != nil && answer == "b" {
+		return back.Run([]string{md.Project, md.ID}, stdout, stderr)
+	}
 	accepted := answer == "" || strings.HasPrefix(answer, "y")
 	if !accepted {
 		return 0
@@ -137,7 +201,8 @@ func promptStageNextStage(next *Command, root string, md *run.Metadata, hint str
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
-// (`moe <wf> push`), or PR (`moe <wf> push --pr`).
+// (`moe <wf> push`), or PR (`moe <wf> push --pr`), plus an optional
+// `b` to re-open the just-finished code stage when back is non-nil.
 // Parsing is case-insensitive; the label capitalization just signals
 // the default. N-as-default is load-bearing — a reflex Enter must
 // never ship.
@@ -152,7 +217,7 @@ func promptStageNextStage(next *Command, root string, md *run.Metadata, hint str
 // Whitespace-only or missing canvas falls through to the bare prompt:
 // no header or decoration — the canvas is markdown the agent wrote
 // for the operator, printed as written.
-func promptPushNextStage(next *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+func promptPushNextStage(next, back *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 	if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
 		fmt.Fprint(stdout, string(body))
@@ -160,7 +225,17 @@ func promptPushNextStage(next *Command, root string, md *run.Metadata, hint stri
 			fmt.Fprintln(stdout)
 		}
 	}
-	moePrintf(stdout, "next: %s — run now? [N/m/p] ", hint)
+	opts := []promptOption{
+		{key: 'N', hint: "skip"},
+		{key: 'm', hint: "fast-forward merge"},
+		{key: 'p', hint: "open PR"},
+	}
+	if back != nil {
+		opts = append(opts, promptOption{key: 'b', hint: "back to " + back.Name})
+	}
+	label := renderPromptLabel(opts)
+	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
+	moePrintln(stdout, renderPromptLegend(opts))
 	sig, stopSig := installSigint()
 	defer stopSig()
 	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
@@ -180,6 +255,10 @@ func promptPushNextStage(next *Command, root string, md *run.Metadata, hint stri
 		return next.Run([]string{md.Project, md.ID}, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project, md.ID}, stdout, stderr)
+	case "b":
+		if back != nil {
+			return back.Run([]string{md.Project, md.ID}, stdout, stderr)
+		}
 	}
 	// Anything else — blank, "n", or a typo — declines. Safer than
 	// guessing which ship path a garbled answer meant.

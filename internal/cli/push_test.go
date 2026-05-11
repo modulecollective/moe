@@ -628,7 +628,7 @@ func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -670,7 +670,7 @@ func TestPromptPushNextStageMissingCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -717,7 +717,7 @@ func TestPromptPushNextStageWhitespaceCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -767,7 +767,7 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 	// Empty root → no code canvas on disk → the prompt skips the cat
 	// and falls through to the bare [N/m/p] line, which is what the
 	// dispatch-shape assertions below expect.
-	code := promptPushNextStage(next, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
+	code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("promptPushNextStage exit=%d stderr=%s", code, stderr.String())
 	}
@@ -775,6 +775,114 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 		t.Fatalf("expected [N/m/p] label in prompt, got: %s", stdout.String())
 	}
 	return rec
+}
+
+// TestPromptPushNextStageOffersBackWhenJustFinished: a non-nil back at
+// the push prompt grows the label to [N/m/p/b] and the legend to
+// "N=skip · m=fast-forward merge · p=open PR · b=back to code". Typing
+// `b` dispatches back.Run with [project, run]. Pins the rule that the
+// new option is appended (so the existing N-as-default stays).
+func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			rec.args = append([]string(nil), args...)
+			return 0
+		},
+	}
+	var backRan bool
+	var backArgs []string
+	back := &Command{
+		Name: "code",
+		Run: func(args []string, _, _ io.Writer) int {
+			backRan = true
+			backArgs = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "b\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, back, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/m/p/b]") {
+		t.Fatalf("expected [N/m/p/b] label in prompt, got: %q", got)
+	}
+	if !strings.Contains(got, "N=skip · m=fast-forward merge · p=open PR · b=back to code") {
+		t.Fatalf("expected legend with back target in prompt, got: %q", got)
+	}
+	if rec.ran {
+		t.Errorf("`b` must not dispatch push: rec.args=%v", rec.args)
+	}
+	if !backRan {
+		t.Fatalf("expected back to be dispatched, but it was not")
+	}
+	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+		t.Fatalf("back args = %q, want %q", got, want)
+	}
+}
+
+// TestPromptPushNextStageNoBackWhenNil: a nil back collapses the
+// label back to [N/m/p] (no /b) and the legend omits the b row.
+// Mirrors TestPromptStageNextStageNoBackWhenNil for the push prompt.
+func TestPromptPushNextStageNoBackWhenNil(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "b\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/m/p]") {
+		t.Fatalf("expected [N/m/p] label without /b, got: %q", got)
+	}
+	if strings.Contains(got, "/b]") {
+		t.Fatalf("expected no /b in label, got: %q", got)
+	}
+	if strings.Contains(got, "b=back") {
+		t.Fatalf("expected legend without back entry, got: %q", got)
+	}
+	if rec.ran {
+		t.Errorf("`b` with nil back must not dispatch anything")
+	}
 }
 
 // writeHookScript drops an executable script into
