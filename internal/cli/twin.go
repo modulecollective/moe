@@ -7,8 +7,8 @@ import (
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
-// The twin workflow owns the closed-schema digital-twin lifecycle for
-// a project. Two operator-facing verbs:
+// `moe twin` is the top-level verb group for the closed-schema digital
+// twin lifecycle. Two operator-facing verbs:
 //
 //   moe twin reflect <project>  — walk the five managed docs against
 //                                 recent activity, fold the idea
@@ -18,7 +18,11 @@ import (
 //   moe twin claim <project>    — record context for decided edits
 //
 // Both are out-of-band relative to runs (no canvas, no stage ladder)
-// — twin is project-scoped, not run-scoped.
+// — twin is project-scoped, not run-scoped. The three-part workflow
+// test (canvas docs + DAG + dash) fails on all three counts here, so
+// twin is a plain CommandGroup with no paired Workflow. The structural
+// kinship with kb lives at the wiki layer (wiki.Config + ingest loop),
+// not the workflow layer.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
 Five managed docs hold the durable layer: vision, architecture,
@@ -104,9 +108,14 @@ func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 }
 
 func init() {
-	twin := NewWorkflow("twin", "digital-twin workflow: reflect, claim")
-	twin.RegisterFacade(reflectCommand("twin", twinWikiBuilder))
-	twin.RegisterFacade(claimCommand("twin", twinWikiBuilder))
-	RegisterWorkflow(twin)
-	Register(twin.Command())
+	// twin is a top-level CommandGroup, not a workflow: its verbs
+	// (reflect, claim) operate on the project-scoped digital twin and
+	// have no canvas, no stage ladder, and no dash presence. The
+	// three-part workflow test (canvas docs + DAG + dash) fails on all
+	// three counts, so twin sheds the empty Workflow shell that used
+	// to register it.
+	g := NewCommandGroup("twin", "digital-twin verbs: reflect, claim")
+	g.Register(reflectCommand("twin", twinWikiBuilder))
+	g.Register(claimCommand("twin", twinWikiBuilder))
+	RegisterGroup(g)
 }
