@@ -14,8 +14,10 @@ import (
 // commit (run.json, plus followups.md when it ends up on disk).
 //
 // skipEdit controls the harvest pre-flight: false opens followups.md
-// in $EDITOR (close's interactive default); true harvests as-is
-// (push, sync, and `close --no-edit`).
+// in $EDITOR (close and push — both are operator-initiated termination
+// decisions, so the operator gets to review what's about to fan out
+// into ideas); true harvests as-is (sync reconciling an upstream merge,
+// and `close --no-edit`).
 //
 // The whole rule "any non-idea run reaching a terminal status
 // harvests its follow-ups" lives here, once. Every site that flips a

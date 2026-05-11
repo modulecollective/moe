@@ -34,6 +34,12 @@ type pushFixture struct {
 
 func newPushFixture(t *testing.T) *pushFixture {
 	t.Helper()
+	// Push's merge path now pops $EDITOR on followups.md before
+	// harvest (matching close — both are operator-initiated termination
+	// decisions). Stub it to a no-op binary so the harvest pre-flight
+	// succeeds without dropping the test into vi. Tests that explicitly
+	// exercise the no-editor failure can override with noEditor(t).
+	stubEditor(t)
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	projectID := "tele"
@@ -332,6 +338,90 @@ func TestPushNoRebaseNeededFastPath(t *testing.T) {
 	}
 	if got := f.originHead(); got != f.tipSHA {
 		t.Fatalf("origin/main: want %s, got %s", f.tipSHA, got)
+	}
+}
+
+// TestPushHarvestsFollowupsWithBodyAtMerge pins the new push-time
+// editor gate end-to-end: a sentinel $EDITOR is invoked on the
+// followups.md, the captured body lands in the harvested idea's seed
+// canvas, the line is rewritten as `[x]` carrying the resolved slug,
+// and the merge proceeds. Without the skipEdit=false flip in
+// mergePath this test would not see the editor invocation marker.
+func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
+	f := newPushFixture(t)
+
+	// Sentinel editor: writes a marker file when invoked. Confirms the
+	// editor pops at push time, not just that harvest ran (which it
+	// would have under the old skipEdit=true path too).
+	marker := filepath.Join(t.TempDir(), "editor-was-called")
+	editorScript := filepath.Join(t.TempDir(), "editor.sh")
+	if err := os.WriteFile(editorScript,
+		[]byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", editorScript)
+	t.Setenv("VISUAL", "")
+
+	writeFollowups(t, f.root, f.projectID, f.runID, strings.Join([]string{
+		"# Follow-ups",
+		"",
+		"- [ ] `cleanup-foo` — Clean up foo helper",
+		"",
+		"  Why: foo's internals leak; foo.go:42 is the load-bearing line.",
+		"",
+	}, "\n"))
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("expected $EDITOR to be invoked at push time: %v", err)
+	}
+
+	canvas, err := os.ReadFile(filepath.Join(f.root,
+		"projects", f.projectID, "runs", "cleanup-foo", "documents", "idea", "content.md"))
+	if err != nil {
+		t.Fatalf("read harvested idea canvas: %v", err)
+	}
+	want := "# Clean up foo helper\n" +
+		"\n" +
+		"Why: foo's internals leak; foo.go:42 is the load-bearing line.\n"
+	if string(canvas) != want {
+		t.Errorf("idea canvas missing body:\nwant: %q\n got: %q", want, string(canvas))
+	}
+
+	got, err := os.ReadFile(filepath.Join(f.root, run.FollowupsPath(f.projectID, f.runID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "- [x] `cleanup-foo` — Clean up foo helper") {
+		t.Errorf("followups.md not rewritten as harvested:\n%s", got)
+	}
+}
+
+// TestPushFailsCleanlyWhenNoEditorAtMerge: the merge path now requires
+// $EDITOR (it pops on followups.md before harvest). With neither
+// $EDITOR nor $VISUAL set, push fails with the same error message
+// close emits, the run stays in_progress, and origin/main is unchanged.
+func TestPushFailsCleanlyWhenNoEditorAtMerge(t *testing.T) {
+	f := newPushFixture(t)
+	noEditor(t)
+
+	mainBefore := f.originHead()
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit when no editor is configured; stdout=%s stderr=%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "no $EDITOR or $VISUAL set") {
+		t.Errorf("expected editor-missing error in stderr, got: %s", stderr)
+	}
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin/main must not advance when push fails the editor gate: want %s, got %s", mainBefore, got)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status should remain in_progress after editor-gate failure, got %s", md.Status)
 	}
 }
 

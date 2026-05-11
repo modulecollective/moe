@@ -293,7 +293,9 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// ff-push: harvest (and any per-idea slug failures) must be
 	// reversible, and FastForwardToDefault is the point of no return
 	// for the merged transition. enterTerminal does the harvest under
-	// lock so each createIdea sees a held bureaucracy lock.
+	// lock so each createIdea sees a held bureaucracy lock. skipEdit=
+	// false: push is the operator's termination decision, so the
+	// editor pops on followups.md before harvest just like close.
 	priorStatus := md.Status
 	var paths []string
 	err = withRepoLock(root, repolock.Options{
@@ -301,7 +303,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
 		var ferr error
-		paths, ferr = enterTerminal(root, md, run.StatusMerged, true)
+		paths, ferr = enterTerminal(root, md, run.StatusMerged, false)
 		return ferr
 	})
 	if err != nil {
