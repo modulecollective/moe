@@ -4,28 +4,29 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // TestEnsurePlainRepo covers the simpler of the two source layouts:
 // `projects/<id>/.git` is a real directory, no gitfile. Equivalent to
 // what a freshly `git init`-ed repo looks like.
 func TestEnsurePlainRepo(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "init", "-b", "main")
 	if err := os.WriteFile(filepath.Join(src, "code.txt"), []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "add", "code.txt")
-	runGit(t, src, "commit", "-m", "v1")
+	gittest.Run(t, src, "add", "code.txt")
+	gittest.Run(t, src, "commit", "-m", "v1")
 
 	clone, err := Ensure(root, "thing", "req-a")
 	if err != nil {
@@ -69,18 +70,18 @@ func TestEnsurePlainRepo(t *testing.T) {
 // linked-worktree under it, and writes a gitfile in the clone pointing
 // at .git/worktrees/<...>.
 func TestEnsureGitfileSubmodule(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "init", "-b", "main")
 	if err := os.WriteFile(filepath.Join(src, "code.txt"), []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "add", "code.txt")
-	runGit(t, src, "commit", "-m", "v1")
+	gittest.Run(t, src, "add", "code.txt")
+	gittest.Run(t, src, "commit", "-m", "v1")
 
 	realGitDir := filepath.Join(root, ".git", "modules", "projects", "thing", "src")
 	if err := os.MkdirAll(filepath.Dir(realGitDir), 0o755); err != nil {
@@ -93,7 +94,7 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runGitDir(t, realGitDir, "config", "core.worktree", absSrc)
+	gittest.Run(t, "", "--git-dir", realGitDir, "config", "core.worktree", absSrc)
 	rel, err := filepath.Rel(src, realGitDir)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, ".git"), []byte("gitdir: "+rel+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "status")
+	gittest.Run(t, src, "status")
 
 	clone, err := Ensure(root, "thing", "req-a")
 	if err != nil {
@@ -119,7 +120,7 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 		t.Fatalf("expected gitfile, got %q", gitfile)
 	}
 
-	runGit(t, clone, "status")
+	gittest.Run(t, clone, "status")
 
 	// Commit in the worktree on detached HEAD: the source working
 	// tree on disk stays at v1, and main in the canonical gitdir is
@@ -127,18 +128,18 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "code.txt"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, clone, "commit", "-am", "v2")
+	gittest.Run(t, clone, "commit", "-am", "v2")
 
 	srcContent, _ := os.ReadFile(filepath.Join(src, "code.txt"))
 	if !bytes.Equal(srcContent, []byte("v1")) {
 		t.Fatalf("source worktree contaminated: %q", srcContent)
 	}
-	out := runGitOut(t, src, "log", "--format=%s")
-	if got := string(bytes.TrimSpace(out)); got != "v1" {
-		t.Fatalf("source main advanced; log=%q", got)
+	out := gittest.Output(t, src, "log", "--format=%s")
+	if out != "v1" {
+		t.Fatalf("source main advanced; log=%q", out)
 	}
-	out = runGitOut(t, clone, "log", "--format=%s")
-	if !bytes.Contains(out, []byte("v2")) || !bytes.Contains(out, []byte("v1")) {
+	out = gittest.Output(t, clone, "log", "--format=%s")
+	if !strings.Contains(out, "v2") || !strings.Contains(out, "v1") {
 		t.Fatalf("clone log missing commits: %q", out)
 	}
 }
@@ -155,14 +156,14 @@ func TestRemoveIdempotent(t *testing.T) {
 // TestRemoveAfterEnsure confirms Remove deregisters the worktree from
 // the canonical and that Exists tracks both states.
 func TestRemoveAfterEnsure(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "init", "-b", "main")
-	runGit(t, src, "commit", "--allow-empty", "-m", "init")
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
 
 	if Exists(root, "thing", "req-a") {
 		t.Fatal("Exists true before Ensure")
@@ -196,18 +197,18 @@ func TestRemoveAfterEnsure(t *testing.T) {
 // terminal, so any uncommitted state is intentionally being discarded.
 // Plain `git worktree remove` would refuse on a dirty tree.
 func TestRemoveWithDirtyWorktree(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "init", "-b", "main")
 	if err := os.WriteFile(filepath.Join(src, "code.txt"), []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "add", "code.txt")
-	runGit(t, src, "commit", "-m", "v1")
+	gittest.Run(t, src, "add", "code.txt")
+	gittest.Run(t, src, "commit", "-m", "v1")
 
 	clone, err := Ensure(root, "thing", "req-a")
 	if err != nil {
@@ -238,14 +239,14 @@ func TestRemoveWithDirtyWorktree(t *testing.T) {
 // created so worktrees never accidentally get staged into the
 // bureaucracy.
 func TestEnsureWritesGitignore(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, src, "init", "-b", "main")
-	runGit(t, src, "commit", "--allow-empty", "-m", "init")
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
 
 	if _, err := Ensure(root, "thing", "req-a"); err != nil {
 		t.Fatal(err)
@@ -275,30 +276,30 @@ func TestEnsureRejectsMissingSource(t *testing.T) {
 // sandbox primitive must materialise it before adding the worktree
 // rather than failing with a low-level stat error.
 func TestEnsureAutoInit(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	tmp := t.TempDir()
 
 	upstream := filepath.Join(tmp, "upstream")
 	if err := os.MkdirAll(upstream, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, upstream, "init", "-b", "main")
+	gittest.Run(t, upstream, "init", "-b", "main")
 	if err := os.WriteFile(filepath.Join(upstream, "code.txt"), []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, upstream, "add", "code.txt")
-	runGit(t, upstream, "commit", "-m", "v1")
+	gittest.Run(t, upstream, "add", "code.txt")
+	gittest.Run(t, upstream, "commit", "-m", "v1")
 
 	root := filepath.Join(tmp, "bureaucracy")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "init", "-b", "main")
+	gittest.Run(t, root, "init", "-b", "main")
 	// `submodule add` from a local path needs file-protocol consent
 	// on git ≥ 2.38.1.
-	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", upstream, "projects/thing/src")
-	runGit(t, root, "commit", "-m", "add submodule")
-	runGit(t, root, "submodule", "deinit", "--force", "projects/thing/src")
+	gittest.Run(t, root, "-c", "protocol.file.allow=always", "submodule", "add", upstream, "projects/thing/src")
+	gittest.Run(t, root, "commit", "-m", "add submodule")
+	gittest.Run(t, root, "submodule", "deinit", "--force", "projects/thing/src")
 
 	src := filepath.Join(root, "projects", "thing", "src")
 	if entries, _ := os.ReadDir(src); len(entries) != 0 {
@@ -322,12 +323,12 @@ func TestEnsureAutoInit(t *testing.T) {
 // bogus URL), Ensure returns *SubmoduleInitError with a message that
 // names the verbatim retry command.
 func TestEnsureAutoInitFailureSurfacesTypedError(t *testing.T) {
-	requireGit(t)
+	gittest.SetupEnv(t)
 	root := t.TempDir()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "init", "-b", "main")
+	gittest.Run(t, root, "init", "-b", "main")
 
 	// .gitmodules declares a submodule whose URL doesn't resolve; the
 	// mountpoint is an empty dir so the auto-init pre-flight fires.
@@ -357,71 +358,14 @@ func TestEnsureAutoInitFailureSurfacesTypedError(t *testing.T) {
 	}
 }
 
-func requireGit(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	body := "[user]\n\temail = t@example.com\n\tname = T\n" +
-		"[init]\n\tdefaultBranch = main\n" +
-		"[commit]\n\tgpgsign = false\n" +
-		"[tag]\n\tgpgsign = false\n"
-	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = gitEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git -C %s %v: %v: %s", dir, args, err, out)
-	}
-}
-
-func runGitOut(t *testing.T, dir string, args ...string) []byte {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = gitEnv()
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git -C %s %v: %v", dir, args, err)
-	}
-	return out
-}
-
-func runGitDir(t *testing.T, gitDir string, args ...string) {
-	t.Helper()
-	full := append([]string{"--git-dir", gitDir}, args...)
-	cmd := exec.Command("git", full...)
-	cmd.Env = gitEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git --git-dir=%s %v: %v: %s", gitDir, args, err, out)
-	}
-}
-
 // worktreeRegistered reports whether canonicalSrc has a worktree
 // registered at clone — used by tests as the load-bearing assertion
 // that swaps in for "the clone is a fully independent repo."
 func worktreeRegistered(t *testing.T, canonicalSrc, clone string) bool {
 	t.Helper()
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	cmd.Dir = canonicalSrc
-	cmd.Env = gitEnv()
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git worktree list in %s: %v", canonicalSrc, err)
-	}
+	out := gittest.Output(t, canonicalSrc, "worktree", "list", "--porcelain")
 	target := canonical(clone)
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		path, ok := strings.CutPrefix(line, "worktree ")
 		if !ok {
 			continue
@@ -431,14 +375,4 @@ func worktreeRegistered(t *testing.T, canonicalSrc, clone string) bool {
 		}
 	}
 	return false
-}
-
-func gitEnv() []string {
-	return append(os.Environ(),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@example.com",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@example.com",
-		"GIT_TERMINAL_PROMPT=0",
-	)
 }

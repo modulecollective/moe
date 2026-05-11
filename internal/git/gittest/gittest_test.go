@@ -111,6 +111,20 @@ func TestWriteAndCommit_StagesAndCommits(t *testing.T) {
 	}
 }
 
+// TestSetupEnv_AppliesIsolationWithoutRepo confirms SetupEnv installs
+// the same GIT_CONFIG_GLOBAL identity Init does without creating a
+// repo — the entry point sandbox/workspace tests use when they lay
+// out their own gitdir tree.
+func TestSetupEnv_AppliesIsolationWithoutRepo(t *testing.T) {
+	SetupEnv(t)
+
+	dir := t.TempDir()
+	// A bare `git init` here would fail to commit without an identity if
+	// SetupEnv hadn't seeded GIT_CONFIG_GLOBAL.
+	Run(t, dir, "init", "-q")
+	Run(t, dir, "commit", "--allow-empty", "-m", "ok")
+}
+
 // TestOutput_TrimsTrailingNewline confirms Output strips git's trailing
 // newline so callers can compare against literals without TrimSpace.
 func TestOutput_TrimsTrailingNewline(t *testing.T) {

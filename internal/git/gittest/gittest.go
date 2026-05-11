@@ -69,6 +69,17 @@ func InitBare(t *testing.T) string {
 	return dir
 }
 
+// SetupEnv applies the same GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM
+// isolation Init does, without initializing a repo. Use it when the
+// fixture lays out its own directory tree and drives `Run(t, dir,
+// "init", ...)` itself — common in sandbox/worktree tests that pin a
+// specific gitdir layout. Skips if git is not on PATH.
+func SetupEnv(t *testing.T) {
+	t.Helper()
+	requireGit(t)
+	isolateConfig(t)
+}
+
 // Run invokes `git <args...>` in dir. On non-zero exit the test fails
 // with the combined stdout+stderr folded into the message.
 func Run(t *testing.T, dir string, args ...string) {
@@ -153,8 +164,12 @@ func requireGit(t *testing.T) {
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	// init.defaultBranch is pinned so tests don't depend on whether the
+	// host git defaults to `main` or `master` — production root branches
+	// are `main`, so that's the fixture default too.
 	body := "[user]\n\temail = test@example.com\n\tname = test\n" +
-		"[commit]\n\tgpgsign = false\n"
+		"[commit]\n\tgpgsign = false\n" +
+		"[init]\n\tdefaultBranch = main\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatalf("seed gitconfig: %v", err)
 	}

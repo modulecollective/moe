@@ -17,9 +17,6 @@ func newTestRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	gittest.InitAt(t, root)
-	// Production root names the trunk `main`; rename so tests that
-	// assert ref or upstream names match the live shape.
-	gittest.Run(t, root, "branch", "-m", "main")
 	gittest.Commit(t, root, "seed")
 	return root
 }
@@ -91,7 +88,6 @@ func TestCloseWithSubmodule(t *testing.T) {
 
 	// Donor repo to serve as the submodule source.
 	donor := gittest.Init(t)
-	gittest.Run(t, donor, "branch", "-m", "main")
 	gittest.Commit(t, donor, "donor seed")
 
 	// Add the donor as a submodule. `protocol.file.allow=always` is

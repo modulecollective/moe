@@ -255,11 +255,12 @@ func TestAheadOf_Counts(t *testing.T) {
 	gittest.Commit(t, dir, "a")
 	gittest.Commit(t, dir, "b")
 
-	n, err := AheadOf(dir, "master", "feat")
-	if err != nil {
-		// Some git versions default to `main`; try that.
-		n, err = AheadOf(dir, "main", "feat")
-	}
+	// gittest pins init.defaultBranch=main, so `main` is the trunk
+	// regardless of host git version. AheadOf swallows missing-ref
+	// errors (TestAheadOf_UnknownBase pins that), so the test can't
+	// fall through to a default-branch detection — it has to name the
+	// branch it knows exists.
+	n, err := AheadOf(dir, "main", "feat")
 	if err != nil {
 		t.Fatalf("AheadOf: %v", err)
 	}

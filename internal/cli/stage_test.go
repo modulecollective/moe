@@ -24,9 +24,6 @@ func newTestBureaucracy(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	gittest.InitAt(t, root)
-	// Production root names the trunk `main`; rename so tests that
-	// assert ref or upstream names match the live shape.
-	gittest.Run(t, root, "branch", "-m", "main")
 	gittest.Commit(t, root, "seed")
 	return root
 }
