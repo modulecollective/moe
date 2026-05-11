@@ -478,8 +478,8 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 		{"a", "fix-bug", "design"},
 		{"a", "fix-bug", "code"},
 		{"b", "fix-bug", "design"},
-		{"b", "fix-bug", "code"},   // never committed; both paths return zero
-		{"c", "fix-bug", "code"},   // only a session-start; both paths return zero
+		{"b", "fix-bug", "code"}, // never committed; both paths return zero
+		{"c", "fix-bug", "code"}, // only a session-start; both paths return zero
 		{"never", "nope", "design"},
 	}
 	for _, tc := range cases {
