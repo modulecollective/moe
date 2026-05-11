@@ -13,6 +13,8 @@ There is no background worker, no TUI, no dashboard that updates on its
 own. Agents act only when you invoke a command. The UX problem is
 **prioritization and resumption**, not real-time updates.
 
+![MoE dashboard — open runs and backlog](docs/dash.png)
+
 ---
 
 ## At a glance
