@@ -3,11 +3,11 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -190,11 +190,7 @@ func TestCommitReflectTurnStagesCanvas(t *testing.T) {
 		t.Fatalf("commitReflectTurn: %v", err)
 	}
 
-	out, err := exec.Command("git", "-C", root, "show", "--name-only", "--pretty=", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("git show: %v", err)
-	}
-	names := string(out)
+	names := gittest.Output(t, root, "show", "--name-only", "--pretty=", "HEAD")
 	for _, want := range []string{
 		canvasRel,
 		filepath.Join(wikiRel, "vision.md"),

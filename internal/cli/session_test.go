@@ -3,12 +3,12 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -18,30 +18,12 @@ import (
 // self-contained.
 func newSessionTestRoot(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[user]\n\temail=t@example.com\n\tname=T\n[init]\n\tdefaultBranch=main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	root := t.TempDir()
+	gittest.InitAt(t, root)
 	// The ambient $MOE_HOME (from the developer's shell) would steer
 	// bureaucracy.Find at the real repo instead of this temp one. Clear it.
 	t.Setenv(bureaucracy.EnvHome, "")
-
-	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.Commit(t, root, "seed")
 	// Plant the bureaucracy marker so findRoot's Find succeeds when
 	// the CLI subcommand runs against it via chdir.
 	if err := os.WriteFile(filepath.Join(root, "bureaucracy.conf"), nil, 0o644); err != nil {

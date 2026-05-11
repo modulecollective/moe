@@ -3,12 +3,12 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // seedProject writes a minimal project.json so the project-registered
@@ -26,14 +26,8 @@ func seedProject(t *testing.T, root, projectID string) {
 		[]byte(`{"id":"`+projectID+`"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	addCmd := exec.Command("git", "-C", root, "add", "-A")
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	commit := exec.Command("git", "-C", root, "commit", "-m", "register project "+projectID)
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "register project "+projectID)
 }
 
 // stubEditor points EDITOR at `true` — a no-op that exits 0 — so
@@ -174,12 +168,8 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("working tree should be clean after capture, got:\n%v", entries)
 	}
-	show := exec.Command("git", "-C", root, "show", "HEAD:projects/tele/runs/with-body/documents/idea/content.md")
-	shown, err := show.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git show: %v\n%s", err, shown)
-	}
-	if !strings.Contains(string(shown), "added by editor") {
+	shown := gittest.Output(t, root, "show", "HEAD:projects/tele/runs/with-body/documents/idea/content.md")
+	if !strings.Contains(shown, "added by editor") {
 		t.Fatalf("HEAD version missing editor edit:\n%s", shown)
 	}
 }
@@ -926,10 +916,5 @@ func fakeClaudeOnPath(t *testing.T, script string) {
 // gitLog runs `git -C root log <args>` and returns its stdout.
 func gitLog(t *testing.T, root string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", root, "log"}, args...)...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git log: %v\n%s", err, out)
-	}
-	return string(out)
+	return gittest.Output(t, root, append([]string{"log"}, args...)...)
 }

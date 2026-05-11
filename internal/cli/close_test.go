@@ -3,11 +3,11 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -20,14 +20,8 @@ func seedCloseFixture(t *testing.T, projectID, runID, workflow, status string) s
 	t.Helper()
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	addCmd := exec.Command("git", "-C", root, "add", "bureaucracy.conf")
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	commit := exec.Command("git", "-C", root, "commit", "-m", "mark bureaucracy")
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "add", "bureaucracy.conf")
+	gittest.Run(t, root, "commit", "-m", "mark bureaucracy")
 	seedRun(t, root, projectID, runID, workflow, status)
 	return root
 }
@@ -459,7 +453,7 @@ func addDocEntryAndCommit(t *testing.T, root, projectID, runID, docID, body stri
 		t.Fatalf("run.Save: %v", err)
 	}
 	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
-	addArgs := []string{"-C", root, "add", runJSONRel}
+	addArgs := []string{"add", runJSONRel}
 	if body != "" {
 		canvasRel := run.ContentPath(projectID, runID, docID)
 		canvasAbs := filepath.Join(root, canvasRel)
@@ -471,13 +465,8 @@ func addDocEntryAndCommit(t *testing.T, root, projectID, runID, docID, body stri
 		}
 		addArgs = append(addArgs, canvasRel)
 	}
-	if out, err := exec.Command("git", addArgs...).CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	commit := exec.Command("git", "-C", root, "commit", "-m", "register "+docID+" on "+runID)
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, addArgs...)
+	gittest.Run(t, root, "commit", "-m", "register "+docID+" on "+runID)
 }
 
 // TestSDLCCloseRefusesEmptyDesignCanvas: a registered design document

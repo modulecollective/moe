@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
@@ -118,19 +119,8 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	if err := os.MkdirAll(sandboxDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"init", "-b", "develop"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", sandboxDir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
+	gittest.Run(t, sandboxDir, "init", "-b", "develop")
+	gittest.Run(t, sandboxDir, "commit", "--allow-empty", "-m", "seed")
 	wantBase, err := git.RevParse(sandboxDir, "HEAD")
 	if err != nil {
 		t.Fatalf("rev-parse sandbox HEAD: %v", err)

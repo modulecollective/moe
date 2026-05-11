@@ -3,11 +3,11 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -502,15 +502,8 @@ func TestIdeaCloseDoesNotHarvestFollowups(t *testing.T) {
 
 	// Idea close ignores followups; we have to commit the file to keep
 	// the (strict) clean-tree gate happy.
-	addCmd := exec.Command("git", "-C", root, "add",
-		run.FollowupsPath("tele", "plain"))
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	commit := exec.Command("git", "-C", root, "commit", "-m", "stage followups for test")
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "add", run.FollowupsPath("tele", "plain"))
+	gittest.Run(t, root, "commit", "-m", "stage followups for test")
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "close", "tele", "plain"}, &out, &errb)

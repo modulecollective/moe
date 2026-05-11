@@ -36,11 +36,7 @@ func commitWorkTurnAt(t *testing.T, root, projectID, runID, workflow, docID stri
 	trailers := fmt.Sprintf("MoE-Run: %s\nMoE-Project: %s\nMoE-Workflow: %s\nMoE-Document: %s",
 		runID, projectID, workflow, docID)
 	commitTrailer(t, root, "work: update "+docID, trailers, when)
-	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("git rev-parse: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.HeadSHA(t, root)
 }
 
 func commitTrailer(t *testing.T, root, subject, trailers string, when time.Time) {
@@ -447,11 +443,7 @@ func TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 	}
 
 	// And HEAD should only mention run.json, not stray.txt.
-	diff, err := exec.Command("git", "-C", root, "show", "--name-only", "--pretty=", "HEAD").CombinedOutput()
-	if err != nil {
-		t.Fatalf("git show: %v\n%s", err, diff)
-	}
-	names := strings.TrimSpace(string(diff))
+	names := gittest.Output(t, root, "show", "--name-only", "--pretty=", "HEAD")
 	wantPath := filepath.Join("projects", "tele", "runs", "fix-it", "run.json")
 	if names != wantPath {
 		t.Errorf("HEAD files = %q, want %q", names, wantPath)
@@ -845,12 +837,9 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	}
 	// closeSess should have torn the session worktree down — otherwise
 	// every aborted bootstrap leaks a worktree directory plus branch.
-	out, err := exec.Command("git", "-C", root, "worktree", "list").CombinedOutput()
-	if err != nil {
-		t.Fatalf("git worktree list: %v\n%s", err, out)
-	}
+	out := gittest.Output(t, root, "worktree", "list")
 	branch := "session/moe/bootstrap-fail/design"
-	if strings.Contains(string(out), branch) {
+	if strings.Contains(out, branch) {
 		t.Errorf("worktree for %s still present, closeSess did not run:\n%s", branch, out)
 	}
 }
@@ -903,11 +892,7 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 // reimplement the exec.Command plumbing.
 func gitLogFormat(t *testing.T, root string, n int, rev, format string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", root, "log", fmt.Sprintf("-n%d", n), "--format="+format, rev).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git log: %v\n%s", err, out)
-	}
-	return strings.TrimRight(string(out), "\n")
+	return gittest.Output(t, root, "log", fmt.Sprintf("-n%d", n), "--format="+format, rev)
 }
 
 // registerThrowawayWorkflow adds a one-off workflow to the package

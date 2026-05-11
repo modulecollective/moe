@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 func noEnv(string) string { return "" }
@@ -80,14 +82,7 @@ func TestFindErrorsWhenMoeHomeLacksMarker(t *testing.T) {
 }
 
 func TestInitScaffoldsAndCommits(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	os.WriteFile(cfg, []byte("[user]\n\temail = t@example.com\n\tname = T\n[init]\n\tdefaultBranch = main\n"), 0o644)
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
+	gittest.SetupEnv(t)
 	dir := t.TempDir()
 	if err := Init(dir, ""); err != nil {
 		t.Fatal(err)
@@ -114,13 +109,7 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 	if err := cmd.Run(); err == nil {
 		t.Errorf("expected HEAD to be unborn after init, but it resolved")
 	}
-	cmd = exec.Command("git", "diff", "--cached", "--name-only")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("diff --cached: %v\n%s", err, out)
-	}
-	staged := strings.TrimSpace(string(out))
+	staged := gittest.Output(t, dir, "diff", "--cached", "--name-only")
 	for _, want := range []string{"bureaucracy.conf", "projects/.gitkeep"} {
 		if !strings.Contains(staged, want) {
 			t.Errorf("staged set missing %s:\n%s", want, staged)
@@ -132,14 +121,7 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 }
 
 func TestInitWritesMoeGitignore(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	os.WriteFile(cfg, []byte("[user]\n\temail = t@example.com\n\tname = T\n[init]\n\tdefaultBranch = main\n"), 0o644)
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
+	gittest.SetupEnv(t)
 	dir := t.TempDir()
 	if err := Init(dir, ""); err != nil {
 		t.Fatal(err)
@@ -162,26 +144,13 @@ func TestInitRefusesExistingMarker(t *testing.T) {
 }
 
 func TestInitSetsRemote(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	os.WriteFile(cfg, []byte("[user]\n\temail = t@example.com\n\tname = T\n[init]\n\tdefaultBranch = main\n"), 0o644)
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
+	gittest.SetupEnv(t)
 	dir := t.TempDir()
 	if err := Init(dir, "git@example.com:me/b.git"); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("remote get-url: %v\n%s", err, out)
-	}
-	if strings.TrimSpace(string(out)) != "git@example.com:me/b.git" {
-		t.Errorf("origin=%q", out)
+	if got := gittest.Output(t, dir, "remote", "get-url", "origin"); got != "git@example.com:me/b.git" {
+		t.Errorf("origin=%q", got)
 	}
 }
 

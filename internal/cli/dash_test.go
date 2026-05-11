@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
@@ -49,10 +49,7 @@ func seedRun(t *testing.T, root, projectID, runID, workflow, status string) *run
 	// Commit it so git log --grep=MoE-Run finds the run at all.
 	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
 	projectJSONRel := filepath.Join("projects", projectID, "project.json")
-	addCmd := exec.Command("git", "-C", root, "add", runJSONRel, projectJSONRel)
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
+	gittest.Run(t, root, "add", runJSONRel, projectJSONRel)
 	commitTrailer(t, root, "Open run "+projectID+"/"+runID+": T",
 		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, time.Time{})
 	return md
@@ -828,11 +825,8 @@ func seedTwinSession(t *testing.T, root, projectID, slug, docID string, when tim
 		t.Fatal(err)
 	}
 	f.Close()
-	addCmd := exec.Command("git", "-C", root, "add",
+	gittest.Run(t, root, "add",
 		filepath.Join("projects", projectID, "digital-twin", "log.md"))
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
 	trailers := fmt.Sprintf("MoE-Run: %s\nMoE-Project: %s\nMoE-Workflow: twin\nMoE-Document: %s",
 		slug, projectID, docID)
 	commitTrailer(t, root, "twin: "+slug, trailers, when)

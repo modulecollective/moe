@@ -88,11 +88,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 	writeFile(t, filepath.Join(clonePath, "feature.txt"), "hello\n")
 	gittest.Run(t, clonePath, "add", "feature.txt")
 	gittest.Run(t, clonePath, "commit", "-m", "add feature")
-	tip, err := exec.Command("git", "-C", clonePath, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tipSHA := strings.TrimSpace(string(tip))
+	tipSHA := gittest.HeadSHA(t, clonePath)
 
 	return &pushFixture{
 		t:         t,
@@ -109,18 +105,14 @@ func newPushFixture(t *testing.T) *pushFixture {
 // originHasRef reports whether the bare origin has a given ref.
 func (f *pushFixture) originHasRef(ref string) bool {
 	f.t.Helper()
-	err := exec.Command("git", "-C", f.origin, "rev-parse", "--verify", "--quiet", ref).Run()
-	return err == nil
+	cmd := exec.Command("git", "-C", f.origin, "rev-parse", "--verify", "--quiet", ref)
+	return cmd.Run() == nil
 }
 
 // originHead returns the SHA at origin's main.
 func (f *pushFixture) originHead() string {
 	f.t.Helper()
-	out, err := exec.Command("git", "-C", f.origin, "rev-parse", "main").Output()
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.Output(f.t, f.origin, "rev-parse", "main")
 }
 
 // reloadRun returns the run's on-disk metadata — tests check it as a
@@ -194,7 +186,7 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	gittest.Run(t, work, "add", "other.txt")
 	gittest.Run(t, work, "commit", "-m", "divergent")
 	gittest.Run(t, work, "push", "origin", "main")
-	movedBaseSHA := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
+	movedBaseSHA := gittest.HeadSHA(t, work)
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {
@@ -209,7 +201,7 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	// SHA — the rebase rewrote the run commit — but we do assert the
 	// merge happened (run flipped to merged, sandbox gone, branch deleted)
 	// and the divergent commit is still in origin's history.
-	headOut := strings.TrimSpace(mustGitOutput(t, "", "-C", f.origin, "rev-parse", "main"))
+	headOut := gittest.Output(t, f.origin, "rev-parse", "main")
 	if headOut == movedBaseSHA {
 		t.Fatalf("origin/main should have advanced past the divergent commit after the rebased ff-push, still at %s", movedBaseSHA)
 	}
@@ -244,7 +236,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	gittest.Run(t, work, "add", "feature.txt")
 	gittest.Run(t, work, "commit", "-m", "default-side feature")
 	gittest.Run(t, work, "push", "origin", "main")
-	movedHead := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
+	movedHead := gittest.HeadSHA(t, work)
 
 	// Stub the chain-back: capture the conflict context, do not actually
 	// launch Claude (the test process has no terminal/agent).
@@ -1180,18 +1172,4 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 	if strings.Contains(stdout, "running pre-push hook ") || strings.Contains(stderr, "running pre-push hook ") {
 		t.Fatalf("no scripts to run, but saw 'running pre-push hook' in output:\n%s\n%s", stdout, stderr)
 	}
-}
-
-// mustGitOutput runs git and returns its stdout, failing the test on error.
-func mustGitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
-	}
-	return string(out)
 }

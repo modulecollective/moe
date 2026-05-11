@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,20 +76,12 @@ func (f *syncFixture) advanceOrigin(id, branch, content string) string {
 	gittest.Run(f.t, work, "add", "change.txt")
 	gittest.Run(f.t, work, "commit", "-m", "advance")
 	gittest.Run(f.t, work, "push", "origin", branch)
-	out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
-	if err != nil {
-		f.t.Fatalf("rev-parse: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.HeadSHA(f.t, work)
 }
 
 func (f *syncFixture) bureaucracyHead() string {
 	f.t.Helper()
-	out, err := exec.Command("git", "-C", f.root, "rev-parse", "HEAD").Output()
-	if err != nil {
-		f.t.Fatalf("rev-parse: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.HeadSHA(f.t, f.root)
 }
 
 func (f *syncFixture) gitlink(subPath string) string {
@@ -343,11 +334,8 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 	}
 
 	// The sync commit should touch only the submodule gitlink, not scratch.txt.
-	out, err := exec.Command("git", "-C", f.root, "show", "--name-only", "--format=", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	touched := strings.Fields(strings.TrimSpace(string(out)))
+	out := gittest.Output(t, f.root, "show", "--name-only", "--format=", "HEAD")
+	touched := strings.Fields(out)
 	if len(touched) != 1 || touched[0] != "projects/proj/src" {
 		t.Fatalf("sync commit touched unexpected paths: %v", touched)
 	}
@@ -578,9 +566,5 @@ func writeFile(t *testing.T, path, content string) {
 
 func lastCommitMessage(t *testing.T, root string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", root, "log", "-1", "--format=%B").Output()
-	if err != nil {
-		t.Fatalf("git log: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.Output(t, root, "log", "-1", "--format=%B")
 }
