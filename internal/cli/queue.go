@@ -267,10 +267,10 @@ func queueItemPreview(root string, it queue.Item) string {
 	if err != nil {
 		return fmt.Sprintf("(will drop: %v)", err)
 	}
-	if kind != NextKindStage || next == nil {
+	if kind != NextKindStage || next == "" {
 		return "next: (none — at merge gate)"
 	}
-	return "next: " + next.Name
+	return "next: " + next
 }
 
 // queueDispatchOpts controls how the walker drives each item.

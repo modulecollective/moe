@@ -7,14 +7,110 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+// Workflow is the stage DAG for a run-bearing verb. It owns three
+// things: the ordered stage list, the prereq edges, and the
+// satisfaction walk (Next). Dispatch lives separately in a paired
+// CommandGroup — Workflow holds only stage *names*, never *Command
+// pointers, so the DAG is decoupled from the dispatch table. The
+// three-part test for whether a verb deserves a Workflow is:
+//
+//  1. owns canvas documents (one per stage)
+//  2. has a stage ladder Next can walk
+//  3. shows up in `moe dash`
+//
+// Verbs that miss any leg of the test (queue, project, session, twin)
+// live as plain CommandGroups; they have no Workflow at all.
+type Workflow struct {
+	Name       string
+	stageOrder []string
+	prereqs    map[string][]string
+	// successors is the inverse of prereqs, computed at RegisterStage
+	// time. A stage's successor is any stage that names it as a prereq;
+	// stageSatisfied uses this to walk forward (a stage stays "parked"
+	// until something downstream commits a fresher turn). The chain
+	// prompt asks Successor(stage) for the DAG-level "what's next?"
+	// answer, decoupled from Next()'s git-derived satisfaction walk.
+	successors map[string][]string
+}
+
+// NewWorkflow constructs an empty workflow. Callers add stages with
+// RegisterStage and then hand the workflow to RegisterWorkflow.
+func NewWorkflow(name string) *Workflow {
+	return &Workflow{
+		Name:       name,
+		prereqs:    map[string][]string{},
+		successors: map[string][]string{},
+	}
+}
+
+// RegisterStage adds a stage name to this workflow's ladder. Panics on
+// duplicate names — same contract the dispatcher uses. Optional prereq
+// stage names record that this stage's satisfaction depends on those
+// stages' latest work turns; the list is consumed by Next,
+// upstreamChangeBanner (stage session), and checkStaleness (push).
+//
+// The stage name is the document id under projects/<p>/runs/<r>/documents/.
+// Whether the name is also a typed verb on the workflow's paired
+// CommandGroup is a separate question — the workflow doesn't know or
+// care. (idea is the example: stage name "idea" lives in the DAG but
+// no `moe idea idea` verb is registered.)
+func (w *Workflow) RegisterStage(name string, prereqs ...string) {
+	for _, s := range w.stageOrder {
+		if s == name {
+			panic("cli: duplicate stage " + w.Name + " " + name)
+		}
+	}
+	w.stageOrder = append(w.stageOrder, name)
+	if len(prereqs) > 0 {
+		w.prereqs[name] = append([]string(nil), prereqs...)
+		for _, p := range prereqs {
+			w.successors[p] = append(w.successors[p], name)
+		}
+	}
+}
+
+// Stages returns the registered stage names in registration order.
+func (w *Workflow) Stages() []string {
+	out := make([]string, len(w.stageOrder))
+	copy(out, w.stageOrder)
+	return out
+}
+
+// Prereqs returns the prereq stage names for stage, or nil if stage has
+// none (or isn't part of this workflow).
+func (w *Workflow) Prereqs(stage string) []string {
+	return w.prereqs[stage]
+}
+
+// Successor returns the stage name that has stage as a prereq, or ""
+// for unknown stages and stages with no successor (the terminal stage
+// in a linear ladder). Pure DAG lookup — no git involved. The chain
+// prompt uses this to ask "what's next after the stage I just
+// finished?" without going through Next()'s satisfaction walk: under
+// the forward-walking rule Next() reports the just-finished stage as
+// parked, which is the wrong answer.
+//
+// Today every workflow's DAG is linear (one successor per stage), so
+// the first registered successor is the right answer; the
+// implementation returns "" if none exist. If a future workflow adds a
+// fan-out, callers will need to choose between successors — surface
+// the design question then rather than inventing one here.
+func (w *Workflow) Successor(stage string) string {
+	succs := w.successors[stage]
+	if len(succs) == 0 {
+		return ""
+	}
+	return succs[0]
+}
+
 // NextKind enumerates what Workflow.Next decided about a run's next move.
 type NextKind int
 
 const (
-	// NextKindStage means the returned Command is the next incomplete stage.
+	// NextKindStage means the returned name is the next incomplete stage.
 	NextKindStage NextKind = iota
 	// NextKindDone means every stage is satisfied (or the run is
-	// already past its final stage). The returned Command is nil.
+	// already past its final stage). The returned name is "".
 	NextKindDone
 )
 
@@ -36,21 +132,25 @@ const (
 // to the next one. Re-opens (a fresh design turn after code) still
 // flip the run back to the affected stage by the same rule, since
 // the stale stage now has a successor whose turn is older.
-func (w *Workflow) Next(root string, md *run.Metadata) (*Command, NextKind, error) {
+//
+// Returns the stage name, not a *Command — the caller looks up the
+// command via LookupGroup(md.Workflow).Lookup(stage) when it needs to
+// invoke one.
+func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error) {
 	switch md.Status {
 	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		return nil, NextKindDone, nil
+		return "", NextKindDone, nil
 	}
 	for _, stage := range w.stageOrder {
 		satisfied, err := w.stageSatisfied(root, md, stage)
 		if err != nil {
-			return nil, 0, err
+			return "", 0, err
 		}
 		if !satisfied {
-			return w.commands[stage], NextKindStage, nil
+			return stage, NextKindStage, nil
 		}
 	}
-	return nil, NextKindDone, nil
+	return "", NextKindDone, nil
 }
 
 func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (bool, error) {

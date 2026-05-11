@@ -398,10 +398,10 @@ func stateForActive(root string, md *run.Metadata) string {
 		return md.Workflow
 	}
 	next, kind, err := wf.Next(root, md)
-	if err != nil || kind != NextKindStage || next == nil {
+	if err != nil || kind != NextKindStage || next == "" {
 		return md.Workflow
 	}
-	return md.Workflow + ":" + next.Name
+	return md.Workflow + ":" + next
 }
 
 // idleLine renders the one-line idle status that lands on stderr when

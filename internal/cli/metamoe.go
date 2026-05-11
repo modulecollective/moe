@@ -33,9 +33,9 @@ const metaMoeWorkflow = "meta-moe"
 const metaMoeReportDoc = "report"
 
 func init() {
-	wf := NewWorkflow(metaMoeWorkflow, "meta-moe workflow: new, report")
-	wf.RegisterFacade(newRunCommand(metaMoeWorkflow))
-	wf.Register(&Command{
+	g := NewCommandGroup(metaMoeWorkflow, "meta-moe workflow: new, report")
+	g.Register(newRunCommand(metaMoeWorkflow))
+	g.Register(&Command{
 		Name:    metaMoeReportDoc,
 		Summary: "open a Claude Code session on the run's report canvas; publishes to projects/<p>/meta-moe.md on commit",
 		Run:     runMetaMoeReport,
@@ -44,9 +44,12 @@ func init() {
 	// branch (NeedsSandbox: false below), so the shared close skeleton
 	// has nothing to clean up — pass nil and ride the standard
 	// state-guard / harvest / status-flip path.
-	wf.RegisterFacade(closeCommand(metaMoeWorkflow, "Close meta-moe run %s/%s", nil))
-	RegisterWorkflow(wf)
-	Register(wf.Command())
+	g.Register(closeCommand(metaMoeWorkflow, "Close meta-moe run %s/%s", nil))
+	RegisterGroup(g)
+
+	w := NewWorkflow(metaMoeWorkflow)
+	w.RegisterStage(metaMoeReportDoc)
+	RegisterWorkflow(w)
 }
 
 func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {

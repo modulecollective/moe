@@ -111,8 +111,8 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		dec := dash.NextDecision{Done: kind == NextKindDone}
-		if next != nil {
-			dec.Stage = next.Name
+		if next != "" {
+			dec.Stage = next
 		}
 		nextByRun[md.ID] = dec
 	}

@@ -15,12 +15,15 @@ import (
 // TestKBRegistered: init() ordering or registration drift silently
 // dropping the quick workflow would break dispatch.
 func TestQuickRegistered(t *testing.T) {
-	wf, err := LookupWorkflow("quick")
+	if _, err := LookupWorkflow("quick"); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LookupGroup("quick")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wf.Summary == "" {
-		t.Fatal("quick workflow summary should not be empty")
+	if g.Summary == "" {
+		t.Fatal("quick group summary should not be empty")
 	}
 	var out, errb bytes.Buffer
 	code := Run([]string{"quick"}, &out, &errb)
@@ -77,8 +80,8 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("no turns: expected stage code, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("no turns: expected stage code, got kind=%v name=%q", kind, next)
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
@@ -87,8 +90,8 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%q", kind, next)
 	}
 
 	// Push is terminal via status flip, not a work turn — mirror runPush.

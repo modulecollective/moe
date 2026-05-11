@@ -52,27 +52,31 @@ func kbWikiBuilder(root string, md *run.Metadata) (*wiki.Config, error) {
 }
 
 func init() {
-	kb := NewWorkflow("kb", "knowledge-base workflow: new, research, summarize")
-	kb.RegisterFacade(newRunCommand("kb"))
-	kb.Register(&Command{
+	g := NewCommandGroup("kb", "knowledge-base workflow: new, research, summarize")
+	g.Register(newRunCommand("kb"))
+	g.Register(&Command{
 		Name:    "research",
 		Summary: "open a Claude Code session on the run's research bibliography",
 		Run:     runResearch,
 	})
-	kb.Register(&Command{
+	g.Register(&Command{
 		Name:    "summarize",
 		Summary: "open a Claude Code ingest session on the project's wiki",
 		Run:     runSummarize,
-	}, "research")
-	kb.RegisterFacade(closeCommand("kb", "Close kb run %s/%s", nil))
+	})
+	g.Register(closeCommand("kb", "Close kb run %s/%s", nil))
 	// Lint is out-of-band relative to runs (no stage, no canvas,
 	// no run.json), so it lives alongside `new` and `close` as a
-	// workflow facade. Reuses kbWikiBuilder so the lint and
-	// summarize sessions agree on the wiki's identity and on-disk
-	// shape.
-	kb.RegisterFacade(lintCommand("kb", kbLintWikiBuilder))
-	RegisterWorkflow(kb)
-	Register(kb.Command())
+	// non-stage group subcommand. Reuses kbWikiBuilder so the lint
+	// and summarize sessions agree on the wiki's identity and
+	// on-disk shape.
+	g.Register(lintCommand("kb", kbLintWikiBuilder))
+	RegisterGroup(g)
+
+	w := NewWorkflow("kb")
+	w.RegisterStage("research")
+	w.RegisterStage("summarize", "research")
+	RegisterWorkflow(w)
 }
 
 // kbLintWikiBuilder is the (root, projectID) → *wiki.Config adapter

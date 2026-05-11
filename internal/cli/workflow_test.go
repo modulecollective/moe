@@ -31,8 +31,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "design" {
-		t.Fatalf("no turns: expected stage design, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("no turns: expected stage design, got kind=%v name=%q", kind, next)
 	}
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
@@ -41,8 +41,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "design" {
-		t.Fatalf("after design (no code yet): expected stage design (parked), got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("after design (no code yet): expected stage design (parked), got kind=%v name=%q", kind, next)
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
@@ -50,8 +50,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%q", kind, next)
 	}
 
 	for _, terminal := range []string{run.StatusPushed, run.StatusMerged, run.StatusClosed} {
@@ -60,8 +60,8 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if kind != NextKindDone || next != nil {
-			t.Fatalf("after %s: expected done, got kind=%v name=%v", terminal, kind, nameOrNil(next))
+		if kind != NextKindDone || next != "" {
+			t.Fatalf("after %s: expected done, got kind=%v name=%q", terminal, kind, next)
 		}
 	}
 }
@@ -96,8 +96,8 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "design" {
-		t.Fatalf("re-opened design: expected stage design, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("re-opened design: expected stage design, got kind=%v name=%q", kind, next)
 	}
 
 	// Land a fresh code turn — design's successor is now newer than
@@ -107,8 +107,8 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("re-coded after re-design: expected stage code, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("re-coded after re-design: expected stage code, got kind=%v name=%q", kind, next)
 	}
 }
 
@@ -166,8 +166,8 @@ func TestWorkflowNextIgnoresOtherProjectSameSlug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "design" {
-		t.Fatalf("expected project b to start at design, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("expected project b to start at design, got kind=%v name=%q", kind, next)
 	}
 }
 
@@ -199,8 +199,8 @@ func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "code" {
-		t.Fatalf("session-start alone must not satisfy code, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("session-start alone must not satisfy code, got kind=%v name=%q", kind, next)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestWorkflowSuccessor(t *testing.T) {
 	}
 	cases := []struct {
 		stage string
-		want  string // "" means nil (no successor, or unknown stage)
+		want  string // "" means no successor or unknown stage
 	}{
 		{"design", "code"},
 		{"code", "push"},
@@ -225,21 +225,8 @@ func TestWorkflowSuccessor(t *testing.T) {
 		{"", ""},
 	}
 	for _, tc := range cases {
-		got := wf.Successor(tc.stage)
-		switch {
-		case tc.want == "" && got != nil:
-			t.Errorf("Successor(%q) = %q, want nil", tc.stage, got.Name)
-		case tc.want != "" && got == nil:
-			t.Errorf("Successor(%q) = nil, want %q", tc.stage, tc.want)
-		case tc.want != "" && got.Name != tc.want:
-			t.Errorf("Successor(%q) = %q, want %q", tc.stage, got.Name, tc.want)
+		if got := wf.Successor(tc.stage); got != tc.want {
+			t.Errorf("Successor(%q) = %q, want %q", tc.stage, got, tc.want)
 		}
 	}
-}
-
-func nameOrNil(c *Command) string {
-	if c == nil {
-		return "<nil>"
-	}
-	return c.Name
 }

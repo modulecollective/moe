@@ -230,18 +230,19 @@ func TestSdlcResumeInteractiveInvokesNextStage(t *testing.T) {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 
-	// Swap the design stage's Run for a recorder. workflow.commands[]
-	// is package-private state, so we mutate it directly and restore
-	// in cleanup.
-	wf, err := LookupWorkflow("sdlc")
+	// Swap the design stage's Run for a recorder. The group's
+	// commands map is package-private state; mutate directly and
+	// restore in cleanup. (Workflow no longer holds *Command pointers
+	// after the split — dispatch lives on CommandGroup.)
+	g, err := LookupGroup("sdlc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := wf.commands["design"]
-	t.Cleanup(func() { wf.commands["design"] = original })
+	original := g.commands["design"]
+	t.Cleanup(func() { g.commands["design"] = original })
 
 	var gotArgs []string
-	wf.commands["design"] = &Command{
+	g.commands["design"] = &Command{
 		Name: "design",
 		Run: func(args []string, _, _ io.Writer) int {
 			gotArgs = append([]string(nil), args...)

@@ -14,17 +14,21 @@ import (
 // workflow lives under projects/moe/runs/fix-workflow/.
 
 func init() {
-	quick := NewWorkflow("quick", "quick-fix workflow: new, code, push")
-	quick.RegisterFacade(newRunCommand("quick"))
-	quick.Register(&Command{
+	g := NewCommandGroup("quick", "quick-fix workflow: new, code, push")
+	g.Register(newRunCommand("quick"))
+	g.Register(&Command{
 		Name:    "code",
 		Summary: "open a Claude Code session on the run's code canvas (in a sandbox clone)",
 		Run:     runQuickCode,
 	})
-	quick.Register(pushCmd, "code")
-	quick.RegisterFacade(closeCommand("quick", "Close quick run %s/%s", releaseWorkspaceCleanup))
-	RegisterWorkflow(quick)
-	Register(quick.Command())
+	g.Register(pushCmd)
+	g.Register(closeCommand("quick", "Close quick run %s/%s", releaseWorkspaceCleanup))
+	RegisterGroup(g)
+
+	w := NewWorkflow("quick")
+	w.RegisterStage("code")
+	w.RegisterStage("push", "code")
+	RegisterWorkflow(w)
 }
 
 func runQuickCode(args []string, stdout, stderr io.Writer) int {

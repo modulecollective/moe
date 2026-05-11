@@ -13,12 +13,15 @@ import (
 // against init() ordering / registration drift silently dropping the
 // kb workflow's top-level entry.
 func TestKBRegistered(t *testing.T) {
-	wf, err := LookupWorkflow("kb")
+	if _, err := LookupWorkflow("kb"); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LookupGroup("kb")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wf.Summary == "" {
-		t.Fatal("kb workflow summary should not be empty")
+	if g.Summary == "" {
+		t.Fatal("kb group summary should not be empty")
 	}
 	var out, errb bytes.Buffer
 	code := Run([]string{"kb"}, &out, &errb)
@@ -116,8 +119,8 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "research" {
-		t.Fatalf("no turns: expected stage research, got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "research" {
+		t.Fatalf("no turns: expected stage research, got kind=%v name=%q", kind, next)
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
@@ -126,8 +129,8 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next.Name != "research" {
-		t.Fatalf("after research (no summarize yet): expected stage research (parked), got kind=%v name=%v", kind, nameOrNil(next))
+	if kind != NextKindStage || next != "research" {
+		t.Fatalf("after research (no summarize yet): expected stage research (parked), got kind=%v name=%q", kind, next)
 	}
 
 	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))

@@ -13,12 +13,15 @@ import (
 // TestMetaMoeRegistered partners with TestSDLCRegistered: a registration
 // drift in init() ordering would silently drop the meta-moe workflow.
 func TestMetaMoeRegistered(t *testing.T) {
-	wf, err := LookupWorkflow(metaMoeWorkflow)
+	if _, err := LookupWorkflow(metaMoeWorkflow); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LookupGroup(metaMoeWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wf.Summary == "" {
-		t.Fatal("meta-moe workflow summary should not be empty")
+	if g.Summary == "" {
+		t.Fatal("meta-moe group summary should not be empty")
 	}
 	var out, errb bytes.Buffer
 	code := Run([]string{metaMoeWorkflow}, &out, &errb)

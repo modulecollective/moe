@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -938,9 +937,8 @@ func gitLogFormat(t *testing.T, root string, n int, rev, format string) string {
 func registerThrowawayWorkflow(t *testing.T, suffix string) *Workflow {
 	t.Helper()
 	name := "test-" + suffix + "-" + strings.ReplaceAll(t.Name(), "/", "-")
-	wf := NewWorkflow(name, "test workflow")
-	noop := func(args []string, stdout, stderr io.Writer) int { return 0 }
-	wf.Register(&Command{Name: "ghost", Summary: "no fragment on disk", Run: noop})
+	wf := NewWorkflow(name)
+	wf.RegisterStage("ghost")
 	RegisterWorkflow(wf)
 	return wf
 }

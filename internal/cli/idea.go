@@ -40,65 +40,43 @@ const ideaWorkflow = "idea"
 const ideaDocID = "idea"
 
 func init() {
-	Register(&Command{
-		Name:    "idea",
-		Summary: "idea workflow: new, edit, close, list, cat",
-		Run:     runIdea,
+	g := NewCommandGroup("idea", "idea workflow: new, edit, close, list, cat")
+	g.Register(&Command{
+		Name:    "new",
+		Summary: "capture a new idea (opens $EDITOR, or --chat for Claude Code)",
+		Run:     runIdeaNew,
 	})
+	g.Register(&Command{
+		Name:    "edit",
+		Summary: "refine a captured idea ($EDITOR, or --chat for Claude Code)",
+		Run:     runIdeaEdit,
+	})
+	g.Register(&Command{
+		Name:    "close",
+		Summary: "close a captured idea without promoting (status → closed)",
+		Run:     runIdeaClose,
+	})
+	g.Register(&Command{
+		Name:    "list",
+		Summary: "list this project's open ideas",
+		Run:     runIdeaList,
+	})
+	g.Register(&Command{
+		Name:    "cat",
+		Summary: "dump an idea's canvas to stdout",
+		Run:     runIdeaCat,
+	})
+	RegisterGroup(g)
 
 	// Register the idea workflow so run.Load, dash lookup, and
-	// --from-idea's wf.Stages() all resolve it. The single stage is
-	// kept as a defensive stub; the operator-facing verbs are the
-	// runIdea* handlers wired into the top-level `moe idea` Command
-	// above.
-	wf := NewWorkflow(ideaWorkflow, "idea workflow: new, edit, close, list, cat")
-	wf.Register(&Command{
-		Name:    ideaDocID,
-		Summary: "idea canvas (use `moe idea edit` instead of invoking directly)",
-		Hidden:  true, // kept in stageOrder for Workflow.Next; hidden from usage
-		Run: func(args []string, stdout, stderr io.Writer) int {
-			moePrintln(stderr, "idea runs are driven via `moe idea` — try `moe idea edit <project> <slug>`")
-			return 2
-		},
-	})
-	RegisterWorkflow(wf)
-}
-
-func runIdea(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		printIdeaUsage(stdout)
-		return 0
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		printIdeaUsage(stdout)
-		return 0
-	case "new":
-		return runIdeaNew(args[1:], stdout, stderr)
-	case "edit":
-		return runIdeaEdit(args[1:], stdout, stderr)
-	case "close":
-		return runIdeaClose(args[1:], stdout, stderr)
-	case "list":
-		return runIdeaList(args[1:], stdout, stderr)
-	case "cat":
-		return runIdeaCat(args[1:], stdout, stderr)
-	default:
-		moePrintf(stderr, "unknown idea subcommand %q\n", args[0])
-		printIdeaUsage(stderr)
-		return 1
-	}
-}
-
-func printIdeaUsage(w io.Writer) {
-	moePrintln(w, "usage: moe idea <subcommand> [args...]")
-	moePrintln(w, "")
-	moePrintln(w, "subcommands:")
-	moePrintf(w, "  %-14s  %s\n", "new", "capture a new idea (opens $EDITOR, or --chat for Claude Code)")
-	moePrintf(w, "  %-14s  %s\n", "edit", "refine a captured idea ($EDITOR, or --chat for Claude Code)")
-	moePrintf(w, "  %-14s  %s\n", "close", "close a captured idea without promoting (status → closed)")
-	moePrintf(w, "  %-14s  %s\n", "list", "list this project's open ideas")
-	moePrintf(w, "  %-14s  %s\n", "cat", "dump an idea's canvas to stdout")
+	// --from-idea's wf.Stages() all resolve it. The single stage name
+	// `idea` lives in the DAG without a matching `moe idea idea` verb
+	// — operator-facing verbs (new/edit/close/list/cat) are group
+	// subcommands above. wf.Next reporting "idea" is fine: no chain
+	// prompt or resume path ever reaches the idea workflow today.
+	w := NewWorkflow(ideaWorkflow)
+	w.RegisterStage(ideaDocID)
+	RegisterWorkflow(w)
 }
 
 func runIdeaNew(args []string, stdout, stderr io.Writer) int {

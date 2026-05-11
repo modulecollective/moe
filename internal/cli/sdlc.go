@@ -18,32 +18,37 @@ import (
 // point that creates a run in this workflow.
 
 func init() {
-	sdlc := NewWorkflow("sdlc", "sdlc workflow: new, design, code, push")
-	sdlc.RegisterFacade(newRunCommand("sdlc"))
-	sdlc.Register(&Command{
+	g := NewCommandGroup("sdlc", "sdlc workflow: new, design, code, push")
+	g.Register(newRunCommand("sdlc"))
+	g.Register(&Command{
 		Name:    "design",
 		Summary: "open a Claude Code session on the run's design document",
 		Run:     runDesign,
 	})
-	sdlc.Register(&Command{
+	g.Register(&Command{
 		Name:    "code",
 		Summary: "open a Claude Code session on the run's code document (in a sandbox clone)",
 		Run:     runCode,
-	}, "design")
-	sdlc.Register(pushCmd, "code")
-	sdlc.RegisterFacade(&Command{
+	})
+	g.Register(pushCmd)
+	g.Register(&Command{
 		Name:    "shell",
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
 		Run:     runShell,
 	})
-	sdlc.RegisterFacade(closeCommand("sdlc", "Close sdlc run %s/%s", releaseWorkspaceCleanup))
-	sdlc.RegisterFacade(&Command{
+	g.Register(closeCommand("sdlc", "Close sdlc run %s/%s", releaseWorkspaceCleanup))
+	g.Register(&Command{
 		Name:    "resume",
 		Summary: "drive any pending stages of an opened run headlessly, then prompt at the merge gate",
 		Run:     runResume,
 	})
-	RegisterWorkflow(sdlc)
-	Register(sdlc.Command())
+	RegisterGroup(g)
+
+	w := NewWorkflow("sdlc")
+	w.RegisterStage("design")
+	w.RegisterStage("code", "design")
+	w.RegisterStage("push", "code")
+	RegisterWorkflow(w)
 }
 
 func runDesign(args []string, stdout, stderr io.Writer) int {
@@ -202,7 +207,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	next, kind, err := wf.Next(root, md)
+	nextStage, kind, err := wf.Next(root, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -212,8 +217,8 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		// Headless chain. push (or NextKindDone) skips both stages and
 		// hands straight to the merge-gate prompt.
 		startStage := ""
-		if kind == NextKindStage && next != nil {
-			startStage = next.Name
+		if kind == NextKindStage {
+			startStage = nextStage
 		}
 		return runOneShotChain(root, md, startStage, stdout, stderr)
 	}
@@ -221,7 +226,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	// Interactive mode: invoke the next stage interactively. Its
 	// post-stage [Y/n/o] / [N/m/p] prompt drives the rest of the chain
 	// — same behaviour the operator gets today after a stage exits.
-	if kind != NextKindStage || next == nil {
+	if kind != NextKindStage || nextStage == "" {
 		// Defensive: under the forward-walking satisfaction rule,
 		// Next() returns the parked stage rather than NextKindDone for
 		// any non-terminal in_progress run, and resume already refuses
@@ -231,7 +236,17 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		// turns at all and a workflow with no stages) doesn't panic.
 		return promptNextStage(root, md, "", stdout, stderr)
 	}
-	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+	g, err := LookupGroup(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	cmd := g.Lookup(nextStage)
+	if cmd == nil {
+		moePrintf(stderr, "sdlc resume: workflow %s has no command for stage %q\n", md.Workflow, nextStage)
+		return 1
+	}
+	return cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 }
 
 // requireRun fails the stage entry point fast when the run doesn't

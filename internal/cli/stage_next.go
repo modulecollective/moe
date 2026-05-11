@@ -35,10 +35,10 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	var next *Command
+	var stage string
 	if justFinished != "" {
-		next = wf.Successor(justFinished)
-		if next == nil {
+		stage = wf.Successor(justFinished)
+		if stage == "" {
 			return 0
 		}
 	} else {
@@ -47,10 +47,23 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		if kind != NextKindStage || n == nil {
+		if kind != NextKindStage || n == "" {
 			return 0
 		}
-		next = n
+		stage = n
+	}
+	g, err := LookupGroup(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	next := g.Lookup(stage)
+	if next == nil {
+		// Workflow tracks the stage but the group has no matching
+		// command (idea is the case today). Treat the same as "no
+		// runnable next" — print the stage hint and return.
+		moePrintf(stdout, "next: %s %s (no runnable command)\n", wf.Name, stage)
+		return 0
 	}
 	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
