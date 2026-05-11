@@ -1,11 +1,12 @@
 package wiki
 
 import (
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 func TestScanClosedSchema(t *testing.T) {
@@ -141,11 +142,11 @@ func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
 	// trailer (recorded). vision.md's latest commit doesn't (operator
 	// edit → unrecorded). Trailer presence is the discriminator; commit
 	// times are irrelevant.
-	gitInRepo(t, root, "add", "projects/p/digital-twin/architecture.md")
-	gitInRepo(t, root, "commit", "-m", "reflect updates architecture\n\nMoE-Workflow: twin")
+	gittest.Run(t, root, "add", "projects/p/digital-twin/architecture.md")
+	gittest.Run(t, root, "commit", "-m", "reflect updates architecture\n\nMoE-Workflow: twin")
 
-	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
-	gitInRepo(t, root, "commit", "-m", "operator edits vision")
+	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
+	gittest.Run(t, root, "commit", "-m", "operator edits vision")
 
 	cp := Checkpoint{
 		Version:       CheckpointVersion,
@@ -193,8 +194,8 @@ func TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime(t *testing.T) {
 	// otherwise.
 	t.Setenv("GIT_AUTHOR_DATE", "2026-05-02T12:00:01Z")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-05-02T12:00:01Z")
-	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
-	gitInRepo(t, root, "commit", "-m", "reflect updates vision\n\nMoE-Workflow: twin")
+	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
+	gittest.Run(t, root, "commit", "-m", "reflect updates vision\n\nMoE-Workflow: twin")
 
 	cp := Checkpoint{
 		Version:       CheckpointVersion,
@@ -236,26 +237,20 @@ func TestDetectUnrecordedEditsIgnoresNetNoopRevert(t *testing.T) {
 
 	t.Setenv("GIT_AUTHOR_DATE", "2026-04-01T12:00:00Z")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-04-01T12:00:00Z")
-	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
-	gitInRepo(t, root, "commit", "-m", "seed twin")
+	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
+	gittest.Run(t, root, "commit", "-m", "seed twin")
 
-	revCmd := exec.Command("git", "rev-parse", "HEAD")
-	revCmd.Dir = root
-	revOut, err := revCmd.Output()
-	if err != nil {
-		t.Fatalf("rev-parse: %v", err)
-	}
-	checkpointSHA := strings.TrimSpace(string(revOut))
+	checkpointSHA := gittest.HeadSHA(t, root)
 
 	t.Setenv("GIT_AUTHOR_DATE", "2026-04-02T12:00:00Z")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-04-02T12:00:00Z")
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n\nedited\n")
-	gitInRepo(t, root, "add", "projects/p/digital-twin/vision.md")
-	gitInRepo(t, root, "commit", "-m", "edit vision")
+	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
+	gittest.Run(t, root, "commit", "-m", "edit vision")
 
 	t.Setenv("GIT_AUTHOR_DATE", "2026-04-03T12:00:00Z")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-04-03T12:00:00Z")
-	gitInRepo(t, root, "revert", "--no-edit", "HEAD")
+	gittest.Run(t, root, "revert", "--no-edit", "HEAD")
 
 	cp := Checkpoint{
 		Version:        CheckpointVersion,

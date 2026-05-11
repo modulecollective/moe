@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // TestEventsSinceCheckpointNoTruncation locks in the design decision
@@ -25,23 +27,17 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 	// commits on top so the SHA..HEAD walk is well past the old cap.
 	projectRepo := newGitRepo(t)
 	writeFile(t, filepath.Join(projectRepo, "seed.txt"), "seed\n")
-	gitInRepo(t, projectRepo, "add", "seed.txt")
-	gitInRepo(t, projectRepo, "commit", "-m", "seed file")
+	gittest.Run(t, projectRepo, "add", "seed.txt")
+	gittest.Run(t, projectRepo, "commit", "-m", "seed file")
 
-	revCmd := exec.Command("git", "rev-parse", "HEAD")
-	revCmd.Dir = projectRepo
-	revOut, err := revCmd.Output()
-	if err != nil {
-		t.Fatalf("rev-parse: %v", err)
-	}
-	checkpointSHA := strings.TrimSpace(string(revOut))
+	checkpointSHA := gittest.HeadSHA(t, projectRepo)
 
 	const commitCount = 30
 	for i := 0; i < commitCount; i++ {
 		path := filepath.Join(projectRepo, fmt.Sprintf("file-%02d.txt", i))
 		writeFile(t, path, "x\n")
-		gitInRepo(t, projectRepo, "add", filepath.Base(path))
-		gitInRepo(t, projectRepo, "commit", "-m", fmt.Sprintf("commit %02d", i))
+		gittest.Run(t, projectRepo, "add", filepath.Base(path))
+		gittest.Run(t, projectRepo, "commit", "-m", fmt.Sprintf("commit %02d", i))
 	}
 
 	// Closed runs: write 10 run.json files under the project's runs/
@@ -128,8 +124,8 @@ func TestEventsSinceCheckpointFirstReflectUnbounded(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_DATE", "2026-01-01T12:00:00Z")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-01-01T12:00:00Z")
 	writeFile(t, filepath.Join(projectRepo, "ancient.txt"), "ancient\n")
-	gitInRepo(t, projectRepo, "add", "ancient.txt")
-	gitInRepo(t, projectRepo, "commit", "-m", "ancient commit")
+	gittest.Run(t, projectRepo, "add", "ancient.txt")
+	gittest.Run(t, projectRepo, "commit", "-m", "ancient commit")
 
 	cfg := Config{
 		Mode:            Closed,
@@ -172,8 +168,8 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	for i := 0; i < content; i++ {
 		path := filepath.Join(projectRepo, fmt.Sprintf("file-%03d.txt", i))
 		writeFile(t, path, "x\n")
-		gitInRepo(t, projectRepo, "add", filepath.Base(path))
-		gitInRepo(t, projectRepo, "commit", "-m", fmt.Sprintf("commit %03d", i))
+		gittest.Run(t, projectRepo, "add", filepath.Base(path))
+		gittest.Run(t, projectRepo, "commit", "-m", fmt.Sprintf("commit %03d", i))
 	}
 
 	cfg := Config{

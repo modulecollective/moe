@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 func TestIngestPromptSectionOpenSchema(t *testing.T) {
@@ -301,27 +302,9 @@ func TestCheckpointMarshalsNullSHAs(t *testing.T) {
 
 func newGitRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[user]\n\temail=t@example.com\n\tname=T\n[init]\n\tdefaultBranch=main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
 	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed")
 	return root
 }
 
@@ -332,15 +315,6 @@ func writeFile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func gitInRepo(t *testing.T, repo string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
 
@@ -809,8 +783,8 @@ func TestFinalizeIngestPicksUpDeletes(t *testing.T) {
 	wikiDir := filepath.Join(root, "kb")
 	// Commit a starter doc, then delete it in the working tree.
 	writeFile(t, filepath.Join(wikiDir, "old.md"), "to retire\n")
-	gitInRepo(t, root, "add", "kb/old.md")
-	gitInRepo(t, root, "commit", "-m", "seed kb")
+	gittest.Run(t, root, "add", "kb/old.md")
+	gittest.Run(t, root, "commit", "-m", "seed kb")
 	if err := os.Remove(filepath.Join(wikiDir, "old.md")); err != nil {
 		t.Fatal(err)
 	}
