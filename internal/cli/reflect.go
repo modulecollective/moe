@@ -18,13 +18,15 @@ import (
 )
 
 // reflectCommand builds the `reflect` facade for a workflow. Reflect
-// is closed-schema only and out-of-band relative to the run ladder
-// (no per-run canvas, no stage). It is the only twin-mutating pass
-// over closed-schema content: roadmap synthesis, doc-by-doc walk
-// against recent events, and structural hygiene cleanup all happen
-// in the same session — `last_ingest_at` recovers its single meaning
-// ("events ingested through here") with no partial-pass commands
-// left to skew the checkpoint.
+// is closed-schema only and out-of-band relative to the run ladder:
+// no run.json, no stage progression, no merge gates. It does mint a
+// `reflect-<timestamp>` run directory whose only artifact is a single
+// end-of-pass summary at `documents/reflect/content.md` — the durable
+// "what changed and why" the session-close gate refuses to seal
+// without. Roadmap synthesis, doc-by-doc walk against recent events,
+// and structural hygiene cleanup all happen in the same session, so
+// `last_ingest_at` keeps its single meaning ("events ingested through
+// here") with no partial-pass commands left to skew the checkpoint.
 func reflectCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "reflect",
@@ -42,9 +44,11 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "usage: moe %s reflect <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code reflect session on the project's twin.")
-		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json — the")
-		moePrintln(stderr, "session surfaces under the dash's TWIN rail (`recent: …`), not in")
-		moePrintln(stderr, "ACTIVE/BACKLOG/COMPLETED.")
+		moePrintln(stderr, "Out-of-band relative to runs: no run.json, no stage, no merge gates. The")
+		moePrintln(stderr, "session writes a one-shot end-of-pass summary to")
+		moePrintln(stderr, "projects/<p>/runs/reflect-<timestamp>/documents/reflect/content.md, staged")
+		moePrintln(stderr, "in the same `work: reflect pass …` commit as the twin edits. Surfaces")
+		moePrintln(stderr, "under the dash's TWIN rail (`recent: …`), not ACTIVE/BACKLOG/COMPLETED.")
 		moePrintln(stderr, "Walks each managed doc against project commits and closed runs since the")
 		moePrintln(stderr, "last reflect, folds the open idea backlog into the roadmap, and clears")
 		moePrintln(stderr, "structural hygiene findings. The engine re-scans at session-end and")
