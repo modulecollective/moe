@@ -118,13 +118,12 @@ loose ideas without starting a run.
 Pre-1.0 and under active development. The command surface, file
 layout, and commit-trailer conventions are subject to change. If
 you're reading this because you're considering trying it — welcome,
-but expect sharp edges.
+but expect sharp edges. Issue triage is best-effort; this is a
+one-operator project, not a supported product.
 
 ---
 
 ## References
 
 - [Anthropic: Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
-- [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/)
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html)
-- [The Emerging Harness Engineering Playbook](https://www.ignorance.ai/p/the-emerging-harness-engineering)
