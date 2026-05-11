@@ -3,13 +3,14 @@ package git
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // TestStatus_SpacesAndRename pins down two facts that the project
@@ -17,15 +18,15 @@ import (
 // no octal escapes), and `-z` rename records arrive as NEW-then-OLD
 // (the reverse of the human `R old -> new` form).
 func TestStatus_SpacesAndRename(t *testing.T) {
-	dir := newTempRepo(t)
+	dir := gittest.Init(t)
 
 	// Seed a tracked file with a space, then commit so we have a HEAD.
 	writeFile(t, filepath.Join(dir, "kept name.txt"), "kept\n")
-	gitMust(t, dir, "add", ".")
-	gitMust(t, dir, "commit", "-m", "init")
+	gittest.Run(t, dir, "add", ".")
+	gittest.Run(t, dir, "commit", "-m", "init")
 
 	// Rename it through git so the rename record is staged.
-	gitMust(t, dir, "mv", "kept name.txt", "renamed name.txt")
+	gittest.Run(t, dir, "mv", "kept name.txt", "renamed name.txt")
 	// Drop an untracked file with a space so the ?? path is exercised too.
 	writeFile(t, filepath.Join(dir, "stray two.txt"), "stray\n")
 
@@ -50,10 +51,10 @@ func TestStatus_SpacesAndRename(t *testing.T) {
 // produces zero entries (and a nil slice, so callers can use
 // len() == 0 as the dirty check).
 func TestStatus_CleanTreeReturnsNil(t *testing.T) {
-	dir := newTempRepo(t)
+	dir := gittest.Init(t)
 	writeFile(t, filepath.Join(dir, "a.txt"), "a\n")
-	gitMust(t, dir, "add", ".")
-	gitMust(t, dir, "commit", "-m", "init")
+	gittest.Run(t, dir, "add", ".")
+	gittest.Run(t, dir, "commit", "-m", "init")
 
 	entries, err := Status(dir)
 	if err != nil {
@@ -67,8 +68,8 @@ func TestStatus_CleanTreeReturnsNil(t *testing.T) {
 // TestStatus_PathsScope confirms scoping limits results to the
 // requested pathspec.
 func TestStatus_PathsScope(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -89,8 +90,8 @@ func TestStatus_PathsScope(t *testing.T) {
 // index.lock and succeeds once another process releases it — the
 // steady-state half of the moe/hunk worktree contention fix.
 func TestRun_RetriesIndexLockUntilCleared(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	// Shrink the retry envelope so the test stays sub-second. The
 	// production cap (2s) is policy, not behaviour we want to assert
@@ -123,8 +124,8 @@ func TestRun_RetriesIndexLockUntilCleared(t *testing.T) {
 // fix, so a genuinely stuck lock from a crashed prior run doesn't
 // disappear behind a synthetic error message.
 func TestRun_IndexLockExhaustsCap(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	withIndexLockTiming(t, 80*time.Millisecond, 10*time.Millisecond)
 
@@ -157,8 +158,8 @@ func TestRun_IndexLockExhaustsCap(t *testing.T) {
 // dies on this. Output uses the shorter read cap; we shrink both to
 // keep the test fast.
 func TestOutput_RetriesIndexLock(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	withIndexLockTiming(t, 500*time.Millisecond, 10*time.Millisecond)
 
@@ -181,8 +182,8 @@ func TestOutput_RetriesIndexLock(t *testing.T) {
 // TestProbe_ExitCodeAnswer covers Probe's contract: exit 0 → true,
 // non-zero → false, output suppressed regardless.
 func TestProbe_ExitCodeAnswer(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	// HEAD exists → rev-parse --verify --quiet succeeds.
 	if !Probe(dir, "rev-parse", "--verify", "--quiet", "HEAD") {
@@ -198,8 +199,8 @@ func TestProbe_ExitCodeAnswer(t *testing.T) {
 // the typed-wrapper layer — pins the convenience surface callers will
 // actually use.
 func TestHasRef(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	if !HasRef(dir, "HEAD") {
 		t.Fatalf("HasRef HEAD should be true after init commit")
@@ -213,8 +214,8 @@ func TestHasRef(t *testing.T) {
 // @{u} returns "" rather than an error — the contract sync.HasUpstream
 // callers depend on.
 func TestUpstream_NoUpstreamReturnsEmpty(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	got, err := Upstream(dir)
 	if err != nil {
@@ -229,13 +230,12 @@ func TestUpstream_NoUpstreamReturnsEmpty(t *testing.T) {
 // round-trips. We point at the same repo via a bare clone so the test
 // doesn't depend on the network.
 func TestUpstream_ReturnsConfiguredRef(t *testing.T) {
-	bare := t.TempDir()
-	gitMust(t, bare, "init", "--bare", "-q")
+	bare := gittest.InitBare(t)
 
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
-	gitMust(t, dir, "remote", "add", "origin", bare)
-	gitMust(t, dir, "push", "-u", "origin", "HEAD")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
+	gittest.Run(t, dir, "remote", "add", "origin", bare)
+	gittest.Run(t, dir, "push", "-u", "origin", "HEAD")
 
 	got, err := Upstream(dir)
 	if err != nil {
@@ -249,11 +249,11 @@ func TestUpstream_ReturnsConfiguredRef(t *testing.T) {
 // TestAheadOf_Counts confirms AheadOf returns the rev-list count when
 // base and head both exist.
 func TestAheadOf_Counts(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "base")
-	gitMust(t, dir, "checkout", "-b", "feat")
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "a")
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "b")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "base")
+	gittest.Run(t, dir, "checkout", "-b", "feat")
+	gittest.Commit(t, dir, "a")
+	gittest.Commit(t, dir, "b")
 
 	n, err := AheadOf(dir, "master", "feat")
 	if err != nil {
@@ -271,8 +271,8 @@ func TestAheadOf_Counts(t *testing.T) {
 // TestAheadOf_UnknownBase confirms AheadOf swallows rev-list failures
 // and returns (0, nil) — the contract CheckBranchHasCommits depends on.
 func TestAheadOf_UnknownBase(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	n, err := AheadOf(dir, "refs/heads/does-not-exist", "HEAD")
 	if err != nil {
@@ -287,19 +287,15 @@ func TestAheadOf_UnknownBase(t *testing.T) {
 // symbolic HEAD out of `ls-remote --symref`, using a bare local repo
 // as the URL so the test runs offline.
 func TestLsRemoteDefault_BareRepo(t *testing.T) {
-	src := newTempRepo(t)
-	gitMust(t, src, "commit", "--allow-empty", "-m", "init")
+	src := gittest.Init(t)
+	gittest.Commit(t, src, "init")
 
 	// Determine src's default branch (could be `main` or `master`
 	// depending on git defaults) and use it as the assertion target.
-	out, err := Output(src, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		t.Fatalf("rev-parse HEAD: %v", err)
-	}
-	want := strings.TrimSpace(out)
+	want := gittest.Output(t, src, "rev-parse", "--abbrev-ref", "HEAD")
 
 	bare := t.TempDir()
-	gitMust(t, bare, "clone", "--bare", "-q", src, ".")
+	gittest.Run(t, bare, "clone", "--bare", "-q", src, ".")
 
 	got, err := LsRemoteDefault(bare)
 	if err != nil {
@@ -312,8 +308,8 @@ func TestLsRemoteDefault_BareRepo(t *testing.T) {
 
 // TestHEAD_Sugar confirms HEAD returns the same SHA as RevParse("HEAD").
 func TestHEAD_Sugar(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	want, err := RevParse(dir, "HEAD")
 	if err != nil {
@@ -332,8 +328,8 @@ func TestHEAD_Sugar(t *testing.T) {
 // writers we hand it (the property the interactive push/pull callers
 // rely on).
 func TestStream_PassesThroughWriters(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	var stdout, stderr bytes.Buffer
 	if err := Stream(dir, &stdout, &stderr, "log", "-1", "--format=%s"); err != nil {
@@ -349,8 +345,8 @@ func TestStream_PassesThroughWriters(t *testing.T) {
 // Stream (passthrough path) — the test seam value the design bundles
 // in.
 func TestHook_FiresOnRunAndStream(t *testing.T) {
-	dir := newTempRepo(t)
-	gitMust(t, dir, "commit", "--allow-empty", "-m", "init")
+	dir := gittest.Init(t)
+	gittest.Commit(t, dir, "init")
 
 	type call struct {
 		args []string
@@ -402,25 +398,6 @@ func withIndexLockTiming(t *testing.T, cap, step time.Duration) {
 		readRetryCap = pr
 		indexLockRetryStep = ps
 	})
-}
-
-func newTempRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	gitMust(t, dir, "init", "-q")
-	gitMust(t, dir, "config", "user.email", "test@example.com")
-	gitMust(t, dir, "config", "user.name", "test")
-	gitMust(t, dir, "config", "commit.gpgsign", "false")
-	return dir
-}
-
-func gitMust(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
 }
 
 func writeFile(t *testing.T, path, content string) {
