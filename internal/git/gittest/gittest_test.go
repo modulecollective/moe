@@ -30,6 +30,22 @@ func TestInit_HasIsolatedConfigAndIdentity(t *testing.T) {
 	}
 }
 
+// TestInit_IdentityCoversSecondaryRepos confirms a second repo
+// initialized via raw Run (not Init) inherits the same identity — the
+// donor/origin/seed pattern every fixture relies on.
+func TestInit_IdentityCoversSecondaryRepos(t *testing.T) {
+	Init(t) // first call installs the GIT_CONFIG_GLOBAL identity.
+
+	second := filepath.Join(t.TempDir(), "secondary")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	Run(t, second, "init", "-q")
+	// If the identity hadn't propagated, this commit would fail with
+	// `unable to auto-detect email address`.
+	Run(t, second, "commit", "--allow-empty", "-m", "secondary")
+}
+
 // TestInitAt_UsesGivenDir confirms InitAt initializes the repo at the
 // caller-provided path rather than a fresh TempDir.
 func TestInitAt_UsesGivenDir(t *testing.T) {

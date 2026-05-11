@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -48,18 +49,18 @@ func newPushFixture(t *testing.T) *pushFixture {
 	// Bare "remote" with one seed commit on main — the push/merge
 	// flow FF-pushes on top of this.
 	origin := filepath.Join(t.TempDir(), projectID+".git")
-	mustGit(t, "", "init", "--bare", "-b", "main", origin)
+	gittest.Run(t, "", "init", "--bare", "-b", "main", origin)
 	seed := t.TempDir()
-	mustGit(t, "", "init", "-b", "main", seed)
+	gittest.Run(t, "", "init", "-b", "main", seed)
 	writeFile(t, filepath.Join(seed, "README.md"), "seed\n")
-	mustGit(t, seed, "add", "README.md")
-	mustGit(t, seed, "commit", "-m", "seed")
-	mustGit(t, seed, "remote", "add", "origin", origin)
-	mustGit(t, seed, "push", "origin", "main")
+	gittest.Run(t, seed, "add", "README.md")
+	gittest.Run(t, seed, "commit", "-m", "seed")
+	gittest.Run(t, seed, "remote", "add", "origin", origin)
+	gittest.Run(t, seed, "push", "origin", "main")
 
 	// Register as submodule so project.Load / sandbox.Ensure find it.
 	subPath := filepath.Join("projects", projectID, "src")
-	mustGit(t, root, "-c", "protocol.file.allow=always",
+	gittest.Run(t, root, "-c", "protocol.file.allow=always",
 		"submodule", "add", "-b", "main", origin, subPath)
 
 	// Seed the run first — seedRun writes a minimal project.json, so
@@ -67,11 +68,11 @@ func newPushFixture(t *testing.T) *pushFixture {
 	seedRun(t, root, projectID, runID, "sdlc", run.StatusInProgress)
 	writeFile(t, filepath.Join(root, "projects", projectID, "project.json"),
 		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
-	mustGit(t, root, "add", ".gitmodules", subPath, filepath.Join("projects", projectID, "project.json"))
-	mustGit(t, root, "commit", "-m", "Register project "+projectID)
+	gittest.Run(t, root, "add", ".gitmodules", subPath, filepath.Join("projects", projectID, "project.json"))
+	gittest.Run(t, root, "commit", "-m", "Register project "+projectID)
 	writeContent(t, root, projectID, runID, "code", "# code doc\n")
-	mustGit(t, root, "add", filepath.Join("projects", projectID, "runs", runID, "documents", "code", "content.md"))
-	mustGit(t, root, "commit", "-m", "work: update code\n\nMoE-Run: "+runID+"\nMoE-Document: code\n")
+	gittest.Run(t, root, "add", filepath.Join("projects", projectID, "runs", runID, "documents", "code", "content.md"))
+	gittest.Run(t, root, "commit", "-m", "work: update code\n\nMoE-Run: "+runID+"\nMoE-Document: code\n")
 
 	// Bring the sandbox up — mirrors what `moe sdlc code` does.
 	clonePath, err := sandbox.Ensure(root, projectID, runID)
@@ -85,8 +86,8 @@ func newPushFixture(t *testing.T) *pushFixture {
 	// Put a single commit on moe/<run> so checkBranchHasCommits
 	// passes and FF-merge has something to ship.
 	writeFile(t, filepath.Join(clonePath, "feature.txt"), "hello\n")
-	mustGit(t, clonePath, "add", "feature.txt")
-	mustGit(t, clonePath, "commit", "-m", "add feature")
+	gittest.Run(t, clonePath, "add", "feature.txt")
+	gittest.Run(t, clonePath, "commit", "-m", "add feature")
 	tip, err := exec.Command("git", "-C", clonePath, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -188,11 +189,11 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	// The divergent file (`other.txt`) doesn't overlap with `feature.txt`
 	// so the rebase is clean.
 	work := t.TempDir()
-	mustGit(t, "", "clone", "-b", "main", f.origin, work)
+	gittest.Run(t, "", "clone", "-b", "main", f.origin, work)
 	writeFile(t, filepath.Join(work, "other.txt"), "other\n")
-	mustGit(t, work, "add", "other.txt")
-	mustGit(t, work, "commit", "-m", "divergent")
-	mustGit(t, work, "push", "origin", "main")
+	gittest.Run(t, work, "add", "other.txt")
+	gittest.Run(t, work, "commit", "-m", "divergent")
+	gittest.Run(t, work, "push", "origin", "main")
 	movedBaseSHA := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
@@ -238,11 +239,11 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	// Advance origin/main with a commit that touches the SAME file
 	// the run branch added — guarantees a rebase conflict.
 	work := t.TempDir()
-	mustGit(t, "", "clone", "-b", "main", f.origin, work)
+	gittest.Run(t, "", "clone", "-b", "main", f.origin, work)
 	writeFile(t, filepath.Join(work, "feature.txt"), "from-default\n")
-	mustGit(t, work, "add", "feature.txt")
-	mustGit(t, work, "commit", "-m", "default-side feature")
-	mustGit(t, work, "push", "origin", "main")
+	gittest.Run(t, work, "add", "feature.txt")
+	gittest.Run(t, work, "commit", "-m", "default-side feature")
+	gittest.Run(t, work, "push", "origin", "main")
 	movedHead := strings.TrimSpace(mustGitOutput(t, work, "rev-parse", "HEAD"))
 
 	// Stub the chain-back: capture the conflict context, do not actually
@@ -440,8 +441,8 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 	addInsteadOfRewrite(t, fakeRemote, f.origin)
 	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
 		`{"id":"`+f.projectID+`","submodule":"projects/`+f.projectID+`/src","remote":"`+fakeRemote+`","default_branch":"main"}`+"\n")
-	mustGit(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
-	mustGit(t, f.root, "commit", "-m", "use GitHub-shaped remote for --pr test")
+	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
+	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for --pr test")
 
 	fakeGh(t, nil)
 
@@ -530,8 +531,8 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	if err := run.Save(f.root, md); err != nil {
 		t.Fatal(err)
 	}
-	mustGit(t, f.root, "add", filepath.Join("projects", f.projectID, "runs", f.runID, "run.json"))
-	mustGit(t, f.root, "commit", "-m", "sync: close\n\nMoE-Run: "+f.runID+"\nMoE-Closed: https://example.com/pr/1\n")
+	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "runs", f.runID, "run.json"))
+	gittest.Run(t, f.root, "commit", "-m", "sync: close\n\nMoE-Run: "+f.runID+"\nMoE-Closed: https://example.com/pr/1\n")
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
 	if code != 0 {

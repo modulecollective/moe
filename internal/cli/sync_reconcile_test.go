@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 )
@@ -173,9 +174,9 @@ func newReconcileFixture(t *testing.T, status string) *reconcileFixture {
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	mustGit(t, root, "add", filepath.Join("projects", projectID, "project.json"),
+	gittest.Run(t, root, "add", filepath.Join("projects", projectID, "project.json"),
 		filepath.Join("projects", projectID, "runs", runID, "run.json"))
-	mustGit(t, root, "commit", "-m", "Open run "+projectID+"/"+runID+"\n\nMoE-Run: "+runID+"\nMoE-Project: "+projectID+"\n")
+	gittest.Run(t, root, "commit", "-m", "Open run "+projectID+"/"+runID+"\n\nMoE-Run: "+runID+"\nMoE-Project: "+projectID+"\n")
 
 	// push-record commit carrying the MoE-PR trailer — mirrors what
 	// runPush writes after opening the PR.

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/sync"
 )
 
@@ -36,26 +37,26 @@ func newSyncFixture(t *testing.T) *syncFixture {
 func (f *syncFixture) addProjectSubmodule(id, branch string) string {
 	f.t.Helper()
 	origin := filepath.Join(f.t.TempDir(), id+".git")
-	mustGit(f.t, "", "init", "--bare", "-b", branch, origin)
+	gittest.Run(f.t, "", "init", "--bare", "-b", branch, origin)
 
 	// Seed the origin with one commit on <branch>.
 	seed := f.t.TempDir()
-	mustGit(f.t, "", "init", "-b", branch, seed)
+	gittest.Run(f.t, "", "init", "-b", branch, seed)
 	writeFile(f.t, filepath.Join(seed, "README.md"), "seed\n")
-	mustGit(f.t, seed, "add", "README.md")
-	mustGit(f.t, seed, "commit", "-m", "seed")
-	mustGit(f.t, seed, "remote", "add", "origin", origin)
-	mustGit(f.t, seed, "push", "origin", branch)
+	gittest.Run(f.t, seed, "add", "README.md")
+	gittest.Run(f.t, seed, "commit", "-m", "seed")
+	gittest.Run(f.t, seed, "remote", "add", "origin", origin)
+	gittest.Run(f.t, seed, "push", "origin", branch)
 
 	subPath := filepath.Join("projects", id, "src")
 	// -c protocol.file.allow=always because `git submodule add` uses a
 	// file:// URL in these tests and modern git rejects that by default.
-	mustGit(f.t, f.root, "-c", "protocol.file.allow=always", "submodule", "add", "-b", branch, origin, subPath)
+	gittest.Run(f.t, f.root, "-c", "protocol.file.allow=always", "submodule", "add", "-b", branch, origin, subPath)
 
 	projectJSON := filepath.Join(f.root, "projects", id, "project.json")
 	writeFile(f.t, projectJSON, `{"id":"`+id+`","default_branch":"`+branch+`"}`+"\n")
-	mustGit(f.t, f.root, "add", projectJSON, ".gitmodules", subPath)
-	mustGit(f.t, f.root, "commit", "-m", "Register project "+id)
+	gittest.Run(f.t, f.root, "add", projectJSON, ".gitmodules", subPath)
+	gittest.Run(f.t, f.root, "commit", "-m", "Register project "+id)
 
 	f.originBySub[subPath] = origin
 	return origin
@@ -71,11 +72,11 @@ func (f *syncFixture) advanceOrigin(id, branch, content string) string {
 		f.t.Fatalf("no origin registered for project %s", id)
 	}
 	work := f.t.TempDir()
-	mustGit(f.t, "", "clone", "-b", branch, origin, work)
+	gittest.Run(f.t, "", "clone", "-b", branch, origin, work)
 	writeFile(f.t, filepath.Join(work, "change.txt"), content)
-	mustGit(f.t, work, "add", "change.txt")
-	mustGit(f.t, work, "commit", "-m", "advance")
-	mustGit(f.t, work, "push", "origin", branch)
+	gittest.Run(f.t, work, "add", "change.txt")
+	gittest.Run(f.t, work, "commit", "-m", "advance")
+	gittest.Run(f.t, work, "push", "origin", branch)
 	out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
 	if err != nil {
 		f.t.Fatalf("rev-parse: %v", err)
@@ -194,10 +195,10 @@ func TestBumpProjectPointersAbortsOnDivergedSubmodule(t *testing.T) {
 	subAbs := filepath.Join(f.root, "projects/proj/src")
 	// Start a local commit that's NOT on origin, then advance origin
 	// separately so the two have diverged with no fast-forward path.
-	mustGit(t, subAbs, "checkout", "main")
+	gittest.Run(t, subAbs, "checkout", "main")
 	writeFile(t, filepath.Join(subAbs, "local.txt"), "local\n")
-	mustGit(t, subAbs, "add", "local.txt")
-	mustGit(t, subAbs, "commit", "-m", "local-only")
+	gittest.Run(t, subAbs, "add", "local.txt")
+	gittest.Run(t, subAbs, "commit", "-m", "local-only")
 	f.advanceOrigin("proj", "main", "remote\n")
 
 	before := f.bureaucracyHead()
@@ -221,12 +222,12 @@ func TestBumpProjectPointersAbortsOnMissingOriginBranch(t *testing.T) {
 	// it; we simulate a remote that doesn't have our branch by replacing
 	// the remote URL with an empty bare repo.
 	origin := filepath.Join(t.TempDir(), "empty.git")
-	mustGit(t, "", "init", "--bare", "-b", "main", origin)
+	gittest.Run(t, "", "init", "--bare", "-b", "main", origin)
 	subAbs := filepath.Join(f.root, "projects/proj/src")
-	mustGit(t, subAbs, "remote", "set-url", "origin", origin)
+	gittest.Run(t, subAbs, "remote", "set-url", "origin", origin)
 	// Also blow away the locally cached origin/main ref so fetch must
 	// establish it fresh from the (empty) remote.
-	mustGit(t, subAbs, "update-ref", "-d", "refs/remotes/origin/main")
+	gittest.Run(t, subAbs, "update-ref", "-d", "refs/remotes/origin/main")
 
 	_, _, err := f.runBump()
 	if err == nil {
@@ -314,7 +315,7 @@ func TestBumpProjectPointersRecoversFromDetachedHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustGit(t, subAbs, "checkout", "--detach", head)
+	gittest.Run(t, subAbs, "checkout", "--detach", head)
 
 	if _, _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
@@ -335,7 +336,7 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 
 	scratch := filepath.Join(f.root, "scratch.txt")
 	writeFile(t, scratch, "operator's in-progress work\n")
-	mustGit(t, f.root, "add", "scratch.txt")
+	gittest.Run(t, f.root, "add", "scratch.txt")
 
 	if _, _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
@@ -564,17 +565,6 @@ func TestDoSyncAheadOnlyPushes(t *testing.T) {
 }
 
 // ---- small test utilities ----
-
-func mustGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-}
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()

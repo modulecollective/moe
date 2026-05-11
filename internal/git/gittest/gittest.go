@@ -35,9 +35,12 @@ import (
 )
 
 // Init creates an initialized git repo in t.TempDir() and returns its
-// path. It configures user.name/user.email, disables commit.gpgsign,
-// and isolates GIT_CONFIG_GLOBAL for the test's duration. If `git` is
-// not on PATH the test is skipped, not failed.
+// path. The identity (user.name/user.email, commit.gpgsign=false) and
+// GIT_CONFIG_GLOBAL isolation apply to every subsequent git invocation
+// in the test, not just to this one repo — so a fixture that opens a
+// donor/origin/seed repo alongside the main one inherits the same
+// defaults without having to call Init twice. If `git` is not on PATH
+// the test is skipped, not failed.
 func Init(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -53,9 +56,6 @@ func InitAt(t *testing.T, dir string) {
 	requireGit(t)
 	isolateConfig(t)
 	Run(t, dir, "init", "-q")
-	Run(t, dir, "config", "user.email", "test@example.com")
-	Run(t, dir, "config", "user.name", "test")
-	Run(t, dir, "config", "commit.gpgsign", "false")
 }
 
 // InitBare creates an initialized bare repo in t.TempDir() and returns
@@ -137,11 +137,27 @@ func requireGit(t *testing.T) {
 	}
 }
 
-// isolateConfig points GIT_CONFIG_GLOBAL at a throwaway path so a
-// stray ~/.gitconfig (alias, commit.gpgsign true, init.defaultBranch,
-// includeIf rules) cannot reach into the fixture. t.Setenv reverts at
-// test end and refuses to run under t.Parallel — both intended.
+// isolateConfig points GIT_CONFIG_GLOBAL at a throwaway file seeded
+// with the test identity and a gpgsign=false, then points
+// GIT_CONFIG_SYSTEM at /dev/null so a strict CI box can't leak in via
+// /etc/gitconfig either. Per-test scope is intentional: t.Setenv
+// reverts at test end and refuses to run under t.Parallel — both the
+// behaviour we want, since fixtures aren't parallel-safe and the
+// identity must not leak across tests.
+//
+// The identity goes in GIT_CONFIG_GLOBAL (not `git config` in the
+// repo) so it applies to every git invocation in the test — including
+// secondary fixture repos (donor, origin, seed) the caller initializes
+// with raw `Run(t, "", "init", …)`. Repo-local config would only cover
+// the first repo and force every fixture to call Init twice.
 func isolateConfig(t *testing.T) {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	body := "[user]\n\temail = test@example.com\n\tname = test\n" +
+		"[commit]\n\tgpgsign = false\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("seed gitconfig: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -20,17 +21,17 @@ import (
 func seedSdlcOneShotProject(t *testing.T, root, projectID string) {
 	t.Helper()
 	origin := filepath.Join(t.TempDir(), projectID+".git")
-	mustGit(t, "", "init", "--bare", "-b", "main", origin)
+	gittest.Run(t, "", "init", "--bare", "-b", "main", origin)
 	seed := t.TempDir()
-	mustGit(t, "", "init", "-b", "main", seed)
+	gittest.Run(t, "", "init", "-b", "main", seed)
 	writeFile(t, filepath.Join(seed, "README.md"), "seed\n")
-	mustGit(t, seed, "add", "README.md")
-	mustGit(t, seed, "commit", "-m", "seed")
-	mustGit(t, seed, "remote", "add", "origin", origin)
-	mustGit(t, seed, "push", "origin", "main")
+	gittest.Run(t, seed, "add", "README.md")
+	gittest.Run(t, seed, "commit", "-m", "seed")
+	gittest.Run(t, seed, "remote", "add", "origin", origin)
+	gittest.Run(t, seed, "push", "origin", "main")
 
 	subPath := filepath.Join("projects", projectID, "src")
-	mustGit(t, root, "-c", "protocol.file.allow=always",
+	gittest.Run(t, root, "-c", "protocol.file.allow=always",
 		"submodule", "add", "-b", "main", origin, subPath)
 	writeFile(t, filepath.Join(root, "projects", projectID, "project.json"),
 		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
@@ -38,8 +39,8 @@ func seedSdlcOneShotProject(t *testing.T, root, projectID string) {
 	// before this helper runs) and any other pending files come along
 	// — runNew refuses on a dirty tree, and `submodule add` plus the
 	// markBureaucracy file together leave several pending paths.
-	mustGit(t, root, "add", "-A")
-	mustGit(t, root, "commit", "-m", "Register project "+projectID)
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "Register project "+projectID)
 }
 
 // fakeOneShotClaude installs a `claude` stub that, on every -p

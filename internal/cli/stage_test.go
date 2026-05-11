@@ -13,6 +13,7 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -21,27 +22,12 @@ import (
 // so commits can happen without polluting ~/.gitconfig. Returns the root path.
 func newTestBureaucracy(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	cfg := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(cfg, []byte("[user]\n\temail=t@example.com\n\tname=T\n[init]\n\tdefaultBranch=main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
 	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
+	gittest.InitAt(t, root)
+	// Production root names the trunk `main`; rename so tests that
+	// assert ref or upstream names match the live shape.
+	gittest.Run(t, root, "branch", "-m", "main")
+	gittest.Commit(t, root, "seed")
 	return root
 }
 
