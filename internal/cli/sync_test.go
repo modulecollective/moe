@@ -19,6 +19,7 @@ type syncFixture struct {
 	t           *testing.T
 	root        string            // bureaucracy root
 	originBySub map[string]string // submodule path -> bare remote dir
+	origin      string            // bureaucracy bare remote (set by initBureaucracyOrigin)
 }
 
 func newSyncFixture(t *testing.T) *syncFixture {
@@ -363,6 +364,202 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("scratch.txt should still be staged, status=%v", entries)
+	}
+}
+
+// initBureaucracyOrigin sets up a bare remote for the bureaucracy and
+// pushes main to it with -u so HasUpstream returns true and subsequent
+// `git pull` / `git push` calls have somewhere to go. The bare repo
+// lives under t.TempDir() so cleanup is automatic.
+func (f *syncFixture) initBureaucracyOrigin() {
+	f.t.Helper()
+	bare := filepath.Join(f.t.TempDir(), "bureaucracy.git")
+	mustGit(f.t, "", "init", "--bare", "-b", "main", bare)
+	mustGit(f.t, f.root, "remote", "add", "origin", bare)
+	mustGit(f.t, f.root, "push", "-u", "origin", "main")
+	f.origin = bare
+}
+
+// advanceBureaucracyOrigin commits to the bare bureaucracy remote
+// independently of f.root, simulating a sync from another machine.
+// Returns the SHA of the new commit on origin/main.
+func (f *syncFixture) advanceBureaucracyOrigin(path, content, msg string) string {
+	f.t.Helper()
+	if f.origin == "" {
+		f.t.Fatal("initBureaucracyOrigin not called")
+	}
+	work := f.t.TempDir()
+	mustGit(f.t, "", "clone", "-b", "main", f.origin, work)
+	writeFile(f.t, filepath.Join(work, path), content)
+	mustGit(f.t, work, "add", path)
+	mustGit(f.t, work, "commit", "-m", msg)
+	mustGit(f.t, work, "push", "origin", "main")
+	out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
+	if err != nil {
+		f.t.Fatalf("rev-parse: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// originHead returns the SHA at refs/heads/main in the bare remote.
+func (f *syncFixture) originHead() string {
+	f.t.Helper()
+	out, err := exec.Command("git", "-C", f.origin, "rev-parse", "main").Output()
+	if err != nil {
+		f.t.Fatalf("rev-parse main on origin: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestDoSyncRebasesOverDivergedRemote(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	// Local: one turn-shaped commit with a MoE-Run trailer, to confirm
+	// the trailer survives the rebase replay.
+	writeFile(t, filepath.Join(f.root, "local.txt"), "local\n")
+	mustGit(t, f.root, "add", "local.txt")
+	mustGit(t, f.root, "commit", "-m", "local: add local.txt\n\nMoE-Run: r-local\n")
+	localSubject := lastCommitMessage(t, f.root)
+
+	// Remote: a parallel commit, no path overlap.
+	remoteSHA := f.advanceBureaucracyOrigin("remote.txt", "remote\n", "remote: add remote.txt")
+
+	var stdout, stderr bytes.Buffer
+	if err := doSync(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("doSync: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	// After rebase, the local commit sits on top of the remote tip.
+	head := f.bureaucracyHead()
+	parentOut, err := exec.Command("git", "-C", f.root, "rev-parse", "HEAD^").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD^: %v", err)
+	}
+	parent := strings.TrimSpace(string(parentOut))
+	if parent != remoteSHA {
+		t.Fatalf("rebased HEAD doesn't sit on remote tip: want parent %s, got %s", remoteSHA, parent)
+	}
+
+	// Both files materialised.
+	for _, p := range []string{"local.txt", "remote.txt"} {
+		if _, err := os.Stat(filepath.Join(f.root, p)); err != nil {
+			t.Fatalf("missing %s after rebase: %v", p, err)
+		}
+	}
+
+	// Trailer ridden along on the replayed commit.
+	replayed := lastCommitMessage(t, f.root)
+	if !strings.Contains(replayed, "MoE-Run: r-local") {
+		t.Fatalf("trailer not preserved on replay:\nbefore=%q\nafter=%q", localSubject, replayed)
+	}
+
+	// Sync also pushed: origin advanced to the new local HEAD.
+	if got := f.originHead(); got != head {
+		t.Fatalf("origin didn't receive rebased push: want %s, got %s", head, got)
+	}
+}
+
+func TestDoSyncRebaseConflictHaltsWithRecovery(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	// Seed a shared file on both sides so the rebase has a hunk to
+	// conflict on.
+	shared := filepath.Join(f.root, "shared.txt")
+	writeFile(t, shared, "base\n")
+	mustGit(t, f.root, "add", "shared.txt")
+	mustGit(t, f.root, "commit", "-m", "base: add shared.txt")
+	mustGit(t, f.root, "push", "origin", "main")
+
+	// Local: rewrite shared.txt.
+	writeFile(t, shared, "local\n")
+	mustGit(t, f.root, "add", "shared.txt")
+	mustGit(t, f.root, "commit", "-m", "local: rewrite shared.txt")
+
+	// Remote: rewrite the same line independently.
+	f.advanceBureaucracyOrigin("shared.txt", "remote\n", "remote: rewrite shared.txt")
+
+	var stdout, stderr bytes.Buffer
+	err := doSync(f.root, &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("doSync: expected error\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if !rebaseInProgress(f.root) {
+		t.Fatal("expected worktree to be left in rebase-in-progress state")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "rebase --continue") {
+		t.Fatalf("recovery hint missing from error: %v", err)
+	}
+	if !strings.Contains(msg, "shared.txt") {
+		t.Fatalf("error doesn't name the conflicting path: %v", err)
+	}
+}
+
+func TestDoSyncRefusesWhenRebaseInProgress(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	// Plant a rebase-merge directory directly. doSync should refuse
+	// without touching the network.
+	if err := os.MkdirAll(filepath.Join(f.root, ".git", "rebase-merge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	headBefore := f.bureaucracyHead()
+	originBefore := f.originHead()
+
+	var stdout, stderr bytes.Buffer
+	err := doSync(f.root, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("doSync: expected refusal")
+	}
+	if !strings.Contains(err.Error(), "rebase is in progress") {
+		t.Fatalf("error wrong shape: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rebase --continue") {
+		t.Fatalf("error missing recovery hint: %v", err)
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatal("HEAD moved despite refusal")
+	}
+	if f.originHead() != originBefore {
+		t.Fatal("origin advanced despite refusal")
+	}
+}
+
+func TestDoSyncNoopWhenUpToDate(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+	headBefore := f.bureaucracyHead()
+
+	var stdout, stderr bytes.Buffer
+	if err := doSync(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("doSync: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatalf("HEAD moved on no-op sync: %s -> %s", headBefore, f.bureaucracyHead())
+	}
+}
+
+func TestDoSyncAheadOnlyPushes(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	writeFile(t, filepath.Join(f.root, "local.txt"), "local\n")
+	mustGit(t, f.root, "add", "local.txt")
+	mustGit(t, f.root, "commit", "-m", "local: add local.txt")
+	local := f.bureaucracyHead()
+
+	var stdout, stderr bytes.Buffer
+	if err := doSync(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("doSync: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if f.bureaucracyHead() != local {
+		t.Fatal("HEAD should be unchanged on ahead-only sync")
+	}
+	if got := f.originHead(); got != local {
+		t.Fatalf("origin didn't receive push: want %s, got %s", local, got)
 	}
 }
 
