@@ -422,6 +422,78 @@ func TestJournalIndexCapturesPromotedToAndPRURL(t *testing.T) {
 	}
 }
 
+// TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA pins the
+// load-bearing equivalence for the indexed stage-satisfaction path:
+// every (project, run, doc) the index claims a time for must match
+// what LatestWorkTurnSHA would return for the same key. Workflow.Next
+// WithIndex relies on that — collapsing M×N forks into a map lookup
+// is only safe when both produce the same answer.
+func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string, when time.Time) {
+		t.Helper()
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+		cmd.Dir = root
+		if !when.IsZero() {
+			stamp := when.Format(time.RFC3339)
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_DATE="+stamp,
+				"GIT_COMMITTER_DATE="+stamp,
+			)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	workTurn := func(projectID, runID, docID string, when time.Time) {
+		commitWith(
+			"work: update "+docID,
+			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n",
+			when,
+		)
+	}
+	// Two projects, same slug — the project leg of WorkTurnKey is the
+	// thing keeping these from cross-satisfying each other (the same
+	// invariant TestWorkflowNextIgnoresOtherProjectSameSlug pins for
+	// the forking path).
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	workTurn("a", "fix-bug", "design", t0)
+	workTurn("a", "fix-bug", "code", t0.Add(time.Hour))
+	workTurn("b", "fix-bug", "design", t0.Add(2*time.Hour))
+	// Session-start commit must not register a work turn — the subject
+	// pin keeps it out, same as LatestWorkTurnSHA's anchored grep.
+	commitWith(
+		"work: start session for code",
+		"MoE-Run: fix-bug\nMoE-Project: c\nMoE-Workflow: sdlc\nMoE-Document: code\n",
+		t0.Add(3*time.Hour),
+	)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	cases := []struct {
+		project, run, doc string
+	}{
+		{"a", "fix-bug", "design"},
+		{"a", "fix-bug", "code"},
+		{"b", "fix-bug", "design"},
+		{"b", "fix-bug", "code"},   // never committed; both paths return zero
+		{"c", "fix-bug", "code"},   // only a session-start; both paths return zero
+		{"never", "nope", "design"},
+	}
+	for _, tc := range cases {
+		_, want, err := LatestWorkTurnSHA(root, tc.project, tc.run, tc.doc)
+		if err != nil {
+			t.Fatalf("LatestWorkTurnSHA(%v): %v", tc, err)
+		}
+		got := idx.WorkTurnTime[WorkTurnKey{Project: tc.project, Run: tc.run, Doc: tc.doc}]
+		if !got.Equal(want) {
+			t.Errorf("(%s/%s/%s): index=%v LatestWorkTurnSHA=%v", tc.project, tc.run, tc.doc, got, want)
+		}
+	}
+}
+
 // TestJournalIndexPicksMostRecentTrailerValue: when a slug shows up
 // on multiple commits each carrying a different MoE-PR (the closed →
 // reopened case), the most recent value wins — same answer the

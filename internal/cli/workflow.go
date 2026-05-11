@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -136,13 +137,30 @@ const (
 // Returns the stage name, not a *Command — the caller looks up the
 // command via LookupGroup(md.Workflow).Lookup(stage) when it needs to
 // invoke one.
+//
+// Next is a shim over NextWithIndex(nil). Callers that already hold a
+// *run.JournalIndex (dash builds one per render) thread it through to
+// collapse per-stage forks into in-memory lookups; everything else
+// keeps the per-call git log shape.
 func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error) {
+	return w.NextWithIndex(root, md, nil)
+}
+
+// NextWithIndex is Next with an optional precomputed journal index.
+// A non-nil idx promotes the per-stage LatestWorkTurnSHA fork into a
+// WorkTurnTime map lookup — dash with M runs and N stages drops from
+// M×N git forks (plus one journal-wide BuildJournalIndex scan) to
+// just the one scan. Passing nil restores the per-call fork shape,
+// which is the right answer for one-off callers (stage prompt,
+// follow, queue walker) that don't keep an index in scope. Same
+// satisfaction rule either way: see stageSatisfied.
+func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.JournalIndex) (string, NextKind, error) {
 	switch md.Status {
 	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:
 		return "", NextKindDone, nil
 	}
 	for _, stage := range w.stageOrder {
-		satisfied, err := w.stageSatisfied(root, md, stage)
+		satisfied, err := w.stageSatisfied(root, md, stage, idx)
 		if err != nil {
 			return "", 0, err
 		}
@@ -153,8 +171,8 @@ func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error)
 	return "", NextKindDone, nil
 }
 
-func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (bool, error) {
-	_, stageWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, stage)
+func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, idx *run.JournalIndex) (bool, error) {
+	stageWhen, err := workTurnTime(root, md.Project, md.ID, stage, idx)
 	if err != nil {
 		return false, err
 	}
@@ -166,7 +184,7 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (
 		return true, nil
 	}
 	for _, succ := range succs {
-		_, succWhen, err := run.LatestWorkTurnSHA(root, md.Project, md.ID, succ)
+		succWhen, err := workTurnTime(root, md.Project, md.ID, succ, idx)
 		if err != nil {
 			return false, err
 		}
@@ -185,6 +203,19 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string) (
 		}
 	}
 	return false, nil
+}
+
+// workTurnTime returns the committer time of (project, run, doc)'s
+// latest work-turn commit, reading from idx when supplied and falling
+// back to a per-call LatestWorkTurnSHA fork otherwise. Returns the
+// zero time when no work-turn commit exists yet — the same "first
+// turn, nothing to diff against" signal LatestWorkTurnSHA produces.
+func workTurnTime(root, projectID, runID, docID string, idx *run.JournalIndex) (time.Time, error) {
+	if idx != nil {
+		return idx.WorkTurnTime[run.WorkTurnKey{Project: projectID, Run: runID, Doc: docID}], nil
+	}
+	_, when, err := run.LatestWorkTurnSHA(root, projectID, runID, docID)
+	return when, err
 }
 
 var workflows = map[string]*Workflow{}

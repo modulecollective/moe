@@ -609,11 +609,15 @@ func LastActivity(root, runID string) (time.Time, error) {
 // lookups instead of forking git per run, dropping dash's hot-path
 // invocation count from ~99 to ~3.
 //
-// All maps are keyed by run slug (MoE-Run trailer value) and follow
-// the same "first commit encountered wins" rule LastActivity uses —
-// that is HEAD-side topo order, not strictly the newest committer
-// date. Missing slugs read as the zero value (zero time, "") so
-// callers don't need to branch on presence.
+// LastActivity / PromotedTo / PRURL are keyed by run slug (MoE-Run
+// trailer value) and follow the same "first commit encountered wins"
+// rule LastActivity uses — HEAD-side topo order, not strictly newest
+// committer date. Missing slugs read as the zero value (zero time,
+// "") so callers don't need to branch on presence. WorkTurnTime is
+// keyed by (project, run, doc) — every consumer (Workflow.NextWithIndex,
+// stage-satisfaction walks) already knows the project, and the seam
+// has to be cross-project safe because slugs are per-project unique,
+// not per-bureaucracy.
 type JournalIndex struct {
 	// LastActivity maps run slug → committer time of the latest
 	// reachable commit carrying MoE-Run: <slug>. Same contract as
@@ -627,6 +631,21 @@ type JournalIndex struct {
 	// most recent commit scoped to the slug. Replaces a per-row
 	// trailerValue fork.
 	PRURL map[string]string
+	// WorkTurnTime maps (project, run, doc) → committer time of the
+	// most recent `work: update <doc>` commit scoped to that run.
+	// Same contract as LatestWorkTurnSHA's `when` return — zero
+	// time means "no work turn on record yet."
+	WorkTurnTime map[WorkTurnKey]time.Time
+}
+
+// WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
+// project leg is load-bearing: runs/<slug> is project-scoped, so two
+// projects can carry the same slug (TestWorkflowNextIgnoresOtherProject
+// SameSlug pins this), and a slug-only key would cross-satisfy them.
+type WorkTurnKey struct {
+	Project string
+	Run     string
+	Doc     string
 }
 
 // BuildJournalIndex walks `git log` once and indexes every MoE-Run
@@ -652,6 +671,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		LastActivity: make(map[string]time.Time),
 		PromotedTo:   make(map[string]string),
 		PRURL:        make(map[string]string),
+		WorkTurnTime: make(map[WorkTurnKey]time.Time),
 	}
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
@@ -667,13 +687,29 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			continue
 		}
 		body := record[nul+1:]
+		subject := body
+		if nl := strings.IndexByte(body, '\n'); nl >= 0 {
+			subject = body[:nl]
+		}
 		slug := ""
-		var promotedTo, prURL string
+		var promotedTo, prURL, projectID, docID string
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
 				if slug == "" {
 					slug = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Project:"); ok {
+				if projectID == "" {
+					projectID = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Document:"); ok {
+				if docID == "" {
+					docID = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -704,6 +740,15 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		if prURL != "" {
 			if _, ok := idx.PRURL[slug]; !ok {
 				idx.PRURL[slug] = prURL
+			}
+		}
+		// Work-turn keying is project-scoped, and the subject pin
+		// keeps session-start / merge / push commits out — same
+		// filter LatestWorkTurnSHA uses.
+		if projectID != "" && docID != "" && subject == "work: update "+docID {
+			k := WorkTurnKey{Project: projectID, Run: slug, Doc: docID}
+			if _, ok := idx.WorkTurnTime[k]; !ok {
+				idx.WorkTurnTime[k] = time.Unix(epoch, 0).UTC()
 			}
 		}
 	}

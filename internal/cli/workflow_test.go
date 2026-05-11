@@ -204,6 +204,58 @@ func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	}
 }
 
+// TestWorkflowNextWithIndexMatchesForkingPath pins the load-bearing
+// equivalence behind dash's hot-path optimisation: for every state
+// the forking path produces, NextWithIndex(idx) must agree. If they
+// drift, dash silently picks a different next stage than `moe sdlc
+// resume` or the chain prompt — exactly the seam a "trailers are
+// canonical, Status is a projection" rule is meant to keep tight.
+func TestWorkflowNextWithIndexMatchesForkingPath(t *testing.T) {
+	root := newTestBureaucracy(t)
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mdA := &run.Metadata{ID: "fix-bug", Project: "a", Workflow: "sdlc", Status: run.StatusInProgress}
+	mdB := &run.Metadata{ID: "fix-bug", Project: "b", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	// Walk a representative timeline: nothing → design committed →
+	// code committed → design re-opened (re-flips to design) → code
+	// re-committed (flips back to code) → project B's identically-
+	// slugged run stays at design throughout. Each row exercises a
+	// branch of stageSatisfied; the index path must agree with the
+	// forking path at every point.
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	checkpoints := []func(){
+		func() {},
+		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0) },
+		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour)) },
+		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(2*time.Hour)) },
+		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(3*time.Hour)) },
+	}
+	for i, step := range checkpoints {
+		step()
+		idx, err := run.BuildJournalIndex(root)
+		if err != nil {
+			t.Fatalf("step %d: BuildJournalIndex: %v", i, err)
+		}
+		for _, md := range []*run.Metadata{mdA, mdB} {
+			wantStage, wantKind, err := wf.Next(root, md)
+			if err != nil {
+				t.Fatalf("step %d %s/%s fork: %v", i, md.Project, md.ID, err)
+			}
+			gotStage, gotKind, err := wf.NextWithIndex(root, md, idx)
+			if err != nil {
+				t.Fatalf("step %d %s/%s indexed: %v", i, md.Project, md.ID, err)
+			}
+			if gotStage != wantStage || gotKind != wantKind {
+				t.Errorf("step %d %s/%s: indexed=(%q,%v) fork=(%q,%v)",
+					i, md.Project, md.ID, gotStage, gotKind, wantStage, wantKind)
+			}
+		}
+	}
+}
+
 // TestWorkflowSuccessor covers the pure DAG lookup the chain prompt
 // uses to ask "what's next after the stage I just finished?". The
 // answer is decoupled from Next() — under the forward-walking rule

@@ -105,7 +105,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		next, kind, err := wf.Next(root, md)
+		next, kind, err := wf.NextWithIndex(root, md, idx)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
