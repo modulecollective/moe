@@ -61,7 +61,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	case "push":
 		return promptPushNextStage(next, root, md, hint, stdout, stderr)
 	}
-	return promptStageNextStage(next, md, hint, stdout, stderr)
+	return promptStageNextStage(next, root, md, hint, stdout, stderr)
 }
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for most
@@ -72,7 +72,26 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 // keeps the prompt honest — no other workflow has --one-shot today,
 // and we'd rather widen deliberately than offer a flag that doesn't
 // exist.
-func promptStageNextStage(next *Command, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+//
+// When the next stage is code, the just-finished design canvas is
+// printed above the prompt — same shape as promptPushNextStage prints
+// the code canvas above [N/m/p]. follow no longer surfaces the design
+// canvas once the design session closes, so this is the canvas's one
+// chance to land in front of the operator at the design→code gate.
+// The [Y/n/o] default stays Y: design→code is reversible (re-design
+// after a botched code run), so the canvas read is informative, not
+// gating. Whitespace-only or missing canvas falls through to the bare
+// prompt, no header or decoration.
+func promptStageNextStage(next *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+	if next.Name == "code" {
+		canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
+		if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
+			fmt.Fprint(stdout, string(body))
+			if !strings.HasSuffix(string(body), "\n") {
+				fmt.Fprintln(stdout)
+			}
+		}
+	}
 	offerOneShot := md.Workflow == "sdlc"
 	label := "[Y/n]"
 	if offerOneShot {

@@ -249,7 +249,7 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	var stdout, stderr safeBuffer
 	exit := make(chan int, 1)
 	go func() {
-		exit <- promptStageNextStage(next, md, "moe sdlc code tele fix-it", &stdout, &stderr)
+		exit <- promptStageNextStage(next, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr)
 	}()
 
 	// Wait for signal.Notify to install (the prompt prints its label
