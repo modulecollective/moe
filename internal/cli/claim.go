@@ -19,9 +19,9 @@ import (
 
 // claimCommand builds the `claim` facade for a workflow. Claim is
 // closed-schema only and records context for managed-doc edits the
-// operator made outside a reflect pass. It does NOT edit managed
-// docs — the entry lands in log.md and the checkpoint advances so
-// the next reflect sees a clean state.
+// operator made outside a reflect pass. It does not edit managed
+// docs — the session writes a per-pass record to
+// documents/claim/content.md and a one-line journal entry to log.md.
 func claimCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "claim",
@@ -39,8 +39,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 		moePrintf(stderr, "usage: moe %s claim <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Record context for decided edits the operator made directly to managed docs.")
-		moePrintln(stderr, "Out-of-band relative to runs (no stage, no canvas, no run.json — surfaces")
-		moePrintln(stderr, "under the dash's TWIN rail, not in ACTIVE/BACKLOG/COMPLETED).")
+		moePrintln(stderr, "Surfaces under the dash's TWIN rail, not in ACTIVE/BACKLOG/COMPLETED.")
 		moePrintln(stderr, "Bookkeeping only — does not edit managed docs.")
 	}
 	if err := fs.Parse(args); err != nil {
