@@ -79,8 +79,20 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// with no upstream — nothing to pull from. On rebase conflict, git
 	// leaves the worktree mid-rebase; we surface a recovery block
 	// rather than git's raw stderr.
+	//
+	// --no-recurse-submodules is explicit: rebase preflights
+	// submodule_touches_in_range(upstream..HEAD) and aborts if any
+	// local commit ahead of upstream changes a gitlink. Bump commits
+	// from sync itself routinely move gitlinks, so the preflight would
+	// fire on every sync against a worktree that is ahead. The recursion
+	// work the flag would do (fetch submodules in parallel, then
+	// `git submodule update` to match the new gitlinks) is already
+	// owned by BumpProjectPointers below, which fetches each submodule
+	// and reconciles its worktree against the recorded gitlink. Passing
+	// --no- explicitly so a user-side pull.recurseSubmodules / submodule.recurse
+	// config can't re-enable it.
 	if sync.HasUpstream(root) {
-		if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--recurse-submodules"); err != nil {
+		if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
 			if rebaseInProgress(root) {
 				return rebaseRecoveryError(root)
 			}
