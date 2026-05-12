@@ -185,14 +185,21 @@ context. If reflect-style content fixes are also warranted, the
 operator can run ` + "`moe twin reflect`" + ` after claiming.
 
 Engine-managed files: the engine writes checkpoint.json on its own.
-For claim, ` + "`log.md`" + ` is your output — append a new entry at the
-bottom in the shape:
+For claim, ` + "`log.md`" + ` is the journal entry — append a new entry at
+the bottom in the shape:
 
     ## YYYY-MM-DD — claim-<timestamp>
     _<short title>_
     _For: <run-id>_   (if a bureaucracy run drove this; omit otherwise)
 
     <one-paragraph synthesis: what changed, why, naming the docs>
+
+The per-pass durable record lives at
+` + "`projects/<project>/runs/<run-slug>/documents/claim/content.md`" + ` —
+the engine threads the exact path into your kickoff. Treat it as a
+short PR description for the operator's edits: Trigger / Decision /
+Diff in prose. log.md is the journal line; the canvas is the long
+record. The session refuses to seal until the canvas is non-empty.
 
 The engine bumps the checkpoint at session close so the next reflect
 sees a clean state.

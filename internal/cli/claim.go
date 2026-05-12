@@ -126,7 +126,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 				ClonePath:        "",
 				SessionUUID:      sessionUUID,
 				NewSession:       true,
-				InitialPrompt:    claimKickoff(det, diff, recentRun, recentCtx),
+				InitialPrompt:    claimKickoff(det, diff, recentRun, recentCtx, run.ContentPath(projectID, runSlug, docID)),
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: claimRunTitle(recentRun),
 				FinalizeClaim:    true,
@@ -162,7 +162,7 @@ func buildClaimSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	return strings.Join(sections, "\n---\n\n"), nil
 }
 
-func claimKickoff(det wiki.DetectionResult, diff string, recentRun *run.Metadata, recentCtx string) string {
+func claimKickoff(det wiki.DetectionResult, diff string, recentRun *run.Metadata, recentCtx string, canvasRel string) string {
 	var b strings.Builder
 	b.WriteString("The operator just opened a twin claim session. " +
 		"Managed docs have been edited outside a reflect pass. Walk through what " +
@@ -200,7 +200,12 @@ func claimKickoff(det wiki.DetectionResult, diff string, recentRun *run.Metadata
 	b.WriteString("Acknowledge the diff in one or two sentences. Ask the operator for the *why* (and " +
 		"the run id if any), then synthesise the log entry together. Once you and the operator agree, " +
 		"append a short paragraph or bullet list to log.md under the heading the engine writes at " +
-		"finalize. Don't touch managed docs.\n")
+		"finalize. Don't touch managed docs.\n\n")
+	fmt.Fprintf(&b, "When the pass is sealed and you're ready to hand control back, write the durable "+
+		"per-pass record to `%s`. Same shape as a short PR description for the operator's edits — "+
+		"Trigger (what prompted them), Decision (what they kept and why), Diff (the docs touched, in "+
+		"prose). log.md gets the one-paragraph journal line; the canvas gets the longer record. The "+
+		"session refuses to seal until that file is non-empty.\n", canvasRel)
 	return b.String()
 }
 
@@ -215,7 +220,18 @@ func commitClaimTurn(workRoot, workflow, projectID, runSlug, wikiRel string) err
 	if wikiRel == "" {
 		return run.ErrNothingToCommit
 	}
-	if err := run.Stage(workRoot, wikiRel); err != nil {
+	paths := []string{wikiRel}
+	// The agent is instructed (in claimKickoff) to drop a per-pass
+	// summary at canvasRel. Stage it alongside the wiki edits so both
+	// land in the same `work: claim pass <runSlug>` commit and the
+	// session-close gate sees a non-empty canvas at the branch tip.
+	// `git add` errors on a missing path, so skip if the agent forgot —
+	// the close-time gate is the strict check that will refuse to seal.
+	canvasRel := run.ContentPath(projectID, runSlug, "claim")
+	if _, err := os.Stat(filepath.Join(workRoot, canvasRel)); err == nil {
+		paths = append(paths, canvasRel)
+	}
+	if err := run.Stage(workRoot, paths...); err != nil {
 		return err
 	}
 	if !run.HasStagedChanges(workRoot) {
@@ -228,7 +244,7 @@ func commitClaimTurn(workRoot, workflow, projectID, runSlug, wikiRel string) err
 			Workflow: workflow,
 			Document: "claim",
 		}.String()
-	return run.StageAndCommit(workRoot, msg, wikiRel)
+	return run.StageAndCommit(workRoot, msg, paths...)
 }
 
 // loadRecentRunContext returns the most recently closed (or merged /
