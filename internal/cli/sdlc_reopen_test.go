@@ -182,10 +182,10 @@ func TestStripDateSuffix(t *testing.T) {
 		{"foo-2025-12-01", "foo"},
 		{"foo-2025-12-01-2", "foo"},
 		{"foo-bar-2025-12-01", "foo-bar"},
-		{"foo-2", "foo-2"},                  // not a date
-		{"foo-25-12-01", "foo-25-12-01"},    // 2-digit year is not the shape
-		{"foo-2025-13-01", "foo"},           // out-of-range month accepted: shape match only.
-		{"2025-12-01", "2025-12-01"},        // no `-` prefix on the suffix → no strip
+		{"foo-2", "foo-2"},               // not a date
+		{"foo-25-12-01", "foo-25-12-01"}, // 2-digit year is not the shape
+		{"foo-2025-13-01", "foo"},        // out-of-range month accepted: shape match only.
+		{"2025-12-01", "2025-12-01"},     // no `-` prefix on the suffix → no strip
 	}
 	for _, tc := range cases {
 		if got := stripDateSuffix(tc.in); got != tc.want {
