@@ -197,5 +197,23 @@ run is pushed.
 		"operator reviews and prunes these at termination; unchecked\n" +
 		"entries become idea runs with the body carried into the seed\n" +
 		"canvas.\n"
+
+	// Sibling channel for notes addressed to the digital twin instead
+	// of the operator. The boundary is the audience: if the next reader
+	// is the twin (a recorded pattern is drifting, an architecture claim
+	// no longer matches the code, vision is being pushed against),
+	// the note belongs here; if it's a work item for the operator, it
+	// stays in followups.md. Two adjacent paragraphs so the agent
+	// makes the classification once.
+	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
+	out += "\n" +
+		"If you notice something the digital twin should know but can't act on\n" +
+		"yourself — drift from a recorded pattern, a decision the architecture\n" +
+		"doc doesn't reflect, a vision claim that no longer matches the work —\n" +
+		"append a note to:\n" +
+		"  " + twinFeedback + "\n" +
+		"Free-form prose; separate notes with `---`. The next `moe twin reflect`\n" +
+		"picks them up as kickoff context. Use this *instead of* the followups\n" +
+		"file above when the audience is the twin, not the operator.\n"
 	return out
 }

@@ -365,6 +365,24 @@ func FollowupsPath(projectID, id string) string {
 	return filepath.Join(Dir(projectID, id), "followups.md")
 }
 
+// FeedbackDir returns the path (relative to the bureaucracy root) of a
+// run's feedback/ directory: sibling of run.json that holds free-form
+// notes workflow agents leave for downstream recipients (twin reflect,
+// future meta-moe report, …). The directory is optional — a run that
+// never produces feedback never has one on disk.
+func FeedbackDir(projectID, id string) string {
+	return filepath.Join(Dir(projectID, id), "feedback")
+}
+
+// FeedbackPath returns the path (relative to the bureaucracy root) of a
+// per-recipient feedback file under a run's feedback/ directory. v1
+// callers pass "twin" so reflect picks the notes up on its next pass;
+// the recipient axis is the wedge that lets a future "moe" recipient
+// slot in without restructuring.
+func FeedbackPath(projectID, id, recipient string) string {
+	return filepath.Join(FeedbackDir(projectID, id), recipient+".md")
+}
+
 // uuidV4Pattern matches the canonical 8-4-4-4-12 hex form Claude Code
 // requires for --session-id. Kept here so EnsureDocument can detect and
 // heal entries that predate the UUID requirement.

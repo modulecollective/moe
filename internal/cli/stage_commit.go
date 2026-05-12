@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -85,6 +86,12 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	if followupsRel, ok := stageableFollowups(root, md); ok {
 		allPaths = append(allPaths, followupsRel)
 	}
+	// feedback/*.md is the sibling directory for notes addressed to
+	// downstream recipients (twin reflect today, future meta-moe
+	// report). v1 picks up twin.md; a future moe.md lands here for
+	// free. Same conditional-stage pattern as followups so a turn
+	// that touched neither still trips ErrNothingToCommit cleanly.
+	allPaths = append(allPaths, stageableFeedback(root, md)...)
 	return run.StageAndCommit(root, msg, allPaths...)
 }
 
@@ -98,4 +105,30 @@ func stageableFollowups(root string, md *run.Metadata) (string, bool) {
 		return "", false
 	}
 	return rel, true
+}
+
+// stageableFeedback returns every feedback/<recipient>.md path
+// (relative to root) the run has on disk. v1 writers only produce
+// twin.md, but the helper globs the directory so a future moe.md (and
+// any other recipient added later) rides the same stage commit
+// without a code change here. Returns nil when the dir is absent or
+// empty — a run with no feedback never touches the index.
+func stageableFeedback(root string, md *run.Metadata) []string {
+	dir := filepath.Join(root, run.FeedbackDir(md.Project, md.ID))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		out = append(out, filepath.Join(run.FeedbackDir(md.Project, md.ID), name))
+	}
+	return out
 }

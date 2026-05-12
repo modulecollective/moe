@@ -887,6 +887,120 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 	}
 }
 
+// The operational core prompt teaches the agent two adjacent
+// channels: followups.md (operator) and feedback/twin.md (twin). The
+// split is the whole point — the existing dashboard pollution is
+// category confusion between the two — so pin both paragraphs and the
+// fact that they sit next to each other.
+func TestOperationalCoreNamesBothFollowupsAndFeedback(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	got := operationalCore(root, md, "design", "")
+
+	followups := filepath.Join(root, run.FollowupsPath("tele", "fix-it"))
+	feedback := filepath.Join(root, run.FeedbackPath("tele", "fix-it", "twin"))
+	if !strings.Contains(got, followups) {
+		t.Errorf("prompt missing followups path %q:\n%s", followups, got)
+	}
+	if !strings.Contains(got, feedback) {
+		t.Errorf("prompt missing twin feedback path %q:\n%s", feedback, got)
+	}
+	// The contrast steer ("use *instead of* the followups file above
+	// when the audience is the twin") is what teaches the agent to
+	// make the classification once. Prompt body wraps at a newline,
+	// so match against the salient adjacent words rather than the
+	// full phrase.
+	if !strings.Contains(got, "*instead of*") {
+		t.Errorf("prompt missing 'instead of' emphasis:\n%s", got)
+	}
+	if !strings.Contains(got, "audience is the twin, not the operator") {
+		t.Errorf("prompt missing twin-vs-operator contrast:\n%s", got)
+	}
+}
+
+// commitTurn stages feedback/*.md alongside followups.md when a stage
+// turn lands. Without this the agent's twin-note would sit on disk in
+// the sandbox clone and never reach the bureaucracy journal, so the
+// next reflect's loadTwinFeedback walk would never see it.
+func TestCommitTurnStagesFeedbackFile(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitSessionStart(root, md, "design"); err != nil {
+		t.Fatalf("commitSessionStart: %v", err)
+	}
+
+	contentRel := run.ContentPath("tele", "fix-it", "design")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent drops a twin feedback note this turn.
+	feedbackRel := run.FeedbackPath("tele", "fix-it", "twin")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, feedbackRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, feedbackRel), []byte("patterns.md drifted from cli/foo.go:42.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitTurn(root, md, "design"); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+
+	names := gittest.Output(t, root, "show", "--name-only", "--pretty=", "HEAD")
+	if !strings.Contains(names, feedbackRel) {
+		t.Errorf("commit missing feedback file %q in:\n%s", feedbackRel, names)
+	}
+}
+
+// stageableFeedback returns every feedback/*.md path on disk so a
+// future moe.md (or any other recipient) rides the same commit without
+// a code change. Pin the multi-recipient case directly.
+func TestStageableFeedbackGlobsRecipients(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	dir := filepath.Join(root, run.FeedbackDir(md.Project, md.ID))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"twin.md", "moe.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("note\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A non-md sibling should be ignored — the glob is intentional.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stageableFeedback(root, md)
+	wantSet := map[string]bool{
+		run.FeedbackPath("tele", "fix-it", "twin"): false,
+		run.FeedbackPath("tele", "fix-it", "moe"):  false,
+	}
+	for _, p := range got {
+		if _, ok := wantSet[p]; !ok {
+			t.Errorf("unexpected path %q in stageable set", p)
+			continue
+		}
+		wantSet[p] = true
+	}
+	for p, seen := range wantSet {
+		if !seen {
+			t.Errorf("expected %q in stageable set, got %v", p, got)
+		}
+	}
+}
+
 // gitLogFormat runs `git log -n <n> --format=<fmt> <rev>` and returns
 // the trimmed stdout — small helper so each assertion doesn't
 // reimplement the exec.Command plumbing.
