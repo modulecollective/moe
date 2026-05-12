@@ -394,13 +394,20 @@ func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
 	}
 }
 
-// TestPushFailsCleanlyWhenNoEditorAtMerge: the merge path now requires
-// $EDITOR (it pops on followups.md before harvest). With neither
-// $EDITOR nor $VISUAL set, push fails with the same error message
-// close emits, the run stays in_progress, and origin/main is unchanged.
+// TestPushFailsCleanlyWhenNoEditorAtMerge: the merge path pops $EDITOR
+// on followups.md before harvest whenever there's an unchecked entry to
+// review. With one such entry on disk and neither $EDITOR nor $VISUAL
+// set, push fails with the editor-missing error, the run stays
+// in_progress, and origin/main is unchanged.
 func TestPushFailsCleanlyWhenNoEditorAtMerge(t *testing.T) {
 	f := newPushFixture(t)
 	noEditor(t)
+
+	// Seed an unchecked entry so the harvest pre-flight reaches the
+	// editor pop — an empty followups.md now short-circuits before the
+	// $EDITOR check, which would let push succeed.
+	writeFollowups(t, f.root, f.projectID, f.runID,
+		"- [ ] `chase-it` — Chase the thing\n")
 
 	mainBefore := f.originHead()
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)

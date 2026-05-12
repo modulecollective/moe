@@ -32,11 +32,6 @@ import (
 // title H1. Already-checked lines are pass-through, which makes a
 // retry after a partial-failure idempotent.
 
-// followupHeader is the stub a fresh editor session lands on when no
-// followups.md exists yet. Just a header — the operator (or agent) adds
-// list items below it.
-const followupHeader = "# Follow-ups\n\n"
-
 // followupOpenRE matches an unchecked entry. Captures the indent + box
 // prefix (group 1), the slug (group 2), and the title (group 3 — may
 // be empty after trim, in which case parseFollowups raises a more
@@ -55,6 +50,14 @@ var followupCheckboxRE = regexp.MustCompile(`^\s*-\s+\[[ xX]\]`)
 // these (they are the audit trail of past close runs); we just need to
 // recognise them so they don't get rejected as malformed.
 var followupDoneRE = regexp.MustCompile(`^\s*-\s+\[[xX]\]`)
+
+// followupUncheckedShapeRE detects any line whose shape suggests an
+// unchecked follow-up, malformed or not. The pop-the-editor gate uses
+// this as its trigger — anything that looks like an open item is worth
+// the operator's review, even if parseFollowups would later reject it.
+// Validation is still parseFollowups's job; this is intentionally a
+// strictly looser predicate.
+var followupUncheckedShapeRE = regexp.MustCompile(`^\s*-\s+\[\s\]`)
 
 // parsedFollowup is one harvest candidate plucked from followups.md.
 type parsedFollowup struct {
@@ -182,7 +185,10 @@ func markHarvested(line, baseSlug, resolvedSlug string) string {
 // runClose for non-idea workflows. Caller holds the bureaucracy lock.
 //
 // Steps, on the happy path:
-//  1. If !skipEdit, scaffold and open followups.md in $EDITOR.
+//  1. If !skipEdit and the on-disk file has at least one unchecked
+//     entry, open followups.md in $EDITOR for operator review. An
+//     absent / header-only / all-`[x]` file skips the pop entirely —
+//     there's nothing to review and nothing to fan out.
 //  2. Read and parse the file. Empty/absent file is a no-op.
 //  3. For each unchecked entry, call createIdea (which writes its own
 //     open-run commit). Track the resolved slug so the line can be
@@ -199,10 +205,7 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 	relPath := run.FollowupsPath(projectID, runID)
 	absPath := filepath.Join(root, relPath)
 
-	if !skipEdit {
-		if err := scaffoldFollowups(absPath); err != nil {
-			return fmt.Errorf("scaffold followups.md: %w", err)
-		}
+	if !skipEdit && hasUncheckedEntry(absPath) {
 		if err := launchEditorOrFail(absPath); err != nil {
 			return err
 		}
@@ -256,20 +259,27 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 	return nil
 }
 
-// scaffoldFollowups creates absPath with the minimal `# Follow-ups\n\n`
-// header if no file exists yet, so the operator drops into a known
-// shape rather than an empty buffer. A no-op when the file is already
-// there — the agent (or a previous close attempt) owns its content.
-func scaffoldFollowups(absPath string) error {
-	if _, err := os.Stat(absPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
+// hasUncheckedEntry reports whether absPath contains any line whose
+// shape matches an open follow-up (`- [ ] ...`). It's a deliberately
+// loose check: malformed open lines (missing slug, wrong dash) also
+// trigger a true so the operator gets the chance to fix them in
+// $EDITOR rather than hit a parse error after the pop was skipped.
+//
+// Absent file (the common case at close time when the agent appended
+// nothing) and read errors below the IsNotExist line both return
+// false: there's no review to do, so the harvest can fall through to
+// the parser's empty-file no-op path.
+func hasUncheckedEntry(absPath string) bool {
+	body, err := os.ReadFile(absPath)
+	if err != nil {
+		return false
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return err
+	for _, line := range strings.Split(string(body), "\n") {
+		if followupUncheckedShapeRE.MatchString(line) {
+			return true
+		}
 	}
-	return os.WriteFile(absPath, []byte(followupHeader), 0o644)
+	return false
 }
 
 // launchEditorOrFail mirrors launchEditor but returns an error rather
