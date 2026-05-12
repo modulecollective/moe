@@ -237,6 +237,12 @@ type OneShotRequest struct {
 	// Stderr captures claude's diagnostic output. nil falls back to
 	// os.Stderr.
 	Stderr io.Writer
+	// Timeout, when > 0, hard-caps the whole invocation via
+	// CommandContext. Mirrors HeadlessRequest.Timeout: callers that
+	// want a guard against a spinning agent set it; the open-ended
+	// `moe sdlc new --one-shot` chain leaves it zero so wiki-finalize-
+	// sized work isn't artificially capped.
+	Timeout time.Duration
 }
 
 // ExecuteOneShot runs `claude -p` non-interactively and surfaces a
@@ -291,7 +297,13 @@ func ExecuteOneShot(r OneShotRequest) error {
 		"--append-system-prompt", r.Prompt,
 		r.UserPrompt,
 	}
-	cmd := exec.Command(bin, args...)
+	ctx := context.Background()
+	if r.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	if r.ClonePath != "" {
 		cmd.Dir = r.ClonePath
 	} else {
@@ -326,6 +338,9 @@ func ExecuteOneShot(r OneShotRequest) error {
 	}()
 	waitErr := cmd.Wait()
 	<-done
+	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("executor: claude -p timed out after %s", r.Timeout)
+	}
 	return waitErr
 }
 

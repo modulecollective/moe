@@ -555,7 +555,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// Close the session: land it on local main and tear the
 	// worktree down. Local-only — origin push is moe sync's job —
 	// so a short budget and no heartbeat are fine.
-	closeErr := closeSess()
+	//
+	// closeWithAutoResolve wraps the close: on a *RebaseFailureError
+	// it launches a one-shot agent in the session worktree to
+	// resolve, then retries close once. Falls through to today's
+	// "resolve by hand / moe session abandon" message if the agent
+	// can't take.
+	closeErr := closeWithAutoResolve(closeSess, stdout, stderr)
 
 	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, gateErr, stdout, stderr)
 }

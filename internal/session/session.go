@@ -16,8 +16,10 @@
 // the lock.
 //
 // Conflict policy: if rebase fails, Close aborts the rebase and
-// returns an error that names the worktree and branch so the operator
-// can resolve by hand or via `moe session abandon`.
+// returns a *RebaseFailureError that names the worktree, branch, and
+// conflict context. The CLI errors.As's it to launch a one-shot
+// agent in the worktree; falls back to "resolve by hand or
+// `moe session abandon`" when auto-resolve doesn't take.
 package session
 
 import (
@@ -32,6 +34,54 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// RebaseFailureError is the typed error Close returns when the
+// rebase-onto-main step fails. Carries the diagnostic context the CLI
+// chain-back needs to launch a one-shot agent inside the session
+// worktree: the branch/worktree paths it'll cd into, the raw git
+// output that triggered the failure, the unmerged paths git left (or
+// nil when Dirty is true and the rebase never started), and the
+// Dirty flag distinguishing "rebase refused because the worktree is
+// dirty" from "rebase hit real conflicts" — different kickoff shape
+// per design.
+type RebaseFailureError struct {
+	Branch       string
+	WorktreePath string
+	// Conflicts lists the unmerged paths git flagged before --abort
+	// discarded the rebase state. Empty when Dirty is true (the
+	// rebase never started, so there's nothing in UU state) or when
+	// the git status read between rebase failure and --abort itself
+	// failed.
+	Conflicts []string
+	// GitOutput is the verbatim stdout+stderr of the failing rebase,
+	// trimmed. Surfaced to the agent so it can read what git said.
+	GitOutput string
+	// Dirty is true when the rebase refused because the worktree had
+	// uncommitted/unstaged changes — i.e. the rebase never started.
+	// Detected from the "cannot rebase" prefix in GitOutput.
+	Dirty bool
+}
+
+func (e *RebaseFailureError) Error() string {
+	if e.Dirty {
+		return fmt.Sprintf(
+			"session close: rebase %s onto main refused: worktree has uncommitted/unstaged changes\n"+
+				"  worktree: %s\n"+
+				"  branch:   %s\n"+
+				"  resolve by hand (cd into the worktree, clean up, re-run moe session resolve)\n"+
+				"  or drop it: moe session abandon %s\n"+
+				"  git output:\n%s",
+			e.Branch, e.WorktreePath, e.Branch, e.Branch, e.GitOutput)
+	}
+	return fmt.Sprintf(
+		"session close: rebase %s onto main failed\n"+
+			"  worktree: %s\n"+
+			"  branch:   %s\n"+
+			"  resolve by hand (cd into the worktree, rebase, re-run moe session resolve)\n"+
+			"  or drop it: moe session abandon %s\n"+
+			"  git output:\n%s",
+		e.Branch, e.WorktreePath, e.Branch, e.Branch, e.GitOutput)
+}
 
 // Session identifies one active stage session.
 type Session struct {
@@ -171,16 +221,29 @@ func Close(s *Session) error {
 	// Rebase inside the worktree. We don't fetch origin first —
 	// bureaucracy pushes happen through `moe sync`, which holds the
 	// same repo lock. Under the lock, local main is the source of truth.
+	//
+	// On failure we return a typed *RebaseFailureError so the CLI
+	// chain-back can launch a one-shot agent in the worktree to
+	// resolve. Conflict files are read before --abort discards the
+	// rebase state — same pattern push uses for its
+	// RebaseConflictError. "cannot rebase" in git's output means the
+	// rebase refused outright (dirty worktree), not a mid-rebase
+	// conflict — different kickoff shape so we surface it as Dirty.
 	if out, err := git.Combined(s.WorktreePath, "rebase", "main"); err != nil {
+		trimmed := strings.TrimSpace(out)
+		dirty := strings.Contains(trimmed, "cannot rebase")
+		var conflicts []string
+		if !dirty {
+			conflicts = sessionUnmergedPaths(s.WorktreePath)
+		}
 		_, _ = git.Combined(s.WorktreePath, "rebase", "--abort")
-		return fmt.Errorf(
-			"session close: rebase %s onto main failed: %w\n"+
-				"  worktree: %s\n"+
-				"  branch:   %s\n"+
-				"  resolve by hand (cd into the worktree, rebase, re-run moe session resolve)\n"+
-				"  or drop it: moe session abandon %s\n"+
-				"  git output:\n%s",
-			s.Branch, err, s.WorktreePath, s.Branch, s.Branch, strings.TrimSpace(out))
+		return &RebaseFailureError{
+			Branch:       s.Branch,
+			WorktreePath: s.WorktreePath,
+			Conflicts:    conflicts,
+			GitOutput:    trimmed,
+			Dirty:        dirty,
+		}
 	}
 
 	// Fast-forward main from the canonical root, not via `update-ref`.
@@ -390,6 +453,29 @@ func newCommitsPastMain(root, branch string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(strings.TrimSpace(out))
+}
+
+// sessionUnmergedPaths reports the files git left in a conflicted
+// (UU/AA/...) state at the time of the failing rebase — the same
+// shape push's chain-back uses to name conflicting paths in its
+// kickoff. Read before --abort discards the rebase state. Returns
+// nil on git.Status failure (the kickoff just lists no files; the
+// agent can still run `git status` itself).
+func sessionUnmergedPaths(worktreePath string) []string {
+	entries, err := git.Status(worktreePath)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if len(e.XY) < 2 {
+			continue
+		}
+		if e.XY[0] == 'U' || e.XY[1] == 'U' || e.XY == "AA" || e.XY == "DD" {
+			out = append(out, e.Path)
+		}
+	}
+	return out
 }
 
 func newUUID() (string, error) {

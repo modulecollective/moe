@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,12 +186,83 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	if !strings.Contains(err.Error(), "rebase") {
 		t.Errorf("error does not mention rebase: %v", err)
 	}
-	// Worktree and branch remain, so the operator can fix by hand.
+	// Typed error so the CLI chain-back can errors.As it and launch
+	// a one-shot agent inside the worktree to resolve.
+	var rfe *RebaseFailureError
+	if !errors.As(err, &rfe) {
+		t.Fatalf("expected *RebaseFailureError, got %T", err)
+	}
+	if rfe.Branch != s.Branch {
+		t.Errorf("rfe.Branch = %q, want %q", rfe.Branch, s.Branch)
+	}
+	if rfe.WorktreePath != s.WorktreePath {
+		t.Errorf("rfe.WorktreePath = %q, want %q", rfe.WorktreePath, s.WorktreePath)
+	}
+	if rfe.Dirty {
+		t.Errorf("rfe.Dirty = true, want false (real conflict, not a refusal)")
+	}
+	// Conflict files are read before --abort discards the rebase
+	// state, so the chain-back kickoff can name them.
+	foundShared := false
+	for _, p := range rfe.Conflicts {
+		if p == "shared.txt" {
+			foundShared = true
+			break
+		}
+	}
+	if !foundShared {
+		t.Errorf("expected shared.txt in rfe.Conflicts, got %v", rfe.Conflicts)
+	}
+	if rfe.GitOutput == "" {
+		t.Errorf("rfe.GitOutput should carry the verbatim rebase output")
+	}
+	// Worktree and branch remain, so the operator (or the chain-back
+	// agent) can fix it.
 	if _, err := os.Stat(s.WorktreePath); err != nil {
 		t.Errorf("worktree missing after rebase failure: %v", err)
 	}
 	if !branchExists(root, s.Branch) {
 		t.Errorf("branch missing after rebase failure")
+	}
+}
+
+// TestCloseRebaseRefusalIsDirty: when the rebase refuses to start
+// because the worktree is dirty (the seed transcript's failure mode —
+// --abort left residue, a follow-up Close ran rebase against the
+// dirty tree, git refused), Close surfaces it as Dirty=true so the
+// CLI can pick the dirty-shape kickoff prompt rather than the
+// conflict-shape one.
+func TestCloseRebaseRefusalIsDirty(t *testing.T) {
+	root := newTestRoot(t)
+
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md",
+		"# Design\n", "work: update design")
+
+	// Move main forward so the rebase actually has work to do.
+	gittest.WriteAndCommit(t, root, "main-only.txt", "main\n", "main: add")
+
+	// Drop an unstaged edit in the worktree before close — git rebase
+	// refuses with "cannot rebase: You have unstaged changes" before
+	// it starts touching the branch.
+	dirty := filepath.Join(s.WorktreePath, "projects/moe/runs/r1/documents/design/content.md")
+	if err := os.WriteFile(dirty, []byte("# Design\nunstaged edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Close(s)
+	if err == nil {
+		t.Fatal("expected rebase refusal, got nil")
+	}
+	var rfe *RebaseFailureError
+	if !errors.As(err, &rfe) {
+		t.Fatalf("expected *RebaseFailureError, got %T: %v", err, err)
+	}
+	if !rfe.Dirty {
+		t.Errorf("rfe.Dirty = false, want true for unstaged-changes refusal; output=%q", rfe.GitOutput)
 	}
 }
 
