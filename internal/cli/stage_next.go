@@ -160,7 +160,7 @@ func promptStageNextStage(next, back *Command, root string, md *run.Metadata, hi
 	}
 	opts := []promptOption{
 		{key: 'Y', hint: "run"},
-		{key: 'n', hint: "skip"},
+		{key: 'n', hint: "decline"},
 	}
 	offerOneShot := md.Workflow == "sdlc"
 	if offerOneShot {
@@ -226,7 +226,7 @@ func promptPushNextStage(next, back *Command, root string, md *run.Metadata, hin
 		}
 	}
 	opts := []promptOption{
-		{key: 'N', hint: "skip"},
+		{key: 'N', hint: "decline"},
 		{key: 'm', hint: "fast-forward merge"},
 		{key: 'p', hint: "open PR"},
 	}

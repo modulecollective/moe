@@ -244,7 +244,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !strings.Contains(got, "[Y/n/o/b]") {
 		t.Fatalf("expected [Y/n/o/b] label in prompt, got: %q", got)
 	}
-	if !strings.Contains(got, "Y=run · n=skip · o=run headless · b=back to design") {
+	if !strings.Contains(got, "Y=run · n=decline · o=run headless · b=back to design") {
 		t.Fatalf("expected legend with back target in prompt, got: %q", got)
 	}
 	if rec.ran {
@@ -304,7 +304,7 @@ func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 
 // TestPromptStageNextStageBackWithoutOneShot: a non-sdlc workflow with
 // a back target produces [Y/n/b] (no /o, but /b appended) and the
-// legend reads "Y=run · n=skip · b=back to <stage>".
+// legend reads "Y=run · n=decline · b=back to <stage>".
 func TestPromptStageNextStageBackWithoutOneShot(t *testing.T) {
 	next := &Command{
 		Name: "ingest",

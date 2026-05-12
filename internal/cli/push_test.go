@@ -772,7 +772,7 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 
 // TestPromptPushNextStageOffersBackWhenJustFinished: a non-nil back at
 // the push prompt grows the label to [N/m/p/b] and the legend to
-// "N=skip · m=fast-forward merge · p=open PR · b=back to code". Typing
+// "N=decline · m=fast-forward merge · p=open PR · b=back to code". Typing
 // `b` dispatches back.Run with [project, run]. Pins the rule that the
 // new option is appended (so the existing N-as-default stays).
 func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
@@ -818,7 +818,7 @@ func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !strings.Contains(got, "[N/m/p/b]") {
 		t.Fatalf("expected [N/m/p/b] label in prompt, got: %q", got)
 	}
-	if !strings.Contains(got, "N=skip · m=fast-forward merge · p=open PR · b=back to code") {
+	if !strings.Contains(got, "N=decline · m=fast-forward merge · p=open PR · b=back to code") {
 		t.Fatalf("expected legend with back target in prompt, got: %q", got)
 	}
 	if rec.ran {
