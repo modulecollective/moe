@@ -1191,7 +1191,6 @@ func scriptedEditorWithSideEffect(t *testing.T, bufferBody, sidePath, sideBody s
 	t.Setenv("VISUAL", "")
 }
 
-
 // pinQueueEditTimestamp pins queueEditNow so tests can predict the
 // `.bak` filename. Restored on cleanup.
 func pinQueueEditTimestamp(t *testing.T, ts int64) {
