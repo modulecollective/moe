@@ -38,6 +38,45 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 	return err
 }
 
+// commitWikiTurn stages the wiki content dir alongside the per-run
+// canvas in a single `work: <docID> pass <runSlug>` commit. Shared by
+// the three wiki-attached out-of-band sessions (claim, reflect, lint)
+// — every wiki-touching workflow lands its turn through this helper.
+//
+// The canvas branch is conditional: callers (claim, reflect) instruct
+// the agent to drop a per-pass record at `run.ContentPath(...)`, and
+// the helper stages it alongside the wiki edits so both land in the
+// same commit and the session-close empty-canvas gate sees a non-empty
+// canvas at the branch tip. Lint doesn't write a canvas, so `os.Stat`
+// skips the branch and the commit stays wiki-only — if lint ever starts
+// writing a canvas the helper picks it up with no change. The close-
+// time gate is the strict check; this helper tolerates a missing
+// canvas so the wiki edits still land if the agent forgot.
+func commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel string) error {
+	if wikiRel == "" {
+		return run.ErrNothingToCommit
+	}
+	paths := []string{wikiRel}
+	canvasRel := run.ContentPath(projectID, runSlug, docID)
+	if _, err := os.Stat(filepath.Join(workRoot, canvasRel)); err == nil {
+		paths = append(paths, canvasRel)
+	}
+	if err := run.Stage(workRoot, paths...); err != nil {
+		return err
+	}
+	if !run.HasStagedChanges(workRoot) {
+		return run.ErrNothingToCommit
+	}
+	msg := fmt.Sprintf("work: %s pass %s\n\n", docID, runSlug) +
+		trailers.Block{
+			Run:      runSlug,
+			Project:  projectID,
+			Workflow: workflow,
+			Document: docID,
+		}.String()
+	return run.StageAndCommit(workRoot, msg, paths...)
+}
+
 // commitTurn stages the document dir and run.json, then commits with
 // a trailer block keyed to the document/session. See README §"one run
 // branch per run" for the trailer convention.

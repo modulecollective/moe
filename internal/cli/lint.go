@@ -11,7 +11,6 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -119,7 +118,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 					return buildLintSystemPrompt(worktreeWiki)
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
-					return commitLintTurn(workRoot, workflow, projectID, runSlug, wikiRel)
+					return commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel)
 				},
 			}, nil
 		},
@@ -161,24 +160,4 @@ func lintKickoff(findings wiki.Findings) string {
 		"drift) you'd add. Then wait for the operator's go-ahead.\n\n")
 	b.WriteString(wiki.RenderFindings(findings))
 	return b.String()
-}
-
-func commitLintTurn(workRoot, workflow, projectID, runSlug, wikiRel string) error {
-	if wikiRel == "" {
-		return run.ErrNothingToCommit
-	}
-	if err := run.Stage(workRoot, wikiRel); err != nil {
-		return err
-	}
-	if !run.HasStagedChanges(workRoot) {
-		return run.ErrNothingToCommit
-	}
-	msg := fmt.Sprintf("work: lint pass %s\n\n", runSlug) +
-		trailers.Block{
-			Run:      runSlug,
-			Project:  projectID,
-			Workflow: workflow,
-			Document: "lint",
-		}.String()
-	return run.StageAndCommit(workRoot, msg, wikiRel)
 }

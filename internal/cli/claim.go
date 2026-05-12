@@ -13,7 +13,6 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -133,7 +132,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 					return buildClaimSystemPrompt(worktreeWiki)
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
-					return commitClaimTurn(workRoot, workflow, projectID, runSlug, wikiRel)
+					return commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel)
 				},
 			}, nil
 		},
@@ -213,37 +212,6 @@ func claimRunTitle(recentRun *run.Metadata) string {
 		return "Twin claim"
 	}
 	return fmt.Sprintf("Twin claim (driven by %s)", recentRun.ID)
-}
-
-func commitClaimTurn(workRoot, workflow, projectID, runSlug, wikiRel string) error {
-	if wikiRel == "" {
-		return run.ErrNothingToCommit
-	}
-	paths := []string{wikiRel}
-	// The agent is instructed (in claimKickoff) to drop a per-pass
-	// summary at canvasRel. Stage it alongside the wiki edits so both
-	// land in the same `work: claim pass <runSlug>` commit and the
-	// session-close gate sees a non-empty canvas at the branch tip.
-	// `git add` errors on a missing path, so skip if the agent forgot —
-	// the close-time gate is the strict check that will refuse to seal.
-	canvasRel := run.ContentPath(projectID, runSlug, "claim")
-	if _, err := os.Stat(filepath.Join(workRoot, canvasRel)); err == nil {
-		paths = append(paths, canvasRel)
-	}
-	if err := run.Stage(workRoot, paths...); err != nil {
-		return err
-	}
-	if !run.HasStagedChanges(workRoot) {
-		return run.ErrNothingToCommit
-	}
-	msg := fmt.Sprintf("work: claim pass %s\n\n", runSlug) +
-		trailers.Block{
-			Run:      runSlug,
-			Project:  projectID,
-			Workflow: workflow,
-			Document: "claim",
-		}.String()
-	return run.StageAndCommit(workRoot, msg, paths...)
 }
 
 // loadRecentRunContext returns the most recently closed (or merged /
