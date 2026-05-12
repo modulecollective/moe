@@ -488,3 +488,38 @@ func TestJournalIndexPicksMostRecentTrailerValue(t *testing.T) {
 		t.Errorf("PRURL[r] = %q, want %q (most recent wins)", got, "https://example.com/pr/2")
 	}
 }
+
+// TestJournalIndexCapturesReopenedFrom: a reopen commit's
+// MoE-Reopen-Of trailer lands in the index keyed by the new run's
+// slug (the commit's MoE-Run value) → the prior slug. Mirrors the
+// PromotedTo shape but read in the opposite direction; dash inverts
+// the map to find unreopened candidates.
+func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+	// A reopen lands as an open commit on the new slug carrying
+	// MoE-Reopen-Of pointing back at the prior slug.
+	commitWith("Open run p run-new from reopen of run-old: T",
+		"MoE-Run: run-new\nMoE-Project: p\nMoE-Reopen-Of: run-old\n")
+	// An unrelated run with no Reopen-Of must not pollute the map.
+	commitWith("Open run p loose: T",
+		"MoE-Run: loose\nMoE-Project: p\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.ReopenedFrom["run-new"]; got != "run-old" {
+		t.Errorf("ReopenedFrom[run-new] = %q, want %q", got, "run-old")
+	}
+	if _, ok := idx.ReopenedFrom["loose"]; ok {
+		t.Errorf("ReopenedFrom[loose] should be absent for a run without the trailer")
+	}
+}

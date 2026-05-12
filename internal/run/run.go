@@ -654,6 +654,16 @@ type JournalIndex struct {
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
 	// time means "no work turn on record yet."
 	WorkTurnTime map[WorkTurnKey]time.Time
+	// ReopenedFrom maps new run slug → prior run slug, populated from
+	// the MoE-Reopen-Of trailer carried on a reopened run's open
+	// commit. Parallel in shape to PromotedTo, but read in the
+	// opposite direction: PromotedTo is keyed by the source run
+	// (whose commit carries the trailer at status-bump time);
+	// ReopenedFrom is keyed by the destination run (whose open
+	// commit carries the trailer). Dash uses the value set to
+	// recognise prior runs that have *not* been reopened yet — those
+	// are the candidates the closed bucket marks.
+	ReopenedFrom map[string]string
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -690,6 +700,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		PromotedTo:   make(map[string]string),
 		PRURL:        make(map[string]string),
 		WorkTurnTime: make(map[WorkTurnKey]time.Time),
+		ReopenedFrom: make(map[string]string),
 	}
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
@@ -710,7 +721,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			subject = body[:nl]
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID string
+		var promotedTo, prURL, projectID, docID, reopenOf string
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
@@ -743,6 +754,12 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 				}
 				continue
 			}
+			if v, ok := strings.CutPrefix(line, "MoE-Reopen-Of:"); ok {
+				if reopenOf == "" {
+					reopenOf = strings.TrimSpace(v)
+				}
+				continue
+			}
 		}
 		if slug == "" {
 			continue
@@ -758,6 +775,11 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		if prURL != "" {
 			if _, ok := idx.PRURL[slug]; !ok {
 				idx.PRURL[slug] = prURL
+			}
+		}
+		if reopenOf != "" {
+			if _, ok := idx.ReopenedFrom[slug]; !ok {
+				idx.ReopenedFrom[slug] = reopenOf
 			}
 		}
 		// Work-turn keying is project-scoped, and the subject pin

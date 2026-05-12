@@ -31,6 +31,7 @@ type Block struct {
 	PromotedTo string
 	FromRun    string
 	Idea       string
+	ReopenOf   string
 }
 
 // String renders the block. Empty fields are skipped; field
@@ -48,6 +49,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Promoted-To", b.PromotedTo)
 	write(&sb, "MoE-From-Run", b.FromRun)
 	write(&sb, "MoE-Idea", b.Idea)
+	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
 	return sb.String()
 }
 
