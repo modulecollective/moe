@@ -500,7 +500,7 @@ func TestIdleLineWithLast(t *testing.T) {
 		activeCount: 2,
 		last:        &followLast{project: "tele", run: "fix-it", state: "awaiting merge"},
 	})
-	want := "(no run in play · 2 active · last: tele/fix-it awaiting merge)"
+	want := "(no run in play · 2 active · last: tele fix-it awaiting merge)"
 	if got != want {
 		t.Fatalf("idleLine(): got %q want %q", got, want)
 	}

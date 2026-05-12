@@ -249,7 +249,7 @@ func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (
 		if out, err := git.Combined(subAbs, "merge-base", "--is-ancestor", localSHA, remoteSHA); err != nil {
 			_ = out
 			return nil, fmt.Errorf(
-				"moe sync: %s/%s has diverged from origin — refusing to sync.\n\nRecovery:\n  git -C %s log origin/%s..HEAD   # see local-only commits\n  # decide whether to push, reset, or stash, then retry moe sync",
+				"moe sync: %s %s has diverged from origin — refusing to sync.\n\nRecovery:\n  git -C %s log origin/%s..HEAD   # see local-only commits\n  # decide whether to push, reset, or stash, then retry moe sync",
 				e.Path, branch, e.Path, branch,
 			)
 		}

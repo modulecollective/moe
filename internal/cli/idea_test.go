@@ -97,7 +97,7 @@ func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "captured idea tele/faster-dash-load") {
+	if !strings.Contains(out.String(), "captured idea tele faster-dash-load") {
 		t.Fatalf("missing capture confirmation: %q", out.String())
 	}
 
@@ -112,7 +112,7 @@ func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 
 	// The open-run commit is HEAD with the expected subject + trailers.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Open run tele/faster-dash-load: Faster dash load") {
+	if !strings.Contains(head, "Open run tele faster-dash-load: Faster dash load") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{"MoE-Run: faster-dash-load", "MoE-Project: tele"} {
@@ -182,7 +182,7 @@ func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	for _, want := range []string{"tele/foo", "tele/foo-2", "tele/foo-3"} {
+	for _, want := range []string{"tele foo", "tele foo-2", "tele foo-3"} {
 		var out, errb bytes.Buffer
 		code := Run([]string{"idea", "new", "tele", "foo"}, &out, &errb)
 		if code != 0 {
@@ -231,7 +231,7 @@ func TestIdeaNewTolerantToFlagAfterPositional(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "captured idea tele/custom-slug") {
+	if !strings.Contains(out.String(), "captured idea tele custom-slug") {
 		t.Fatalf("expected slug from --id override, got: %q", out.String())
 	}
 	if _, err := os.Stat(ideaCanvas(root, "tele", "custom-slug")); err != nil {
@@ -429,7 +429,7 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "refined idea tele/starter") {
+	if !strings.Contains(out.String(), "refined idea tele starter") {
 		t.Fatalf("missing refine confirmation: %q", out.String())
 	}
 
@@ -594,7 +594,7 @@ func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed idea tele/close-me") {
+	if !strings.Contains(out.String(), "closed idea tele close-me") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -607,7 +607,7 @@ func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close idea tele/close-me") {
+	if !strings.Contains(head, "Close idea tele close-me") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
@@ -849,7 +849,7 @@ exit 0
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "captured idea tele/chat-capture") {
+	if !strings.Contains(out.String(), "captured idea tele chat-capture") {
 		t.Fatalf("missing capture confirmation: stdout=%q stderr=%q", out.String(), errb.String())
 	}
 	body, err := os.ReadFile(ideaCanvas(root, "tele", "chat-capture"))
@@ -887,7 +887,7 @@ exit 0
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "refined idea tele/chat-refine") {
+	if !strings.Contains(out.String(), "refined idea tele chat-refine") {
 		t.Fatalf("missing refine confirmation: %q", out.String())
 	}
 	body, err := os.ReadFile(ideaCanvas(root, "tele", "chat-refine"))

@@ -407,7 +407,7 @@ func stateForActive(root string, md *run.Metadata) string {
 // idleLine renders the one-line idle status that lands on stderr when
 // no run is in play:
 //
-//	(no run in play · 2 active · last: tele/fix-it awaiting merge)
+//	(no run in play · 2 active · last: tele fix-it awaiting merge)
 //
 // With no active runs the trailing "last:" segment drops.
 func idleLine(s followSummary) string {
@@ -416,7 +416,7 @@ func idleLine(s followSummary) string {
 		fmt.Sprintf("%d active", s.activeCount),
 	}
 	if s.last != nil {
-		parts = append(parts, fmt.Sprintf("last: %s/%s %s",
+		parts = append(parts, fmt.Sprintf("last: %s %s %s",
 			s.last.project, s.last.run, s.last.state))
 	}
 	return "(" + strings.Join(parts, " · ") + ")"

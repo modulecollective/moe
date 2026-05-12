@@ -46,7 +46,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed sdlc tele/abandon-me") {
+	if !strings.Contains(out.String(), "closed sdlc tele abandon-me") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -63,7 +63,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close sdlc run tele/abandon-me") {
+	if !strings.Contains(head, "Close sdlc run tele abandon-me") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
@@ -90,7 +90,7 @@ func TestSDLCCloseWithoutSandboxIsFine(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed sdlc tele/never-opened") {
+	if !strings.Contains(out.String(), "closed sdlc tele never-opened") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 }
@@ -195,7 +195,7 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed kb tele/dead-end") {
+	if !strings.Contains(out.String(), "closed kb tele dead-end") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -208,7 +208,7 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close kb run tele/dead-end") {
+	if !strings.Contains(head, "Close kb run tele dead-end") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
@@ -336,7 +336,7 @@ func TestMetaMoeCloseBumpsStatusAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed meta-moe tele/abandon-mm") {
+	if !strings.Contains(out.String(), "closed meta-moe tele abandon-mm") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -349,7 +349,7 @@ func TestMetaMoeCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close meta-moe run tele/abandon-mm") {
+	if !strings.Contains(head, "Close meta-moe run tele abandon-mm") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
@@ -404,7 +404,7 @@ func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed quick tele/abandon-quick") {
+	if !strings.Contains(out.String(), "closed quick tele abandon-quick") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -421,7 +421,7 @@ func TestQuickCloseRemovesSandboxAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close quick run tele/abandon-quick") {
+	if !strings.Contains(head, "Close quick run tele abandon-quick") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
@@ -541,7 +541,7 @@ func TestSDLCCloseAllowsNeverStartedCode(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed sdlc tele/design-only") {
+	if !strings.Contains(out.String(), "closed sdlc tele design-only") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 }
@@ -618,7 +618,7 @@ func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed idea tele/idea-empty") {
+	if !strings.Contains(out.String(), "closed idea tele idea-empty") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 }

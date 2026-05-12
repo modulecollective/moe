@@ -255,7 +255,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 			return 1
 		}
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
+		msg := fmt.Sprintf("push: %s %s\n\n", md.Project, md.ID) +
 			trailers.Block{
 				Run:      md.ID,
 				Project:  md.Project,
@@ -331,7 +331,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
-	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
+	msg := fmt.Sprintf("push: %s %s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:      md.ID,
 			Project:  md.Project,
@@ -352,7 +352,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "commit merge record: %v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
+	moePrintf(stdout, "merged %s %s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
 	return 0
 }
 

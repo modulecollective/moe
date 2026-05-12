@@ -196,11 +196,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
+	moePrintf(stdout, "opened run %s %s\n", md.Project, md.ID)
 
 	if sourceIdea != nil {
 		if err := markIdeaPromoted(root, sourceIdea, md); err != nil {
-			moePrintf(stderr, "warning: could not mark idea %s/%s promoted: %v\n", sourceIdea.Project, sourceIdea.ID, err)
+			moePrintf(stderr, "warning: could not mark idea %s %s promoted: %v\n", sourceIdea.Project, sourceIdea.ID, err)
 			// The new run is already open; surface the warning but
 			// don't fail the command, since the idea->run transition
 			// is still greppable via the new run's MoE-Idea trailer.
@@ -325,7 +325,7 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, erro
 		// metadata + error pair so callers can decide whether to abort
 		// or continue (queue add chooses to continue: the run is open
 		// and queueable, the idea is just not yet flipped to promoted).
-		return md, fmt.Errorf("warning: could not mark idea %s/%s promoted: %w", src.Project, src.ID, err)
+		return md, fmt.Errorf("warning: could not mark idea %s %s promoted: %w", src.Project, src.ID, err)
 	}
 	return md, nil
 }
@@ -339,15 +339,15 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, "", fmt.Errorf("--from-idea: run %s/%s does not exist", projectID, slug)
+			return nil, "", fmt.Errorf("--from-idea: run %s %s does not exist", projectID, slug)
 		}
 		return nil, "", fmt.Errorf("--from-idea: %w", err)
 	}
 	if md.Workflow != ideaWorkflow {
-		return nil, "", fmt.Errorf("--from-idea: run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
+		return nil, "", fmt.Errorf("--from-idea: run %s %s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
 	if md.Status != run.StatusInProgress {
-		return nil, "", fmt.Errorf("--from-idea: idea %s/%s is already %s", projectID, slug, md.Status)
+		return nil, "", fmt.Errorf("--from-idea: idea %s %s is already %s", projectID, slug, md.Status)
 	}
 	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
 	b, err := os.ReadFile(filepath.Join(root, canvasRel))
@@ -366,7 +366,7 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
+	msg := fmt.Sprintf("Promote idea %s %s → %s %s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
 		trailers.Block{
 			Run:        md.ID,
 			Project:    md.Project,

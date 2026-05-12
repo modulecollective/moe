@@ -303,7 +303,7 @@ func commitHarvestProgress(root, projectID, runID, workflow, relPath string, lin
 	if err := os.WriteFile(filepath.Join(root, relPath), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return fmt.Errorf("write progress %s: %w", relPath, err)
 	}
-	subject := fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID)
+	subject := fmt.Sprintf("harvest: capture follow-ups for %s %s", projectID, runID)
 	msg := subject + "\n\n" +
 		trailers.Block{
 			Run:      runID,

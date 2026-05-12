@@ -190,7 +190,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "captured idea %s/%s\n", md.Project, md.ID)
+	moePrintf(stdout, "captured idea %s %s\n", md.Project, md.ID)
 	return 0
 }
 
@@ -310,12 +310,12 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	})
 	switch {
 	case errors.Is(err, run.ErrNothingToCommit):
-		moePrintf(stdout, "idea %s/%s unchanged\n", projectID, slug)
+		moePrintf(stdout, "idea %s %s unchanged\n", projectID, slug)
 	case err != nil:
 		moePrintf(stderr, "idea: commit: %v\n", err)
 		return 1
 	default:
-		moePrintf(stdout, "refined idea %s/%s\n", projectID, slug)
+		moePrintf(stdout, "refined idea %s %s\n", projectID, slug)
 	}
 	return 0
 }
@@ -325,7 +325,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 // idea <p>/<r>` subject shape that predates the shared helper (sdlc/kb
 // use `Close <wf> run <p>/<r>` — see design).
 func runIdeaClose(args []string, stdout, stderr io.Writer) int {
-	return runClose(ideaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)
+	return runClose(ideaWorkflow, "Close idea %s %s", nil, args, stdout, stderr)
 }
 
 func runIdeaList(args []string, stdout, stderr io.Writer) int {
@@ -452,12 +452,12 @@ func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, fmt.Errorf("idea %s/%s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
+			return nil, fmt.Errorf("idea %s %s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
 		}
 		return nil, err
 	}
 	if md.Workflow != ideaWorkflow {
-		return nil, fmt.Errorf("run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
+		return nil, fmt.Errorf("run %s %s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
 	return md, nil
 }

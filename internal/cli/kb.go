@@ -64,7 +64,7 @@ func init() {
 		Summary: "open a Claude Code ingest session on the project's wiki",
 		Run:     runSummarize,
 	})
-	g.Register(closeCommand("kb", "Close kb run %s/%s", nil))
+	g.Register(closeCommand("kb", "Close kb run %s %s", nil))
 	// Lint is out-of-band relative to runs (no stage, no canvas,
 	// no run.json), so it lives alongside `new` and `close` as a
 	// non-stage group subcommand. Reuses kbWikiBuilder so the lint

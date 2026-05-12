@@ -27,8 +27,8 @@ func TestSDLCDesignWrongProjectFailsFast(t *testing.T) {
 	if !strings.Contains(msg, "run not found") {
 		t.Fatalf("expected run-not-found error, got: %q", msg)
 	}
-	if !strings.Contains(msg, "wrongproj/ghost") {
-		t.Fatalf("expected error to name wrongproj/ghost, got: %q", msg)
+	if !strings.Contains(msg, "wrongproj ghost") {
+		t.Fatalf("expected error to name wrongproj ghost, got: %q", msg)
 	}
 }
 

@@ -312,7 +312,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		}
 	}
 
-	subject := fmt.Sprintf("Open run %s/%s", projectID, id)
+	subject := fmt.Sprintf("Open run %s %s", projectID, id)
 	if opts.SubjectFrom != "" {
 		subject += " from " + opts.SubjectFrom
 	}

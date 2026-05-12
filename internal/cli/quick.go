@@ -22,7 +22,7 @@ func init() {
 		Run:     runQuickCode,
 	})
 	g.Register(pushCmd)
-	g.Register(closeCommand("quick", "Close quick run %s/%s", releaseWorkspaceCleanup))
+	g.Register(closeCommand("quick", "Close quick run %s %s", releaseWorkspaceCleanup))
 	RegisterGroup(g)
 
 	w := NewWorkflow("quick")

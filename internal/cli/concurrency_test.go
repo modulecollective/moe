@@ -74,7 +74,7 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 	}
 	// Log should show n "Open run …" commits in the history.
 	out := gittest.Output(t, root, "log", "--format=%s")
-	gotOpens := strings.Count(out, "Open run demo/")
+	gotOpens := strings.Count(out, "Open run demo ")
 	if gotOpens != n {
 		t.Errorf("git history has %d open-run commits, want %d\n%s", gotOpens, n, out)
 	}
