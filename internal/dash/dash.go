@@ -195,7 +195,16 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 	case run.StatusMerged:
 		return BucketCompletedRuns, prefix + "merged", "", ""
 	case run.StatusClosed:
-		return BucketCompletedRuns, prefix + "closed", "", ""
+		note := prefix + "closed"
+		// sdlc-only: reopen is an sdlc verb, so marking non-sdlc closed
+		// runs would advertise an action the operator can't take.
+		// Closed runs whose MoE-Reopen-Of chain is unextended are the
+		// candidates the operator might still want to carry forward —
+		// reduxes that previously needed a fresh `*-redux` slug.
+		if md.Workflow == "sdlc" && !hasBeenReopened(idx, md.ID) {
+			note += " · reopen?"
+		}
+		return BucketCompletedRuns, note, "", ""
 	case run.StatusPromoted:
 		return BucketCompletedRuns, prefix + "promoted", "", ""
 	}
@@ -257,6 +266,25 @@ func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run
 		return "", false
 	}
 	return dest.ID, true
+}
+
+// hasBeenReopened reports whether any run in the journal claims slug
+// as its MoE-Reopen-Of prior. Scans ReopenedFrom's values rather than
+// keying off them so the lookup matches the question dash actually
+// asks ("is this prior the source of a reopen?"), and so a single
+// reopen index serves both directions without a second map. O(n)
+// scan; n is bounded by the number of reopens across the bureaucracy
+// (small).
+func hasBeenReopened(idx *run.JournalIndex, slug string) bool {
+	if idx == nil {
+		return false
+	}
+	for _, prior := range idx.ReopenedFrom {
+		if prior == slug {
+			return true
+		}
+	}
+	return false
 }
 
 // prNumberForRun finds the PR number recorded for runID by pulling

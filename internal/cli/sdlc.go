@@ -38,6 +38,11 @@ func init() {
 	})
 	g.Register(closeCommand("sdlc", "Close sdlc run %s %s", releaseWorkspaceCleanup))
 	g.Register(&Command{
+		Name:    "reopen",
+		Summary: "open a fresh sdlc run seeded with the design canvas of a terminal prior run",
+		Run:     runSDLCReopen,
+	})
+	g.Register(&Command{
 		Name:    "resume",
 		Summary: "drive any pending stages of an opened run headlessly, then prompt at the merge gate",
 		Run:     runResume,

@@ -261,8 +261,10 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 	}
 }
 
-// TestDashClosedRunShowsClosed: a run with StatusClosed (PR closed
-// without merging) renders as "closed" in COMPLETED.
+// TestDashClosedRunShowsClosed: a closed sdlc run that hasn't yet been
+// reopened renders with a "· reopen?" marker so the operator sees it
+// as a candidate to carry forward via `moe sdlc reopen`. The marker
+// is gated on workflow ("sdlc") because reopen is an sdlc verb.
 func TestDashClosedRunShowsClosed(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -283,8 +285,8 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("expected closed run in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:closed") {
-		t.Fatalf("expected run row with stage 'sdlc:closed', got:\n%s", got)
+	if !strings.Contains(got, "sdlc:closed · reopen?") {
+		t.Fatalf("expected closed sdlc run to carry the reopen marker, got:\n%s", got)
 	}
 }
 
