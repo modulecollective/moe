@@ -31,9 +31,12 @@ type Item struct {
 	Run      string `json:"run"`
 }
 
-// String renders the item the way the walker logs it.
+// String renders the item the way the walker logs it. Three
+// whitespace-separated tokens, matching the shape `moe queue add` and
+// `moe queue edit` take on input — the `<project>/<run>` slash form is
+// an internal trailer/log convention, not the operator-facing surface.
 func (q Item) String() string {
-	return fmt.Sprintf("%s %s/%s", q.Workflow, q.Project, q.Run)
+	return fmt.Sprintf("%s %s %s", q.Workflow, q.Project, q.Run)
 }
 
 // Path is the on-disk JSON file. Lives under .moe/ alongside
