@@ -89,6 +89,51 @@ func TestSDLCReopenSeedsDesignAndCarriesTrailer(t *testing.T) {
 	}
 }
 
+// TestSDLCReopenSeedsKickoffWhenSourceEmpty: operator opens a run,
+// bails without writing any design, closes. Reopen of that run must
+// not refuse — the slug-base + workspace inheritance is the verb's
+// value even when there's no canvas to carry. New run gets an
+// engine-written kickoff naming the prior slug.
+func TestSDLCReopenSeedsKickoffWhenSourceEmpty(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "blank", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele", "blank"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup close failed")
+	}
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "tele", "blank"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	dated := "blank-" + todayDateSuffix()
+	if !strings.Contains(out.String(), "opened run tele "+dated+" (reopen of blank)") {
+		t.Fatalf("missing open confirmation for %q in %q", dated, out.String())
+	}
+
+	// Seed: design canvas non-empty and names the prior slug, so the
+	// design agent's first turn sees why this retake exists.
+	body, err := os.ReadFile(filepath.Join(root, run.ContentPath("tele", dated, "design")))
+	if err != nil {
+		t.Fatalf("seeded design missing: %v", err)
+	}
+	if len(body) == 0 {
+		t.Fatalf("seeded design is empty; expected kickoff text")
+	}
+	if !strings.Contains(string(body), "blank") {
+		t.Fatalf("kickoff seed should name the prior slug, got:\n%s", body)
+	}
+
+	// Trailer carries the link regardless of canvas presence.
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "MoE-Reopen-Of: blank") {
+		t.Fatalf("open commit missing MoE-Reopen-Of trailer:\n%s", head)
+	}
+}
+
 // TestSDLCReopenRefusesInProgress: the design's "just keep working"
 // guidance — reopen of an in-progress run is a usage error, not a
 // silent no-op.

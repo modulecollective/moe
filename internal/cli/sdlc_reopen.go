@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,7 +20,12 @@ import (
 // "just keep working" is the right answer there.
 //
 // What carries over:
-//   - The design canvas, byte-for-byte, seeded into the new run.
+//   - The design canvas, byte-for-byte, seeded into the new run. If the
+//     source's design canvas is missing or empty (operator opened, bailed,
+//     closed without writing), the new run gets a short kickoff seed that
+//     names the prior slug and prompts the operator for the goal of the
+//     retake — the verb's slug-base + workspace inheritance is the value,
+//     not the canvas carry-forward.
 //   - Title and workspace inherited verbatim.
 //
 // What's left behind:
@@ -91,19 +97,24 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 
 	canvasRel := run.ContentPath(projectID, priorSlug, "design")
 	canvasBody, err := os.ReadFile(filepath.Join(root, canvasRel))
-	if err != nil {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		canvasBody = nil
+	case err != nil:
 		moePrintf(stderr, "sdlc reopen: read %s: %v\n", canvasRel, err)
 		return 1
 	}
+	var designSeed string
 	if len(canvasBody) == 0 {
-		moePrintf(stderr, "sdlc reopen: %s is empty; nothing to carry forward\n", canvasRel)
-		return 1
+		designSeed = renderEmptyReopenSeed(prior.Title, priorSlug)
+	} else {
+		designSeed = string(canvasBody)
 	}
 
 	opts := run.Options{
 		Workflow:    prior.Workflow,
 		IDBase:      stripDateSuffix(priorSlug),
-		SeedDocs:    map[string]string{"design": string(canvasBody)},
+		SeedDocs:    map[string]string{"design": designSeed},
 		SubjectFrom: "reopen of " + priorSlug,
 		Trailers:    trailers.Block{ReopenOf: priorSlug},
 		Workspace:   prior.Workspace,
@@ -127,6 +138,19 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "opened run %s %s (reopen of %s)\n", md.Project, md.ID, priorSlug)
 	return promptNextStage(root, md, "", stdout, stderr)
+}
+
+// renderEmptyReopenSeed produces the design-canvas kickoff for a reopen
+// whose source had no design content. The seed names the prior slug
+// (visible in the design agent's first turn via --append-system-prompt)
+// and prompts the operator for the goal of the retake — strictly more
+// useful than a blank canvas and avoids the empty-canvas invariant
+// firing on open.
+func renderEmptyReopenSeed(title, priorSlug string) string {
+	return fmt.Sprintf(
+		"# %s\n\n> Reopened from `%s`, which had no design content.\n> Operator: what's the goal of this retake?\n",
+		title, priorSlug,
+	)
 }
 
 // datedSuffixPattern matches a trailing `-YYYY-MM-DD` segment,
