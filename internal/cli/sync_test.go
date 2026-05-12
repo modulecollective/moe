@@ -363,9 +363,9 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 func (f *syncFixture) initBureaucracyOrigin() {
 	f.t.Helper()
 	bare := filepath.Join(f.t.TempDir(), "bureaucracy.git")
-	mustGit(f.t, "", "init", "--bare", "-b", "main", bare)
-	mustGit(f.t, f.root, "remote", "add", "origin", bare)
-	mustGit(f.t, f.root, "push", "-u", "origin", "main")
+	gittest.Run(f.t, "", "init", "--bare", "-b", "main", bare)
+	gittest.Run(f.t, f.root, "remote", "add", "origin", bare)
+	gittest.Run(f.t, f.root, "push", "-u", "origin", "main")
 	f.origin = bare
 }
 
@@ -378,26 +378,18 @@ func (f *syncFixture) advanceBureaucracyOrigin(path, content, msg string) string
 		f.t.Fatal("initBureaucracyOrigin not called")
 	}
 	work := f.t.TempDir()
-	mustGit(f.t, "", "clone", "-b", "main", f.origin, work)
+	gittest.Run(f.t, "", "clone", "-b", "main", f.origin, work)
 	writeFile(f.t, filepath.Join(work, path), content)
-	mustGit(f.t, work, "add", path)
-	mustGit(f.t, work, "commit", "-m", msg)
-	mustGit(f.t, work, "push", "origin", "main")
-	out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
-	if err != nil {
-		f.t.Fatalf("rev-parse: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	gittest.Run(f.t, work, "add", path)
+	gittest.Run(f.t, work, "commit", "-m", msg)
+	gittest.Run(f.t, work, "push", "origin", "main")
+	return gittest.HeadSHA(f.t, work)
 }
 
 // originHead returns the SHA at refs/heads/main in the bare remote.
 func (f *syncFixture) originHead() string {
 	f.t.Helper()
-	out, err := exec.Command("git", "-C", f.origin, "rev-parse", "main").Output()
-	if err != nil {
-		f.t.Fatalf("rev-parse main on origin: %v", err)
-	}
-	return strings.TrimSpace(string(out))
+	return gittest.Output(f.t, f.origin, "rev-parse", "main")
 }
 
 func TestDoSyncRebasesOverDivergedRemote(t *testing.T) {
@@ -407,8 +399,8 @@ func TestDoSyncRebasesOverDivergedRemote(t *testing.T) {
 	// Local: one turn-shaped commit with a MoE-Run trailer, to confirm
 	// the trailer survives the rebase replay.
 	writeFile(t, filepath.Join(f.root, "local.txt"), "local\n")
-	mustGit(t, f.root, "add", "local.txt")
-	mustGit(t, f.root, "commit", "-m", "local: add local.txt\n\nMoE-Run: r-local\n")
+	gittest.Run(t, f.root, "add", "local.txt")
+	gittest.Run(t, f.root, "commit", "-m", "local: add local.txt\n\nMoE-Run: r-local\n")
 	localSubject := lastCommitMessage(t, f.root)
 
 	// Remote: a parallel commit, no path overlap.
@@ -421,11 +413,7 @@ func TestDoSyncRebasesOverDivergedRemote(t *testing.T) {
 
 	// After rebase, the local commit sits on top of the remote tip.
 	head := f.bureaucracyHead()
-	parentOut, err := exec.Command("git", "-C", f.root, "rev-parse", "HEAD^").Output()
-	if err != nil {
-		t.Fatalf("rev-parse HEAD^: %v", err)
-	}
-	parent := strings.TrimSpace(string(parentOut))
+	parent := gittest.Output(t, f.root, "rev-parse", "HEAD^")
 	if parent != remoteSHA {
 		t.Fatalf("rebased HEAD doesn't sit on remote tip: want parent %s, got %s", remoteSHA, parent)
 	}
@@ -457,14 +445,14 @@ func TestDoSyncRebaseConflictHaltsWithRecovery(t *testing.T) {
 	// conflict on.
 	shared := filepath.Join(f.root, "shared.txt")
 	writeFile(t, shared, "base\n")
-	mustGit(t, f.root, "add", "shared.txt")
-	mustGit(t, f.root, "commit", "-m", "base: add shared.txt")
-	mustGit(t, f.root, "push", "origin", "main")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "base: add shared.txt")
+	gittest.Run(t, f.root, "push", "origin", "main")
 
 	// Local: rewrite shared.txt.
 	writeFile(t, shared, "local\n")
-	mustGit(t, f.root, "add", "shared.txt")
-	mustGit(t, f.root, "commit", "-m", "local: rewrite shared.txt")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "local: rewrite shared.txt")
 
 	// Remote: rewrite the same line independently.
 	f.advanceBureaucracyOrigin("shared.txt", "remote\n", "remote: rewrite shared.txt")
@@ -536,8 +524,8 @@ func TestDoSyncAheadOnlyPushes(t *testing.T) {
 	f.initBureaucracyOrigin()
 
 	writeFile(t, filepath.Join(f.root, "local.txt"), "local\n")
-	mustGit(t, f.root, "add", "local.txt")
-	mustGit(t, f.root, "commit", "-m", "local: add local.txt")
+	gittest.Run(t, f.root, "add", "local.txt")
+	gittest.Run(t, f.root, "commit", "-m", "local: add local.txt")
 	local := f.bureaucracyHead()
 
 	var stdout, stderr bytes.Buffer
