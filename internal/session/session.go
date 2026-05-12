@@ -210,12 +210,14 @@ func Close(s *Session) error {
 	switch out, err := git.Combined(s.WorktreePath, "show", s.Branch+":"+canvasRel); {
 	case err != nil, len(strings.TrimRight(out, "\n")) == 0:
 		return fmt.Errorf(
-			"session close: canvas %s at %s is empty — no commitTurn landed this session\n"+
+			"session close: canvas %s at %s is empty or missing at the branch tip\n"+
 				"  worktree: %s\n"+
 				"  branch:   %s\n"+
+				"  (a commit may have landed without staging the canvas — check\n"+
+				"   `git log %s` and re-stage if needed)\n"+
 				"  resolve by writing to the canvas and re-closing,\n"+
 				"  or drop it: moe session abandon %s",
-			canvasRel, s.Branch, s.WorktreePath, s.Branch, s.Branch)
+			canvasRel, s.Branch, s.WorktreePath, s.Branch, s.Branch, s.Branch)
 	}
 
 	// Rebase inside the worktree. We don't fetch origin first —

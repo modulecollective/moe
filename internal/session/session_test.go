@@ -337,6 +337,16 @@ func TestSessionCloseRefusesEmptyCanvas(t *testing.T) {
 	if !strings.Contains(err.Error(), "moe session abandon") {
 		t.Errorf("error should point at abandon: %v", err)
 	}
+	// The "commit landed without staging the canvas" hint distinguishes
+	// the silent-staging-bug failure mode from "no commits at all" — a
+	// claim/reflect that committed wiki edits but forgot the canvas
+	// shouldn't surface as a contradictory "no commitTurn landed".
+	if !strings.Contains(err.Error(), "empty or missing at the branch tip") {
+		t.Errorf("error should describe the canvas as empty-or-missing: %v", err)
+	}
+	if !strings.Contains(err.Error(), "without staging the canvas") {
+		t.Errorf("error should hint at the missing-stage failure mode: %v", err)
+	}
 	// Worktree and branch must remain so the operator can recover.
 	if _, err := os.Stat(s.WorktreePath); err != nil {
 		t.Errorf("worktree missing after refusal: %v", err)
