@@ -149,16 +149,19 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	// Count active from buckets rather than md.Status so the footer
-	// matches what the ACTIVE section actually shows. A KB run past
-	// its terminal stage is Status=in_progress on disk but lives in
-	// COMPLETED here — counting it as active would mislead.
-	activeCount := 0
+	// Count *projects with at least one active run*, not active rows.
+	// The footer sentence is "N project(s) registered · M with active
+	// runs" — both numbers count projects. Bucketing (not md.Status)
+	// is what defines "active" so the footer matches the ACTIVE
+	// section: a KB run past its terminal stage is in_progress on
+	// disk but lives in COMPLETED here, so its project doesn't count.
+	activeProjects := map[string]struct{}{}
 	for _, r := range rows {
 		if r.Bucket == dash.BucketActiveRuns {
-			activeCount++
+			activeProjects[r.Project] = struct{}{}
 		}
 	}
+	activeCount := len(activeProjects)
 
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))

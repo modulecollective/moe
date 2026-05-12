@@ -93,7 +93,7 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 		"ACTIVE (0)",
 		"BACKLOG (0)",
 		"COMPLETED (0)",
-		"0 project(s) registered · 0 active",
+		"0 project(s) registered · 0 with active runs",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in output:\n%s", want, got)
@@ -504,6 +504,34 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "3 project(s) registered") {
 		t.Fatalf("expected 3 projects in footer, got:\n%s", out.String())
+	}
+}
+
+// TestDashFooterActiveCountsProjectsNotRuns pins the footer semantic:
+// "N with active runs" counts *projects* with at least one active run,
+// not active rows. Two active runs in one project ⇒ 1, not 2. The
+// dashboard already shows the row count on the ACTIVE header, so the
+// footer carries a fact you can't read off the section headers.
+func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	seedRun(t, root, "tele", "fix-a", "sdlc", run.StatusInProgress)
+	seedRun(t, root, "tele", "fix-b", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE (2)") {
+		t.Fatalf("expected two active rows, got:\n%s", got)
+	}
+	if !strings.Contains(got, "1 project(s) registered · 1 with active runs") {
+		t.Fatalf("expected footer to count the single project once, got:\n%s", got)
 	}
 }
 

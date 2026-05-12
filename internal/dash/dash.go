@@ -557,6 +557,11 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 // and the footer. tabwriter aligns columns per section so a long
 // idea title doesn't widen the run rows. COMPLETED is capped at
 // CompletedCap unless showAll is set.
+//
+// activeCount is the number of *projects* with at least one active
+// run — not the count of active rows. The footer reads "N project(s)
+// registered · M with active runs", so both numbers count projects.
+// The ACTIVE section header already exposes the row count.
 func Render(w io.Writer, now time.Time, rows []Row, twinRows []TwinRow, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
 	cliout.Printf(w, "Ministry of Everything %38s\n", now.Format("2006-01-02  15:04"))
 	for _, line := range BuildFactoryArt(state, ArtWidth, r) {
@@ -638,5 +643,5 @@ func Render(w io.Writer, now time.Time, rows []Row, twinRows []TwinRow, projectC
 		fmt.Fprintln(w)
 	}
 
-	cliout.Printf(w, "%d project(s) registered · %d active\n", projectCount, activeCount)
+	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
 }
