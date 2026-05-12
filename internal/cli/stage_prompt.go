@@ -169,13 +169,44 @@ run is pushed.
 `, clonePath)
 	}
 
+	// Twin-feedback channel comes first so the more specific case
+	// gets read while the agent is still classifying — followups is
+	// the fallback. Trigger is mechanical (would acting on this edit
+	// a digital-twin doc?) rather than philosophical, because the
+	// philosophical phrasing ("a decision the doc doesn't reflect")
+	// requires an abstraction the agent doesn't always perform.
+	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
+	out += "\n" +
+		"If you notice something about the project that belongs in the digital\n" +
+		"twin — would acting on this note edit `digital-twin/<project>/`\n" +
+		"(architecture.md, vision.md, patterns.md, operations.md, roadmap.md)? —\n" +
+		"append a note to:\n" +
+		"  " + twinFeedback + "\n" +
+		"Free-form prose; separate notes with `---`. Name the twin doc and\n" +
+		"any file:line refs so the next `moe twin reflect` knows where to\n" +
+		"look. Example:\n" +
+		"\n" +
+		"  architecture.md says the universal gate is the only path into\n" +
+		"  claim/, but cli/claim.go:84 takes an explicit-path shortcut that\n" +
+		"  bypasses it. Either the gate isn't universal anymore, or claim.go\n" +
+		"  needs to route through it.\n" +
+		"\n" +
+		"  ---\n" +
+		"\n" +
+		"  patterns.md \"fail loud\" claims handlers panic on bad input, but\n" +
+		"  cli/foo.go:42 silently returns nil now. Decide which is canon.\n" +
+		"\n" +
+		"The next `moe twin reflect` picks these up as kickoff context — the\n" +
+		"note arrives where the work actually happens.\n"
+
 	// Capture-as-you-go: the close-time harvester turns each unchecked
 	// entry of this file into an idea run, threading any indented body
 	// into the new idea's seed canvas. Worded so the agent appends
 	// rather than rewrites — the file accumulates across stages — and
 	// so the body steer is "only when it would save a future agent
 	// real work," to avoid replacing bare-line junk with body-padded
-	// junk.
+	// junk. The closing backward link catches the agent who drafted a
+	// followup before reading the twin paragraph above.
 	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 	out += "\n" +
 		"If you notice something worth doing but out of scope for this cycle —\n" +
@@ -196,24 +227,9 @@ run is pushed.
 		"sketch. Skip the body when the title is self-explanatory. The\n" +
 		"operator reviews and prunes these at termination; unchecked\n" +
 		"entries become idea runs with the body carried into the seed\n" +
-		"canvas.\n"
-
-	// Sibling channel for notes addressed to the digital twin instead
-	// of the operator. The boundary is the audience: if the next reader
-	// is the twin (a recorded pattern is drifting, an architecture claim
-	// no longer matches the code, vision is being pushed against),
-	// the note belongs here; if it's a work item for the operator, it
-	// stays in followups.md. Two adjacent paragraphs so the agent
-	// makes the classification once.
-	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
-	out += "\n" +
-		"If you notice something the digital twin should know but can't act on\n" +
-		"yourself — drift from a recorded pattern, a decision the architecture\n" +
-		"doc doesn't reflect, a vision claim that no longer matches the work —\n" +
-		"append a note to:\n" +
-		"  " + twinFeedback + "\n" +
-		"Free-form prose; separate notes with `---`. The next `moe twin reflect`\n" +
-		"picks them up as kickoff context. Use this *instead of* the followups\n" +
-		"file above when the audience is the twin, not the operator.\n"
+		"canvas.\n" +
+		"\n" +
+		"If acting on this entry would edit a digital-twin doc, it belongs\n" +
+		"in `feedback/twin.md` above instead.\n"
 	return out
 }

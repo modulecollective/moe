@@ -890,8 +890,10 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 // The operational core prompt teaches the agent two adjacent
 // channels: followups.md (operator) and feedback/twin.md (twin). The
 // split is the whole point — the existing dashboard pollution is
-// category confusion between the two — so pin both paragraphs and the
-// fact that they sit next to each other.
+// category confusion between the two — so pin both paragraphs, the
+// fact that they sit next to each other in twin-first order, the
+// mechanical trigger that names the twin docs, and the backward link
+// from followups that catches an agent who drafted there first.
 func TestOperationalCoreNamesBothFollowupsAndFeedback(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
@@ -905,16 +907,27 @@ func TestOperationalCoreNamesBothFollowupsAndFeedback(t *testing.T) {
 	if !strings.Contains(got, feedback) {
 		t.Errorf("prompt missing twin feedback path %q:\n%s", feedback, got)
 	}
-	// The contrast steer ("use *instead of* the followups file above
-	// when the audience is the twin") is what teaches the agent to
-	// make the classification once. Prompt body wraps at a newline,
-	// so match against the salient adjacent words rather than the
-	// full phrase.
-	if !strings.Contains(got, "*instead of*") {
-		t.Errorf("prompt missing 'instead of' emphasis:\n%s", got)
+	// Twin first: primacy matters because an agent who has already
+	// mentally drafted a followup entry never re-checks. Pin the
+	// order by path position so reordering the paragraphs is a
+	// deliberate change.
+	if fi, ti := strings.Index(got, followups), strings.Index(got, feedback); ti < 0 || fi < 0 || ti > fi {
+		t.Errorf("twin feedback paragraph must precede followups (twin=%d, followups=%d):\n%s", ti, fi, got)
 	}
-	if !strings.Contains(got, "audience is the twin, not the operator") {
-		t.Errorf("prompt missing twin-vs-operator contrast:\n%s", got)
+	// Mechanical trigger: enumerate the twin docs the agent should
+	// recognize. Philosophical phrasing ("a decision the doc doesn't
+	// reflect") is what failed in claim-seems-broken; the names of
+	// the actual files are the load-bearing cue.
+	for _, doc := range []string{"architecture.md", "vision.md", "patterns.md", "operations.md", "roadmap.md"} {
+		if !strings.Contains(got, doc) {
+			t.Errorf("twin trigger missing twin doc name %q:\n%s", doc, got)
+		}
+	}
+	// Backward link from the followups paragraph closes the
+	// asymmetric-redirect hole: an agent who reads only the
+	// followups paragraph still gets sent to feedback/twin.md.
+	if !strings.Contains(got, "belongs\nin `feedback/twin.md` above instead") {
+		t.Errorf("prompt missing followups→twin backward link:\n%s", got)
 	}
 }
 
