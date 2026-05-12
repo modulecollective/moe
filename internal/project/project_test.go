@@ -259,6 +259,99 @@ func TestDeriveID(t *testing.T) {
 	}
 }
 
+// writeListFixture lays down projects/<id>/project.json with the given
+// Metadata. Used by the List tests to construct a populated projects/
+// tree without going through Register (which needs a real git remote).
+func writeListFixture(t *testing.T, root string, md *Metadata) {
+	t.Helper()
+	dir := filepath.Join(root, "projects", md.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.MarshalIndent(md, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListEmpty(t *testing.T) {
+	mds, warns, err := List(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mds) != 0 || len(warns) != 0 {
+		t.Fatalf("expected empty result, got mds=%v warns=%v", mds, warns)
+	}
+}
+
+func TestListSortsByID(t *testing.T) {
+	root := t.TempDir()
+	writeListFixture(t, root, &Metadata{ID: "beta", DefaultBranch: "main", Remote: "https://example.com/beta.git"})
+	writeListFixture(t, root, &Metadata{ID: "alpha", DefaultBranch: "trunk", Remote: "git@example.com:org/alpha.git"})
+
+	mds, warns, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("unexpected warnings: %v", warns)
+	}
+	if len(mds) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(mds))
+	}
+	if mds[0].ID != "alpha" || mds[1].ID != "beta" {
+		t.Fatalf("expected [alpha beta], got [%s %s]", mds[0].ID, mds[1].ID)
+	}
+	if mds[0].DefaultBranch != "trunk" || mds[0].Remote != "git@example.com:org/alpha.git" {
+		t.Errorf("alpha round-trip lost data: %+v", mds[0])
+	}
+}
+
+func TestListSkipsDirWithoutJSON(t *testing.T) {
+	root := t.TempDir()
+	writeListFixture(t, root, &Metadata{ID: "good", DefaultBranch: "main", Remote: "x"})
+	if err := os.MkdirAll(filepath.Join(root, "projects", "stray"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mds, warns, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("missing project.json should be silent, got warns=%v", warns)
+	}
+	if len(mds) != 1 || mds[0].ID != "good" {
+		t.Fatalf("expected [good], got %+v", mds)
+	}
+}
+
+func TestListWarnsOnMalformedJSON(t *testing.T) {
+	root := t.TempDir()
+	writeListFixture(t, root, &Metadata{ID: "good", DefaultBranch: "main", Remote: "x"})
+	badDir := filepath.Join(root, "projects", "bad")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "project.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mds, warns, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mds) != 1 || mds[0].ID != "good" {
+		t.Fatalf("expected only [good], got %+v", mds)
+	}
+	if len(warns) != 1 || warns[0].ID != "bad" || warns[0].Err == nil {
+		t.Fatalf("expected one warning for bad, got %+v", warns)
+	}
+}
+
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

@@ -121,6 +121,57 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 	return md, nil
 }
 
+// ListWarning describes one entry under projects/ that exists but
+// couldn't be parsed. Returned alongside the valid entries from List
+// so the caller (e.g. `moe project list`) can render skip warnings
+// without the scan deciding output format.
+type ListWarning struct {
+	ID  string
+	Err error
+}
+
+// List walks projects/ under root and returns the parsed Metadata of
+// every entry that carries a readable project.json. Entries lacking a
+// project.json are silently skipped — projects/<id>/ exists as a plain
+// directory only when the project is registered, so its absence just
+// means "not a registered project here." Entries whose project.json is
+// unreadable or unparseable surface as warnings; the rest of the scan
+// still succeeds. Results are sorted by id (os.ReadDir guarantees
+// filename order, which is the id namespace).
+func List(root string) ([]*Metadata, []ListWarning, error) {
+	entries, err := os.ReadDir(filepath.Join(root, "projects"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("project: read projects/: %w", err)
+	}
+	var mds []*Metadata
+	var warnings []ListWarning
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		path := filepath.Join(root, "projects", id, "project.json")
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			warnings = append(warnings, ListWarning{ID: id, Err: err})
+			continue
+		}
+		md := &Metadata{}
+		if err := json.Unmarshal(b, md); err != nil {
+			warnings = append(warnings, ListWarning{ID: id, Err: err})
+			continue
+		}
+		mds = append(mds, md)
+	}
+	return mds, warnings, nil
+}
+
 // Load reads projects/<id>/project.json and returns the resolved Metadata.
 // Used by commands that operate against a registered project (e.g. push)
 // to resolve Remote, DefaultBranch, and Submodule without re-deriving.

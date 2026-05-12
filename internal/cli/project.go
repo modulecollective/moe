@@ -11,11 +11,16 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("project", "manage projects (subcommands: add, remove)")
+	g := NewCommandGroup("project", "manage projects (subcommands: add, list, remove)")
 	g.Register(&Command{
 		Name:    "add",
 		Summary: "register a project from a remote git URL",
 		Run:     runProjectAdd,
+	})
+	g.Register(&Command{
+		Name:    "list",
+		Summary: "list registered projects",
+		Run:     runProjectList,
 	})
 	g.Register(&Command{
 		Name:    "remove",
@@ -62,6 +67,40 @@ func runProjectAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "registered %s (branch %s) at %s\n", md.ID, md.DefaultBranch, md.Submodule)
+	return 0
+}
+
+func runProjectList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("project list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { moePrintln(stderr, "usage: moe project list") }
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	mds, warnings, err := project.List(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	for _, w := range warnings {
+		moePrintf(stderr, "project list: skipping %s: %v\n", w.ID, w.Err)
+	}
+	if len(mds) == 0 {
+		moePrintln(stdout, "(no projects registered)")
+		return 0
+	}
+	for _, md := range mds {
+		moePrintf(stdout, "%s\t%s\t%s\n", md.ID, md.DefaultBranch, md.Remote)
+	}
 	return 0
 }
 
