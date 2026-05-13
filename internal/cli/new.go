@@ -215,16 +215,19 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 
-// oneShotStages is sdlc's headless ladder: design then code. The list
-// is the source of truth for both runOneShotChain (start-from-stage
-// dispatch) and any future workflow that earns --one-shot.
-var oneShotStages = []struct {
-	name         string
-	needsSandbox bool
-}{
-	{name: "design", needsSandbox: false},
-	{name: "code", needsSandbox: true},
-}
+// oneShotStages is sdlc's headless ladder: design, code, test. The
+// list is the source of truth for runOneShotChain (start-from-stage
+// dispatch). test stage runs headlessly under the same shape as code
+// — the agent narrates verification on its own; push stays a separate
+// verb so an operator-decision still gates ship.
+//
+// Each entry is just a stage name — runOneShotChain dispatches through
+// the typed Command (g.Lookup(stage).Run(["--one-shot", ...])) so
+// every stage-specific setup the typed handler does (canvas skeleton,
+// prior-canvas refusal, kickoff prompt) fires on the initial one-shot
+// invocation the same way it does on the chained re-entry via the
+// post-stage `o` prompt.
+var oneShotStages = []string{"design", "code", "test"}
 
 // runOneShotChain runs the first applicable stage of sdlc's headless
 // ladder and hands off to runStageSession's post-turn `[Y/n/o]` chain
@@ -246,35 +249,40 @@ var oneShotStages = []struct {
 // Automatic pushing is still off the table: the merge-gate prompt's
 // default-N keeps a reflex Enter from shipping.
 func runOneShotChain(root string, md *run.Metadata, startStage string, stdout, stderr io.Writer) int {
+	g, err := LookupGroup(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	skipping := startStage != ""
-	for _, s := range oneShotStages {
+	for _, stage := range oneShotStages {
 		if skipping {
-			if s.name == startStage {
+			if stage == startStage {
 				skipping = false
 			} else {
 				continue
 			}
 		}
-		moePrintf(stdout, "one-shot: %s (headless)\n", s.name)
-		return runOneShotStage(md.Project, md.ID, s.name, s.needsSandbox, stdout, stderr)
+		cmd := g.Lookup(stage)
+		if cmd == nil {
+			moePrintf(stderr, "one-shot: workflow %s has no command for stage %q\n", md.Workflow, stage)
+			return 1
+		}
+		moePrintf(stdout, "one-shot: %s (headless)\n", stage)
+		// Dispatch through the typed handler so stage-specific setup
+		// (canvas skeleton seeding, prior-canvas refusal, kickoff
+		// prompt) fires the same way it does on the chained `o`
+		// re-entry. Returning after one stage matches the prior
+		// behaviour — the chain advances via the post-stage `[Y/n/o]`
+		// prompt's `o` branch, which calls cmd.Run(["--one-shot", ...])
+		// for the next stage.
+		return cmd.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
 	}
 	// No matching one-shot stage (e.g. resume from a state where Next()
 	// is push). Fall through to promptNextStage with empty
 	// justFinished so it falls back to Next() — the merge-gate hint
 	// surfaces the same way today's resume hits it.
 	return promptNextStage(root, md, "", stdout, stderr)
-}
-
-// runOneShotStage runs one stage of the sdlc one-shot chain. It's a
-// thin wrapper over runStageSession that flips the headless knob;
-// runStageSession seeds the user prompt from the run title for any
-// headless caller and fires its own `[Y/n/o]` chain prompt after the
-// turn, so callers don't drive either piece by hand.
-func runOneShotStage(projectID, runID, docID string, needsSandbox bool, stdout, stderr io.Writer) int {
-	return runStageSession(projectID, runID, docID, stageSessionOpts{
-		NeedsSandbox: needsSandbox,
-		Headless:     true,
-	}, stdout, stderr)
 }
 
 // promoteIdeaToSdlcRun opens a fresh sdlc run seeded by an idea's

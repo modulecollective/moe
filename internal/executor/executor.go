@@ -64,6 +64,13 @@ type Request struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// ExtraEnv is appended to os.Environ() before the claude subprocess
+	// is spawned. Stage callers use it to inject the dev-env hooks'
+	// parsed output (DATABASE_URL, MOE_HOME, etc.) so the agent's
+	// `Bash` tool calls run against the project's isolated runtime
+	// instead of the operator's real env. Empty preserves the prior
+	// behaviour — claude inherits the moe process env verbatim.
+	ExtraEnv []string
 }
 
 // sandboxSettingsJSON builds the `--settings` payload that pins the
@@ -179,6 +186,9 @@ func Execute(r Request) error {
 	default:
 		cmd.Dir = r.Root
 	}
+	if len(r.ExtraEnv) > 0 {
+		cmd.Env = append(os.Environ(), r.ExtraEnv...)
+	}
 	cmd.Stdin = r.Stdin
 	cmd.Stdout = r.Stdout
 	cmd.Stderr = r.Stderr
@@ -243,6 +253,12 @@ type OneShotRequest struct {
 	// `moe sdlc new --one-shot` chain leaves it zero so wiki-finalize-
 	// sized work isn't artificially capped.
 	Timeout time.Duration
+	// ExtraEnv is appended to os.Environ() before the claude
+	// subprocess is spawned — same semantics as Request.ExtraEnv. The
+	// headless code/test stages route their dev-env vars through this
+	// field so the agent's tool calls see the project's isolated
+	// runtime.
+	ExtraEnv []string
 }
 
 // ExecuteOneShot runs `claude -p` non-interactively and surfaces a
@@ -308,6 +324,9 @@ func ExecuteOneShot(r OneShotRequest) error {
 		cmd.Dir = r.ClonePath
 	} else {
 		cmd.Dir = r.Root
+	}
+	if len(r.ExtraEnv) > 0 {
+		cmd.Env = append(os.Environ(), r.ExtraEnv...)
 	}
 	// No stdin: -p mode reads only flags + positional prompt. Wiring
 	// stdin would let claude block on a tty that nobody's typing into.

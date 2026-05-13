@@ -163,8 +163,19 @@ func renderPromptLegend(opts []promptOption) string {
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
 func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	if next.Name == "code" {
-		canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
+	// Surface the just-finished stage's canvas above the prompt so the
+	// operator reads it before authorising the next stage. The pairing
+	// is design → code: print design; code → test: print code. Same
+	// shape promptPushNextStage uses for test → push.
+	priorCanvas := ""
+	switch next.Name {
+	case "code":
+		priorCanvas = "design"
+	case "test":
+		priorCanvas = "code"
+	}
+	if priorCanvas != "" {
+		canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, priorCanvas))
 		if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
 			fmt.Fprint(stdout, string(body))
 			if !strings.HasSuffix(string(body), "\n") {
@@ -233,18 +244,21 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 // "no, and close." The forward-leaning m/p/b slots keep their familiar
 // positions for muscle memory.
 //
-// The code canvas is printed above the prompt so the operator reads
-// the agent's pre-push framing at the exact moment they're deciding
-// whether to ship. follow no longer surfaces the code canvas during
-// the code stage (it shows the sandbox diff instead), so this is the
-// canvas's one chance to land in front of the operator. By the time
-// promptNextStage fires, session.Close has already rebased the code
+// The just-finished stage's canvas is printed above the prompt so the
+// operator reads the agent's pre-push framing at the exact moment
+// they're deciding whether to ship. With test stage in place, that's
+// the test canvas — the verification narrative is the more direct
+// "should we ship?" lens than the code canvas (which holds the PR
+// body but is one stage back). follow no longer surfaces stage
+// canvases once their sessions close, so this is the canvas's one
+// chance to land in front of the operator. By the time
+// promptNextStage fires, session.Close has already rebased the
 // session onto main, so root is the right base for the read.
 // Whitespace-only or missing canvas falls through to the bare prompt:
 // no header or decoration — the canvas is markdown the agent wrote
 // for the operator, printed as written.
 func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
 	if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
 		fmt.Fprint(stdout, string(body))
 		if !strings.HasSuffix(string(body), "\n") {

@@ -13,14 +13,24 @@ import (
 
 // runOneShotStageDirect drives one stage via the same path the chain
 // uses, so test fixtures can stand up a "design done, code pending"
-// state without typing through promptNextStage. Reuses runOneShotStage
-// directly (the same call runOneShotChain makes), so the test fixture
-// reflects production semantics.
+// state without typing through promptNextStage. Goes through the
+// typed Command's Run with --one-shot, mirroring runOneShotChain's
+// production dispatch (and the post-stage `o` prompt's), so the
+// fixture reflects production semantics.
 func runOneShotStageDirect(t *testing.T, projectID, runID, docID string, needsSandbox bool) {
 	t.Helper()
+	_ = needsSandbox // sandbox-need is now derived by the typed handler.
+	g, err := LookupGroup("sdlc")
+	if err != nil {
+		t.Fatalf("lookup sdlc group: %v", err)
+	}
+	cmd := g.Lookup(docID)
+	if cmd == nil {
+		t.Fatalf("sdlc has no command for stage %q", docID)
+	}
 	var out, errb bytes.Buffer
-	if code := runOneShotStage(projectID, runID, docID, needsSandbox, &out, &errb); code != 0 {
-		t.Fatalf("runOneShotStage %s: exit=%d stderr=%q", docID, code, errb.String())
+	if code := cmd.Run([]string{"--one-shot", projectID, runID}, &out, &errb); code != 0 {
+		t.Fatalf("one-shot %s: exit=%d stderr=%q", docID, code, errb.String())
 	}
 }
 
@@ -111,12 +121,12 @@ func TestSdlcResumeRerunsParkedDesign(t *testing.T) {
 	}
 }
 
-// TestSdlcResumeRerunsParkedCode: design + code committed, no push
-// yet. Push has no work-turn commit shape, so under the
-// forward-walking rule code stays parked until the run hits a
-// terminal status. resume re-enters code and surfaces the push hint
-// at the end via the successor lookup. Design is not re-run because
-// it satisfies — code's later turn is the successor it needs.
+// TestSdlcResumeRerunsParkedCode: design + code committed, no test
+// or push yet. Test has no work-turn commit, so under the forward-
+// walking rule code stays parked (its successor is test). resume
+// re-enters code, and the post-stage hint points at test — the
+// successor lookup decoupled from Next(). Design is not re-run
+// because its successor (code) has a later turn.
 func TestSdlcResumeRerunsParkedCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -152,9 +162,12 @@ func TestSdlcResumeRerunsParkedCode(t *testing.T) {
 	if strings.Contains(out.String(), "design → code") {
 		t.Fatalf("did not expect design→code banner on parked-code resume: %q", out.String())
 	}
-	// Push hint surfaces at the end.
-	if !strings.Contains(out.String(), "next: moe sdlc push tele resume-from-push") {
-		t.Fatalf("expected push hint, got: %q", out.String())
+	// Test hint surfaces at the end — code's successor is test, not
+	// push. The full chain to the merge gate is code → test → push;
+	// suppressNextStagePrompt stops the chain after one stage, so we
+	// see the immediate successor hint here.
+	if !strings.Contains(out.String(), "next: moe sdlc test tele resume-from-push") {
+		t.Fatalf("expected test hint, got: %q", out.String())
 	}
 	// Design canvas was not touched — its successor is satisfied.
 	designAfter, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "resume-from-push", "documents", "design", "content.md"))

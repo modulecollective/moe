@@ -65,6 +65,14 @@ type stageSessionOpts struct {
 	// chain (design → code) and never wants the interactive next-stage
 	// prompt to fire mid-chain.
 	SkipNextStage bool
+	// CanvasSkeleton, when non-empty, is written to the canvas file the
+	// first time the document is opened (the EnsureDocument-mutated
+	// branch). Lets stages with a fixed structural canvas — test stage's
+	// "What was verified / What wasn't verified / Fixes applied /
+	// Operator spot-check" headings — seed the agent's first read with
+	// the shape it has to fill, instead of relying on the prompt
+	// fragment alone. Skipped on resume turns.
+	CanvasSkeleton string
 	// WikiBuilder, when non-nil, is invoked after the bureaucracy
 	// root and run metadata are resolved. It returns the wiki engine
 	// config for this stage; nil means the stage is not an ingest
@@ -156,6 +164,21 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err := run.Save(workRoot, md); err != nil {
 					return wikiTurnSpec{}, err
 				}
+				// Seed the canvas skeleton on first open if requested —
+				// stages with a fixed structural shape (test stage) want
+				// the agent's first read to land on the headings it has
+				// to fill, not a blank file. Only writes if the canvas
+				// doesn't already exist on disk: a pre-existing canvas
+				// from a stale stub or test fixture stays untouched.
+				if opts.CanvasSkeleton != "" {
+					canvasRel := run.ContentPath(md.Project, md.ID, docID)
+					canvasAbs := filepath.Join(workRoot, canvasRel)
+					if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
+						if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
+							return wikiTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
+						}
+					}
+				}
 				// Commit on the session branch — no repo lock needed
 				// because the branch has a single writer (this session).
 				if err := commitSessionStart(workRoot, md, docID); err != nil {
@@ -173,6 +196,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// vs named workspace based on md.Workspace; the callers
 			// here don't need to know which.
 			clonePath := ""
+			var devEnv map[string]string
 			if opts.NeedsSandbox {
 				if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
 					return wikiTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
@@ -181,6 +205,18 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err != nil {
 					return wikiTurnSpec{}, err
 				}
+				// Dev-env hooks fire on every code/test stage open
+				// against this working tree. First touch runs the
+				// project's dev-env.d/* setup scripts and caches the
+				// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
+				// later turns re-source the cache. Projects with no
+				// dev-env.d/ directory get an empty env (the
+				// single-driver default) — no warning, no refusal.
+				env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
+				if err != nil {
+					return wikiTurnSpec{}, fmt.Errorf("dev-env: %w", err)
+				}
+				devEnv = env
 			}
 
 			// Document-only stages need a cwd that's stable across
@@ -267,6 +303,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				Headless:         opts.Headless,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
+				ExtraEnv:         mapToEnv(devEnv),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
 					if err != nil {
@@ -399,6 +436,13 @@ type wikiTurnSpec struct {
 	// message. Returning run.ErrNothingToCommit is treated as a soft
 	// empty turn — reported but not fatal.
 	CommitStager func(workRoot, wikiRel string) error
+	// ExtraEnv is the merged dev-env exports (parsed from the
+	// project's `hooks/dev-env.d/*` setup scripts) that should ride
+	// the claude subprocess as additional KEY=VALUE entries. Empty
+	// for stages without a working tree (design, lint, etc.) or for
+	// projects that ship no dev-env hooks. Routed unchanged to
+	// executor.Request.ExtraEnv / executor.OneShotRequest.ExtraEnv.
+	ExtraEnv []string
 }
 
 // runWikiSession owns the full wiki-aware session lifecycle: open the
@@ -488,6 +532,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			ClonePath:  spec.ClonePath,
 			Stdout:     stdout,
 			Stderr:     stderr,
+			ExtraEnv:   spec.ExtraEnv,
 		})
 	} else {
 		runErr = executor.Execute(executor.Request{
@@ -503,6 +548,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Stdin:         os.Stdin,
 			Stdout:        os.Stdout,
 			Stderr:        stderr,
+			ExtraEnv:      spec.ExtraEnv,
 		})
 	}
 

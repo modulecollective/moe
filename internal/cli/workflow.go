@@ -32,7 +32,21 @@ type Workflow struct {
 	// prompt asks Successor(stage) for the DAG-level "what's next?"
 	// answer, decoupled from Next()'s git-derived satisfaction walk.
 	successors map[string][]string
+	// stageGates lets a stage layer an additional satisfiability check
+	// on top of the default "has a work-turn newer than upstream" rule.
+	// Today only sdlc's test stage uses it: a committed test-canvas
+	// that left the structural sections empty must not advance the
+	// stage. The gate runs *after* the default work-turn check, only
+	// when that check passed — so a stage with no work-turn stays
+	// parked regardless of gate state.
+	stageGates map[string]StageGate
 }
+
+// StageGate is the optional canvas-aware check a stage can register
+// alongside its work-turn rule. Returning (false, nil) parks the stage;
+// returning a non-nil error bubbles up. Receives the bureaucracy root
+// and the run metadata so it can read the canvas from disk.
+type StageGate func(root string, md *run.Metadata) (bool, error)
 
 // NewWorkflow constructs an empty workflow. Callers add stages with
 // RegisterStage and then hand the workflow to RegisterWorkflow.
@@ -41,7 +55,28 @@ func NewWorkflow(name string) *Workflow {
 		Name:       name,
 		prereqs:    map[string][]string{},
 		successors: map[string][]string{},
+		stageGates: map[string]StageGate{},
 	}
+}
+
+// RegisterStageGate attaches an additional satisfiability check to
+// stage. Panics if stage isn't already registered or if a gate is
+// already attached — same fail-loud contract as RegisterStage.
+func (w *Workflow) RegisterStageGate(stage string, gate StageGate) {
+	found := false
+	for _, s := range w.stageOrder {
+		if s == stage {
+			found = true
+			break
+		}
+	}
+	if !found {
+		panic("cli: gate registered for unknown stage " + w.Name + " " + stage)
+	}
+	if _, dup := w.stageGates[stage]; dup {
+		panic("cli: duplicate stage gate " + w.Name + " " + stage)
+	}
+	w.stageGates[stage] = gate
 }
 
 // RegisterStage adds a stage name to this workflow's ladder. Panics on
@@ -178,6 +213,21 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 	}
 	if stageWhen.IsZero() {
 		return false, nil
+	}
+	// Stage gates run as an AND with the work-turn rule, but only when
+	// a turn has already landed — a gate that read an empty canvas
+	// would just report "not filled" for the same reason the work-turn
+	// check already would. Layering it on top of the time check keeps
+	// the gate honest: it speaks to the *quality* of a committed turn,
+	// not its existence.
+	if gate, ok := w.stageGates[stage]; ok {
+		ok, err := gate(root, md)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
 	}
 	succs := w.successors[stage]
 	if len(succs) == 0 {

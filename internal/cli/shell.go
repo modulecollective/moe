@@ -78,6 +78,14 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 // shell there. Refuses missing or terminal runs at the boundary so
 // a stale shell call against a closed run doesn't silently land on
 // a directory that's about to be removed.
+//
+// Sources the cached dev-env from <tree>/.moe/dev-env.env if it
+// exists so the operator's manual spot-check sees the same
+// `DATABASE_URL`, `MOE_HOME`, etc. the agent saw during code/test
+// stages. A missing cache means dev-env hooks never ran for this
+// tree (no code/test stage yet, or the project ships no dev-env.d/);
+// in that case the shell inherits the operator's real env, same as
+// before.
 func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) int {
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -93,8 +101,13 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	extraEnv, _, err := devEnvLoadCache(wp)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	moePrintf(stdout, "shell in %s (run %s %s)\n", wp, md.Project, md.ID)
-	return execShell(wp, stderr)
+	return execShell(wp, mapToEnv(extraEnv), stderr)
 }
 
 // shellNamedWorkspace drops into a named workspace without a run. The
@@ -102,6 +115,12 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 // stat. Doesn't switch branches and doesn't take a claim — the
 // workspace is just a directory at this point, and a run that later
 // attaches with `--workspace <name>` is what flips it to "owned."
+//
+// Sources the workspace's cached dev-env if it exists. The unclaimed
+// shell-only path doesn't run setup itself (there's no run to bind
+// to and no design intent for the workspace to imply env), so the
+// env shows up only after some run has already attached to this
+// workspace and produced a cache.
 func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer) int {
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -121,13 +140,18 @@ func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer)
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	extraEnv, _, err := devEnvLoadCache(wp)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	switch {
 	case holder != nil:
 		moePrintf(stdout, "shell in %s (workspace %q, currently held by run %s)\n", wp, name, holder.Run)
 	default:
 		moePrintf(stdout, "shell in %s (workspace %q, unclaimed)\n", wp, name)
 	}
-	return execShell(wp, stderr)
+	return execShell(wp, mapToEnv(extraEnv), stderr)
 }
 
 // execShell runs the operator's interactive shell with cwd set to
@@ -138,7 +162,13 @@ func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer)
 // exit code. Returning 1 instead of the actual code on launch failure
 // is intentional: any nonzero from the shell process itself is
 // preserved.
-func execShell(dir string, stderr io.Writer) int {
+//
+// extraEnv is appended to os.Environ() before the shell launches —
+// today's caller threads the cached dev-env vars through so the
+// operator's manual spot-check sees the same `DATABASE_URL`,
+// `MOE_HOME`, etc. the agent saw. An empty slice falls back to a
+// plain inherited env.
+func execShell(dir string, extraEnv []string, stderr io.Writer) int {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -148,7 +178,11 @@ func execShell(dir string, stderr io.Writer) int {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
+	env := os.Environ()
+	if len(extraEnv) > 0 {
+		env = append(env, extraEnv...)
+	}
+	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

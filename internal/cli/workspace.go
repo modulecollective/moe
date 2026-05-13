@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
@@ -77,15 +78,29 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 }
 
 // releaseRunWorkspace drops the run's hold on its workspace at
-// terminal status. For per-run sandboxes that means removing the
-// clone (the branch and worktree go with it); for named workspaces
-// that means releasing the claim and leaving the directory in place
-// for the next run to reuse.
+// terminal status. For per-run sandboxes that means running the
+// project's dev-env teardown hooks (so postgres dbs / tmpdirs / etc.
+// die alongside the sandbox), then removing the clone — the branch
+// and worktree go with it. For named workspaces that means releasing
+// the claim and leaving the directory in place for the next run to
+// reuse; teardown is deferred to `moe workspace dev-env-refresh` or a
+// future workspace-teardown verb, since the workspace's env is
+// expected to outlive the run.
 //
 // Idempotent: a run that never reached `sdlc code` (no clone, no
-// claim) is a no-op either way.
+// claim) is a no-op either way. Teardown is invoked best-effort —
+// a non-zero exit is logged but doesn't block sandbox removal,
+// because a half-removed sandbox is worse than a half-cleaned dev
+// resource (the operator can re-run cleanup; they can't undo
+// "sandbox stuck in a corrupt state").
 func releaseRunWorkspace(root string, md *run.Metadata) error {
 	if md.Workspace == "" {
+		if sandbox.Exists(root, md.Project, md.ID) {
+			workTree := sandbox.Path(root, md.Project, md.ID)
+			if err := devEnvRunTeardown(root, workTree, md, os.Stdout, os.Stderr); err != nil {
+				fmt.Fprintf(os.Stderr, "dev-env: teardown for %s %s: %v\n", md.Project, md.ID, err)
+			}
+		}
 		return sandbox.Remove(root, md.Project, md.ID)
 	}
 	return workspace.Release(root, md.Project, md.Workspace)

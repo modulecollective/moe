@@ -46,6 +46,7 @@ const (
 var stageGlyphs = map[string]string{
 	"design":         "⚒",
 	"code":           "⚙",
+	"test":           "✓",
 	"awaiting merge": "▶",
 }
 

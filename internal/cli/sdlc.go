@@ -18,7 +18,7 @@ import (
 // point that creates a run in this workflow.
 
 func init() {
-	g := NewCommandGroup("sdlc", "sdlc workflow: new, design, code, push")
+	g := NewCommandGroup("sdlc", "sdlc workflow: new, design, code, test, push")
 	g.Register(newRunCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "design",
@@ -29,6 +29,11 @@ func init() {
 		Name:    "code",
 		Summary: "open a Claude Code session on the run's code document (in a sandbox clone)",
 		Run:     runCode,
+	})
+	g.Register(&Command{
+		Name:    "test",
+		Summary: "open a Claude Code session on the run's test document — verify the code stage's work",
+		Run:     runTest,
 	})
 	g.Register(pushCmd)
 	g.Register(&Command{
@@ -52,7 +57,14 @@ func init() {
 	w := NewWorkflow("sdlc")
 	w.RegisterStage("design")
 	w.RegisterStage("code", "design")
-	w.RegisterStage("push", "code")
+	w.RegisterStage("test", "code")
+	w.RegisterStage("push", "test")
+	// Test stage's anti-theater check: the work-turn commit alone
+	// doesn't tell us whether the agent actually filled the canvas
+	// or just committed the placeholder skeleton. The gate reads the
+	// canvas and refuses to advance until "What was verified" and
+	// "What wasn't verified" both have substantive content.
+	w.RegisterStageGate("test", testStageGate)
 	RegisterWorkflow(w)
 }
 
@@ -136,6 +148,81 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
 		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
 }
+
+func runTest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sdlc test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe sdlc test [--one-shot] <project> <run>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Opens an interactive Claude Code session on the test canvas. The agent")
+		moePrintln(stderr, "verifies the code stage's work — running the project's checks, driving")
+		moePrintln(stderr, "the change end-to-end, applying small in-place fixes, and narrating what")
+		moePrintln(stderr, "was and wasn't verified on the canvas. Pre-push hooks still gate ship.")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	if code := requireRun("sdlc test", fs.Arg(0), fs.Arg(1), stderr); code != 0 {
+		return code
+	}
+	// test depends on code's output (the diff to verify) the same way code
+	// depends on design's. Refuse if the code canvas is missing so a
+	// skipped-ahead `sdlc test` fails fast instead of opening a session
+	// against nothing.
+	if err := requireCodeCanvas(fs.Arg(0), fs.Arg(1)); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if *oneShot {
+		return runStageSession(fs.Arg(0), fs.Arg(1), "test",
+			stageSessionOpts{
+				NeedsSandbox:   true,
+				Headless:       true,
+				CanvasSkeleton: testCanvasSkeleton,
+			}, stdout, stderr)
+	}
+	const kickoff = "The operator just opened this test session. " +
+		"Read the canvas file before replying, so your acknowledgement reflects " +
+		"what's actually on it. In one or two sentences, acknowledge where " +
+		"verification stands (fresh start vs. resumed) and ask what they'd " +
+		"like to verify or spot-check next. Then wait for their reply."
+	return runStageSession(fs.Arg(0), fs.Arg(1), "test",
+		stageSessionOpts{
+			NeedsSandbox:   true,
+			InitialPrompt:  kickoff,
+			CanvasSkeleton: testCanvasSkeleton,
+		}, stdout, stderr)
+}
+
+// testCanvasSkeleton is the fixed structural shape every test canvas
+// opens with. The Next.satisfied check (see workflow.go) enforces
+// non-empty "What was verified" and "What wasn't verified" sections;
+// the stage fragment instructs the agent on the anti-theater rules.
+const testCanvasSkeleton = `# Test
+
+## What was verified
+
+(agent fills: commands run, end-to-end paths driven, what passed — cite and quote)
+
+## What wasn't verified
+
+(agent fills: skipped surfaces + why — needs human eye, needs prod-shaped data, out of scope. "Nothing — automated tests cover the change" is acceptable for pure-backend work.)
+
+## Fixes applied during this stage
+
+(agent fills: one row per in-place fix; empty if none)
+
+## Operator spot-check
+
+(optional; the operator may fill if they drove the change manually)
+`
 
 // runResume drives an already-opened sdlc run forward through whichever
 // of design/code is still pending and hands off to the merge-gate
@@ -284,6 +371,20 @@ func requireRun(verb, projectID, runID string, stderr io.Writer) int {
 // interactive and `--one-shot` paths so an operator skipping straight
 // to `sdlc code` on a fresh run gets the same error either way.
 func requireDesignCanvas(projectID, runID string) error {
+	return requirePriorCanvas(projectID, runID, "design", "code")
+}
+
+// requireCodeCanvas is the analogue for test stage: refuse to open a
+// test session when there's no code canvas to verify. Same fail-loud
+// invariant as requireDesignCanvas, one stage downstream.
+func requireCodeCanvas(projectID, runID string) error {
+	return requirePriorCanvas(projectID, runID, "code", "test")
+}
+
+// requirePriorCanvas is the shared shape behind requireDesignCanvas and
+// requireCodeCanvas: stat the prior stage's canvas and bail with a
+// pointer at the verb the operator needs to run first.
+func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -292,10 +393,11 @@ func requireDesignCanvas(projectID, runID string) error {
 	if err != nil {
 		return err
 	}
-	canvas := filepath.Join(root, run.ContentPath(projectID, runID, "design"))
+	canvas := filepath.Join(root, run.ContentPath(projectID, runID, priorStage))
 	info, err := os.Stat(canvas)
 	if err != nil || info.Size() == 0 {
-		return fmt.Errorf("design canvas missing — run `moe sdlc design %s %s` first", projectID, runID)
+		return fmt.Errorf("%s canvas missing — run `moe sdlc %s %s %s` before `moe sdlc %s`",
+			priorStage, priorStage, projectID, runID, currentStage)
 	}
 	return nil
 }

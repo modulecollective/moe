@@ -588,11 +588,14 @@ func TestPromptPushNextStageBlankDeclines(t *testing.T) {
 	}
 }
 
-// TestPromptPushNextStagePrintsCodeCanvas: when the code canvas
+// TestPromptPushNextStagePrintsTestCanvas: when the test canvas
 // exists on disk, its bytes appear above the [N/m/p] prompt verbatim
-// (no header, no decoration). follow no longer surfaces the code
-// canvas during the code stage, so this is the canvas's one chance
-// to land in front of the operator at the merge decision.
+// (no header, no decoration). follow no longer surfaces stage
+// canvases once their sessions close, so this is the canvas's one
+// chance to land in front of the operator at the merge decision.
+// The test canvas is the just-finished narrative — the more direct
+// "should we ship?" framing than the code canvas (which holds the PR
+// body but is one stage back).
 func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
@@ -605,11 +608,11 @@ func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	root := t.TempDir()
-	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "code"))
+	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "test"))
 	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const body = "## What changed\n\nReplaced the canvas pager with hunk.\n"
+	const body = "## What was verified\n\n`go test ./...` passes.\n"
 	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
