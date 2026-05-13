@@ -462,7 +462,7 @@ func TestDoSyncRebaseConflictHaltsWithRecovery(t *testing.T) {
 	if err == nil {
 		t.Fatalf("doSync: expected error\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
-	if !rebaseInProgress(f.root) {
+	if !sync.RebaseInProgress(f.root) {
 		t.Fatal("expected worktree to be left in rebase-in-progress state")
 	}
 	msg := err.Error()
@@ -537,6 +537,273 @@ func TestDoSyncAheadOnlyPushes(t *testing.T) {
 	}
 	if got := f.originHead(); got != local {
 		t.Fatalf("origin didn't receive push: want %s, got %s", local, got)
+	}
+}
+
+// TestAutoPushAheadOnlyPushesAndIsCheap is the happy-path session-close
+// shape: a turn commit lives on local main, AutoPush gets it to origin
+// without doing pointer bumps or PR reconciliation (those are sync's
+// job). Asserts the local HEAD reaches origin and that no extra
+// bureaucracy commit was created (sync would have made one if it ran).
+func TestAutoPushAheadOnlyPushesAndIsCheap(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	writeFile(t, filepath.Join(f.root, "turn.txt"), "turn\n")
+	gittest.Run(t, f.root, "add", "turn.txt")
+	gittest.Run(t, f.root, "commit", "-m", "work: turn commit")
+	local := f.bureaucracyHead()
+
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPush: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if got := f.originHead(); got != local {
+		t.Fatalf("origin didn't receive push: want %s, got %s", local, got)
+	}
+	if f.bureaucracyHead() != local {
+		t.Fatalf("AutoPush mutated bureaucracy HEAD: %s -> %s (it should only push, not bump)", local, f.bureaucracyHead())
+	}
+}
+
+// TestAutoPushNoUpstreamIsSilentNoop is the brand-new-branch case: no
+// @{u} configured, AutoPush returns nil without trying to push.
+func TestAutoPushNoUpstreamIsSilentNoop(t *testing.T) {
+	f := newSyncFixture(t)
+	// Deliberately no initBureaucracyOrigin — main has no upstream.
+
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPush: %v\nstderr=%s", err, stderr.String())
+	}
+	if stderr.Len() != 0 || stdout.Len() != 0 {
+		t.Fatalf("expected silent no-op, got stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+// TestAutoPushWarnsAndContinuesOnNetworkFailure: origin is unreachable
+// (path that doesn't exist). AutoPush must not fail the turn — it warns
+// to stderr and returns nil. Local HEAD must be untouched.
+func TestAutoPushWarnsAndContinuesOnNetworkFailure(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+	// Repoint origin at a path that doesn't exist so push fails locally
+	// (no network needed to reproduce).
+	bogus := filepath.Join(t.TempDir(), "does-not-exist.git")
+	gittest.Run(t, f.root, "remote", "set-url", "origin", bogus)
+
+	writeFile(t, filepath.Join(f.root, "turn.txt"), "turn\n")
+	gittest.Run(t, f.root, "add", "turn.txt")
+	gittest.Run(t, f.root, "commit", "-m", "work: turn commit")
+	headBefore := f.bureaucracyHead()
+
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPush returned %v; should warn and continue on network failure", err)
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatal("AutoPush mutated HEAD on a failure path")
+	}
+	if !strings.Contains(stderr.String(), "[auto-sync skipped]") {
+		t.Fatalf("expected warn line on stderr, got %q", stderr.String())
+	}
+}
+
+// TestAutoPullPullsRebasedRemoteHead: remote advanced independently;
+// AutoPull rebases local onto origin/main without any local divergence.
+func TestAutoPullPullsRebasedRemoteHead(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	remoteSHA := f.advanceBureaucracyOrigin("remote.txt", "remote\n", "remote: add remote.txt")
+
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPull(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPull: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if got := f.bureaucracyHead(); got != remoteSHA {
+		t.Fatalf("local HEAD didn't advance to remote: want %s, got %s", remoteSHA, got)
+	}
+}
+
+// TestAutoPullNoUpstreamIsSilentNoop: brand-new branch with no @{u}.
+func TestAutoPullNoUpstreamIsSilentNoop(t *testing.T) {
+	f := newSyncFixture(t)
+
+	headBefore := f.bureaucracyHead()
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPull(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPull: %v\nstderr=%s", err, stderr.String())
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatal("AutoPull moved HEAD without an upstream configured")
+	}
+	if stderr.Len() != 0 || stdout.Len() != 0 {
+		t.Fatalf("expected silent no-op, got stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+// TestAutoPullRefusesWhenRebaseInProgress: a pre-existing rebase halts
+// the auto-pull with the recovery prose, same contract as doSync.
+func TestAutoPullRefusesWhenRebaseInProgress(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	if err := os.MkdirAll(filepath.Join(f.root, ".git", "rebase-merge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	headBefore := f.bureaucracyHead()
+
+	var stdout, stderr bytes.Buffer
+	err := sync.AutoPull(f.root, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("AutoPull: expected refusal on pre-existing rebase")
+	}
+	if !strings.Contains(err.Error(), "rebase is in progress") {
+		t.Fatalf("error shape wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rebase --continue") {
+		t.Fatalf("error missing recovery hint: %v", err)
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatal("HEAD moved despite refusal")
+	}
+}
+
+// TestAutoPullHaltsOnRebaseConflict: divergent commits on the same path
+// cause a real rebase conflict; AutoPull halts with the recovery prose,
+// leaving the worktree mid-rebase for the operator to resolve.
+func TestAutoPullHaltsOnRebaseConflict(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	shared := filepath.Join(f.root, "shared.txt")
+	writeFile(t, shared, "base\n")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "base: add shared.txt")
+	gittest.Run(t, f.root, "push", "origin", "main")
+
+	writeFile(t, shared, "local\n")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "local: rewrite shared.txt")
+
+	f.advanceBureaucracyOrigin("shared.txt", "remote\n", "remote: rewrite shared.txt")
+
+	var stdout, stderr bytes.Buffer
+	err := sync.AutoPull(f.root, &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("AutoPull: expected halt on conflict\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if !sync.RebaseInProgress(f.root) {
+		t.Fatal("expected worktree left mid-rebase for operator")
+	}
+	if !strings.Contains(err.Error(), "rebase --continue") {
+		t.Fatalf("recovery hint missing: %v", err)
+	}
+}
+
+// TestOpenWikiSessionRunsAutoPullBeforeSessionOpen pins the
+// session-open wiring: openWikiSession must auto-pull from origin
+// before it lays the session worktree down, so the agent's first turn
+// starts from current state. Setup advances origin beyond what's local;
+// after openWikiSession, local main must have caught up.
+func TestOpenWikiSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+	remoteSHA := f.advanceBureaucracyOrigin("remote.txt", "remote\n", "remote: add remote.txt")
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "auto-pull-test",
+		DocID:       "design",
+		LockPurpose: "stage",
+	}
+	var stdout, stderr bytes.Buffer
+	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("openWikiSession: %v\nstderr=%s", err, stderr.String())
+	}
+	// Tear the session worktree down. The session never produced a
+	// commit, so closeSess will call session.Abandon — auto-push still
+	// runs but has nothing new to send.
+	t.Cleanup(func() {
+		if err := closeSess(); err != nil {
+			t.Logf("closeSess: %v", err)
+		}
+		_ = sess
+	})
+
+	mainSHA, err := git.RevParse(f.root, "main")
+	if err != nil {
+		t.Fatalf("rev-parse main: %v", err)
+	}
+	if mainSHA != remoteSHA {
+		t.Fatalf("local main didn't pick up remote advance: want %s, got %s (auto-pull didn't fire?)", remoteSHA, mainSHA)
+	}
+}
+
+// TestOpenWikiSessionRefusesOnRebaseConflict pins the halt-loud
+// contract: if auto-pull hits a rebase conflict, the session never
+// opens. No worktree, no branch — the operator resolves the conflict
+// before any turn starts.
+func TestOpenWikiSessionRefusesOnRebaseConflict(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	// Set up divergent commits on the same path so the pull rebase
+	// conflicts.
+	shared := filepath.Join(f.root, "shared.txt")
+	writeFile(t, shared, "base\n")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "base: shared")
+	gittest.Run(t, f.root, "push", "origin", "main")
+
+	writeFile(t, shared, "local\n")
+	gittest.Run(t, f.root, "add", "shared.txt")
+	gittest.Run(t, f.root, "commit", "-m", "local: shared")
+	f.advanceBureaucracyOrigin("shared.txt", "remote\n", "remote: shared")
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "auto-pull-conflict",
+		DocID:       "design",
+		LockPurpose: "stage",
+	}
+	var stdout, stderr bytes.Buffer
+	_, _, err := openWikiSession(f.root, in, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("openWikiSession: expected refusal on rebase conflict")
+	}
+	if !strings.Contains(err.Error(), "rebase --continue") {
+		t.Fatalf("error missing recovery prose: %v", err)
+	}
+	// No session branch should exist — Open never ran.
+	branch := "session/moe/auto-pull-conflict/design"
+	wt := gittest.Output(t, f.root, "worktree", "list")
+	if strings.Contains(wt, branch) {
+		t.Fatalf("session worktree was created despite auto-pull halt:\n%s", wt)
+	}
+}
+
+// TestAutoPullWarnsAndContinuesOnNetworkFailure: origin unreachable
+// (path doesn't exist). AutoPull must warn and return nil so the turn
+// continues offline.
+func TestAutoPullWarnsAndContinuesOnNetworkFailure(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+	bogus := filepath.Join(t.TempDir(), "does-not-exist.git")
+	gittest.Run(t, f.root, "remote", "set-url", "origin", bogus)
+
+	headBefore := f.bureaucracyHead()
+	var stdout, stderr bytes.Buffer
+	if err := sync.AutoPull(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("AutoPull returned %v; should warn and continue on network failure", err)
+	}
+	if f.bureaucracyHead() != headBefore {
+		t.Fatal("AutoPull mutated HEAD on a failure path")
+	}
+	if !strings.Contains(stderr.String(), "[auto-sync skipped]") {
+		t.Fatalf("expected warn line on stderr, got %q", stderr.String())
 	}
 }
 

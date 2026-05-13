@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -67,8 +65,8 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// recovery block instead of charging into another pull. Resolution
 	// is plain git: `git status` → fix → `git rebase --continue` (or
 	// `--abort`). Once the rebase is gone, the next sync proceeds.
-	if rebaseInProgress(root) {
-		return rebaseRecoveryError(root)
+	if sync.RebaseInProgress(root) {
+		return sync.RebaseRecoveryError(root)
 	}
 
 	// --rebase --autostash so the two-machines case (operator commits
@@ -93,8 +91,8 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// config can't re-enable it.
 	if sync.HasUpstream(root) {
 		if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
-			if rebaseInProgress(root) {
-				return rebaseRecoveryError(root)
+			if sync.RebaseInProgress(root) {
+				return sync.RebaseRecoveryError(root)
 			}
 			return fmt.Errorf("git pull: %w", err)
 		}
@@ -253,46 +251,3 @@ func deleteRemoteBranchForRun(root string, md *run.Metadata) error {
 	return sync.DeleteRemoteBranch(repo, branchPrefix+md.ID)
 }
 
-// rebaseInProgress reports whether a `git rebase` is paused in dir's
-// worktree. True on either apply-style (`rebase-apply/`) or
-// merge-style (`rebase-merge/`) rebases — `git pull --rebase` uses
-// one or the other depending on backend. Goes through
-// `git rev-parse --git-path` so it resolves correctly when .git is a
-// file pointing into a shared gitdir (linked worktrees).
-func rebaseInProgress(dir string) bool {
-	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		out, err := git.Output(dir, "rev-parse", "--git-path", name)
-		if err != nil {
-			continue
-		}
-		p := strings.TrimSpace(out)
-		if p == "" {
-			continue
-		}
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(dir, p)
-		}
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// rebaseRecoveryError builds the refuse-with-recovery message used
-// when the bureaucracy worktree has a rebase paused — either because
-// the just-run pull hit a conflict, or because a previous sync left
-// one behind. Names any dirty/unmerged paths from `git status` so the
-// operator knows exactly what to look at; resolution stays plain git.
-func rebaseRecoveryError(root string) error {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "moe sync: a git rebase is in progress in %s — refusing to sync.", root)
-	if entries, err := git.Status(root); err == nil && len(entries) > 0 {
-		sb.WriteString("\n")
-		for _, e := range entries {
-			fmt.Fprintf(&sb, "\n  %s %s", e.XY, e.Path)
-		}
-	}
-	fmt.Fprintf(&sb, "\n\nRecovery:\n  cd %s\n  git status                # inspect conflicts\n  # resolve, then:\n  git rebase --continue     # or: git rebase --abort\n  moe sync                  # retry once the rebase is gone", root)
-	return errors.New(sb.String())
-}

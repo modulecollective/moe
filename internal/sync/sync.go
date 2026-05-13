@@ -362,6 +362,98 @@ func PRStateOf(prURL string) (*PRState, error) {
 	return &s, nil
 }
 
+// RebaseInProgress reports whether a `git rebase` is paused in dir's
+// worktree. True on either apply-style (`rebase-apply/`) or
+// merge-style (`rebase-merge/`) rebases — `git pull --rebase` uses
+// one or the other depending on backend. Goes through
+// `git rev-parse --git-path` so it resolves correctly when .git is a
+// file pointing into a shared gitdir (linked worktrees).
+func RebaseInProgress(dir string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := git.Output(dir, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(out)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RebaseRecoveryError builds the refuse-with-recovery message used
+// when the bureaucracy worktree has a rebase paused — either because
+// a just-run pull hit a conflict, or because a previous sync left
+// one behind. Names any dirty/unmerged paths from `git status` so the
+// operator knows exactly what to look at; resolution stays plain git.
+func RebaseRecoveryError(root string) error {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "moe sync: a git rebase is in progress in %s — refusing to sync.", root)
+	if entries, err := git.Status(root); err == nil && len(entries) > 0 {
+		sb.WriteString("\n")
+		for _, e := range entries {
+			fmt.Fprintf(&sb, "\n  %s %s", e.XY, e.Path)
+		}
+	}
+	fmt.Fprintf(&sb, "\n\nRecovery:\n  cd %s\n  git status                # inspect conflicts\n  # resolve, then:\n  git rebase --continue     # or: git rebase --abort\n  moe sync                  # retry once the rebase is gone", root)
+	return errors.New(sb.String())
+}
+
+// AutoPull is the session-open read-edge: pull bureaucracy's upstream
+// onto local main before the operator's first edit lands on a stale
+// canvas. Same pull command as `moe sync` (rebase + autostash, no
+// submodule recursion — `BumpProjectPointers` is sync's job, not ours)
+// but with a lighter failure policy. Rebase conflicts halt with the
+// full recovery prose so the turn never starts on a half-rebased
+// worktree; everything else (network, auth, dns) is best-effort —
+// warn one line and return nil so the operator can keep working
+// offline. The next clean auto-pull catches any divergence.
+//
+// No upstream configured is a silent no-op — brand-new branches with
+// no @{u} are common during local-only setup.
+func AutoPull(root string, stdout, stderr io.Writer) error {
+	if RebaseInProgress(root) {
+		return RebaseRecoveryError(root)
+	}
+	if !HasUpstream(root) {
+		return nil
+	}
+	if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
+		if RebaseInProgress(root) {
+			return RebaseRecoveryError(root)
+		}
+		cliout.Printf(stderr, "[auto-sync skipped] git pull failed: %v — working offline\n", err)
+		return nil
+	}
+	return nil
+}
+
+// AutoPush is the session-close write-edge: push the turn commit that
+// just landed on local main so the other machine sees it before the
+// operator switches over. Plain `git push` — no submodule recursion
+// (auto-push never moves a gitlink, that's `moe sync`'s job) and no
+// PR reconcile. Best-effort: a brand-new branch with no upstream is a
+// silent no-op, and a network failure warns one line and returns nil
+// so a turn can't fail just because origin is unreachable. The local
+// commit is intact; the next session close retries.
+func AutoPush(root string, stdout, stderr io.Writer) error {
+	if !HasUpstream(root) {
+		return nil
+	}
+	if err := git.Stream(root, stdout, stderr, "push"); err != nil {
+		cliout.Printf(stderr, "[auto-sync skipped] git push failed: %v — working offline\n", err)
+		return nil
+	}
+	return nil
+}
+
 // DeleteRemoteBranch asks GitHub to drop refs/heads/<branch> from
 // repo via `gh api DELETE`. A 422 with "Reference does not exist" is
 // treated as success (someone — auto-delete on merge, an earlier

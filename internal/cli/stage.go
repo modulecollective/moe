@@ -29,6 +29,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -409,7 +410,7 @@ type wikiTurnSpec struct {
 // in runStageSession; lint sessions call the helper directly with no
 // run scaffolding. Returns the exit code to bubble up.
 func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) int {
-	sess, closeSess, err := openWikiSession(root, in)
+	sess, closeSess, err := openWikiSession(root, in, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -571,14 +572,28 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 // lock options. Centralising both halves means each early-failure path
 // in runWikiSession is one `_ = closeSess()` line, and adding a new
 // path can't drift the lock purpose / Run key away from the open side.
-func openWikiSession(root string, in wikiSessionInputs) (*session.Session, func() error, error) {
+//
+// Auto-sync is woven into both lock windows: an auto-pull runs before
+// session.Open so the operator's first edit lands on current state,
+// and an auto-push runs after session.Close so the turn commit reaches
+// the other machine without the operator having to remember `moe sync`.
+// A rebase-conflict on auto-pull refuses-loud (the turn never starts);
+// a network failure on either side warns and continues. Heartbeat is on
+// because the network legs can sit for several seconds on a slow link
+// and we don't want a contending invocation to declare the lock stale.
+func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) (*session.Session, func() error, error) {
 	// Open (or resume) the session worktree under the repo lock.
-	// Short hold: the only work is `git worktree add` (or a lookup).
+	// The local work is just `git worktree add` (or a lookup); the
+	// auto-pull before it can sit on the network briefly.
 	var sess *session.Session
 	err := withRepoLock(root, repolock.Options{
-		Purpose: in.LockPurpose + "-open",
-		Run:     in.Project + "/" + in.RunSlug,
+		Purpose:   in.LockPurpose + "-open",
+		Run:       in.Project + "/" + in.RunSlug,
+		Heartbeat: true,
 	}, func() error {
+		if err := sync.AutoPull(root, stdout, stderr); err != nil {
+			return err
+		}
 		s, err := session.Open(root, in.Project, in.RunSlug, in.DocID)
 		if err != nil {
 			return err
@@ -591,9 +606,15 @@ func openWikiSession(root string, in wikiSessionInputs) (*session.Session, func(
 	}
 	closeSess := func() error {
 		return withRepoLock(root, repolock.Options{
-			Purpose: in.LockPurpose + "-close",
-			Run:     in.Project + "/" + in.RunSlug,
-		}, func() error { return session.Close(sess) })
+			Purpose:   in.LockPurpose + "-close",
+			Run:       in.Project + "/" + in.RunSlug,
+			Heartbeat: true,
+		}, func() error {
+			if err := session.Close(sess); err != nil {
+				return err
+			}
+			return sync.AutoPush(root, stdout, stderr)
+		})
 	}
 	return sess, closeSess, nil
 }
