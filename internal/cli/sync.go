@@ -250,4 +250,3 @@ func deleteRemoteBranchForRun(root string, md *run.Metadata) error {
 	}
 	return sync.DeleteRemoteBranch(repo, branchPrefix+md.ID)
 }
-
