@@ -21,7 +21,7 @@ func init() {
 		Summary: "open a Claude Code session on the run's code canvas (in a sandbox clone)",
 		Run:     runQuickCode,
 	})
-	g.Register(pushCmd)
+	g.Register(pushCommand("quick"))
 	g.Register(closeCommand("quick", "Close quick run %s %s", releaseWorkspaceCleanup))
 	RegisterGroup(g)
 

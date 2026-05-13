@@ -18,10 +18,20 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-var pushCmd = &Command{
-	Name:    "push",
-	Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
-	Run:     runPush,
+// pushCommand builds the `push` facade for a workflow. Same shape as
+// lintCommand/reflectCommand — the factory closes over the workflow
+// name so the Usage closure can render a runnable banner instead of a
+// `<wf>` placeholder. runPush itself stays workflow-agnostic: it loads
+// the run, reads md.Workflow, and threads it into the per-call
+// messages that need it.
+func pushCommand(workflow string) *Command {
+	return &Command{
+		Name:    "push",
+		Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
+		Run: func(args []string, stdout, stderr io.Writer) int {
+			return runPush(workflow, args, stdout, stderr)
+		},
+	}
 }
 
 const branchPrefix = "moe/"
@@ -35,12 +45,12 @@ const branchPrefix = "moe/"
 //
 // Idempotent on terminal runs: rerunning after a merged/closed run is
 // a no-op that prints the terminal state and exits 0.
-func runPush(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("workflow push", flag.ContinueOnError)
+func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(workflow+" push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe <wf> push [--pr] <project> <run>")
+		moePrintf(stderr, "usage: moe %s push [--pr] <project> <run>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
@@ -105,11 +115,11 @@ func runPush(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	branch := branchPrefix + md.ID
-	if err := push.CheckCleanWorkTree(clonePath); err != nil {
+	if err := push.CheckCleanWorkTree(clonePath, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch); err != nil {
+	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}

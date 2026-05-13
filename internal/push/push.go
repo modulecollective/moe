@@ -156,8 +156,10 @@ func DeleteRemoteBranch(clonePath, branch string, stdout, stderr io.Writer) erro
 // changes — staged, unstaged, or untracked. The agent is responsible
 // for committing inside the sandbox before exiting; if it didn't, the
 // loose edits would silently be left behind by the push and we'd ship
-// a branch that doesn't reflect the agent's actual work.
-func CheckCleanWorkTree(clonePath string) error {
+// a branch that doesn't reflect the agent's actual work. `workflow` is
+// threaded in only to render a runnable command in the error message;
+// the caller (cli/push.go) already has it on md.Workflow.
+func CheckCleanWorkTree(clonePath, workflow string) error {
 	entries, err := git.Status(clonePath)
 	if err != nil {
 		return fmt.Errorf("push: git status in sandbox: %w", err)
@@ -167,15 +169,16 @@ func CheckCleanWorkTree(clonePath string) error {
 	}
 	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
        sandbox: %s
-       re-run `+"`moe <wf> code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath)
+       re-run `+"`moe %s code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath, workflow)
 }
 
 // CheckBranchHasCommits confirms the sandbox clone has `branch` and
 // that it's ahead of `base`. A branch at zero commits-ahead means the
-// agent didn't actually commit anything.
-func CheckBranchHasCommits(clonePath, branch, base string) error {
+// agent didn't actually commit anything. `workflow` is the run's
+// workflow name, used to render a runnable command in the error.
+func CheckBranchHasCommits(clonePath, branch, base, workflow string) error {
 	if !git.HasRef(clonePath, "refs/heads/"+branch) {
-		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe <wf> code` and have the agent commit", branch)
+		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe %s code` and have the agent commit", branch, workflow)
 	}
 	// AheadOf swallows rev-list failures (returns 0, nil) so an unknown
 	// base ref just skips this check — the push itself surfaces a real

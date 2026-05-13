@@ -35,7 +35,7 @@ func init() {
 		Summary: "open a Claude Code session on the run's test document — verify the code stage's work",
 		Run:     runTest,
 	})
-	g.Register(pushCmd)
+	g.Register(pushCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "shell",
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
