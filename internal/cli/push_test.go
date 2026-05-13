@@ -628,7 +628,7 @@ func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -670,7 +670,7 @@ func TestPromptPushNextStageMissingCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -717,7 +717,7 @@ func TestPromptPushNextStageWhitespaceCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -767,7 +767,7 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 	// Empty root → no code canvas on disk → the prompt skips the cat
 	// and falls through to the bare [N/m/p] line, which is what the
 	// dispatch-shape assertions below expect.
-	code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
+	code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("promptPushNextStage exit=%d stderr=%s", code, stderr.String())
 	}
@@ -818,7 +818,7 @@ func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, back, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, back, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -867,7 +867,7 @@ func TestPromptPushNextStageNoBackWhenNil(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -882,6 +882,161 @@ func TestPromptPushNextStageNoBackWhenNil(t *testing.T) {
 	}
 	if rec.ran {
 		t.Errorf("`b` with nil back must not dispatch anything")
+	}
+}
+
+// TestPromptPushNextStageOffersScuttleWhenRegistered: a non-nil scuttle
+// at the push prompt grows the label to [N/s/m/p] (scuttle adjacent to
+// the decline default), the legend names "scuttle (close)", and typing
+// `s\n` dispatches scuttle.Run([project, run]). Pins the "abandon ship"
+// affordance one keystroke from the merge gate, where the design says
+// the intent most often forms.
+func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			rec.args = append([]string(nil), args...)
+			return 0
+		},
+	}
+	var scuttleRan bool
+	var scuttleArgs []string
+	scuttle := &Command{
+		Name: "close",
+		Run: func(args []string, _, _ io.Writer) int {
+			scuttleRan = true
+			scuttleArgs = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "s\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, scuttle, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/s/m/p]") {
+		t.Fatalf("expected [N/s/m/p] label, got: %q", got)
+	}
+	if !strings.Contains(got, "s=scuttle (close)") {
+		t.Fatalf("expected legend entry for scuttle, got: %q", got)
+	}
+	if rec.ran {
+		t.Errorf("`s` must not dispatch push: rec.args=%v", rec.args)
+	}
+	if !scuttleRan {
+		t.Fatalf("expected scuttle to dispatch on `s`")
+	}
+	if got, want := strings.Join(scuttleArgs, " "), "tele fix-it"; got != want {
+		t.Fatalf("scuttle args = %q, want %q", got, want)
+	}
+}
+
+// TestPromptPushNextStageScuttleWithBack: scuttle and back both
+// registered produce [N/s/m/p/b] — scuttle adjacent to N, back at the
+// tail — and the legend lists both in that order.
+func TestPromptPushNextStageScuttleWithBack(t *testing.T) {
+	next := &Command{
+		Name: "push",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	back := &Command{
+		Name: "code",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	scuttle := &Command{
+		Name: "close",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, back, scuttle, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/s/m/p/b]") {
+		t.Fatalf("expected [N/s/m/p/b] label, got: %q", got)
+	}
+	if !strings.Contains(got, "N=decline · s=scuttle (close) · m=fast-forward merge · p=open PR · b=back to code") {
+		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
+	}
+}
+
+// TestPromptPushNextStageNoScuttleWhenNil: a nil scuttle keeps the
+// label at [N/m/p] and the legend free of any `s=` entry. `s\n` on
+// stdin must not dispatch anything — it falls into the decline arm
+// like any other unrecognised input.
+func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "push",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			rec.args = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "s\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/m/p]") {
+		t.Fatalf("expected [N/m/p] label without /s, got: %q", got)
+	}
+	if strings.Contains(got, "/s/") || strings.Contains(got, "/s]") {
+		t.Fatalf("expected no /s in label, got: %q", got)
+	}
+	if strings.Contains(got, "s=scuttle") {
+		t.Fatalf("expected legend without scuttle entry, got: %q", got)
+	}
+	if rec.ran {
+		t.Errorf("`s` with nil scuttle must not dispatch push: args=%v", rec.args)
 	}
 }
 

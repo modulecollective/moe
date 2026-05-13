@@ -52,7 +52,7 @@ func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -93,7 +93,7 @@ func TestPromptStageNextStageMissingDesignCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -140,7 +140,7 @@ func TestPromptStageNextStageWhitespaceDesignCanvasFallsThrough(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -189,7 +189,7 @@ func TestPromptStageNextStageNonCodeStageSkipsCanvas(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, root, md, "moe sdlc design tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc design tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if strings.Contains(stdout.String(), body) {
@@ -237,7 +237,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -287,7 +287,7 @@ func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -334,7 +334,7 @@ func TestPromptStageNextStageBackWithoutOneShot(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -349,5 +349,152 @@ func TestPromptStageNextStageBackWithoutOneShot(t *testing.T) {
 	}
 	if !backRan {
 		t.Fatalf("expected back to dispatch on `b`")
+	}
+}
+
+// TestPromptStageNextStageOffersScuttleWhenRegistered: a non-nil scuttle
+// command extends the [Y/n/o] label to [Y/n/s/o] (scuttle adjacent to
+// the decline key — both are "no" answers), the legend names "scuttle
+// (close)", and typing `s\n` dispatches scuttle.Run([project, run]).
+// The next stage and back command must not fire on the scuttle path.
+func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
+	next := &Command{
+		Name: "code",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var nextRan bool
+	next.Run = func(_ []string, _, _ io.Writer) int {
+		nextRan = true
+		return 0
+	}
+	var scuttleRan bool
+	var scuttleArgs []string
+	scuttle := &Command{
+		Name: "close",
+		Run: func(args []string, _, _ io.Writer) int {
+			scuttleRan = true
+			scuttleArgs = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "s\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, scuttle, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/s/o]") {
+		t.Fatalf("expected [Y/n/s/o] label, got: %q", got)
+	}
+	if !strings.Contains(got, "s=scuttle (close)") {
+		t.Fatalf("expected legend entry for scuttle, got: %q", got)
+	}
+	if nextRan {
+		t.Errorf("`s` must not dispatch next")
+	}
+	if !scuttleRan {
+		t.Fatalf("expected scuttle to dispatch on `s`")
+	}
+	if got, want := strings.Join(scuttleArgs, " "), "tele fix-it"; got != want {
+		t.Fatalf("scuttle args = %q, want %q", got, want)
+	}
+}
+
+// TestPromptStageNextStageScuttleWithBack: scuttle and back both
+// registered produce [Y/n/s/o/b] — scuttle adjacent to n, back at the
+// tail — and the legend lists both. Pins the option ordering against
+// future drift; the order is the operator's muscle memory.
+func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
+	next := &Command{
+		Name: "code",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	back := &Command{
+		Name: "design",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	scuttle := &Command{
+		Name: "close",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, back, scuttle, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/s/o/b]") {
+		t.Fatalf("expected [Y/n/s/o/b] label, got: %q", got)
+	}
+	if !strings.Contains(got, "Y=run · n=decline · s=scuttle (close) · o=run headless · b=back to design") {
+		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageNoScuttleWhenNil: a nil scuttle keeps the
+// label at [Y/n/o] and the legend free of any `s=` entry. Pins the
+// "workflow doesn't register close → no scuttle option" path so a
+// future workflow without close stays honest.
+func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
+	next := &Command{
+		Name: "code",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "s\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/o]") {
+		t.Fatalf("expected [Y/n/o] label without /s, got: %q", got)
+	}
+	if strings.Contains(got, "/s/") || strings.Contains(got, "/s]") {
+		t.Fatalf("expected no /s in label, got: %q", got)
+	}
+	if strings.Contains(got, "s=scuttle") {
+		t.Fatalf("expected legend without scuttle entry, got: %q", got)
 	}
 }
