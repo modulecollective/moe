@@ -43,6 +43,26 @@ const hookFirePrefix = "hook-fire-"
 // on workflow see a stable marker for "this is a fire, not a real run."
 const hookFireWorkflow = "hook-fire"
 
+// hookFireEvents is the single source of truth for which events
+// `moe hook fire` will dispatch. Used by the pre-mint gate in
+// runHookFire and the defensive default in dispatchHookFire so the
+// two surfaces can't drift on which names are accepted.
+var hookFireEvents = []string{"dev-env", "dev-env-teardown", "pre-push"}
+
+func isHookFireEvent(s string) bool {
+	for _, e := range hookFireEvents {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+func unknownHookFireEventMsg(event string) string {
+	return fmt.Sprintf("hook fire: unknown event %q (known: %s)",
+		event, strings.Join(hookFireEvents, ", "))
+}
+
 func runHookFire(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hook fire", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -62,6 +82,15 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	projectID, event := fs.Arg(0), fs.Arg(1)
+
+	// Validate the event before any side effects. cleanPriorHookFireSandboxes
+	// and mintHookFireSandbox both touch disk; a typo'd event name shouldn't
+	// look like "something ran" to the operator. Placement pre-findRoot is
+	// deliberate — operator typos surface fast regardless of CWD.
+	if !isHookFireEvent(event) {
+		moePrintln(stderr, unknownHookFireEventMsg(event))
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -164,7 +193,10 @@ func dispatchHookFire(root, sandboxPath string, pj *project.Metadata, md *run.Me
 		}
 		return 0
 	default:
-		moePrintf(stderr, "hook fire: unknown event %q (known: dev-env, dev-env-teardown, pre-push)\n", event)
+		// Defensive belt-and-suspenders: runHookFire gates on the same
+		// allowlist before we ever reach here, but new callers of
+		// dispatchHookFire shouldn't have to know that.
+		moePrintln(stderr, unknownHookFireEventMsg(event))
 		return 2
 	}
 }

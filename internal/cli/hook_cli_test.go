@@ -160,6 +160,57 @@ func TestHookFireUnknownEvent(t *testing.T) {
 	}
 }
 
+// TestHookFireRejectsUnknownEventBeforeMint pins the no-side-effects
+// contract for a typo'd event name end-to-end. The load-bearing
+// assertion is that .moe/clones/<p>/ has no hook-fire-* child — a
+// future regression that moved the gate below mintHookFireSandbox
+// would re-introduce the original bug while exit=2 stayed correct
+// (the dispatcher's defensive default still catches the typo). With a
+// real bureaucracy on disk, findRoot and project.Load would both
+// succeed if reached, so this test would notice the regression.
+func TestHookFireRejectsUnknownEventBeforeMint(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	if err := os.WriteFile(filepath.Join(root, "bureaucracy.conf"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(root, "projects", projID)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projJSON := `{"id":"tele","status":"incubating","submodule":"projects/tele/src","remote":"git@example.com:x/tele.git","default_branch":"main"}`
+	if err := os.WriteFile(filepath.Join(projDir, "project.json"), []byte(projJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOE_HOME", root)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "fire", projID, "bogus"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unknown event "bogus"`) {
+		t.Errorf("stderr missing `unknown event \"bogus\"`: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "dev-env, dev-env-teardown, pre-push") {
+		t.Errorf("stderr missing known-events list: %q", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "sandbox:") {
+		t.Errorf("stdout printed sandbox banner after typo: %q", stdout.String())
+	}
+	clonesDir := filepath.Join(root, ".moe", "clones", projID)
+	entries, err := os.ReadDir(clonesDir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), hookFirePrefix) {
+			t.Errorf("hook-fire sandbox %s minted despite typo'd event", e.Name())
+		}
+	}
+}
+
 // TestCleanPriorHookFireSandboxesStrictPrefix: prior hook-fire-*
 // directories get removed; a real-run sandbox (slug without the
 // hook-fire- prefix) stays put. Load-bearing safety check — without
