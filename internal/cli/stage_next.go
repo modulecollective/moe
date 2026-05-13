@@ -94,6 +94,22 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	return promptStageNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
 }
 
+// readPrintableCanvas returns the named stage's content.md body if it
+// exists and contains non-whitespace, or the empty string otherwise.
+// Read errors collapse to empty — the canvas is operator-facing context,
+// not load-bearing state, so a missing file falls through silently.
+func readPrintableCanvas(root string, md *run.Metadata, stage string) string {
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
+	body, err := os.ReadFile(canvasPath)
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return ""
+	}
+	return string(body)
+}
+
 // promptOption is one entry in a chain prompt's label/legend pair. key
 // is the single rune the operator types (uppercase for the default);
 // hint is the short verb shown in the legend. Two helpers turn a
@@ -138,20 +154,25 @@ func renderPromptLegend(opts []promptOption) string {
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for most
 // workflows, [Y/n/o] for sdlc non-push stages where headless one-shot
-// is supported, and optional /x and /b suffixes when scuttle / back are
-// non-nil. Y still defaults so a reflex Enter chains the next stage
-// interactively, the same as before. `o` invokes the next stage with
-// `--one-shot` prepended to its argv. `b` re-invokes the just-finished
-// stage interactively. `x` dispatches the workflow's close command for
-// the current run — the "abandon ship" path the operator forms at the
-// same surface they decline from. Hardcoding the sdlc gate keeps the
-// prompt honest — no other workflow has --one-shot today, and we'd
-// rather widen deliberately than offer a flag that doesn't exist.
+// is supported, [Y/n/o/s] when the next stage is sdlc's test (the skip
+// shortcut jumps straight to the push prompt), and optional /x and /b
+// suffixes when scuttle / back are non-nil. Y still defaults so a
+// reflex Enter chains the next stage interactively, the same as before.
+// `o` invokes the next stage with `--one-shot` prepended to its argv.
+// `b` re-invokes the just-finished stage interactively. `x` dispatches
+// the workflow's close command for the current run — the "abandon
+// ship" path the operator forms at the same surface they decline from.
+// `s` opens the push prompt early without satisfying the test stage:
+// useful for doc-only diffs and trivial fixes where the anti-theater
+// rule that test stage enforces would just produce a rubber-stamp
+// canvas. Hardcoding the sdlc gate keeps the prompt honest — no other
+// workflow has --one-shot or a test stage today, and we'd rather widen
+// deliberately than offer affordances that don't exist.
 //
 // `x` is positioned adjacent to `n` (decline) because both read as "no":
 // scuttle is "no, and also close this run." Grouping the two negatives
 // reads better than appending `x` at the tail, and it leaves the
-// forward-leaning `o` / `b` slots in their familiar positions.
+// forward-leaning `o` / `s` / `b` slots in their familiar positions.
 //
 // When the next stage is code, the just-finished design canvas is
 // printed above the prompt — same shape as promptPushNextStage prints
@@ -175,10 +196,9 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 		priorCanvas = "code"
 	}
 	if priorCanvas != "" {
-		canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, priorCanvas))
-		if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
-			fmt.Fprint(stdout, string(body))
-			if !strings.HasSuffix(string(body), "\n") {
+		if body := readPrintableCanvas(root, md, priorCanvas); body != "" {
+			fmt.Fprint(stdout, body)
+			if !strings.HasSuffix(body, "\n") {
 				fmt.Fprintln(stdout)
 			}
 		}
@@ -193,6 +213,16 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 	offerOneShot := md.Workflow == "sdlc"
 	if offerOneShot {
 		opts = append(opts, promptOption{key: 'o', hint: "run headless"})
+	}
+	// `s` is the cascade-only shortcut to jump from post-code straight
+	// to the push prompt, skipping test. Gated to sdlc + next.Name ==
+	// "test" so the option only shows up at the exact gate it makes
+	// sense: post-code, where the next thing the chain would do is open
+	// test. Other prompts (post-design, non-sdlc workflows) leave this
+	// off — they have no test stage to skip over.
+	offerSkipToPush := md.Workflow == "sdlc" && next.Name == "test"
+	if offerSkipToPush {
+		opts = append(opts, promptOption{key: 's', hint: "skip to push"})
 	}
 	if back != nil {
 		opts = append(opts, promptOption{key: 'b', hint: "back to " + back.Name})
@@ -220,6 +250,29 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 	}
 	if offerOneShot && answer == "o" {
 		return next.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
+	}
+	if offerSkipToPush && answer == "s" {
+		// Skip-to-push opens the push prompt directly without
+		// satisfying test. The push command lives in the same group as
+		// the just-decline-able test stage; look it up the same way
+		// promptNextStage does for the natural cascade. `back` is
+		// already the code command (justFinished == "code" upstream),
+		// which is the right back target for the push prompt: the
+		// operator's mental "just finished" is code; test was the one
+		// they elected to skip. A workflow that registers test but no
+		// push wouldn't make sense, but we stay nil-safe just in case.
+		g, err := LookupGroup(md.Workflow)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		pushCmd := g.Lookup("push")
+		if pushCmd == nil {
+			moePrintf(stderr, "workflow %q has no push command\n", md.Workflow)
+			return 1
+		}
+		pushHint := fmt.Sprintf("moe %s %s %s %s", md.Workflow, pushCmd.Name, md.Project, md.ID)
+		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
 	}
 	if back != nil && answer == "b" {
 		return back.Run([]string{md.Project, md.ID}, stdout, stderr)
@@ -249,19 +302,27 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 // they're deciding whether to ship. With test stage in place, that's
 // the test canvas — the verification narrative is the more direct
 // "should we ship?" lens than the code canvas (which holds the PR
-// body but is one stage back). follow no longer surfaces stage
-// canvases once their sessions close, so this is the canvas's one
-// chance to land in front of the operator. By the time
-// promptNextStage fires, session.Close has already rebased the
-// session onto main, so root is the right base for the read.
-// Whitespace-only or missing canvas falls through to the bare prompt:
-// no header or decoration — the canvas is markdown the agent wrote
-// for the operator, printed as written.
+// body but is one stage back). When the test canvas is missing or
+// whitespace-only (the operator skipped test via the post-code `s`
+// shortcut, or invoked `moe sdlc push` directly without test having
+// landed), fall back to the code canvas: the operator's last reading
+// material before the ship decision should still be the most recent
+// thing the agent wrote. follow no longer surfaces stage canvases
+// once their sessions close, so this is the canvas's one chance to
+// land in front of the operator. By the time promptNextStage fires,
+// session.Close has already rebased the session onto main, so root is
+// the right base for the read. If both canvases are missing or
+// whitespace-only, the prompt prints bare — no header or decoration.
+// The canvas is markdown the agent wrote for the operator, printed
+// as written.
 func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
-	if body, err := os.ReadFile(canvasPath); err == nil && strings.TrimSpace(string(body)) != "" {
-		fmt.Fprint(stdout, string(body))
-		if !strings.HasSuffix(string(body), "\n") {
+	body := readPrintableCanvas(root, md, "test")
+	if body == "" {
+		body = readPrintableCanvas(root, md, "code")
+	}
+	if body != "" {
+		fmt.Fprint(stdout, body)
+		if !strings.HasSuffix(body, "\n") {
 			fmt.Fprintln(stdout)
 		}
 	}

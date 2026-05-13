@@ -498,3 +498,223 @@ func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
 		t.Fatalf("expected legend without scuttle entry, got: %q", got)
 	}
 }
+
+// TestPromptStageNextStageOffersSkipToPush: at the post-code gate
+// (next.Name == "test", workflow == "sdlc") the prompt grows the
+// label to include `s` and the legend names "skip to push". This is
+// the cascade-only shortcut that opens the push prompt directly,
+// bypassing test — useful for doc-only diffs and trivial fixes where
+// the anti-theater rule would just produce a rubber-stamp canvas.
+func TestPromptStageNextStageOffersSkipToPush(t *testing.T) {
+	next := &Command{
+		Name: "test",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/o/s]") {
+		t.Fatalf("expected [Y/n/o/s] label, got: %q", got)
+	}
+	if !strings.Contains(got, "s=skip to push") {
+		t.Fatalf("expected legend with skip-to-push entry, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageNoSkipAtPostDesign: the post-design gate
+// (next.Name == "code") must not offer `s`. The shortcut is anchored
+// to "next is test"; offering it post-design would mean shipping
+// without implementation, which isn't a thing.
+func TestPromptStageNextStageNoSkipAtPostDesign(t *testing.T) {
+	next := &Command{
+		Name: "code",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if strings.Contains(got, "/s]") || strings.Contains(got, "/s/") {
+		t.Fatalf("post-design prompt must not offer /s, got: %q", got)
+	}
+	if strings.Contains(got, "s=skip") {
+		t.Fatalf("post-design legend must not name skip-to-push, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageNoSkipForNonSdlcWorkflow: a non-sdlc
+// workflow must not offer `s` even if its next stage happens to be
+// named "test". The shortcut is gated on md.Workflow == "sdlc" —
+// future workflows that grow a test-like stage opt in deliberately.
+func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
+	next := &Command{
+		Name: "test",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe kb test tele dns-basics", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if strings.Contains(got, "/s]") || strings.Contains(got, "/s/") {
+		t.Fatalf("non-sdlc prompt must not offer /s, got: %q", got)
+	}
+	if strings.Contains(got, "s=skip") {
+		t.Fatalf("non-sdlc legend must not name skip-to-push, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageSkipDispatchesPushPrompt: typing `s` at
+// the post-code gate opens the push prompt — the [N/m/p] label
+// appears in stdout, and the hint reads "moe sdlc push <project>
+// <run>". The test does not drive the push command itself (stdin
+// EOFs at the push prompt → decline), but the label transition is
+// proof the dispatch happened. The next.Run stub for the test stage
+// must not be invoked on the `s` path.
+func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
+	var testRan bool
+	next := &Command{
+		Name: "test",
+		Run: func(_ []string, _, _ io.Writer) int {
+			testRan = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// "s" picks skip; the push prompt then hits EOF, declines, and
+	// returns 0 — no real push is dispatched because we never type
+	// m or p.
+	if _, err := io.WriteString(w, "s\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if testRan {
+		t.Errorf("`s` must not dispatch the test stage")
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[N/m/p]") {
+		t.Fatalf("expected push prompt's [N/m/p] label after `s`, got: %q", got)
+	}
+	if !strings.Contains(got, "moe sdlc push tele fix-it") {
+		t.Fatalf("expected push prompt hint with project/run, got: %q", got)
+	}
+	// The test prompt's [Y/n/o/s] label must still appear before the
+	// push prompt's [N/m/p] — proves the cascade order.
+	if i, j := strings.Index(got, "[Y/n/o/s]"), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
+		t.Fatalf("expected post-code prompt before push prompt; post-code=%d push=%d", i, j)
+	}
+}
+
+// TestPromptStageNextStageSkipForwardsBackTarget: the push prompt
+// reached via `s` should carry the post-code prompt's back target
+// through — the operator's mental "just finished" is code (test was
+// the one they skipped), so `b` at the push prompt should re-open
+// code, not test.
+func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
+	next := &Command{
+		Name: "test",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var backRan bool
+	var backArgs []string
+	back := &Command{
+		Name: "code",
+		Run: func(args []string, _, _ io.Writer) int {
+			backRan = true
+			backArgs = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// `s` → push prompt opens with back=code → `b` → back.Run fires.
+	if _, err := io.WriteString(w, "s\nb\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if !backRan {
+		t.Fatalf("expected back to fire at the push prompt's `b`")
+	}
+	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+		t.Fatalf("back args = %q, want %q", got, want)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "b=back to code") {
+		t.Fatalf("expected push prompt legend to name `back to code`, got: %q", got)
+	}
+}

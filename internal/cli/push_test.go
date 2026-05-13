@@ -729,6 +729,110 @@ func TestPromptPushNextStageWhitespaceCanvasFallsThrough(t *testing.T) {
 	}
 }
 
+// TestPromptPushNextStageFallsBackToCodeCanvas: when the test canvas
+// is missing (operator skipped test via `s`, or invoked `moe sdlc
+// push` directly without test having landed), the code canvas takes
+// its place above [N/m/p]. The operator's last reading material
+// before the ship decision should still be the most recent thing
+// the agent wrote.
+func TestPromptPushNextStageFallsBackToCodeCanvas(t *testing.T) {
+	next := &Command{
+		Name: "push",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	root := t.TempDir()
+	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "code"))
+	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const body = "## Summary\n\nDoc-only diff; skipped test.\n"
+	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, body) {
+		t.Errorf("code canvas body not printed verbatim:\n%s", got)
+	}
+	if i, j := strings.Index(got, body), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
+		t.Errorf("code canvas should appear above the prompt label; canvas=%d prompt=%d", i, j)
+	}
+}
+
+// TestPromptPushNextStagePrefersTestCanvasOverCode: when both
+// canvases exist, the test canvas wins — it's the more direct
+// "should we ship?" framing. Pins the precedence against a future
+// refactor that might accidentally swap or merge the two.
+func TestPromptPushNextStagePrefersTestCanvasOverCode(t *testing.T) {
+	next := &Command{
+		Name: "push",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	root := t.TempDir()
+	codeCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "code"))
+	if err := os.MkdirAll(filepath.Dir(codeCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const codeBody = "## Summary\n\nCode canvas — should not appear when test canvas exists.\n"
+	if err := os.WriteFile(codeCanvas, []byte(codeBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "test"))
+	if err := os.MkdirAll(filepath.Dir(testCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const testBody = "## What was verified\n\nTest canvas — the agent's pre-push framing.\n"
+	if err := os.WriteFile(testCanvas, []byte(testBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, testBody) {
+		t.Errorf("test canvas should be printed when present:\n%s", got)
+	}
+	if strings.Contains(got, codeBody) {
+		t.Errorf("code canvas should not appear when test canvas is present:\n%s", got)
+	}
+}
+
 // promptDispatchRecord captures whether promptPushNextStage invoked
 // next.Run and with what args.
 type promptDispatchRecord struct {
