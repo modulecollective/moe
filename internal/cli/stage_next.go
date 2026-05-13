@@ -75,10 +75,12 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 		back = g.Lookup(justFinished)
 	}
 	// scuttle is the workflow's `close` command, offered at the prompt
-	// as `s` so the operator can abandon the run from the same surface
-	// they decline the next stage from. Nil-safe: workflows that don't
-	// register close (none today, but the prompt should stay honest)
-	// simply don't see the option.
+	// as `x` so the operator can abandon the run from the same surface
+	// they decline the next stage from. `x` reads as "exit/abandon" and
+	// avoids overloading `s` (which the operator might mistake for
+	// "skip" or "save"). Nil-safe: workflows that don't register close
+	// (none today, but the prompt should stay honest) simply don't see
+	// the option.
 	scuttle := g.Lookup("close")
 	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
@@ -136,19 +138,19 @@ func renderPromptLegend(opts []promptOption) string {
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for most
 // workflows, [Y/n/o] for sdlc non-push stages where headless one-shot
-// is supported, and optional /s and /b suffixes when scuttle / back are
+// is supported, and optional /x and /b suffixes when scuttle / back are
 // non-nil. Y still defaults so a reflex Enter chains the next stage
 // interactively, the same as before. `o` invokes the next stage with
 // `--one-shot` prepended to its argv. `b` re-invokes the just-finished
-// stage interactively. `s` dispatches the workflow's close command for
+// stage interactively. `x` dispatches the workflow's close command for
 // the current run — the "abandon ship" path the operator forms at the
 // same surface they decline from. Hardcoding the sdlc gate keeps the
 // prompt honest — no other workflow has --one-shot today, and we'd
 // rather widen deliberately than offer a flag that doesn't exist.
 //
-// `s` is positioned adjacent to `n` (decline) because both read as "no":
+// `x` is positioned adjacent to `n` (decline) because both read as "no":
 // scuttle is "no, and also close this run." Grouping the two negatives
-// reads better than appending `s` at the tail, and it leaves the
+// reads better than appending `x` at the tail, and it leaves the
 // forward-leaning `o` / `b` slots in their familiar positions.
 //
 // When the next stage is code, the just-finished design canvas is
@@ -175,7 +177,7 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 		{key: 'n', hint: "decline"},
 	}
 	if scuttle != nil {
-		opts = append(opts, promptOption{key: 's', hint: "scuttle (close)"})
+		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
 	offerOneShot := md.Workflow == "sdlc"
 	if offerOneShot {
@@ -202,7 +204,7 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
-	if scuttle != nil && answer == "s" {
+	if scuttle != nil && answer == "x" {
 		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 	}
 	if offerOneShot && answer == "o" {
@@ -219,7 +221,7 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
-// (`moe <wf> push`), or PR (`moe <wf> push --pr`), plus optional `s`
+// (`moe <wf> push`), or PR (`moe <wf> push --pr`), plus optional `x`
 // (scuttle: dispatch the workflow's close) and `b` (re-open the
 // just-finished code stage) suffixes when the respective commands are
 // non-nil. Parsing is case-insensitive; the label capitalization just
@@ -227,7 +229,7 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 // must never ship, and must never terminate the run either; scuttle is
 // explicit-only.
 //
-// `s` sits adjacent to N (decline): both are "no" answers; scuttle is
+// `x` sits adjacent to N (decline): both are "no" answers; scuttle is
 // "no, and close." The forward-leaning m/p/b slots keep their familiar
 // positions for muscle memory.
 //
@@ -253,7 +255,7 @@ func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Meta
 		{key: 'N', hint: "decline"},
 	}
 	if scuttle != nil {
-		opts = append(opts, promptOption{key: 's', hint: "scuttle (close)"})
+		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
 	opts = append(opts,
 		promptOption{key: 'm', hint: "fast-forward merge"},
@@ -284,7 +286,7 @@ func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Meta
 		return next.Run([]string{md.Project, md.ID}, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project, md.ID}, stdout, stderr)
-	case "s":
+	case "x":
 		if scuttle != nil {
 			return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 		}

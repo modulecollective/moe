@@ -886,9 +886,9 @@ func TestPromptPushNextStageNoBackWhenNil(t *testing.T) {
 }
 
 // TestPromptPushNextStageOffersScuttleWhenRegistered: a non-nil scuttle
-// at the push prompt grows the label to [N/s/m/p] (scuttle adjacent to
+// at the push prompt grows the label to [N/x/m/p] (scuttle adjacent to
 // the decline default), the legend names "scuttle (close)", and typing
-// `s\n` dispatches scuttle.Run([project, run]). Pins the "abandon ship"
+// `x\n` dispatches scuttle.Run([project, run]). Pins the "abandon ship"
 // affordance one keystroke from the merge gate, where the design says
 // the intent most often forms.
 func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
@@ -918,7 +918,7 @@ func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := io.WriteString(w, "s\n"); err != nil {
+	if _, err := io.WriteString(w, "x\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -931,17 +931,17 @@ func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[N/s/m/p]") {
-		t.Fatalf("expected [N/s/m/p] label, got: %q", got)
+	if !strings.Contains(got, "[N/x/m/p]") {
+		t.Fatalf("expected [N/x/m/p] label, got: %q", got)
 	}
-	if !strings.Contains(got, "s=scuttle (close)") {
+	if !strings.Contains(got, "x=scuttle (close)") {
 		t.Fatalf("expected legend entry for scuttle, got: %q", got)
 	}
 	if rec.ran {
-		t.Errorf("`s` must not dispatch push: rec.args=%v", rec.args)
+		t.Errorf("`x` must not dispatch push: rec.args=%v", rec.args)
 	}
 	if !scuttleRan {
-		t.Fatalf("expected scuttle to dispatch on `s`")
+		t.Fatalf("expected scuttle to dispatch on `x`")
 	}
 	if got, want := strings.Join(scuttleArgs, " "), "tele fix-it"; got != want {
 		t.Fatalf("scuttle args = %q, want %q", got, want)
@@ -949,7 +949,7 @@ func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
 }
 
 // TestPromptPushNextStageScuttleWithBack: scuttle and back both
-// registered produce [N/s/m/p/b] — scuttle adjacent to N, back at the
+// registered produce [N/x/m/p/b] — scuttle adjacent to N, back at the
 // tail — and the legend lists both in that order.
 func TestPromptPushNextStageScuttleWithBack(t *testing.T) {
 	next := &Command{
@@ -984,16 +984,16 @@ func TestPromptPushNextStageScuttleWithBack(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[N/s/m/p/b]") {
-		t.Fatalf("expected [N/s/m/p/b] label, got: %q", got)
+	if !strings.Contains(got, "[N/x/m/p/b]") {
+		t.Fatalf("expected [N/x/m/p/b] label, got: %q", got)
 	}
-	if !strings.Contains(got, "N=decline · s=scuttle (close) · m=fast-forward merge · p=open PR · b=back to code") {
+	if !strings.Contains(got, "N=decline · x=scuttle (close) · m=fast-forward merge · p=open PR · b=back to code") {
 		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
 	}
 }
 
 // TestPromptPushNextStageNoScuttleWhenNil: a nil scuttle keeps the
-// label at [N/m/p] and the legend free of any `s=` entry. `s\n` on
+// label at [N/m/p] and the legend free of any `x=` entry. `x\n` on
 // stdin must not dispatch anything — it falls into the decline arm
 // like any other unrecognised input.
 func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
@@ -1013,7 +1013,7 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := io.WriteString(w, "s\n"); err != nil {
+	if _, err := io.WriteString(w, "x\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -1027,16 +1027,16 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 	}
 	got := stdout.String()
 	if !strings.Contains(got, "[N/m/p]") {
-		t.Fatalf("expected [N/m/p] label without /s, got: %q", got)
+		t.Fatalf("expected [N/m/p] label without /x, got: %q", got)
 	}
-	if strings.Contains(got, "/s/") || strings.Contains(got, "/s]") {
-		t.Fatalf("expected no /s in label, got: %q", got)
+	if strings.Contains(got, "/x/") || strings.Contains(got, "/x]") {
+		t.Fatalf("expected no /x in label, got: %q", got)
 	}
-	if strings.Contains(got, "s=scuttle") {
+	if strings.Contains(got, "x=scuttle") {
 		t.Fatalf("expected legend without scuttle entry, got: %q", got)
 	}
 	if rec.ran {
-		t.Errorf("`s` with nil scuttle must not dispatch push: args=%v", rec.args)
+		t.Errorf("`x` with nil scuttle must not dispatch push: args=%v", rec.args)
 	}
 }
 
