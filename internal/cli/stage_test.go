@@ -839,12 +839,20 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	if !strings.Contains(stderr.String(), "ManagedDocs to be non-empty") {
 		t.Errorf("stderr missing bootstrap root cause: %q", stderr.String())
 	}
-	// closeSess should have torn the session worktree down — otherwise
-	// every aborted bootstrap leaks a worktree directory plus branch.
-	out := gittest.Output(t, root, "worktree", "list")
+	// closeSess fires, but its canvas-unchanged gate refuses the
+	// fast-forward (the session never wrote a canvas — same shape
+	// as the cascade footgun this run targets) and leaves the
+	// worktree intact so the operator can recover. The previous
+	// silent-Abandon behavior on zero-commit branches is by design
+	// gone — the operator should see the loud refusal alongside the
+	// bootstrap root cause.
+	if !strings.Contains(stderr.String(), "unchanged from main") {
+		t.Errorf("stderr missing canvas-unchanged refusal from closeSess: %q", stderr.String())
+	}
 	branch := "session/moe/bootstrap-fail/design"
-	if strings.Contains(out, branch) {
-		t.Errorf("worktree for %s still present, closeSess did not run:\n%s", branch, out)
+	out := gittest.Output(t, root, "worktree", "list")
+	if !strings.Contains(out, branch) {
+		t.Errorf("worktree for %s should remain after canvas-unchanged refusal:\n%s", branch, out)
 	}
 }
 

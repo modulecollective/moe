@@ -487,6 +487,19 @@ type wikiTurnSpec struct {
 	ExtraEnv []string
 }
 
+// closeBootstrapFailedSession runs closeSess on an early-exit path
+// (BuildSpec / wiki bootstrap / BuildPrompt failed before the executor
+// ran) and surfaces any non-nil close error to stderr. The bootstrap
+// failure has already been printed; this layer makes sure a subsequent
+// canvas-unchanged refusal — the new "no-op session" gate's loud-fail
+// behaviour — doesn't get swallowed alongside the session worktree it
+// leaves intact.
+func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
+	if err := closeSess(); err != nil {
+		moePrintf(stderr, "session close: %v\n", err)
+	}
+}
+
 // runWikiSession owns the full wiki-aware session lifecycle: open the
 // session worktree under the repo lock, rewrite the wiki cfg to the
 // worktree, seed .wiki-ops, ask the caller for the per-turn spec, run
@@ -509,7 +522,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	spec, err := in.BuildSpec(workRoot)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		_ = closeSess()
+		closeBootstrapFailedSession(closeSess, stderr)
 		return 1
 	}
 
@@ -523,7 +536,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		canonical, err := in.WikiBuilder(root)
 		if err != nil {
 			moePrintf(stderr, "wiki: %v\n", err)
-			_ = closeSess()
+			closeBootstrapFailedSession(closeSess, stderr)
 			return 1
 		}
 		if canonical != nil {
@@ -542,7 +555,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			// invariant breach at finalize.
 			if _, err := wiki.EnsureManagedDocs(*wikiCfg); err != nil {
 				moePrintf(stderr, "wiki: %v\n", err)
-				_ = closeSess()
+				closeBootstrapFailedSession(closeSess, stderr)
 				return 1
 			}
 			// Seed the .wiki-ops stash so the agent has a fresh
@@ -561,7 +574,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	prompt, err := spec.BuildPrompt(workRoot, wikiCfg)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		_ = closeSess()
+		closeBootstrapFailedSession(closeSess, stderr)
 		return 1
 	}
 

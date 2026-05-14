@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -427,8 +429,25 @@ func requireCodeCanvas(projectID, runID string) error {
 }
 
 // requirePriorCanvas is the shared shape behind requireDesignCanvas and
-// requireCodeCanvas: stat the prior stage's canvas and bail with a
+// requireCodeCanvas: read the prior stage's canvas and bail with a
 // pointer at the verb the operator needs to run first.
+//
+// Two failure modes, both fatal at this gate:
+//
+//  1. The canvas is missing or empty on disk — the prior stage was
+//     never opened. Same shape today's check covers; kept as a cheap
+//     early-out before reaching for git.
+//  2. The canvas at HEAD is byte-identical to the kickoff commit's
+//     blob — the prior stage was opened but the agent never wrote
+//     to the canvas (or someone reverted it back to the seed). This
+//     is the cascade footgun the design twin records: a `!!` after
+//     a no-op session would otherwise dispatch the next stage
+//     against an unchanged stub.
+//
+// Defense in depth: session.Close has its own gate that refuses to
+// fast-forward an unchanged canvas, but operators can also commit
+// directly via `git commit` outside sessions, so the read-side gate
+// has to stand on its own.
 func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -438,11 +457,54 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 	if err != nil {
 		return err
 	}
-	canvas := filepath.Join(root, run.ContentPath(projectID, runID, priorStage))
+	canvasRel := run.ContentPath(projectID, runID, priorStage)
+	canvas := filepath.Join(root, canvasRel)
 	info, err := os.Stat(canvas)
 	if err != nil || info.Size() == 0 {
 		return fmt.Errorf("%s canvas missing — run `moe sdlc %s %s %s` before `moe sdlc %s`",
 			priorStage, priorStage, projectID, runID, currentStage)
 	}
+	// Compare the blob at HEAD to the blob at the canvas's kickoff
+	// commit. The check only fires when the kickoff was an `Open
+	// run` — i.e. run.New seeded the canvas via SeedDocs. When the
+	// canvas's first commit is a work turn (no SeedDocs path), the
+	// "first content was an agent edit" case isn't a meaningful
+	// failure — there's no stub to be unchanged from.
+	kickoffSHA, kickoffSubject, err := canvasKickoffCommit(root, canvasRel)
+	if err != nil || kickoffSHA == "" {
+		return nil
+	}
+	if !strings.HasPrefix(kickoffSubject, "Open run ") {
+		return nil
+	}
+	headBlob, headErr := git.RevParse(root, "HEAD:"+canvasRel)
+	kickoffBlob, kickoffBlobErr := git.RevParse(root, kickoffSHA+":"+canvasRel)
+	if headErr != nil || kickoffBlobErr != nil {
+		return nil
+	}
+	if headBlob == kickoffBlob {
+		return fmt.Errorf("%s canvas unchanged from kickoff — run `moe sdlc %s %s %s` and write to the canvas before `moe sdlc %s`",
+			priorStage, priorStage, projectID, runID, currentStage)
+	}
 	return nil
+}
+
+// canvasKickoffCommit returns the SHA and subject of the first commit
+// that added canvasRel. `git log --diff-filter=A --format=%H %s --
+// <path>` lists adds newest-first; the last line is the original add.
+// Returns "", "" with nil error if the path has no add in history (an
+// untracked canvas), so the caller can decide what to do without
+// disambiguating "no history" from "git failed".
+func canvasKickoffCommit(root, canvasRel string) (sha, subject string, err error) {
+	out, err := git.Output(root, "log", "--diff-filter=A", "--format=%H %s", "--", canvasRel)
+	if err != nil {
+		return "", "", err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	last := lines[len(lines)-1]
+	if last == "" {
+		return "", "", nil
+	}
+	sha, subject, _ = strings.Cut(last, " ")
+	return sha, subject, nil
 }
