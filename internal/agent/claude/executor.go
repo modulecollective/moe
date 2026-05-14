@@ -1,77 +1,31 @@
-// Package executor runs one stage turn against the local `claude`
-// binary: assembles the CLI args, wires stdio to the operator's
-// terminal, and mirrors the session's on-disk JSONL into the
-// document's thread.jsonl when the turn ends.
-package executor
+// Package claude is the agent.Agent implementation for the local
+// `claude` binary: assembles the CLI args, wires stdio to the
+// operator's terminal, and mirrors the session's on-disk JSONL into
+// the document's per-agent thread file when the turn ends.
+package claude
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/modulecollective/moe/internal/claude"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// Request is the inputs for one turn on one document.
-type Request struct {
-	// Root is the bureaucracy repo root. Used to compute canonical
-	// in-repo paths (e.g. where to write the mirrored transcript) and
-	// passed to claude as --add-dir so the canvas stays reachable when
-	// the agent's cwd is the sandbox clone.
-	Root string
-	// Metadata is the run's on-disk state. Read-only. Optional —
-	// run-less sessions (e.g. wiki lint) pass nil, which skips
-	// transcript mirroring at turn end since there is no document
-	// thread.jsonl to copy into.
-	Metadata *run.Metadata
-	// DocID is which document on the run this turn is for. Ignored
-	// when Metadata is nil.
-	DocID string
-	// SessionID is the canonical UUID that identifies this document's
-	// conversation. Claude Code uses it to create or resume its own
-	// session keyed to the same identity.
-	SessionID string
-	// NewSession is true when SessionID was just minted this turn
-	// (first ever call for this document) and false when it already
-	// has a server-side session that should be resumed.
-	NewSession bool
-	// Prompt is the assembled system prompt from buildSystemPrompt.
-	Prompt string
-	// ClonePath is the private per-run sandbox clone of the target
-	// project's submodule, or "" for document-only runs. When set,
-	// claude runs with this as its working directory.
-	ClonePath string
-	// SessionCwd is the document-only fallback cwd: a stable per-document
-	// path whose only purpose is to keep claude's encoded-cwd project dir
-	// constant across turns so `--resume <sid>` finds its JSONL. Empty
-	// for code stages (ClonePath already gives them a stable cwd).
-	SessionCwd string
-	// InitialPrompt, if non-empty, is auto-sent as the first user message
-	// of the turn so the operator doesn't have to type anything to kick
-	// the session off. Stage handlers use it to have the agent greet the
-	// operator and ask what they'd like to work on.
-	InitialPrompt string
-	// Stdin / Stdout / Stderr wire the interactive agent to the
-	// operator's terminal or capture output in tests.
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	// ExtraEnv is appended to os.Environ() before the claude subprocess
-	// is spawned. Stage callers use it to inject the dev-env hooks'
-	// parsed output (DATABASE_URL, MOE_HOME, etc.) so the agent's
-	// `Bash` tool calls run against the project's isolated runtime
-	// instead of the operator's real env. Empty preserves the prior
-	// behaviour — claude inherits the moe process env verbatim.
-	ExtraEnv []string
+func init() {
+	agent.Register("claude", Agent{})
 }
+
+// Agent is the claude implementation of agent.Agent. Stateless — the
+// per-turn data lives on the Request structs; this type is the
+// dispatch hook the registry hands back.
+type Agent struct{}
 
 // sandboxSettingsJSON builds the `--settings` payload that pins the
 // claude subprocess into the built-in sandbox regardless of the
@@ -142,14 +96,17 @@ func readWorktreeGitdir(clonePath string) (string, error) {
 }
 
 // Execute shells out to `claude`, wires stdio to the operator's
-// terminal, and mirrors the session's on-disk JSONL into the document's
-// thread.jsonl when the turn ends. A non-nil error means claude itself
-// exited non-zero; callers still commit whatever document edits landed
-// on disk, because the operator may have bailed mid-edit intentionally.
-func Execute(r Request) error {
+// terminal, and mirrors the session's on-disk JSONL into the
+// document's thread file when the turn ends. The returned string is
+// the session id the agent reports back — for claude that's always
+// the SessionID we passed in. A non-nil error means claude itself
+// exited non-zero; callers still commit whatever document edits
+// landed on disk, because the operator may have bailed mid-edit
+// intentionally.
+func (Agent) Execute(r agent.Request) (string, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
-		return fmt.Errorf("executor: claude CLI not found on PATH: %w", err)
+		return r.SessionID, fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 
 	// Claude Code uses --session-id to create and --resume to continue.
@@ -207,64 +164,14 @@ func Execute(r Request) error {
 	// aborted before claude wrote anything, or ran on another machine),
 	// and other I/O errors don't block the caller's post-run commit.
 	// Run-less sessions (Metadata nil) skip the copy entirely — there
-	// is no per-document thread.jsonl to mirror into.
+	// is no per-document thread file to mirror into.
 	if r.Metadata != nil {
 		threadPath := filepath.Join(r.Root, run.ThreadPath(r.Metadata.Project, r.Metadata.ID, r.DocID))
-		if _, err := claude.CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
+		if _, err := CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
 			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
 		}
 	}
-	return runErr
-}
-
-// OneShotRequest drives a single non-interactive `claude -p` turn whose
-// stdout streams to the operator's terminal as it lands — the
-// non-interactive twin of Execute. Same prompt-assembly contract
-// (system prompt + add-dirs + sandbox settings + positional user
-// prompt), but no session id, no REPL, no transcript mirroring: the
-// agent gets one turn, produces its work directly on disk, and exits.
-// Used by the cli's headless stage helpers (openSdlcStage, the
-// chain prompt's `o` keystroke, the cascade driver) to chain stage
-// turns without putting the operator on stdin.
-type OneShotRequest struct {
-	// Root is the bureaucracy repo root. Passed as --add-dir so the
-	// canvas stays reachable when cwd is the sandbox clone.
-	Root string
-	// Prompt is the assembled --append-system-prompt payload (same
-	// shape as Request.Prompt — soul + stage fragment + canvas hint +
-	// any one-shot addendum).
-	Prompt string
-	// UserPrompt is the positional `claude -p <prompt>` argument — the
-	// single user turn for this stage.
-	UserPrompt string
-	// ClonePath, when non-empty, is cwd for the claude subprocess —
-	// the per-run sandbox clone for code stages. Empty for
-	// document-only stages (cwd falls back to Root).
-	ClonePath string
-	// Model, if non-empty, is passed as --model. Empty string defers to
-	// the operator's configured default. Mirrors HeadlessRequest.Model:
-	// bounded curation tasks (push synthesis) pass "sonnet" so the cost
-	// stays predictable; full stage turns leave it empty.
-	Model string
-	// Stdout streams claude's output to the operator's terminal. nil
-	// falls back to os.Stdout — the runner wants the operator to watch
-	// progress so they can Ctrl-C if it goes off the rails.
-	Stdout io.Writer
-	// Stderr captures claude's diagnostic output. nil falls back to
-	// os.Stderr.
-	Stderr io.Writer
-	// Timeout, when > 0, hard-caps the whole invocation via
-	// CommandContext. Mirrors HeadlessRequest.Timeout: callers that
-	// want a guard against a spinning agent set it; the open-ended
-	// cascade chain leaves it zero so wiki-finalize-sized work
-	// isn't artificially capped.
-	Timeout time.Duration
-	// ExtraEnv is appended to os.Environ() before the claude
-	// subprocess is spawned — same semantics as Request.ExtraEnv. The
-	// headless code/test stages route their dev-env vars through this
-	// field so the agent's tool calls see the project's isolated
-	// runtime.
-	ExtraEnv []string
+	return r.SessionID, runErr
 }
 
 // ExecuteOneShot runs `claude -p` non-interactively and surfaces a
@@ -272,20 +179,19 @@ type OneShotRequest struct {
 // the long agent turn doesn't look hung. The agent gets one turn to do
 // its work; transcript mirroring is intentionally skipped (the canvas
 // + per-turn commit are the durable artifacts — one-shot runs don't
-// carry a thread.jsonl). A non-nil error means the subprocess exited
-// non-zero or the binary can't be found; callers still commit whatever
-// the agent landed on disk because partial work is salvage, not
-// contamination.
+// carry a thread file). Returns the empty session id and a non-nil
+// error on subprocess failure; callers still commit whatever the
+// agent landed on disk because partial work is salvage.
 //
 // Implementation: claude is invoked with `--output-format stream-json
 // --verbose --include-partial-messages` so its stdout is a JSON event
 // stream rather than buffered final text. A reader goroutine maps each
 // tool_use event to a short progress line (`> reading <path>`,
 // `> bash: <cmd>`, etc.) on r.Stdout; the raw JSON is never shown.
-func ExecuteOneShot(r OneShotRequest) error {
+func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
-		return fmt.Errorf("executor: claude CLI not found on PATH: %w", err)
+		return "", fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 	// --add-dir is variadic, so --settings/--append-system-prompt
 	// must sit between it and the positional user prompt — same
@@ -354,10 +260,10 @@ func ExecuteOneShot(r OneShotRequest) error {
 	// after the process exits and Run does both internally.
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("executor: claude -p stdout pipe: %w", err)
+		return "", fmt.Errorf("claude: -p stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("executor: claude -p start: %w", err)
+		return "", fmt.Errorf("claude: -p start: %w", err)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -367,60 +273,20 @@ func ExecuteOneShot(r OneShotRequest) error {
 	waitErr := cmd.Wait()
 	<-done
 	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("executor: claude -p timed out after %s", r.Timeout)
+		return "", fmt.Errorf("claude: -p timed out after %s", r.Timeout)
 	}
-	return waitErr
-}
-
-// HeadlessRequest drives a one-shot, non-interactive `claude -p` call —
-// no REPL, no --session-id, no transcript mirroring. The agent reads
-// the prompts, produces its response on stdout, and exits. Suited to
-// callers whose agent job is a bounded question-and-answer rather than
-// a conversation (e.g. a future wiki finalize that asks the model to
-// summarise a diff into one log entry).
-type HeadlessRequest struct {
-	// WorkDir is the cwd for the claude subprocess. Typically the
-	// bureaucracy root so any incidental Read goes through the
-	// canonical paths.
-	WorkDir string
-	// Model, if non-empty, is passed as --model. Empty string defers to
-	// the operator's configured default. Shelve passes "sonnet".
-	Model string
-	// AllowedTools is the comma-joined --allowed-tools list, e.g.
-	// "Read". Empty means Claude's default set — callers that want a
-	// locked-down tool surface must set this explicitly.
-	AllowedTools string
-	// SystemPrompt is appended to Claude's system prompt via
-	// --append-system-prompt, same as the interactive path.
-	SystemPrompt string
-	// UserPrompt is the `claude -p <prompt>` positional argument — the
-	// single "here is your task" turn for a headless run.
-	UserPrompt string
-	// AddDirs are passed as repeated --add-dir flags for any paths the
-	// agent needs to read outside WorkDir.
-	AddDirs []string
-	// Timeout bounds the whole invocation. Zero means no timeout, which
-	// no caller should actually choose — headless calls that hang are
-	// the worst kind of silent failure.
-	Timeout time.Duration
-	// Stderr, if non-nil, streams the subprocess's stderr so the
-	// operator can see progress/errors in real time. Stdout is captured
-	// and returned rather than streamed — callers parse it (JSON, a
-	// short answer, etc.) and decide what to show the operator.
-	Stderr io.Writer
+	return "", waitErr
 }
 
 // ExecuteHeadless runs a single non-interactive `claude -p` call under
 // a timeout and returns the subprocess's stdout as bytes. A non-nil
 // error means claude exited non-zero, the timeout fired, or the binary
 // can't be found — the stdout bytes collected up to that point are
-// still returned so the caller can log them for debugging. Callers
-// treat failures as "this turn produced no commit; operator can retry"
-// — there is no state to unwind.
-func ExecuteHeadless(r HeadlessRequest) ([]byte, error) {
+// still returned so the caller can log them for debugging.
+func (Agent) ExecuteHeadless(r agent.HeadlessRequest) ([]byte, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
-		return nil, fmt.Errorf("executor: claude CLI not found on PATH: %w", err)
+		return nil, fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 
 	args := []string{"-p"}
@@ -459,9 +325,38 @@ func ExecuteHeadless(r HeadlessRequest) ([]byte, error) {
 	}
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return out.Bytes(), fmt.Errorf("executor: claude -p timed out after %s", r.Timeout)
+			return out.Bytes(), fmt.Errorf("claude: -p timed out after %s", r.Timeout)
 		}
-		return out.Bytes(), fmt.Errorf("executor: claude -p: %w", err)
+		return out.Bytes(), fmt.Errorf("claude: -p: %w", err)
 	}
 	return out.Bytes(), nil
 }
+
+// CopyTranscript is the Agent method form of the package-level
+// CopyTranscript func. Defined as a method so the registry returns
+// something that satisfies agent.Agent.CopyTranscript.
+func (Agent) CopyTranscript(sessionID, dest string) (bool, error) {
+	return CopyTranscript(sessionID, dest)
+}
+
+// TranscriptExists reports whether claude's per-session JSONL is at
+// the canonical path it would read for `--resume sessionID` from cwd.
+// True with nil err means "safe to --resume"; false with nil err is
+// the re-mint-and-warn branch the stage pre-flight uses.
+func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
+	canonical := CanonicalTranscriptPath(cwd, sessionID)
+	if canonical == "" {
+		return false, nil
+	}
+	switch _, err := os.Stat(canonical); {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// Compile-time check that Agent satisfies the interface.
+var _ agent.Agent = Agent{}

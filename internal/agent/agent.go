@@ -1,0 +1,226 @@
+// Package agent is the seam between the CLI's stage orchestration
+// and the agent binary that actually drives a stage turn (claude or
+// codex today). The three executor entry points (Execute,
+// ExecuteOneShot, ExecuteHeadless) plus the transcript mirror sit
+// behind Agent so stage.go doesn't need to know which binary is on
+// the other side. Implementations register themselves via Register
+// in init(); callers look one up with Get.
+//
+// Request, OneShotRequest, HeadlessRequest are kept here (not on the
+// implementation side) so a future third backend can be added by
+// dropping a sibling package next to claude/ and codex/ without
+// touching any call site.
+package agent
+
+import (
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/modulecollective/moe/internal/run"
+)
+
+// Agent runs one stage turn against a backend binary and mirrors its
+// per-session transcript into the document directory. The three
+// modes — interactive, one-shot streaming, headless captured — exist
+// because the stage and curation call sites have different
+// requirements for stdio, session resume, and output handling.
+//
+// The interactive and one-shot methods return (sessionID, err): the
+// claude implementation echoes the UUID it was passed; the codex
+// implementation reads its session id back from the agent's
+// per-session rollout file after the turn (codex generates the id
+// itself; an upstream feature request to allow callers to pre-mint
+// it is open). Callers persist the returned id when it differs from
+// what they passed in.
+//
+// All four methods are safe to call from one goroutine at a time;
+// they do not assume concurrent invocation.
+type Agent interface {
+	// Execute is the interactive stage turn: stdio wired to the
+	// operator's terminal, session resumes via the agent's native
+	// resume mechanism. Returns the session id the agent used (echoed
+	// for claude, discovered from the rollout file for codex).
+	Execute(Request) (string, error)
+	// ExecuteOneShot is the headless streaming path: no operator on
+	// stdin, output translated to one-line-per-tool progress on the
+	// caller's stdout. Returns the session id the same way Execute
+	// does.
+	ExecuteOneShot(OneShotRequest) (string, error)
+	// ExecuteHeadless is the headless captured path: stdout returned
+	// as bytes for the caller to parse. No session state, no
+	// transcript mirror — for bounded curation calls.
+	ExecuteHeadless(HeadlessRequest) ([]byte, error)
+	// CopyTranscript copies the agent's per-session JSONL into dest.
+	// Returns (found, err): found=false means the agent has no
+	// transcript for sessionID yet (a legitimate no-op state, e.g.
+	// the operator aborted before the first turn wrote anything).
+	CopyTranscript(sessionID, dest string) (bool, error)
+	// TranscriptExists is the pre-flight probe stage.go uses before
+	// passing --resume to a returning session: returns whether the
+	// agent's per-session transcript for sessionID is present at the
+	// path the agent will look for it under cwd. False with nil err
+	// is the "transcript not found, re-mint and warn" branch.
+	//
+	// The cwd argument matters for claude (encoded into the project
+	// dir under ~/.claude/projects/) and is ignored by codex (rollout
+	// files live under ~/.codex/sessions/<date>/, keyed only by
+	// session id).
+	TranscriptExists(sessionID, cwd string) (bool, error)
+}
+
+// Request is the inputs for one interactive turn on one document.
+// All path / id fields are populated by stage.go from the resolved
+// run metadata.
+type Request struct {
+	// Root is the bureaucracy repo root. Passed to the agent as a
+	// writable add-dir so the canvas stays reachable when cwd is the
+	// sandbox clone.
+	Root string
+	// Metadata is the run's on-disk state. Read-only. Optional —
+	// run-less sessions (e.g. wiki lint) pass nil, which skips
+	// transcript mirroring at turn end since there is no document
+	// thread file to copy into.
+	Metadata *run.Metadata
+	// DocID is which document on the run this turn is for. Ignored
+	// when Metadata is nil.
+	DocID string
+	// SessionID is the canonical UUID that identifies this document's
+	// conversation. Claude uses it directly (--session-id /
+	// --resume); codex generates its own and the agent reads it back.
+	SessionID string
+	// NewSession is true when SessionID was just minted this turn
+	// (first ever call for this document) and false when it already
+	// has a server-side session that should be resumed.
+	NewSession bool
+	// Prompt is the assembled system prompt from buildSystemPrompt.
+	Prompt string
+	// ClonePath is the private per-run sandbox clone of the target
+	// project's submodule, or "" for document-only runs. When set,
+	// the agent runs with this as its working directory.
+	ClonePath string
+	// SessionCwd is the document-only fallback cwd: a stable per-document
+	// path whose only purpose is to keep claude's encoded-cwd project dir
+	// constant across turns so `--resume <sid>` finds its JSONL. Empty
+	// for code stages (ClonePath already gives them a stable cwd). Codex
+	// ignores this field — its rollout files aren't cwd-indexed.
+	SessionCwd string
+	// InitialPrompt, if non-empty, is auto-sent as the first user message
+	// of the turn so the operator doesn't have to type anything to kick
+	// the session off.
+	InitialPrompt string
+	// Stdin / Stdout / Stderr wire the interactive agent to the
+	// operator's terminal or capture output in tests.
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+	// ExtraEnv is appended to os.Environ() before the agent subprocess
+	// is spawned. Stage callers use it to inject the dev-env hooks'
+	// parsed output (DATABASE_URL, MOE_HOME, etc.) so the agent's
+	// shell tool calls run against the project's isolated runtime.
+	ExtraEnv []string
+}
+
+// OneShotRequest drives a single non-interactive streaming turn: the
+// agent's stdout is translated to one-line-per-tool progress and
+// surfaced on the caller's stdout while the turn runs. No session
+// resume, no operator on stdin.
+type OneShotRequest struct {
+	// Root is the bureaucracy repo root. Passed as a writable
+	// add-dir so the canvas stays reachable when cwd is the sandbox
+	// clone.
+	Root string
+	// Prompt is the assembled system prompt for this turn.
+	Prompt string
+	// UserPrompt is the single user turn for the headless run.
+	UserPrompt string
+	// ClonePath, when non-empty, is cwd for the agent subprocess —
+	// the per-run sandbox clone for code stages. Empty for
+	// document-only stages (cwd falls back to Root).
+	ClonePath string
+	// Model, if non-empty, names the model to use. Empty defers to
+	// the agent's configured default. Bounded curation tasks (push
+	// synthesis) pass a cheap-tier model; full stage turns leave it
+	// empty.
+	Model string
+	// Stdout streams agent output (progress translation) to the
+	// operator's terminal.
+	Stdout io.Writer
+	// Stderr captures the agent's diagnostic output.
+	Stderr io.Writer
+	// Timeout, when > 0, hard-caps the whole invocation. Zero leaves
+	// the call open-ended.
+	Timeout time.Duration
+	// ExtraEnv is appended to os.Environ() before the agent
+	// subprocess is spawned — same shape as Request.ExtraEnv.
+	ExtraEnv []string
+}
+
+// HeadlessRequest drives a one-shot, non-interactive call whose
+// stdout is captured and returned as bytes. No session, no
+// transcript, no progress translation — for bounded
+// question-and-answer curation calls.
+type HeadlessRequest struct {
+	// WorkDir is the cwd for the agent subprocess.
+	WorkDir string
+	// Model, if non-empty, names the model to use.
+	Model string
+	// AllowedTools is a per-agent tool-scoping hint (claude:
+	// `--allowed-tools`; codex: ignored — codex has no per-tool
+	// flag, scoping is the coarser sandbox+approval pair).
+	AllowedTools string
+	// SystemPrompt is the system prompt for this turn.
+	SystemPrompt string
+	// UserPrompt is the single user turn.
+	UserPrompt string
+	// AddDirs are additional read/write paths the agent needs.
+	AddDirs []string
+	// Timeout bounds the whole invocation. Zero means no timeout,
+	// which no caller should actually choose.
+	Timeout time.Duration
+	// Stderr, if non-nil, streams the subprocess's stderr.
+	Stderr io.Writer
+}
+
+var (
+	mu       sync.RWMutex
+	registry = map[string]Agent{}
+)
+
+// Register associates name with an Agent implementation. Called from
+// the implementation package's init(). Panics on duplicate names —
+// agent names are a tiny closed set today, so a collision is a
+// programming error.
+func Register(name string, a Agent) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, dup := registry[name]; dup {
+		panic("agent: duplicate registration for " + name)
+	}
+	registry[name] = a
+}
+
+// Get returns the Agent registered under name. Unknown names return
+// an error rather than silently falling back to a default; the
+// caller (a CLI flag or env var) should surface the failure to the
+// operator instead of running the wrong backend.
+func Get(name string) (Agent, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	a, ok := registry[name]
+	if !ok {
+		return nil, fmt.Errorf("agent: unknown backend %q (registered: %v)", name, names())
+	}
+	return a, nil
+}
+
+// names returns the sorted list of registered agent names. Used for
+// error-message context. Caller holds the read lock.
+func names() []string {
+	out := make([]string, 0, len(registry))
+	for k := range registry {
+		out = append(out, k)
+	}
+	return out
+}

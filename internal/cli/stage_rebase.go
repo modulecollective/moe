@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modulecollective/moe/internal/executor"
+	"github.com/modulecollective/moe/internal/agent"
+	_ "github.com/modulecollective/moe/internal/agent/claude"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -45,7 +46,14 @@ func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) erro
 // session worktree. Overridable in tests so closeWithAutoResolve can
 // be exercised end-to-end without spinning a real claude subprocess.
 var launchSessionRebaseResolve = func(worktreePath, userPrompt string, stdout, stderr io.Writer) error {
-	return executor.ExecuteOneShot(executor.OneShotRequest{
+	// The chain-back rebase resolver is single-binary by construction
+	// (it's a session-close fallback, not a stage turn), so it pins
+	// claude rather than reading from any per-run agent setting.
+	a, err := agent.Get("claude")
+	if err != nil {
+		return err
+	}
+	_, err = a.ExecuteOneShot(agent.OneShotRequest{
 		Root:       worktreePath,
 		Prompt:     sessionRebaseResolveSystemPrompt,
 		UserPrompt: userPrompt,
@@ -54,6 +62,7 @@ var launchSessionRebaseResolve = func(worktreePath, userPrompt string, stdout, s
 		Stderr:     stderr,
 		Timeout:    rebaseAutoResolveTimeout,
 	})
+	return err
 }
 
 // sessionRebaseResolveSystemPrompt is the system-prompt addendum for

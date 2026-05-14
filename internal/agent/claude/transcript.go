@@ -1,10 +1,9 @@
-// Package claude is a thin seam over the `claude` CLI's on-disk artifacts.
-//
-// The only artifact today is the per-session transcript Claude Code writes
-// to <CLAUDE_CONFIG_DIR>/projects/<encoded-cwd>/<session-id>.jsonl every
-// turn. Each stage turn copies that file into the document's thread.jsonl
-// so the conversation lives in the bureaucracy repo alongside the document
-// it produced. See designs/conversation-saving.md.
+// transcript.go is the thin seam over the `claude` CLI's on-disk
+// session artifacts. Claude Code writes per-turn JSONL to
+// <CLAUDE_CONFIG_DIR>/projects/<encoded-cwd>/<session-id>.jsonl; each
+// stage turn copies that file into the document's per-agent thread
+// file so the conversation lives in the bureaucracy repo alongside
+// the document it produced. See designs/conversation-saving.md.
 package claude
 
 import (

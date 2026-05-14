@@ -22,10 +22,10 @@ import (
 	"strings"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/agent"
+	_ "github.com/modulecollective/moe/internal/agent/claude"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
-	"github.com/modulecollective/moe/internal/claude"
-	"github.com/modulecollective/moe/internal/executor"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -123,6 +123,26 @@ type stageSessionOpts struct {
 	// pass. Routed straight through to wikiTurnSpec.PreFinalizeGate;
 	// see that field for the contract.
 	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
+	// Agent names the backend (claude / codex) that should drive this
+	// turn. Empty falls through resolveAgentName's precedence ladder:
+	// $MOE_AGENT, else "claude". Stage callers populate this from the
+	// run.json field when present, or from a --agent flag override.
+	Agent string
+}
+
+// resolveAgentName picks the backend for this turn. Precedence:
+// explicit (the stage caller's choice — flag, run.json, or hardcoded
+// for a non-stage caller), then $MOE_AGENT, then the "claude"
+// default. The same ladder is the operator-facing contract; keep this
+// helper as the single source.
+func resolveAgentName(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if v := os.Getenv("MOE_AGENT"); v != "" {
+		return v
+	}
+	return "claude"
 }
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
@@ -301,28 +321,29 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					resumeCwd = sessionCwd
 				}
 				if resumeCwd != "" {
-					canonical := claude.CanonicalTranscriptPath(resumeCwd, doc.Session)
-					if canonical != "" {
-						switch _, statErr := os.Stat(canonical); {
-						case statErr == nil:
-							// At the canonical path — normal --resume.
-						case errors.Is(statErr, fs.ErrNotExist):
-							moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
-							sid, err := run.NewSessionID()
-							if err != nil {
-								return wikiTurnSpec{}, err
-							}
-							doc.Session = sid
-							if err := run.Save(workRoot, md); err != nil {
-								return wikiTurnSpec{}, err
-							}
-							if err := commitSessionStart(workRoot, md, docID); err != nil {
-								return wikiTurnSpec{}, err
-							}
-							newSession = true
-						default:
-							return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", statErr)
+					a, agentErr := agent.Get(resolveAgentName(opts.Agent))
+					if agentErr != nil {
+						return wikiTurnSpec{}, agentErr
+					}
+					switch found, err := a.TranscriptExists(doc.Session, resumeCwd); {
+					case err != nil:
+						return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", err)
+					case found:
+						// Transcript present — normal --resume path.
+					default:
+						moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
+						sid, err := run.NewSessionID()
+						if err != nil {
+							return wikiTurnSpec{}, err
 						}
+						doc.Session = sid
+						if err := run.Save(workRoot, md); err != nil {
+							return wikiTurnSpec{}, err
+						}
+						if err := commitSessionStart(workRoot, md, docID); err != nil {
+							return wikiTurnSpec{}, err
+						}
+						newSession = true
 					}
 				}
 			}
@@ -346,6 +367,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
 				Model:            opts.Model,
+				Agent:            resolveAgentName(opts.Agent),
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				SkipFinalize:     opts.SkipFinalize,
@@ -482,6 +504,12 @@ type wikiTurnSpec struct {
 	// finalize stage. The gate / commit / close sequence is
 	// otherwise unchanged.
 	SkipFinalize bool
+	// Agent names the backend the executor should dispatch to. Always
+	// non-empty in production paths (runStageSession resolves it via
+	// resolveAgentName before populating this struct); test callers
+	// that build wikiTurnSpec directly leave it empty and runWikiSession
+	// falls back to resolveAgentName("") at dispatch time.
+	Agent string
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg
 	// (nil if the session has no wiki).
@@ -602,9 +630,15 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 
+	a, err := agent.Get(resolveAgentName(spec.Agent))
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		closeBootstrapFailedSession(closeSess, stderr)
+		return 1
+	}
 	var runErr error
 	if spec.Headless {
-		runErr = executor.ExecuteOneShot(executor.OneShotRequest{
+		_, runErr = a.ExecuteOneShot(agent.OneShotRequest{
 			Root:       workRoot,
 			Prompt:     prompt,
 			UserPrompt: spec.InitialPrompt,
@@ -615,7 +649,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			ExtraEnv:   spec.ExtraEnv,
 		})
 	} else {
-		runErr = executor.Execute(executor.Request{
+		// Execute returns the session id the agent reports back. For
+		// claude that's always the SessionID we passed in, so the
+		// returned value matches what's already on disk. For codex
+		// (next commit), the agent discovers the id from its rollout
+		// file post-turn — at that point this branch will persist the
+		// returned id when it differs.
+		_, runErr = a.Execute(agent.Request{
 			Root:          workRoot,
 			Metadata:      spec.Metadata,
 			DocID:         spec.DocID,
