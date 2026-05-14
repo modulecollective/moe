@@ -32,16 +32,16 @@ const (
 )
 
 // StageEntry prints the top-of-stage banner: gradient mark, workflow ·
-// stage, project / run. Fired once at the start of every stage session
+// stage, project + run. Fired once at the start of every stage session
 // — the one place every stage-using verb funnels through.
 func StageEntry(w io.Writer, workflow, stage, project, run string) {
-	cliout.Printf(w, "%s  %s · %s  ·  %s / %s\n", bar, workflow, stage, project, run)
+	cliout.Printf(w, "%s  %s · %s  ·  %s %s\n", bar, workflow, stage, project, run)
 }
 
 // StageExit prints the stage-bottom footer. Flipped gradient blocks
 // bookend a short status (`complete` when a commit landed, `no-op` for
 // the "no document changes; nothing committed" return) plus the same
-// project / run anchor as the entry. Skipped on error exits — pairing
+// project + run anchor as the entry. Skipped on error exits — pairing
 // every error with a "complete" footer would be worse than the
 // asymmetry.
 func StageExit(w io.Writer, workflow, stage, project, runID string, committed bool) {
@@ -49,7 +49,7 @@ func StageExit(w io.Writer, workflow, stage, project, runID string, committed bo
 	if !committed {
 		status = "no-op"
 	}
-	cliout.Printf(w, "%s %s %s  ·  %s / %s %s\n", barOpen, stage, status, project, runID, barClose)
+	cliout.Printf(w, "%s %s %s  ·  %s %s %s\n", barOpen, stage, status, project, runID, barClose)
 }
 
 // Dash prints the dash-render mark, with the render timestamp appended
