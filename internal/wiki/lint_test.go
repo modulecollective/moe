@@ -176,6 +176,79 @@ func TestRenderFindingsEmptyReturnsEmpty(t *testing.T) {
 	}
 }
 
+// Glossary orphan scan: a glossary entry whose term doesn't appear in
+// any other managed doc is an orphan (retire it or restore the prose
+// reference). The check only fires under closed-schema and only when
+// glossary.md is in the managed-doc set; absent or empty glossary is
+// a no-op.
+func TestScanGlossaryOrphans(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"),
+		"# Vision\n\nThe sandbox worktree is per-run.\n")
+	writeFile(t, filepath.Join(dir, "architecture.md"),
+		"# Architecture\n\nThe wiki engine has two modes.\n")
+	writeFile(t, filepath.Join(dir, "glossary.md"),
+		"# Glossary\n\n"+
+			"### Sandbox worktree\n\nPer-run working tree of the target submodule.\n\n"+
+			"### Wiki engine\n\nGeneric engine backing kb and twin.\n\n"+
+			"### Phantom term\n\nNobody references this in the prose.\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+			{Filename: "glossary.md", Title: "Glossary"},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.GlossaryOrphans, []string{"Phantom term"}; !equalStrings(got, want) {
+		t.Errorf("GlossaryOrphans: got %v want %v", got, want)
+	}
+}
+
+// A glossary.md with no H3 entries doesn't produce orphan noise — the
+// first reflect pass after the engine change adds the doc, and the
+// initial stub is just `# Glossary\n` until the agent populates it.
+func TestScanGlossaryOrphansEmptyGlossary(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\nbody\n")
+	writeFile(t, filepath.Join(dir, "glossary.md"), "# Glossary\n\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "glossary.md", Title: "Glossary"},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.GlossaryOrphans) != 0 {
+		t.Errorf("expected no orphans for an empty glossary, got %v", f.GlossaryOrphans)
+	}
+}
+
+// Render path: glossary orphans surface under their own labelled
+// bullet group so the agent knows what the rubric is for.
+func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
+	got := RenderFindings(Findings{GlossaryOrphans: []string{"Phantom term"}})
+	for _, want := range []string{
+		"## Structural pre-scan",
+		"**Glossary orphans**",
+		"- Phantom term",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 // equalStrings compares two string slices element-wise. We can't use
 // reflect.DeepEqual on []string{} vs nil cleanly; this helper treats
 // them as equal when both have the same elements in the same order.

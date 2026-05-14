@@ -86,6 +86,8 @@ substantive work:
 - operations.md — how the project runs day-to-day.
 - roadmap.md — what's next: prioritized intent across near, mid,
   long term, and parked.
+- glossary.md — project-specific vocabulary; terse entries
+  pointing back to the home doc where each term is anchored.
 
 When your work would contradict a recorded decision in
 architecture.md, name the conflict before continuing. When you'd

@@ -82,6 +82,35 @@ func TestReflectPromptSectionRendersClosed(t *testing.T) {
 	}
 }
 
+// The glossary inclusion bar lives in the reflect kickoff prompt, not
+// in operations.md. Pin that the convention block surfaces both the
+// 2+-doc rule and the code-seam carve-out so the agent applies the
+// rule from the prompt verbatim.
+func TestReflectPromptSectionRendersGlossaryConvention(t *testing.T) {
+	got, err := ReflectPromptSection(Config{
+		Mode:       Closed,
+		Name:       "twin",
+		ContentDir: "/x/projects/p/digital-twin",
+		ManagedDocs: []ManagedDoc{
+			{Filename: "glossary.md", Title: "Glossary", Purpose: "vocabulary"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Glossary convention",
+		"alphabetical list",
+		"Inclusion bar",
+		"2+ twin docs",
+		"code seam",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestClaimPromptSectionRefusesOpen(t *testing.T) {
 	if _, err := ClaimPromptSection(Config{Mode: Open}); err == nil {
 		t.Fatal("ClaimPromptSection should refuse open-schema")
@@ -301,6 +330,7 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"patterns.md",
 		"operations.md",
 		"roadmap.md",
+		"glossary.md",
 		"`moe twin claim`",
 	} {
 		if !strings.Contains(got, want) {

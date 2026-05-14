@@ -10,7 +10,7 @@ import (
 // `moe twin` is the top-level verb group for the closed-schema digital
 // twin lifecycle. Two operator-facing verbs:
 //
-//   moe twin reflect <project>  — walk the five managed docs against
+//   moe twin reflect <project>  — walk the six managed docs against
 //                                 recent activity, fold the idea
 //                                 backlog into the roadmap, and clear
 //                                 structural hygiene findings (the
@@ -25,12 +25,12 @@ import (
 // not the workflow layer.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
-Five managed docs hold the durable layer: vision, architecture,
-patterns, operations, and roadmap. The doc set is fixed; reflect
-updates the contents based on observed events, folds the open idea
-backlog into the roadmap, and clears structural hygiene findings.
-Decided edits (vision pivots, architectural intent) are authored,
-recorded via claim, not derived.`
+Six managed docs hold the durable layer: vision, architecture,
+patterns, operations, roadmap, and glossary. The doc set is fixed;
+reflect updates the contents based on observed events, folds the
+open idea backlog into the roadmap, and clears structural hygiene
+findings. Decided edits (vision pivots, architectural intent) are
+authored, recorded via claim, not derived.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
 // project's twin gets. Names, titles, purposes, and per-doc reflect
@@ -84,6 +84,20 @@ var twinManagedDocs = []wiki.ManagedDoc{
 			"recent work landed nothing on, long-term items now an open " +
 			"run, parked items the project is quietly doing anyway. Do " +
 			"not rewrite the roadmap — that's the plan verb's job.",
+	},
+	{
+		Filename: "glossary.md",
+		Title:    "Glossary",
+		Purpose:  "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
+		ReflectPrompt: "Walk the glossary against the other managed docs. " +
+			"Apply the inclusion bar in the kickoff conventions: a term " +
+			"earns an entry when it appears load-bearing in 2+ twin docs, " +
+			"or when it names a code seam the twin discusses. Entries are " +
+			"1–3 sentences pointing back to the home doc by section " +
+			"heading, never line number — definitions live in the home " +
+			"doc, the glossary is the index. Retire entries whose term no " +
+			"longer appears elsewhere; normalize prose spellings to the " +
+			"glossary form when synonyms drift apart.",
 	},
 }
 

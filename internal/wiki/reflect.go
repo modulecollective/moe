@@ -57,6 +57,22 @@ this pass. On subsequent passes, walk the prior content with the
 operator and promote / demote / retire entries against the idea
 backlog and recent activity.
 
+Glossary convention: glossary.md is a single alphabetical list of
+project-specific terms. Each entry is a ` + "`### Term`" + ` heading
+followed by 1–3 sentences that compress the definition and point back
+to the home doc by section heading (never line number). The
+definition lives in the home doc; the glossary is the index.
+
+Inclusion bar — a term earns a glossary entry when **either** it
+appears load-bearing in 2+ twin docs, **or** it names a code seam the
+twin discusses (a package, command, struct, or commit trailer). A
+term that appears once in one doc stays in that doc. Generic nouns
+("the agent", "the operator") do not earn entries. Acronyms follow
+the same rule: project-specific short forms (` + "`MoE`" + `, ` + "`kb`" + `,
+` + "`sdlc`" + `) belong; general programming acronyms (` + "`PR`" + `,
+` + "`SHA`" + `, ` + "`CLI`" + `) do not. When synonyms drift across docs,
+normalize the prose to the glossary form during the pass.
+
 Hygiene findings (orphans, broken cross-links, empty docs) are
 pre-scanned and surfaced in your kickoff. Walk them before the
 doc-by-doc pass so structural issues inform the synthesis. Apply

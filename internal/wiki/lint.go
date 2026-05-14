@@ -102,6 +102,12 @@ type Findings struct {
 	// that don't exist on disk. Closed-schema only — open-schema
 	// wikis don't declare a fixed doc set.
 	MissingManagedDocs []string
+	// GlossaryOrphans are glossary entries (H3 terms in glossary.md)
+	// whose term text appears nowhere in the other managed docs.
+	// Closed-schema only. The contract is that the glossary is an
+	// index over the prose, not a separate definition surface — an
+	// orphan means the prose moved on without the entry.
+	GlossaryOrphans []string
 }
 
 // BrokenLink is one cross-link a topic doc makes that doesn't resolve.
@@ -118,7 +124,8 @@ func (f Findings) IsEmpty() bool {
 		len(f.MissingFromIndex) == 0 &&
 		len(f.BrokenLinks) == 0 &&
 		len(f.EmptyDocs) == 0 &&
-		len(f.MissingManagedDocs) == 0
+		len(f.MissingManagedDocs) == 0 &&
+		len(f.GlossaryOrphans) == 0
 }
 
 // Scan walks the wiki content directory and returns the structural
@@ -289,6 +296,13 @@ func RenderFindings(f Findings) string {
 		}
 		b.WriteString("\n")
 	}
+	if len(f.GlossaryOrphans) > 0 {
+		b.WriteString("**Glossary orphans** (entry term appears nowhere else — retire it or restore the prose reference):\n")
+		for _, o := range f.GlossaryOrphans {
+			fmt.Fprintf(&b, "- %s\n", o)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -341,8 +355,11 @@ func scanClosed(cfg Config) (Findings, error) {
 		}
 	}
 
+	f.GlossaryOrphans = scanGlossaryOrphans(cfg)
+
 	sort.Strings(f.MissingManagedDocs)
 	sort.Strings(f.EmptyDocs)
+	sort.Strings(f.GlossaryOrphans)
 	sort.Slice(f.BrokenLinks, func(i, j int) bool {
 		if f.BrokenLinks[i].From != f.BrokenLinks[j].From {
 			return f.BrokenLinks[i].From < f.BrokenLinks[j].From
@@ -350,6 +367,73 @@ func scanClosed(cfg Config) (Findings, error) {
 		return f.BrokenLinks[i].Target < f.BrokenLinks[j].Target
 	})
 	return f, nil
+}
+
+// glossaryDocName is the closed-schema glossary doc the orphan scan
+// targets. Kept in one place so a future rename (or a per-project
+// override) lands in a single spot.
+const glossaryDocName = "glossary.md"
+
+// glossaryTermPattern matches the `### Term` H3 line a glossary entry
+// opens with. The term capture includes any trailing whitespace, which
+// scanGlossaryOrphans trims before use.
+var glossaryTermPattern = regexp.MustCompile(`(?m)^###\s+(.+?)\s*$`)
+
+// scanGlossaryOrphans extracts H3 entries from glossary.md and returns
+// the terms whose text doesn't appear anywhere in the other managed
+// docs. The orphan signal is "the prose moved on without the entry" —
+// either retire the entry or restore the prose reference. Returns nil
+// when glossary.md is absent (a fresh twin has no entries to orphan).
+//
+// Matching is case-insensitive substring: a glossary entry titled
+// `### Sandbox worktree` is satisfied by prose that says "the sandbox
+// worktree …". Headings in the glossary itself don't count — the
+// check only walks the other managed docs.
+func scanGlossaryOrphans(cfg Config) []string {
+	managedHasGlossary := false
+	for _, d := range cfg.ManagedDocs {
+		if d.Filename == glossaryDocName {
+			managedHasGlossary = true
+			break
+		}
+	}
+	if !managedHasGlossary {
+		return nil
+	}
+	body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, glossaryDocName))
+	if err != nil || !ok {
+		return nil
+	}
+	matches := glossaryTermPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var others strings.Builder
+	for _, d := range cfg.ManagedDocs {
+		if d.Filename == glossaryDocName {
+			continue
+		}
+		otherBody, ok, err := readMaybe(filepath.Join(cfg.ContentDir, d.Filename))
+		if err != nil || !ok {
+			continue
+		}
+		others.WriteString(otherBody)
+		others.WriteByte('\n')
+	}
+	prose := strings.ToLower(others.String())
+	seen := map[string]bool{}
+	var orphans []string
+	for _, m := range matches {
+		term := strings.TrimSpace(m[1])
+		if term == "" || seen[term] {
+			continue
+		}
+		seen[term] = true
+		if !strings.Contains(prose, strings.ToLower(term)) {
+			orphans = append(orphans, term)
+		}
+	}
+	return orphans
 }
 
 // readMaybe reads path, returning ("", false, nil) when the file is

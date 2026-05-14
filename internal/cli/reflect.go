@@ -224,7 +224,7 @@ func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
 // terminal "found N unresolved findings" line.
 func findingsCount(f wiki.Findings) int {
 	return len(f.Orphans) + len(f.MissingFromIndex) + len(f.BrokenLinks) +
-		len(f.EmptyDocs) + len(f.MissingManagedDocs)
+		len(f.EmptyDocs) + len(f.MissingManagedDocs) + len(f.GlossaryOrphans)
 }
 
 // reflectKickoff is the auto-sent first user message. It frames the
