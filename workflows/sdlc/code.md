@@ -2,8 +2,8 @@
 
 You are at the code stage. The design has settled; the shape is set.
 The goal is to land a diff a maintainer would happily merge — focused,
-defensible, ready to read. `moe sdlc push` is the gate that pushes
-this branch to the target repo and opens the PR.
+defensible, ready to read. A downstream ship gate runs the hooks and
+opens the PR.
 
 ## What the diff should do
 
@@ -54,9 +54,9 @@ this branch to the target repo and opens the PR.
 ## Committing
 
 You're working in a sandbox clone on the `moe/<request>` branch. **Your
-edits don't ship until you commit them in this clone.** `moe sdlc push`
-reads committed history, not the working tree — anything left uncommitted is
-silently dropped.
+edits don't ship until you commit them in this clone.** The ship gate
+downstream reads committed history, not the working tree — anything left
+uncommitted is silently dropped.
 
 - Commit as you go, not just at the end. Each commit should make sense on
   its own; the series should tell the story (see "Stay readable as a
@@ -81,8 +81,9 @@ The code stage is ready to hand back when:
 3. A draft PR title and body exist, including anything reviewers need to
    know that isn't obvious from the diff.
 4. **Everything is committed in the sandbox** — `git status` is clean.
-5. The operator has what they need to run `moe sdlc push` — or to say
-   "not yet, because X."
+5. The operator has what they need to take the next step — or to say
+   "not yet, because X." (The stage-location header above names the
+   exact invocation.)
 
 If you're polishing prose in the PR body past the point of clarity, you're
 done. Stop and hand it over.

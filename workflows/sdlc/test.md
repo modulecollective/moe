@@ -148,8 +148,9 @@ The test stage is ready to hand back when:
    (empty section if you didn't need to).
 4. **Everything is committed in the sandbox** — `git status` is
    clean.
-5. The operator has what they need to run `moe sdlc push` — or
-   to say "not yet, because X."
+5. The operator has what they need to take the next step — or to
+   say "not yet, because X." (The stage-location header above names
+   the exact invocation.)
 
 ## Before you start
 
