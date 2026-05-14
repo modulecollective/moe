@@ -348,12 +348,22 @@ func ContentPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "content.md")
 }
 
-// ThreadPath returns the path (relative to the bureaucracy root) of a
-// document's conversation transcript. Stage sessions mirror Claude
-// Code's per-session JSONL here every turn, so the full human/agent
-// exchange is stored in-repo alongside the compressed content.md.
+// ThreadPath returns the legacy single-agent transcript path
+// (`thread.jsonl`). New code should prefer ThreadPathFor; this
+// function is kept for tests and any caller that needs to locate
+// pre-multi-agent files written before the agent suffix landed.
 func ThreadPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "thread.jsonl")
+}
+
+// ThreadPathFor returns the per-agent conversation transcript path
+// (`thread-<agent>.jsonl`) relative to the bureaucracy root. Every
+// stage turn mirrors its agent's per-session JSONL here. A document
+// touched by two agents accumulates two files in its directory
+// (`thread-claude.jsonl`, `thread-codex.jsonl`) — the operator's
+// `cat thread-*.jsonl` reads the agent-tagged forensic history.
+func ThreadPathFor(agent, projectID, id, docID string) string {
+	return filepath.Join(DocDir(projectID, id, docID), "thread-"+agent+".jsonl")
 }
 
 // FollowupsPath returns the path (relative to the bureaucracy root) of

@@ -72,3 +72,69 @@ func writeGitfile(t *testing.T, clonePath, gitdir string) {
 		t.Fatalf("write .git: %v", err)
 	}
 }
+
+// TestRenameLegacyThreadJSONLMigratesOnFirstTouch covers the one-time
+// migration shape: an old thread.jsonl file (pre-multi-agent) sitting
+// next to where we're about to write thread-claude.jsonl gets renamed
+// in place so old git history rolls forward.
+func TestRenameLegacyThreadJSONLMigratesOnFirstTouch(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "thread.jsonl")
+	if err := os.WriteFile(legacy, []byte("legacy content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newPath := filepath.Join(dir, "thread-claude.jsonl")
+
+	if err := renameLegacyThreadJSONL(newPath); err != nil {
+		t.Fatalf("renameLegacyThreadJSONL: %v", err)
+	}
+
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy thread.jsonl should be gone; stat err=%v", err)
+	}
+	got, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("read renamed thread-claude.jsonl: %v", err)
+	}
+	if string(got) != "legacy content" {
+		t.Fatalf("renamed file content = %q, want legacy content", got)
+	}
+}
+
+// TestRenameLegacyThreadJSONLDropsLegacyWhenNewAlreadyExists covers
+// the second-turn shape: thread-claude.jsonl already exists (the
+// turn 1 mirror) AND a thread.jsonl is somehow still hanging around
+// (operator-edited working tree, partial migration). The legacy
+// file is removed rather than clobbering the up-to-date new file.
+func TestRenameLegacyThreadJSONLDropsLegacyWhenNewAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "thread.jsonl")
+	newPath := filepath.Join(dir, "thread-claude.jsonl")
+	if err := os.WriteFile(legacy, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("fresh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := renameLegacyThreadJSONL(newPath); err != nil {
+		t.Fatalf("renameLegacyThreadJSONL: %v", err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy thread.jsonl should be gone; stat err=%v", err)
+	}
+	if got, _ := os.ReadFile(newPath); string(got) != "fresh" {
+		t.Fatalf("new path should be untouched; got %q want fresh", got)
+	}
+}
+
+// TestRenameLegacyThreadJSONLNoOpWhenLegacyAbsent is the steady-state
+// case: most documents have no legacy thread.jsonl, just the new
+// per-agent file. The migration helper should silently do nothing.
+func TestRenameLegacyThreadJSONLNoOpWhenLegacyAbsent(t *testing.T) {
+	dir := t.TempDir()
+	newPath := filepath.Join(dir, "thread-claude.jsonl")
+	if err := renameLegacyThreadJSONL(newPath); err != nil {
+		t.Fatalf("renameLegacyThreadJSONL: %v", err)
+	}
+}
