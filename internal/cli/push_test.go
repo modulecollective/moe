@@ -243,10 +243,10 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	var captured *push.RebaseConflictError
 	var capturedRun *run.Metadata
 	prev := openCodeSessionForRebaseConflict
-	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *push.RebaseConflictError, _, _ io.Writer) int {
+	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *push.RebaseConflictError, _, _ io.Writer) (int, error) {
 		capturedRun = md
 		captured = c
-		return 1
+		return 1, &PushDeferredError{Recovery: "rebase-conflict", Project: md.Project, Run: md.ID}
 	}
 	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
 
@@ -312,6 +312,122 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	if !strings.Contains(kickoff, "chain prompt") {
 		t.Fatalf("kickoff prompt should point the agent at the post-turn chain prompt rather than asking the operator to re-run: %s", kickoff)
 	}
+}
+
+// TestRunPushReturnsDeferredOnRebaseRecovery pins the typed-error
+// contract added in cascade-message-was-a-lie: when push hands off to
+// a recovery session and that session exits cleanly (exit 0), the
+// caller still gets a *PushDeferredError back through runPushTyped so
+// the cascade can render "deferred to recovery (rebase conflict) —
+// stopped" instead of mistaking the clean recovery for a successful
+// ship. The standalone CLI (pushCmd.Run) discards the error to
+// preserve the Command.Run int contract — so exit 0 still flows
+// through to the shell, but the cascade reads the typed channel.
+//
+// Subtest "rebase-conflict" covers openCodeSessionForRebaseConflict;
+// "hook-failure" covers openCodeSessionForHookFailure. Both pin
+// the same shape: clean inner exit + typed error.
+func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
+	t.Run("rebase-conflict", func(t *testing.T) {
+		f := newPushFixture(t)
+
+		// Advance origin/main with a commit that conflicts with the run
+		// branch's feature.txt commit, so the pre-push rebase hits a
+		// real conflict.
+		work := t.TempDir()
+		gittest.Run(t, "", "clone", "-b", "main", f.origin, work)
+		writeFile(t, filepath.Join(work, "feature.txt"), "from-default\n")
+		gittest.Run(t, work, "add", "feature.txt")
+		gittest.Run(t, work, "commit", "-m", "default-side feature")
+		gittest.Run(t, work, "push", "origin", "main")
+
+		// Stub the recovery helper to return (0, *PushDeferredError) —
+		// the "agent resolved and exited cleanly" case.
+		prev := openCodeSessionForRebaseConflict
+		openCodeSessionForRebaseConflict = func(md *run.Metadata, _ *push.RebaseConflictError, _, _ io.Writer) (int, error) {
+			return 0, &PushDeferredError{
+				Recovery: "rebase-conflict",
+				Project:  md.Project,
+				Run:      md.ID,
+			}
+		}
+		t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
+
+		// Call runPushTyped directly to assert both returns. MOE_HOME
+		// is what bureaucracy.Find consults, so the test can run from
+		// any cwd.
+		t.Setenv("MOE_HOME", f.root)
+		t.Setenv("NO_COLOR", "1")
+		var stdout, stderr bytes.Buffer
+		code, err := runPushTyped("sdlc", []string{f.projectID, f.runID}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
+		}
+		var deferred *PushDeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("runPushTyped error: want *PushDeferredError, got %T (%v)", err, err)
+		}
+		if deferred.Recovery != "rebase-conflict" {
+			t.Fatalf("deferred.Recovery: want %q, got %q", "rebase-conflict", deferred.Recovery)
+		}
+		if deferred.Project != f.projectID || deferred.Run != f.runID {
+			t.Fatalf("deferred identity: want (%s,%s), got (%s,%s)",
+				f.projectID, f.runID, deferred.Project, deferred.Run)
+		}
+
+		// The standalone CLI contract: pushCmd.Run wraps runPushTyped
+		// and discards the error. Exit 0 flows through; the typed
+		// signal is invisible at the shell boundary.
+		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+		if cliCode != 0 {
+			t.Fatalf("pushCmd.Run (clean recovery) exit: want 0, got %d; stdout=%s stderr=%s",
+				cliCode, stdoutBuf, stderrBuf)
+		}
+	})
+
+	t.Run("hook-failure", func(t *testing.T) {
+		f := newPushFixture(t)
+
+		writeHookScript(t, f.root, f.projectID, "pre-push", "10-fail.sh", `#!/bin/sh
+echo "intentional hook output"
+exit 7
+`)
+
+		prev := openCodeSessionForHookFailure
+		openCodeSessionForHookFailure = func(md *run.Metadata, _ *hookFailure, _, _ io.Writer) (int, error) {
+			return 0, &PushDeferredError{
+				Recovery: "hook-failure",
+				Project:  md.Project,
+				Run:      md.ID,
+			}
+		}
+		t.Cleanup(func() { openCodeSessionForHookFailure = prev })
+
+		t.Setenv("MOE_HOME", f.root)
+		t.Setenv("NO_COLOR", "1")
+		var stdout, stderr bytes.Buffer
+		code, err := runPushTyped("sdlc", []string{f.projectID, f.runID}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
+		}
+		var deferred *PushDeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("runPushTyped error: want *PushDeferredError, got %T (%v)", err, err)
+		}
+		if deferred.Recovery != "hook-failure" {
+			t.Fatalf("deferred.Recovery: want %q, got %q", "hook-failure", deferred.Recovery)
+		}
+		if deferred.Project != f.projectID || deferred.Run != f.runID {
+			t.Fatalf("deferred identity: want (%s,%s), got (%s,%s)",
+				f.projectID, f.runID, deferred.Project, deferred.Run)
+		}
+
+		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+		if cliCode != 0 {
+			t.Fatalf("pushCmd.Run (clean recovery) exit: want 0, got %d; stdout=%s stderr=%s",
+				cliCode, stdoutBuf, stderrBuf)
+		}
+	})
 }
 
 // TestPushNoRebaseNeededFastPath: when origin/main hasn't moved past
@@ -1551,10 +1667,10 @@ exit 7
 	var captured *hookFailure
 	var capturedRun *run.Metadata
 	prev := openCodeSessionForHookFailure
-	openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, _, _ io.Writer) int {
+	openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, _, _ io.Writer) (int, error) {
 		capturedRun = md
 		captured = fail
-		return 1
+		return 1, &PushDeferredError{Recovery: "hook-failure", Project: md.Project, Run: md.ID}
 	}
 	t.Cleanup(func() { openCodeSessionForHookFailure = prev })
 
@@ -1615,42 +1731,46 @@ exit 7
 // closure passes through (no SkipNextStage, docID="code", sandbox on).
 func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 	cases := []struct {
-		name        string
-		invoke      func(md *run.Metadata) int
-		stubReturns int
+		name         string
+		invoke       func(md *run.Metadata) (int, error)
+		stubReturns  int
+		wantRecovery string
 	}{
 		{
 			name: "hook failure",
-			invoke: func(md *run.Metadata) int {
+			invoke: func(md *run.Metadata) (int, error) {
 				return openCodeSessionForHookFailure(md, &hookFailure{
 					event:  hookEventPrePush,
 					script: "10-fail.sh",
 					output: "boom\n",
 				}, io.Discard, io.Discard)
 			},
-			stubReturns: 0,
+			stubReturns:  0,
+			wantRecovery: "hook-failure",
 		},
 		{
 			name: "hook failure (inner non-zero)",
-			invoke: func(md *run.Metadata) int {
+			invoke: func(md *run.Metadata) (int, error) {
 				return openCodeSessionForHookFailure(md, &hookFailure{
 					event:  hookEventPrePush,
 					script: "10-fail.sh",
 					output: "boom\n",
 				}, io.Discard, io.Discard)
 			},
-			stubReturns: 1,
+			stubReturns:  1,
+			wantRecovery: "hook-failure",
 		},
 		{
 			name: "rebase conflict",
-			invoke: func(md *run.Metadata) int {
+			invoke: func(md *run.Metadata) (int, error) {
 				return openCodeSessionForRebaseConflict(md, &push.RebaseConflictError{
 					Branch:        "moe/fix-it",
 					DefaultBranch: "main",
 					Conflicts:     []string{"feature.txt"},
 				}, io.Discard, io.Discard)
 			},
-			stubReturns: 0,
+			stubReturns:  0,
+			wantRecovery: "rebase-conflict",
 		},
 	}
 
@@ -1671,9 +1791,26 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 				Project:  "tele",
 				Workflow: "sdlc",
 			}
-			got := tc.invoke(md)
+			got, err := tc.invoke(md)
 			if got != tc.stubReturns {
 				t.Fatalf("chain-back exit code: want propagated %d, got %d", tc.stubReturns, got)
+			}
+			// The typed-error contract: every chain-back surfaces a
+			// *PushDeferredError tagged with the recovery flavour and
+			// the run identity, regardless of whether the inner
+			// session exited cleanly or not. The cascade reads this
+			// to render `push deferred to recovery (...)` instead of
+			// claiming a ship that never happened.
+			var deferred *PushDeferredError
+			if !errors.As(err, &deferred) {
+				t.Fatalf("chain-back error: want *PushDeferredError, got %T (%v)", err, err)
+			}
+			if deferred.Recovery != tc.wantRecovery {
+				t.Fatalf("recovery tag: want %q, got %q", tc.wantRecovery, deferred.Recovery)
+			}
+			if deferred.Project != md.Project || deferred.Run != md.ID {
+				t.Fatalf("deferred identity: want (%s,%s), got (%s,%s)",
+					md.Project, md.ID, deferred.Project, deferred.Run)
 			}
 			if capturedDoc != "code" {
 				t.Fatalf("docID: want %q, got %q", "code", capturedDoc)

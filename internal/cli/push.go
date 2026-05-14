@@ -21,20 +21,46 @@ import (
 // pushCommand builds the `push` facade for a workflow. Same shape as
 // lintCommand/reflectCommand — the factory closes over the workflow
 // name so the Usage closure can render a runnable banner instead of a
-// `<wf>` placeholder. runPush itself stays workflow-agnostic: it loads
-// the run, reads md.Workflow, and threads it into the per-call
-// messages that need it.
+// `<wf>` placeholder. runPushTyped itself stays workflow-agnostic: it
+// loads the run, reads md.Workflow, and threads it into the per-call
+// messages that need it. The wrapper discards the typed error so the
+// Command.Run contract stays `int`; the cascade calls runPushTyped
+// directly to pick up the deferred-to-recovery signal.
 func pushCommand(workflow string) *Command {
 	return &Command{
 		Name:    "push",
 		Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
 		Run: func(args []string, stdout, stderr io.Writer) int {
-			return runPush(workflow, args, stdout, stderr)
+			code, _ := runPushTyped(workflow, args, stdout, stderr)
+			return code
 		},
 	}
 }
 
 const branchPrefix = "moe/"
+
+// PushDeferredError is the typed value runPushTyped returns when the
+// pre-push gate hit a conflict or hook failure and pushed control to
+// a fresh code session instead of shipping. The recovery session's
+// own exit is propagated as the int return — non-zero if the agent
+// gave up, zero if it resolved cleanly — but the typed error rides
+// alongside so the caller can tell "push handed off" apart from
+// "push shipped." The cascade reads this to render
+// `push deferred to recovery (rebase conflict) — stopped` instead of
+// claiming a ship that never happened.
+//
+// Recovery is "rebase-conflict" or "hook-failure". Project and Run
+// echo the run the deferral fired on, so callers logging this don't
+// have to plumb the metadata separately.
+type PushDeferredError struct {
+	Recovery string
+	Project  string
+	Run      string
+}
+
+func (e *PushDeferredError) Error() string {
+	return fmt.Sprintf("push deferred to recovery (%s) for %s/%s", e.Recovery, e.Project, e.Run)
+}
 
 // pushCanvasSkeleton is the fixed structural shape every push canvas
 // opens with. Synthesis fills it from code/content.md and (when
@@ -99,16 +125,25 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
 }
 
-// runPush ships the sandbox branch. The default path fast-forwards the
-// target repo's default branch to include moe/<run>, deletes the remote
-// branch, drops the sandbox clone, and marks the run `merged`. The
-// `--pr` path is today's behavior: push the branch, open (or re-use) a
-// PR, mark the run `pushed`, keep the sandbox. A pushed run later
+// runPushTyped ships the sandbox branch. The default path fast-forwards
+// the target repo's default branch to include moe/<run>, deletes the
+// remote branch, drops the sandbox clone, and marks the run `merged`.
+// The `--pr` path is today's behavior: push the branch, open (or re-use)
+// a PR, mark the run `pushed`, keep the sandbox. A pushed run later
 // reconciles to merged/closed via `moe sync`.
 //
 // Idempotent on terminal runs: rerunning after a merged/closed run is
 // a no-op that prints the terminal state and exits 0.
-func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
+//
+// Returns (exitCode, error). The exit code is what `moe sdlc push`
+// hands back to the shell: 0 on a real ship; 0 on a recovery session
+// that exited cleanly; non-zero on any other failure. The error is
+// non-nil only on the deferred-to-recovery paths — `*PushDeferredError`
+// carrying the recovery flavour — so the cascade can render
+// `push deferred to recovery (...) — stopped` instead of claiming a
+// ship that never happened. Standalone callers (pushCmd.Run) discard
+// the error and propagate just the exit code.
+func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int, error) {
 	fs := flag.NewFlagSet(workflow+" push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
@@ -120,29 +155,29 @@ func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
+		return 2, nil
 	}
 	if fs.NArg() != 2 {
 		fs.Usage()
-		return 2
+		return 2, nil
 	}
 	projectID, runID := fs.Arg(0), fs.Arg(1)
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	// Terminal statuses short-circuit before touching the sandbox — the
@@ -155,40 +190,40 @@ func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 		} else {
 			moePrintln(stdout, "already merged")
 		}
-		return 0
+		return 0, nil
 	case run.StatusClosed:
 		moePrintln(stdout, "already closed")
-		return 0
+		return 0, nil
 	}
 
 	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	if err := checkCodeContent(root, md); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	clonePath, err := sandboxClonePath(root, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 	branch := branchPrefix + md.ID
 	if err := push.CheckCleanWorkTree(clonePath, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 	if err := push.EnsureOrigin(clonePath, pj.Remote); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	hooks := hookEnv{
@@ -212,7 +247,7 @@ func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 			return openCodeSessionForHookFailure(md, fail, stdout, stderr)
 		}
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	// When origin already has moe/<run> (a prior `--pr` cycle, or a
@@ -226,13 +261,13 @@ func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 
 	if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	if *prFlag {
-		return openPRPath(root, md, pj, branch, stdout, stderr)
+		return openPRPath(root, md, pj, branch, stdout, stderr), nil
 	}
-	return mergePath(root, md, pj, clonePath, branch, stdout, stderr)
+	return mergePath(root, md, pj, clonePath, branch, stdout, stderr), nil
 }
 
 // init registers the rebase-onto-default check as the first pre-push
@@ -255,17 +290,24 @@ func init() {
 // that names the conflicting paths and the target branch, then propagate
 // that session's exit code so a clean resolve-and-commit lets the
 // workflow's chain prompt offer push next — same shape `moe <wf> code`
-// already produces.
+// already produces. The second return is a *PushDeferredError marking
+// the deferral so the cascade renders "deferred to recovery" instead
+// of mistaking the recovery's clean exit for a successful ship.
 //
 // Overridable in tests; the default invokes runStageSession directly
 // with docID="code", same as `moe <wf> code` would.
-var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *push.RebaseConflictError, stdout, stderr io.Writer) int {
+var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *push.RebaseConflictError, stdout, stderr io.Writer) (int, error) {
 	moePrintln(stderr, "       opening a fresh code session — resolve the conflicts and commit; the chain prompt will offer push next")
 	kickoff := buildRebaseConflictKickoff(md.Workflow, conflict)
-	return runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
 		InitialPrompt: kickoff,
 	}, stdout, stderr)
+	return code, &PushDeferredError{
+		Recovery: "rebase-conflict",
+		Project:  md.Project,
+		Run:      md.ID,
+	}
 }
 
 // buildRebaseConflictKickoff is the agent-facing kickoff prompt for a

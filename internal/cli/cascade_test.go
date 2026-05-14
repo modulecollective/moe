@@ -69,35 +69,42 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 	}
 }
 
-// stubSdlcStageCommands replaces the sdlc group's design/code/test/push
-// commands with no-op recorders for the lifetime of the test. The
-// returned map captures the args each stub received, in dispatch order,
-// keyed by stage. Restores originals on cleanup. Used for the cascade's
-// yolo-mode push-ship dispatch, which still goes through pushCmd.Run;
-// non-ship dispatches now flow through openSdlcStage and are intercepted
-// by stubOpenSdlcStage.
-func stubSdlcStageCommands(t *testing.T, perStageExit map[string]int) map[string][][]string {
+// pushFromCascadeInvocation records one cascade-side push dispatch.
+// args holds whatever the cascade passed through (today: just
+// {project, run} for the merge path), defer is the typed
+// *PushDeferredError the stub was configured to surface, exit is the
+// int the stub returned. Tests assert directly on these fields.
+type pushFromCascadeInvocation struct {
+	args   []string
+	defer_ *PushDeferredError
+	exit   int
+}
+
+// stubPushFromCascade swaps pushFromCascade — the cascade's typed
+// entry to runPushTyped — for a recorder. exit and deferred pin what
+// the stub hands back: (exit, deferred) is the same shape the real
+// runPushTyped uses on a deferred recovery (non-zero exit + typed
+// error), and (exit, nil) covers the happy-ship and bare-failure
+// paths. Returns a pointer to the captured invocations so the test
+// can assert on call count and args. Original is restored on cleanup.
+func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[]pushFromCascadeInvocation {
 	t.Helper()
-	g, err := LookupGroup("sdlc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	captured := map[string][][]string{}
-	stages := []string{"design", "code", "test", "push"}
-	for _, stage := range stages {
-		stage := stage
-		original := g.commands[stage]
-		exit := perStageExit[stage]
-		t.Cleanup(func() { g.commands[stage] = original })
-		g.commands[stage] = &Command{
-			Name: stage,
-			Run: func(args []string, _, _ io.Writer) int {
-				captured[stage] = append(captured[stage], append([]string(nil), args...))
-				return exit
-			},
+	var captured []pushFromCascadeInvocation
+	prev := pushFromCascade
+	pushFromCascade = func(_ string, args []string, _, _ io.Writer) (int, error) {
+		inv := pushFromCascadeInvocation{
+			args:   append([]string(nil), args...),
+			defer_: deferred,
+			exit:   exit,
 		}
+		captured = append(captured, inv)
+		if deferred != nil {
+			return exit, deferred
+		}
+		return exit, nil
 	}
-	return captured
+	t.Cleanup(func() { pushFromCascade = prev })
+	return &captured
 }
 
 // openSdlcStageInvocation records one openSdlcStage dispatch — the
@@ -187,13 +194,14 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 
 // TestCascadeFromGateYoloShipsAtPush pins the !! shape: cascade
 // walks every remaining stage and ships at push. code/test go
-// through openSdlcStage (headless), push goes through pushCmd.Run
-// (merge path, no flags). No synthesis pre-call at push: `!!`
-// defaults to fast-forward merge, whose commit body is bare, so
-// the curation would write a canvas nothing reads.
+// through openSdlcStage (headless), push goes through pushFromCascade
+// (the typed entry that wraps runPushTyped — merge path, no flags).
+// No synthesis pre-call at push: `!!` defaults to fast-forward merge,
+// whose commit body is bare, so the curation would write a canvas
+// nothing reads.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	openCaptured := stubOpenSdlcStage(t, nil)
-	cmdCaptured := stubSdlcStageCommands(t, nil)
+	pushCaptured := stubPushFromCascade(t, 0, nil)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
@@ -222,12 +230,12 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if got := countInvocations(*openCaptured, "push"); got != 0 {
 		t.Fatalf("push must not dispatch via openSdlcStage (no cascade synth): got %d", got)
 	}
-	// push ship is a separate pushCmd.Run call with no flags.
-	pushShip := cmdCaptured["push"]
-	if len(pushShip) != 1 {
-		t.Fatalf("push ship dispatched %d times, want 1: %v", len(pushShip), pushShip)
+	// push ship is a pushFromCascade call with the bare (project, run)
+	// args — merge path, no --pr flag.
+	if len(*pushCaptured) != 1 {
+		t.Fatalf("push ship dispatched %d times, want 1: %v", len(*pushCaptured), *pushCaptured)
 	}
-	if got, want := strings.Join(pushShip[0], " "), "tele fix-it"; got != want {
+	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele fix-it"; got != want {
 		t.Fatalf("push ship args = %q, want %q (merge path, no flags)", got, want)
 	}
 }
@@ -533,6 +541,92 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "!!=ship now") {
 		t.Fatalf("expected !! legend at push gate, got: %q", stdout.String())
+	}
+}
+
+// TestCascadeFromGateDoesNotShipOnPushDeferred pins the bug fix for
+// cascade-message-was-a-lie: when push hands off to a recovery code
+// session, the cascade must mark the step as deferred (not shipped),
+// render "push deferred to recovery (rebase conflict) — stopped" in
+// the summary, and not advance to a next stage (push is the last).
+// Before the fix, push returning 0 was treated as a successful ship
+// even when the 0 actually came from a clean-exit recovery session.
+//
+// Two flavours: rebase-conflict (built-in hook check) and hook-failure
+// (project script). Both deserve the same summary shape and ship gate
+// behaviour.
+func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
+	cases := []struct {
+		name        string
+		recovery    string
+		wantSummary string
+	}{
+		{
+			name:        "rebase-conflict",
+			recovery:    "rebase-conflict",
+			wantSummary: "cascade: code ok · test ok · push deferred to recovery (rebase conflict) — stopped",
+		},
+		{
+			name:        "hook-failure",
+			recovery:    "hook-failure",
+			wantSummary: "cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			openCaptured := stubOpenSdlcStage(t, nil)
+			deferred := &PushDeferredError{
+				Recovery: tc.recovery,
+				Project:  "tele",
+				Run:      "fix-it",
+			}
+			// Recovery exited cleanly (exit 0) — the cascade must
+			// still treat this as a stop, not a ship.
+			pushCaptured := stubPushFromCascade(t, 0, deferred)
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+			var stdout, stderr bytes.Buffer
+			res, code := cascadeFromGate("code", "", md, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("cascade exit=%d, want 0 (recovery exited cleanly); stderr=%q", code, stderr.String())
+			}
+			if res.shipped {
+				t.Fatalf("res.shipped = true on deferred push; the bug this test pins is the cascade claiming a ship that never happened")
+			}
+			// All three stages should appear in res.ran; push must
+			// be marked deferred with the recovery tag.
+			wantStages := []string{"code", "test", "push"}
+			if len(res.ran) != len(wantStages) {
+				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
+			}
+			for i, s := range wantStages {
+				if res.ran[i].stage != s {
+					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+				}
+			}
+			pushStep := res.ran[len(res.ran)-1]
+			if pushStep.deferred != tc.recovery {
+				t.Fatalf("push step deferred tag: want %q, got %q", tc.recovery, pushStep.deferred)
+			}
+			// Summary renders the deferred branch verbatim — the
+			// design's chosen vocabulary, pinned end-to-end.
+			if got := renderCascadeSummary(res); got != tc.wantSummary {
+				t.Fatalf("summary = %q, want %q", got, tc.wantSummary)
+			}
+			// pushFromCascade was invoked exactly once (no retry).
+			if len(*pushCaptured) != 1 {
+				t.Fatalf("push dispatched %d times, want 1: %+v", len(*pushCaptured), *pushCaptured)
+			}
+			// No openSdlcStage call happened after the deferred push
+			// (push is the last stage in the sdlc ladder; this guards
+			// against a future ladder extension silently advancing
+			// past a deferred ship).
+			for _, inv := range *openCaptured {
+				if inv.stage == "push" {
+					t.Fatalf("openSdlcStage must not dispatch push (cascade routes push through pushFromCascade): %+v", inv)
+				}
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -553,10 +554,31 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 	return promptNextStage(root, md, lastStage, stdout, stderr)
 }
 
-// cascadeStepResult records one dispatched stage's outcome.
+// pushFromCascade is the typed push entry the cascade's `!!` step
+// calls into. Wired to runPushTyped in init() rather than referenced
+// directly so the var-init dependency analyser doesn't trace through
+// cascadeFromGate → runPushTyped → openCodeSessionFor… (var) →
+// runStageSession (var) → promptNextStage → … → cascadeFromGate and
+// flag the chain as an initialization cycle. Tests override this
+// var to stub the cascade's push step without touching the standalone
+// `moe sdlc push` path (which still goes through pushCmd.Run →
+// runPushTyped → discard-error).
+var pushFromCascade func(workflow string, args []string, stdout, stderr io.Writer) (int, error)
+
+func init() {
+	pushFromCascade = runPushTyped
+}
+
+// cascadeStepResult records one dispatched stage's outcome. deferred
+// is non-empty only when push's pre-push gate handed off to a
+// recovery code session — its value ("rebase-conflict" or
+// "hook-failure") is what the summary renders inside
+// `push deferred to recovery (...)`. A deferred step is a stop, not
+// a ship, regardless of the recovery session's own exit code.
 type cascadeStepResult struct {
-	stage string
-	code  int
+	stage    string
+	code     int
+	deferred string
 }
 
 // cascadeResult is what cascadeFromGate hands back: the ordered list
@@ -629,17 +651,32 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 			// would be writing a canvas nothing reads. Synthesis
 			// runs inside `push --pr`, where it has somewhere to
 			// land.
-			g, err := LookupGroup(md.Workflow)
-			if err != nil {
-				moePrintf(stderr, "%v\n", err)
-				return res, 1
+			//
+			// Call runPushTyped via pushFromCascade (bypassing
+			// g.Lookup("push")) so the deferred-to-recovery signal —
+			// when push's pre-push gate hands off to a fresh code
+			// session — comes back as a typed *PushDeferredError. The
+			// command-group indirection used by !<stage> cascades
+			// discards that error to preserve the Command.Run
+			// contract; only this path needs it. Without the typed
+			// channel, a recovery session that exits 0 would look
+			// identical to a real ship and the cascade summary would
+			// claim "shipped" when nothing was pushed.
+			ship, err := pushFromCascade(md.Workflow, []string{md.Project, md.ID}, stdout, stderr)
+			var deferred *PushDeferredError
+			if errors.As(err, &deferred) {
+				res.ran = append(res.ran, cascadeStepResult{
+					stage:    stage,
+					code:     ship,
+					deferred: deferred.Recovery,
+				})
+				// Propagate the recovery session's exit verbatim:
+				// 0 if the agent resolved cleanly (operator's next
+				// move is to re-run push), non-zero if the agent
+				// gave up. Either way the deferred marker keeps
+				// the summary honest — this was not a ship.
+				return res, ship
 			}
-			cmd := g.Lookup(stage)
-			if cmd == nil {
-				moePrintf(stderr, "cascade: workflow %s has no command for stage %q\n", md.Workflow, stage)
-				return res, 1
-			}
-			ship := cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
 			if ship != 0 {
 				return res, ship
@@ -667,27 +704,52 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 //	cascade: code failed (exit 1) — stopped
 //	cascade: code ok · test ok · push ok — shipped
 //	cascade: code ok · test failed (exit 2) — stopped
+//	cascade: code ok · test ok · push deferred to recovery (rebase conflict) — stopped
+//	cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped
 func renderCascadeSummary(res cascadeResult) string {
 	if len(res.ran) == 0 {
 		return ""
 	}
 	parts := make([]string, 0, len(res.ran))
-	failed := false
+	stopped := false
 	for _, r := range res.ran {
-		if r.code != 0 {
+		switch {
+		case r.deferred != "":
+			parts = append(parts, fmt.Sprintf("%s deferred to recovery (%s)", r.stage, deferredLabel(r.deferred)))
+			stopped = true
+		case r.code != 0:
 			parts = append(parts, fmt.Sprintf("%s failed (exit %d)", r.stage, r.code))
-			failed = true
-		} else {
+			stopped = true
+		default:
 			parts = append(parts, fmt.Sprintf("%s ok", r.stage))
 		}
 	}
 	s := "cascade: " + strings.Join(parts, " · ")
-	if failed {
+	if stopped {
 		s += " — stopped"
 	} else if res.shipped {
 		s += " — shipped"
 	}
 	return s
+}
+
+// deferredLabel turns the *PushDeferredError.Recovery tag into the
+// human phrase the summary renders. "rebase-conflict" stays
+// "rebase conflict" (drop the dash); "hook-failure" reads as
+// "pre-push hook" — the only event that defers today, and the phrase
+// the operator already saw in the recovery session's kickoff.
+// Unknown tags fall through to the raw value so a future recovery
+// flavour is at least legible; the test wires it into the canonical
+// renderings.
+func deferredLabel(recovery string) string {
+	switch recovery {
+	case "rebase-conflict":
+		return "rebase conflict"
+	case "hook-failure":
+		return "pre-push hook"
+	default:
+		return recovery
+	}
 }
 
 // indexOfString returns the index of s in xs, or -1 if absent.

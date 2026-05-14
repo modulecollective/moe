@@ -156,17 +156,25 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 // a clean fix-and-commit lets the workflow's chain prompt offer push
 // next — same shape `moe <wf> code` already produces. Built-ins with
 // richer semantics (the rebase check) keep their own chain-back —
-// see openCodeSessionForRebaseConflict.
+// see openCodeSessionForRebaseConflict. The second return is a
+// *PushDeferredError marking the deferral so the cascade renders
+// "deferred to recovery" instead of mistaking the recovery's clean
+// exit for a successful ship.
 //
 // Overridable in tests; the default invokes runStageSession with
 // docID="code", same as `moe <wf> code` would.
-var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, stdout, stderr io.Writer) int {
+var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, stdout, stderr io.Writer) (int, error) {
 	moePrintln(stderr, "       opening a fresh code session — fix the hook failure and commit; the chain prompt will offer push next")
 	kickoff := buildHookFailureKickoff(md.Workflow, fail)
-	return runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
 		InitialPrompt: kickoff,
 	}, stdout, stderr)
+	return code, &PushDeferredError{
+		Recovery: "hook-failure",
+		Project:  md.Project,
+		Run:      md.ID,
+	}
 }
 
 // buildHookFailureKickoff is the agent-facing kickoff for a generic
