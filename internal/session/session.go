@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -60,6 +59,36 @@ type RebaseFailureError struct {
 	// uncommitted/unstaged changes — i.e. the rebase never started.
 	// Detected from the "cannot rebase" prefix in GitOutput.
 	Dirty bool
+}
+
+// CanvasUnchangedError is the typed error Close returns when the
+// session branch's canvas blob matches main's — i.e. this session
+// never wrote to its own canvas. The branch and worktree stay
+// intact so the operator can either reopen and write the canvas
+// or `moe session abandon` explicitly. The previous behaviour
+// (silent Abandon on zero-commit sessions, fast-forward on stub-
+// equals-main) is the cascade footgun this error is here to close:
+// a chain prompt firing after a no-op close lets `!!` carry the
+// next stage forward against an unchanged canvas.
+type CanvasUnchangedError struct {
+	Project      string
+	Run          string
+	Doc          string
+	Branch       string
+	WorktreePath string
+	// CanvasPath is the canvas's repo-relative path (the same path
+	// rendered into the error message).
+	CanvasPath string
+}
+
+func (e *CanvasUnchangedError) Error() string {
+	return fmt.Sprintf(
+		"session close: %s canvas at %s tip is unchanged from main\n"+
+			"  run:      %s/%s\n"+
+			"  worktree: %s\n"+
+			"  the agent never wrote to the canvas. either reopen and write,\n"+
+			"  or drop the session: moe session abandon %s",
+		e.CanvasPath, e.Branch, e.Project, e.Run, e.WorktreePath, e.Branch)
 }
 
 func (e *RebaseFailureError) Error() string {
@@ -182,42 +211,48 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 // are left intact, and the error names both so the operator can
 // resolve by hand or run `moe session abandon`.
 func Close(s *Session) error {
-	// A session that never produced a commit (open + early bail before
-	// the first turn — bootstrap error, executor refused, etc.) has
-	// nothing to land. Tear it down silently rather than running the
-	// canvas gate against a branch tip that's literally still at main.
-	// The gate is for the silent-empty-fast-forward case where commits
-	// exist but the canvas isn't among them; a zero-commit branch is
-	// the no-work case, and Abandon is the right semantics.
-	count, err := newCommitsPastMain(s.Root, s.Branch)
-	if err != nil {
-		return fmt.Errorf("session close: count commits on %s: %w", s.Branch, err)
-	}
-	if count == 0 {
-		return Abandon(s)
-	}
-
-	// Mirror commitTurn's per-turn predicate at the seal point: refuse
-	// to land a session whose canvas at the branch tip is empty (or
-	// absent from the tree). commitTurn is the only producer of
-	// session-branch commits and refuses to commit an empty canvas, so
-	// a non-empty blob here means at least one work turn landed. The
-	// branch-tip read (rather than the worktree) is the direct mirror
-	// of "what would actually merge" — the worktree can disagree
-	// (post-commit edits, a seed canvas the session never touched),
-	// and only what's committed can fast-forward main.
+	// Refuse to land a session whose canvas at the branch tip is
+	// identical to main's — the agent had a conversation but never
+	// wrote to the canvas. This single check covers two cases:
+	//
+	//   1. Zero commits past main: branch is literally at main, so
+	//      the blob comparison trivially matches. (Was a silent
+	//      Abandon; that path is the cascade footgun this run
+	//      closes.)
+	//   2. Commits exist but none touched the canvas: the kickoff
+	//      stub committed at `Open run` is still the blob at branch
+	//      tip and at main. Close used to fast-forward on this; a
+	//      downstream `!!` cascade would then dispatch the next
+	//      stage against the stub.
+	//
+	// We compare blob OIDs at <branch>:<canvas> to <main>:<canvas>.
+	// Equal blob OIDs mean equal content, which is exactly the
+	// "this session never wrote to the canvas" predicate. The
+	// branch and worktree stay intact so the operator can reopen
+	// and write, or abandon explicitly.
 	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
-	switch out, err := git.Combined(s.WorktreePath, "show", s.Branch+":"+canvasRel); {
-	case err != nil, len(strings.TrimRight(out, "\n")) == 0:
-		return fmt.Errorf(
-			"session close: canvas %s at %s is empty or missing at the branch tip\n"+
-				"  worktree: %s\n"+
-				"  branch:   %s\n"+
-				"  (a commit may have landed without staging the canvas — check\n"+
-				"   `git log %s` and re-stage if needed)\n"+
-				"  resolve by writing to the canvas and re-closing,\n"+
-				"  or drop it: moe session abandon %s",
-			canvasRel, s.Branch, s.WorktreePath, s.Branch, s.Branch, s.Branch)
+	branchBlob, branchErr := git.RevParse(s.WorktreePath, s.Branch+":"+canvasRel)
+	mainBlob, mainErr := git.RevParse(s.Root, "main:"+canvasRel)
+	// branchErr means the canvas doesn't exist at the branch tip at
+	// all — agent never landed it. Refuse loud, same shape as
+	// "blob equals main".
+	//
+	// mainErr means main has no canvas yet (this is the first session
+	// to land one). Allow as long as the branch wrote something —
+	// branchErr already gated above.
+	//
+	// Equal blobs is the cascade footgun: kickoff stub on both sides.
+	canvasUnchanged := branchErr != nil ||
+		(mainErr == nil && branchBlob == mainBlob)
+	if canvasUnchanged {
+		return &CanvasUnchangedError{
+			Project:      s.Project,
+			Run:          s.Run,
+			Doc:          s.Doc,
+			Branch:       s.Branch,
+			WorktreePath: s.WorktreePath,
+			CanvasPath:   canvasRel,
+		}
 	}
 
 	// Rebase inside the worktree. We don't fetch origin first —
@@ -443,18 +478,6 @@ func findWorktreeForBranch(root, branch string) (string, error) {
 func branchExists(root, branch string) bool {
 	_, err := git.Output(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	return err == nil
-}
-
-// newCommitsPastMain returns how many commits branch carries beyond
-// main. Used by Close to distinguish "session never produced anything,
-// silently tear down" (zero) from "session has commits, run the canvas
-// gate against them" (non-zero).
-func newCommitsPastMain(root, branch string) (int, error) {
-	out, err := git.Output(root, "rev-list", "--count", "main.."+branch)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(strings.TrimSpace(out))
 }
 
 // sessionUnmergedPaths reports the files git left in a conflicted

@@ -312,40 +312,54 @@ func TestListIncludesOpenSessions(t *testing.T) {
 	}
 }
 
-// TestSessionCloseRefusesEmptyCanvas: a session that committed
-// non-canvas paths (e.g. unrelated edits) but never landed a canvas
-// turn must refuse Close. Gate 1 mirrors commitTurn at the seal point
-// — the silent empty fast-forward this run was opened against would
-// otherwise tear the worktree down without leaving a trace.
-func TestSessionCloseRefusesEmptyCanvas(t *testing.T) {
+// TestSessionCloseRefusesUnchangedCanvasFromCommittedSession: a
+// session that committed non-canvas paths but left the canvas blob
+// equal to main's (the kickoff stub) must refuse Close with a typed
+// *CanvasUnchangedError. Without this gate, the "agent had a
+// conversation but never wrote the canvas" case fast-forwards
+// silently and a downstream `!!` cascade dispatches the next stage
+// against the unchanged stub — the exact incident this run targets.
+func TestSessionCloseRefusesUnchangedCanvasFromCommittedSession(t *testing.T) {
 	root := newTestRoot(t)
+	// Seed the kickoff stub on main so the branch starts with a
+	// non-empty canvas blob that matches main's blob — exactly the
+	// shape `Open run` produces.
+	canvasRel := "projects/moe/runs/r1/documents/design/content.md"
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\n", "Open run moe/r1")
+
 	s, err := Open(root, "moe", "r1", "design")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	// Commit something other than the canvas so the branch has at
-	// least one commit but no canvas blob in its tree.
+	// least one commit but the canvas blob is still the stub.
 	commitInWorktree(t, s.WorktreePath, "scratch.txt", "scratch\n", "session: scratch")
 
 	err = Close(s)
 	if err == nil {
 		t.Fatal("expected refusal, got nil")
 	}
-	if !strings.Contains(err.Error(), "canvas projects/moe/runs/r1/documents/design/content.md") {
-		t.Errorf("error should name the canvas path: %v", err)
+	var cue *CanvasUnchangedError
+	if !errors.As(err, &cue) {
+		t.Fatalf("expected *CanvasUnchangedError, got %T: %v", err, err)
+	}
+	if cue.CanvasPath != canvasRel {
+		t.Errorf("CanvasPath = %q, want %q", cue.CanvasPath, canvasRel)
+	}
+	if cue.Branch != s.Branch {
+		t.Errorf("Branch = %q, want %q", cue.Branch, s.Branch)
+	}
+	if cue.WorktreePath != s.WorktreePath {
+		t.Errorf("WorktreePath = %q, want %q", cue.WorktreePath, s.WorktreePath)
+	}
+	if cue.Project != "moe" || cue.Run != "r1" || cue.Doc != "design" {
+		t.Errorf("identity wrong: %+v", cue)
+	}
+	if !strings.Contains(err.Error(), "unchanged from main") {
+		t.Errorf("error should describe the canvas as unchanged from main: %v", err)
 	}
 	if !strings.Contains(err.Error(), "moe session abandon") {
 		t.Errorf("error should point at abandon: %v", err)
-	}
-	// The "commit landed without staging the canvas" hint distinguishes
-	// the silent-staging-bug failure mode from "no commits at all" — a
-	// claim/reflect that committed wiki edits but forgot the canvas
-	// shouldn't surface as a contradictory "no commitTurn landed".
-	if !strings.Contains(err.Error(), "empty or missing at the branch tip") {
-		t.Errorf("error should describe the canvas as empty-or-missing: %v", err)
-	}
-	if !strings.Contains(err.Error(), "without staging the canvas") {
-		t.Errorf("error should hint at the missing-stage failure mode: %v", err)
 	}
 	// Worktree and branch must remain so the operator can recover.
 	if _, err := os.Stat(s.WorktreePath); err != nil {
@@ -356,26 +370,36 @@ func TestSessionCloseRefusesEmptyCanvas(t *testing.T) {
 	}
 }
 
-// TestSessionCloseSilentlyAbandonsZeroCommitSession: a session that
-// hit a bootstrap failure (or any pre-first-turn bail) has no commits
-// past main and nothing to land. Close treats it as Abandon and tears
-// the worktree down silently — the canvas gate is for the
-// "commits-exist-but-canvas-isn't-among-them" case, not for
-// literally-no-work.
-func TestSessionCloseSilentlyAbandonsZeroCommitSession(t *testing.T) {
+// TestSessionCloseRefusesZeroCommitSession: a session that hit a
+// bootstrap failure (or any pre-first-turn bail) has no commits
+// past main, so the branch tip canvas trivially matches main's. The
+// silent-Abandon path used to swallow this case — the chain prompt
+// would then fire and cascade. With the new gate it surfaces as a
+// typed *CanvasUnchangedError so the operator sees what happened
+// and can either re-open or `moe session abandon` explicitly.
+func TestSessionCloseRefusesZeroCommitSession(t *testing.T) {
 	root := newTestRoot(t)
+	canvasRel := "projects/moe/runs/r1/documents/design/content.md"
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\n", "Open run moe/r1")
+
 	s, err := Open(root, "moe", "r1", "design")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := Close(s); err != nil {
-		t.Fatalf("Close on zero-commit session should silently abandon, got: %v", err)
+	err = Close(s)
+	if err == nil {
+		t.Fatal("expected zero-commit close to refuse loud, got nil")
 	}
-	if _, err := os.Stat(s.WorktreePath); !os.IsNotExist(err) {
-		t.Errorf("worktree still present after silent abandon: err=%v", err)
+	var cue *CanvasUnchangedError
+	if !errors.As(err, &cue) {
+		t.Fatalf("expected *CanvasUnchangedError, got %T: %v", err, err)
 	}
-	if branchExists(root, s.Branch) {
-		t.Errorf("branch %s still present after silent abandon", s.Branch)
+	// Branch and worktree must remain so the operator can recover.
+	if _, err := os.Stat(s.WorktreePath); err != nil {
+		t.Errorf("worktree missing after refusal: %v", err)
+	}
+	if !branchExists(root, s.Branch) {
+		t.Errorf("branch missing after refusal")
 	}
 }
 
