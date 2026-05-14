@@ -39,6 +39,14 @@ import (
 // buildSystemPrompt uses internally.
 const oneShotPromptDelimiter = "\n---\n\n"
 
+// inCascade is set by cascadeFromGate while the chain-prompt cascade
+// driver is walking stages. runStageSession reads it as an OR with
+// opts.SkipNextStage to suppress the inner promptNextStage call —
+// the cascade owns routing, and re-firing the prompt inside each
+// stage would either deadlock at the next gate (no operator stdin)
+// or double-prompt. Scoped via defer in the cascade driver.
+var inCascade bool
+
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
 // InitialPrompt. Wiki-aware ingest stages (kb summarize, future twin
@@ -358,7 +366,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return code
 	}
 	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
-	if opts.SkipNextStage {
+	if opts.SkipNextStage || inCascade {
 		return 0
 	}
 	return promptNextStage(root, md, docID, stdout, stderr)

@@ -31,16 +31,3 @@ func TestSdlcRegistersTestStage(t *testing.T) {
 	}
 }
 
-// TestOneShotStagesIncludesTest: the headless chain runs design,
-// then code, then test — push stays a separate verb.
-func TestOneShotStagesIncludesTest(t *testing.T) {
-	want := []string{"design", "code", "test"}
-	if len(oneShotStages) != len(want) {
-		t.Fatalf("oneShotStages = %v, want %v", oneShotStages, want)
-	}
-	for i, s := range oneShotStages {
-		if s != want[i] {
-			t.Fatalf("oneShotStages[%d] = %q, want %q", i, s, want[i])
-		}
-	}
-}

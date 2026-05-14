@@ -225,34 +225,30 @@ const testCanvasSkeleton = `# Test
 `
 
 // runResume drives an already-opened sdlc run forward through whichever
-// of design/code is still pending and hands off to the merge-gate
+// of design/code/test is still pending and hands off to the next chain
 // prompt. Useful as a first-class operator verb (pick up an opened run
-// and ride it to the merge gate without typing two stage commands) and
+// and ride it to the next gate without typing two stage commands) and
 // as the per-item entry point for `moe queue run`.
 //
-// Two modes:
-//   - default (interactive): invoke the next pending stage interactively;
-//     the stage's existing [Y/n/o] / [N/m/p] chain prompt walks through
-//     the rest. Operator is in the loop at every Claude session.
-//   - --one-shot: drive each pending stage headlessly via `claude -p`,
-//     then hand off to the merge gate. Operator is in the loop only at
-//     the merge gate.
+// Always interactive: invokes the next pending stage interactively;
+// the stage's existing chain prompt (`[Y/n/o…]` / `[N/m/p…]`) walks
+// the rest. Headless cascade is no longer a `resume` flag — the
+// operator types `!<stage>` or `!!` at the chain prompt once they've
+// seen the canvas, the same vocabulary every other one-shot decision
+// uses.
 //
-// Both modes refuse missing or terminal runs at the boundary so a
-// resume call against a dead run fails fast instead of spawning a session.
+// Refuses missing or terminal runs at the boundary so a resume call
+// against a dead run fails fast instead of spawning a session.
 func runResume(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc resume", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	oneShot := fs.Bool("one-shot", false, "drive pending stages headlessly via `claude -p` (default: interactive)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc resume [--one-shot] <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc resume <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Picks up the run at its first pending stage and drives it forward.")
-		moePrintln(stderr, "Without --one-shot, opens the stage interactively (operator in the loop).")
-		moePrintln(stderr, "With --one-shot, drives the pending stage headlessly and prompts")
-		moePrintln(stderr, "[Y/n/o] before chaining to the next — operator can spot-check the")
-		moePrintln(stderr, "design before letting code run. The final stage hands off to the")
-		moePrintln(stderr, "[N/m/p] merge-gate prompt. Refuses runs that are missing or already")
+		moePrintln(stderr, "Picks up the run at its first pending stage and opens it")
+		moePrintln(stderr, "interactively. The stage's post-turn chain prompt drives the rest:")
+		moePrintln(stderr, "`o` runs the next stage headless, `!<stage>` cascades to a named gate,")
+		moePrintln(stderr, "`!!` cascades and ships. Refuses runs that are missing or already")
 		moePrintln(stderr, "terminal.")
 		fs.PrintDefaults()
 	}
@@ -289,11 +285,11 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Decide where to start. Workflow.Next returns the parked stage
-	// for any in_progress sdlc run — design, code, or push — under
-	// the forward-walking satisfaction rule. NextKindDone is reserved
-	// for terminal statuses and runs whose workflow has no stages,
-	// neither of which can reach this point (resume refuses terminal
-	// above; sdlc has three stages).
+	// for any in_progress sdlc run — design, code, test, or push —
+	// under the forward-walking satisfaction rule. NextKindDone is
+	// reserved for terminal statuses and runs whose workflow has no
+	// stages, neither of which can reach this point (resume refuses
+	// terminal above; sdlc has four stages).
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -305,19 +301,9 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *oneShot {
-		// Headless chain. push (or NextKindDone) skips both stages and
-		// hands straight to the merge-gate prompt.
-		startStage := ""
-		if kind == NextKindStage {
-			startStage = nextStage
-		}
-		return runOneShotChain(root, md, startStage, stdout, stderr)
-	}
-
 	// Interactive mode: invoke the next stage interactively. Its
-	// post-stage [Y/n/o] / [N/m/p] prompt drives the rest of the chain
-	// — same behaviour the operator gets today after a stage exits.
+	// post-stage chain prompt drives the rest — same behaviour the
+	// operator gets today after a stage exits.
 	if kind != NextKindStage || nextStage == "" {
 		// Defensive: under the forward-walking satisfaction rule,
 		// Next() returns the parked stage rather than NextKindDone for

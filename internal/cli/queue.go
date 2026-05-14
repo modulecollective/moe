@@ -351,17 +351,75 @@ func defaultDispatchQueueItem(it queue.Item, opts queueDispatchOpts, stdout, std
 	}
 }
 
-// dispatchSdlcResume shells through `moe sdlc resume` for a queued
-// (or just-promoted) sdlc run. Extracted so the idea-dispatch path
-// and the plain-sdlc path share one resume shape — including the
-// --one-shot pass-through.
+// dispatchSdlcResume drives a queued (or just-promoted) sdlc run.
+// Default is interactive — runResume opens the next pending stage
+// and the operator walks the chain. With OneShot the dispatch
+// cascades through the pending stages headlessly and parks at the
+// push gate, same semantics `moe sdlc resume --one-shot` used to
+// have (the underlying mechanism is now the chain-prompt cascade
+// driver, not a flag on resume).
 func dispatchSdlcResume(projectID, runID string, opts queueDispatchOpts, stdout, stderr io.Writer) int {
-	var args []string
-	if opts.OneShot {
-		args = append(args, "--one-shot")
+	if !opts.OneShot {
+		return runResume([]string{projectID, runID}, stdout, stderr)
 	}
-	args = append(args, projectID, runID)
-	return runResume(args, stdout, stderr)
+	return cascadeQueuedSdlcResume(projectID, runID, stdout, stderr)
+}
+
+// cascadeQueuedSdlcResume is the headless walker the queue dispatches
+// when `--one-shot` is set. Mirrors runResume's pre-flight (refuses
+// missing/terminal/pushed runs) then either parks at the push gate
+// (when stages are still pending) or hands straight to it (when the
+// only thing left is the merge gate). The cascade itself is the same
+// driver the chain prompt's `!push` answer uses.
+func cascadeQueuedSdlcResume(projectID, runID string, stdout, stderr io.Writer) int {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "sdlc resume: %v\n", err)
+		return 1
+	}
+	if md.Workflow != "sdlc" {
+		moePrintf(stderr, "sdlc resume: %s %s is a %s run, not sdlc\n", projectID, runID, md.Workflow)
+		return 1
+	}
+	switch md.Status {
+	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
+		moePrintf(stderr, "sdlc resume: %s %s is %s; nothing to resume\n", projectID, runID, md.Status)
+		return 1
+	case run.StatusPushed:
+		moePrintf(stderr, "sdlc resume: %s %s already pushed; resume cannot drive a pushed run\n", projectID, runID)
+		return 1
+	}
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	nextStage, kind, err := wf.Next(root, md)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if kind != NextKindStage || nextStage == "" || nextStage == "push" {
+		// Nothing to cascade — hand straight to the chain prompt so the
+		// push gate fires (or so a terminal-shaped run falls through).
+		return promptNextStage(root, md, "", stdout, stderr)
+	}
+	res, code := cascadeFromGate(nextStage, "push", md, stdout, stderr)
+	if summary := renderCascadeSummary(res); summary != "" {
+		moePrintln(stdout, summary)
+	}
+	if code != 0 {
+		return code
+	}
+	var lastStage string
+	if len(res.ran) > 0 {
+		lastStage = res.ran[len(res.ran)-1].stage
+	}
+	return promptNextStage(root, md, lastStage, stdout, stderr)
 }
 
 func runQueueRun(args []string, stdout, stderr io.Writer) int {
