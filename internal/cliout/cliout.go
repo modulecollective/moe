@@ -26,6 +26,15 @@ func colorOn(w io.Writer) bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
+	return IsTTY(w)
+}
+
+// IsTTY reports whether w is a *os.File pointing at a character device
+// (a real terminal). Test buffers and pipes return false. NO_COLOR is
+// deliberately ignored: callers using this for layout decisions
+// (banner.IndentStderr) want the operator's terminal indented even
+// when colour is suppressed.
+func IsTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false

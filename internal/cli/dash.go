@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/queue"
@@ -165,6 +166,11 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// Mark the dash render with the same one-line gradient bar every
+	// stage session opens with. Dash refreshes are frequent, so a
+	// single line up front (instead of a multi-line block) keeps a
+	// tab of repeated runs from accumulating vertical noise.
+	banner.Dash(stdout)
 	dash.Render(stdout, now, rows, twinRows, projectCount, activeCount, *all, state, r)
 	return 0
 }

@@ -1,15 +1,15 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
+	"time"
 
+	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -105,51 +105,40 @@ func runHooks(root string, event hookEvent, env hookEnv, stdout, stderr io.Write
 // and the MOE_* env vars exported, and returns *hookFailure on the
 // first non-zero exit.
 func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, stderr io.Writer) error {
-	dir := filepath.Join(root, project.Dir(env.Project), "hooks", string(event)+".d")
-	entries, err := os.ReadDir(dir)
+	dirRel := filepath.Join(project.Dir(env.Project), "hooks", string(event)+".d")
+	dir := filepath.Join(root, dirRel)
+	// listExecutables filters dotfiles + non-executables upfront so the
+	// section header can name an accurate count. The walker shares the
+	// "missing dir / empty dir → silent no-op" contract pre-push relies
+	// on for projects with no hooks installed.
+	scripts, err := listExecutables(dir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("hooks: read %s: %w", dir, err)
+		return fmt.Errorf("hooks: list %s: %w", dir, err)
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		// Dotfiles (.gitkeep, editor backups, macOS ._foo metadata)
-		// are convention-skipped, matching run-parts.
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		names = append(names, e.Name())
+	if len(scripts) == 0 {
+		return nil
 	}
-	sort.Strings(names)
+	banner.HookSection(stdout, string(event)+" hooks", len(scripts), dirRel)
 
-	for _, name := range names {
+	for _, name := range scripts {
 		path := filepath.Join(dir, name)
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("hooks: stat %s: %w", path, err)
-		}
-		// Non-executable files are silently skipped: a script the
-		// operator hasn't `chmod +x`'d yet is a half-installed hook,
-		// not a hard error. run-parts behaves the same way.
-		if info.Mode()&0o111 == 0 {
-			continue
-		}
+		rel := filepath.Join(dirRel, name)
+		banner.HookStart(stdout, name)
+		start := time.Now()
 
-		rel := filepath.Join(project.Dir(env.Project), "hooks", string(event)+".d", name)
-		moePrintf(stdout, "running %s hook %s...\n", event, rel)
-
+		// Capture stdout + stderr verbatim into a buffer for the
+		// chain-back kickoff. Operators also see the raw stream live
+		// — pre-push scripts emit human status lines on both streams
+		// and the failure-time output is the same text they just read.
 		var captured strings.Builder
 		cmd := exec.Command(path)
 		cmd.Dir = env.Sandbox
 		cmd.Env = append(os.Environ(), env.envVars()...)
 		cmd.Stdout = io.MultiWriter(&captured, stdout)
 		cmd.Stderr = io.MultiWriter(&captured, stderr)
-		if err := cmd.Run(); err != nil {
+		runErr := cmd.Run()
+		banner.HookDone(stdout, name, time.Since(start))
+		if runErr != nil {
 			return &hookFailure{
 				event:  event,
 				script: rel,

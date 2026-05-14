@@ -1211,8 +1211,11 @@ func TestPushProjectHookSeesSandboxAndEnv(t *testing.T) {
 			t.Errorf("hook env: want %q in canary:\n%s", want, canaryStr)
 		}
 	}
-	if !strings.Contains(stdout, "running pre-push hook ") {
-		t.Errorf("stdout missing 'running pre-push hook' notice:\n%s", stdout)
+	if !strings.Contains(stdout, "pre-push hooks:") {
+		t.Errorf("stdout missing pre-push section header:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "→ 10-canary.sh") {
+		t.Errorf("stdout missing per-script start marker:\n%s", stdout)
 	}
 }
 
@@ -1438,7 +1441,7 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
-	if strings.Contains(stdout, "running pre-push hook ") || strings.Contains(stderr, "running pre-push hook ") {
-		t.Fatalf("no scripts to run, but saw 'running pre-push hook' in output:\n%s\n%s", stdout, stderr)
+	if strings.Contains(stdout, "pre-push hooks:") || strings.Contains(stderr, "pre-push hooks:") {
+		t.Fatalf("no scripts to run, but saw pre-push section header in output:\n%s\n%s", stdout, stderr)
 	}
 }

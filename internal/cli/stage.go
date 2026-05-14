@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/claude"
 	"github.com/modulecollective/moe/internal/executor"
@@ -131,10 +132,24 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
-	// Run-scoped state captured by closure. md is loaded inside
-	// buildSpec (after the worktree is open) and referenced again by
-	// promptNextStage if the turn lands successfully.
-	var md *run.Metadata
+	// Run-scoped state captured by closure. md is pre-loaded from the
+	// canonical root so the entry banner can name md.Workflow before
+	// the session worktree opens; BuildSpec uses the same pointer and
+	// promptNextStage reads it after the executor returns. Loading
+	// from `root` rather than the worktree is safe — run.json doesn't
+	// drift on `git worktree add`.
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	banner.StageEntry(stdout, md.Workflow, docID, md.Project, md.ID)
+	// committed flips true when CommitStager returns a clean nil —
+	// the same branch reportWikiSessionExit treats as "committed turn".
+	// A ErrNothingToCommit return leaves it false so the exit footer
+	// reads `no-op`. Other commit errors short-circuit before the
+	// footer fires (non-zero exit code below).
+	var committed bool
 
 	in := wikiSessionInputs{
 		Project:     projectID,
@@ -147,15 +162,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			}
 			return opts.WikiBuilder(canonicalRoot, md)
 		},
-		// WikiBuilder fires after BuildSpec has populated md. Run-scoped
-		// extras (sandbox, prompt, transcript probe) live in BuildSpec.
+		// md is pre-loaded at runStageSession entry; BuildSpec rides on
+		// the same pointer rather than re-reading run.json from the
+		// worktree, which is identical content. Run-scoped extras
+		// (sandbox, prompt, transcript probe) still resolve here.
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			loaded, err := run.Load(workRoot, projectID, runID)
-			if err != nil {
-				return wikiTurnSpec{}, err
-			}
-			md = loaded
-
 			doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
 			if err != nil {
 				return wikiTurnSpec{}, err
@@ -328,16 +339,25 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						}
 						extras = append(extras, more...)
 					}
-					return commitTurn(workRoot, md, docID, extras...)
+					err := commitTurn(workRoot, md, docID, extras...)
+					if err == nil {
+						committed = true
+					}
+					return err
 				},
 			}, nil
 		},
 	}
 
 	code := runWikiSession(root, in, stdout, stderr)
-	if code != 0 || md == nil {
+	if code != 0 {
+		// Error exit — skip the footer. Pairing every error with a
+		// "complete" footer would be worse than the asymmetry, and the
+		// entry banner is still in scrollback so the operator can
+		// locate where things went wrong.
 		return code
 	}
+	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
 	if opts.SkipNextStage {
 		return 0
 	}

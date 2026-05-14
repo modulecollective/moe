@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -65,6 +67,12 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 	if env, ok, err := readDevEnvCache(cachePath); err != nil {
 		return nil, false, err
 	} else if ok {
+		// Cache hit short-circuits the setup walker — print one line
+		// so the operator can tell a fast stage open (sourced cache)
+		// apart from one that re-ran the scripts. Without this line
+		// the cached path is silent and the operator can't tell why
+		// a "running …" notice they expected didn't appear.
+		banner.HookCacheHit(stdout, "dev-env", devEnvCacheRel)
 		return env, false, nil
 	}
 	env, err := runDevEnvSetup(root, workTree, md, stdout, stderr)
@@ -178,22 +186,33 @@ func writeDevEnvCache(cachePath string, env map[string]string) error {
 // "created postgres db myapp_dev_foo" — surface verbatim). Non-zero
 // exit halts the chain and bubbles up.
 func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, error) {
-	dir := filepath.Join(root, project.Dir(md.Project), "hooks", devEnvDirRel)
+	dirRel := filepath.Join(project.Dir(md.Project), "hooks", devEnvDirRel)
+	dir := filepath.Join(root, dirRel)
 	scripts, err := listExecutables(dir)
 	if err != nil {
 		return nil, err
 	}
 	if len(scripts) == 0 {
 		// No setup scripts — empty env is fine; the project is
-		// operator-driven and never asked for isolation.
+		// operator-driven and never asked for isolation. Stay silent
+		// like pre-push's no-scripts case so the section header isn't
+		// announcing a walker with nothing to do.
 		return map[string]string{}, nil
 	}
+	banner.HookSection(stdout, "dev-env setup", len(scripts), dirRel)
 	env := map[string]string{}
 	for _, script := range scripts {
-		moePrintf(stdout, "running dev-env hook %s...\n", filepath.Join(project.Dir(md.Project), "hooks", devEnvDirRel, script))
-		out, err := runDevEnvSetupScript(filepath.Join(dir, script), workTree, md, env, stderr)
-		if err != nil {
-			return nil, err
+		banner.HookStart(stdout, script)
+		start := time.Now()
+		// Indent script stderr under the per-script header. Setup
+		// scripts emit short human status lines ("created postgres db
+		// myapp_dev_foo") on stderr — KEY=VALUE goes via stdout — so
+		// indenting groups them visually under the script that wrote
+		// them. IndentStderr passes through on non-TTY destinations.
+		out, runErr := runDevEnvSetupScript(filepath.Join(dir, script), workTree, md, env, banner.IndentStderr(stderr))
+		banner.HookDone(stdout, script, time.Since(start))
+		if runErr != nil {
+			return nil, runErr
 		}
 		parsed, err := parseDevEnvLines(strings.NewReader(out), stderr)
 		if err != nil {
@@ -229,20 +248,35 @@ func runDevEnvSetupScript(path, workTree string, md *run.Metadata, accumulated m
 // stdout AND stderr stream straight to the operator since teardown
 // scripts don't communicate via KEY=VALUE.
 func runDevEnvScripts(root, eventDirRel, workTree string, md *run.Metadata, cached map[string]string, stdout, stderr io.Writer) error {
-	dir := filepath.Join(root, project.Dir(md.Project), "hooks", eventDirRel)
+	dirRel := filepath.Join(project.Dir(md.Project), "hooks", eventDirRel)
+	dir := filepath.Join(root, dirRel)
 	scripts, err := listExecutables(dir)
 	if err != nil {
 		return err
 	}
+	if len(scripts) == 0 {
+		return nil
+	}
+	// Label the section by the event dir name (e.g. "dev-env-teardown.d")
+	// — same shape the section header takes for setup, just with the
+	// event-specific prefix the design's walker discussion calls out.
+	banner.HookSection(stdout, eventDirRel, len(scripts), dirRel)
 	for _, script := range scripts {
-		moePrintf(stdout, "running %s hook %s...\n", eventDirRel, filepath.Join(project.Dir(md.Project), "hooks", eventDirRel, script))
+		banner.HookStart(stdout, script)
+		start := time.Now()
+		// Teardown stdout + stderr are both human output today; we
+		// pass both through raw so a script that wants to write a
+		// status line above an indented detail block can compose its
+		// own layout.
 		cmd := exec.Command(filepath.Join(dir, script))
 		cmd.Dir = workTree
 		cmd.Env = append(devEnvBaseEnv(workTree, md), mapToEnv(cached)...)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("dev-env: %s exited non-zero: %w", filepath.Join(eventDirRel, script), err)
+		runErr := cmd.Run()
+		banner.HookDone(stdout, script, time.Since(start))
+		if runErr != nil {
+			return fmt.Errorf("dev-env: %s exited non-zero: %w", filepath.Join(eventDirRel, script), runErr)
 		}
 	}
 	return nil
