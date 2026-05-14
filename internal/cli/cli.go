@@ -36,6 +36,7 @@ func Register(c *Command) {
 
 // Run dispatches one invocation and returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
+	installGitTrace()
 	if len(args) == 0 {
 		PrintUsage(stdout)
 		moePrintln(stdout, "try 'moe dash'")
