@@ -1,17 +1,29 @@
 # Ministry of Everything (MoE)
 
-**A CLI-first agent harness for a single operator working with AI.**
+**A Git-backed command system for one person supervising an army of
+agents.**
+
+MoE helps one operator turn intent into parallel agent work without
+losing context or control. Agents work in bounded threads attached to
+markdown documents; every conversation, decision, and artifact is saved
+back into a Git journal so the project keeps an improving memory of
+itself.
+
+The goal is not autonomous magic. The human remains the strategist,
+scheduler, reviewer, and source of judgment. MoE removes the
+coordination tax between thought and execution: backlog, runs,
+followups, knowledge base, and digital twin all feed each other so the
+operator and the bots share a compounding model of the project.
 
 MoE runs [Claude Code](https://claude.com/claude-code) against living
-documents. You collaborate with agents through threaded conversations
-attached to markdown files; each document compresses its conversation
-into a clean artifact that becomes context for the next step. The
-harness is domain-agnostic — software development is the first workflow
-to open, with knowledge-base and quick-fix workflows alongside.
+documents. Each document compresses its threaded discussion into a
+clean artifact that becomes context for the next step. Software
+development is the first workflow, with quick-fix, knowledge-base,
+hook-authoring, meta-review, and digital-twin workflows alongside.
 
 There is no background worker, no TUI, no dashboard that updates on its
 own. Agents act only when you invoke a command. The UX problem is
-**prioritization and resumption**, not real-time updates.
+**prioritization, supervision, and resumption**, not real-time updates.
 
 ![MoE dashboard — open runs and backlog](docs/dash.png)
 
@@ -19,20 +31,29 @@ own. Agents act only when you invoke a command. The UX problem is
 
 ## At a glance
 
-MoE is split across two repos that sit side by side — like `git` and
-the repository it operates on:
+MoE is a small CLI wrapped around a durable operating journal:
 
 - **`moe/`** (this repo) — the Go CLI. Stdlib only, shells out to
   `git` and `claude`.
 - **`bureaucracy/`** — your private state: projects, runs, documents,
-  and the markdown fragments that steer agents. Discovered via a
-  `bureaucracy.conf` marker file found by walking up from `$PWD`, or
-  via `$MOE_HOME`.
+  backlog, digital twins, and the markdown fragments that steer agents.
+  Discovered via a `bureaucracy.conf` marker file found by walking up
+  from `$PWD`, or via `$MOE_HOME`.
 
 Every turn lands as one commit on the bureaucracy's `main` branch, with
 trailers (`MoE-Run`, `MoE-Document`, `MoE-Session`, …) that scope the
 journal. Rewinding is `git reset --soft`; reverting is `git revert`.
 Git is the checkpoint.
+
+The feedback loop is the product:
+
+- Ideas become backlog items without forcing a run.
+- Runs turn backlog into designed, coded, tested, and shipped work.
+- Agent-discovered loose ends harvest back into followups.
+- Knowledge-base and twin workflows fold completed work into durable
+  project memory.
+- Future humans and agents start with better context than the last run
+  had.
 
 ---
 
@@ -67,34 +88,49 @@ moe project add <repo-url>
 A workflow is a short stage DAG with one canonical document per stage.
 The current workflows are:
 
-| Workflow  | Stages                                | For                                  |
-|-----------|---------------------------------------|--------------------------------------|
-| `sdlc`    | `design` → `code` → `push`            | designed features with a review loop |
-| `quick`   | `code` → `push`                       | small fixes that don't need a design |
-| `kb`      | `research` → `summarize`              | knowledge-base articles              |
+| Workflow   | Stages                                                     | For                                      |
+|------------|------------------------------------------------------------|------------------------------------------|
+| `sdlc`     | `design` → `code` → `test` → `push`                        | designed features with review and ship gates |
+| `quick`    | `code` → `push`                                            | small fixes that don't need a design     |
+| `kb`       | `research` → `summarize`                                   | knowledge-base articles                  |
+| `idea`     | `capture` / `refine`                                       | backlog without starting a run           |
+| `twin`     | `vision` → `architecture` → `patterns` → `operations` → `glossary` → `finalize` | project digital twin |
+| `hooks`    | `code`                                                     | project-specific automation hooks        |
+| `meta-moe` | `report`                                                   | inspect the bureaucracy itself           |
 
 Each stage is a subcommand that opens a Claude Code session on that
 stage's document. Each workflow is its own top-level verb — `moe sdlc`,
 `moe kb`, `moe quick`, `moe twin`. For example:
 
 ```sh
-moe sdlc new "add batch support"   # open a new run
-moe sdlc design                    # threaded chat on design/content.md
-moe sdlc code                      # agent codes inside a sandbox clone
-moe sdlc push --pr                 # open a PR against the target repo
+moe sdlc new tele "add batch support"       # open a new run
+moe sdlc design tele add-batch-support      # threaded chat on design/content.md
+moe sdlc code tele add-batch-support        # agent codes inside a sandbox clone
+moe sdlc test tele add-batch-support        # agent verifies and records what passed
+moe sdlc push --pr tele add-batch-support   # open a PR against the target repo
 ```
 
 `moe dash` shows your open runs and backlog. `moe idea` captures
-loose ideas without starting a run.
+loose ideas without starting a run. Followups discovered during work
+can flow back into the backlog, and twin/kb passes keep project memory
+fresh without turning documentation into a separate manual job.
 
 ---
 
 ## How it works
 
+- **One operator, many bounded threads.** MoE does not try to replace
+  judgment with autonomy. It gives the operator fast verbs for opening,
+  resuming, chaining, closing, and shipping agent work while keeping
+  every thread attached to an auditable project artifact.
 - **Guidance is markdown, not config.** Agent behavior comes from
   concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
   fragments into a single `--append-system-prompt`. Every agent
   mistake becomes a fragment edit; the next invocation picks it up.
+- **Project memory compounds.** Runs, canvases, followups, knowledge
+  base entries, and digital-twin docs are all normal files in the same
+  journal. The output of one pass becomes context for the next, for
+  both the human and the agents.
 - **Per-run sandbox worktrees.** Code work runs inside a private `git
   worktree` of the target repo at `.moe/clones/<project>/<run>/`,
   linked off the canonical submodule and pre-positioned on a
@@ -105,11 +141,13 @@ loose ideas without starting a run.
   `Grep`, `WebSearch`, and a scoped `Edit` — the worst a bad turn
   does is write a bad paragraph. The `code` document gets the
   dangerous permissions (`Edit`, `Write`, `Bash`), confined to its
-  sandbox worktree. Enforcement is `--allowedTools`, not a custom
-  sandbox.
-- **Backend is Claude Code headless.** `claude -p` as a subprocess —
-  real CLI, real OAuth, one human driver. Scheduled or unattended
-  runs must route to the Claude API under Commercial Terms instead.
+  sandbox worktree. Enforcement rides on Claude Code's sandbox and
+  tool controls, not a custom isolation engine.
+- **Backend is Claude Code as a subprocess.** Interactive turns resume
+  normal Claude Code sessions; chained and bounded turns use
+  `claude -p`. Either way it is the real CLI, real OAuth, and one
+  human driver. Scheduled or unattended runs must route to the Claude
+  API under Commercial Terms instead.
 
 ---
 
