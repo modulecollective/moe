@@ -36,6 +36,76 @@ func pushCommand(workflow string) *Command {
 
 const branchPrefix = "moe/"
 
+// pushCanvasSkeleton is the fixed structural shape every push canvas
+// opens with. Synthesis fills it from code/content.md and (when
+// present) test/content.md. The ship gate's preamble reads this
+// canvas verbatim, so the agent's `## PR body` section is what the
+// operator sees at the [N/m/p] decision and what lands on the actual
+// PR / merge commit message.
+const pushCanvasSkeleton = `# Push
+
+## PR body
+
+(agent fills: the final PR body / merge commit message — curated from code's draft, amended by test's findings)
+
+## Ship readiness
+
+(agent fills: two or three sentences — what was verified, what wasn't, why this is ready to ship; or what's blocking)
+
+## Conflicts surfaced
+
+(agent fills: disagreements between code's draft and test's findings; empty if the two agree)
+`
+
+// pushSynthesisKickoff is the interactive synthesis session's first
+// user message — same shape as the design/code/test kickoffs. Tells
+// the agent to read the prior canvases and acknowledge state before
+// drafting; without this, fresh sessions tend to dive into writing
+// without first checking what code stage's draft already said.
+const pushSynthesisKickoff = "The operator just opened this push synthesis session. " +
+	"Read the code canvas (and the test canvas, if present) before replying, so your acknowledgement reflects " +
+	"what's actually been drafted and verified. In one or two sentences, acknowledge where synthesis " +
+	"stands (fresh start vs. resumed) and ask what they'd like to refine. Then wait for their reply."
+
+// runPushSynthesisSession opens the push stage session that curates
+// code's draft and test's findings into push/content.md. Two ways in:
+// the chain prompt path automatically invokes this before rendering
+// the [N/m/p] gate (so the gate displays the synthesized canvas), and
+// `moe sdlc push --one-shot` invokes the headless variant directly.
+// Both share this function so the prompt fragment, canvas skeleton,
+// and kickoff string stay identical between operator-driven and
+// chain-driven entry. SkipNextStage suppresses the post-session chain
+// prompt — synthesis sits inside a larger flow (chain prompt → gate,
+// or one-shot → exit) that owns its own routing.
+func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+	opts := stageSessionOpts{
+		NeedsSandbox:   true,
+		Headless:       headless,
+		SkipNextStage:  true,
+		CanvasSkeleton: pushCanvasSkeleton,
+	}
+	if !headless {
+		opts.InitialPrompt = pushSynthesisKickoff
+	}
+	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
+}
+
+// runPushSynthesisFromChain is the hook the chain prompt fires before
+// the [N/m/p] ship gate (and the `s` skip-to-push shortcut). Default
+// dispatches the push command in --one-shot mode so the synthesis
+// stage session runs headlessly against the run on disk — the same
+// effect as `moe sdlc push --one-shot`.
+//
+// Overridable in tests; the prompt-level tests use stub *Command
+// values that aren't backed by a real run, so the default would
+// surface a "run not found" error during synthesis dispatch. Tests
+// that want to assert prompt behaviour (label, legend, dispatch
+// shape) replace this with a no-op; tests that exercise the
+// synthesis path end-to-end leave it alone.
+var runPushSynthesisFromChain = func(pushCmd *Command, md *run.Metadata, stdout, stderr io.Writer) int {
+	return pushCmd.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
+}
+
 // runPush ships the sandbox branch. The default path fast-forwards the
 // target repo's default branch to include moe/<run>, deletes the remote
 // branch, drops the sandbox clone, and marks the run `merged`. The
@@ -43,18 +113,26 @@ const branchPrefix = "moe/"
 // PR, mark the run `pushed`, keep the sandbox. A pushed run later
 // reconciles to merged/closed via `moe sync`.
 //
+// `--one-shot` runs the push synthesis stage headlessly (sdlc only) and
+// exits without shipping — the operator re-runs `moe sdlc push` (or
+// drives through the chain prompt) to ship interactively. Matches the
+// other sdlc stages' headless contract: one bounded turn, no operator
+// in the loop, the canvas is the durable artifact.
+//
 // Idempotent on terminal runs: rerunning after a merged/closed run is
 // a no-op that prints the terminal state and exits 0.
 func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
+	oneShot := fs.Bool("one-shot", false, "drive push synthesis headlessly via `claude -p`; no ship")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s push [--pr] <project> <run>\n", workflow)
+		moePrintf(stderr, "usage: moe %s push [--pr | --one-shot] <project> <run>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
 		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
+		moePrintln(stderr, "--one-shot: (sdlc only) run the push synthesis stage headlessly; no ship.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -64,6 +142,23 @@ func runPush(workflow string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	projectID, runID := fs.Arg(0), fs.Arg(1)
+
+	// --one-shot is a synthesis-only path: writes push/content.md
+	// headlessly and exits, leaving the ship decision to the operator's
+	// next invocation (interactive `moe <wf> push`, or the chain
+	// prompt's [N/m/p] gate). Only sdlc has a synthesis stage today —
+	// other workflows reject the flag rather than silently ship.
+	if *oneShot {
+		if workflow != "sdlc" {
+			moePrintf(stderr, "%s push: --one-shot is sdlc-only (push synthesis stage)\n", workflow)
+			return 2
+		}
+		if *prFlag {
+			moePrintf(stderr, "%s push: --one-shot and --pr are mutually exclusive\n", workflow)
+			return 2
+		}
+		return runPushSynthesisSession(projectID, runID, true, stdout, stderr)
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {

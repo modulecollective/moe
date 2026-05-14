@@ -30,10 +30,14 @@ import (
 // first stage is the next thing to run) and for entry points that
 // don't know which stage just landed (resume hitting the merge gate).
 //
-// justFinished also drives the "back" target offered at the prompt:
-// a non-empty justFinished resolves to back := g.Lookup(justFinished),
-// which the prompt offers as the `b` option so the operator can
-// re-open the stage whose canvas is sitting above the cursor.
+// justFinished also drives the "back" targets offered at the prompt:
+// a non-empty justFinished resolves to the list of stages strictly
+// prior in the workflow ladder, each looked up against the paired
+// command group. The prompt offers `b` to jump back to any of them —
+// a single prior stage runs directly, multiple stages route through a
+// sub-prompt that asks which to re-open. This lets the operator skip
+// over intermediate stages (test → design) instead of stepping back
+// one at a time.
 func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -70,10 +74,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 		moePrintf(stdout, "next: %s %s (no runnable command)\n", wf.Name, stage)
 		return 0
 	}
-	var back *Command
-	if justFinished != "" {
-		back = g.Lookup(justFinished)
-	}
+	back := backTargets(wf, g, justFinished)
 	// scuttle is the workflow's `close` command, offered at the prompt
 	// as `x` so the operator can abandon the run from the same surface
 	// they decline the next stage from. `x` reads as "exit/abandon" and
@@ -89,9 +90,106 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	}
 	switch next.Name {
 	case "push":
+		// sdlc's push has a synthesis stage that curates code+test into
+		// push/content.md. Run it (headless) before the ship gate so
+		// [N/m/p] displays the synthesized canvas — the operator's
+		// "should I ship?" preamble, and the eventual PR body / merge
+		// commit message. Dispatch via runPushSynthesisFromChain (a
+		// var) rather than the helper directly so prompt-level tests
+		// can stub it out and assert label/dispatch shape without a
+		// real run on disk. Other workflows (quick) skip synthesis
+		// and go straight to the gate.
+		if md.Workflow == "sdlc" {
+			if code := runPushSynthesisFromChain(next, md, stdout, stderr); code != 0 {
+				return code
+			}
+		}
 		return promptPushNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
 	}
 	return promptStageNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
+}
+
+// backTargets returns the prior stages the chain prompt's `b` should
+// route to: every stage strictly before justFinished in the workflow
+// ladder, mapped through the paired command group. An empty
+// justFinished (fresh-run callers) gets an empty slice — no prior
+// stage to re-open. Stages whose command group has no matching verb
+// (idea is the only such case today) are skipped silently so the
+// operator only sees options that actually dispatch.
+//
+// Today every workflow's ladder is linear, so "prior" means "appears
+// earlier in wf.Stages()". A fan-in or fan-out would need a richer
+// answer; surface the design question if and when one shows up.
+func backTargets(wf *Workflow, g *CommandGroup, justFinished string) []*Command {
+	if justFinished == "" {
+		return nil
+	}
+	var back []*Command
+	for _, s := range wf.Stages() {
+		if s == justFinished {
+			break
+		}
+		if cmd := g.Lookup(s); cmd != nil {
+			back = append(back, cmd)
+		}
+	}
+	return back
+}
+
+// dispatchBack invokes a back target. A single back target dispatches
+// directly. Multiple targets fan out to a sub-prompt keyed by the
+// stage name's first letter; a blank/unrecognized answer collapses to
+// "declined" and returns 0, the same shape the top-level prompt uses
+// for typos. Stage names with colliding first letters would break the
+// keying — none today, and the workflow registry test would catch a
+// future collision before it shipped.
+func dispatchBack(back []*Command, md *run.Metadata, stdout, stderr io.Writer) int {
+	if len(back) == 0 {
+		return 0
+	}
+	if len(back) == 1 {
+		return back[0].Run([]string{md.Project, md.ID}, stdout, stderr)
+	}
+	keys := make(map[rune]*Command, len(back))
+	parts := make([]string, 0, len(back))
+	for _, cmd := range back {
+		r := rune(cmd.Name[0])
+		keys[r] = cmd
+		parts = append(parts, fmt.Sprintf("%c=%s", r, cmd.Name))
+	}
+	moePrintf(stdout, "back to: %s ?\n", strings.Join(parts, " · "))
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	if interrupted {
+		moePrintln(stdout, "^C")
+		return 0
+	}
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer == "" {
+		return 0
+	}
+	cmd, ok := keys[rune(answer[0])]
+	if !ok {
+		return 0
+	}
+	return cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
+}
+
+// backHint formats the legend phrase for the `b` option. Single
+// target reads "back to <stage>" so muscle memory still parses the
+// option without typing it; multiple targets read "back to prior
+// stage" — the operator picks the specific stage at the sub-prompt
+// after typing `b`.
+func backHint(back []*Command) string {
+	if len(back) == 1 {
+		return "back to " + back[0].Name
+	}
+	return "back to prior stage"
 }
 
 // readPrintableCanvas returns the named stage's content.md body if it
@@ -183,7 +281,7 @@ func renderPromptLegend(opts []promptOption) string {
 // after a botched code run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
-func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	// Surface the just-finished stage's canvas above the prompt so the
 	// operator reads it before authorising the next stage. The pairing
 	// is design → code: print design; code → test: print code. Same
@@ -224,8 +322,8 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 	if offerSkipToPush {
 		opts = append(opts, promptOption{key: 's', hint: "skip to push"})
 	}
-	if back != nil {
-		opts = append(opts, promptOption{key: 'b', hint: "back to " + back.Name})
+	if len(back) > 0 {
+		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
 	}
 	label := renderPromptLabel(opts)
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
@@ -255,8 +353,9 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 		// Skip-to-push opens the push prompt directly without
 		// satisfying test. The push command lives in the same group as
 		// the just-decline-able test stage; look it up the same way
-		// promptNextStage does for the natural cascade. `back` is
-		// already the code command (justFinished == "code" upstream),
+		// promptNextStage does for the natural cascade. `back` is the
+		// same prior-stage list this prompt is offering (justFinished ==
+		// "code" upstream, so back contains design+code as appropriate),
 		// which is the right back target for the push prompt: the
 		// operator's mental "just finished" is code; test was the one
 		// they elected to skip. A workflow that registers test but no
@@ -271,11 +370,20 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 			moePrintf(stderr, "workflow %q has no push command\n", md.Workflow)
 			return 1
 		}
+		// Synthesis runs even on the `s` shortcut — without a test
+		// canvas the synthesis curates code's draft alone, but the
+		// push canvas is still the source of truth the gate displays.
+		// Same hook the natural cascade uses; tests stub it out.
+		if md.Workflow == "sdlc" {
+			if code := runPushSynthesisFromChain(pushCmd, md, stdout, stderr); code != 0 {
+				return code
+			}
+		}
 		pushHint := fmt.Sprintf("moe %s %s %s %s", md.Workflow, pushCmd.Name, md.Project, md.ID)
 		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
 	}
-	if back != nil && answer == "b" {
-		return back.Run([]string{md.Project, md.ID}, stdout, stderr)
+	if len(back) > 0 && answer == "b" {
+		return dispatchBack(back, md, stdout, stderr)
 	}
 	accepted := answer == "" || strings.HasPrefix(answer, "y")
 	if !accepted {
@@ -315,8 +423,16 @@ func promptStageNextStage(next, back, scuttle *Command, root string, md *run.Met
 // whitespace-only, the prompt prints bare — no header or decoration.
 // The canvas is markdown the agent wrote for the operator, printed
 // as written.
-func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	body := readPrintableCanvas(root, md, "test")
+func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
+	// Push canvas is the source of truth post-synthesis: the synthesis
+	// pass writes push/content.md with the curated PR body and
+	// ship-readiness narrative. Fall back to test → code only when
+	// push/content.md is missing or whitespace (a `--pr`-without-prior
+	// chain, or a workflow that doesn't run a synthesis pass — quick).
+	body := readPrintableCanvas(root, md, "push")
+	if body == "" {
+		body = readPrintableCanvas(root, md, "test")
+	}
 	if body == "" {
 		body = readPrintableCanvas(root, md, "code")
 	}
@@ -336,8 +452,8 @@ func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Meta
 		promptOption{key: 'm', hint: "fast-forward merge"},
 		promptOption{key: 'p', hint: "open PR"},
 	)
-	if back != nil {
-		opts = append(opts, promptOption{key: 'b', hint: "back to " + back.Name})
+	if len(back) > 0 {
+		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
 	}
 	label := renderPromptLabel(opts)
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
@@ -366,8 +482,8 @@ func promptPushNextStage(next, back, scuttle *Command, root string, md *run.Meta
 			return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 		}
 	case "b":
-		if back != nil {
-			return back.Run([]string{md.Project, md.ID}, stdout, stderr)
+		if len(back) > 0 {
+			return dispatchBack(back, md, stdout, stderr)
 		}
 	}
 	// Anything else — blank, "n", or a typo — declines. Safer than

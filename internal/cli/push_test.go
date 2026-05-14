@@ -925,7 +925,7 @@ func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, back, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -1087,7 +1087,7 @@ func TestPromptPushNextStageScuttleWithBack(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, back, scuttle, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptPushNextStage(next, []*Command{back}, scuttle, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -1144,6 +1144,129 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 	}
 	if rec.ran {
 		t.Errorf("`x` with nil scuttle must not dispatch push: args=%v", rec.args)
+	}
+}
+
+// TestPushOneShotDispatchesSynthesisOnly verifies the new --one-shot
+// flag wires runPush to the synthesis-only path and never touches the
+// ship logic. With the chain-prompt synthesis hook stubbed at the
+// runStageSession seam, we can assert the runPush --one-shot call
+// invokes the push stage session headless and exits cleanly without
+// reaching pre-push hooks, branch push, or merge/PR.
+func TestPushOneShotDispatchesSynthesisOnly(t *testing.T) {
+	var capturedDoc string
+	var capturedOpts stageSessionOpts
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+		capturedDoc = docID
+		capturedOpts = opts
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	var stdout, stderr bytes.Buffer
+	if code := runPush("sdlc", []string{"--one-shot", "tele", "fix-it"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if capturedDoc != "push" {
+		t.Fatalf("docID: want push, got %q", capturedDoc)
+	}
+	if !capturedOpts.Headless {
+		t.Errorf("Headless: want true (--one-shot path)")
+	}
+	if !capturedOpts.NeedsSandbox {
+		t.Errorf("NeedsSandbox: want true (synthesis runs in the run sandbox)")
+	}
+	if !capturedOpts.SkipNextStage {
+		t.Errorf("SkipNextStage: want true (synthesis sits inside a larger flow)")
+	}
+	if capturedOpts.CanvasSkeleton == "" {
+		t.Errorf("CanvasSkeleton: want non-empty (push canvas seeded with structural headings)")
+	}
+}
+
+// TestPushOneShotRejectedOnNonSdlc keeps --one-shot scoped to sdlc.
+// Other workflows have no synthesis stage today; surfacing a 2 exit
+// is cheaper than silently shipping (the old behaviour) or producing
+// an empty canvas (a confusing in-between).
+func TestPushOneShotRejectedOnNonSdlc(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runPush("quick", []string{"--one-shot", "tele", "fix-it"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit=%d (want 2)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--one-shot is sdlc-only") {
+		t.Errorf("expected sdlc-only error, got: %s", stderr.String())
+	}
+}
+
+// TestPushOneShotRejectedWithPR: --one-shot is synthesis-only and --pr
+// is a ship variant; combining them has no coherent meaning. Reject
+// with exit 2 so the operator sees the conflict instead of one flag
+// silently winning.
+func TestPushOneShotRejectedWithPR(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runPush("sdlc", []string{"--one-shot", "--pr", "tele", "fix-it"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit=%d (want 2)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("expected mutually-exclusive error, got: %s", stderr.String())
+	}
+}
+
+// TestPromptPushNextStagePrefersPushCanvasOverTest pins the new
+// canvas precedence: when push/content.md exists (post-synthesis),
+// it wins over test/content.md. The push canvas is the source of
+// truth for the ship gate's preamble — synthesis curated it from
+// the prior canvases on purpose, so falling back to the raw test
+// canvas after synthesis ran would defeat the point.
+func TestPromptPushNextStagePrefersPushCanvasOverTest(t *testing.T) {
+	next := &Command{
+		Name: "push",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	root := t.TempDir()
+	testCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "test"))
+	if err := os.MkdirAll(filepath.Dir(testCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const testBody = "## What was verified\n\nRaw test canvas — should NOT appear post-synthesis.\n"
+	if err := os.WriteFile(testCanvas, []byte(testBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pushCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "push"))
+	if err := os.MkdirAll(filepath.Dir(pushCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const pushBody = "## PR body\n\nSynthesized PR body — what the operator should read.\n"
+	if err := os.WriteFile(pushCanvas, []byte(pushBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, root, md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, pushBody) {
+		t.Errorf("push canvas body should appear above the gate:\n%s", got)
+	}
+	if strings.Contains(got, testBody) {
+		t.Errorf("test canvas body should not appear when push canvas exists:\n%s", got)
 	}
 }
 

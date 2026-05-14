@@ -237,7 +237,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -334,7 +334,7 @@ func TestPromptStageNextStageBackWithoutOneShot(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -447,7 +447,7 @@ func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, scuttle, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, []*Command{back}, scuttle, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -612,6 +612,20 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 	}
 }
 
+// stubPushSynthesisFromChain replaces the chain-prompt synthesis hook
+// with a no-op for the duration of the test. Prompt-level tests use
+// stub *Command values with no real run on disk, so the production
+// hook (which dispatches `moe sdlc push --one-shot`) would surface a
+// "run not found" error before the test could observe the [N/m/p]
+// label it cares about. The end-to-end push fixture tests don't need
+// the stub — they have a real run.
+func stubPushSynthesisFromChain(t *testing.T) {
+	t.Helper()
+	prev := runPushSynthesisFromChain
+	runPushSynthesisFromChain = func(*Command, *run.Metadata, io.Writer, io.Writer) int { return 0 }
+	t.Cleanup(func() { runPushSynthesisFromChain = prev })
+}
+
 // TestPromptStageNextStageSkipDispatchesPushPrompt: typing `s` at
 // the post-code gate opens the push prompt — the [N/m/p] label
 // appears in stdout, and the hint reads "moe sdlc push <project>
@@ -620,6 +634,7 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 // proof the dispatch happened. The next.Run stub for the test stage
 // must not be invoked on the `s` path.
 func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
+	stubPushSynthesisFromChain(t)
 	var testRan bool
 	next := &Command{
 		Name: "test",
@@ -673,6 +688,7 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 // the one they skipped), so `b` at the push prompt should re-open
 // code, not test.
 func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
+	stubPushSynthesisFromChain(t)
 	next := &Command{
 		Name: "test",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
@@ -704,7 +720,7 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, back, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if !backRan {
@@ -716,5 +732,159 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 	got := stdout.String()
 	if !strings.Contains(got, "b=back to code") {
 		t.Fatalf("expected push prompt legend to name `back to code`, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageMultipleBackOffersSubPrompt: when there's
+// more than one prior stage, the chain prompt's `b` no longer names
+// a specific target — the legend reads "back to prior stage", and
+// typing `b` opens a sub-prompt that lets the operator pick which
+// stage to re-open. This is the test-stage shape: design and code
+// are both behind us, so `b` must let the operator jump to either.
+func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
+	next := &Command{
+		Name: "test",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var designRan bool
+	design := &Command{
+		Name: "design",
+		Run: func(_ []string, _, _ io.Writer) int {
+			designRan = true
+			return 0
+		},
+	}
+	var codeRan bool
+	code := &Command{
+		Name: "code",
+		Run: func(_ []string, _, _ io.Writer) int {
+			codeRan = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// `b` opens the sub-prompt; `d` picks design.
+	if _, err := io.WriteString(w, "b\nd\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := promptStageNextStage(next, []*Command{design, code}, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "b=back to prior stage") {
+		t.Fatalf("expected legend with 'back to prior stage' for multi-back, got: %q", got)
+	}
+	if !strings.Contains(got, "back to:") {
+		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)
+	}
+	if !strings.Contains(got, "d=design") || !strings.Contains(got, "c=code") {
+		t.Fatalf("expected sub-prompt to list both stage keys, got: %q", got)
+	}
+	if !designRan {
+		t.Fatalf("expected design to fire after `b` then `d`")
+	}
+	if codeRan {
+		t.Errorf("code should not fire when the operator picks `d` for design")
+	}
+}
+
+// TestPromptStageNextStageMultipleBackSubPromptDeclines: blank input
+// at the sub-prompt collapses to "declined" — same shape the top-
+// level prompt uses for unrecognized input. No back target fires,
+// the call returns 0.
+func TestPromptStageNextStageMultipleBackSubPromptDeclines(t *testing.T) {
+	next := &Command{
+		Name: "test",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var anyRan bool
+	mark := func(_ []string, _, _ io.Writer) int { anyRan = true; return 0 }
+	design := &Command{Name: "design", Run: mark}
+	code := &Command{Name: "code", Run: mark}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// `b` opens the sub-prompt; blank declines.
+	if _, err := io.WriteString(w, "b\n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := promptStageNextStage(next, []*Command{design, code}, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
+	}
+	if anyRan {
+		t.Fatalf("expected no back target to fire on blank sub-prompt answer")
+	}
+}
+
+// TestPromptPushNextStageMultipleBackOffersSubPrompt: same shape at
+// the [N/m/p] gate — multiple prior stages produce a generic
+// "back to prior stage" legend entry plus a sub-prompt that fans
+// the choice out. Pins the parallel behaviour between the two
+// chain prompts.
+func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
+	next := &Command{
+		Name: "push",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	var testRan bool
+	testCmd := &Command{
+		Name: "test",
+		Run: func(_ []string, _, _ io.Writer) int {
+			testRan = true
+			return 0
+		},
+	}
+	design := &Command{Name: "design", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	code := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "b\nt\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if exitCode := promptPushNextStage(next, []*Command{design, code, testCmd}, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "b=back to prior stage") {
+		t.Fatalf("expected legend with 'back to prior stage' for multi-back, got: %q", got)
+	}
+	if !strings.Contains(got, "back to:") {
+		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)
+	}
+	if !testRan {
+		t.Fatalf("expected test to fire after `b` then `t`")
 	}
 }
