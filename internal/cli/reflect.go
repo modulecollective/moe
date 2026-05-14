@@ -10,26 +10,35 @@ import (
 	"strings"
 	"time"
 
-	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
-// reflectCommand builds the `reflect` facade for a workflow. Reflect
-// is closed-schema only and out-of-band relative to the run ladder:
-// no run.json, no stage progression, no merge gates. It does mint a
-// `reflect-<timestamp>` run directory whose only artifact is a single
-// end-of-pass summary at `documents/reflect/content.md` — the durable
-// "what changed and why" the session-close gate refuses to seal
-// without. Roadmap synthesis, doc-by-doc walk against recent events,
-// and structural hygiene cleanup all happen in the same session, so
-// `last_ingest_at` keeps its single meaning ("events ingested through
-// here") with no partial-pass commands left to skew the checkpoint.
+// reflectCommand is the user-facing `moe twin reflect <project>`
+// entry. It mints a fresh `reflect-<timestamp>` run whose seven
+// stages (vision → architecture → patterns → operations → roadmap →
+// glossary → finalize) walk the closed-schema twin, then dispatches
+// the first stage interactively. The chain prompt drives the
+// remainder of the ladder; the cascade vocabulary (`!<stage>` /
+// `!!`) is available at every stage gate.
+//
+// Per-stage commits don't bump the checkpoint; finalize does. That
+// keeps `EventsSinceCheckpoint` stable across the pass — every stage
+// reads the same events list — and folds log.md / checkpoint.json
+// into the same per-turn commit as finalize's inline cleanups.
+//
+// Refuses with a redirect when:
+//   - the operator has touched managed docs outside the changelog
+//     (run `moe twin claim` first to record the decided edit), or
+//   - an in-progress twin run already exists for this project (resume
+//     it via `moe twin <stage> <project> <run>` or close it before
+//     starting a new pass).
 func reflectCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "reflect",
-		Summary: "open a Claude Code reflect session on the project's twin",
+		Summary: "mint a twin reflect run and walk the seven-stage ladder",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runReflectSession(workflow, builder, args, stdout, stderr)
 		},
@@ -42,16 +51,12 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s reflect <project>\n", workflow)
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code reflect session on the project's twin.")
-		moePrintln(stderr, "Out-of-band relative to runs: no run.json, no stage, no merge gates. The")
-		moePrintln(stderr, "session writes a one-shot end-of-pass summary to")
-		moePrintln(stderr, "projects/<p>/runs/reflect-<timestamp>/documents/reflect/content.md, staged")
-		moePrintln(stderr, "in the same `work: reflect pass …` commit as the twin edits. Surfaces")
-		moePrintln(stderr, "under the dash's TWIN rail (`recent: …`), not ACTIVE/BACKLOG/COMPLETED.")
-		moePrintln(stderr, "Walks each managed doc against project commits and closed runs since the")
-		moePrintln(stderr, "last reflect, folds the open idea backlog into the roadmap, and clears")
-		moePrintln(stderr, "structural hygiene findings. The engine re-scans at session-end and")
-		moePrintln(stderr, "refuses to seal a reflect with leftover findings.")
+		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
+		moePrintln(stderr, "dispatches the first stage of the seven-stage ladder. Each managed doc")
+		moePrintln(stderr, "(vision, architecture, patterns, operations, roadmap, glossary) gets its")
+		moePrintln(stderr, "own per-stage canvas; finalize seals the pass — inline hygiene cleanup,")
+		moePrintln(stderr, "history-summary fold, checkpoint bump. The engine refuses to seal with")
+		moePrintln(stderr, "leftover findings; per-stage commits don't bump the checkpoint.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -98,97 +103,79 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return 1
 	}
 
-	runSlug := "reflect-" + time.Now().Local().Format("2006-01-02-150405")
-	docID := "reflect"
+	// Refuse if an in-progress twin run already exists. Two concurrent
+	// reflects would each see the same kickoff context (events,
+	// findings, feedback) but write divergent stage commits, and the
+	// `EventsSinceCheckpoint` filter has no way to distinguish them.
+	// One pass at a time.
+	if existing, err := findInProgressTwinRun(root, projectID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	} else if existing != "" {
+		moePrintf(stderr,
+			"twin reflect: a pass is already in progress (%s %s) — resume it with `moe twin <stage> %s %s` or close it before starting another\n",
+			projectID, existing, projectID, existing)
+		return 1
+	}
 
-	sessionUUID, err := run.NewSessionID()
+	// Mint the run. workflow="twin"; title is the human label for the
+	// pass; the id-base "reflect" routes the slug through
+	// nextFreeDatedID, producing `reflect-YYYY-MM-DD` (or
+	// `reflect-YYYY-MM-DD-2` on same-day collision). Bare title is
+	// fine — the slug, not the title, is the operator-facing handle.
+	title := "Twin reflect pass — " + time.Now().Local().Format("2006-01-02")
+	opts := run.Options{
+		IDBase:   "reflect",
+		Workflow: "twin",
+	}
+	var md *run.Metadata
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "run-new",
+		Run:     projectID,
+	}, func() error {
+		m, err := run.New(root, projectID, title, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	moePrintf(stdout, "opened twin reflect %s %s\n", md.Project, md.ID)
 
-	events, err := wiki.EventsSinceCheckpoint(*canonical)
-	if err != nil {
-		moePrintf(stderr, "wiki: events: %v\n", err)
-		return 1
-	}
-	historySummary, err := wiki.ReadHistorySummary(*canonical)
-	if err != nil {
-		moePrintf(stderr, "wiki: history summary: %v\n", err)
-		return 1
-	}
-	ideas, err := loadIdeaBacklog(root, projectID)
-	if err != nil {
-		moePrintf(stderr, "wiki: ideas: %v\n", err)
-		return 1
-	}
-	feedback, err := loadTwinFeedback(root, projectID, *canonical)
-	if err != nil {
-		moePrintf(stderr, "wiki: feedback: %v\n", err)
-		return 1
-	}
-	// Pre-flight hygiene scan against the canonical wiki so the
-	// kickoff carries the same findings the post-flight gate will
-	// later check against. EnsureManagedDocs hasn't run yet — fresh
-	// twins surface as MissingManagedDocs here, which is the right
-	// signal for the agent.
-	findings, err := wiki.Scan(*canonical)
-	if err != nil {
-		moePrintf(stderr, "wiki scan: %v\n", err)
-		return 1
-	}
-
-	in := wikiSessionInputs{
-		Project:     projectID,
-		RunSlug:     runSlug,
-		DocID:       docID,
-		LockPurpose: "reflect",
-		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			return builder(canonicalRoot, projectID)
-		},
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			return wikiTurnSpec{
-				Metadata:         nil,
-				DocID:            docID,
-				ClonePath:        "",
-				SessionUUID:      sessionUUID,
-				NewSession:       true,
-				InitialPrompt:    reflectKickoff(*canonical, historySummary, events, ideas, feedback, findings, run.ContentPath(projectID, runSlug, docID)),
-				FinalizeRunID:    runSlug,
-				FinalizeRunTitle: "Twin reflect pass",
-				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					return buildReflectSystemPrompt(worktreeWiki)
-				},
-				PreFinalizeGate: func(workRoot string, worktreeWiki *wiki.Config) error {
-					return reflectPostFlightGate(worktreeWiki, stderr)
-				},
-				CommitStager: func(workRoot, wikiRel string) error {
-					return commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel)
-				},
-			}, nil
-		},
-	}
-
-	return runWikiSession(root, in, stdout, stderr)
+	// Hand off to the chain prompt's fresh-run path. justFinished="" so
+	// promptNextStage falls back to Workflow.Next, which returns the
+	// first parked stage (vision). The chain prompt offers `Y` to run
+	// it; `!!` to cascade through the ladder; `o` for headless dispatch
+	// of just the next stage.
+	return promptNextStage(root, md, "", stdout, stderr)
 }
 
-func buildReflectSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
-	if worktreeWiki == nil {
-		return "", fmt.Errorf("reflect: missing wiki config")
-	}
-	var sections []string
-	if soul := moe.Soul(); soul != "" {
-		sections = append(sections, soul)
-	}
-	if ref := wiki.TwinReferenceSection(*worktreeWiki); ref != "" {
-		sections = append(sections, ref)
-	}
-	body, err := wiki.ReflectPromptSection(*worktreeWiki)
+// findInProgressTwinRun returns the slug of an in-progress twin run
+// for projectID, or "" if none. Scans the project's runs dir for
+// run.json files keyed to workflow=twin / status=in_progress. Errors
+// only on I/O — a project with no runs dir is "" with nil error.
+func findInProgressTwinRun(root, projectID string) (string, error) {
+	mds, err := run.Scan(root)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("scan runs: %w", err)
 	}
-	sections = append(sections, body)
-	return strings.Join(sections, "\n---\n\n"), nil
+	for _, md := range mds {
+		if md.Project != projectID {
+			continue
+		}
+		if md.Workflow != "twin" {
+			continue
+		}
+		if md.Status != run.StatusInProgress {
+			continue
+		}
+		return md.ID, nil
+	}
+	return "", nil
 }
 
 // reflectPostFlightGate re-runs the structural scan against the
@@ -225,114 +212,6 @@ func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
 func findingsCount(f wiki.Findings) int {
 	return len(f.Orphans) + len(f.MissingFromIndex) + len(f.BrokenLinks) +
 		len(f.EmptyDocs) + len(f.MissingManagedDocs) + len(f.GlossaryOrphans)
-}
-
-// reflectKickoff is the auto-sent first user message. It frames the
-// pass and lays out the session in the order the agent should walk
-// it: hygiene findings (structural cleanup informs synthesis), the
-// workflow feedback dropped by non-twin runs since the last reflect,
-// the per-doc reflect prompts, the open idea backlog (drives roadmap
-// re-prioritisation), the rolling history summary, and the verbatim
-// "events since last reflect" tail. Empty inputs collapse to a
-// one-line placeholder — a quiet section is fine.
-func reflectKickoff(cfg wiki.Config, historySummary, events string, ideas []ideaSummary, feedback []twinFeedbackEntry, findings wiki.Findings, canvasRel string) string {
-	var b strings.Builder
-	b.WriteString("The operator just opened a twin reflect session. " +
-		"Walk each managed doc against recent project activity, fold the open " +
-		"idea backlog into the roadmap, and clear any structural hygiene " +
-		"findings. Vision is drift-only — flag gaps, don't rewrite.\n\n")
-
-	if !findings.IsEmpty() {
-		b.WriteString("## Hygiene findings\n\n")
-		b.WriteString("Walk these with the operator before the doc-by-doc pass — " +
-			"structural issues inform the synthesis. The engine re-scans at " +
-			"session-end and refuses to seal a reflect with leftover findings.\n\n")
-		b.WriteString(wiki.RenderFindings(findings))
-	}
-
-	b.WriteString("## Workflow feedback\n\n")
-	if len(feedback) == 0 {
-		b.WriteString("(no workflow feedback since the last reflect)\n\n")
-	} else {
-		b.WriteString("Notes that workflow agents left for this reflect pass. Each " +
-			"entry is from a non-twin run; treat as input, not direction — fold " +
-			"what's real into the relevant managed doc, set aside what isn't.\n\n")
-		for _, fb := range feedback {
-			title := fb.runTitle
-			if title == "" {
-				title = fb.runID
-			}
-			fmt.Fprintf(&b, "### %s — %s (%s)\n\n", fb.runID, title, fb.when.Format("2006-01-02"))
-			body := strings.TrimSpace(fb.body)
-			if body == "" {
-				b.WriteString("(empty feedback file)\n\n")
-				continue
-			}
-			b.WriteString(body)
-			b.WriteString("\n\n")
-		}
-	}
-
-	b.WriteString("## Per-doc reflect prompts\n\n")
-	for _, d := range cfg.ManagedDocs {
-		fmt.Fprintf(&b, "### %s\n\n", d.Filename)
-		body := strings.TrimSpace(d.ReflectPrompt)
-		if body == "" {
-			body = "Walk this doc against recent activity. Update where work has changed what the doc claims."
-		}
-		b.WriteString(body)
-		b.WriteString("\n\n")
-	}
-
-	b.WriteString("## Idea backlog\n\n")
-	if len(ideas) == 0 {
-		b.WriteString("(no open ideas captured for this project)\n\n")
-	} else {
-		b.WriteString("Each entry below is an open idea run (`moe idea list`). " +
-			"Decide which belong on the roadmap and at which horizon; the rest " +
-			"stay on the idea shelf or move to Parked with a reason.\n\n")
-		for _, idea := range ideas {
-			fmt.Fprintf(&b, "### %s — %s\n\n", idea.slug, idea.title)
-			body := strings.TrimSpace(idea.body)
-			if body == "" {
-				b.WriteString("(empty canvas)\n\n")
-				continue
-			}
-			b.WriteString(body)
-			b.WriteString("\n\n")
-		}
-	}
-
-	b.WriteString("## History summary\n\n")
-	if historySummary != "" {
-		b.WriteString(historySummary)
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString("(no rolling summary yet — seed `history-summary.md` from the events " +
-			"below at the end of this pass)\n\n")
-	}
-
-	if events != "" {
-		b.WriteString(events)
-	} else {
-		b.WriteString("## Events since last reflect\n\n")
-		b.WriteString("(no project commits or closed runs since the last checkpoint)\n\n")
-	}
-
-	b.WriteString("Acknowledge in one or two sentences which docs look most likely to need " +
-		"updates and how you'd walk through them with the operator — name the hygiene " +
-		"findings you'd clear and the idea-backlog entries you'd promote. Then wait for " +
-		"the operator's go-ahead.\n\n")
-	b.WriteString("Before you finish the pass, propose an updated `history-summary.md` that " +
-		"folds in the events you just walked. The summary is the twin's compressed memory " +
-		"of everything before the next checkpoint — keep it prose, keep it slow-growing, " +
-		"and don't drop signal that future reflects will need.\n\n")
-	fmt.Fprintf(&b, "When the pass is sealed and you're ready to hand control back, write "+
-		"your end-of-pass summary to `%s`. That summary is the durable per-pass artifact — "+
-		"the same kind of \"what changed and why\" you'd write in a PR description. Keep it "+
-		"terse; the twin diff itself is the detail. The session refuses to seal until that "+
-		"file is non-empty.\n", canvasRel)
-	return b.String()
 }
 
 // unrecordedEditsRedirect formats the one-line redirect printed when

@@ -20,234 +20,208 @@ func writeWikiDoc(t *testing.T, dir, name, body string) error {
 	return os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644)
 }
 
-func TestReflectKickoffRendersHistorySummary(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	summary := "The twin was seeded in 2026-Q1; auth rewrite landed in 2026-Q2."
-	got := reflectKickoff(cfg, summary, "", nil, nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
-	if !strings.Contains(got, "## History summary") {
-		t.Errorf("kickoff missing history summary heading:\n%s", got)
-	}
-	if !strings.Contains(got, summary) {
-		t.Errorf("kickoff missing summary body:\n%s", got)
-	}
-	if !strings.Contains(got, "updated `history-summary.md`") {
-		t.Errorf("kickoff missing closing instruction asking the agent to update the summary:\n%s", got)
-	}
-}
-
-// When the summary is absent (fresh wiki, or migration from a wiki
-// that has a checkpoint but no summary file) the kickoff should still
-// render the heading and prompt the agent to seed the file from the
-// events block at end of pass.
-func TestReflectKickoffFreshSummaryFraming(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	got := reflectKickoff(cfg, "", "## Events since last reflect\n\n- abc1234 first commit\n", nil, nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
-	if !strings.Contains(got, "## History summary") {
-		t.Errorf("kickoff missing history summary heading:\n%s", got)
-	}
-	if !strings.Contains(got, "no rolling summary yet") {
-		t.Errorf("kickoff missing fresh-summary framing:\n%s", got)
-	}
-	if !strings.Contains(got, "seed `history-summary.md`") {
-		t.Errorf("kickoff should tell the agent to seed history-summary.md:\n%s", got)
-	}
-	// Events block still rendered alongside the empty summary.
-	if !strings.Contains(got, "abc1234 first commit") {
-		t.Errorf("kickoff missing events body:\n%s", got)
-	}
-}
-
-// Idea backlog and hygiene findings are the two synthesis inputs
-// that used to live in plan / lint and now ride into reflect's
-// kickoff. Pin both: empty inputs collapse silently; populated
-// inputs render their named sections.
-func TestReflectKickoffRendersIdeaBacklog(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "roadmap.md", Title: "Roadmap"}},
-	}
-	ideas := []ideaSummary{
-		{slug: "fix-auth", title: "Fix auth race", body: "Auth tokens leak under load."},
-		{slug: "tidy-cli", title: "Tidy CLI errors", body: "Errors mention internals."},
-	}
-	got := reflectKickoff(cfg, "", "", ideas, nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
-	for _, want := range []string{
-		"## Idea backlog",
-		"### fix-auth — Fix auth race",
-		"Auth tokens leak under load.",
-		"### tidy-cli — Tidy CLI errors",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("kickoff missing %q in:\n%s", want, got)
-		}
-	}
-}
-
-func TestReflectKickoffRendersHygieneFindings(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	findings := wiki.Findings{
-		EmptyDocs:          []string{"patterns.md"},
-		MissingManagedDocs: []string{"roadmap.md"},
-	}
-	got := reflectKickoff(cfg, "", "", nil, nil, findings, "projects/p/runs/r/documents/reflect/content.md")
-	for _, want := range []string{
-		"## Hygiene findings",
-		"refuses to seal a reflect with leftover findings",
-		"patterns.md",
-		"roadmap.md",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("kickoff missing %q in:\n%s", want, got)
-		}
-	}
-}
-
-// Empty hygiene findings should not render the hygiene heading at
-// all — a clean wiki shouldn't pad the kickoff with an empty section.
-func TestReflectKickoffOmitsEmptyHygieneSection(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	got := reflectKickoff(cfg, "", "", nil, nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
-	if strings.Contains(got, "## Hygiene findings") {
-		t.Errorf("kickoff should omit hygiene section when findings empty:\n%s", got)
-	}
-}
-
-// The canvas-write instruction is the load-bearing prompt change for
-// the "reflect-is-broken-by-checks" fix: the agent must know to write
-// the end-of-pass summary to the per-run canvas, and the path it sees
-// in the prompt is the same path commitReflectTurn stages and
-// session.Close reads at the branch tip.
-func TestReflectKickoffInstructsCanvasWrite(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	canvasRel := "projects/tele/runs/reflect-2026-05-11-120000/documents/reflect/content.md"
-	got := reflectKickoff(cfg, "", "", nil, nil, wiki.Findings{}, canvasRel)
-	for _, want := range []string{
-		"end-of-pass summary",
-		canvasRel,
-		"refuses to seal",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("kickoff missing %q in:\n%s", want, got)
-		}
-	}
-}
-
-// TestBuildReflectSystemPromptSectionsEndWithNewline pins the same
-// trailing-newline contract as TestBuildSystemPromptSectionsEndWithNewline,
-// but for buildReflectSystemPrompt's three-section join (soul, twin
-// reference, reflect body). Closed-schema only — reflect refuses
-// other modes — so the fixture mirrors the closed-schema fixture in
-// stage_test.go.
-func TestBuildReflectSystemPromptSectionsEndWithNewline(t *testing.T) {
+// TestReflectKickoffContextRendersAllPassSections covers the
+// pass-scoped kickoff block every twin stage shares: hygiene findings
+// (when non-empty), workflow feedback, idea backlog, history summary,
+// events tail. Walks the assembly on real on-disk fixtures so the
+// markdown the agent ultimately sees gets exercised end-to-end.
+func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 	root := newTestBureaucracy(t)
-
 	twinDir := wiki.TwinDir(root, "tele")
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n"), 0o644); err != nil {
+	if err := writeWikiDoc(t, twinDir, "vision.md", "# Vision\n\nReal content.\n"); err != nil {
+		t.Fatal(err)
+	}
+	// history-summary present so the section renders the body.
+	if err := writeWikiDoc(t, twinDir, "history-summary.md",
+		"The twin was seeded in 2026-Q1; auth rewrite landed in 2026-Q2.\n"); err != nil {
 		t.Fatal(err)
 	}
 
-	wikiCfg := &wiki.Config{
-		Name:            "twin",
+	cfg := wiki.Config{
 		Mode:            wiki.Closed,
+		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
 		BureaucracyPath: root,
 		ManagedDocs: []wiki.ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", Purpose: "what this is."},
+			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-
-	got, err := buildReflectSystemPrompt(wikiCfg)
+	got, err := reflectKickoffContext(root, "tele", cfg)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reflectKickoffContext: %v", err)
 	}
-	assertPromptSectionsEndWithNewline(t, got, 3)
-}
-
-// Workflow feedback section: present runs render with provenance; an
-// empty feedback list collapses to the "(no workflow feedback …)"
-// placeholder. Mirrors the idea-backlog / hygiene shape so the
-// section is always present (legible empty state) but doesn't pad
-// the kickoff with anything more than one line when there is nothing
-// to say.
-func TestReflectKickoffRendersWorkflowFeedback(t *testing.T) {
-	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "patterns.md", Title: "Patterns"}},
-	}
-	feedback := []twinFeedbackEntry{
-		{
-			runID:    "fix-auth",
-			runTitle: "Fix auth race",
-			body:     "patterns.md says X is load-bearing; cli/auth.go:99 no longer matches.",
-			when:     time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC),
-		},
-		{
-			runID:    "tidy-cli",
-			runTitle: "",
-			body:     "Vision claims non-goal Y; this run pushed against it. Flag for operator.",
-			when:     time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
-		},
-	}
-	got := reflectKickoff(cfg, "", "", nil, feedback, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
 	for _, want := range []string{
-		"## Workflow feedback",
-		"### fix-auth — Fix auth race (2026-05-11)",
-		"cli/auth.go:99 no longer matches",
-		"### tidy-cli — tidy-cli (2026-05-10)", // falls back to runID when title is empty
-		"Vision claims non-goal Y",
+		"## Pass context",
+		"### Workflow feedback",
+		"(no workflow feedback since the last reflect)",
+		"### Idea backlog",
+		"(no open ideas captured for this project)",
+		"### History summary",
+		"auth rewrite landed",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("kickoff missing %q in:\n%s", want, got)
+			t.Errorf("kickoff context missing %q in:\n%s", want, got)
 		}
 	}
 }
 
-func TestReflectKickoffEmptyWorkflowFeedbackCollapses(t *testing.T) {
+// Hygiene findings — when the pre-flight scan surfaces issues, they
+// land in the context block. Missing managed docs are the simplest
+// trigger (the wiki dir doesn't have vision.md yet).
+func TestReflectKickoffContextRendersHygieneFindings(t *testing.T) {
+	root := newTestBureaucracy(t)
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg := wiki.Config{
-		Mode:        wiki.Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+		Mode:            wiki.Closed,
+		Name:            "twin",
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: root,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
 	}
-	got := reflectKickoff(cfg, "", "", nil, nil, wiki.Findings{}, "projects/p/runs/r/documents/reflect/content.md")
-	if !strings.Contains(got, "## Workflow feedback") {
-		t.Errorf("kickoff missing workflow feedback heading on empty input:\n%s", got)
+	got, err := reflectKickoffContext(root, "tele", cfg)
+	if err != nil {
+		t.Fatalf("reflectKickoffContext: %v", err)
 	}
-	if !strings.Contains(got, "no workflow feedback since the last reflect") {
-		t.Errorf("kickoff missing empty-feedback placeholder:\n%s", got)
+	for _, want := range []string{
+		"### Hygiene findings",
+		"refuses to ship a reflect with leftover findings",
+		"vision.md",
+		"architecture.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("kickoff context missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// Clean wiki — the hygiene section is omitted entirely rather than
+// printed with an empty body. Same shape as the pre-redesign kickoff.
+func TestReflectKickoffContextOmitsEmptyHygieneSection(t *testing.T) {
+	root := newTestBureaucracy(t)
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWikiDoc(t, twinDir, "vision.md", "# Vision\n\nReal content.\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := wiki.Config{
+		Mode:            wiki.Closed,
+		Name:            "twin",
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: root,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+	got, err := reflectKickoffContext(root, "tele", cfg)
+	if err != nil {
+		t.Fatalf("reflectKickoffContext: %v", err)
+	}
+	if strings.Contains(got, "### Hygiene findings") {
+		t.Errorf("kickoff context should omit hygiene section when findings empty:\n%s", got)
+	}
+}
+
+// TestFinalizeStageGateRefusesEmptySections is the anti-theater check
+// for finalize. A committed skeleton (the seeded `(...)` placeholders)
+// must not advance the stage; substantive content in both load-bearing
+// sections must.
+func TestFinalizeStageGateRefusesEmptySections(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "reflect-2026-05-14", Project: "tele", Workflow: "twin"}
+	canvasRel := run.ContentPath(md.Project, md.ID, "finalize")
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(canvasRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Skeleton with placeholders — anti-theater check should refuse.
+	if err := os.WriteFile(filepath.Join(root, canvasRel), []byte(finalizeCanvasSkeleton), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := finalizeStageGate(root, md)
+	if err != nil {
+		t.Fatalf("finalizeStageGate: %v", err)
+	}
+	if ok {
+		t.Error("finalize gate should refuse a canvas left at the seeded skeleton")
+	}
+
+	// Filled — both load-bearing sections have substantive content.
+	filled := `# Finalize
+
+## What I fixed
+
+- renamed glossary entry "X" to "Y" to match patterns.md
+
+## What I left
+
+- nothing left
+
+## History-summary delta
+
+- seeded with this pass.
+`
+	if err := os.WriteFile(filepath.Join(root, canvasRel), []byte(filled), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = finalizeStageGate(root, md)
+	if err != nil {
+		t.Fatalf("finalizeStageGate: %v", err)
+	}
+	if !ok {
+		t.Error("finalize gate should advance with both load-bearing sections filled")
+	}
+}
+
+// TestFinalizeStageGateRefusesMissingCanvas — a stage that hasn't run
+// yet (no canvas on disk) is parked, not erroring. Mirrors test_gate's
+// missing-canvas tolerance.
+func TestFinalizeStageGateRefusesMissingCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "reflect-2026-05-14", Project: "tele", Workflow: "twin"}
+	ok, err := finalizeStageGate(root, md)
+	if err != nil {
+		t.Fatalf("finalizeStageGate: %v", err)
+	}
+	if ok {
+		t.Error("finalize gate should refuse a missing canvas")
+	}
+}
+
+// TestTwinPriorStageWalksLadderForward pins the per-stage prereq
+// lookup behind requireTwinPriorCanvas. Linear ladder, vision is
+// first.
+func TestTwinPriorStageWalksLadderForward(t *testing.T) {
+	cases := []struct {
+		stage, want string
+	}{
+		{"vision", ""},
+		{"architecture", "vision"},
+		{"patterns", "architecture"},
+		{"operations", "patterns"},
+		{"roadmap", "operations"},
+		{"glossary", "roadmap"},
+		{"finalize", "glossary"},
+		{"unknown", ""},
+	}
+	for _, c := range cases {
+		if got := twinPriorStage(c.stage); got != c.want {
+			t.Errorf("twinPriorStage(%q) = %q, want %q", c.stage, got, c.want)
+		}
 	}
 }
 
@@ -490,5 +464,31 @@ func TestReflectPostFlightGate(t *testing.T) {
 	stderr.Reset()
 	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
 		t.Fatalf("clean wiki should pass the gate, got %v\nstderr=%s", err, stderr.String())
+	}
+}
+
+// TestFindInProgressTwinRunDetectsExisting pins the guard
+// reflectCommand uses to refuse opening a second pass while one is
+// already in flight.
+func TestFindInProgressTwinRunDetectsExisting(t *testing.T) {
+	root := newTestBureaucracy(t)
+	if got, err := findInProgressTwinRun(root, "tele"); err != nil {
+		t.Fatalf("findInProgressTwinRun on empty repo: %v", err)
+	} else if got != "" {
+		t.Errorf("findInProgressTwinRun on empty repo = %q, want \"\"", got)
+	}
+	writeRunMeta(t, root, "tele", "reflect-2026-05-14", "Twin reflect pass", "twin")
+	got, err := findInProgressTwinRun(root, "tele")
+	if err != nil {
+		t.Fatalf("findInProgressTwinRun: %v", err)
+	}
+	if got != "reflect-2026-05-14" {
+		t.Errorf("findInProgressTwinRun = %q, want reflect-2026-05-14", got)
+	}
+	// A different project's twin run must not match.
+	if other, err := findInProgressTwinRun(root, "other"); err != nil {
+		t.Fatalf("findInProgressTwinRun other: %v", err)
+	} else if other != "" {
+		t.Errorf("findInProgressTwinRun(other) = %q, want \"\"", other)
 	}
 }

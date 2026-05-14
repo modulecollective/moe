@@ -8,21 +8,18 @@ import (
 )
 
 // `moe twin` is the top-level verb group for the closed-schema digital
-// twin lifecycle. Two operator-facing verbs:
+// twin lifecycle.
 //
-//   moe twin reflect <project>  — walk the six managed docs against
-//                                 recent activity, fold the idea
-//                                 backlog into the roadmap, and clear
-//                                 structural hygiene findings (the
-//                                 only twin-mutating pass)
-//   moe twin claim <project>    — record context for decided edits
+// `moe twin reflect <project>` is the operator-facing entry: it mints
+// a fresh `reflect-<timestamp>` run and dispatches the first stage of
+// the seven-stage ladder. Each managed doc gets its own stage canvas
+// under `documents/<stage>/content.md`; finalize seals the pass with
+// hygiene cleanups, the history-summary fold, and the checkpoint bump.
+// The structural kinship with kb lives at the wiki layer (wiki.Config
+// + ingest loop), not the workflow layer.
 //
-// Both are out-of-band relative to runs (no canvas, no stage ladder)
-// — twin is project-scoped, not run-scoped. The three-part workflow
-// test (canvas docs + DAG + dash) fails on all three counts here, so
-// twin is a plain CommandGroup with no paired Workflow. The structural
-// kinship with kb lives at the wiki layer (wiki.Config + ingest loop),
-// not the workflow layer.
+// `moe twin claim <project>` is the out-of-band decided-edit recorder
+// — it has no stage ladder and isn't part of the twin workflow DAG.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
 Six managed docs hold the durable layer: vision, architecture,
@@ -121,15 +118,92 @@ func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 	return cfg, nil
 }
 
+// twinStageOrder is the canonical ladder for `moe twin reflect`. Six
+// per-doc stages walk the managed docs in dependency order — vision /
+// architecture set the frame, patterns / operations encode conventions,
+// roadmap is planning, glossary is the index that cross-refs everything
+// — and finalize seals the pass (hygiene cleanups, history-summary
+// fold, checkpoint bump). Exported as a package-level slice so the
+// stage entry points and the dispatcher iterate one list.
+var twinStageOrder = []string{
+	"vision",
+	"architecture",
+	"patterns",
+	"operations",
+	"roadmap",
+	"glossary",
+	"finalize",
+}
+
 func init() {
-	// twin is a top-level CommandGroup, not a workflow: its verbs
-	// (reflect, claim) operate on the project-scoped digital twin and
-	// have no canvas, no stage ladder, and no dash presence. The
-	// three-part workflow test (canvas docs + DAG + dash) fails on all
-	// three counts, so twin sheds the empty Workflow shell that used
-	// to register it.
-	g := NewCommandGroup("twin", "digital-twin verbs: reflect, claim")
+	g := NewCommandGroup("twin", "digital-twin verbs: reflect, vision, architecture, patterns, operations, roadmap, glossary, finalize, claim, close")
+	// `moe twin reflect <project>` is the user-facing entry. It mints
+	// a fresh run and dispatches the first stage; the chain prompt
+	// drives the rest of the ladder.
 	g.Register(reflectCommand("twin", twinWikiBuilder))
+	// Per-stage entry points (six doc stages plus finalize). Each opens
+	// an interactive Claude Code session against the named stage's
+	// canvas; the dispatcher behind them (openTwinStage) routes the
+	// chain prompt's `o` keystroke and the cascade driver. Stage order
+	// here matches twinStageOrder so a reordering shows up in one
+	// place.
+	g.Register(&Command{
+		Name:    "vision",
+		Summary: "open a Claude Code session on the run's vision-stage canvas",
+		Run:     twinStageRun("vision"),
+	})
+	g.Register(&Command{
+		Name:    "architecture",
+		Summary: "open a Claude Code session on the run's architecture-stage canvas",
+		Run:     twinStageRun("architecture"),
+	})
+	g.Register(&Command{
+		Name:    "patterns",
+		Summary: "open a Claude Code session on the run's patterns-stage canvas",
+		Run:     twinStageRun("patterns"),
+	})
+	g.Register(&Command{
+		Name:    "operations",
+		Summary: "open a Claude Code session on the run's operations-stage canvas",
+		Run:     twinStageRun("operations"),
+	})
+	g.Register(&Command{
+		Name:    "roadmap",
+		Summary: "open a Claude Code session on the run's roadmap-stage canvas",
+		Run:     twinStageRun("roadmap"),
+	})
+	g.Register(&Command{
+		Name:    "glossary",
+		Summary: "open a Claude Code session on the run's glossary-stage canvas",
+		Run:     twinStageRun("glossary"),
+	})
+	g.Register(&Command{
+		Name:    "finalize",
+		Summary: "open a Claude Code session on the run's finalize-stage canvas — clear hygiene findings, fold events, seal the pass",
+		Run:     twinStageRun("finalize"),
+	})
+	// Claim stays out-of-band: no run.json, no stage ladder, just the
+	// decided-edit recorder.
 	g.Register(claimCommand("twin", twinWikiBuilder))
+	// Close marks the in-progress twin run terminal once finalize has
+	// landed. Mirrors `moe sdlc close`: no cleanup hook, since twin
+	// runs have no sandbox.
+	g.Register(closeCommand("twin", "Close twin reflect pass %s %s", nil))
 	RegisterGroup(g)
+
+	w := NewWorkflow("twin")
+	w.RegisterStage("vision")
+	w.RegisterStage("architecture", "vision")
+	w.RegisterStage("patterns", "architecture")
+	w.RegisterStage("operations", "patterns")
+	w.RegisterStage("roadmap", "operations")
+	w.RegisterStage("glossary", "roadmap")
+	w.RegisterStage("finalize", "glossary")
+	// Finalize is the working-stage equivalent of sdlc's test: anti-
+	// theater on the canvas (both `What I fixed` and `What I left`
+	// must have substantive content) plus a re-scan of the wiki for
+	// leftover hygiene findings. The work-turn check still gates entry;
+	// this gate decides whether the committed turn was substantive.
+	w.RegisterStageGate("finalize", finalizeStageGate)
+	RegisterWorkflow(w)
 }
