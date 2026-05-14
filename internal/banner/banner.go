@@ -52,11 +52,13 @@ func StageExit(w io.Writer, workflow, stage, project, runID string, committed bo
 	cliout.Printf(w, "%s %s %s  ·  %s / %s %s\n", barOpen, stage, status, project, runID, barClose)
 }
 
-// Dash prints the dash-render mark. Fired once per `moe dash` render,
-// above the existing factory-art header — frequent enough that we keep
-// it to one line.
-func Dash(w io.Writer) {
-	cliout.Printf(w, "%s  dash\n", bar)
+// Dash prints the dash-render mark, with the render timestamp appended
+// after `dash`. The dash factory art used to carry its own sentence-case
+// title with the timestamp; now that the banner is in scrollback the
+// title line is gone and the timestamp lives here so the operator still
+// sees when the dash was rendered.
+func Dash(w io.Writer, now time.Time) {
+	cliout.Printf(w, "%s  dash  %s\n", bar, now.Format("2006-01-02  15:04"))
 }
 
 // HookSection prints the section header for a hook-walker pass:

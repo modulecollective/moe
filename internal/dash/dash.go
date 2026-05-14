@@ -552,18 +552,22 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 	return state
 }
 
-// Render prints the full dashboard: header, factory art, three
-// sections (ACTIVE, BACKLOG, COMPLETED), the optional TWIN section,
-// and the footer. tabwriter aligns columns per section so a long
-// idea title doesn't widen the run rows. COMPLETED is capped at
-// CompletedCap unless showAll is set.
+// Render prints the full dashboard: factory art, three sections
+// (ACTIVE, BACKLOG, COMPLETED), the optional TWIN section, and the
+// footer. tabwriter aligns columns per section so a long idea title
+// doesn't widen the run rows. COMPLETED is capped at CompletedCap
+// unless showAll is set.
+//
+// The dash banner (rendered upstream of Render by the CLI handler)
+// carries the render timestamp; Render itself no longer prints a
+// title line. `now` is still threaded through for HumanAgo /
+// FormatRecents inside the per-row decoration.
 //
 // activeCount is the number of *projects* with at least one active
 // run — not the count of active rows. The footer reads "N project(s)
 // registered · M with active runs", so both numbers count projects.
 // The ACTIVE section header already exposes the row count.
 func Render(w io.Writer, now time.Time, rows []Row, twinRows []TwinRow, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
-	cliout.Printf(w, "Ministry of Everything %38s\n", now.Format("2006-01-02  15:04"))
 	for _, line := range BuildFactoryArt(state, ArtWidth, r) {
 		fmt.Fprintln(w, line)
 	}

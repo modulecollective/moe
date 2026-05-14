@@ -38,8 +38,9 @@ func TestStageExitCompleteAndNoOp(t *testing.T) {
 
 func TestDashGolden(t *testing.T) {
 	var buf bytes.Buffer
-	Dash(&buf)
-	if got, want := buf.String(), "▓▒░ MINISTRY OF EVERYTHING ░▒▓  dash\n"; got != want {
+	now := time.Date(2026, 5, 14, 0, 13, 0, 0, time.UTC)
+	Dash(&buf, now)
+	if got, want := buf.String(), "▓▒░ MINISTRY OF EVERYTHING ░▒▓  dash  2026-05-14  00:13\n"; got != want {
 		t.Fatalf("Dash =\n%q\nwant\n%q", got, want)
 	}
 }

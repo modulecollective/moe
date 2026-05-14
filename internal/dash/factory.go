@@ -15,9 +15,10 @@ import (
 // expands to a three-line plume-over-rail when populated; section
 // headers below carry the precise counts.
 
-// ArtWidth is the target column width for the factory art row, sized
-// to match the title line ("Ministry of Everything" plus the
-// right-aligned timestamp).
+// ArtWidth is the target column width for the factory art row. The
+// 61-column figure is historical (it matched the retired sentence-case
+// title that used to sit above the art) and is kept as a stable budget
+// for the rail so the section headers below line up consistently.
 const ArtWidth = 61
 
 // Visual budget per zone — fixed so the art doesn't blow past

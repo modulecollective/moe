@@ -89,7 +89,7 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"Ministry of Everything",
+		"MINISTRY OF EVERYTHING",
 		"ACTIVE (0)",
 		"BACKLOG (0)",
 		"COMPLETED (0)",
@@ -1708,7 +1708,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	titleIdx := strings.Index(got, "Ministry of Everything")
+	titleIdx := strings.Index(got, "MINISTRY OF EVERYTHING")
 	activeIdx := strings.Index(got, "ACTIVE (")
 	if titleIdx < 0 || activeIdx < 0 {
 		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
@@ -1722,7 +1722,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 	}
 }
 
-// TestDashRendersFactoryArt: dash output between the title line and
+// TestDashRendersFactoryArt: dash output between the banner line and
 // the ACTIVE section carries the factory art (one or two lines), not
 // just a blank gap. Pinned at the empty-bureaucracy state because
 // it's the easiest deterministic shape (dotted line, no RNG drift on
@@ -1739,7 +1739,7 @@ func TestDashRendersFactoryArt(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	titleIdx := strings.Index(got, "Ministry of Everything")
+	titleIdx := strings.Index(got, "MINISTRY OF EVERYTHING")
 	activeIdx := strings.Index(got, "ACTIVE (")
 	if titleIdx < 0 || activeIdx < 0 {
 		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
