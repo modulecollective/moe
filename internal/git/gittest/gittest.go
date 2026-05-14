@@ -91,6 +91,23 @@ func Run(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// RunWithEnv invokes `git <args...>` in dir with extra env entries
+// appended to os.Environ() (each entry "KEY=VALUE"). Same failure
+// behaviour as Run. Use it when a single git call needs an env override
+// (e.g. GIT_AUTHOR_DATE for a backdated commit) that should not leak to
+// sibling invocations — t.Setenv would persist past the call.
+func RunWithEnv(t *testing.T, dir string, env []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
 // Output invokes `git <args...>` in dir and returns trimmed stdout.
 // Non-zero exit fails the test with stderr folded into the message.
 func Output(t *testing.T, dir string, args ...string) string {
