@@ -93,6 +93,18 @@ const pushSynthesisKickoff = "The operator just opened this push synthesis sessi
 	"what's actually been drafted and verified. In one or two sentences, acknowledge where synthesis " +
 	"stands (fresh start vs. resumed) and ask what they'd like to refine. Then wait for their reply."
 
+// pushSynthesisDefaultModel maps an agent name to the cheap-tier model
+// the push synthesis headless turn should pin. Synthesis is a bounded
+// curation task (read code + test canvases, fill in three skeleton
+// sections, flag any contradictions); Opus / GPT-5 reasoning depth
+// would be overkill at the operator's default cost. A registered
+// agent without an entry here gets "" — same as omitting --model on
+// the agent's CLI, which falls back to the agent's own default.
+var pushSynthesisDefaultModel = map[string]string{
+	"claude": "sonnet",
+	"codex":  "gpt-5-mini",
+}
+
 // runPushSynthesisSession opens the push stage session that curates
 // code's draft and test's findings into push/content.md. One way in
 // today: `moe sdlc push --pr` invokes the headless variant from
@@ -104,12 +116,9 @@ const pushSynthesisKickoff = "The operator just opened this push synthesis sessi
 // the post-session chain prompt — synthesis sits inside the push
 // action → PR open flow, which owns its own routing.
 //
-// The headless path pins Model="sonnet": synthesis is a bounded
-// curation task (read code + test canvases, fill in three skeleton
-// sections, flag any contradictions) and Opus's reasoning depth would
-// be overkill at the operator's default cost. Sonnet is the right
-// floor; if it turns out to miss subtle contradictions in practice,
-// dropping to Opus is a one-line change.
+// The headless path pins a cheap-tier model per agent: see
+// pushSynthesisDefaultModel above. If a future agent needs the
+// floor adjusted, that map is the one-line change.
 func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 	opts := stageSessionOpts{
 		NeedsSandbox:   true,
@@ -118,7 +127,19 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 		CanvasSkeleton: pushCanvasSkeleton,
 	}
 	if headless {
-		opts.Model = "sonnet"
+		// Resolve the agent the same way runStageSession will, so the
+		// model lookup matches what actually runs. md may be unreadable
+		// (test stubs, freshly-checked-out tree mid-rebase) — fall
+		// through to resolveAgentName's runDefault=""; the env / hard
+		// default kicks in, which under steady state means "claude" /
+		// "sonnet", preserving the historical pin.
+		runDefault := ""
+		if root, err := findRoot(stderr); err == nil {
+			if md, err := run.Load(root, projectID, runID); err == nil {
+				runDefault = md.Agent
+			}
+		}
+		opts.Model = pushSynthesisDefaultModel[resolveAgentName("", runDefault)]
 	} else {
 		opts.InitialPrompt = pushSynthesisKickoff
 	}
