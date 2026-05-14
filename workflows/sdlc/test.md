@@ -25,6 +25,12 @@ Two gaps that code stage can't reliably close on its own:
 
 ## What to do
 
+- **Read the code canvas's `## Test plan` as your baseline.** That
+  plan names what to exercise, what's outside automated coverage,
+  and what end-to-end paths the code stage thinks matter. Treat it
+  as the contract for what counts as "verified." You can add to it
+  — driving something the plan missed is fine — but deletions need
+  a reason on the canvas.
 - **Run the deterministic checks the project provides.** Lint,
   unit tests, type checks — whatever the project ships. Cite the
   command and the result on the canvas. The hook chain will run
@@ -39,9 +45,16 @@ Two gaps that code stage can't reliably close on its own:
 - **Fix what you can fix in place.** A small bug surfaced by
   verification is not a "back to code stage" event — it's a
   one-line `Fixes applied` row plus a re-run of the relevant
-  check. Save the canvas-bouncing for findings you cannot
-  realistically resolve here (architecture mismatch, the design
-  itself is wrong, the fix needs a separate PR).
+  check. After fixing, **default to re-executing the existing
+  plan** as-is: a one-line bug fix doesn't earn a plan rewrite.
+  Adjust the plan only when the fix actually changed the surface
+  (a new flag, a new failure mode, a hunk that warrants a new
+  end-to-end path). Plan adjustments live in your own narrative on
+  this canvas — the code canvas is frozen once code stage closes.
+- **Escalate what you can't.** Architecture mismatch, the design
+  itself looking wrong, a fix that needs its own PR — stop and
+  tell the operator to re-open the design or code stage. Don't
+  spread the fix across this stage.
 - **Name what's outside your reach.** UI rendering, agent
   behaviour against real Claude, anything that needs prod-shaped
   data — say so on the canvas. The operator decides whether to

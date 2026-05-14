@@ -71,6 +71,23 @@ uncommitted is silently dropped.
   recovery is re-running the stage. Even on a code-only turn, drop a
   short note (what changed, what's next) into the canvas before handing
   back.
+- **Leave a black-box test plan on the canvas under `## Test plan`.**
+  The plan is the handoff to test stage: what to exercise, what's
+  outside automated coverage, what end-to-end paths to drive. Bullets,
+  not a template — light enough that it doesn't turn into theater.
+  Test stage reads this as the baseline; the downstream push synthesis
+  curates it into the final PR body.
+
+## Fix-or-escalate
+
+If something the design assumes turns out to be wrong while you're
+implementing — a missing prerequisite, a contradicting constraint, an
+API shape the design didn't see — fix in place if it's small and
+clearly within the change's scope. If it's gnarly, contradicts the
+design, or you'd want a full re-design pass to settle, stop and ask
+the operator to re-open the design stage rather than papering over it
+here. Same shape test and push enforce downstream: fix small things
+where they surface, escalate the rest deliberately.
 
 ## When you're done
 
