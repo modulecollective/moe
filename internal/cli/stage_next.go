@@ -243,12 +243,12 @@ func renderPromptLegend(opts []promptOption) string {
 }
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for most
-// workflows, [Y/n/o] for sdlc non-push stages where headless one-shot
+// workflows, [Y/n/o] for sdlc non-push stages where headless dispatch
 // is supported, [Y/n/o/s] when the next stage is sdlc's test (the skip
 // shortcut jumps straight to the push prompt), and optional /x and /b
 // suffixes when scuttle / back are non-nil. Y still defaults so a
 // reflex Enter chains the next stage interactively, the same as before.
-// `o` invokes the next stage with `--one-shot` prepended to its argv.
+// `o` invokes the next stage headless via openSdlcStage.
 // `b` re-invokes the just-finished stage interactively. `x` dispatches
 // the workflow's close command for the current run — the "abandon
 // ship" path the operator forms at the same surface they decline from.
@@ -256,8 +256,9 @@ func renderPromptLegend(opts []promptOption) string {
 // useful for doc-only diffs and trivial fixes where the anti-theater
 // rule that test stage enforces would just produce a rubber-stamp
 // canvas. Hardcoding the sdlc gate keeps the prompt honest — no other
-// workflow has --one-shot or a test stage today, and we'd rather widen
-// deliberately than offer affordances that don't exist.
+// workflow has a headless `o` keystroke or a test stage today, and
+// we'd rather widen deliberately than offer affordances that don't
+// exist.
 //
 // `x` is positioned adjacent to `n` (decline) because both read as "no":
 // scuttle is "no, and also close this run." Grouping the two negatives
@@ -345,7 +346,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 	}
 	if offerOneShot && answer == "o" {
-		return next.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
+		return openSdlcStage(next.Name, md.Project, md.ID, stdout, stderr)
 	}
 	if offerSkipToPush && answer == "s" {
 		// Skip-to-push opens the push prompt directly without
@@ -576,25 +577,20 @@ type cascadeResult struct {
 // A destination at or behind startStage produces a no-op cascade and
 // exit 0.
 //
-// Each headless dispatch goes through the typed Command's Run with
-// `--one-shot` prepended — same shape the existing `o` keystroke
-// uses — so stage-specific pre-flight (requireDesignCanvas,
-// requireCodeCanvas, canvas skeleton seeding) still fires. The
-// inCascade flag suppresses each stage's inner promptNextStage so
-// the cascade owns routing.
+// Each headless dispatch goes through openSdlcStage — same Go-level
+// seam the chain prompt's `o` keystroke uses — so stage-specific
+// pre-flight (requireDesignCanvas, requireCodeCanvas, canvas skeleton
+// seeding) still fires. The inCascade flag suppresses each stage's
+// inner promptNextStage so the cascade owns routing.
 //
-// At push in yolo mode the dispatch is the merge path (no flags),
-// not `--one-shot`: `!!` defaults to fast-forward merge, and the
-// merge commit body is bare, so a synthesis pre-call would just
-// write a canvas nothing reads.
+// At push in yolo mode the dispatch is the merge path (pushCmd.Run
+// with no flags), not a synth-then-ship pair: `!!` defaults to
+// fast-forward merge, the merge commit body is bare, and a
+// synthesis pre-call would write a canvas nothing reads.
+// Synthesis runs inside `push --pr` itself.
 func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return res, 1
-	}
-	g, err := LookupGroup(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return res, 1
@@ -625,17 +621,24 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 	defer func() { inCascade = prev }()
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
-		cmd := g.Lookup(stage)
-		if cmd == nil {
-			moePrintf(stderr, "cascade: workflow %s has no command for stage %q\n", md.Workflow, stage)
-			return res, 1
-		}
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
-			// `!!` at push: ship via the merge path. No `--one-shot`
-			// synthesis pre-call — the merge commit body is bare and
-			// no PR body lands on a reviewer's screen, so the
-			// curation would be writing a canvas nothing reads.
+			// `!!` at push: ship via the merge path. No synthesis
+			// pre-call — the merge commit body is bare and no PR
+			// body lands on a reviewer's screen, so the curation
+			// would be writing a canvas nothing reads. Synthesis
+			// runs inside `push --pr`, where it has somewhere to
+			// land.
+			g, err := LookupGroup(md.Workflow)
+			if err != nil {
+				moePrintf(stderr, "%v\n", err)
+				return res, 1
+			}
+			cmd := g.Lookup(stage)
+			if cmd == nil {
+				moePrintf(stderr, "cascade: workflow %s has no command for stage %q\n", md.Workflow, stage)
+				return res, 1
+			}
 			ship := cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
 			if ship != 0 {
@@ -644,7 +647,7 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 			res.shipped = true
 			continue
 		}
-		code := cmd.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
+		code := openSdlcStage(stage, md.Project, md.ID, stdout, stderr)
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code

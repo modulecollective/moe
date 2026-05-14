@@ -11,29 +11,6 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// runOneShotStageDirect drives one stage via the same path the chain
-// uses, so test fixtures can stand up a "design done, code pending"
-// state without typing through promptNextStage. Goes through the
-// typed Command's Run with --one-shot, mirroring runOneShotChain's
-// production dispatch (and the post-stage `o` prompt's), so the
-// fixture reflects production semantics.
-func runOneShotStageDirect(t *testing.T, projectID, runID, docID string, needsSandbox bool) {
-	t.Helper()
-	_ = needsSandbox // sandbox-need is now derived by the typed handler.
-	g, err := LookupGroup("sdlc")
-	if err != nil {
-		t.Fatalf("lookup sdlc group: %v", err)
-	}
-	cmd := g.Lookup(docID)
-	if cmd == nil {
-		t.Fatalf("sdlc has no command for stage %q", docID)
-	}
-	var out, errb bytes.Buffer
-	if code := cmd.Run([]string{"--one-shot", projectID, runID}, &out, &errb); code != 0 {
-		t.Fatalf("one-shot %s: exit=%d stderr=%q", docID, code, errb.String())
-	}
-}
-
 func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)

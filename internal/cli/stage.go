@@ -67,11 +67,13 @@ type stageSessionOpts struct {
 	// terminal (no stdin), the workflow's oneshot.md fragment is
 	// appended to the system prompt, and transcript mirroring is
 	// skipped (the canvas + per-turn commit are the durable
-	// artifacts). Set by `moe sdlc new --one-shot`.
+	// artifacts). Set by the chain prompt's `o` keystroke and the
+	// `!<stage>` / `!!` cascade driver.
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
-	// chained-stage call. Used by one-shot, which composes its own
-	// chain (design → code) and never wants the interactive next-stage
+	// chained-stage call. Used by the cascade driver, which composes
+	// its own chain (design → code → test → push) and never wants the
+	// interactive next-stage
 	// prompt to fire mid-chain.
 	SkipNextStage bool
 	// Model, if non-empty, is the `--model` value for the headless
@@ -269,7 +271,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			//   - JSONL at the canonical path → resume normally.
 			//   - JSONL absent (cross-machine fresh checkout, wiped
 			//     cache, dirty exit before claude wrote turn 1, or
-			//     a prior --one-shot turn which doesn't honor moe's
+			//     a prior headless turn which doesn't honor moe's
 			//     --session-id) → re-mint the session id, persist +
 			//     commit run.json, and pass --session-id instead of
 			//     --resume. Chat history is gone but the canvas on
@@ -311,7 +313,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 
 			// Headless mode has no operator on stdin to type the seed
 			// prompt, so default it to the run title — the same shape
-			// `moe sdlc new --one-shot` has been seeding by hand.
+			// the cascade driver and `o` keystroke depend on.
 			// Callers that pass an explicit InitialPrompt keep theirs.
 			initialPrompt := opts.InitialPrompt
 			if opts.Headless && initialPrompt == "" {

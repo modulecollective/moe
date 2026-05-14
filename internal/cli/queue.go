@@ -294,14 +294,6 @@ func queueItemPreview(root string, it queue.Item) string {
 	return "next: " + next
 }
 
-// queueDispatchOpts controls how the walker drives each item.
-// OneShot flips per-item dispatch from interactive to headless —
-// same shape as `moe sdlc resume --one-shot` vs `moe sdlc resume`
-// typed by hand.
-type queueDispatchOpts struct {
-	OneShot bool
-}
-
 // dispatchQueueItem invokes the per-item entry for one queue item.
 // Hot-pluggable so tests can swap in a deterministic stub that
 // records invocation order and exit codes without spawning Claude.
@@ -313,10 +305,10 @@ type queueDispatchOpts struct {
 // stage session is grinding away.
 var dispatchQueueItem = defaultDispatchQueueItem
 
-func defaultDispatchQueueItem(it queue.Item, opts queueDispatchOpts, stdout, stderr io.Writer) int {
+func defaultDispatchQueueItem(it queue.Item, stdout, stderr io.Writer) int {
 	switch it.Workflow {
 	case queueWorkflowSDLC:
-		return dispatchSdlcResume(it.Project, it.Run, opts, stdout, stderr)
+		return cascadeQueuedSdlcResume(it.Project, it.Run, stdout, stderr)
 	case queueWorkflowIdea:
 		// Lazy promote at dispatch. promoteIdeaToSdlcRun takes its own
 		// repolock for the run-new and idea-promote commits; that's
@@ -343,34 +335,24 @@ func defaultDispatchQueueItem(it queue.Item, opts queueDispatchOpts, stdout, std
 		//   moe queue remove idea <project> <slug>
 		//   moe queue add sdlc <project> <new-slug>
 		// — the new slug is in the stdout line above, hence the loud
-		// print before runResume.
-		return dispatchSdlcResume(md.Project, md.ID, opts, stdout, stderr)
+		// print before cascade.
+		return cascadeQueuedSdlcResume(md.Project, md.ID, stdout, stderr)
 	default:
 		moePrintf(stderr, "queue: workflow %q not supported by walker\n", it.Workflow)
 		return 1
 	}
 }
 
-// dispatchSdlcResume drives a queued (or just-promoted) sdlc run.
-// Default is interactive — runResume opens the next pending stage
-// and the operator walks the chain. With OneShot the dispatch
-// cascades through the pending stages headlessly and parks at the
-// push gate, same semantics `moe sdlc resume --one-shot` used to
-// have (the underlying mechanism is now the chain-prompt cascade
-// driver, not a flag on resume).
-func dispatchSdlcResume(projectID, runID string, opts queueDispatchOpts, stdout, stderr io.Writer) int {
-	if !opts.OneShot {
-		return runResume([]string{projectID, runID}, stdout, stderr)
-	}
-	return cascadeQueuedSdlcResume(projectID, runID, stdout, stderr)
-}
-
-// cascadeQueuedSdlcResume is the headless walker the queue dispatches
-// when `--one-shot` is set. Mirrors runResume's pre-flight (refuses
-// missing/terminal/pushed runs) then either parks at the push gate
-// (when stages are still pending) or hands straight to it (when the
-// only thing left is the merge gate). The cascade itself is the same
-// driver the chain prompt's `!push` answer uses.
+// cascadeQueuedSdlcResume is the per-item walker the queue dispatches.
+// Mirrors runResume's pre-flight (refuses missing/terminal/pushed
+// runs) then either parks at the push gate (when stages are still
+// pending) or hands straight to it (when the only thing left is the
+// merge gate). The cascade itself is the same driver the chain
+// prompt's `!push` answer uses; items in the queue are work the
+// operator already triaged, so the walker grinds them headless to
+// the ship decision rather than re-opening every stage interactively.
+// Operators who want full interactivity on one item pull it off the
+// queue (`moe queue remove`) and run `moe sdlc resume` on it.
 func cascadeQueuedSdlcResume(projectID, runID string, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -425,16 +407,16 @@ func cascadeQueuedSdlcResume(projectID, runID string, stdout, stderr io.Writer) 
 func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("queue run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	oneShot := fs.Bool("one-shot", false, "drive each item headlessly via `claude -p` instead of opening interactive sessions")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe queue run [--one-shot]")
+		moePrintln(stderr, "usage: moe queue run")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Walks the queue, pausing at each merge gate. Default opens an")
-		moePrintln(stderr, "interactive session per pending stage; --one-shot drives each stage")
-		moePrintln(stderr, "headlessly and prompts [Y/n/o] before chaining to the next.")
+		moePrintln(stderr, "Walks the queue, cascading each item headlessly to its push gate")
+		moePrintln(stderr, "and prompting [N/m/p] before chaining to the next item. Items in")
+		moePrintln(stderr, "the queue are work already triaged; the walker grinds them rather")
+		moePrintln(stderr, "than re-opening every stage interactively. Pull an item out with")
+		moePrintln(stderr, "`moe queue remove` if you want full interactivity on it.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Exits when the queue is empty; relaunch after `queue add` to drain more.")
-		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -447,7 +429,6 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	dispatchOpts := queueDispatchOpts{OneShot: *oneShot}
 
 	// Walker-scoped SIGINT subscription. Catches Ctrl-C delivered at
 	// the stage prompt (where the prompt's own helper has already
@@ -519,7 +500,7 @@ func runQueueRun(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 
-		code := dispatchQueueItem(head, dispatchOpts, stdout, stderr)
+		code := dispatchQueueItem(head, stdout, stderr)
 		if code != 0 {
 			moePrintf(stderr, "queue: %s exited %d; leaving at head of queue\n", head, code)
 			return code

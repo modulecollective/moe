@@ -223,8 +223,9 @@ func Execute(r Request) error {
 // (system prompt + add-dirs + sandbox settings + positional user
 // prompt), but no session id, no REPL, no transcript mirroring: the
 // agent gets one turn, produces its work directly on disk, and exits.
-// Used by `moe sdlc new --one-shot` to chain stage turns
-// without putting the operator on stdin.
+// Used by the cli's headless stage helpers (openSdlcStage, the
+// chain prompt's `o` keystroke, the cascade driver) to chain stage
+// turns without putting the operator on stdin.
 type OneShotRequest struct {
 	// Root is the bureaucracy repo root. Passed as --add-dir so the
 	// canvas stays reachable when cwd is the sandbox clone.
@@ -255,8 +256,8 @@ type OneShotRequest struct {
 	// Timeout, when > 0, hard-caps the whole invocation via
 	// CommandContext. Mirrors HeadlessRequest.Timeout: callers that
 	// want a guard against a spinning agent set it; the open-ended
-	// `moe sdlc new --one-shot` chain leaves it zero so wiki-finalize-
-	// sized work isn't artificially capped.
+	// cascade chain leaves it zero so wiki-finalize-sized work
+	// isn't artificially capped.
 	Timeout time.Duration
 	// ExtraEnv is appended to os.Environ() before the claude
 	// subprocess is spawned — same semantics as Request.ExtraEnv. The

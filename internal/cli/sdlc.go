@@ -71,13 +71,11 @@ func init() {
 func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc design", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc design [--one-shot] <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc design <project> <run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the design canvas.")
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
-		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -86,11 +84,65 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	if code := requireRun("sdlc design", fs.Arg(0), fs.Arg(1), stderr); code != 0 {
+	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+}
+
+func runCode(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe sdlc code <project> <run>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
+		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
+		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+}
+
+func runTest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sdlc test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe sdlc test <project> <run>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Opens an interactive Claude Code session on the test canvas. The agent")
+		moePrintln(stderr, "verifies the code stage's work — running the project's checks, driving")
+		moePrintln(stderr, "the change end-to-end, applying small in-place fixes, and narrating what")
+		moePrintln(stderr, "was and wasn't verified on the canvas. Pre-push hooks still gate ship.")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+}
+
+// openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
+// typed `Command.Run` parses args and hands to this helper; the chain
+// prompt's `o` keystroke and the cascade driver reach it directly via
+// openSdlcStage. The contract is identical either way: requireRun
+// guards the run, then runStageSession opens an interactive (or
+// headless) session against the design canvas. headless=true is the
+// path that used to be `--one-shot`; the flag is gone, but the Go
+// function still distinguishes the two so internal callers can ask
+// for the bounded one-turn variant without re-entering the parser.
+func openSdlcDesign(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+	if code := requireRun("sdlc design", projectID, runID, stderr); code != 0 {
 		return code
 	}
-	if *oneShot {
-		return runStageSession(fs.Arg(0), fs.Arg(1), "design",
+	if headless {
+		return runStageSession(projectID, runID, "design",
 			stageSessionOpts{Headless: true}, stdout, stderr)
 	}
 	// The agent produces the user-facing cue itself: Claude Code has no
@@ -102,42 +154,27 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"design stands (fresh start vs. resumed) and ask what they'd like to " +
 		"work on next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "design",
+	return runStageSession(projectID, runID, "design",
 		stageSessionOpts{InitialPrompt: kickoff}, stdout, stderr)
 }
 
-func runCode(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc code [--one-shot] <project> <run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
-		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
-		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
-		return 2
-	}
-	// Validate the run before requireDesignCanvas, so a wrong-project
-	// typo surfaces as "run not found" instead of "design canvas
-	// missing" (which would send the operator off to run a design
-	// stage that's also going to fail). Mirrors runResume's shape.
-	if code := requireRun("sdlc code", fs.Arg(0), fs.Arg(1), stderr); code != 0 {
+// openSdlcCode is the Go-level seam behind `moe sdlc code`. See
+// openSdlcDesign for the broader contract. The extra step here is
+// requireDesignCanvas: code can't drive against a design that was
+// never opened, on either the interactive or headless path. The
+// run-validation step runs *before* the canvas check so a wrong-
+// project typo surfaces as "run not found" instead of sending the
+// operator off to run a design stage that's also going to fail.
+func openSdlcCode(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+	if code := requireRun("sdlc code", projectID, runID, stderr); code != 0 {
 		return code
 	}
-	if err := requireDesignCanvas(fs.Arg(0), fs.Arg(1)); err != nil {
+	if err := requireDesignCanvas(projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if *oneShot {
-		return runStageSession(fs.Arg(0), fs.Arg(1), "code",
+	if headless {
+		return runStageSession(projectID, runID, "code",
 			stageSessionOpts{NeedsSandbox: true, Headless: true}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this code session. " +
@@ -145,43 +182,25 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"implementation stands (fresh start vs. resumed) and ask what they'd " +
 		"like to work on next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "code",
+	return runStageSession(projectID, runID, "code",
 		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
 }
 
-func runTest(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("sdlc test", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	oneShot := fs.Bool("one-shot", false, "drive this stage headlessly via `claude -p`; the run title is the user prompt")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc test [--one-shot] <project> <run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the test canvas. The agent")
-		moePrintln(stderr, "verifies the code stage's work — running the project's checks, driving")
-		moePrintln(stderr, "the change end-to-end, applying small in-place fixes, and narrating what")
-		moePrintln(stderr, "was and wasn't verified on the canvas. Pre-push hooks still gate ship.")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
-		return 2
-	}
-	if code := requireRun("sdlc test", fs.Arg(0), fs.Arg(1), stderr); code != 0 {
+// openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
+// shape as openSdlcCode one stage downstream — requireCodeCanvas
+// stands in for requireDesignCanvas, and the canvas skeleton wires
+// in so the agent's first read sees the structural shape it has to
+// fill.
+func openSdlcTest(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+	if code := requireRun("sdlc test", projectID, runID, stderr); code != 0 {
 		return code
 	}
-	// test depends on code's output (the diff to verify) the same way code
-	// depends on design's. Refuse if the code canvas is missing so a
-	// skipped-ahead `sdlc test` fails fast instead of opening a session
-	// against nothing.
-	if err := requireCodeCanvas(fs.Arg(0), fs.Arg(1)); err != nil {
+	if err := requireCodeCanvas(projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if *oneShot {
-		return runStageSession(fs.Arg(0), fs.Arg(1), "test",
+	if headless {
+		return runStageSession(projectID, runID, "test",
 			stageSessionOpts{
 				NeedsSandbox:   true,
 				Headless:       true,
@@ -193,12 +212,52 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		"what's actually on it. In one or two sentences, acknowledge where " +
 		"verification stands (fresh start vs. resumed) and ask what they'd " +
 		"like to verify or spot-check next. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "test",
+	return runStageSession(projectID, runID, "test",
 		stageSessionOpts{
 			NeedsSandbox:   true,
 			InitialPrompt:  kickoff,
 			CanvasSkeleton: testCanvasSkeleton,
 		}, stdout, stderr)
+}
+
+// openSdlcStage routes the chain prompt's `o` keystroke and the
+// cascade driver's pre-push iteration to the right per-stage helper,
+// headless. Knowing the stage names statically (sdlc has three
+// headlessable stages — push is not one of them) is what lets a
+// switch beat a registry: the alternative is a typed-CLI re-entry
+// via `cmd.Run` with a flag prepended, which is the pattern the run
+// that removed `--one-shot` set out to retire.
+//
+// push deliberately has no case here. Push synthesis runs lazily
+// inside `push --pr` (see openPRPath) and the merge path is a bare
+// commit body; the cascade's yolo branch ships via pushCmd.Run with
+// no flags, so no caller wants this seam for push. An unexpected
+// stage="push" call surfaces as the default branch's error rather
+// than silently routing somewhere wrong.
+//
+// Declared as a var and assigned in init() so the static reference
+// chain promptStageNextStage → openSdlcStage → openSdlcDesign →
+// runStageSession (a var whose initializer reaches back through
+// promptNextStage) stays clear of Go's package init-order cycle
+// checker. Closing the loop with a direct func declaration tipped
+// it into an init-cycle error; the var has no initializer
+// expression for the checker to follow.
+var openSdlcStage func(stage, projectID, runID string, stdout, stderr io.Writer) int
+
+func init() {
+	openSdlcStage = func(stage, projectID, runID string, stdout, stderr io.Writer) int {
+		switch stage {
+		case "design":
+			return openSdlcDesign(projectID, runID, true, stdout, stderr)
+		case "code":
+			return openSdlcCode(projectID, runID, true, stdout, stderr)
+		case "test":
+			return openSdlcTest(projectID, runID, true, stdout, stderr)
+		default:
+			moePrintf(stderr, "sdlc: openSdlcStage: unknown stage %q\n", stage)
+			return 1
+		}
+	}
 }
 
 // testCanvasSkeleton is the fixed structural shape every test canvas
@@ -234,7 +293,7 @@ const testCanvasSkeleton = `# Test
 // the stage's existing chain prompt (`[Y/n/o…]` / `[N/m/p…]`) walks
 // the rest. Headless cascade is no longer a `resume` flag — the
 // operator types `!<stage>` or `!!` at the chain prompt once they've
-// seen the canvas, the same vocabulary every other one-shot decision
+// seen the canvas, the same vocabulary every other headless decision
 // uses.
 //
 // Refuses missing or terminal runs at the boundary so a resume call
@@ -354,8 +413,8 @@ func requireRun(verb, projectID, runID string, stderr io.Writer) int {
 // canvas is missing or empty. The fail-loud invariant the design twin
 // records on the commit side carries into the read side: code can't
 // drive against a design that was never opened. Applies to both
-// interactive and `--one-shot` paths so an operator skipping straight
-// to `sdlc code` on a fresh run gets the same error either way.
+// interactive and headless paths so an operator skipping straight to
+// `sdlc code` on a fresh run gets the same error either way.
 func requireDesignCanvas(projectID, runID string) error {
 	return requirePriorCanvas(projectID, runID, "design", "code")
 }

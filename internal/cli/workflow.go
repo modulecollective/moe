@@ -240,7 +240,7 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 		}
 		// Forward progression counts when the successor's turn is at
 		// least as recent as the stage's. Strict After would flake on
-		// same-second commits — the design→code one-shot chain lands
+		// same-second commits — a design→code cascade chain lands
 		// both turns inside one tick of git's second-resolution
 		// committer time, and we want that case satisfied. The old
 		// backward-walking rule had the same precision limit on the

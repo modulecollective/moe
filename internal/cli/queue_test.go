@@ -426,7 +426,7 @@ type dispatchRecorder struct {
 	exit  func(it queue.Item) int
 }
 
-func (r *dispatchRecorder) record(it queue.Item, _ queueDispatchOpts, _, _ io.Writer) int {
+func (r *dispatchRecorder) record(it queue.Item, _, _ io.Writer) int {
 	r.mu.Lock()
 	r.calls = append(r.calls, it)
 	r.mu.Unlock()

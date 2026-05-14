@@ -1315,13 +1315,12 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 	}
 }
 
-// TestPushOneShotDispatchesSynthesisOnly verifies the new --one-shot
-// flag wires runPush to the synthesis-only path and never touches the
-// ship logic. With the chain-prompt synthesis hook stubbed at the
-// runStageSession seam, we can assert the runPush --one-shot call
-// invokes the push stage session headless and exits cleanly without
-// reaching pre-push hooks, branch push, or merge/PR.
-func TestPushOneShotDispatchesSynthesisOnly(t *testing.T) {
+// TestPushSynthesisDispatchesHeadlessStage verifies the headless
+// push-synthesis session is wired with the right stageSessionOpts
+// shape: headless, sandboxed, sonnet-pinned, post-turn chain prompt
+// suppressed, canvas skeleton seeded. Stubs runStageSession at the
+// seam runPushSynthesisSession goes through.
+func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	var capturedDoc string
 	var capturedOpts stageSessionOpts
 	prev := runStageSession
@@ -1333,14 +1332,14 @@ func TestPushOneShotDispatchesSynthesisOnly(t *testing.T) {
 	t.Cleanup(func() { runStageSession = prev })
 
 	var stdout, stderr bytes.Buffer
-	if code := runPush("sdlc", []string{"--one-shot", "tele", "fix-it"}, &stdout, &stderr); code != 0 {
+	if code := runPushSynthesisSession("tele", "fix-it", true, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if capturedDoc != "push" {
 		t.Fatalf("docID: want push, got %q", capturedDoc)
 	}
 	if !capturedOpts.Headless {
-		t.Errorf("Headless: want true (--one-shot path)")
+		t.Errorf("Headless: want true (synthesis is headless-only)")
 	}
 	if !capturedOpts.NeedsSandbox {
 		t.Errorf("NeedsSandbox: want true (synthesis runs in the run sandbox)")
@@ -1351,33 +1350,8 @@ func TestPushOneShotDispatchesSynthesisOnly(t *testing.T) {
 	if capturedOpts.CanvasSkeleton == "" {
 		t.Errorf("CanvasSkeleton: want non-empty (push canvas seeded with structural headings)")
 	}
-}
-
-// TestPushOneShotRejectedOnNonSdlc keeps --one-shot scoped to sdlc.
-// Other workflows have no synthesis stage today; surfacing a 2 exit
-// is cheaper than silently shipping (the old behaviour) or producing
-// an empty canvas (a confusing in-between).
-func TestPushOneShotRejectedOnNonSdlc(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := runPush("quick", []string{"--one-shot", "tele", "fix-it"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("exit=%d (want 2)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "--one-shot is sdlc-only") {
-		t.Errorf("expected sdlc-only error, got: %s", stderr.String())
-	}
-}
-
-// TestPushOneShotRejectedWithPR: --one-shot is synthesis-only and --pr
-// is a ship variant; combining them has no coherent meaning. Reject
-// with exit 2 so the operator sees the conflict instead of one flag
-// silently winning.
-func TestPushOneShotRejectedWithPR(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := runPush("sdlc", []string{"--one-shot", "--pr", "tele", "fix-it"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("exit=%d (want 2)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "mutually exclusive") {
-		t.Errorf("expected mutually-exclusive error, got: %s", stderr.String())
+	if capturedOpts.Model != "sonnet" {
+		t.Errorf("Model: want sonnet (bounded curation task), got %q", capturedOpts.Model)
 	}
 }
 

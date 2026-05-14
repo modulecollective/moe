@@ -83,10 +83,10 @@ esac
 `
 }
 
-// Per-stage --one-shot on design lands the canvas headlessly. The run
-// title flows through as the user prompt (not the interactive kickoff
-// string), so the agent gets the same context the chained one-shot
-// already exercises.
+// Headless design (via openSdlcDesign) lands the canvas without an
+// interactive turn. The run title flows through as the user prompt
+// (not the interactive kickoff string), so the agent gets the same
+// context the cascade and `o` keystroke produce.
 func TestRunDesignOneShot(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -118,8 +118,8 @@ exit 0
 	}
 	out.Reset()
 	errb.Reset()
-	if code := runDesign([]string{"--one-shot", "tele", "per-stage-design"}, &out, &errb); code != 0 {
-		t.Fatalf("runDesign --one-shot exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	if code := openSdlcDesign("tele", "per-stage-design", true, &out, &errb); code != 0 {
+		t.Fatalf("openSdlcDesign headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-design", "documents", "design", "content.md"))
@@ -148,9 +148,9 @@ exit 0
 	}
 }
 
-// Per-stage --one-shot on code runs under the sandbox clone with the
-// design canvas pre-seeded. Canvas lands; design canvas keeps the
-// content the design turn wrote.
+// Headless code (via openSdlcCode) runs under the sandbox clone with
+// the design canvas pre-seeded. Canvas lands; design canvas keeps
+// the content the design turn wrote.
 func TestRunCodeOneShot(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -169,8 +169,8 @@ func TestRunCodeOneShot(t *testing.T) {
 	// something to work against.
 	out.Reset()
 	errb.Reset()
-	if code := runDesign([]string{"--one-shot", "tele", "per-stage-code"}, &out, &errb); code != 0 {
-		t.Fatalf("runDesign --one-shot exit=%d stderr=%q", code, errb.String())
+	if code := openSdlcDesign("tele", "per-stage-code", true, &out, &errb); code != 0 {
+		t.Fatalf("openSdlcDesign headless exit=%d stderr=%q", code, errb.String())
 	}
 	designCanvas := filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "design", "content.md")
 	beforeDesign, err := os.ReadFile(designCanvas)
@@ -180,8 +180,8 @@ func TestRunCodeOneShot(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := runCode([]string{"--one-shot", "tele", "per-stage-code"}, &out, &errb); code != 0 {
-		t.Fatalf("runCode --one-shot exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	if code := openSdlcCode("tele", "per-stage-code", true, &out, &errb); code != 0 {
+		t.Fatalf("openSdlcCode headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "code", "content.md"))
@@ -232,20 +232,34 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 
-	for _, args := range [][]string{
-		{"tele", "no-design"},
-		{"--one-shot", "tele", "no-design"},
+	type codeCall struct {
+		label string
+		run   func(*bytes.Buffer, *bytes.Buffer) int
+	}
+	for _, call := range []codeCall{
+		{
+			label: "runCode interactive",
+			run: func(o, e *bytes.Buffer) int {
+				return runCode([]string{"tele", "no-design"}, o, e)
+			},
+		},
+		{
+			label: "openSdlcCode headless",
+			run: func(o, e *bytes.Buffer) int {
+				return openSdlcCode("tele", "no-design", true, o, e)
+			},
+		},
 	} {
 		out.Reset()
 		errb.Reset()
-		if code := runCode(args, &out, &errb); code == 0 {
-			t.Fatalf("expected refusal exit for %v, got 0; stdout=%q stderr=%q", args, out.String(), errb.String())
+		if code := call.run(&out, &errb); code == 0 {
+			t.Fatalf("expected refusal exit for %s, got 0; stdout=%q stderr=%q", call.label, out.String(), errb.String())
 		}
 		if !strings.Contains(errb.String(), "design canvas missing") {
-			t.Fatalf("expected design-canvas error for %v, got stderr=%q", args, errb.String())
+			t.Fatalf("expected design-canvas error for %s, got stderr=%q", call.label, errb.String())
 		}
 		if !strings.Contains(errb.String(), "moe sdlc design tele no-design") {
-			t.Fatalf("expected guidance to run design first for %v, got stderr=%q", args, errb.String())
+			t.Fatalf("expected guidance to run design first for %s, got stderr=%q", call.label, errb.String())
 		}
 	}
 
@@ -258,27 +272,33 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 }
 
 // promptStageNextStage offers [Y/n/o] for sdlc non-push stages and
-// `o` invokes the next stage with --one-shot prepended. Non-sdlc
+// `o` invokes the next stage headless via openSdlcStage. Non-sdlc
 // workflows keep the [Y/n] label and never see the o option. Mirrors
-// capturePromptDispatch's shape: stub the next.Run, pipe stdin, call
-// the helper directly so the test isn't bound to stdinIsTerminal().
+// capturePromptDispatch's shape: stub the headless seam (and the
+// interactive next.Run) for the test, pipe stdin, call the helper
+// directly so the test isn't bound to stdinIsTerminal().
 func TestPromptNextStageOfferOneShot(t *testing.T) {
 	cases := []struct {
 		name      string
 		workflow  string
 		input     string
 		wantLabel string
-		wantArgs  []string
+		// wantArgs records the interactive next.Run args. wantHeadless
+		// names the stage openSdlcStage should fire for; empty means
+		// the headless path must not be invoked.
+		wantArgs     []string
+		wantHeadless string
 	}{
-		{name: "sdlc-o-runs-headless", workflow: "sdlc", input: "o\n", wantLabel: "[Y/n/o]", wantArgs: []string{"--one-shot", "tele", "fix-it"}},
+		{name: "sdlc-o-runs-headless", workflow: "sdlc", input: "o\n", wantLabel: "[Y/n/o]", wantHeadless: "code"},
 		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
 		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
-		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/o]", wantArgs: nil},
-		{name: "kb-no-o-option", workflow: "kb", input: "o\n", wantLabel: "[Y/n]", wantArgs: nil},
+		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/o]"},
+		{name: "kb-no-o-option", workflow: "kb", input: "o\n", wantLabel: "[Y/n]"},
 		{name: "kb-default-runs", workflow: "kb", input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			headless := stubOpenSdlcStage(t, nil)
 			rec := &promptDispatchRecord{}
 			next := &Command{
 				Name: "code",
@@ -309,6 +329,18 @@ func TestPromptNextStageOfferOneShot(t *testing.T) {
 			}
 			if !strings.Contains(stdout.String(), tc.wantLabel) {
 				t.Fatalf("expected label %q in prompt, got: %q", tc.wantLabel, stdout.String())
+			}
+			if tc.wantHeadless != "" {
+				if len(*headless) != 1 || (*headless)[0].stage != tc.wantHeadless || (*headless)[0].projectID != "tele" || (*headless)[0].runID != "fix-it" {
+					t.Fatalf("openSdlcStage want one call for stage %q with (tele, fix-it), got: %+v", tc.wantHeadless, *headless)
+				}
+				if rec.ran {
+					t.Fatalf("interactive next.Run must not fire on `o`; got args=%v", rec.args)
+				}
+				return
+			}
+			if len(*headless) != 0 {
+				t.Fatalf("openSdlcStage must not fire for %q, got: %+v", tc.name, *headless)
 			}
 			if tc.wantArgs == nil {
 				if rec.ran {
