@@ -29,6 +29,16 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 		sections = append(sections, soul)
 	}
 
+	// Stage-location header lands before the stage fragment so the
+	// agent reads "you are at code, downstream is test, then push"
+	// *before* the code lens. The lens then answers "given that
+	// location, here's the job." Lets every fragment stay on-topic
+	// (the lens) and keeps neighbor-command names out of hand-written
+	// prose — see TestFragmentsDoNotMentionNeighborCommands.
+	if loc := stageLocationSection(md, docID); loc != "" {
+		sections = append(sections, loc)
+	}
+
 	if frag := moe.Stage(md.Workflow, docID); frag != "" {
 		sections = append(sections, frag)
 	}
@@ -56,6 +66,78 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 	}
 
 	return strings.Join(sections, "\n---\n\n"), nil
+}
+
+// stageLocationSection renders the generated "Stage location" block that
+// tells the agent where this stage sits in the workflow ladder and, when
+// applicable, the exact invocation the operator's chain prompt will
+// offer once this turn closes. Sourced from the workflow registry — the
+// DAG is canonical, the prose fragments stay on the lens (what to do at
+// this stage), not the location.
+//
+// Returns "" for unknown workflows or unregistered docIDs so an upstream
+// data bug fails by producing no header rather than a wrong one.
+// buildSystemPrompt drops empty sections the same way it drops a missing
+// stage fragment.
+func stageLocationSection(md *run.Metadata, docID string) string {
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return ""
+	}
+	stages := wf.Stages()
+	inLadder := false
+	for _, s := range stages {
+		if s == docID {
+			inLadder = true
+			break
+		}
+	}
+	if !inLadder {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("## Stage location\n\n")
+	fmt.Fprintf(&b, "Workflow: %s — %s\n", wf.Name, renderStageLadder(stages, docID))
+	fmt.Fprintf(&b, "You are at: %s\n", docID)
+
+	prereqs := wf.Prereqs(docID)
+	if len(prereqs) > 0 {
+		fmt.Fprintf(&b, "\nPrevious stage: %s\n", prereqs[0])
+	}
+
+	if next := wf.Successor(docID); next != "" {
+		// Same gate promptNextStage uses: only render the invocation
+		// hint when the paired CommandGroup actually has a runnable
+		// command for the successor. Stage names that live in the DAG
+		// without a matching verb (idea today) get a bare stage name
+		// and no hint.
+		fmt.Fprintf(&b, "Next stage: %s\n", next)
+		if g, err := LookupGroup(wf.Name); err == nil {
+			if cmd := g.Lookup(next); cmd != nil {
+				fmt.Fprintf(&b,
+					"  When this turn closes, the chain prompt will offer\n  `moe %s %s %s %s`.\n",
+					wf.Name, next, md.Project, md.ID)
+			}
+		}
+	}
+	return b.String()
+}
+
+// renderStageLadder returns the workflow's stages joined with → arrows,
+// with current emphasised in **bold**. The current stage is always
+// present in stages by stageLocationSection's caller — callers that
+// can't guarantee it must filter first.
+func renderStageLadder(stages []string, current string) string {
+	parts := make([]string, len(stages))
+	for i, s := range stages {
+		if s == current {
+			parts[i] = "**" + s + "**"
+		} else {
+			parts[i] = s
+		}
+	}
+	return strings.Join(parts, " → ")
 }
 
 // upstreamChangeBanner returns a system-prompt section listing prerequisite

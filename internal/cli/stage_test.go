@@ -156,9 +156,10 @@ func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 // TestBuildSystemPromptMissingFragmentIsNotAnError registers a
 // throwaway workflow with a stage that has no embedded fragment and
 // confirms buildSystemPrompt still returns (no error, no ghost empty
-// section). The soul section is always embedded so we still expect
-// exactly one separator — between soul and the operational core —
-// not two or more in a row from an empty stage insert.
+// section). Soul and the stage-location header are both unconditional
+// for a registered stage, so we expect three sections joined by two
+// separators (soul → location → core). A regression that re-introduced
+// an empty fragment insert would push the count to three in a row.
 func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf := registerThrowawayWorkflow(t, "noFragment")
@@ -171,10 +172,13 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	if !strings.Contains(got, "Your canvas for this document") {
 		t.Fatalf("core prompt missing:\n%s", got)
 	}
-	// Two sections (soul, core) → one separator. If Stage() had leaked
-	// an empty section we'd see the separator twice in a row.
-	if strings.Count(got, "\n---\n") != 1 {
-		t.Fatalf("expected exactly one separator (soul→core), got %d:\n%s",
+	if !strings.Contains(got, "## Stage location") {
+		t.Fatalf("stage-location header missing:\n%s", got)
+	}
+	// Three sections (soul, location, core) → two separators. If
+	// Stage() had leaked an empty section we'd see three.
+	if strings.Count(got, "\n---\n") != 2 {
+		t.Fatalf("expected exactly two separators (soul→location→core), got %d:\n%s",
 			strings.Count(got, "\n---\n"), got)
 	}
 }

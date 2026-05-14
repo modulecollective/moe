@@ -1,0 +1,123 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/modulecollective/moe/internal/run"
+)
+
+// TestStageLocationSectionSDLC pins the rendered header for each sdlc
+// stage. The header is the agent-facing replacement for the
+// neighbor-command prose the fragments used to carry; pinning the
+// expected substrings catches a future rendering bug at build time
+// rather than at "operator complained the agent said the wrong thing."
+func TestStageLocationSectionSDLC(t *testing.T) {
+	md := &run.Metadata{Project: "p", ID: "r", Workflow: "sdlc"}
+	cases := []struct {
+		stage string
+		want  []string
+		deny  []string
+	}{
+		{
+			stage: "design",
+			want: []string{
+				"## Stage location",
+				"Workflow: sdlc — **design** → code → test → push",
+				"You are at: design",
+				"Next stage: code",
+				"`moe sdlc code p r`.",
+			},
+			deny: []string{"Previous stage"},
+		},
+		{
+			stage: "code",
+			want: []string{
+				"Workflow: sdlc — design → **code** → test → push",
+				"You are at: code",
+				"Previous stage: design",
+				"Next stage: test",
+				"`moe sdlc test p r`.",
+			},
+		},
+		{
+			stage: "test",
+			want: []string{
+				"Workflow: sdlc — design → code → **test** → push",
+				"You are at: test",
+				"Previous stage: code",
+				"Next stage: push",
+				"`moe sdlc push p r`.",
+			},
+		},
+		{
+			stage: "push",
+			want: []string{
+				"Workflow: sdlc — design → code → test → **push**",
+				"You are at: push",
+				"Previous stage: test",
+			},
+			deny: []string{"Next stage"},
+		},
+	}
+	for _, tc := range cases {
+		got := stageLocationSection(md, tc.stage)
+		for _, sub := range tc.want {
+			if !strings.Contains(got, sub) {
+				t.Errorf("stage %q: missing %q in:\n%s", tc.stage, sub, got)
+			}
+		}
+		for _, sub := range tc.deny {
+			if strings.Contains(got, sub) {
+				t.Errorf("stage %q: unexpected %q in:\n%s", tc.stage, sub, got)
+			}
+		}
+	}
+}
+
+// TestStageLocationSectionUnknownStage returns "" for stages not in
+// the workflow's ladder — buildSystemPrompt then drops the section the
+// same way it drops a missing fragment, instead of rendering a header
+// that names a stage outside the workflow.
+func TestStageLocationSectionUnknownStage(t *testing.T) {
+	md := &run.Metadata{Project: "p", ID: "r", Workflow: "sdlc"}
+	if got := stageLocationSection(md, "bogus"); got != "" {
+		t.Errorf("expected empty for unknown stage, got:\n%s", got)
+	}
+}
+
+// TestStageLocationSectionUnknownWorkflow returns "" for an unregistered
+// workflow rather than a partial header. Symmetric with the unknown-
+// stage case — both are upstream data bugs and both should surface as
+// "no header" rather than wrong header.
+func TestStageLocationSectionUnknownWorkflow(t *testing.T) {
+	md := &run.Metadata{Project: "p", ID: "r", Workflow: "bogus"}
+	if got := stageLocationSection(md, "code"); got != "" {
+		t.Errorf("expected empty for unknown workflow, got:\n%s", got)
+	}
+}
+
+// TestStageLocationSectionIdeaStage exercises the single-stage / no-
+// runnable-verb branch: idea registers `idea` as its only stage and
+// has no `moe idea idea` verb, so the header renders the ladder and
+// the you-are-at line without a chain-prompt invocation hint and
+// without prev/next lines.
+func TestStageLocationSectionIdeaStage(t *testing.T) {
+	md := &run.Metadata{Project: "p", ID: "r", Workflow: "idea"}
+	got := stageLocationSection(md, "idea")
+	wantSubs := []string{
+		"## Stage location",
+		"Workflow: idea — **idea**",
+		"You are at: idea",
+	}
+	for _, sub := range wantSubs {
+		if !strings.Contains(got, sub) {
+			t.Errorf("missing %q in:\n%s", sub, got)
+		}
+	}
+	for _, sub := range []string{"Previous stage", "Next stage", "chain prompt will offer"} {
+		if strings.Contains(got, sub) {
+			t.Errorf("unexpected %q in:\n%s", sub, got)
+		}
+	}
+}
