@@ -132,13 +132,16 @@ type stageSessionOpts struct {
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
-// explicit (the stage caller's choice — flag, run.json, or hardcoded
-// for a non-stage caller), then $MOE_AGENT, then the "claude"
-// default. The same ladder is the operator-facing contract; keep this
-// helper as the single source.
-func resolveAgentName(explicit string) string {
+// explicit per-call override (--agent flag on this verb) → run-level
+// persisted default (run.json.Agent) → $MOE_AGENT → "claude". The
+// same ladder is the operator-facing contract; keep this helper as
+// the single source.
+func resolveAgentName(explicit, runDefault string) string {
 	if explicit != "" {
 		return explicit
+	}
+	if runDefault != "" {
+		return runDefault
 	}
 	if v := os.Getenv("MOE_AGENT"); v != "" {
 		return v
@@ -322,7 +325,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					resumeCwd = sessionCwd
 				}
 				if resumeCwd != "" {
-					a, agentErr := agent.Get(resolveAgentName(opts.Agent))
+					a, agentErr := agent.Get(resolveAgentName(opts.Agent, md.Agent))
 					if agentErr != nil {
 						return wikiTurnSpec{}, agentErr
 					}
@@ -368,7 +371,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
 				Model:            opts.Model,
-				Agent:            resolveAgentName(opts.Agent),
+				Agent:            resolveAgentName(opts.Agent, md.Agent),
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				SkipFinalize:     opts.SkipFinalize,
@@ -631,7 +634,15 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 
-	a, err := agent.Get(resolveAgentName(spec.Agent))
+	// spec.Agent is populated by runStageSession via resolveAgentName;
+	// test callers that build wikiTurnSpec directly may leave it empty.
+	// Fall back through the same ladder with no run default so the
+	// dispatch never sees an empty key.
+	agentName := spec.Agent
+	if agentName == "" {
+		agentName = resolveAgentName("", "")
+	}
+	a, err := agent.Get(agentName)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		closeBootstrapFailedSession(closeSess, stderr)

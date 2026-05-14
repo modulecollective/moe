@@ -74,7 +74,16 @@ type Metadata struct {
 	// every later verb (stage session, push, close, sync, shell)
 	// routes off it. omitempty keeps run.json bodies of pre-workspace
 	// runs unchanged so diffs and tests stay clean.
-	Workspace string               `json:"workspace,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// Agent names the backend (claude / codex) that should drive
+	// every stage turn on this run. Empty falls through to
+	// $MOE_AGENT, then "claude". Persisted at run-open via
+	// `--agent <name>` on `sdlc new` so cross-machine `sdlc resume`
+	// picks up the same backend without having to re-pass the flag.
+	// Per-stage overrides (`--agent codex` on a single stage) read
+	// past this value but do not write back — the run-level default
+	// is sticky.
+	Agent     string               `json:"agent,omitempty"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -138,6 +147,14 @@ type Options struct {
 	// workspace itself is materialised lazily on first attach
 	// (sdlc code) or shell drop-in.
 	Workspace string
+
+	// Agent, when non-empty, names the agent backend that should
+	// drive stage turns on this run. Persisted to Metadata.Agent.
+	// Stage callers thread this through stageSessionOpts.Agent so
+	// resolveAgentName picks it up over $MOE_AGENT / the "claude"
+	// default. Empty leaves Metadata.Agent unset; the same precedence
+	// then runs unchanged.
+	Agent string
 
 	// AllowDirty bypasses the working-tree-clean precondition. The
 	// guardrail is there so a stray edit doesn't ride along on the
@@ -279,6 +296,7 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		Title:     title,
 		Status:    StatusInProgress,
 		Workflow:  opts.Workflow,
+		Agent:     opts.Agent,
 		Created:   now().Local().Format("2006-01-02"),
 		Workspace: opts.Workspace,
 		Documents: map[string]*Document{},

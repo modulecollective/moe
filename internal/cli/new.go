@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -58,8 +59,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// shared `new` facade and we reject it for non-sdlc workflows
 	// below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc only) attach this run to the named per-project workspace at .moe/named/<project>/<name>/ instead of a fresh per-run sandbox")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Persisted to run.json; defaults to $MOE_AGENT then claude")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--workspace <name>] <project> [\"title\"]\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--workspace <name>] [--agent <name>] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -77,6 +79,15 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if err := workspace.ValidateName(*workspaceName); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
+	// Validate --agent against the registry up-front so a typo surfaces
+	// at run open rather than at first stage turn. Empty (the steady
+	// state) skips validation — resolveAgentName fills it in later.
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 2
 		}
@@ -110,6 +121,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		ID:        *idOverride,
 		Workflow:  workflowName,
 		Workspace: *workspaceName,
+		Agent:     *agentOverride,
 	}
 
 	// Keep a handle on the source idea run so we can bump its status

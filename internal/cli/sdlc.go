@@ -73,10 +73,11 @@ func init() {
 func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc design", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc design <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc design [--agent <name>] <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the design canvas.")
+		moePrintln(stderr, "Opens an interactive agent session on the design canvas.")
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -86,16 +87,17 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc code <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc code [--agent <name>] <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the code canvas. The agent")
+		moePrintln(stderr, "Opens an interactive agent session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
 		moePrintln(stderr, "from other activity until `moe sdlc push` opens a PR.")
 	}
@@ -106,16 +108,17 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc test", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc test <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc test [--agent <name>] <project> <run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the test canvas. The agent")
+		moePrintln(stderr, "Opens an interactive agent session on the test canvas. The agent")
 		moePrintln(stderr, "verifies the code stage's work — running the project's checks, driving")
 		moePrintln(stderr, "the change end-to-end, applying small in-place fixes, and narrating what")
 		moePrintln(stderr, "was and wasn't verified on the canvas. Pre-push hooks still gate ship.")
@@ -127,7 +130,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, stdout, stderr)
+	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
@@ -139,25 +142,25 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 // path that used to be `--one-shot`; the flag is gone, but the Go
 // function still distinguishes the two so internal callers can ask
 // for the bounded one-turn variant without re-entering the parser.
-func openSdlcDesign(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+func openSdlcDesign(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc design", projectID, runID, stderr); code != 0 {
 		return code
 	}
 	if headless {
 		return runStageSession(projectID, runID, "design",
-			stageSessionOpts{Headless: true}, stdout, stderr)
+			stageSessionOpts{Headless: true, Agent: agentOverride}, stdout, stderr)
 	}
-	// The agent produces the user-facing cue itself: Claude Code has no
-	// way to pre-seed the input box with editable text, so instead of a
-	// printed banner (which the TUI would cover on launch) we ask the
-	// agent to greet the operator and prompt for input.
+	// The agent produces the user-facing cue itself: the interactive TUI
+	// has no way to pre-seed the input box with editable text, so instead
+	// of a printed banner (which the TUI would cover on launch) we ask
+	// the agent to greet the operator and prompt for input.
 	const kickoff = "The operator just opened this design session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"design stands (fresh start vs. resumed) and ask what they'd like to " +
 		"work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "design",
-		stageSessionOpts{InitialPrompt: kickoff}, stdout, stderr)
+		stageSessionOpts{InitialPrompt: kickoff, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcCode is the Go-level seam behind `moe sdlc code`. See
@@ -167,7 +170,7 @@ func openSdlcDesign(projectID, runID string, headless bool, stdout, stderr io.Wr
 // run-validation step runs *before* the canvas check so a wrong-
 // project typo surfaces as "run not found" instead of sending the
 // operator off to run a design stage that's also going to fail.
-func openSdlcCode(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+func openSdlcCode(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc code", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -177,7 +180,7 @@ func openSdlcCode(projectID, runID string, headless bool, stdout, stderr io.Writ
 	}
 	if headless {
 		return runStageSession(projectID, runID, "code",
-			stageSessionOpts{NeedsSandbox: true, Headless: true}, stdout, stderr)
+			stageSessionOpts{NeedsSandbox: true, Headless: true, Agent: agentOverride}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this code session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
@@ -185,7 +188,7 @@ func openSdlcCode(projectID, runID string, headless bool, stdout, stderr io.Writ
 		"implementation stands (fresh start vs. resumed) and ask what they'd " +
 		"like to work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "code",
-		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff}, stdout, stderr)
+		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
@@ -193,7 +196,7 @@ func openSdlcCode(projectID, runID string, headless bool, stdout, stderr io.Writ
 // stands in for requireDesignCanvas, and the canvas skeleton wires
 // in so the agent's first read sees the structural shape it has to
 // fill.
-func openSdlcTest(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+func openSdlcTest(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc test", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -207,6 +210,7 @@ func openSdlcTest(projectID, runID string, headless bool, stdout, stderr io.Writ
 				NeedsSandbox:   true,
 				Headless:       true,
 				CanvasSkeleton: testCanvasSkeleton,
+				Agent:          agentOverride,
 			}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this test session. " +
@@ -219,6 +223,7 @@ func openSdlcTest(projectID, runID string, headless bool, stdout, stderr io.Writ
 			NeedsSandbox:   true,
 			InitialPrompt:  kickoff,
 			CanvasSkeleton: testCanvasSkeleton,
+			Agent:          agentOverride,
 		}, stdout, stderr)
 }
 
@@ -248,13 +253,16 @@ var openSdlcStage func(stage, projectID, runID string, stdout, stderr io.Writer)
 
 func init() {
 	openSdlcStage = func(stage, projectID, runID string, stdout, stderr io.Writer) int {
+		// Chain / cascade entry: no per-call --agent override. The run's
+		// persisted agent (from run.json) takes over inside
+		// runStageSession.
 		switch stage {
 		case "design":
-			return openSdlcDesign(projectID, runID, true, stdout, stderr)
+			return openSdlcDesign(projectID, runID, true, "", stdout, stderr)
 		case "code":
-			return openSdlcCode(projectID, runID, true, stdout, stderr)
+			return openSdlcCode(projectID, runID, true, "", stdout, stderr)
 		case "test":
-			return openSdlcTest(projectID, runID, true, stdout, stderr)
+			return openSdlcTest(projectID, runID, true, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "sdlc: openSdlcStage: unknown stage %q\n", stage)
 			return 1
