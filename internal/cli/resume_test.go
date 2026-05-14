@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
@@ -46,7 +47,7 @@ func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
 func TestSdlcResumeRefusesMissingRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 

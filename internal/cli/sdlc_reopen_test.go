@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // seedClosedSDLCRun composes a closed sdlc run with a populated design
@@ -161,7 +162,7 @@ func TestSDLCReopenRefusesInProgress(t *testing.T) {
 func TestSDLCReopenRefusesMissingRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -289,8 +290,8 @@ func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "kb-dead", "kb", run.StatusClosed)
-	commitTrailer(t, root, "Close kb run tele kb-dead",
+	trailerstest.SeedRun(t, root, "tele", "kb-dead", "kb", run.StatusClosed)
+	trailerstest.CommitTrailer(t, root, "Close kb run tele kb-dead",
 		"MoE-Run: kb-dead\nMoE-Project: tele\nMoE-Workflow: kb",
 		time.Now().UTC().Add(-2*24*time.Hour))
 

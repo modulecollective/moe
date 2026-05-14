@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestWorkflowNextWalksStages exercises the satisfaction logic in the
@@ -36,7 +37,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +46,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after design (no code yet): expected stage design (parked), got kind=%v name=%q", kind, next)
 	}
 
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +87,11 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
 	// Design reworked after the code turn — design becomes parked
 	// again, awaiting a fresh code turn.
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0.Add(2*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0.Add(2*time.Hour))
 
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
@@ -102,7 +103,7 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 
 	// Land a fresh code turn — design's successor is now newer than
 	// design, so design satisfies and code becomes the parked stage.
-	commitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(3*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(3*time.Hour))
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -157,8 +158,8 @@ func TestWorkflowNextIgnoresOtherProjectSameSlug(t *testing.T) {
 	}
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	// Project "a" has a full sdlc run for slug "fix-bug".
-	commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour))
 
 	// Project "b" opens the same slug fresh. Should start at design.
 	md := &run.Metadata{ID: "fix-bug", Project: "b", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -228,10 +229,10 @@ func TestWorkflowNextWithIndexMatchesForkingPath(t *testing.T) {
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	checkpoints := []func(){
 		func() {},
-		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0) },
-		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour)) },
-		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(2*time.Hour)) },
-		func() { commitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(3*time.Hour)) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour)) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(2*time.Hour)) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(3*time.Hour)) },
 	}
 	for i, step := range checkpoints {
 		step()

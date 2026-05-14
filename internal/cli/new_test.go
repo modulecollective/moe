@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // todayDateSuffix returns the current local date in YYYY-MM-DD form —
@@ -54,7 +56,7 @@ func suppressNextStagePrompt(t *testing.T) {
 func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -138,7 +140,7 @@ func TestRunNewFromIdeaExplicitTitleOverridesIdeaTitle(t *testing.T) {
 	// the rename, they pass --id.
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -168,7 +170,7 @@ func TestRunNewFromIdeaExplicitTitleOverridesIdeaTitle(t *testing.T) {
 func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -191,7 +193,7 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 func TestRunNewFromIdeaErrorsOnMissingIdea(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -211,7 +213,7 @@ func TestRunNewFromIdeaRefusesPromotedIdea(t *testing.T) {
 	// across two runs — refuse the second attempt.
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -238,7 +240,7 @@ func TestRunNewFromIdeaRefusesPromotedIdea(t *testing.T) {
 func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -263,7 +265,7 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -280,7 +282,7 @@ func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
 func TestRunNewRequiresTitleWithoutFromIdea(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // fastQueueCountdown shrinks the per-tick interval so a 3-tick
@@ -99,7 +100,7 @@ func TestQueueRegistered(t *testing.T) {
 func TestQueueAddRefusesMissingRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -165,7 +166,7 @@ func TestQueueAddRejectsDuplicate(t *testing.T) {
 func TestQueueAddIdeaLazy(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	captureIdea(t, "tele", "Promote me")
@@ -202,7 +203,7 @@ func TestQueueAddIdeaLazy(t *testing.T) {
 func TestQueueAddIdeaRefusesMissing(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -246,7 +247,7 @@ func TestQueueAddIdeaRefusesWrongWorkflow(t *testing.T) {
 func TestQueueAddFromIdeaFlagRemoved(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -766,7 +767,7 @@ func TestQueueRunStopsOnSignalDuringCountdown(t *testing.T) {
 func TestQueueListPreviewsIdeaItem(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	captureIdea(t, "tele", "Promote me lazy")

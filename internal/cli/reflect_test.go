@@ -11,6 +11,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -452,7 +453,7 @@ func writeFeedbackAndCommit(t *testing.T, root, projectID, runID, recipient, bod
 		t.Fatal(err)
 	}
 	gittest.Run(t, root, "add", "--", rel)
-	commitTrailer(t, root, "work: add feedback "+recipient,
+	trailerstest.CommitTrailer(t, root, "work: add feedback "+recipient,
 		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, when)
 }
 

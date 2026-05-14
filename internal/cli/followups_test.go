@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // writeFollowups drops a followups.md alongside run.json without committing.
@@ -621,7 +622,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 func TestIdeaCloseDoesNotHarvestFollowups(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)

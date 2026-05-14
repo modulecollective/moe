@@ -16,44 +16,9 @@ import (
 	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 	"github.com/modulecollective/moe/internal/wiki"
 )
-
-// seedRun writes a minimal run.json + project.json pair under root so
-// moe dash's scan finds it. The opening commit is what newTestBureaucracy
-// plus commitTrailer supply — tests add work/sign trailers on top.
-func seedRun(t *testing.T, root, projectID, runID, workflow, status string) *run.Metadata {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "projects", projectID), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(root, "projects", projectID, "project.json"),
-		[]byte(`{"id":"`+projectID+`"}`),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-	md := &run.Metadata{
-		ID:        runID,
-		Project:   projectID,
-		Title:     "T",
-		Status:    status,
-		Workflow:  workflow,
-		Created:   "2026-04-01",
-		Documents: map[string]*run.Document{},
-	}
-	if err := run.Save(root, md); err != nil {
-		t.Fatal(err)
-	}
-	// Commit it so git log --grep=MoE-Run finds the run at all.
-	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
-	projectJSONRel := filepath.Join("projects", projectID, "project.json")
-	gittest.Run(t, root, "add", runJSONRel, projectJSONRel)
-	commitTrailer(t, root, "Open run "+projectID+"/"+runID+": T",
-		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, time.Time{})
-	return md
-}
 
 func writeContent(t *testing.T, root, projectID, runID, docID, body string) {
 	t.Helper()
@@ -112,7 +77,7 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 	// Relative to now so the work-turn timestamps stay inside the
 	// 30-day dormancy cutoff regardless of when the suite runs. The
@@ -120,8 +85,8 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	// 30+ days past that, dash filtered the run out and the test
 	// failed for date-decay reasons unrelated to what it's checking.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -151,7 +116,7 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
 	// Relative to now so the work-turn timestamps stay inside the
@@ -160,9 +125,9 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	// 30+ days past that, dash filtered the run out and the test
 	// failed for date-decay reasons unrelated to what it's checking.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -186,7 +151,7 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -212,8 +177,8 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
-	commitTrailer(t, root, "push: fix-it",
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
+	trailerstest.CommitTrailer(t, root, "push: fix-it",
 		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
@@ -242,8 +207,8 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusMerged)
-	commitTrailer(t, root, "push: fix-it merged",
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusMerged)
+	trailerstest.CommitTrailer(t, root, "push: fix-it merged",
 		"MoE-Run: fix-it\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
@@ -271,8 +236,8 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusClosed)
-	commitTrailer(t, root, "push: fix-it closed",
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusClosed)
+	trailerstest.CommitTrailer(t, root, "push: fix-it closed",
 		"MoE-Run: fix-it\nMoE-Closed: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
@@ -302,10 +267,10 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
 	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
-	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "summarize", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "lookup", "kb", "summarize", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -332,9 +297,9 @@ func TestDashKBRunAfterResearchShowsResearchParked(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
 	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "lookup", "kb", "research", t0)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -353,8 +318,8 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "old-one", "sdlc", run.StatusInProgress)
-	commitTrailer(t, root, "work: update spec",
+	trailerstest.SeedRun(t, root, "tele", "old-one", "sdlc", run.StatusInProgress)
+	trailerstest.CommitTrailer(t, root, "work: update spec",
 		"MoE-Run: old-one\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
@@ -386,13 +351,13 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
-	commitTrailer(t, root, "work: update spec",
+	trailerstest.SeedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
+	trailerstest.CommitTrailer(t, root, "work: update spec",
 		"MoE-Run: older\nMoE-Document: spec",
 		time.Now().UTC().Add(-3*24*time.Hour))
 
-	seedRun(t, root, "tele", "newer", "sdlc", run.StatusInProgress)
-	commitTrailer(t, root, "work: update spec",
+	trailerstest.SeedRun(t, root, "tele", "newer", "sdlc", run.StatusInProgress)
+	trailerstest.CommitTrailer(t, root, "work: update spec",
 		"MoE-Run: newer\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))
 
@@ -415,7 +380,7 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -518,8 +483,8 @@ func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-a", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "tele", "fix-b", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-a", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-b", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -549,8 +514,8 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 	// the newer slugs to the top of the section.
 	for i := 0; i < 12; i++ {
 		slug := fmt.Sprintf("done-%02d", i)
-		seedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
-		commitTrailer(t, root, "push: "+slug+" merged",
+		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
+		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
 			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
@@ -614,13 +579,13 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	idea := seedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
+	idea := trailerstest.SeedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
 	idea.Title = "Cross-project search"
 	if err := run.Save(root, idea); err != nil {
 		t.Fatal(err)
 	}
-	seedRun(t, root, "tele", "search-impl", "sdlc", run.StatusInProgress)
-	commitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
+	trailerstest.SeedRun(t, root, "tele", "search-impl", "sdlc", run.StatusInProgress)
+	trailerstest.CommitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
 		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
 		time.Time{})
 
@@ -646,8 +611,8 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "ghost-idea", ideaWorkflow, run.StatusPromoted)
-	commitTrailer(t, root, "Promote idea tele/ghost-idea → tele/never-seeded",
+	trailerstest.SeedRun(t, root, "tele", "ghost-idea", ideaWorkflow, run.StatusPromoted)
+	trailerstest.CommitTrailer(t, root, "Promote idea tele/ghost-idea → tele/never-seeded",
 		"MoE-Run: ghost-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/never-seeded",
 		time.Time{})
 
@@ -675,8 +640,8 @@ func TestDashFilterByProject(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "bar", "beta", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "bar", "beta", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash", "--project", "foo"}, &out, &errb)
@@ -703,8 +668,8 @@ func TestDashFilterByWorkflow(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "lookup", "kb", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash", "--workflow", "kb"}, &out, &errb)
@@ -731,9 +696,9 @@ func TestDashFilterCombined(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "foo", "lookup", "kb", run.StatusInProgress)
-	seedRun(t, root, "bar", "lookup", "kb", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "foo", "lookup", "kb", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "bar", "lookup", "kb", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash", "--project", "foo", "--workflow", "kb"}, &out, &errb)
@@ -764,7 +729,7 @@ func TestDashFilterUnknownReturnsEmpty(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash", "--project", "bogus"}, &out, &errb)
@@ -794,8 +759,8 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 
 	for i := 0; i < 12; i++ {
 		slug := fmt.Sprintf("done-%02d", i)
-		seedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
-		commitTrailer(t, root, "push: "+slug+" merged",
+		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
+		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
 			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
@@ -859,7 +824,7 @@ func seedTwinSession(t *testing.T, root, projectID, slug, docID string, when tim
 		filepath.Join("projects", projectID, "digital-twin", "log.md"))
 	trailers := fmt.Sprintf("MoE-Run: %s\nMoE-Project: %s\nMoE-Workflow: twin\nMoE-Document: %s",
 		slug, projectID, docID)
-	commitTrailer(t, root, "twin: "+slug, trailers, when)
+	trailerstest.CommitTrailer(t, root, "twin: "+slug, trailers, when)
 }
 
 // seedTwinProject sets up a project.json + bare digital-twin/ dir so
@@ -1185,8 +1150,8 @@ func TestDashQueuedRunGetsMarker(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "queued-one", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "tele", "loose-one", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "queued-one", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "loose-one", "sdlc", run.StatusInProgress)
 	if err := queue.Save(root, []queue.Item{
 		{Workflow: "sdlc", Project: "tele", Run: "queued-one"},
 	}); err != nil {
@@ -1220,7 +1185,7 @@ func TestDashMissingQueueFileNoError(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -1245,7 +1210,7 @@ func TestDashCorruptQueueFileSilent(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1280,16 +1245,16 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	// Relative to now so the work-turn timestamps stay inside the
 	// 30-day dormancy cutoff regardless of when the suite runs. The
 	// fixture used to use a hard-coded April 10 2026; once "now" was
 	// 30+ days past that, dash filtered the run out and the test
 	// failed for date-decay reasons unrelated to what it's checking.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 	// design + code signed: parked at code under the forward-walking rule.
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
@@ -1319,7 +1284,7 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	// Fresh run with no work turns: parked at design.
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -1347,7 +1312,7 @@ func TestDashOpenSessionAndQueuedStackInOrder(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	if err := queue.Save(root, []queue.Item{
 		{Workflow: "sdlc", Project: "tele", Run: "fix-it"},
 	}); err != nil {
@@ -1379,7 +1344,7 @@ func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -1695,7 +1660,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	// Fresh sdlc run: parked at design.
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)

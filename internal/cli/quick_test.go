@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestQuickRegistered partners with TestSDLCRegistered and
@@ -85,7 +86,7 @@ func TestQuickWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "p", "r", "quick", "code", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "quick", "code", t0)
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +152,7 @@ func TestBuildSystemPromptInjectsCrossRunBlockAtQuickCode(t *testing.T) {
 func TestRunNewFromIdeaSeedsQuickFirstStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)

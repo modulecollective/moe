@@ -10,6 +10,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // seedCloseFixture composes the test setup every close test wants: a
@@ -22,7 +23,7 @@ func seedCloseFixture(t *testing.T, projectID, runID, workflow, status string) s
 	markBureaucracy(t, root)
 	gittest.Run(t, root, "add", "bureaucracy.conf")
 	gittest.Run(t, root, "commit", "-m", "mark bureaucracy")
-	seedRun(t, root, projectID, runID, workflow, status)
+	trailerstest.SeedRun(t, root, projectID, runID, workflow, status)
 	return root
 }
 
@@ -169,7 +170,7 @@ func TestSDLCCloseWorkflowMismatch(t *testing.T) {
 func TestSDLCCloseMissingRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele") // seedProject commits everything pending, including the marker
+	trailerstest.SeedProject(t, root, "tele") // seedProject commits everything pending, including the marker
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -369,7 +370,7 @@ func TestMetaMoeCloseBumpsStatusAndCommits(t *testing.T) {
 func TestMetaMoeCloseMissingRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 

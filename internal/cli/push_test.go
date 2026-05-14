@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // pushFixture wires together the moving pieces runPush expects:
@@ -65,7 +66,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 
 	// Seed the run first — seedRun writes a minimal project.json, so
 	// we overwrite it afterwards with the fields push/project.Load need.
-	seedRun(t, root, projectID, runID, "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, projectID, runID, "sdlc", run.StatusInProgress)
 	writeFile(t, filepath.Join(root, "projects", projectID, "project.json"),
 		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
 	gittest.Run(t, root, "add", ".gitmodules", subPath, filepath.Join("projects", projectID, "project.json"))

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestKBRegistered is the partner to TestSDLCRegistered: it guards
@@ -124,7 +125,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "p", "r", "kb", "research", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "kb", "research", t0)
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +134,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after research (no summarize yet): expected stage research (parked), got kind=%v name=%q", kind, next)
 	}
 
-	commitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "kb", "summarize", t0.Add(time.Hour))
 	_, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)

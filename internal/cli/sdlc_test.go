@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestSDLCDesignWrongProjectFailsFast: a typo on the project (or run)
@@ -19,7 +20,7 @@ import (
 func TestSDLCDesignWrongProjectFailsFast(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -49,7 +50,7 @@ func TestSDLCDesignWrongProjectFailsFast(t *testing.T) {
 func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -93,7 +94,7 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 func TestRequireDesignCanvasAcceptsEditedCanvas(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -204,7 +205,7 @@ func findFirstRunID(t *testing.T, root, projectID string) string {
 func TestSDLCCodeWrongProjectSaysRunNotFound(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 

@@ -9,26 +9,8 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
-
-// seedProject writes a minimal project.json so the project-registered
-// check in idea/runNew passes. Commits everything currently pending
-// (including the bureaucracy.conf marker laid down by markBureaucracy)
-// so the tree is clean for commands that refuse to run on a dirty
-// working tree.
-func seedProject(t *testing.T, root, projectID string) {
-	t.Helper()
-	dir := filepath.Join(root, "projects", projectID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "project.json"),
-		[]byte(`{"id":"`+projectID+`"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gittest.Run(t, root, "add", "-A")
-	gittest.Run(t, root, "commit", "-m", "register project "+projectID)
-}
 
 // stubEditor points EDITOR at `true` — a no-op that exits 0 — so
 // launchEditor spawns something real but non-interactive. Satisfies
@@ -87,7 +69,7 @@ func TestBuildIdeaChatPromptSectionsEndWithNewline(t *testing.T) {
 func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -134,7 +116,7 @@ func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -177,7 +159,7 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -197,7 +179,7 @@ func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -221,7 +203,7 @@ func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
 func TestIdeaNewTolerantToFlagAfterPositional(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -244,7 +226,7 @@ func TestIdeaNewTolerantToFlagAfterPositional(t *testing.T) {
 func TestIdeaNewRequiresEditor(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	noEditor(t)
@@ -290,7 +272,7 @@ func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
 func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -312,7 +294,7 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -349,7 +331,7 @@ func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -388,7 +370,7 @@ func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 func TestIdeaListEmptyProjectIsZero(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -407,7 +389,7 @@ func TestIdeaListEmptyProjectIsZero(t *testing.T) {
 func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -461,7 +443,7 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 func TestIdeaEditNoChangeDoesNotCommit(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -490,7 +472,7 @@ func TestIdeaEditNoChangeDoesNotCommit(t *testing.T) {
 func TestIdeaEditMissingSlug(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -508,7 +490,7 @@ func TestIdeaEditMissingSlug(t *testing.T) {
 func TestIdeaEditRequiresEditor(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -531,7 +513,7 @@ func TestIdeaEditRequiresEditor(t *testing.T) {
 func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -558,7 +540,7 @@ func TestIdeaEditRefusesNonIdeaRun(t *testing.T) {
 	// since ideas and other runs share one slug namespace per project.
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -580,7 +562,7 @@ func TestIdeaEditRefusesNonIdeaRun(t *testing.T) {
 func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -624,7 +606,7 @@ func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 func TestIdeaCloseMissingSlug(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -642,7 +624,7 @@ func TestIdeaCloseMissingSlug(t *testing.T) {
 func TestIdeaCloseRejectsAlreadyClosed(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -681,7 +663,7 @@ func TestIdeaCloseUsageErrorsOnMissingArgs(t *testing.T) {
 func TestIdeaCatPrintsCanvas(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -707,7 +689,7 @@ func TestIdeaCatPrintsCanvas(t *testing.T) {
 func TestIdeaCatUnknownSlug(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -729,7 +711,7 @@ func TestIdeaCatUnknownSlug(t *testing.T) {
 func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -753,7 +735,7 @@ func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
 func TestIdeaCatStatusAgnostic(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
@@ -814,7 +796,7 @@ func TestBuildIdeaChatPromptHasAllSections(t *testing.T) {
 func TestIdeaNewChatSkipsEditorGate(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	noEditor(t)
@@ -864,7 +846,7 @@ exit 0
 func TestIdeaEditChatSkipsEditorGate(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
-	seedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 

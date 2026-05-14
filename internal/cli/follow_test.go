@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestPickFollowTargetEmpty: no runs registered → no candidate, no
@@ -44,7 +45,7 @@ func TestPickFollowTargetParkedNotACandidate(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
 	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
@@ -68,7 +69,7 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -105,7 +106,7 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeProjectJSONWithDefaults(t, root, "tele", "develop")
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
@@ -155,7 +156,7 @@ func TestPickFollowTargetLiveCodeSessionWithoutSandboxIdles(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeProjectJSONWithDefaults(t, root, "tele", "main")
 	sess, err := session.Open(root, "tele", "fix-it", "code")
 	if err != nil {
@@ -182,10 +183,10 @@ func TestPickFollowTargetSessionOnDesignBeatsParkedElsewhere(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	commitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
 	// Parked at code; open a design session — design's worktree wins
 	// over the parked-at-code state.
 	sess, err := session.Open(root, "tele", "fix-it", "design")
@@ -212,9 +213,9 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 	markBureaucracy(t, root)
 
 	// Live: design committed (parked at code), open session on design.
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitWorkTurnAt(t, root, "tele", "alpha", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "alpha", "sdlc", "design", t0)
 	sessA, err := session.Open(root, "tele", "alpha", "design")
 	if err != nil {
 		t.Fatalf("session.Open alpha: %v", err)
@@ -223,8 +224,8 @@ func TestPickFollowTargetLiveOnly(t *testing.T) {
 
 	// Parked-only: fresh run, more recent activity than alpha's design
 	// commit but no open session — must not surface.
-	seedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
-	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
+	trailerstest.SeedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
+	trailerstest.CommitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(2*time.Hour))
 
 	target, _, err := pickFollowTarget(root, "", "")
@@ -246,11 +247,11 @@ func TestPickFollowTargetMostRecentLiveWins(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	commitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele", t0)
-	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
+	trailerstest.CommitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele", t0)
+	trailerstest.CommitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: tele",
 		t0.Add(time.Hour))
 
 	sessA, err := session.Open(root, "tele", "alpha", "design")
@@ -281,8 +282,8 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "beta", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	// alpha is the natural recency winner …
 	sessA, err := session.Open(root, "tele", "alpha", "design")
@@ -290,7 +291,7 @@ func TestPickFollowTargetRunFilterPinsSpecificRun(t *testing.T) {
 		t.Fatalf("session.Open alpha: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Abandon(sessA) })
-	commitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele",
+	trailerstest.CommitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele",
 		t0.Add(time.Hour))
 	// … but pin to beta. Beta needs an open session for the pin to
 	// land — pin overrides recency, not liveness.
@@ -317,7 +318,7 @@ func TestPickFollowTargetRunFilterWithoutLiveSessionIdles(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
 
 	target, _, err := pickFollowTarget(root, "", "alpha")
 	if err != nil {
@@ -337,8 +338,8 @@ func TestPickFollowTargetSkipsTerminalAndPushed(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "merged-one", "sdlc", run.StatusMerged)
-	seedRun(t, root, "tele", "shipped", "sdlc", run.StatusPushed)
+	trailerstest.SeedRun(t, root, "tele", "merged-one", "sdlc", run.StatusMerged)
+	trailerstest.SeedRun(t, root, "tele", "shipped", "sdlc", run.StatusPushed)
 
 	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
@@ -362,7 +363,7 @@ func TestPickFollowTargetIdeaRunsExcluded(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "captured", "idea", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "captured", "idea", run.StatusInProgress)
 
 	target, sum, err := pickFollowTarget(root, "", "")
 	if err != nil {
@@ -385,12 +386,12 @@ func TestPickFollowTargetProjectFilterNarrowsCandidates(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
-	seedRun(t, root, "other", "beta", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "alpha", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "other", "beta", "sdlc", run.StatusInProgress)
 	t0 := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	// alpha first, beta later → beta is the natural recency winner.
-	commitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele", t0)
-	commitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: other",
+	trailerstest.CommitTrailer(t, root, "touch alpha", "MoE-Run: alpha\nMoE-Project: tele", t0)
+	trailerstest.CommitTrailer(t, root, "touch beta", "MoE-Run: beta\nMoE-Project: other",
 		t0.Add(time.Hour))
 
 	sessA, err := session.Open(root, "tele", "alpha", "design")
@@ -427,7 +428,7 @@ func TestResolveFollowTargetUsesMergeBaseForNonCode(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -446,7 +447,7 @@ func TestResolveFollowTargetUsesMergeBaseForNonCode(t *testing.T) {
 	// merge-base must stay anchored at the divergence point (not
 	// advance to the new main HEAD), so the unrelated commit doesn't
 	// retroactively appear in the diff base.
-	commitTrailer(t, root, "unrelated work on main", "MoE-Run: other\n", time.Time{})
+	trailerstest.CommitTrailer(t, root, "unrelated work on main", "MoE-Run: other\n", time.Time{})
 
 	md := &run.Metadata{
 		ID: "fix-it", Project: "tele", Workflow: "sdlc",
@@ -526,7 +527,7 @@ func TestRunFollowDefaultHumanForm(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -564,7 +565,7 @@ func TestRunFollowPathOnly(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -594,7 +595,7 @@ func TestRunFollowBaseOnly(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -625,7 +626,7 @@ func TestRunFollowDirOnly(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
@@ -683,7 +684,7 @@ func TestRunFollowShell(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	seedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	sess, err := session.Open(root, "tele", "fix-it", "design")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)

@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // sha1New is a thin alias so sha1Sum doesn't have to import crypto/sha1
@@ -180,7 +181,7 @@ func newReconcileFixture(t *testing.T, status string) *reconcileFixture {
 
 	// push-record commit carrying the MoE-PR trailer — mirrors what
 	// runPush writes after opening the PR.
-	commitTrailer(t, root, "push: "+projectID+"/"+runID,
+	trailerstest.CommitTrailer(t, root, "push: "+projectID+"/"+runID,
 		"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Document: push\nMoE-PR: "+prURL,
 		time.Now().UTC())
 
