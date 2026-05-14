@@ -103,7 +103,7 @@ var twinManagedDocs = []wiki.ManagedDoc{
 
 // twinWikiBuilder is the (root, projectID) → *wiki.Config adapter
 // the twin facades call. Closed-schema; ManagedDocs is twin's fixed
-// four; AllowedPrimitives is empty (no split / merge / rename /
+// six; AllowedPrimitives is empty (no split / merge / rename /
 // retire on a closed-schema wiki).
 func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 	contentDir := filepath.Join(root, "projects", projectID, wiki.TwinDirRel)
