@@ -3,9 +3,14 @@
 You are at the push stage. Code is written; test stage has either
 verified it, applied small fixes, or named what's outside automated
 coverage. **Your job here is synthesis, not new work** — read the
-prior canvases, curate them into the artifact the ship gate displays,
+prior canvases and curate them into the PR body the reviewer reads,
 and surface any conflict between code's draft and test's findings so
-the operator sees it at the merge decision.
+the operator sees it before opening the PR.
+
+This stage runs inside the `--pr` ship path (and the operator-driven
+`--one-shot` headless variant). The fast-forward merge path skips it
+— its commit body is bare by design — so when you're invoked, the
+output lands on a reviewer's screen. Write accordingly.
 
 The pre-push hooks (lint, test, build, rebase-onto-default) are the
 deterministic gate downstream. They run after this stage; you don't
@@ -15,17 +20,18 @@ need to re-run them here.
 
 Two things land on the push canvas:
 
-1. **The final PR body / merge commit message.** Code stage drafted
-   this. Test stage may have surfaced findings — fixes applied, gaps
-   named, deliberate skips — that change what the body should say.
-   Curate the two into a single body the operator can read at the
-   ship prompt and the reviewer can read on the PR. The code-stage
-   draft is the baseline; test-stage findings amend it.
+1. **The final PR body.** Code stage drafted a candidate body. Test
+   stage may have surfaced findings — fixes applied, gaps named,
+   deliberate skips — that change what the body should say. Curate
+   the two into a single body the reviewer reads on the PR. The
+   code-stage draft is the baseline; test-stage findings amend it.
+   `gh pr create --body-file` reads the `## PR body` section of this
+   canvas directly, so that section *is* the PR description.
 2. **A short ship-readiness narrative.** What was verified, what
    wasn't, and why this is ready to ship. Two or three sentences.
-   The narrative is the operator's "should I press merge?" framing
-   — it's not a re-run of the test canvas, it's the synthesis of
-   the test canvas's bottom line.
+   The narrative is the operator's record of "why this was safe to
+   send for review" — it's not a re-run of the test canvas, it's
+   the synthesis of the test canvas's bottom line.
 
 ## What not to do
 
@@ -46,10 +52,10 @@ Two things land on the push canvas:
 
 When code's draft and test's findings disagree about what's ready,
 the canvas is where you surface that — explicitly, in its own
-section if it needs one. The operator sees this at the ship prompt
-and can re-open a prior stage if the conflict matters. Quiet
-synthesis ("I noticed but smoothed it over") defeats the point of
-having a synthesis pass at all.
+section if it needs one. The operator reads the canvas before the
+PR opens; a conflict that lands on the reviewer's screen unannounced
+is how regressions ship. Quiet synthesis ("I noticed but smoothed
+it over") defeats the point of having a synthesis pass at all.
 
 ## Canvas shape
 
@@ -60,8 +66,7 @@ the headings.
 # Push
 
 ## PR body
-(the final PR body / merge commit message — what the operator types
-at the ship prompt and the reviewer reads on the PR)
+(the final PR body — what the reviewer reads on the PR)
 
 ## Ship readiness
 (two or three sentences: what was verified, what wasn't, why this
@@ -72,8 +77,9 @@ is ready to ship — or, if it isn't, what's blocking)
 the two agree)
 ```
 
-The ship prompt displays this canvas as its preamble — your `PR body`
-section is what the operator reads while deciding to merge.
+`gh pr create --body-file` reads the `## PR body` section verbatim,
+so what you write there is what reviewers see on the PR — headings,
+links, code blocks and all.
 
 ## Fix-or-escalate
 

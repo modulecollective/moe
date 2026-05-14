@@ -90,20 +90,12 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	}
 	switch next.Name {
 	case "push":
-		// sdlc's push has a synthesis stage that curates code+test into
-		// push/content.md. Run it (headless) before the ship gate so
-		// [N/m/p] displays the synthesized canvas — the operator's
-		// "should I ship?" preamble, and the eventual PR body / merge
-		// commit message. Dispatch via runPushSynthesisFromChain (a
-		// var) rather than the helper directly so prompt-level tests
-		// can stub it out and assert label/dispatch shape without a
-		// real run on disk. Other workflows (quick) skip synthesis
-		// and go straight to the gate.
-		if md.Workflow == "sdlc" {
-			if code := runPushSynthesisFromChain(next, md, stdout, stderr); code != 0 {
-				return code
-			}
-		}
+		// The ship gate prints immediately after test closes — synthesis
+		// no longer fires at chain-prompt time. The operator's modal
+		// answer here is `N` (decline), and on `m` the merge commit body
+		// is bare anyway; paying a `claude -p` round-trip for either is
+		// waste. Synthesis runs inside `push --pr` itself, where its
+		// output actually lands on the PR.
 		return promptPushNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
 	}
 	return promptStageNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
@@ -376,15 +368,10 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 			moePrintf(stderr, "workflow %q has no push command\n", md.Workflow)
 			return 1
 		}
-		// Synthesis runs even on the `s` shortcut — without a test
-		// canvas the synthesis curates code's draft alone, but the
-		// push canvas is still the source of truth the gate displays.
-		// Same hook the natural cascade uses; tests stub it out.
-		if md.Workflow == "sdlc" {
-			if code := runPushSynthesisFromChain(pushCmd, md, stdout, stderr); code != 0 {
-				return code
-			}
-		}
+		// No synthesis here either — the `s` shortcut takes the same
+		// path as the natural post-test cascade now: straight to the
+		// ship gate, where the operator chooses (and synthesis only
+		// runs inside `push --pr`).
 		pushHint := fmt.Sprintf("moe %s %s %s %s", md.Workflow, pushCmd.Name, md.Project, md.ID)
 		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
 	}
@@ -429,16 +416,14 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 // whitespace-only, the prompt prints bare — no header or decoration.
 // The canvas is markdown the agent wrote for the operator, printed
 // as written.
+//
+// The push canvas is deliberately not in this fallback chain. Synthesis
+// runs inside `push --pr` now, not at chain-prompt time, so by the time
+// the operator reads this preamble the push canvas (if any) is left
+// over from a prior `--pr` cycle — stale relative to whatever the
+// operator's about to do. Test → code is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	// Push canvas is the source of truth post-synthesis: the synthesis
-	// pass writes push/content.md with the curated PR body and
-	// ship-readiness narrative. Fall back to test → code only when
-	// push/content.md is missing or whitespace (a `--pr`-without-prior
-	// chain, or a workflow that doesn't run a synthesis pass — quick).
-	body := readPrintableCanvas(root, md, "push")
-	if body == "" {
-		body = readPrintableCanvas(root, md, "test")
-	}
+	body := readPrintableCanvas(root, md, "test")
 	if body == "" {
 		body = readPrintableCanvas(root, md, "code")
 	}
@@ -567,10 +552,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 	return promptNextStage(root, md, lastStage, stdout, stderr)
 }
 
-// cascadeStepResult records one dispatched stage's outcome. A push
-// stage in `!!` mode produces two underlying cmd.Run calls (synthesis
-// + ship) but appears once in the result: the entry's code reflects
-// whichever step actually ran last.
+// cascadeStepResult records one dispatched stage's outcome.
 type cascadeStepResult struct {
 	stage string
 	code  int
@@ -601,10 +583,10 @@ type cascadeResult struct {
 // inCascade flag suppresses each stage's inner promptNextStage so
 // the cascade owns routing.
 //
-// At push in yolo mode, two dispatches run back-to-back: synthesis
-// (`--one-shot` on push) writes push/content.md, then the merge
-// path (no flags) ships. A non-zero exit at either step stops the
-// cascade and the failure surfaces in the summary.
+// At push in yolo mode the dispatch is the merge path (no flags),
+// not `--one-shot`: `!!` defaults to fast-forward merge, and the
+// merge commit body is bare, so a synthesis pre-call would just
+// write a canvas nothing reads.
 func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
@@ -650,17 +632,10 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		}
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
-			// `!!` at push: synthesize first (so the push canvas is
-			// the source of truth on the eventual merge commit /
-			// PR body), then ship via the merge path. Two cmd.Run
-			// calls because the existing push semantics are flag-
-			// driven: `--one-shot` = synthesis only, no flags =
-			// fast-forward merge.
-			synth := cmd.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
-			if synth != 0 {
-				res.ran = append(res.ran, cascadeStepResult{stage: stage, code: synth})
-				return res, synth
-			}
+			// `!!` at push: ship via the merge path. No `--one-shot`
+			// synthesis pre-call — the merge commit body is bare and
+			// no PR body lands on a reviewer's screen, so the
+			// curation would be writing a canvas nothing reads.
 			ship := cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
 			if ship != 0 {

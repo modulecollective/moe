@@ -444,6 +444,8 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for --pr test")
 
 	fakeGh(t, nil)
+	stubSynthesisWritesCanvas(t, f.root, f.projectID, f.runID,
+		"# Push\n\n## PR body\n\nSynthesized body for review.\n\n## Ship readiness\n\nGreen.\n")
 
 	mainBefore := f.originHead()
 
@@ -475,6 +477,172 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 	if !strings.Contains(stdout, "opened PR: https://github.com/owner/repo/pull/99") {
 		t.Fatalf("expected PR URL in stdout, got:\n%s", stdout)
 	}
+}
+
+// TestExtractMarkdownSection pins the slicing helper writePRBodyFile
+// uses to pull `## PR body` out of the push canvas. The skeleton has
+// a fixed shape, so the helper doesn't need a real markdown parser —
+// but the line-by-line semantics ("section ends at next `## ` or
+// EOF, contents trimmed") have to stay honest, since they're what
+// ends up on the PR.
+func TestExtractMarkdownSection(t *testing.T) {
+	const canvas = `# Push
+
+## PR body
+
+Body line 1.
+
+Body line 2.
+
+## Ship readiness
+
+Green.
+
+## Conflicts surfaced
+`
+	if got, want := extractMarkdownSection(canvas, "PR body"), "Body line 1.\n\nBody line 2."; got != want {
+		t.Fatalf("PR body section = %q, want %q", got, want)
+	}
+	if got, want := extractMarkdownSection(canvas, "Ship readiness"), "Green."; got != want {
+		t.Fatalf("Ship readiness section = %q, want %q", got, want)
+	}
+	// Final section: extends to EOF and trims trailing whitespace.
+	if got, want := extractMarkdownSection(canvas, "Conflicts surfaced"), ""; got != want {
+		t.Fatalf("empty trailing section = %q, want %q", got, want)
+	}
+	// Missing section returns "".
+	if got := extractMarkdownSection(canvas, "Nope"); got != "" {
+		t.Fatalf("missing section = %q, want \"\"", got)
+	}
+}
+
+// TestWritePRBodyFile exercises the helper openPRPath uses after
+// synthesis writes the push canvas: read push/content.md, slice out
+// `## PR body`, drop the content in a tempfile gh pr create can pass
+// to --body-file.
+func TestWritePRBodyFile(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "push"))
+	if err := os.MkdirAll(filepath.Dir(canvasPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const canvas = "# Push\n\n## PR body\n\nFinal body for the reviewer.\n\n## Ship readiness\n\nGreen.\n"
+	if err := os.WriteFile(canvasPath, []byte(canvas), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, cleanup, err := writePRBodyFile(root, md)
+	if err != nil {
+		t.Fatalf("writePRBodyFile: %v", err)
+	}
+	defer cleanup()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read tempfile: %v", err)
+	}
+	if want := "Final body for the reviewer."; string(got) != want {
+		t.Fatalf("body file = %q, want %q", string(got), want)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cleanup did not remove tempfile %s: stat err=%v", path, err)
+	}
+}
+
+// TestWritePRBodyFileMissingCanvas: synthesis was supposed to write
+// the push canvas just above; if it's missing the helper surfaces a
+// clear error instead of silently degrading to an empty PR body.
+func TestWritePRBodyFileMissingCanvas(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	_, _, err := writePRBodyFile(root, md)
+	if err == nil {
+		t.Fatal("expected error when push canvas is missing")
+	}
+	if !strings.Contains(err.Error(), "push canvas") {
+		t.Fatalf("expected error to mention push canvas, got: %v", err)
+	}
+}
+
+// TestWritePRBodyFileMissingSection: a push canvas without a `## PR
+// body` heading (degenerate synthesis output) is an error, not a
+// soft fallback. The PR opens with whatever synthesis produced or it
+// doesn't open at all — silently shipping a blank body is the worst
+// case.
+func TestWritePRBodyFileMissingSection(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "push"))
+	if err := os.MkdirAll(filepath.Dir(canvasPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvasPath, []byte("# Push\n\n## Ship readiness\n\nGreen.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := writePRBodyFile(root, md)
+	if err == nil {
+		t.Fatal("expected error when `## PR body` section is missing")
+	}
+	if !strings.Contains(err.Error(), "PR body") {
+		t.Fatalf("expected error to mention PR body, got: %v", err)
+	}
+}
+
+// TestRunPushSynthesisSessionPinsSonnet asserts the headless synthesis
+// session opts the executor sees pass Model="sonnet". The cost
+// argument is the load-bearing reason synthesis can now run inside
+// every `--pr`: bounded curation, predictable spend. Catching a
+// future inadvertent drop back to Opus matters.
+func TestRunPushSynthesisSessionPinsSonnet(t *testing.T) {
+	var captured stageSessionOpts
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+		if docID != "push" {
+			t.Fatalf("unexpected docID %q", docID)
+		}
+		captured = opts
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	if code := runPushSynthesisSession("tele", "fix-it", true, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("synthesis session exit=%d, want 0", code)
+	}
+	if got, want := captured.Model, "sonnet"; got != want {
+		t.Fatalf("Model = %q, want %q", got, want)
+	}
+	if !captured.Headless {
+		t.Errorf("Headless: want true")
+	}
+}
+
+// stubSynthesisWritesCanvas swaps runStageSession for a stub that
+// writes the given canvas content to push/content.md and returns 0 —
+// what `runPushSynthesisSession` does on the happy path, minus the
+// actual claude turn. Tests that drive `--pr` through runPush use this
+// so the synthesis call inside openPRPath produces the canvas
+// writePRBodyFile expects without spinning up a real session worktree.
+// Restores the original on cleanup. Canvas content should be a full
+// canvas including `## PR body` so writePRBodyFile finds a section to
+// extract.
+func stubSynthesisWritesCanvas(t *testing.T, root, projectID, runID, canvas string) {
+	t.Helper()
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, _ stageSessionOpts, _, _ io.Writer) int {
+		if docID != "push" {
+			t.Fatalf("stubSynthesisWritesCanvas: unexpected docID %q (only push expected)", docID)
+		}
+		canvasPath := filepath.Join(root, run.ContentPath(projectID, runID, "push"))
+		if err := os.MkdirAll(filepath.Dir(canvasPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(canvasPath, []byte(canvas), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
 }
 
 // addInsteadOfRewrite appends a `url.<real>.insteadOf = <fake>` to the
@@ -1213,13 +1381,13 @@ func TestPushOneShotRejectedWithPR(t *testing.T) {
 	}
 }
 
-// TestPromptPushNextStagePrefersPushCanvasOverTest pins the new
-// canvas precedence: when push/content.md exists (post-synthesis),
-// it wins over test/content.md. The push canvas is the source of
-// truth for the ship gate's preamble — synthesis curated it from
-// the prior canvases on purpose, so falling back to the raw test
-// canvas after synthesis ran would defeat the point.
-func TestPromptPushNextStagePrefersPushCanvasOverTest(t *testing.T) {
+// TestPromptPushNextStageIgnoresPushCanvas pins the rule that the
+// ship gate's preamble doesn't fall back to push/content.md.
+// Synthesis runs inside `push --pr` now, not at chain-prompt time, so
+// by the time the operator reads this preamble the push canvas (if
+// any) is left over from a prior `--pr` cycle — stale relative to
+// whatever the operator's about to do. Test → code is the live story.
+func TestPromptPushNextStageIgnoresPushCanvas(t *testing.T) {
 	next := &Command{
 		Name: "push",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
@@ -1231,7 +1399,7 @@ func TestPromptPushNextStagePrefersPushCanvasOverTest(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(testCanvas), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const testBody = "## What was verified\n\nRaw test canvas — should NOT appear post-synthesis.\n"
+	const testBody = "## What was verified\n\nLive test canvas — this is what should appear.\n"
 	if err := os.WriteFile(testCanvas, []byte(testBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1239,7 +1407,7 @@ func TestPromptPushNextStagePrefersPushCanvasOverTest(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(pushCanvas), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const pushBody = "## PR body\n\nSynthesized PR body — what the operator should read.\n"
+	const pushBody = "## PR body\n\nStale push canvas — should NOT appear above the gate.\n"
 	if err := os.WriteFile(pushCanvas, []byte(pushBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1262,11 +1430,11 @@ func TestPromptPushNextStagePrefersPushCanvasOverTest(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, pushBody) {
-		t.Errorf("push canvas body should appear above the gate:\n%s", got)
+	if !strings.Contains(got, testBody) {
+		t.Errorf("test canvas body should appear above the gate:\n%s", got)
 	}
-	if strings.Contains(got, testBody) {
-		t.Errorf("test canvas body should not appear when push canvas exists:\n%s", got)
+	if strings.Contains(got, pushBody) {
+		t.Errorf("push canvas body must not appear at the ship gate:\n%s", got)
 	}
 }
 

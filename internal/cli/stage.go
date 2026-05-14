@@ -74,6 +74,13 @@ type stageSessionOpts struct {
 	// chain (design → code) and never wants the interactive next-stage
 	// prompt to fire mid-chain.
 	SkipNextStage bool
+	// Model, if non-empty, is the `--model` value for the headless
+	// claude invocation. Empty string defers to the operator's
+	// configured default — the right answer for stage turns where the
+	// agent's work isn't bounded. Bounded curation stages (push
+	// synthesis) set this to "sonnet" so the cost stays predictable.
+	// Ignored when Headless is false.
+	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
 	// branch). Lets stages with a fixed structural canvas — test stage's
@@ -320,6 +327,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				NewSession:       newSession,
 				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
+				Model:            opts.Model,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				ExtraEnv:         mapToEnv(devEnv),
@@ -437,6 +445,10 @@ type wikiTurnSpec struct {
 	// after one turn. The rest of the lifecycle — open session
 	// worktree, prompt assembly, commitTurn, close — is unchanged.
 	Headless bool
+	// Model, if non-empty, is passed to ExecuteOneShot as the `--model`
+	// value. Routes stageSessionOpts.Model through to the executor;
+	// see that field for usage notes.
+	Model string
 	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
 	FinalizeRunID    string
 	FinalizeRunTitle string
@@ -558,6 +570,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Prompt:     prompt,
 			UserPrompt: spec.InitialPrompt,
 			ClonePath:  spec.ClonePath,
+			Model:      spec.Model,
 			Stdout:     stdout,
 			Stderr:     stderr,
 			ExtraEnv:   spec.ExtraEnv,

@@ -240,6 +240,11 @@ type OneShotRequest struct {
 	// the per-run sandbox clone for code stages. Empty for
 	// document-only stages (cwd falls back to Root).
 	ClonePath string
+	// Model, if non-empty, is passed as --model. Empty string defers to
+	// the operator's configured default. Mirrors HeadlessRequest.Model:
+	// bounded curation tasks (push synthesis) pass "sonnet" so the cost
+	// stays predictable; full stage turns leave it empty.
+	Model string
 	// Stdout streams claude's output to the operator's terminal. nil
 	// falls back to os.Stdout — the runner wants the operator to watch
 	// progress so they can Ctrl-C if it goes off the rails.
@@ -302,8 +307,11 @@ func ExecuteOneShot(r OneShotRequest) error {
 	// land. Bypass mode skips the per-call prompt; safety still comes
 	// from --settings enabling the built-in sandbox plus --add-dir
 	// scoping filesystem reach to the worktree/clone.
-	args := []string{
-		"-p",
+	args := []string{"-p"}
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
+	args = append(args,
 		"--permission-mode", "bypassPermissions",
 		"--output-format", "stream-json",
 		"--verbose",
@@ -312,7 +320,7 @@ func ExecuteOneShot(r OneShotRequest) error {
 		"--settings", sandboxSettingsJSON(r.ClonePath),
 		"--append-system-prompt", r.Prompt,
 		r.UserPrompt,
-	}
+	)
 	ctx := context.Background()
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc

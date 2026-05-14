@@ -69,14 +69,21 @@ const pushSynthesisKickoff = "The operator just opened this push synthesis sessi
 
 // runPushSynthesisSession opens the push stage session that curates
 // code's draft and test's findings into push/content.md. Two ways in:
-// the chain prompt path automatically invokes this before rendering
-// the [N/m/p] gate (so the gate displays the synthesized canvas), and
-// `moe sdlc push --one-shot` invokes the headless variant directly.
-// Both share this function so the prompt fragment, canvas skeleton,
-// and kickoff string stay identical between operator-driven and
-// chain-driven entry. SkipNextStage suppresses the post-session chain
-// prompt — synthesis sits inside a larger flow (chain prompt → gate,
-// or one-shot → exit) that owns its own routing.
+// `moe sdlc push --pr` invokes the headless variant before opening the
+// PR so the synthesized `## PR body` section is what the reviewer
+// reads, and `moe sdlc push --one-shot` invokes the headless variant
+// directly. Both share this function so the prompt fragment, canvas
+// skeleton, and kickoff string stay identical between operator-driven
+// and ship-path entry. SkipNextStage suppresses the post-session chain
+// prompt — synthesis sits inside a larger flow (push action → PR
+// open, or one-shot → exit) that owns its own routing.
+//
+// The headless path pins Model="sonnet": synthesis is a bounded
+// curation task (read code + test canvases, fill in three skeleton
+// sections, flag any contradictions) and Opus's reasoning depth would
+// be overkill at the operator's default cost. Sonnet is the right
+// floor; if it turns out to miss subtle contradictions in practice,
+// dropping to Opus is a one-line change.
 func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 	opts := stageSessionOpts{
 		NeedsSandbox:   true,
@@ -84,26 +91,12 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 		SkipNextStage:  true,
 		CanvasSkeleton: pushCanvasSkeleton,
 	}
-	if !headless {
+	if headless {
+		opts.Model = "sonnet"
+	} else {
 		opts.InitialPrompt = pushSynthesisKickoff
 	}
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
-}
-
-// runPushSynthesisFromChain is the hook the chain prompt fires before
-// the [N/m/p] ship gate (and the `s` skip-to-push shortcut). Default
-// dispatches the push command in --one-shot mode so the synthesis
-// stage session runs headlessly against the run on disk — the same
-// effect as `moe sdlc push --one-shot`.
-//
-// Overridable in tests; the prompt-level tests use stub *Command
-// values that aren't backed by a real run, so the default would
-// surface a "run not found" error during synthesis dispatch. Tests
-// that want to assert prompt behaviour (label, legend, dispatch
-// shape) replace this with a no-op; tests that exercise the
-// synthesis path end-to-end leave it alone.
-var runPushSynthesisFromChain = func(pushCmd *Command, md *run.Metadata, stdout, stderr io.Writer) int {
-	return pushCmd.Run([]string{"--one-shot", md.Project, md.ID}, stdout, stderr)
 }
 
 // runPush ships the sandbox branch. The default path fast-forwards the
@@ -327,6 +320,12 @@ func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) st
 // already-pushed branch and record the first push's state. The
 // sandbox is intentionally left in place — iteration via
 // `moe <wf> code` stays a one-liner until the PR merges.
+//
+// Synthesis runs lazily, only when a new PR is about to open. Re-runs
+// against an already-pushed branch (`existing == true`) skip synthesis
+// — the PR body was set on the first open and `gh pr create` won't
+// fire again. mergePath stays untouched: bare commit body, no
+// synthesis, fastest path.
 func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
 	ghRepo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
@@ -342,7 +341,21 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 	if existing {
 		moePrintf(stdout, "existing PR: %s\n", url)
 	} else {
-		bodyPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
+		// Synthesize the push canvas — the `## PR body` section is
+		// what `gh pr create --body-file` reads below. Test stage
+		// applies fixes after code closes, so code/content.md is
+		// stale relative to the diff being shipped; synthesis
+		// resolves that by re-reading code + test and producing an
+		// up-to-date narrative.
+		if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
+			return code
+		}
+		bodyPath, cleanup, err := writePRBodyFile(root, md)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		defer cleanup()
 		url, err = push.CreatePR(ghRepo, branch, pj.DefaultBranch, md.Title, bodyPath, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
@@ -459,6 +472,70 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 	moePrintf(stdout, "merged %s %s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
 	return 0
+}
+
+// writePRBodyFile reads the push canvas, slices out the `## PR body`
+// section, and writes the trimmed content to a tempfile. Returns the
+// tempfile path and a cleanup func the caller defers. Errors if the
+// push canvas is missing, unreadable, or has no `## PR body` section
+// — synthesis ran immediately before this call, so any of those is a
+// real failure the operator needs to see, not a soft fallback to
+// stale source.
+func writePRBodyFile(root string, md *run.Metadata) (string, func(), error) {
+	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "push"))
+	canvas, err := os.ReadFile(canvasPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("push: read push canvas: %w", err)
+	}
+	body := extractMarkdownSection(string(canvas), "PR body")
+	if body == "" {
+		return "", nil, fmt.Errorf("push: push canvas %s has no `## PR body` section (synthesis produced nothing usable)", canvasPath)
+	}
+	f, err := os.CreateTemp("", "moe-pr-body-*.md")
+	if err != nil {
+		return "", nil, fmt.Errorf("push: create pr-body tempfile: %w", err)
+	}
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", nil, fmt.Errorf("push: write pr-body tempfile: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", nil, fmt.Errorf("push: close pr-body tempfile: %w", err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	return path, cleanup, nil
+}
+
+// extractMarkdownSection returns the body under a top-level `## <name>`
+// heading: every line between that heading and the next `## ` heading
+// (or EOF), trimmed. Returns "" if the heading is not present. Used to
+// pull `## PR body` out of the push canvas without redoing markdown
+// parsing — the canvas has a fixed skeleton so a line-by-line slice is
+// enough.
+func extractMarkdownSection(md, name string) string {
+	want := "## " + name
+	lines := strings.Split(md, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == want {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
 func checkCodeContent(root string, md *run.Metadata) error {

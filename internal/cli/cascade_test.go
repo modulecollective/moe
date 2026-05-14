@@ -142,8 +142,10 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 }
 
 // TestCascadeFromGateYoloShipsAtPush pins the !! shape: cascade
-// walks every remaining stage and ships at push. Push receives two
-// dispatches — synthesis (--one-shot) then merge (no flags).
+// walks every remaining stage and ships at push. Push receives one
+// dispatch — the merge path (no flags). No `--one-shot` synthesis:
+// `!!` defaults to fast-forward merge, whose commit body is bare,
+// so a synthesis pre-call would just write a canvas nothing reads.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	captured := stubSdlcStageCommands(t, nil)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -165,16 +167,13 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 		}
 	}
-	// push gets two cmd.Run calls: synthesis + ship.
+	// push gets one cmd.Run call: the merge ship.
 	pushInvs := captured["push"]
-	if len(pushInvs) != 2 {
-		t.Fatalf("push dispatched %d times, want 2 (synthesis + ship): %v", len(pushInvs), pushInvs)
+	if len(pushInvs) != 1 {
+		t.Fatalf("push dispatched %d times, want 1 (ship only): %v", len(pushInvs), pushInvs)
 	}
-	if got, want := strings.Join(pushInvs[0], " "), "--one-shot tele fix-it"; got != want {
-		t.Fatalf("push synthesis args = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(pushInvs[1], " "), "tele fix-it"; got != want {
-		t.Fatalf("push ship args = %q, want %q", got, want)
+	if got, want := strings.Join(pushInvs[0], " "), "tele fix-it"; got != want {
+		t.Fatalf("push ship args = %q, want %q (merge path, no flags)", got, want)
 	}
 }
 

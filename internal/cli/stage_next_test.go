@@ -612,20 +612,6 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 	}
 }
 
-// stubPushSynthesisFromChain replaces the chain-prompt synthesis hook
-// with a no-op for the duration of the test. Prompt-level tests use
-// stub *Command values with no real run on disk, so the production
-// hook (which dispatches `moe sdlc push --one-shot`) would surface a
-// "run not found" error before the test could observe the [N/m/p]
-// label it cares about. The end-to-end push fixture tests don't need
-// the stub — they have a real run.
-func stubPushSynthesisFromChain(t *testing.T) {
-	t.Helper()
-	prev := runPushSynthesisFromChain
-	runPushSynthesisFromChain = func(*Command, *run.Metadata, io.Writer, io.Writer) int { return 0 }
-	t.Cleanup(func() { runPushSynthesisFromChain = prev })
-}
-
 // TestPromptStageNextStageSkipDispatchesPushPrompt: typing `s` at
 // the post-code gate opens the push prompt — the [N/m/p] label
 // appears in stdout, and the hint reads "moe sdlc push <project>
@@ -634,7 +620,6 @@ func stubPushSynthesisFromChain(t *testing.T) {
 // proof the dispatch happened. The next.Run stub for the test stage
 // must not be invoked on the `s` path.
 func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
-	stubPushSynthesisFromChain(t)
 	var testRan bool
 	next := &Command{
 		Name: "test",
@@ -688,7 +673,6 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 // the one they skipped), so `b` at the push prompt should re-open
 // code, not test.
 func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
-	stubPushSynthesisFromChain(t)
 	next := &Command{
 		Name: "test",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
