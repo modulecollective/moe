@@ -79,13 +79,24 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// stdinIsTerminal reports whether os.Stdin is attached to a character
-// device — i.e. an interactive terminal, not a pipe or file. Stdlib-only
-// (principle 11) via the ModeCharDevice bit.
+// stdinIsTerminal reports whether os.Stdin is attached to an
+// interactive terminal — not a pipe, file, or the null device.
+// Stdlib-only (principle 11): ModeCharDevice covers TTYs but also
+// matches /dev/null, so we additionally rule that out via os.SameFile
+// against os.DevNull. /dev/null is the load-bearing false positive in
+// practice (an exec.Command with no Stdin gets it on Unix, as do many
+// hook runners); other char devices like /dev/zero aren't real
+// surfaces for moe-init.
 func stdinIsTerminal() bool {
 	stat, err := os.Stdin.Stat()
 	if err != nil {
 		return false
 	}
-	return stat.Mode()&os.ModeCharDevice != 0
+	if stat.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if nullStat, err := os.Stat(os.DevNull); err == nil && os.SameFile(stat, nullStat) {
+		return false
+	}
+	return true
 }
