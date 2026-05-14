@@ -107,6 +107,22 @@ type stageSessionOpts struct {
 	// projects/<p>/meta-moe.md so the project-root snapshot rides
 	// alongside the per-pass canvas in one commit.
 	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
+	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
+	// close. The per-stage twin stages (vision, architecture, …,
+	// glossary) commit their managed-doc edits but don't bump the
+	// checkpoint or write a log.md entry — the finalize stage owns
+	// both at the end of the pass. Without this flag, every per-stage
+	// commit would advance `LastIngestAt`, and stage two's kickoff
+	// would compute a shorter events list than stage one's — the
+	// drift the design forbids.
+	SkipFinalize bool
+	// PreFinalizeGate, when non-nil, runs after the executor returns
+	// and before FinalizeIngest. A non-nil return short-circuits both
+	// FinalizeIngest and the per-turn commit. Used by the finalize
+	// stage's hygiene re-scan: leftover findings refuse to seal the
+	// pass. Routed straight through to wikiTurnSpec.PreFinalizeGate;
+	// see that field for the contract.
+	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
 }
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
@@ -332,6 +348,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				Model:            opts.Model,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
+				SkipFinalize:     opts.SkipFinalize,
 				ExtraEnv:         mapToEnv(devEnv),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
@@ -363,6 +380,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					}
 					return err
 				},
+				PreFinalizeGate: opts.PreFinalizeGate,
 			}, nil
 		},
 	}
@@ -458,6 +476,12 @@ type wikiTurnSpec struct {
 	// session. The agent appends to log.md themselves; finalize
 	// advances the checkpoint without writing a fresh entry.
 	FinalizeClaim bool
+	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
+	// close — the per-stage twin stages commit their managed-doc
+	// edits but leave checkpoint advancement and log.md to the
+	// finalize stage. The gate / commit / close sequence is
+	// otherwise unchanged.
+	SkipFinalize bool
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg
 	// (nil if the session has no wiki).
@@ -631,17 +655,19 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	var commitErr error
 	if gateErr == nil {
 		if wikiCfg != nil {
-			_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
-				RunID:    spec.FinalizeRunID,
-				RunTitle: spec.FinalizeRunTitle,
-				Claim:    spec.FinalizeClaim,
-			}, stderr)
-			if ferr != nil {
-				moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
-				moePrintln(stderr, "  agent edits will commit; checkpoint and "+
-					"log.md were NOT written. Re-run the session or fix the "+
-					"underlying issue before the next reflect.")
-				finalizeErr = ferr
+			if !spec.SkipFinalize {
+				_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
+					RunID:    spec.FinalizeRunID,
+					RunTitle: spec.FinalizeRunTitle,
+					Claim:    spec.FinalizeClaim,
+				}, stderr)
+				if ferr != nil {
+					moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
+					moePrintln(stderr, "  agent edits will commit; checkpoint and "+
+						"log.md were NOT written. Re-run the session or fix the "+
+						"underlying issue before the next reflect.")
+					finalizeErr = ferr
+				}
 			}
 			if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
 				wikiRel = rel

@@ -260,6 +260,9 @@ func init() {
 			return 1
 		}
 	}
+	registerHeadlessDispatcher("sdlc", func(stage, projectID, runID string, stdout, stderr io.Writer) int {
+		return openSdlcStage(stage, projectID, runID, stdout, stderr)
+	})
 }
 
 // testCanvasSkeleton is the fixed structural shape every test canvas

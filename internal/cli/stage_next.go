@@ -49,6 +49,20 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	if justFinished != "" {
 		stage = wf.Successor(justFinished)
 		if stage == "" {
+			// Terminal stage — no successor to offer. If the workflow
+			// has a close command and the run is still in_progress,
+			// nudge the operator at it. Twin's finalize is the only
+			// stage today that hits this path; sdlc's last stage is
+			// push, which is its own ship command and never gets here.
+			if md.Status == run.StatusInProgress {
+				if g, err := LookupGroup(md.Workflow); err == nil {
+					if cmd := g.Lookup("close"); cmd != nil {
+						moePrintf(stdout,
+							"%s sealed — run `moe %s close %s %s` to mark the run terminal.\n",
+							justFinished, md.Workflow, md.Project, md.ID)
+					}
+				}
+			}
 			return 0
 		}
 	} else {
@@ -278,14 +292,24 @@ func renderPromptLegend(opts []promptOption) string {
 func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	// Surface the just-finished stage's canvas above the prompt so the
 	// operator reads it before authorising the next stage. The pairing
-	// is design → code: print design; code → test: print code. Same
-	// shape promptPushNextStage uses for test → push.
+	// is the workflow's prereq edge — design → code, code → test,
+	// vision → architecture, …, glossary → finalize. Same shape
+	// promptPushNextStage uses for test → push. Falls back to the
+	// hardcoded design/code mapping when the workflow registry isn't
+	// reachable (tests against a throwaway workflow).
 	priorCanvas := ""
-	switch next.Name {
-	case "code":
-		priorCanvas = "design"
-	case "test":
-		priorCanvas = "code"
+	if wf, err := LookupWorkflow(md.Workflow); err == nil {
+		if prereqs := wf.Prereqs(next.Name); len(prereqs) > 0 {
+			priorCanvas = prereqs[0]
+		}
+	}
+	if priorCanvas == "" {
+		switch next.Name {
+		case "code":
+			priorCanvas = "design"
+		case "test":
+			priorCanvas = "code"
+		}
 	}
 	if priorCanvas != "" {
 		if body := readPrintableCanvas(root, md, priorCanvas); body != "" {
@@ -302,7 +326,8 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if scuttle != nil {
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
-	offerOneShot := md.Workflow == "sdlc"
+	dispatcher := lookupHeadlessDispatcher(md.Workflow)
+	offerOneShot := dispatcher != nil
 	if offerOneShot {
 		opts = append(opts, promptOption{key: 'o', hint: "run headless"})
 	}
@@ -322,7 +347,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	label := renderPromptLabel(opts)
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
-	if md.Workflow == "sdlc" {
+	if dispatcher != nil {
 		moePrintln(stdout, "  !<stage>=cascade to gate · !!=cascade and ship")
 	}
 	sig, stopSig := installSigint()
@@ -340,14 +365,14 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
-	if md.Workflow == "sdlc" && strings.HasPrefix(answer, "!") {
+	if dispatcher != nil && strings.HasPrefix(answer, "!") {
 		return dispatchCascade(answer, next.Name, root, md, stdout, stderr)
 	}
 	if scuttle != nil && answer == "x" {
 		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 	}
 	if offerOneShot && answer == "o" {
-		return openSdlcStage(next.Name, md.Project, md.ID, stdout, stderr)
+		return dispatcher(next.Name, md.Project, md.ID, stdout, stderr)
 	}
 	if offerSkipToPush && answer == "s" {
 		// Skip-to-push opens the push prompt directly without
@@ -638,6 +663,11 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		}
 		endIdx = destIdx
 	}
+	dispatcher := lookupHeadlessDispatcher(md.Workflow)
+	if dispatcher == nil {
+		moePrintf(stderr, "cascade: workflow %q has no headless dispatcher\n", md.Workflow)
+		return res, 1
+	}
 	prev := inCascade
 	inCascade = true
 	defer func() { inCascade = prev }()
@@ -684,7 +714,7 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 			res.shipped = true
 			continue
 		}
-		code := openSdlcStage(stage, md.Project, md.ID, stdout, stderr)
+		code := dispatcher(stage, md.Project, md.ID, stdout, stderr)
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code
@@ -760,4 +790,34 @@ func indexOfString(xs []string, s string) int {
 		}
 	}
 	return -1
+}
+
+// headlessDispatcher is the Go-level seam a workflow's per-stage init
+// registers so the chain prompt's `o` keystroke and the cascade driver
+// can drive a stage headless without a hardcoded switch on workflow
+// name. The contract matches openSdlcStage / openTwinStage exactly:
+// take (stage, projectID, runID, stdout, stderr), invoke the right
+// per-stage helper headless, return its exit code.
+type headlessDispatcher func(stage, projectID, runID string, stdout, stderr io.Writer) int
+
+var headlessDispatchers = map[string]headlessDispatcher{}
+
+// registerHeadlessDispatcher wires a workflow's headless dispatcher
+// into the registry. Called from each workflow's init() so the
+// chain-prompt and cascade machinery can stay workflow-agnostic.
+// Panics on duplicate names — same fail-loud contract as
+// RegisterWorkflow.
+func registerHeadlessDispatcher(workflow string, d headlessDispatcher) {
+	if _, dup := headlessDispatchers[workflow]; dup {
+		panic("cli: duplicate headless dispatcher for workflow " + workflow)
+	}
+	headlessDispatchers[workflow] = d
+}
+
+// lookupHeadlessDispatcher returns the registered dispatcher for
+// workflow, or nil if none. nil means "this workflow has no headless
+// dispatch wired" — the chain prompt suppresses the `o` keystroke and
+// the cascade refuses to walk.
+func lookupHeadlessDispatcher(workflow string) headlessDispatcher {
+	return headlessDispatchers[workflow]
 }
