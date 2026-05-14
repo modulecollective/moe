@@ -24,6 +24,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/agent"
 	_ "github.com/modulecollective/moe/internal/agent/claude"
+	_ "github.com/modulecollective/moe/internal/agent/codex"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
@@ -637,8 +638,9 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 	var runErr error
+	var returnedSid string
 	if spec.Headless {
-		_, runErr = a.ExecuteOneShot(agent.OneShotRequest{
+		returnedSid, runErr = a.ExecuteOneShot(agent.OneShotRequest{
 			Root:       workRoot,
 			Prompt:     prompt,
 			UserPrompt: spec.InitialPrompt,
@@ -649,13 +651,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			ExtraEnv:   spec.ExtraEnv,
 		})
 	} else {
-		// Execute returns the session id the agent reports back. For
-		// claude that's always the SessionID we passed in, so the
-		// returned value matches what's already on disk. For codex
-		// (next commit), the agent discovers the id from its rollout
-		// file post-turn — at that point this branch will persist the
-		// returned id when it differs.
-		_, runErr = a.Execute(agent.Request{
+		returnedSid, runErr = a.Execute(agent.Request{
 			Root:          workRoot,
 			Metadata:      spec.Metadata,
 			DocID:         spec.DocID,
@@ -670,6 +666,22 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Stderr:        stderr,
 			ExtraEnv:      spec.ExtraEnv,
 		})
+	}
+
+	// Codex generates its session id itself; on first turn the agent
+	// reads it back post-launch (from the rollout file's filename
+	// suffix or, for one-shot, from the `thread.started` JSON event).
+	// When the returned id differs from what we passed in, persist
+	// it so the next turn's `codex resume <sid>` finds the rollout.
+	// Claude always echoes the id we minted, so this is a no-op
+	// there. Run-less callers (lint) carry no document to mutate.
+	if spec.Metadata != nil && returnedSid != "" && returnedSid != spec.SessionUUID {
+		if doc, ok := spec.Metadata.Documents[spec.DocID]; ok {
+			doc.Session = returnedSid
+			if err := run.Save(workRoot, spec.Metadata); err != nil {
+				moePrintf(stderr, "session: persist returned id: %v\n", err)
+			}
+		}
 	}
 
 	// Pre-finalize gate (reflect's hygiene scan). Runs after the
