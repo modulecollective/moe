@@ -30,4 +30,3 @@ func TestSdlcRegistersTestStage(t *testing.T) {
 		t.Fatal("sdlc group has no test command")
 	}
 }
-
