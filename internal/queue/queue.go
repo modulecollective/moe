@@ -23,12 +23,20 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// Item is one entry in .moe/queue.json. Workflow + Project + Run is
-// the identity used for duplicate refusal and identity-matched pop.
+// Item is one entry in .moe/queue.json. Workflow + Project + Run + Agent
+// is the identity used for duplicate refusal and identity-matched pop;
+// Agent participates so queuing the same idea twice with different
+// backends is a no-op idempotent on each pair, not a collision.
 type Item struct {
 	Workflow string `json:"workflow"`
 	Project  string `json:"project"`
 	Run      string `json:"run"`
+	// Agent, when non-empty, names the backend the walker should stamp
+	// onto the run when it lazy-promotes an idea (workflow=idea). For
+	// non-idea entries the field is informational only — the
+	// already-open run carries its own agent on run.json. omit-empty
+	// keeps queue.json bodies of pre-multi-agent entries unchanged.
+	Agent string `json:"agent,omitempty"`
 }
 
 // String renders the item the way the walker logs it. Three
@@ -36,6 +44,9 @@ type Item struct {
 // `moe queue edit` take on input — the `<project>/<run>` slash form is
 // an internal trailer/log convention, not the operator-facing surface.
 func (q Item) String() string {
+	if q.Agent != "" {
+		return fmt.Sprintf("%s %s %s (%s)", q.Workflow, q.Project, q.Run, q.Agent)
+	}
 	return fmt.Sprintf("%s %s %s", q.Workflow, q.Project, q.Run)
 }
 

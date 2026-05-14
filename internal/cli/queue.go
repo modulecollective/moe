@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -96,9 +97,10 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("queue add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	front := fs.Bool("front", false, "prepend to the head of the queue instead of appending to the back")
+	agentOverride := fs.String("agent", "", "(idea only) agent backend to stamp on the run when the walker lazy-promotes it (claude/codex)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe queue add [--front] sdlc <project> <run>")
-		moePrintln(stderr, "       moe queue add [--front] idea <project> <slug>")
+		moePrintln(stderr, "       moe queue add [--front] [--agent <name>] idea <project> <slug>")
 		fs.PrintDefaults()
 	}
 	// `--from-idea` was the eager-promote flavor. The new lazy form —
@@ -125,6 +127,20 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "queue add: workflow %q not supported (use one of: %s)\n", workflow, strings.Join(queueWorkflows, ", "))
 		return 2
 	}
+	// --agent applies only to idea entries — the lazy-promote shape is
+	// where the agent name actually needs to flow somewhere. sdlc
+	// entries reference an already-open run that carries its own
+	// run.json.Agent, so a flag here would mean two sources of truth.
+	if *agentOverride != "" {
+		if workflow != queueWorkflowIdea {
+			moePrintf(stderr, "queue add: --agent only applies to `idea` entries; sdlc entries inherit their run's persisted agent\n")
+			return 2
+		}
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -145,7 +161,7 @@ func runQueueAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	item := queue.Item{Workflow: workflow, Project: projectID, Run: runID}
+	item := queue.Item{Workflow: workflow, Project: projectID, Run: runID, Agent: *agentOverride}
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "queue-add",
 		Run:     projectID + "/" + runID,
@@ -317,7 +333,7 @@ func defaultDispatchQueueItem(it queue.Item, stdout, stderr io.Writer) int {
 		if err != nil {
 			return 1
 		}
-		md, err := promoteIdeaToSdlcRun(root, it.Project, it.Run)
+		md, err := promoteIdeaToSdlcRun(root, it.Project, it.Run, it.Agent)
 		switch {
 		case md == nil && err != nil:
 			moePrintf(stderr, "queue: %v\n", err)

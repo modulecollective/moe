@@ -226,7 +226,14 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 // title-override / one-shot-chain plumbing — the caller (queue add)
 // has no use for those today, and keeping this helper narrow makes the
 // shared promote semantics easy to reason about.
-func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, error) {
+//
+// agentName, when non-empty, is stamped onto the new run's
+// run.json.Agent — the queue-walker passes through whatever the
+// idea entry carried so an idea queued with `--agent codex` opens
+// a codex-driven sdlc run. Empty leaves the field unset and the
+// usual $MOE_AGENT → "claude" precedence ladder runs at first
+// stage turn.
+func promoteIdeaToSdlcRun(root, projectID, ideaSlug, agentName string) (*run.Metadata, error) {
 	wf, err := LookupWorkflow("sdlc")
 	if err != nil {
 		return nil, err
@@ -244,6 +251,7 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug string) (*run.Metadata, erro
 		SeedDocs:    map[string]string{stages[0]: seed},
 		SubjectFrom: "idea " + ideaSlug,
 		Trailers:    trailers.Block{Idea: ideaSlug},
+		Agent:       agentName,
 		// Anchor the run slug to the idea's filename, not its (editable)
 		// H1. run.New will date-suffix on collision.
 		IDBase: ideaSlug,
