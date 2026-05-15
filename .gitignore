@@ -16,3 +16,23 @@ coverage.*
 
 # Agent / dev-env runtime drop site
 .moe/
+
+# Sandbox runtime bind-mounts. fly.io / similar runtimes shadow host
+# config files at the cwd / writable-add-dir scope by bind-mounting
+# /dev/null as character devices with these basenames. They aren't
+# agent edits — the agent can't even remove them ("Device or resource
+# busy") — but `git status` reports them as untracked because the
+# basename exists on disk, which trips push pre-flight's "uncommitted
+# files" gate. Matched without trailing slash so the pattern catches
+# both the device (file) and a real directory if one ever shows up.
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.vscode
+.zprofile
+.zshrc
