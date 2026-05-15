@@ -29,21 +29,32 @@ func colorOn(w io.Writer) bool {
 	return IsTTY(w)
 }
 
-// IsTTY reports whether w is a *os.File pointing at a character device
-// (a real terminal). Test buffers and pipes return false. NO_COLOR is
-// deliberately ignored: callers using this for layout decisions
-// (banner.IndentStderr) want the operator's terminal indented even
-// when colour is suppressed.
+// IsTTY reports whether w is a *os.File pointing at a real terminal.
+// Test buffers and pipes return false; /dev/null also returns false
+// even though it has ModeCharDevice set. NO_COLOR is deliberately
+// ignored: callers using this for layout decisions (banner.IndentStderr)
+// want the operator's terminal indented even when colour is suppressed.
+//
+// The /dev/null guard mirrors stdinIsTerminal in internal/cli/init.go,
+// where it was load-bearing: an exec.Command-spawned `moe init` gets
+// stdin=/dev/null by default on Unix, ModeCharDevice matches, and the
+// helper has to additionally rule out the null device via os.SameFile.
+// No current caller of IsTTY has been observed pointing at /dev/null,
+// but the predicate reads as a general "is this a real terminal?"
+// question and the next caller shouldn't have to relearn the lesson.
 func IsTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false
 	}
 	st, err := f.Stat()
-	if err != nil {
+	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
 		return false
 	}
-	return st.Mode()&os.ModeCharDevice != 0
+	if nullStat, err := os.Stat(os.DevNull); err == nil && os.SameFile(st, nullStat) {
+		return false
+	}
+	return true
 }
 
 // Printf writes a styled line to w.
