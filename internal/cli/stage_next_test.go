@@ -5,11 +5,50 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
 )
+
+func TestBackTargetsIncludesJustFinished(t *testing.T) {
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := LookupGroup("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name         string
+		justFinished string
+		want         []string
+	}{
+		{name: "fresh gate", justFinished: "", want: nil},
+		{name: "post design", justFinished: "design", want: []string{"design"}},
+		{name: "post code", justFinished: "code", want: []string{"design", "code"}},
+		{name: "post test", justFinished: "test", want: []string{"design", "code", "test"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotCmds := backTargets(wf, g, tc.justFinished)
+			got := make([]string, 0, len(gotCmds))
+			for _, cmd := range gotCmds {
+				got = append(got, cmd.Name)
+			}
+			if len(got) == 0 {
+				got = nil
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("backTargets(%q) = %v, want %v", tc.justFinished, got, tc.want)
+			}
+		})
+	}
+}
 
 // TestPromptStageNextStagePrintsDesignCanvas: when the next stage is
 // code and a design canvas exists on disk, its bytes appear above the
@@ -720,11 +759,10 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 }
 
 // TestPromptStageNextStageMultipleBackOffersSubPrompt: when there's
-// more than one prior stage, the chain prompt's `b` no longer names
-// a specific target — the legend reads "back to prior stage", and
+// more than one back target, the chain prompt's `b` no longer names
+// a specific target — the legend reads "back to stage", and
 // typing `b` opens a sub-prompt that lets the operator pick which
-// stage to re-open. This is the test-stage shape: design and code
-// are both behind us, so `b` must let the operator jump to either.
+// stage to re-open.
 func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	next := &Command{
 		Name: "test",
@@ -767,8 +805,8 @@ func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "b=back to prior stage") {
-		t.Fatalf("expected legend with 'back to prior stage' for multi-back, got: %q", got)
+	if !strings.Contains(got, "b=back to stage") {
+		t.Fatalf("expected legend with 'back to stage' for multi-back, got: %q", got)
 	}
 	if !strings.Contains(got, "back to:") {
 		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)
@@ -824,7 +862,7 @@ func TestPromptStageNextStageMultipleBackSubPromptDeclines(t *testing.T) {
 
 // TestPromptPushNextStageMultipleBackOffersSubPrompt: same shape at
 // the [N/m/p] gate — multiple prior stages produce a generic
-// "back to prior stage" legend entry plus a sub-prompt that fans
+// "back to stage" legend entry plus a sub-prompt that fans
 // the choice out. Pins the parallel behaviour between the two
 // chain prompts.
 func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
@@ -862,8 +900,8 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "b=back to prior stage") {
-		t.Fatalf("expected legend with 'back to prior stage' for multi-back, got: %q", got)
+	if !strings.Contains(got, "b=back to stage") {
+		t.Fatalf("expected legend with 'back to stage' for multi-back, got: %q", got)
 	}
 	if !strings.Contains(got, "back to:") {
 		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)

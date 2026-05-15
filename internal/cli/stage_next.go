@@ -32,13 +32,13 @@ import (
 // don't know which stage just landed (resume hitting the merge gate).
 //
 // justFinished also drives the "back" targets offered at the prompt:
-// a non-empty justFinished resolves to the list of stages strictly
-// prior in the workflow ladder, each looked up against the paired
-// command group. The prompt offers `b` to jump back to any of them —
-// a single prior stage runs directly, multiple stages route through a
-// sub-prompt that asks which to re-open. This lets the operator skip
-// over intermediate stages (test → design) instead of stepping back
-// one at a time.
+// a non-empty justFinished resolves to the list of stages up to and
+// including that stage in the workflow ladder, each looked up against
+// the paired command group. The prompt offers `b` to jump back to any
+// of them — a single stage runs directly, multiple stages route through
+// a sub-prompt that asks which to re-open. This lets the operator amend
+// the stage they just read, or skip over intermediate stages (test →
+// design) instead of stepping back one at a time.
 func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -114,28 +114,29 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	return promptStageNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
 }
 
-// backTargets returns the prior stages the chain prompt's `b` should
-// route to: every stage strictly before justFinished in the workflow
-// ladder, mapped through the paired command group. An empty
-// justFinished (fresh-run callers) gets an empty slice — no prior
-// stage to re-open. Stages whose command group has no matching verb
-// (idea is the only such case today) are skipped silently so the
-// operator only sees options that actually dispatch.
+// backTargets returns the stages the chain prompt's `b` should route
+// to: every stage up to and including justFinished in the workflow
+// ladder, mapped through the paired command group. An empty justFinished
+// (fresh-run callers) gets an empty slice — no just-read stage to
+// amend. Stages whose command group has no matching verb (idea is the
+// only such case today) are skipped silently so the operator only sees
+// options that actually dispatch.
 //
-// Today every workflow's ladder is linear, so "prior" means "appears
-// earlier in wf.Stages()". A fan-in or fan-out would need a richer
-// answer; surface the design question if and when one shows up.
+// Today every workflow's ladder is linear, so "up to" means "appears
+// no later than justFinished in wf.Stages()". A fan-in or fan-out would
+// need a richer answer; surface the design question if and when one
+// shows up.
 func backTargets(wf *Workflow, g *CommandGroup, justFinished string) []*Command {
 	if justFinished == "" {
 		return nil
 	}
 	var back []*Command
 	for _, s := range wf.Stages() {
-		if s == justFinished {
-			break
-		}
 		if cmd := g.Lookup(s); cmd != nil {
 			back = append(back, cmd)
+		}
+		if s == justFinished {
+			break
 		}
 	}
 	return back
@@ -185,16 +186,15 @@ func dispatchBack(back []*Command, md *run.Metadata, stdout, stderr io.Writer) i
 	return cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 }
 
-// backHint formats the legend phrase for the `b` option. Single
-// target reads "back to <stage>" so muscle memory still parses the
-// option without typing it; multiple targets read "back to prior
-// stage" — the operator picks the specific stage at the sub-prompt
-// after typing `b`.
+// backHint formats the legend phrase for the `b` option. Single target
+// reads "back to <stage>" so muscle memory still parses the option
+// without typing it; multiple targets read "back to stage" — the
+// operator picks the specific stage at the sub-prompt after typing `b`.
 func backHint(back []*Command) string {
 	if len(back) == 1 {
 		return "back to " + back[0].Name
 	}
-	return "back to prior stage"
+	return "back to stage"
 }
 
 // readPrintableCanvas returns the named stage's content.md body if it
