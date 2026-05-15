@@ -298,7 +298,7 @@ func stageRank(doc string) int {
 // (worktree dir gone, or sandbox not yet attached) idles instead of
 // resolving to a non-existent cwd.
 func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (followTarget, error) {
-	if sess.Doc == "code" {
+	if followDocUsesSandbox(sess.Doc) {
 		dir := sandbox.Path(root, md.Project, md.ID)
 		if _, err := os.Stat(dir); err != nil {
 			return followTarget{}, nil
@@ -319,7 +319,7 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		base := strings.TrimSpace(out)
 		return followTarget{
 			Dir:      dir,
-			Canvas:   filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, sess.Doc)),
+			Canvas:   filepath.Join(dir, CloneRunDir, "documents", sess.Doc, "content.md"),
 			Base:     base,
 			Workflow: md.Workflow,
 			Stage:    sess.Doc,
@@ -344,6 +344,15 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		Project:  md.Project,
 		Run:      md.ID,
 	}, nil
+}
+
+func followDocUsesSandbox(docID string) bool {
+	switch docID {
+	case "code", "test", "push":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildFollowSummary rolls scanned metadata into the figures the idle

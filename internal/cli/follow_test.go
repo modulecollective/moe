@@ -94,14 +94,14 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 }
 
 // TestPickFollowTargetLiveCodeSession: a run with an open code session
-// resolves to (sandbox dir, merge-base(HEAD, default-branch)). Code
-// sessions edit files inside the sandbox worktree, not the
-// bureaucracy worktree — the bureaucracy worktree's only artifact
-// during code is the canvas summary written near the end, which the
-// merge-decision prompt surfaces separately. The merge-base anchors
-// the diff at the session-open commit so a moving default branch
-// (under the worktree primitive the sandbox shares the canonical's
-// ref DB) doesn't drag unrelated commits into the diff.
+// resolves to (sandbox dir, live in-clone canvas, merge-base(HEAD,
+// default-branch)). Code sessions write their canvas through the
+// .moe-run shuttle inside the sandbox, so follow should tail that live
+// file rather than the bureaucracy copy that is synced back after the
+// turn. The merge-base anchors the diff at the session-open commit so
+// a moving default branch (under the worktree primitive the sandbox
+// shares the canonical's ref DB) doesn't drag unrelated commits into
+// the diff.
 func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -137,12 +137,12 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	if target.Base != wantBase {
 		t.Fatalf("base = %q, want merge-base %q", target.Base, wantBase)
 	}
-	wantCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "code"))
+	wantCanvas := filepath.Join(sandboxDir, CloneRunDir, "documents", "code", "content.md")
 	if target.Canvas != wantCanvas {
 		t.Fatalf("canvas = %q, want %q", target.Canvas, wantCanvas)
 	}
-	if strings.HasPrefix(target.Canvas, sandboxDir) {
-		t.Fatalf("canvas %q must not sit under sandbox %q", target.Canvas, sandboxDir)
+	if !strings.HasPrefix(target.Canvas, sandboxDir) {
+		t.Fatalf("canvas %q must sit under sandbox %q", target.Canvas, sandboxDir)
 	}
 }
 

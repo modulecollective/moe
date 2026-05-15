@@ -10,11 +10,10 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// syncRunIntoClone mirrors the bureaucracy run subtree at
-// projects/<p>/runs/<r>/ into <clonePath>/.moe-run/. Pin: every file
-// from the run subtree (canvas, followups, feedback, run.json) lands
-// in the clone with bytes unchanged.
-func TestSyncRunIntoClonePropagates(t *testing.T) {
+// syncRunIntoClone copies only the agent-writable files into
+// <clonePath>/.moe-run/. Pin: the current canvas, followups, and twin
+// feedback land in the clone with bytes unchanged.
+func TestSyncRunIntoClonePropagatesWritableFiles(t *testing.T) {
 	workRoot := t.TempDir()
 	clonePath := t.TempDir()
 	md := &run.Metadata{Project: "tele", ID: "fix-it"}
@@ -45,12 +44,18 @@ func TestSyncRunIntoClonePropagates(t *testing.T) {
 	}
 
 	runJSON := filepath.Join(workRoot, run.Dir(md.Project, md.ID), "run.json")
-	wantRunJSON := `{"id":"fix-it","project":"tele"}`
-	if err := os.WriteFile(runJSON, []byte(wantRunJSON), 0o644); err != nil {
+	if err := os.WriteFile(runJSON, []byte(`{"id":"fix-it","project":"tele"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	design := filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, "design"))
+	if err := os.MkdirAll(filepath.Dir(design), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(design, []byte("prior design"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := syncRunIntoClone(workRoot, clonePath, md); err != nil {
+	if err := syncRunIntoClone(workRoot, clonePath, md, docID); err != nil {
 		t.Fatalf("syncRunIntoClone: %v", err)
 	}
 
@@ -59,7 +64,6 @@ func TestSyncRunIntoClonePropagates(t *testing.T) {
 		filepath.Join(base, "documents", docID, "content.md"): wantCanvas,
 		filepath.Join(base, "followups.md"):                   wantFollowups,
 		filepath.Join(base, "feedback", "twin.md"):            wantFeedback,
-		filepath.Join(base, "run.json"):                       wantRunJSON,
 	}
 	for path, want := range cases {
 		got, err := os.ReadFile(path)
@@ -71,12 +75,19 @@ func TestSyncRunIntoClonePropagates(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
+	for _, path := range []string{
+		filepath.Join(base, "run.json"),
+		filepath.Join(base, "documents", "design", "content.md"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("non-writable file %s should not be copied, err=%v", path, err)
+		}
+	}
 }
 
-// thread-<agent>.jsonl files are operator forensic history written by
-// the executor directly into the bureaucracy worktree. Pin: the
-// shuttle skips them — copying multi-MB transcripts twice per turn
-// would add nothing but I/O.
+// thread-<agent>.jsonl files are not part of the writable allowlist.
+// Pin: the shuttle skips them — copying multi-MB transcripts twice per
+// turn would add nothing but I/O.
 func TestSyncRunIntoCloneSkipsThreadTranscripts(t *testing.T) {
 	workRoot := t.TempDir()
 	clonePath := t.TempDir()
@@ -95,7 +106,7 @@ func TestSyncRunIntoCloneSkipsThreadTranscripts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncRunIntoClone(workRoot, clonePath, md); err != nil {
+	if err := syncRunIntoClone(workRoot, clonePath, md, docID); err != nil {
 		t.Fatalf("syncRunIntoClone: %v", err)
 	}
 	cloned := filepath.Join(clonePath, CloneRunDir, "documents", docID, "thread-claude.jsonl")
@@ -121,7 +132,7 @@ func TestSyncRunIntoCloneClearsStaleWhenSourceMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncRunIntoClone(workRoot, clonePath, md); err != nil {
+	if err := syncRunIntoClone(workRoot, clonePath, md, "code"); err != nil {
 		t.Fatalf("syncRunIntoClone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(clonePath, CloneRunDir)); !os.IsNotExist(err) {
@@ -144,7 +155,7 @@ func TestSyncRunIntoCloneEmptyClonePathIsNoOp(t *testing.T) {
 	if err := os.WriteFile(canvasAbs, []byte(want), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncRunIntoClone(workRoot, "", md); err != nil {
+	if err := syncRunIntoClone(workRoot, "", md, "design"); err != nil {
 		t.Fatalf("syncRunIntoClone: %v", err)
 	}
 	got, err := os.ReadFile(canvasAbs)
@@ -238,10 +249,10 @@ func TestSyncRunFromClonePropagatesFollowupsAndFeedback(t *testing.T) {
 	}
 }
 
-// run.json is MoE-owned. Pin: if the agent edits the in-clone copy,
-// the post-sync refuses loudly rather than letting the change reach
-// bureaucracy.
-func TestSyncRunFromCloneRefusesRunJSONEdit(t *testing.T) {
+// run.json is MoE-owned and not on the writable allowlist. Pin: if an
+// agent somehow creates an in-clone copy, post-sync ignores it rather
+// than letting the change reach bureaucracy.
+func TestSyncRunFromCloneIgnoresRunJSON(t *testing.T) {
 	workRoot := t.TempDir()
 	clonePath := t.TempDir()
 	md := &run.Metadata{Project: "tele", ID: "fix-it"}
@@ -271,11 +282,8 @@ func TestSyncRunFromCloneRefusesRunJSONEdit(t *testing.T) {
 	}
 
 	err := syncRunFromClone(workRoot, clonePath, md, docID)
-	if err == nil {
-		t.Fatal("expected refusal on tampered run.json")
-	}
-	if !strings.Contains(err.Error(), "run.json") {
-		t.Errorf("error %q should name run.json", err)
+	if err != nil {
+		t.Fatalf("syncRunFromClone: %v", err)
 	}
 	// Bureaucracy run.json must be left untouched.
 	got, _ := os.ReadFile(runJSONBureau)
@@ -284,10 +292,10 @@ func TestSyncRunFromCloneRefusesRunJSONEdit(t *testing.T) {
 	}
 }
 
-// Prior-stage canvases are read-only from a code-stage turn. Pin: an
-// agent that rewrites documents/design/content.md trips the refusal,
-// and the bureaucracy design canvas stays at its prior contents.
-func TestSyncRunFromCloneRefusesPriorStageCanvasEdit(t *testing.T) {
+// Prior-stage canvases are not on the writable allowlist. Pin: an
+// agent-created documents/design/content.md is ignored, and the
+// bureaucracy design canvas stays at its prior contents.
+func TestSyncRunFromCloneIgnoresPriorStageCanvasEdit(t *testing.T) {
 	workRoot := t.TempDir()
 	clonePath := t.TempDir()
 	md := &run.Metadata{Project: "tele", ID: "fix-it"}
@@ -317,11 +325,8 @@ func TestSyncRunFromCloneRefusesPriorStageCanvasEdit(t *testing.T) {
 	}
 
 	err := syncRunFromClone(workRoot, clonePath, md, docID)
-	if err == nil {
-		t.Fatal("expected refusal on prior-stage canvas edit")
-	}
-	if !strings.Contains(err.Error(), "design") {
-		t.Errorf("error %q should name design content.md", err)
+	if err != nil {
+		t.Fatalf("syncRunFromClone: %v", err)
 	}
 	got, _ := os.ReadFile(designBureau)
 	if string(got) != "design original" {

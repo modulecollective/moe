@@ -778,6 +778,9 @@ func TestWritePRBodyFileMissingSection(t *testing.T) {
 // every `--pr`: bounded curation, predictable spend. Catching a
 // future inadvertent drop back to Opus matters.
 func TestRunPushSynthesisSessionPinsSonnet(t *testing.T) {
+	t.Setenv("MOE_AGENT", "")
+	t.Setenv("MOE_HOME", newTestBureaucracy(t))
+
 	var captured stageSessionOpts
 	prev := runStageSession
 	runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
@@ -1567,6 +1570,9 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 // suppressed, canvas skeleton seeded. Stubs runStageSession at the
 // seam runPushSynthesisSession goes through.
 func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
+	t.Setenv("MOE_AGENT", "")
+	t.Setenv("MOE_HOME", newTestBureaucracy(t))
+
 	var capturedDoc string
 	var capturedOpts stageSessionOpts
 	prev := runStageSession
