@@ -149,22 +149,33 @@ func TestEventsSinceCheckpointFirstReflectUnbounded(t *testing.T) {
 
 // TestEventsSinceCheckpointFirstReflectCommitCap covers the soft cap
 // on the first-reflect path: with no checkpoint and a project repo
-// well past the cap, the rendered block must list the newest 500 and
-// finish with an "(N earlier commits omitted)" footer. The 500-row
-// cap and footer wording are part of the surface the agent reads, so
-// pin both the boundary subjects and the footer text here.
+// past the cap, the rendered block must list the newest cap-worth of
+// commits and finish with an "(N earlier commits omitted)" footer.
+// The cap value and footer wording are part of the surface the agent
+// reads, so pin both the boundary subjects and the footer text here.
+//
+// firstReflectCommitCap is overridden to 10 for this test so the
+// fixture stays cheap. The production value (500) would force ~1,200
+// git forks per run, which under -race -count=1 ./... races with the
+// rest of the git-heavy suite for fork/pipe/fd resources and was
+// observed to flake on CI. Same shape as git.go's writeRetryCap test
+// seam.
 func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
+	prev := firstReflectCommitCap
+	firstReflectCommitCap = 10
+	t.Cleanup(func() { firstReflectCommitCap = prev })
+
 	root := newGitRepo(t)
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// newGitRepo seeds a single empty commit; layer 600 content
-	// commits on top so total non-merge commits = 601 and we cap
-	// 101 of them.
+	// newGitRepo seeds a single empty commit; layer 10 content commits
+	// on top so total non-merge commits = 11 and the seed alone falls
+	// outside the cap.
 	projectRepo := newGitRepo(t)
-	const content = 600
+	const content = 10
 	for i := 0; i < content; i++ {
 		path := filepath.Join(projectRepo, fmt.Sprintf("file-%03d.txt", i))
 		writeFile(t, path, "x\n")
@@ -185,21 +196,14 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Newest commit is in; cap-edge (commit 100, the 500th-newest) is
-	// in; everything older than the cap is out.
-	for _, want := range []string{"commit 599", "commit 100"} {
+	// Newest content commit is in; cap-edge (commit 000, the 10th-newest)
+	// is in; the pre-content seed commit falls outside the cap.
+	for _, want := range []string{"commit 009", "commit 000"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in events block:\n%s", want, got)
 		}
 	}
-	for i := 0; i < 100; i++ {
-		bad := fmt.Sprintf("commit %03d", i)
-		if strings.Contains(got, bad) {
-			t.Errorf("commit %q is older than cap and should be omitted:\n%s", bad, got)
-			break
-		}
-	}
-	if !strings.Contains(got, "(101 earlier commits omitted)") {
+	if !strings.Contains(got, "(1 earlier commits omitted)") {
 		t.Errorf("expected omitted-count footer in events block:\n%s", got)
 	}
 	// Vocabulary regression guard: the old per-category windowing used

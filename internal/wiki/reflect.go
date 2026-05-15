@@ -20,7 +20,10 @@ import (
 // to the agent so the seeded history-summary.md can call out that
 // older history is in git, not in this prompt. The SHA..HEAD branch
 // stays uncapped — its window is already bounded by reflect cadence.
-const firstReflectCommitCap = 500
+//
+// Var rather than const so the cap test can shrink it; production
+// value is 500. Same pattern as git.go's writeRetryCap.
+var firstReflectCommitCap = 500
 
 // ReflectPromptSection is the wiki-specific block appended to the
 // system prompt for a closed-schema reflect session. Sibling of
