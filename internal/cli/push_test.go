@@ -772,14 +772,15 @@ func TestWritePRBodyFileMissingSection(t *testing.T) {
 	}
 }
 
-// TestRunPushSynthesisSessionPinsSonnet asserts the headless synthesis
-// session opts the executor sees pass Model="sonnet". The cost
-// argument is the load-bearing reason synthesis can now run inside
-// every `--pr`: bounded curation, predictable spend. Catching a
-// future inadvertent drop back to Opus matters.
-func TestRunPushSynthesisSessionPinsSonnet(t *testing.T) {
-	t.Setenv("MOE_AGENT", "")
+// TestRunPushSynthesisSessionPinsCheapClaudeModel asserts the headless
+// synthesis session opts the executor sees pass Model="sonnet" when
+// the resolved agent is claude. The cost argument is the load-bearing
+// reason synthesis can now run inside every `--pr`: bounded curation,
+// predictable spend. Catching a future inadvertent drop back to Opus
+// matters.
+func TestRunPushSynthesisSessionPinsCheapClaudeModel(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
+	t.Setenv("MOE_AGENT", "claude")
 
 	var captured stageSessionOpts
 	prev := runStageSession
@@ -796,6 +797,32 @@ func TestRunPushSynthesisSessionPinsSonnet(t *testing.T) {
 		t.Fatalf("synthesis session exit=%d, want 0", code)
 	}
 	if got, want := captured.Model, "sonnet"; got != want {
+		t.Fatalf("Model = %q, want %q", got, want)
+	}
+	if !captured.Headless {
+		t.Errorf("Headless: want true")
+	}
+}
+
+func TestRunPushSynthesisSessionPinsCheapCodexModel(t *testing.T) {
+	t.Setenv("MOE_HOME", newTestBureaucracy(t))
+	t.Setenv("MOE_AGENT", "codex")
+
+	var captured stageSessionOpts
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+		if docID != "push" {
+			t.Fatalf("unexpected docID %q", docID)
+		}
+		captured = opts
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	if code := runPushSynthesisSession("tele", "fix-it", true, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("synthesis session exit=%d, want 0", code)
+	}
+	if got, want := captured.Model, "gpt-5.4-mini"; got != want {
 		t.Fatalf("Model = %q, want %q", got, want)
 	}
 	if !captured.Headless {
@@ -1566,12 +1593,12 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 
 // TestPushSynthesisDispatchesHeadlessStage verifies the headless
 // push-synthesis session is wired with the right stageSessionOpts
-// shape: headless, sandboxed, sonnet-pinned, post-turn chain prompt
+// shape: headless, sandboxed, cheap-model-pinned, post-turn chain prompt
 // suppressed, canvas skeleton seeded. Stubs runStageSession at the
 // seam runPushSynthesisSession goes through.
 func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
-	t.Setenv("MOE_AGENT", "")
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
+	t.Setenv("MOE_AGENT", "claude")
 
 	var capturedDoc string
 	var capturedOpts stageSessionOpts
@@ -1603,7 +1630,7 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 		t.Errorf("CanvasSkeleton: want non-empty (push canvas seeded with structural headings)")
 	}
 	if capturedOpts.Model != "sonnet" {
-		t.Errorf("Model: want sonnet (bounded curation task), got %q", capturedOpts.Model)
+		t.Errorf("Model: want sonnet for claude (bounded curation task), got %q", capturedOpts.Model)
 	}
 }
 
