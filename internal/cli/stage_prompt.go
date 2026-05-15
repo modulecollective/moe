@@ -266,12 +266,12 @@ other concurrent activities and from the canonical submodule until the
 run is pushed.
 
 Your run-state mirror lives at `+"`./%s/`"+` inside this clone. MoE
-pre-syncs the bureaucracy run subtree there before each turn and
-copies your edits back after the turn commits. Write the canvas,
+pre-syncs only the agent-writable run files there before each turn and
+copies those files back after the turn commits. Write the canvas,
 `+"`followups.md`"+`, and `+"`feedback/twin.md`"+` under this
-directory only — they're the agent-writable surface. `+"`run.json`"+`
-and other stages' canvases under `+"`documents/`"+` are read-only;
-edits there are refused at post-sync.
+directory only — they're the agent-writable surface. Run metadata,
+prior canvases, digital-twin docs, and other bureaucracy paths are
+read-only context; do not edit those paths.
 `, clonePath, CloneRunDir)
 	}
 
