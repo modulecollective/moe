@@ -196,9 +196,8 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 // walks every remaining stage and ships at push. code/test go
 // through openSdlcStage (headless), push goes through pushFromCascade
 // (the typed entry that wraps runPushTyped — merge path, no flags).
-// No synthesis pre-call at push: `!!` defaults to fast-forward merge,
-// whose commit body is bare, so the curation would write a canvas
-// nothing reads.
+// There is no separate cascade synthesis step: `!!` defaults to
+// fast-forward merge and runPushTyped owns the shared synthesis preflight.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	openCaptured := stubOpenSdlcStage(t, nil)
 	pushCaptured := stubPushFromCascade(t, 0, nil)
@@ -228,7 +227,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		}
 	}
 	if got := countInvocations(*openCaptured, "push"); got != 0 {
-		t.Fatalf("push must not dispatch via openSdlcStage (no cascade synth): got %d", got)
+		t.Fatalf("push must not dispatch via openSdlcStage: got %d", got)
 	}
 	// push ship is a pushFromCascade call with the bare (project, run)
 	// args — merge path, no --pr flag.

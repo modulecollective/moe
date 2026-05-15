@@ -105,12 +105,10 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	}
 	switch next.Name {
 	case "push":
-		// The ship gate prints immediately after test closes — synthesis
-		// no longer fires at chain-prompt time. The operator's modal
-		// answer here is `N` (decline), and on `m` the merge commit body
-		// is bare anyway; paying a `claude -p` round-trip for either is
-		// waste. Synthesis runs inside `push --pr` itself, where its
-		// output actually lands on the PR.
+		// The ship gate prints immediately after test closes. Synthesis
+		// does not fire at chain-prompt time because the operator may
+		// decline; the chosen push command runs synthesis as part of its
+		// shared preflight.
 		return promptPushNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
 	}
 	return promptStageNextStage(next, back, scuttle, root, md, hint, stdout, stderr)
@@ -395,10 +393,10 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 			moePrintf(stderr, "workflow %q has no push command\n", md.Workflow)
 			return 1
 		}
-		// No synthesis here either — the `s` shortcut takes the same
-		// path as the natural post-test cascade now: straight to the
-		// ship gate, where the operator chooses (and synthesis only
-		// runs inside `push --pr`).
+		// No prompt-time synthesis here either — the `s` shortcut takes
+		// the same path as the natural post-test cascade: straight to the
+		// ship gate, where the operator chooses and the push command runs
+		// synthesis if they actually ship.
 		pushHint := fmt.Sprintf("moe %s %s %s %s", md.Workflow, pushCmd.Name, md.Project, md.ID)
 		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
 	}
@@ -445,10 +443,10 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 // as written.
 //
 // The push canvas is deliberately not in this fallback chain. Synthesis
-// runs inside `push --pr` now, not at chain-prompt time, so by the time
-// the operator reads this preamble the push canvas (if any) is left
-// over from a prior `--pr` cycle — stale relative to whatever the
-// operator's about to do. Test → code is the live story.
+// runs inside the chosen push command, not at chain-prompt time, so by
+// the time the operator reads this preamble the push canvas (if any) may
+// be left over from a prior push attempt — stale relative to whatever
+// the operator's about to do. Test → code is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	body := readPrintableCanvas(root, md, "test")
 	if body == "" {
@@ -630,11 +628,10 @@ type cascadeResult struct {
 // seeding) still fires. The inCascade flag suppresses each stage's
 // inner promptNextStage so the cascade owns routing.
 //
-// At push in yolo mode the dispatch is the merge path (pushCmd.Run
-// with no flags), not a synth-then-ship pair: `!!` defaults to
-// fast-forward merge, the merge commit body is bare, and a
-// synthesis pre-call would write a canvas nothing reads.
-// Synthesis runs inside `push --pr` itself.
+// At push in yolo mode the dispatch is the merge path (pushCmd.Run with
+// no flags). `!!` defaults to fast-forward merge; runPushTyped still
+// runs the shared synthesis preflight before deterministic hooks and
+// shipping.
 func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
@@ -675,12 +672,9 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		stage := stages[i]
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
-			// `!!` at push: ship via the merge path. No synthesis
-			// pre-call — the merge commit body is bare and no PR
-			// body lands on a reviewer's screen, so the curation
-			// would be writing a canvas nothing reads. Synthesis
-			// runs inside `push --pr`, where it has somewhere to
-			// land.
+			// `!!` at push ships via the merge path. runPushTyped
+			// owns synthesis before the shared ship gate, so the
+			// cascade only needs to call the typed push entry once.
 			//
 			// Call runPushTyped via pushFromCascade (bypassing
 			// g.Lookup("push")) so the deferred-to-recovery signal —

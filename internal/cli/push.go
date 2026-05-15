@@ -64,10 +64,9 @@ func (e *PushDeferredError) Error() string {
 
 // pushCanvasSkeleton is the fixed structural shape every push canvas
 // opens with. Synthesis fills it from code/content.md and (when
-// present) test/content.md. The ship gate's preamble reads this
-// canvas verbatim, so the agent's `## PR body` section is what the
-// operator sees at the [N/m/p] decision and what lands on the actual
-// PR / merge commit message.
+// present) test/content.md. The `## PR body` section is what lands on
+// an actual PR; the rest of the canvas is the durable shipping record
+// for both the PR and fast-forward merge paths.
 const pushCanvasSkeleton = `# Push
 
 ## PR body
@@ -106,15 +105,14 @@ var pushSynthesisDefaultModel = map[string]string{
 }
 
 // runPushSynthesisSession opens the push stage session that curates
-// code's draft and test's findings into push/content.md. One way in
-// today: `moe sdlc push --pr` invokes the headless variant from
-// openPRPath before `gh pr create`, so the synthesized
-// `## PR body` section is what the reviewer reads. The
-// interactive variant (headless=false) lives on for a future
-// `moe sdlc <whatever>` verb that lets the operator iterate on the
-// canvas by hand; no caller wires it today. SkipNextStage suppresses
-// the post-session chain prompt — synthesis sits inside the push
-// action → PR open flow, which owns its own routing.
+// code's draft and test's findings into push/content.md. runPushTyped
+// invokes the headless variant before the shared ship gate so both the
+// PR path and the fast-forward merge path leave the same final push
+// canvas. The interactive variant (headless=false) lives on for a
+// future `moe sdlc <whatever>` verb that lets the operator iterate on
+// the canvas by hand; no caller wires it today. SkipNextStage suppresses
+// the post-session chain prompt — synthesis sits inside the push action,
+// which owns its own routing.
 //
 // The headless path pins a cheap-tier model per agent: see
 // pushSynthesisDefaultModel above. If a future agent needs the
@@ -249,6 +247,10 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 		return 1, nil
 	}
 
+	if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
+		return code, nil
+	}
+
 	hooks := hookEnv{
 		Project:      md.Project,
 		Run:          md.ID,
@@ -359,13 +361,9 @@ func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) st
 // openPRPath is the --pr behavior: open (or re-use) a PR for the
 // already-pushed branch and record the first push's state. The
 // sandbox is intentionally left in place — iteration via
-// `moe <wf> code` stays a one-liner until the PR merges.
-//
-// Synthesis runs lazily, only when a new PR is about to open. Re-runs
-// against an already-pushed branch (`existing == true`) skip synthesis
-// — the PR body was set on the first open and `gh pr create` won't
-// fire again. mergePath stays untouched: bare commit body, no
-// synthesis, fastest path.
+// `moe <wf> code` stays a one-liner until the PR merges. Synthesis
+// already ran in runPushTyped, so this path only consumes the push
+// canvas when a new PR needs a body.
 func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
 	ghRepo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
@@ -381,15 +379,9 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 	if existing {
 		moePrintf(stdout, "existing PR: %s\n", url)
 	} else {
-		// Synthesize the push canvas — the `## PR body` section is
-		// what `gh pr create --body-file` reads below. Test stage
-		// applies fixes after code closes, so code/content.md is
-		// stale relative to the diff being shipped; synthesis
-		// resolves that by re-reading code + test and producing an
-		// up-to-date narrative.
-		if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
-			return code
-		}
+		// The shared push preflight synthesized the canvas. The
+		// `## PR body` section is what `gh pr create --body-file`
+		// reads below.
 		bodyPath, cleanup, err := writePRBodyFile(root, md)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)

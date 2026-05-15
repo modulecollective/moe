@@ -7,10 +7,11 @@ prior canvases and curate them into the PR body the reviewer reads,
 and surface any conflict between code's draft and test's findings so
 the operator sees it before opening the PR.
 
-This stage runs inside the `--pr` ship path (and the operator-driven
-`--one-shot` headless variant). The fast-forward merge path skips it
-— its commit body is bare by design — so when you're invoked, the
-output lands on a reviewer's screen. Write accordingly.
+This stage runs inside the push command before either ship path. The
+`--pr` path consumes `## PR body` as the reviewer-facing PR description;
+the fast-forward merge path keeps its merge commit body bare, but this
+canvas remains the run's durable final shipping record. Write
+accordingly.
 
 The pre-push hooks (lint, test, build, rebase-onto-default) are the
 deterministic gate downstream. They run after this stage; you don't
@@ -77,9 +78,10 @@ is ready to ship — or, if it isn't, what's blocking)
 the two agree)
 ```
 
-`gh pr create --body-file` reads the `## PR body` section verbatim,
-so what you write there is what reviewers see on the PR — headings,
-links, code blocks and all.
+`gh pr create --body-file` reads the `## PR body` section verbatim on
+the PR path, so what you write there is what reviewers see on the PR —
+headings, links, code blocks and all. On the merge path, the same
+section is a draft record only; the merge commit body stays bare.
 
 ## Fix-or-escalate
 

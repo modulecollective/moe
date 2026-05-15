@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -91,6 +92,8 @@ func newPushFixture(t *testing.T) *pushFixture {
 	gittest.Run(t, clonePath, "commit", "-m", "add feature")
 	tipSHA := gittest.HeadSHA(t, clonePath)
 
+	stubSynthesisWritesCanvas(t, root, projectID, runID, "# Push\n\n## PR body\n\nSynthesized body for review.\n\n## Ship readiness\n\nGreen.\n\n## Conflicts surfaced\n\n")
+
 	return &pushFixture{
 		t:         t,
 		root:      root,
@@ -139,8 +142,8 @@ func (f *pushFixture) runInRoot(args ...string) (string, string, int) {
 
 // TestPushMergeFFAdvancesOriginAndMarksMerged is the happy-path
 // default-merge test: origin/main moves to moe/<run>'s tip, the run
-// flips to StatusMerged, the sandbox is gone, and the remote branch
-// is deleted.
+// flips to StatusMerged, the sandbox is gone, the remote branch is
+// deleted, and shared push synthesis left a final push canvas.
 func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	f := newPushFixture(t)
 
@@ -166,6 +169,13 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	body := lastCommitMessage(t, f.root)
 	if !strings.Contains(body, "MoE-Merged: "+f.tipSHA) {
 		t.Fatalf("MoE-Merged trailer missing tip SHA:\n%s", body)
+	}
+	canvas, err := os.ReadFile(filepath.Join(f.root, run.ContentPath(f.projectID, f.runID, "push")))
+	if err != nil {
+		t.Fatalf("read push canvas: %v", err)
+	}
+	if !strings.Contains(string(canvas), "Synthesized body for review.") {
+		t.Fatalf("merge path should write synthesized push canvas, got:\n%s", canvas)
 	}
 }
 
@@ -596,6 +606,62 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 	}
 }
 
+// TestPushPRPathSynthesizesBeforeExistingPR pins the re-run behavior:
+// even when GitHub already has an open PR and `gh pr create` will not
+// run, push still refreshes the push canvas before recording/reusing
+// the PR.
+func TestPushPRPathSynthesizesBeforeExistingPR(t *testing.T) {
+	f := newPushFixture(t)
+	const fakeRemote = "https://github.com/owner/repo.git"
+	const existingURL = "https://github.com/owner/repo/pull/77"
+	addInsteadOfRewrite(t, fakeRemote, f.origin)
+	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
+		`{"id":"`+f.projectID+`","submodule":"projects/`+f.projectID+`/src","remote":"`+fakeRemote+`","default_branch":"main"}`+"\n")
+	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
+	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for existing PR test")
+
+	var synthCalls int
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, _ stageSessionOpts, _, _ io.Writer) int {
+		if docID != "push" {
+			t.Fatalf("unexpected docID %q", docID)
+		}
+		synthCalls++
+		canvasPath := filepath.Join(f.root, run.ContentPath(f.projectID, f.runID, "push"))
+		if err := os.MkdirAll(filepath.Dir(canvasPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(canvasPath, []byte("# Push\n\n## PR body\n\nRefreshed existing PR body.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+	fakeGhExistingPR(t, existingURL)
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if synthCalls != 1 {
+		t.Fatalf("synthesis calls = %d, want 1", synthCalls)
+	}
+	if !strings.Contains(stdout, "existing PR: "+existingURL) {
+		t.Fatalf("expected existing PR URL in stdout, got:\n%s", stdout)
+	}
+	body := lastCommitMessage(t, f.root)
+	if !strings.Contains(body, "MoE-PR: "+existingURL) {
+		t.Fatalf("MoE-PR trailer should record existing PR:\n%s", body)
+	}
+	canvas, err := os.ReadFile(filepath.Join(f.root, run.ContentPath(f.projectID, f.runID, "push")))
+	if err != nil {
+		t.Fatalf("read push canvas: %v", err)
+	}
+	if !strings.Contains(string(canvas), "Refreshed existing PR body.") {
+		t.Fatalf("existing PR path should refresh push canvas, got:\n%s", canvas)
+	}
+}
+
 // TestExtractMarkdownSection pins the slicing helper writePRBodyFile
 // uses to pull `## PR body` out of the push canvas. The skeleton has
 // a fixed shape, so the helper doesn't need a real markdown parser —
@@ -737,9 +803,9 @@ func TestRunPushSynthesisSessionPinsSonnet(t *testing.T) {
 // stubSynthesisWritesCanvas swaps runStageSession for a stub that
 // writes the given canvas content to push/content.md and returns 0 —
 // what `runPushSynthesisSession` does on the happy path, minus the
-// actual claude turn. Tests that drive `--pr` through runPush use this
-// so the synthesis call inside openPRPath produces the canvas
-// writePRBodyFile expects without spinning up a real session worktree.
+// actual claude turn. Tests that drive push through runPush use this so
+// the shared synthesis preflight produces the canvas writePRBodyFile
+// expects without spinning up a real session worktree.
 // Restores the original on cleanup. Canvas content should be a full
 // canvas including `## PR body` so writePRBodyFile finds a section to
 // extract.
@@ -778,6 +844,33 @@ func addInsteadOfRewrite(t *testing.T, fake, real string) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "[url \"%s\"]\n\tinsteadOf = %s\n", real, fake)
+}
+
+func fakeGhExistingPR(t *testing.T, url string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim gh fake only works on unix-y OSes")
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+set -e
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  echo '[{"url":"` + url + `"}]'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo "unexpected gh pr create" >&2
+  exit 9
+fi
+echo "fake gh existing PR: unsupported invocation: $*" >&2
+exit 2
+`
+	ghPath := filepath.Join(dir, "gh")
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
 }
 
 // TestPushIdempotentOnMergedRun: a rerun on a merged run is a no-op
@@ -824,6 +917,42 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "already closed") {
 		t.Fatalf("expected 'already closed' notice, got: %s", stdout)
+	}
+}
+
+// TestPushSynthesisFailureBlocksShip: synthesis is now the shared
+// push-stage canvas, so a failed synthesis must refuse shipping before
+// hooks, branch push, merge, or PR creation.
+func TestPushSynthesisFailureBlocksShip(t *testing.T) {
+	f := newPushFixture(t)
+
+	canary := filepath.Join(t.TempDir(), "hook-ran")
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-canary.sh", `#!/bin/sh
+touch "`+canary+`"
+`)
+
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, _ stageSessionOpts, _, _ io.Writer) int {
+		if docID != "push" {
+			t.Fatalf("unexpected docID %q", docID)
+		}
+		return 42
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	mainBefore := f.originHead()
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	if code != 42 {
+		t.Fatalf("exit=%d, want synthesis exit 42\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin/main must not advance when synthesis fails: want %s, got %s", mainBefore, got)
+	}
+	if _, err := os.Stat(canary); !os.IsNotExist(err) {
+		t.Fatalf("pre-push hook should not run after synthesis failure; stat err=%v", err)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status should remain in_progress after synthesis failure, got %s", md.Status)
 	}
 }
 
@@ -1474,10 +1603,10 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 
 // TestPromptPushNextStageIgnoresPushCanvas pins the rule that the
 // ship gate's preamble doesn't fall back to push/content.md.
-// Synthesis runs inside `push --pr` now, not at chain-prompt time, so
-// by the time the operator reads this preamble the push canvas (if
-// any) is left over from a prior `--pr` cycle — stale relative to
-// whatever the operator's about to do. Test → code is the live story.
+// Synthesis runs inside the chosen push command, not at chain-prompt
+// time, so by the time the operator reads this preamble the push canvas
+// (if any) may be left over from a prior push attempt — stale relative
+// to whatever the operator's about to do. Test → code is the live story.
 func TestPromptPushNextStageIgnoresPushCanvas(t *testing.T) {
 	next := &Command{
 		Name: "push",

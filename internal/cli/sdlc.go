@@ -235,10 +235,9 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 // via `cmd.Run` with a flag prepended, which is the pattern the run
 // that removed `--one-shot` set out to retire.
 //
-// push deliberately has no case here. Push synthesis runs lazily
-// inside `push --pr` (see openPRPath) and the merge path is a bare
-// commit body; the cascade's yolo branch ships via pushCmd.Run with
-// no flags, so no caller wants this seam for push. An unexpected
+// push deliberately has no case here. The cascade's yolo branch ships
+// via pushCmd.Run with no flags, and runPushTyped owns the shared
+// synthesis preflight before either ship path. An unexpected
 // stage="push" call surfaces as the default branch's error rather
 // than silently routing somewhere wrong.
 //
