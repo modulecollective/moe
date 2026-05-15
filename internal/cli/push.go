@@ -99,9 +99,13 @@ const pushSynthesisKickoff = "The operator just opened this push synthesis sessi
 // would be overkill at the operator's default cost. A registered
 // agent without an entry here gets "" — same as omitting --model on
 // the agent's CLI, which falls back to the agent's own default.
+//
+// Slug source of truth: ~/.codex/models_cache.json for codex, claude's
+// CLI for claude. When a vendor renames a slug (e.g. `gpt-5-mini` →
+// `gpt-5.4-mini`), this map is the one-line fix.
 var pushSynthesisDefaultModel = map[string]string{
 	"claude": "sonnet",
-	"codex":  "gpt-5-mini",
+	"codex":  "gpt-5.4-mini",
 }
 
 // runPushSynthesisSession opens the push stage session that curates
