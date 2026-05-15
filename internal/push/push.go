@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/cliout"
@@ -159,17 +160,46 @@ func DeleteRemoteBranch(clonePath, branch string, stdout, stderr io.Writer) erro
 // a branch that doesn't reflect the agent's actual work. `workflow` is
 // threaded in only to render a runnable command in the error message;
 // the caller (cli/push.go) already has it on md.Workflow.
+//
+// Bind-mount character devices (e.g. fly.io / sandbox runtimes that
+// shadow host config files like `.bashrc` / `.gitconfig` with
+// `/dev/null`) are filtered out: git status reports them as untracked
+// because the basename exists on disk, but they aren't agent edits —
+// the agent can't even remove them ("Device or resource busy") — and
+// refusing the push on their account would block every ship under
+// the new plain-clone primitive that places the clone in the runtime's
+// bind-mount scope.
 func CheckCleanWorkTree(clonePath, workflow string) error {
 	entries, err := git.Status(clonePath)
 	if err != nil {
 		return fmt.Errorf("push: git status in sandbox: %w", err)
 	}
+	entries = filterSandboxBindMounts(clonePath, entries)
 	if len(entries) == 0 {
 		return nil
 	}
 	return fmt.Errorf(`push: sandbox clone has %d uncommitted file(s) — the agent edited but did not commit
        sandbox: %s
        re-run `+"`moe %s code`"+` and ask the agent to commit, or commit manually in the sandbox`, len(entries), clonePath, workflow)
+}
+
+// filterSandboxBindMounts removes status entries whose on-disk shape
+// is a character device — the sandbox runtime's bind-mounted /dev/null
+// stand-ins for host config files. A real agent edit is always a
+// regular file (or a deleted regular file, which `os.Stat` reports as
+// missing — the stat-error branch keeps those in the slice). A
+// missing-or-error stat keeps the entry: better to refuse the push on
+// an ambiguous record than silently let an agent edit slip through.
+func filterSandboxBindMounts(clonePath string, entries []git.StatusEntry) []git.StatusEntry {
+	out := entries[:0]
+	for _, e := range entries {
+		info, err := os.Stat(filepath.Join(clonePath, e.Path))
+		if err == nil && info.Mode()&os.ModeDevice != 0 {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // CheckBranchHasCommits confirms the sandbox clone has `branch` and
