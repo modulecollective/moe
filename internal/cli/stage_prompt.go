@@ -221,10 +221,18 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 // that's always present — everything else in the prompt is optional
 // guidance layered on top.
 func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
-	// Absolute path so it resolves regardless of where Claude Code's cwd
-	// lands — document-only runs sit at the bureaucracy root, code-editing
-	// runs sit inside the sandbox clone.
+	// Code-bearing stages (clonePath != "") route the canvas through
+	// ./.moe-canvas.md inside the clone. The shuttle in clone_canvas.go
+	// owns pre-turn copy bureaucracy → clone and post-turn copy clone
+	// → bureaucracy; the agent only ever touches the in-cwd file, which
+	// keeps codex's apply_patch project-scope check happy. For
+	// document-only stages (clonePath == "") cwd is the bureaucracy
+	// root and the absolute bureaucracy path is still the right
+	// answer.
 	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+	if clonePath != "" {
+		content = "./" + CloneCanvasName
+	}
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for run %q (project %q) in a Ministry of Everything bureaucracy repo.
 

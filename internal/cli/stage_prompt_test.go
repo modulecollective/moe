@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,6 +95,46 @@ func TestStageLocationSectionUnknownWorkflow(t *testing.T) {
 	md := &run.Metadata{Project: "p", ID: "r", Workflow: "bogus"}
 	if got := stageLocationSection(md, "code"); got != "" {
 		t.Errorf("expected empty for unknown workflow, got:\n%s", got)
+	}
+}
+
+// TestOperationalCoreCanvasPathSwitchesOnClonePath pins the canvas
+// path the agent reads from operationalCore:
+//   - clonePath == "" (document-only stage, cwd = bureaucracy root):
+//     absolute path under root, so the agent can write directly to
+//     the canonical canvas file.
+//   - clonePath != "" (code-bearing stage, cwd = sandbox clone):
+//     cwd-relative ./.moe-canvas.md, because codex's apply_patch
+//     refuses to write outside the cwd's git project even when the
+//     bureaucracy root is in --add-dir. The pre/post shuttle in
+//     clone_canvas.go owns the bytes' actual journey.
+//
+// Either direction breaks a real workflow — pin both so the next
+// refactor of operationalCore can't silently regress codex's headless
+// code stage back to "patch rejected: writing outside of the project".
+func TestOperationalCoreCanvasPathSwitchesOnClonePath(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+
+	docOnly := operationalCore(root, md, "design", "")
+	wantDocOnly := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
+	if !strings.Contains(docOnly, wantDocOnly) {
+		t.Errorf("doc-only prompt missing absolute canvas path %q:\n%s", wantDocOnly, docOnly)
+	}
+	if strings.Contains(docOnly, "./"+CloneCanvasName) {
+		t.Errorf("doc-only prompt must not name the clone canvas:\n%s", docOnly)
+	}
+
+	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
+	if !strings.Contains(codeStage, "./"+CloneCanvasName) {
+		t.Errorf("code-stage prompt missing ./%s:\n%s", CloneCanvasName, codeStage)
+	}
+	// Absolute path to the bureaucracy canvas would tempt the agent
+	// to apply_patch it and trip codex's project-scope check —
+	// keep the cwd-relative path the only canvas pointer.
+	codeCanvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
+	if strings.Contains(codeStage, codeCanvas) {
+		t.Errorf("code-stage prompt must not name the absolute bureaucracy canvas %q:\n%s", codeCanvas, codeStage)
 	}
 }
 

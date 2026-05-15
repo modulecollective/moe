@@ -313,6 +313,19 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err != nil {
 					return wikiTurnSpec{}, err
 				}
+				// Pre-turn canvas shuttle: copy the bureaucracy canvas
+				// into <clonePath>/.moe-canvas.md so codex's apply_patch
+				// (which gates writes on the cwd's git project, not on
+				// --add-dir) has an in-project target for the agent's
+				// canvas writes. excludeCloneCanvas keeps the shuttle
+				// file out of `git status` noise. See clone_canvas.go
+				// for the full rationale.
+				if err := syncCanvasIntoClone(workRoot, clonePath, md, docID); err != nil {
+					return wikiTurnSpec{}, err
+				}
+				if err := excludeCloneCanvas(clonePath); err != nil {
+					return wikiTurnSpec{}, err
+				}
 				// Dev-env hooks fire on every code/test stage open
 				// against this working tree. First touch runs the
 				// project's dev-env.d/* setup scripts and caches the
@@ -430,6 +443,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					return p, nil
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
+					// Post-turn canvas shuttle: pull the agent's in-clone
+					// canvas back to the bureaucracy path commitTurn's
+					// existence gate (and the rest of the engine) reads.
+					// A missing clone canvas falls through to commitTurn's
+					// loud "agent did not write to its canvas" failure —
+					// the symptom we want when the turn produced nothing.
+					if err := syncCanvasFromClone(workRoot, clonePath, md, docID); err != nil {
+						return err
+					}
 					var extras []string
 					if wikiRel != "" {
 						extras = append(extras, wikiRel)
