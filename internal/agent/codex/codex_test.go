@@ -239,6 +239,62 @@ func TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt(t *testing.T) {
 	}
 }
 
+// TestExecuteOneShotArgsPinsApprovalNever: `codex exec` has no
+// --ask-for-approval flag, so we pin the approval policy explicitly
+// with `-c approval_policy=never`. Without this, a non-"never" policy
+// in ~/.codex/config.toml aborts headless turns at the approval gate.
+// The pin lands after the add-dirs and before the trailing UserPrompt.
+func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
+	args, err := executeOneShotArgs(agent.OneShotRequest{
+		Root:       "/bureaucracy",
+		Prompt:     "system",
+		UserPrompt: "user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPair(args, "-c", "approval_policy=never") {
+		t.Errorf("args missing `-c approval_policy=never` pair: %v", args)
+	}
+	// Sandbox stays on — pinning approval doesn't lift the sandbox.
+	if !containsPair(args, "--sandbox", "workspace-write") {
+		t.Errorf("args missing `--sandbox workspace-write` pair: %v", args)
+	}
+}
+
+// TestExecuteArgsInteractiveDoesNotPinApprovalNever: the interactive
+// path keeps on-request approval (operator-in-the-loop). The headless
+// approval pin must not leak into it.
+func TestExecuteArgsInteractiveDoesNotPinApprovalNever(t *testing.T) {
+	args, err := executeArgs(agent.Request{
+		Root:       "/bureaucracy",
+		ClonePath:  "/bureaucracy/clone",
+		NewSession: true,
+		Prompt:     "system",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(args, " ")
+	if strings.Contains(got, "approval_policy=never") {
+		t.Errorf("interactive path should not pin approval_policy=never: %s", got)
+	}
+	if !strings.Contains(got, "--ask-for-approval on-request") {
+		t.Errorf("interactive path lost --ask-for-approval on-request: %s", got)
+	}
+}
+
+// containsPair reports whether args contains the consecutive pair
+// [key, value] in that order.
+func containsPair(args []string, key, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
 // indexOf returns the first index of needle in args, or -1.
 func indexOf(args []string, needle string) int {
 	for i, a := range args {

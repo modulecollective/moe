@@ -15,10 +15,17 @@
 //     (interactive — TUI has no stdout stream to read). Callers persist
 //     the returned id when it differs from what they passed in.
 //
-//   - Codex has no `--ask-for-approval` on `codex exec` — headless mode
-//     defaults to "never". On interactive `codex` and on `codex resume`,
-//     we pass `--ask-for-approval on-request` (the codex equivalent of
-//     claude's default permission flow).
+//   - Codex has no `--ask-for-approval` on `codex exec`. We pin the
+//     headless approval policy explicitly with `-c approval_policy=never`
+//     so a non-`never` policy in `~/.codex/config.toml` can't abort a
+//     headless turn at the approval gate (the symptom: "patch rejected:
+//     writing outside of the project; rejected by user approval
+//     settings"). The sandbox stays on — `workspace-write` plus the
+//     bureaucracy-root `--add-dir` is still what bounds writes; this
+//     change only removes the human-in-the-loop expectation that
+//     headless can't satisfy. On interactive `codex` and on `codex
+//     resume`, we pass `--ask-for-approval on-request` (the codex
+//     equivalent of claude's default permission flow).
 //
 // System prompt injection uses `-c developer_instructions="""<prompt>"""`.
 // The triple-quoted TOML multi-line form sidesteps the
@@ -127,9 +134,9 @@ func (Agent) Execute(r agent.Request) (string, error) {
 // ExecuteOneShot runs `codex exec --json` non-interactively, translates
 // the JSON event stream into one-line-per-tool progress on r.Stdout,
 // and returns the session id read from the `thread.started` event.
-// On-request approval doesn't exist for `codex exec`; the headless
-// path defaults to "never" (no human to approve), which is what we
-// want for cascade / chain-prompt turns.
+// `codex exec` has no `--ask-for-approval` flag, so the headless
+// approval policy is pinned with `-c approval_policy=never` (see the
+// package doc).
 func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	bin, err := exec.LookPath("codex")
 	if err != nil {
@@ -214,6 +221,11 @@ func (Agent) ExecuteHeadless(r agent.HeadlessRequest) ([]byte, error) {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
+	// Pin approval to "never": `codex exec` has no flag for it, so a
+	// non-`never` `approval_policy` in `~/.codex/config.toml` would
+	// abort headless turns at the approval gate. The sandbox still
+	// enforces add-dirs.
+	args = append(args, "-c", "approval_policy=never")
 
 	cmdArgs := append([]string{"exec", "--skip-git-repo-check"}, args...)
 	cmdArgs = append(cmdArgs, r.UserPrompt)
@@ -378,6 +390,8 @@ func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
+	// Pin approval to "never" — see ExecuteHeadless for the rationale.
+	args = append(args, "-c", "approval_policy=never")
 	cmdArgs := append([]string{"exec", "--json", "--skip-git-repo-check"}, args...)
 	cmdArgs = append(cmdArgs, r.UserPrompt)
 	return cmdArgs, nil
