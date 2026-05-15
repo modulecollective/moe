@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
 )
 
@@ -724,10 +725,10 @@ func TestOpenWikiSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 		t.Fatalf("openWikiSession: %v\nstderr=%s", err, stderr.String())
 	}
 	// Tear the session worktree down. The session never produced a
-	// commit, so closeSess will call session.Abandon — auto-push still
-	// runs but has nothing new to send.
+	// commit, so closeSess will refuse via CanvasUnchangedError —
+	// auto-push wouldn't have a turn to ride either way.
 	t.Cleanup(func() {
-		if err := closeSess(); err != nil {
+		if err := closeSess(true); err != nil {
 			t.Logf("closeSess: %v", err)
 		}
 		_ = sess
@@ -739,6 +740,108 @@ func TestOpenWikiSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 	}
 	if mainSHA != remoteSHA {
 		t.Fatalf("local main didn't pick up remote advance: want %s, got %s (auto-pull didn't fire?)", remoteSHA, mainSHA)
+	}
+}
+
+// TestCloseSessSuppressesAutoPushWhenTurnFailed is the silent-failure-
+// at-push regression: when the caller signals okToPush=false (agent run
+// errored, or pre-finalize gate fired), closeSess must still tear the
+// session worktree down and fast-forward local main, but the in-closure
+// sync.AutoPush must be suppressed. Without this gate, a failed push
+// synthesis turn auto-pushed the bureaucracy per-turn commit to origin
+// while the moe-side branch never reached its remote — bureaucracy
+// claimed the ship landed.
+func TestCloseSessSuppressesAutoPushWhenTurnFailed(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+	originBefore := f.originHead()
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "no-autopush-on-fail",
+		DocID:       "code",
+		LockPurpose: "stage",
+	}
+	var stdout, stderr bytes.Buffer
+	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("openWikiSession: %v\nstderr=%s", err, stderr.String())
+	}
+
+	// Land a canvas commit on the session branch so session.Close has a
+	// non-trivial fast-forward to perform — without it
+	// CanvasUnchangedError fires and we'd never reach the sync.AutoPush
+	// gate that's the actual subject under test.
+	canvasRel := run.ContentPath("moe", "no-autopush-on-fail", "code")
+	canvasAbs := filepath.Join(sess.WorktreePath, canvasRel)
+	if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvasAbs, []byte("# canvas\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, sess.WorktreePath, "add", canvasRel)
+	gittest.Run(t, sess.WorktreePath, "commit", "-m", "work: turn")
+
+	if err := closeSess(false); err != nil {
+		t.Fatalf("closeSess(false): %v\nstderr=%s", err, stderr.String())
+	}
+
+	// Local main fast-forwarded to the session branch tip…
+	localMain, err := git.RevParse(f.root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// …but origin must not have followed. The push gate is the whole
+	// fix; if the assertion below fails, the bug is back.
+	if got := f.originHead(); got != originBefore {
+		t.Errorf("origin advanced despite okToPush=false: want %s, got %s (local main = %s)",
+			originBefore, got, localMain)
+	}
+}
+
+// TestCloseSessRunsAutoPushWhenTurnSucceeded is the positive control:
+// okToPush=true keeps today's behavior — sync.AutoPush fires inside
+// closeSess and origin tracks local main. Without this counterpart,
+// the failing-turn test could pass against a closeSess that never
+// pushed under any condition.
+func TestCloseSessRunsAutoPushWhenTurnSucceeded(t *testing.T) {
+	f := newSyncFixture(t)
+	f.initBureaucracyOrigin()
+
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "autopush-on-success",
+		DocID:       "code",
+		LockPurpose: "stage",
+	}
+	var stdout, stderr bytes.Buffer
+	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("openWikiSession: %v", err)
+	}
+
+	canvasRel := run.ContentPath("moe", "autopush-on-success", "code")
+	canvasAbs := filepath.Join(sess.WorktreePath, canvasRel)
+	if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvasAbs, []byte("# canvas\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, sess.WorktreePath, "add", canvasRel)
+	gittest.Run(t, sess.WorktreePath, "commit", "-m", "work: turn")
+
+	if err := closeSess(true); err != nil {
+		t.Fatalf("closeSess(true): %v\nstderr=%s", err, stderr.String())
+	}
+
+	localMain, err := git.RevParse(f.root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.originHead(); got != localMain {
+		t.Errorf("origin didn't track local main on okToPush=true: want %s, got %s", localMain, got)
 	}
 }
 

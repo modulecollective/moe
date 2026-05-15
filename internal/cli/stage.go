@@ -252,6 +252,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		Project:     projectID,
 		RunSlug:     runID,
 		DocID:       docID,
+		Agent:       agentName,
 		LockPurpose: "stage",
 		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
 			if opts.WikiBuilder == nil {
@@ -504,6 +505,13 @@ type wikiSessionInputs struct {
 	Project string
 	RunSlug string
 	DocID   string
+	// Agent is the resolved backend name (claude / codex) the executor
+	// will dispatch to. Populated by runStageSession before
+	// runWikiSession runs so reportWikiSessionExit can attribute the
+	// "<agent> exited" line honestly. Empty falls back to "agent" in
+	// the reporter, which keeps lint / claim callers correct without
+	// forcing them to resolve up front.
+	Agent string
 	// LockPurpose is the repo-lock label prefix; the helper appends
 	// "-open" / "-close" for the two short-held windows.
 	LockPurpose string
@@ -620,8 +628,12 @@ type wikiTurnSpec struct {
 // canvas-unchanged refusal — the new "no-op session" gate's loud-fail
 // behaviour — doesn't get swallowed alongside the session worktree it
 // leaves intact.
-func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
-	if err := closeSess(); err != nil {
+//
+// okToPush is hard-wired to false: no turn ran, so origin must not
+// receive the bureaucracy-side per-turn commit. Same shape as the
+// post-executor path's failure case.
+func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.Writer) {
+	if err := closeSess(false); err != nil {
 		moePrintf(stderr, "session close: %v\n", err)
 	}
 }
@@ -711,9 +723,17 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// bureaucracy root passed to runWikiSession — workRoot is the
 	// session worktree (no .moe/) and would silently skip the config
 	// step.
+	//
+	// Also reflect the resolved name back into `in` so
+	// reportWikiSessionExit attributes the "<agent> exited" line
+	// honestly even when the caller (lint, claim) didn't pre-populate
+	// in.Agent.
 	agentName := spec.Agent
 	if agentName == "" {
 		agentName = resolveAgentName("", "", root)
+	}
+	if in.Agent == "" {
+		in.Agent = agentName
 	}
 	a, err := agent.Get(agentName)
 	if err != nil {
@@ -828,7 +848,19 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// resolve, then retries close once. Falls through to today's
 	// "resolve by hand / moe session abandon" message if the agent
 	// can't take.
-	closeErr := closeWithAutoResolve(closeSess, stdout, stderr)
+	//
+	// okToPush gates the in-closure sync.AutoPush: the bureaucracy
+	// per-turn commit only races to origin when the agent's turn
+	// genuinely succeeded. runErr / gateErr both mean the turn didn't
+	// produce shippable output (codex turn.failed; reflect hygiene
+	// scan caught residue), so we keep the local commit but suppress
+	// the push — origin won't see it until a later successful turn.
+	// commitErr / finalizeErr are not gates here: a finalize failure
+	// leaves real agent edits on disk that the operator may want
+	// mirrored to other machines, and a CanvasUnchangedError surfaces
+	// through closeErr below regardless of the push toggle.
+	okToPush := runErr == nil && gateErr == nil
+	closeErr := closeWithAutoResolve(closeSess, okToPush, stdout, stderr)
 
 	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, gateErr, stdout, stderr)
 }
@@ -836,7 +868,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 // openWikiSession opens the session worktree under the repo lock and
 // returns a closeSess closure already bound to the matching `-close`
 // lock options. Centralising both halves means each early-failure path
-// in runWikiSession is one `_ = closeSess()` line, and adding a new
+// in runWikiSession is one `_ = closeSess(...)` line, and adding a new
 // path can't drift the lock purpose / Run key away from the open side.
 //
 // Auto-sync is woven into both lock windows: an auto-pull runs before
@@ -847,7 +879,17 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 // a network failure on either side warns and continues. Heartbeat is on
 // because the network legs can sit for several seconds on a slow link
 // and we don't want a contending invocation to declare the lock stale.
-func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) (*session.Session, func() error, error) {
+//
+// closeSess takes okToPush: when false, session.Close still runs (so
+// the worktree is torn down and any committed work lands on local
+// main), but sync.AutoPush is suppressed. The caller passes false when
+// the executor's turn failed — bureaucracy must not race ahead of the
+// project repo when the turn that motivated the commit didn't produce
+// shippable output. The silent-failure-at-push run was the motivating
+// incident: a failed push synthesis turn auto-pushed an empty "work:
+// update push" commit to origin while the moe branch never reached its
+// remote, leaving bureaucracy claiming the ship landed.
+func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) (*session.Session, func(okToPush bool) error, error) {
 	// Open (or resume) the session worktree under the repo lock.
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
@@ -870,7 +912,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	if err != nil {
 		return nil, nil, err
 	}
-	closeSess := func() error {
+	closeSess := func(okToPush bool) error {
 		return withRepoLock(root, repolock.Options{
 			Purpose:   in.LockPurpose + "-close",
 			Run:       in.Project + "/" + in.RunSlug,
@@ -878,6 +920,9 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 		}, func() error {
 			if err := session.Close(sess); err != nil {
 				return err
+			}
+			if !okToPush {
+				return nil
 			}
 			return sync.AutoPush(root, stdout, stderr)
 		})
@@ -897,7 +942,15 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 // stderr block carries the explanation.
 func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr, gateErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
-		moePrintf(stderr, "claude exited: %v\n", runErr)
+		// in.Agent is populated by runWikiSession after agent resolution.
+		// Empty falls back to "agent" — callers that bypass the resolver
+		// (test stubs constructing wikiSessionInputs by hand) still get
+		// a readable line.
+		agentLabel := in.Agent
+		if agentLabel == "" {
+			agentLabel = "agent"
+		}
+		moePrintf(stderr, "%s exited: %v\n", agentLabel, runErr)
 		// Fall through to report commit result and exit non-zero.
 	}
 	switch {

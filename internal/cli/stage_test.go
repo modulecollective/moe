@@ -815,6 +815,43 @@ func TestReportWikiSessionExitGateBlocksWithoutCommit(t *testing.T) {
 	}
 }
 
+// TestReportWikiSessionExitNamesAgentInExitLine pins the silent-
+// failure-at-push fix: when codex is the dispatched agent and its
+// turn fails, the run-error stderr line must name codex, not claude.
+// The bug it guards against: a hardcoded "claude exited:" lying to
+// the operator about which agent died (and burying the failure
+// under a misleading attribution).
+func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
+	cases := []struct {
+		name      string
+		agent     string
+		wantLabel string
+	}{
+		{name: "codex run", agent: "codex", wantLabel: "codex exited:"},
+		{name: "claude run", agent: "claude", wantLabel: "claude exited:"},
+		{name: "unresolved falls back to agent", agent: "", wantLabel: "agent exited:"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "push", Agent: tc.agent}
+			runErr := errors.New("turn.failed")
+			var stdout, stderr bytes.Buffer
+			code := reportWikiSessionExit(in, runErr, nil, nil, nil, nil, &stdout, &stderr)
+			if code != 1 {
+				t.Errorf("exit code = %d, want 1 on run error", code)
+			}
+			if !strings.Contains(stderr.String(), tc.wantLabel) {
+				t.Errorf("stderr missing %q; got %q", tc.wantLabel, stderr.String())
+			}
+			// And the misleading hardcoded label must not slip through
+			// for non-claude agents.
+			if tc.agent == "codex" && strings.Contains(stderr.String(), "claude exited:") {
+				t.Errorf("codex run still surfaced as 'claude exited:': %q", stderr.String())
+			}
+		})
+	}
+}
+
 // TestReportWikiSessionExitNothingToCommitIsCleanExit guards the
 // "no document changes" branch: the operator opens the session,
 // looks around, exits without edits. ErrNothingToCommit is reported

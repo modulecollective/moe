@@ -26,8 +26,12 @@ const rebaseAutoResolveTimeout = 5 * time.Minute
 // still fails the caller sees the typed error and the operator falls
 // back to today's `moe session resolve` / `moe session abandon` path.
 // Other error types pass through unchanged.
-func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) error {
-	err := closeSess()
+//
+// okToPush is threaded through to both attempts so the in-closure
+// sync.AutoPush is suppressed when the turn that triggered the close
+// didn't succeed. See openWikiSession's closeSess for the rationale.
+func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, stdout, stderr io.Writer) error {
+	err := closeSess(okToPush)
 	var rebaseFail *session.RebaseFailureError
 	if !errors.As(err, &rebaseFail) {
 		return err
@@ -39,7 +43,7 @@ func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) erro
 	if agentErr := launchSessionRebaseResolve(rebaseFail.WorktreePath, prompt, stdout, stderr); agentErr != nil {
 		moePrintf(stderr, "  auto-resolve agent: %v\n", agentErr)
 	}
-	return closeSess()
+	return closeSess(okToPush)
 }
 
 // launchSessionRebaseResolve fires the one-shot agent inside the
