@@ -78,10 +78,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	cmdArgs, err := executeArgs(r)
-	if err != nil {
-		return r.SessionID, err
-	}
+	cmdArgs := executeArgs(r)
 
 	cmd := exec.Command(bin, cmdArgs...)
 	// cwd-inversion shape: codex always runs cwd = r.Root (the
@@ -147,10 +144,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		return "", fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	cmdArgs, err := executeOneShotArgs(r)
-	if err != nil {
-		return "", err
-	}
+	cmdArgs := executeOneShotArgs(r)
 
 	ctx := context.Background()
 	if r.Timeout > 0 {
@@ -300,15 +294,12 @@ func rolloutPath(sessionID string) (string, error) {
 // `codex …` for a new session, `codex resume <sid> …` for a returning
 // one. Kept separate from Execute so the argument shape (and its
 // dependence on AddDirs) is unit-testable without shelling out.
-func executeArgs(r agent.Request) ([]string, error) {
-	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
-	if err != nil {
-		return nil, err
-	}
+func executeArgs(r agent.Request) []string {
+	args := commonArgs(r.ClonePath, r.Prompt)
 	// Stage-provided AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) widen
-	// the writable scope alongside the bureaucracy root commonArgs
-	// passes. Loop shape mirrors executeOneShotArgs's so the two call
-	// sites stay structurally identical.
+	// the writable scope alongside the clone path commonArgs passes.
+	// Loop shape mirrors executeOneShotArgs's so the two call sites
+	// stay structurally identical.
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
@@ -326,17 +317,14 @@ func executeArgs(r agent.Request) ([]string, error) {
 	if r.InitialPrompt != "" {
 		args = append(args, r.InitialPrompt)
 	}
-	return args, nil
+	return args
 }
 
 // executeOneShotArgs builds the full codex argv for the non-interactive
 // streaming path (`codex exec --json …`). Same testability rationale
 // as executeArgs.
-func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
-	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
-	if err != nil {
-		return nil, err
-	}
+func executeOneShotArgs(r agent.OneShotRequest) []string {
+	args := commonArgs(r.ClonePath, r.Prompt)
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
@@ -350,22 +338,23 @@ func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
 	args = append(args, "-c", "approval_policy=never")
 	cmdArgs := append([]string{"exec", "--json", "--skip-git-repo-check"}, args...)
 	cmdArgs = append(cmdArgs, r.UserPrompt)
-	return cmdArgs, nil
+	return cmdArgs
 }
 
 // commonArgs builds the codex flag set shared across exec / interactive
-// / resume: developer-instructions injection, sandbox mode, add-dirs,
-// and the cwd hint. Returns the flag slice ready to be prefixed with
-// the subcommand (or used bare for interactive).
+// / resume: developer-instructions injection, sandbox mode, and the
+// per-stage clone add-dir.
 //
-// cwd-inversion shape: code-bearing stages now run with cwd =
-// bureaucracy worktree and add-dir = clonePath, so the agent's canvas
-// writes land at the canvas's natural absolute bureaucracy path
-// (matching the agent's training prior) and source-tree edits land
-// under the add-dir. The shuttle in clone_canvas.go is gone with this
-// flip. Document-only stages have an empty clonePath and only need
-// the bureaucracy root in the writable set.
-func commonArgs(root, clonePath, systemPrompt string) ([]string, error) {
+// cwd-inversion shape: every stage runs cwd = bureaucracy worktree,
+// which `--sandbox workspace-write` makes writable automatically — no
+// explicit `--add-dir <root>` needed. Code-bearing stages reach the
+// project clone via add-dir while cwd sits on the bureaucracy worktree;
+// AGENTS.md discovery walks from cwd up to the git root, so
+// project-specific AGENTS.md under the clone is no longer auto-loaded
+// and is handled separately (system prompt or symlink) where needed.
+// Document-only stages have an empty clonePath; cwd alone gives them
+// the canvas's writable surface.
+func commonArgs(clonePath, systemPrompt string) []string {
 	args := []string{
 		"-c", "developer_instructions=" + tomlMultilineBasic(systemPrompt),
 	}
@@ -373,23 +362,10 @@ func commonArgs(root, clonePath, systemPrompt string) ([]string, error) {
 	// explicit add-dir set. read-only would block the canvas write
 	// every stage needs.
 	args = append(args, "--sandbox", "workspace-write")
-	// Always make the bureaucracy root reachable. cwd = root in all
-	// shapes, so the add-dir is redundant but harmless — keeping it
-	// explicit means any future cwd shift doesn't silently lose the
-	// canvas's writable surface.
-	if root != "" {
-		args = append(args, "--add-dir", root)
-	}
-	// Code-bearing stages: the project clone is the source-tree
-	// workspace, reached via add-dir while cwd sits on the bureaucracy
-	// worktree. AGENTS.md discovery walks from cwd up to the git root;
-	// with cwd = bureaucracy worktree, project-specific AGENTS.md
-	// under the clone is no longer auto-loaded — handled separately
-	// (system prompt or symlink) where needed.
 	if clonePath != "" {
 		args = append(args, "--add-dir", clonePath)
 	}
-	return args, nil
+	return args
 }
 
 // tomlMultilineBasic encodes s as a TOML multi-line basic string

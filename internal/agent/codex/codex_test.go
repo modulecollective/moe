@@ -143,11 +143,12 @@ func TestDiscoverSessionIDPicksNewestSinceTurnStart(t *testing.T) {
 
 // TestExecuteArgsAppendsAddDirsBeforeApproval pins the codex
 // interactive-path shape: every AddDirs entry becomes a `--add-dir <dir>`
-// pair, the pairs land after commonArgs (which already adds `--add-dir
-// <root>`) and before `--ask-for-approval`, and on first-turn we don't
-// prepend `resume`.
+// pair, the pairs land after commonArgs (which adds the clone path
+// add-dir) and before `--ask-for-approval`, and on first-turn we don't
+// prepend `resume`. cwd = bureaucracy root, so workspace-write makes
+// the canvas writable without an explicit `--add-dir <root>`.
 func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
-	args, err := executeArgs(agent.Request{
+	args := executeArgs(agent.Request{
 		Root:          "/bureaucracy",
 		ClonePath:     "/bureaucracy/clone",
 		NewSession:    true,
@@ -155,12 +156,8 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		Prompt:        "system",
 		InitialPrompt: "go",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	got := strings.Join(args, " ")
 	for _, want := range []string{
-		"--add-dir /bureaucracy",
 		"--add-dir /bureaucracy/clone",
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
@@ -169,6 +166,11 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("args missing %q: %s", want, got)
 		}
+	}
+	// cwd-inversion: no explicit `--add-dir /bureaucracy` — cwd handles
+	// it via workspace-write.
+	if strings.Contains(got, "--add-dir /bureaucracy ") || strings.HasSuffix(got, "--add-dir /bureaucracy") {
+		t.Errorf("args should not include redundant --add-dir for bureaucracy root: %s", got)
 	}
 	// Order: each AddDirs --add-dir must precede --ask-for-approval.
 	idxApproval := indexOf(args, "--ask-for-approval")
@@ -192,16 +194,13 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 // `resume <sid>` to the flag set; the positional prompt still lands
 // after all flags.
 func TestExecuteArgsResumePrependsSid(t *testing.T) {
-	args, err := executeArgs(agent.Request{
+	args := executeArgs(agent.Request{
 		Root:          "/bureaucracy",
 		NewSession:    false,
 		SessionID:     "sid-1",
 		Prompt:        "system",
 		InitialPrompt: "follow-up",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if len(args) < 2 || args[0] != "resume" || args[1] != "sid-1" {
 		t.Fatalf("expected leading `resume sid-1`, got %v", args)
 	}
@@ -214,15 +213,12 @@ func TestExecuteArgsResumePrependsSid(t *testing.T) {
 // entry becomes a `--add-dir <dir>` pair sitting after commonArgs and
 // before the trailing positional UserPrompt.
 func TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt(t *testing.T) {
-	args, err := executeOneShotArgs(agent.OneShotRequest{
+	args := executeOneShotArgs(agent.OneShotRequest{
 		Root:       "/bureaucracy",
 		AddDirs:    []string{"/tmp/moe-home"},
 		Prompt:     "system",
 		UserPrompt: "user",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if args[0] != "exec" || args[1] != "--json" || args[2] != "--skip-git-repo-check" {
 		t.Fatalf("expected `exec --json --skip-git-repo-check` prefix, got %v", args[:3])
 	}
@@ -243,17 +239,14 @@ func TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt(t *testing.T) {
 // TestExecuteOneShotArgsPinsApprovalNever: `codex exec` has no
 // --ask-for-approval flag, so we pin the approval policy explicitly
 // with `-c approval_policy=never`. Without this, a non-"never" policy
-// in ~/.codex/config.toml aborts headless turns at the approval gate.
+// in ~/.codex/config.toml aborts the turn at the approval gate.
 // The pin lands after the add-dirs and before the trailing UserPrompt.
 func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
-	args, err := executeOneShotArgs(agent.OneShotRequest{
+	args := executeOneShotArgs(agent.OneShotRequest{
 		Root:       "/bureaucracy",
 		Prompt:     "system",
 		UserPrompt: "user",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !containsPair(args, "-c", "approval_policy=never") {
 		t.Errorf("args missing `-c approval_policy=never` pair: %v", args)
 	}
@@ -265,17 +258,14 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 
 // TestExecuteArgsInteractiveUsesApprovalNever: the interactive path
 // disables approval prompts with the first-class flag while keeping the
-// sandbox boundary. The headless config pin must not leak into it.
+// sandbox boundary. The one-shot config pin must not leak into it.
 func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
-	args, err := executeArgs(agent.Request{
+	args := executeArgs(agent.Request{
 		Root:       "/bureaucracy",
 		ClonePath:  "/bureaucracy/clone",
 		NewSession: true,
 		Prompt:     "system",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	got := strings.Join(args, " ")
 	if strings.Contains(got, "approval_policy=never") {
 		t.Errorf("interactive path should not pin approval_policy=never: %s", got)
