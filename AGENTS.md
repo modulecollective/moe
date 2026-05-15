@@ -31,6 +31,14 @@ you're about to run these two commands first.
 It's easy to screw up state unless you configure things exactly right so
 let the human do manual testing. Do your testing through Go's tests only.
 
+## Operator-local config
+
+`moe config` (list/get/set/unset) reads and writes `.moe/config.json`.
+Keyspace is closed — see `internal/config/keys` for the allowlist.
+Adding a key is a code change plus one entry; nothing on disk is
+free-form. Today the only key is `default_agent`, which slots between
+`$MOE_AGENT` and the `"claude"` hard default in `resolveAgentName`.
+
 ## Tools worth reaching for
 
 Go's off-putting CLIs are agent superpowers — the ergonomics that make

@@ -79,6 +79,13 @@ Register a target project (a git repo — the "thing being worked on"):
 moe project add <repo-url>
 ```
 
+Pick a default agent backend if you want one (optional — defaults to
+`claude`; `$MOE_AGENT` still wins for a one-shell experiment):
+
+```sh
+moe config set default_agent codex
+```
+
 `moe help` is the source of truth for the command surface.
 
 ---
