@@ -41,7 +41,9 @@ Two gaps that code stage can't reliably close on its own:
   the prompt. If it touched a sandbox / hook / workspace path,
   exercise the relevant surface. The dev-env (your `$MOE_HOME`,
   `$DATABASE_URL`, etc.) is the agent-safe environment to drive
-  against.
+  against. When the target project is moe itself, this stage may
+  run `moe` for those scoped end-to-end checks; code stage's
+  "Go tests only" restriction does not apply here.
 - **Fix what you can fix in place.** A small bug surfaced by
   verification is not a "back to code stage" event — it's a
   one-line `Fixes applied` row plus a re-run of the relevant

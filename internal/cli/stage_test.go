@@ -126,6 +126,14 @@ func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	}
 }
 
+func TestSdlcTestFragmentAllowsScopedMoeInvocations(t *testing.T) {
+	got := moe.Stage("sdlc", "test")
+	want := "When the target project is moe itself, this stage may\n  run `moe` for those scoped end-to-end checks"
+	if !strings.Contains(got, want) {
+		t.Fatalf("test fragment should explicitly allow scoped moe invocations during test stage:\n%s", got)
+	}
+}
+
 // TestBuildSystemPromptMissingFragmentIsNotAnError registers a
 // throwaway workflow with a stage that has no embedded fragment and
 // confirms buildSystemPrompt still returns (no error, no ghost empty

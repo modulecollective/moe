@@ -26,10 +26,16 @@ edits.** Not optional — not even for a one-line fix, not even if the
 tests already pass. If you're about to write "fixed it" or "done",
 you're about to run these two commands first.
 
-## Don't run moe itself
+## Running moe itself
 
-It's easy to screw up state unless you configure things exactly right so
-let the human do manual testing. Do your testing through Go's tests only.
+In code stage, don't run `moe` itself. It's easy to screw up state
+unless you configure things exactly right, so do implementation testing
+through Go's tests only.
+
+In test stage, it is OK to run `moe` when the test plan calls for an
+end-to-end CLI path. Use the run's configured dev environment, keep the
+invocation scoped to the surface under test, and record the command and
+result on the test canvas.
 
 ## Operator-local config
 
