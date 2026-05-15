@@ -163,7 +163,7 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		"--add-dir /bureaucracy",
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
-		"--ask-for-approval on-request",
+		"--ask-for-approval never",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("args missing %q: %s", want, got)
@@ -262,10 +262,10 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 	}
 }
 
-// TestExecuteArgsInteractiveDoesNotPinApprovalNever: the interactive
-// path keeps on-request approval (operator-in-the-loop). The headless
-// approval pin must not leak into it.
-func TestExecuteArgsInteractiveDoesNotPinApprovalNever(t *testing.T) {
+// TestExecuteArgsInteractiveUsesApprovalNever: the interactive path
+// disables approval prompts with the first-class flag while keeping the
+// sandbox boundary. The headless config pin must not leak into it.
+func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 	args, err := executeArgs(agent.Request{
 		Root:       "/bureaucracy",
 		ClonePath:  "/bureaucracy/clone",
@@ -279,8 +279,14 @@ func TestExecuteArgsInteractiveDoesNotPinApprovalNever(t *testing.T) {
 	if strings.Contains(got, "approval_policy=never") {
 		t.Errorf("interactive path should not pin approval_policy=never: %s", got)
 	}
-	if !strings.Contains(got, "--ask-for-approval on-request") {
-		t.Errorf("interactive path lost --ask-for-approval on-request: %s", got)
+	if !strings.Contains(got, "--ask-for-approval never") {
+		t.Errorf("interactive path lost --ask-for-approval never: %s", got)
+	}
+	if !containsPair(args, "--sandbox", "workspace-write") {
+		t.Errorf("interactive path lost `--sandbox workspace-write`: %v", args)
+	}
+	if strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Errorf("interactive path should keep sandbox enabled: %s", got)
 	}
 }
 

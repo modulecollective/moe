@@ -24,8 +24,9 @@
 //     bureaucracy-root `--add-dir` is still what bounds writes; this
 //     change only removes the human-in-the-loop expectation that
 //     headless can't satisfy. On interactive `codex` and on `codex
-//     resume`, we pass `--ask-for-approval on-request` (the codex
-//     equivalent of claude's default permission flow).
+//     resume`, we pass `--ask-for-approval never` so MoE-managed
+//     interactive Codex has the same approval posture while keeping the
+//     same sandbox boundary.
 //
 // System prompt injection uses `-c developer_instructions="""<prompt>"""`.
 // The triple-quoted TOML multi-line form sidesteps the
@@ -360,10 +361,10 @@ func executeArgs(r agent.Request) ([]string, error) {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
-	// Interactive mode: on-request approval is the codex equivalent of
-	// claude's default permission flow. The operator can confirm or
-	// deny each agent-proposed write/bash from the TUI.
-	args = append(args, "--ask-for-approval", "on-request")
+	// Interactive mode uses the same approval posture as headless Codex.
+	// The sandbox and add-dir set remain the write boundary; failures
+	// return to the model/operator instead of asking for approval.
+	args = append(args, "--ask-for-approval", "never")
 	if !r.NewSession {
 		// Subsequent turn: `codex resume <sid> [prompt]`. The session
 		// id was stored on r.SessionID after the first turn returned
