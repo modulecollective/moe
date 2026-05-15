@@ -79,12 +79,58 @@ inverted-cwd shape.
   every script under `projects/moe/hooks/dev-env.d/*` reads
   `$MOE_SANDBOX` / `$MOE_HOME` rather than `pwd`, so the inversion
   doesn't break them. No files to change.
+
+## Discovered while shipping
+
+Two issues surfaced during test → push and were folded into the run.
+
+1. **Sandbox bind-mount character devices were tripping the push
+   pre-flight.** The runtime (fly.io's micro-VM, or equivalent) shadows
+   host config files by bind-mounting `/dev/null` as character devices
+   at every writable cwd / add-dir scope. Under the old worktree
+   primitive these landed somewhere innocuous; under the new
+   plain-clone primitive they land in the per-run clone, and
+   `git status` reports them as untracked. `push.CheckCleanWorkTree`
+   counted them as uncommitted edits and refused every ship.
+   - Fix in `internal/push/push.go`: added `filterSandboxBindMounts`
+     which strips status entries whose on-disk shape is an
+     `os.ModeDevice`. Real edits are always regular files; missing
+     files (stat error) stay in the slice so a
+     deleted-but-uncommitted edit still refuses the push.
+   - Tests at `internal/push/push_test.go`: three cases —
+     character-device drop, missing-file keep, regular-file keep.
+   - Stop-gap for the in-flight run: added the eleven bind-mount
+     basenames to `.gitignore`. The current operator-installed `moe`
+     can't see the new filter (it shipped before this branch was
+     cut), so the `.gitignore` entry is what unblocks the immediate
+     push. Once the new `moe` rolls out, the filter is the durable
+     answer and the `.gitignore` lines stay as defense-in-depth for
+     anyone running an older binary against a sandbox the new shape
+     wrote.
+2. **The new `moe` binary can't operate on an old-shape sandbox.**
+   `EnsureAt`'s tightened `cloneAlreadyAt` check requires `.git` to be
+   a directory; an in-flight run opened by the old `moe` has `.git`
+   as a worktree gitfile pointing into the canonical's `.git/modules/
+   .../worktrees/<run>/`, so `EnsureAt` would error with "exists but
+   is not a usable clone — remove it manually."
+   - **Practical consequence:** the operator can't rebuild `moe` and
+     ship this run with the new binary. The fix is to ship with the
+     *old* `moe` (which understands worktree-shaped sandboxes) plus
+     the `.gitignore` patch above (which masks the bind-mounts so
+     the old `moe`'s pre-flight passes).
+   - **Future runs are unaffected** — they start under the new `moe`
+     and get plain-clone sandboxes from the jump. Migration is
+     forward-only.
+
 - **No `internal/push/*` changes.** With plain clones the run's
   branch lives in the clone's local ref-db; `EnsureOrigin`
   overrides the file:// clone-source origin with the project's
   GitHub remote before the push, and every subsequent operation
   works against that. Nothing in the bureaucracy depends on a
   `moe/<run-id>` ref existing in the canonical submodule's ref-db.
+  (Caveat: `push.CheckCleanWorkTree` did need the bind-mount filter
+  noted above — that's `internal/push/push.go`, not the push verb
+  itself.)
 
 ## Risky hunks for review
 
