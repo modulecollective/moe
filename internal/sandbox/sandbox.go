@@ -1,20 +1,32 @@
 // Package sandbox gives every run a private working tree of its
-// project's submodule, implemented as a `git worktree` linked off the
-// canonical submodule.
+// project's submodule, implemented as an object-shared `git clone`
+// against the canonical submodule.
 //
-// On first `moe sdlc code` against a run, Ensure registers a worktree
-// at .moe/clones/<project>/<run>/, pointing at the same gitdir as the
-// canonical submodule but with its own working tree, index, and HEAD.
-// Subsequent turns reuse that worktree — it is the session's workspace
-// for the life of the run. Two runs against the same project get two
-// independent worktrees, so concurrent activities can't step on each
-// other's working tree or index. Branch isolation comes from the
-// per-run `moe/<run-id>` branch the CheckoutBranch step creates.
+// On first `moe sdlc code` against a run, Ensure runs `git clone
+// --local --shared --no-checkout` from `projects/<project>/src/` into
+// `.moe/clones/<project>/<run>/` and checks out HEAD. The resulting
+// clone has its own `.git/` directory (not a worktree gitfile pointing
+// into `<bureaucracy>/.git/modules/...`); objects are hardlinked or
+// referenced via `objects/info/alternates` so there is no network
+// fetch and disk cost is near-zero. Two runs against the same project
+// get two independent clones, so concurrent activities can't step on
+// each other's working tree, index, or refs. Branch isolation comes
+// from the per-run `moe/<run-id>` branch the CheckoutBranch step
+// creates in the clone's own ref-db.
+//
+// The previous primitive — `git worktree add` linked off the canonical
+// submodule — was switched out because codex's `apply_patch` enforces
+// a project-scope check on top of `--add-dir`: writes that cross the
+// moe-submodule ↔ bureaucracy gitdir boundary were silently rejected,
+// regardless of which side held cwd. A plain object-shared clone has
+// no such boundary (its `.git` is a regular directory, not a gitfile
+// into `.git/modules/...`), so the agent can write across cwd /
+// add-dir freely.
 //
 // First-touch on a fresh machine: if `<root>/projects/<project>/src/`
 // is an empty submodule mountpoint and the bureaucracy's .gitmodules
 // declares its url, Ensure runs `git submodule update --init` for that
-// one submodule before adding the worktree. A failed init surfaces a
+// one submodule before cloning. A failed init surfaces a
 // SubmoduleInitError carrying the verbatim retry command, so the
 // operator can copy it into a shell once the underlying issue (auth,
 // network, URL) is resolved.
@@ -57,24 +69,25 @@ func (e *SubmoduleInitError) Error() string {
 
 func (e *SubmoduleInitError) Unwrap() error { return e.Err }
 
-// Path returns the worktree directory for this run, whether or not it
+// Path returns the clone directory for this run, whether or not it
 // currently exists.
 func Path(root, projectID, runID string) string {
 	return filepath.Join(root, ".moe", "clones", projectID, runID)
 }
 
-// Ensure makes sure the worktree for (projectID, runID) exists and
-// returns its absolute path. First call registers a worktree off
-// projects/<projectID>/src; subsequent calls are a no-op when the
-// worktree is already registered against the same path.
+// Ensure makes sure the clone for (projectID, runID) exists and
+// returns its absolute path. First call clones `projects/<projectID>/src`
+// into the per-run path; subsequent calls are a no-op when the clone
+// already exists at the same path.
 func Ensure(root, projectID, runID string) (string, error) {
 	return EnsureAt(root, projectID, Path(root, projectID, runID))
 }
 
-// EnsureAt is the path-parameterised version of Ensure: it adds a
-// worktree for the project's submodule at dst. Used by the workspace
-// package so named workspaces share the same primitive without
-// duplicating the auto-init pre-flight or the git-worktree-add call.
+// EnsureAt is the path-parameterised version of Ensure: it materialises
+// an object-shared clone of the project's submodule at dst. Used by
+// the workspace package so named workspaces share the same primitive
+// without duplicating the auto-init pre-flight or the git-clone
+// invocation.
 func EnsureAt(root, projectID, dst string) (string, error) {
 	src := filepath.Join(root, "projects", projectID, "src")
 
@@ -95,16 +108,14 @@ func EnsureAt(root, projectID, dst string) (string, error) {
 		return "", fmt.Errorf("sandbox: resolve %s: %w", dst, err)
 	}
 
-	registered, err := worktreeRegisteredAt(src, absDst)
-	if err != nil {
-		return "", err
-	}
-	if registered {
+	// Idempotency: if the destination already exists with a usable
+	// `.git/` directory, treat it as already cloned.
+	if cloneAlreadyAt(absDst) {
 		return absDst, nil
 	}
 	if _, err := os.Stat(absDst); err == nil {
 		return "", fmt.Errorf(
-			"sandbox: %s exists but is not a registered worktree of %s; "+
+			"sandbox: %s exists but is not a usable clone of %s; "+
 				"remove it manually before retrying", absDst, src)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("sandbox: stat %s: %w", absDst, err)
@@ -118,14 +129,26 @@ func EnsureAt(root, projectID, dst string) (string, error) {
 		return "", fmt.Errorf("sandbox: mkdir %s: %w", filepath.Dir(absDst), err)
 	}
 
-	if out, err := git.Combined(src, "worktree", "add", "--detach", absDst, "HEAD"); err != nil {
-		return "", fmt.Errorf("sandbox: git worktree add %s: %w (%s)", absDst, err, out)
+	// `git clone --local --shared --no-checkout` against the submodule
+	// path: hardlinks objects from the canonical, sets up
+	// `objects/info/alternates` for shared object access, no network.
+	// `--no-checkout` defers the working-tree population to the
+	// explicit checkout below so we can route any post-clone branch
+	// dance through CheckoutBranch's idempotent path.
+	if out, err := git.Combined("", "clone", "--local", "--shared", "--no-checkout", src, absDst); err != nil {
+		return "", fmt.Errorf("sandbox: git clone %s → %s: %w (%s)", src, absDst, err, out)
+	}
+	if out, err := git.Combined(absDst, "checkout", "HEAD"); err != nil {
+		// Best-effort cleanup so a half-cloned dir doesn't poison the
+		// next attempt.
+		_ = os.RemoveAll(absDst)
+		return "", fmt.Errorf("sandbox: git checkout HEAD in %s: %w (%s)", absDst, err, out)
 	}
 
 	return absDst, nil
 }
 
-// CheckoutBranch makes branch the current HEAD in the worktree at
+// CheckoutBranch makes branch the current HEAD in the clone at
 // clonePath, creating it off HEAD if it doesn't already exist. Used by
 // the stage session setup so `moe code` lands the agent on
 // moe/<run-id> without the agent having to remember the incantation.
@@ -145,26 +168,16 @@ func CheckoutBranch(clonePath, branch string) error {
 	return nil
 }
 
-// Remove tears down the worktree registered at the run's sandbox path.
-// Idempotent: missing canonical, missing worktree registration, and
-// missing directory are all no-ops.
+// Remove tears down the clone at the run's sandbox path. Idempotent:
+// a missing directory is a no-op.
 //
-// `git worktree remove --force` is the right call: by the time Remove
-// runs, the run's terminal status has been written, so any uncommitted
-// state in the worktree is intentionally being discarded. The matching
-// invariant is the one inherited from the worktree-bug fix on the
-// session-close path. A trailing `git worktree prune` cleans up any
-// stale registration left under the canonical's .git/worktrees/.
+// The plain-clone primitive has no canonical-side registration to
+// clean up (unlike the former worktree primitive), so removal is just
+// `os.RemoveAll`. The clone's `objects/info/alternates` is a one-way
+// reference; nuking the clone has no effect on the canonical
+// submodule's object store.
 func Remove(root, projectID, runID string) error {
 	dst := Path(root, projectID, runID)
-	src := filepath.Join(root, "projects", projectID, "src")
-
-	if _, err := os.Stat(src); err == nil {
-		// Tolerate "not a working tree" — the worktree may never have
-		// been registered (run closed before code stage).
-		_, _ = git.Combined(src, "worktree", "remove", "--force", dst)
-		_, _ = git.Combined(src, "worktree", "prune")
-	}
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("sandbox: remove %s: %w", dst, err)
 	}
@@ -251,33 +264,21 @@ func gitmodulesDeclares(path, want string) (bool, error) {
 	return false, nil
 }
 
-// worktreeRegisteredAt returns true when canonicalSrc has a worktree
-// registered at absDst. Used by EnsureAt to make registration
-// idempotent (the equivalent of the old os.Stat short-circuit).
-func worktreeRegisteredAt(canonicalSrc, absDst string) (bool, error) {
-	out, err := git.Output(canonicalSrc, "worktree", "list", "--porcelain")
-	if err != nil {
-		// Canonical isn't a git repo (e.g. test fixture for the
-		// missing-source path) or git isn't reachable; let the caller's
-		// next step produce the diagnostic.
-		return false, nil
+// cloneAlreadyAt reports whether absDst is a usable existing clone —
+// the directory exists and contains a `.git/` directory or gitfile.
+// EnsureAt's idempotency check: a fresh `git clone` would refuse to
+// run against a non-empty destination, so we short-circuit on a
+// previously-materialised clone.
+func cloneAlreadyAt(absDst string) bool {
+	if _, err := os.Stat(filepath.Join(absDst, ".git")); err == nil {
+		return true
 	}
-	target := canonical(absDst)
-	for _, line := range strings.Split(out, "\n") {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
-		if canonical(path) == target {
-			return true, nil
-		}
-	}
-	return false, nil
+	return false
 }
 
 // canonical resolves p as far as it can — symlinks first, abs as a
-// fallback — so the equality check in worktreeRegisteredAt isn't
-// thrown by /tmp -> /private/tmp on macOS or other symlink prefixes.
+// fallback — so equality checks in tests aren't thrown by
+// /tmp -> /private/tmp on macOS or other symlink prefixes.
 func canonical(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
@@ -296,10 +297,10 @@ func indent(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-// ensureGitignore drops a `*` .gitignore under .moe/ so worktrees,
-// locks, and other transient artifacts never leak into the
-// bureaucracy's git history. Writing it lazily (on first Ensure) keeps
-// bureaucracy.Init uncoupled from sandbox internals.
+// ensureGitignore drops a `*` .gitignore under .moe/ so clones, locks,
+// and other transient artifacts never leak into the bureaucracy's git
+// history. Writing it lazily (on first Ensure) keeps bureaucracy.Init
+// uncoupled from sandbox internals.
 func ensureGitignore(root string) error {
 	dir := filepath.Join(root, ".moe")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

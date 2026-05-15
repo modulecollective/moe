@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 //	soul.md                → global philosophy / quality bar
 //	stages/<stage>.md      → lifecycle-phase lens (for the doc being edited)
 //	operational core       → what specifically this invocation is doing
+//	project AGENTS.md      → project-specific guidance from the clone
 //	upstream-change banner → prereq docs that moved since last turn
 //
 // Per-document fragments, overrides, and upstream-document assembly are
@@ -52,6 +54,16 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 	}
 
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
+
+	// Project-specific AGENTS.md / CLAUDE.md from the clone. Codex /
+	// claude both walk from cwd up to the git root looking for these
+	// files; under the cwd-inversion shape cwd = bureaucracy worktree,
+	// so the project's clone-rooted AGENTS.md no longer auto-loads.
+	// Read it explicitly and append as a section so project-specific
+	// guidance still reaches the agent.
+	if guidance := projectAgentsGuidance(clonePath); guidance != "" {
+		sections = append(sections, guidance)
+	}
 
 	if wikiCfg != nil {
 		sections = append(sections, wiki.IngestPromptSection(*wikiCfg))
@@ -221,25 +233,16 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 // that's always present — everything else in the prompt is optional
 // guidance layered on top.
 func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
-	// Code-bearing stages (clonePath != "") route every agent write —
-	// canvas, followups, twin feedback — through `./.moe-run/` inside
-	// the clone. The shuttle in clone_canvas.go owns pre-turn mirror
-	// bureaucracy → clone and post-turn copy clone → bureaucracy; the
-	// agent only ever touches in-cwd files, which keeps codex's
-	// apply_patch project-scope check happy. For document-only stages
-	// (clonePath == "") cwd is the bureaucracy root and the absolute
-	// bureaucracy paths are still the right answer.
-	var content, twinFeedback, followups string
-	if clonePath != "" {
-		runRel := filepath.Join(".", CloneRunDir)
-		content = filepath.Join(runRel, "documents", docID, "content.md")
-		twinFeedback = filepath.Join(runRel, "feedback", "twin.md")
-		followups = filepath.Join(runRel, "followups.md")
-	} else {
-		content = filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
-		twinFeedback = filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
-		followups = filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
-	}
+	// Every agent-writable path is now its natural absolute bureaucracy
+	// path. Code-bearing stages run with cwd = bureaucracy session
+	// worktree and reach the project clone via --add-dir; document-only
+	// stages run with cwd = sessionCwd under .moe/sessions/ and reach
+	// the bureaucracy root via --add-dir. Either way, writes to canvas,
+	// followups, and twin feedback land at the same absolute paths
+	// MoE's commit-turn logic reads back from.
+	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
+	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for run %q (project %q) in a Ministry of Everything bureaucracy repo.
@@ -257,22 +260,21 @@ Run title: %s
 
 	if clonePath != "" {
 		out += fmt.Sprintf(`
-Your working directory is a private copy-on-write clone of the target
-project's submodule:
+Your project's source tree is exposed as an additional writable
+directory at:
   %s
-That's your code workspace — read and edit files there. The clone is
-yours for the lifetime of this run; your edits are isolated from
-other concurrent activities and from the canonical submodule until the
-run is pushed.
+That's where you read and edit the project's code — a private
+per-run clone of the target project's submodule. Your edits there
+are isolated from other concurrent activities and from the canonical
+submodule until the run is pushed.
 
-Your run-state mirror lives at `+"`./%s/`"+` inside this clone. MoE
-pre-syncs only the agent-writable run files there before each turn and
-copies those files back after the turn commits. Write the canvas,
-`+"`followups.md`"+`, and `+"`feedback/twin.md`"+` under this
-directory only — they're the agent-writable surface. Run metadata,
-prior canvases, digital-twin docs, and other bureaucracy paths are
+Your working directory is the bureaucracy session worktree, where the
+canvas above lives at its natural path. Edit code under the clone
+path, edit run artifacts (canvas, followups, twin feedback) at the
+absolute bureaucracy paths named in this prompt. Run metadata, prior
+canvases, digital-twin docs, and other bureaucracy paths are
 read-only context; do not edit those paths.
-`, clonePath, CloneRunDir)
+`, clonePath)
 	}
 
 	// Twin-feedback channel comes first so the more specific case
@@ -336,4 +338,38 @@ read-only context; do not edit those paths.
 		"If acting on this entry would edit a digital-twin doc, it belongs\n" +
 		"in `feedback/twin.md` above instead.\n"
 	return out
+}
+
+// projectAgentsGuidance reads project-specific agent guidance from the
+// clone — `AGENTS.md` (codex convention) and `CLAUDE.md` (claude
+// convention). Returns a system-prompt section concatenating any that
+// exist, with a one-line header naming the source path so the agent
+// knows which file the guidance came from. Empty string when neither
+// file exists or clonePath is empty.
+//
+// Reading them eagerly into the prompt replaces the cwd-walk discovery
+// codex and claude both do natively: under the cwd-inversion shape cwd
+// is the bureaucracy session worktree, not the clone, so the walk
+// doesn't reach the project's AGENTS.md / CLAUDE.md. Without this
+// section the agent would miss project-specific rules ("all git calls
+// go through internal/git", "stdlib only", etc.) that the operator
+// committed alongside the project.
+func projectAgentsGuidance(clonePath string) string {
+	if clonePath == "" {
+		return ""
+	}
+	var parts []string
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		path := filepath.Join(clonePath, name)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(string(body))
+		if trimmed == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("## Project guidance (%s)\n\n%s", name, trimmed))
+	}
+	return strings.Join(parts, "\n\n")
 }

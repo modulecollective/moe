@@ -112,12 +112,18 @@ func executeArgs(r agent.Request) []string {
 	if r.NewSession {
 		sessionFlag = "--session-id"
 	}
-	// --add-dir <root> grants access to the bureaucracy repo even when
-	// cwd is the sandbox clone, so the canvas and upstream documents
-	// stay reachable without per-call permission prompts. Stage-provided
-	// AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) ride alongside so the
-	// test-stage `moe` subprocess can write to its isolated bureaucracy.
+	// --add-dir <root> grants access to the bureaucracy repo. Code
+	// stages now run cwd = root (bureaucracy session worktree) and
+	// reach the project clone via --add-dir <clone>; document-only
+	// stages run cwd = sessionCwd and reach root via --add-dir. Either
+	// way the explicit add-dir keeps the canvas and upstream documents
+	// reachable. Stage-provided AddDirs (dev-env MOE_HOME /
+	// MOE_DEV_TMPDIR) ride alongside so the test-stage `moe`
+	// subprocess can write to its isolated bureaucracy.
 	args := []string{sessionFlag, r.SessionID, "--add-dir", r.Root}
+	if r.ClonePath != "" {
+		args = append(args, "--add-dir", r.ClonePath)
+	}
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
@@ -164,6 +170,9 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 		"--include-partial-messages",
 		"--add-dir", r.Root,
 	)
+	if r.ClonePath != "" {
+		args = append(args, "--add-dir", r.ClonePath)
+	}
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
@@ -191,9 +200,14 @@ func (Agent) Execute(r agent.Request) (string, error) {
 
 	args := executeArgs(r)
 	cmd := exec.Command(bin, args...)
+	// cwd-inversion shape: code-bearing stages (r.ClonePath set) run
+	// cwd = r.Root (the bureaucracy session worktree) and reach the
+	// project clone via --add-dir. Document-only stages run cwd =
+	// r.SessionCwd so claude's encoded-cwd project dir stays stable
+	// across turns (--resume <sid> finds its JSONL).
 	switch {
 	case r.ClonePath != "":
-		cmd.Dir = r.ClonePath
+		cmd.Dir = r.Root
 	case r.SessionCwd != "":
 		cmd.Dir = r.SessionCwd
 	default:
@@ -265,11 +279,10 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
-	if r.ClonePath != "" {
-		cmd.Dir = r.ClonePath
-	} else {
-		cmd.Dir = r.Root
-	}
+	// cwd-inversion shape: r.Root is the canonical cwd (bureaucracy
+	// session worktree for code stages, bureaucracy root for
+	// document-only). The project clone is reached via --add-dir.
+	cmd.Dir = r.Root
 	if len(r.ExtraEnv) > 0 {
 		cmd.Env = append(os.Environ(), r.ExtraEnv...)
 	}

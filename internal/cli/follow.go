@@ -307,19 +307,24 @@ func resolveFollowTarget(root string, md *run.Metadata, sess *session.Session) (
 		if err != nil {
 			return followTarget{}, err
 		}
-		// merge-base, not the default branch directly: under the
-		// worktree primitive the sandbox shares the canonical's ref
-		// DB, so a moving default-branch tip would otherwise drag
-		// unrelated commits into the diff. The merge base is fixed at
-		// session-open and stable across turns.
+		// merge-base, not the default branch directly: the clone keeps
+		// a local `main` from `git clone`, but we want the diff anchor
+		// to be the point at which this run's branch diverged from
+		// default — not the tip of default as it moves. Stable across
+		// turns.
 		out, err := git.Output(dir, "merge-base", "HEAD", proj.DefaultBranch)
 		if err != nil {
 			return followTarget{}, fmt.Errorf("follow: merge-base: %w", err)
 		}
 		base := strings.TrimSpace(out)
+		// Canvas lives at its natural bureaucracy path under the
+		// session worktree, not under the clone — the cwd-inversion
+		// landed the agent's canvas writes back at the absolute
+		// bureaucracy path. Dir stays the clone so source-tree diffs
+		// pick up the agent's code edits.
 		return followTarget{
 			Dir:      dir,
-			Canvas:   filepath.Join(dir, CloneRunDir, "documents", sess.Doc, "content.md"),
+			Canvas:   filepath.Join(sess.WorktreePath, run.ContentPath(md.Project, md.ID, sess.Doc)),
 			Base:     base,
 			Workflow: md.Workflow,
 			Stage:    sess.Doc,

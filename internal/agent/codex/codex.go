@@ -402,36 +402,53 @@ func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
 // / resume: developer-instructions injection, sandbox mode, add-dirs,
 // and the cwd hint. Returns the flag slice ready to be prefixed with
 // the subcommand (or used bare for interactive).
+//
+// cwd-inversion shape: code-bearing stages now run with cwd =
+// bureaucracy worktree and add-dir = clonePath, so the agent's canvas
+// writes land at the canvas's natural absolute bureaucracy path
+// (matching the agent's training prior) and source-tree edits land
+// under the add-dir. The shuttle in clone_canvas.go is gone with this
+// flip. Document-only stages have an empty clonePath and only need
+// the bureaucracy root in the writable set.
 func commonArgs(root, clonePath, systemPrompt string) ([]string, error) {
 	args := []string{
 		"-c", "developer_instructions=" + tomlMultilineBasic(systemPrompt),
 	}
-	// Sandbox: workspace-write covers both code stages (cwd = sandbox
-	// clone, which must be writable) and document-only stages (cwd =
-	// bureaucracy worktree, also writable for canvas edits). read-only
-	// would block the canvas write that doc stages need, so we keep
-	// scoping to the cwd + add-dirs.
+	// Sandbox: workspace-write keeps writes scoped to cwd + the
+	// explicit add-dir set. read-only would block the canvas write
+	// every stage needs.
 	args = append(args, "--sandbox", "workspace-write")
-	// `--add-dir <bureaucracy-root>` keeps the canvas reachable from
-	// the sandbox clone (code stages) or pins the bureaucracy
-	// worktree as the writable scope (doc stages — clonePath empty).
+	// Always make the bureaucracy root reachable. Code stages have
+	// cwd = root (so the add-dir is redundant but harmless); doc
+	// stages have cwd = sessionCwd which sits under root, and need
+	// the explicit add-dir to write the canvas.
 	if root != "" {
 		args = append(args, "--add-dir", root)
 	}
-	// Future: project-level AGENTS.md discovery walks from cwd up to
-	// the git root, so the target submodule's AGENTS.md (if any)
-	// loads automatically on code stages. No flag needed.
-	_ = clonePath
+	// Code-bearing stages: the project clone is the source-tree
+	// workspace, reached via add-dir while cwd sits on the bureaucracy
+	// worktree. AGENTS.md discovery walks from cwd up to the git root;
+	// with cwd = bureaucracy worktree, project-specific AGENTS.md
+	// under the clone is no longer auto-loaded — handled separately
+	// (system prompt or symlink) where needed.
+	if clonePath != "" {
+		args = append(args, "--add-dir", clonePath)
+	}
 	return args, nil
 }
 
-// resolveCwd mirrors the executor's cwd precedence: clone if a
-// sandbox is attached, else session worktree for doc-only stages,
-// else the bureaucracy root.
+// resolveCwd picks the codex subprocess cwd. Code-bearing stages
+// (clonePath set) land in the bureaucracy session worktree (root) so
+// the agent's canvas writes target absolute bureaucracy paths
+// natively; the clone is reachable via add-dir. Document-only stages
+// land in the stable per-document sessionCwd to keep claude-style
+// session-id encoding stable across turns (codex doesn't care about
+// cwd for its own session resume, but the executor interface is
+// shared).
 func resolveCwd(clonePath, sessionCwd, root string) string {
 	switch {
 	case clonePath != "":
-		return clonePath
+		return root
 	case sessionCwd != "":
 		return sessionCwd
 	default:

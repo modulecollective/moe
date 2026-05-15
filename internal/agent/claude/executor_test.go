@@ -159,6 +159,28 @@ func TestExecuteArgsIncludesAddDirsBeforeSettings(t *testing.T) {
 	assertArgsEqual(t, args, want)
 }
 
+// TestExecuteArgsAddsClonePathForCodeStages pins the cwd-inversion
+// shape: when ClonePath is set, it lands as a `--add-dir` right after
+// the bureaucracy root so the agent (sitting at cwd = root, the
+// bureaucracy session worktree) can reach the source-tree workspace.
+func TestExecuteArgsAddsClonePathForCodeStages(t *testing.T) {
+	args := executeArgs(agent.Request{
+		SessionID:  "sid-1",
+		NewSession: true,
+		Root:       "/bureaucracy",
+		ClonePath:  "/bureaucracy/.moe/clones/widget/req-1",
+		Prompt:     "system",
+	})
+	want := []string{
+		"--session-id", "sid-1",
+		"--add-dir", "/bureaucracy",
+		"--add-dir", "/bureaucracy/.moe/clones/widget/req-1",
+		"--settings", `{"sandbox":{"enabled":true}}`,
+		"--append-system-prompt", "system",
+	}
+	assertArgsEqual(t, args, want)
+}
+
 // TestExecuteArgsResumeWhenNotNewSession swaps --session-id for
 // --resume on a returning session and omits InitialPrompt when empty.
 func TestExecuteArgsResumeWhenNotNewSession(t *testing.T) {

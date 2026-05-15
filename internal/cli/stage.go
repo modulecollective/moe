@@ -314,20 +314,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err != nil {
 					return wikiTurnSpec{}, err
 				}
-				// Pre-turn writable-artifact shuttle: copy the
-				// agent-authored files into <clonePath>/.moe-run/ so
-				// codex's apply_patch (which gates writes on the cwd's
-				// git project, not on --add-dir) has in-project targets
-				// for canvas, followups, and twin feedback.
-				// excludeCloneRun keeps the shuttle dir out of
-				// `git status` noise. See clone_canvas.go for the full
-				// rationale.
-				if err := syncRunIntoClone(workRoot, clonePath, md, docID); err != nil {
-					return wikiTurnSpec{}, err
-				}
-				if err := excludeCloneRun(clonePath); err != nil {
-					return wikiTurnSpec{}, err
-				}
 				// Dev-env hooks fire on every code/test stage open
 				// against this working tree. First touch runs the
 				// project's dev-env.d/* setup scripts and caches the
@@ -445,19 +431,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					return p, nil
 				},
 				CommitStager: func(workRoot, wikiRel string) error {
-					// Post-turn writable-artifact shuttle: copy the
-					// agent's in-clone canvas, followups, and twin
-					// feedback back into the bureaucracy run subtree
-					// before commitTurn's existence gate (and the rest
-					// of the engine) reads it. Overwrite-only: if the
-					// agent crashed mid-turn, whatever it managed to
-					// write still lands. A missing clone subtree falls
-					// through to commitTurn's loud "agent did not write
-					// to its canvas" failure — the symptom we want when
-					// the turn produced nothing.
-					if err := syncRunFromClone(workRoot, clonePath, md, docID); err != nil {
-						return err
-					}
+					// cwd-inversion shape: the agent writes the canvas,
+					// followups, and twin feedback at their natural
+					// absolute bureaucracy paths under the session
+					// worktree. No clone-to-bureaucracy shuttle to run
+					// here — commitTurn reads the same paths the agent
+					// just wrote.
 					var extras []string
 					if wikiRel != "" {
 						extras = append(extras, wikiRel)

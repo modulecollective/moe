@@ -94,13 +94,13 @@ func TestPickFollowTargetLiveDesignSession(t *testing.T) {
 }
 
 // TestPickFollowTargetLiveCodeSession: a run with an open code session
-// resolves to (sandbox dir, live in-clone canvas, merge-base(HEAD,
-// default-branch)). Code sessions write their canvas through the
-// .moe-run shuttle inside the sandbox, so follow should tail that live
-// file rather than the bureaucracy copy that is synced back after the
-// turn. The merge-base anchors the diff at the session-open commit so
-// a moving default branch (under the worktree primitive the sandbox
-// shares the canonical's ref DB) doesn't drag unrelated commits into
+// resolves to (sandbox dir, canvas under session worktree, merge-base
+// (HEAD, default-branch)). Under the cwd-inversion shape, code sessions
+// write their canvas at the absolute bureaucracy path under the
+// session worktree (not the clone), so follow tails that path. Dir
+// stays the sandbox clone because that's where source-tree diffs
+// resolve. The merge-base anchors the diff at the session-open commit
+// so a moving default-branch tip doesn't drag unrelated commits into
 // the diff.
 func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	root := newTestBureaucracy(t)
@@ -137,12 +137,12 @@ func TestPickFollowTargetLiveCodeSession(t *testing.T) {
 	if target.Base != wantBase {
 		t.Fatalf("base = %q, want merge-base %q", target.Base, wantBase)
 	}
-	wantCanvas := filepath.Join(sandboxDir, CloneRunDir, "documents", "code", "content.md")
+	wantCanvas := filepath.Join(sess.WorktreePath, run.ContentPath("tele", "fix-it", "code"))
 	if target.Canvas != wantCanvas {
 		t.Fatalf("canvas = %q, want %q", target.Canvas, wantCanvas)
 	}
-	if !strings.HasPrefix(target.Canvas, sandboxDir) {
-		t.Fatalf("canvas %q must sit under sandbox %q", target.Canvas, sandboxDir)
+	if !strings.HasPrefix(target.Canvas, sess.WorktreePath) {
+		t.Fatalf("canvas %q must sit under session worktree %q", target.Canvas, sess.WorktreePath)
 	}
 }
 

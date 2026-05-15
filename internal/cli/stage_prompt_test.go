@@ -98,64 +98,46 @@ func TestStageLocationSectionUnknownWorkflow(t *testing.T) {
 	}
 }
 
-// TestOperationalCoreCanvasPathSwitchesOnClonePath pins the canvas,
-// followups, and twin-feedback paths operationalCore hands to the
-// agent:
-//   - clonePath == "" (document-only stage, cwd = bureaucracy root):
-//     absolute paths under root, so the agent can write directly to
-//     the canonical files.
-//   - clonePath != "" (code-bearing stage, cwd = sandbox clone):
-//     cwd-relative paths under ./.moe-run/, because codex's
-//     apply_patch refuses to write outside the cwd's git project
-//     even when the bureaucracy root is in --add-dir. The pre/post
-//     shuttle in clone_canvas.go owns the bytes' actual journey.
-//
-// Either direction breaks a real workflow — pin all three writable
-// paths so the next refactor of operationalCore can't silently
-// regress codex's headless code stage back to "patch rejected:
-// writing outside of the project".
-func TestOperationalCoreCanvasPathSwitchesOnClonePath(t *testing.T) {
+// TestOperationalCoreCanvasPathIsAbsoluteAcrossStages pins the
+// agent-writable paths operationalCore renders. Under the cwd-inversion
+// shape both code-bearing and document-only stages name the canvas,
+// followups, and twin feedback at their absolute bureaucracy paths
+// — code stages reach those paths because cwd is the bureaucracy
+// session worktree (the clone is reached via --add-dir for source
+// edits), so the agent's natural write target matches the path MoE
+// reads back at commit time.
+func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 
-	docOnly := operationalCore(root, md, "design", "")
-	wantDocOnly := []string{
+	wantAbsolute := []string{
 		filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")),
 		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
 		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
 	}
-	for _, want := range wantDocOnly {
+	docOnly := operationalCore(root, md, "design", "")
+	for _, want := range wantAbsolute {
 		if !strings.Contains(docOnly, want) {
 			t.Errorf("doc-only prompt missing absolute path %q:\n%s", want, docOnly)
 		}
 	}
-	if strings.Contains(docOnly, CloneRunDir) {
-		t.Errorf("doc-only prompt must not name the clone run dir:\n%s", docOnly)
-	}
 
-	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
 	wantCode := []string{
-		filepath.Join(".", CloneRunDir, "documents", "code", "content.md"),
-		filepath.Join(".", CloneRunDir, "followups.md"),
-		filepath.Join(".", CloneRunDir, "feedback", "twin.md"),
-	}
-	for _, want := range wantCode {
-		if !strings.Contains(codeStage, want) {
-			t.Errorf("code-stage prompt missing %q:\n%s", want, codeStage)
-		}
-	}
-	// Absolute paths under the bureaucracy root would tempt the
-	// agent to apply_patch them and trip codex's project-scope
-	// check — keep the cwd-relative paths the only writable pointers
-	// for code stages.
-	denyCode := []string{
 		filepath.Join(root, run.ContentPath(md.Project, md.ID, "code")),
 		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
 		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
 	}
-	for _, deny := range denyCode {
+	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
+	for _, want := range wantCode {
+		if !strings.Contains(codeStage, want) {
+			t.Errorf("code-stage prompt missing absolute path %q:\n%s", want, codeStage)
+		}
+	}
+	// The legacy `./.moe-run/` shuttle paths must not leak back into
+	// the prompt — they belong to the removed clone-canvas indirection.
+	for _, deny := range []string{"./.moe-run/", ".moe-run/documents", ".moe-run/followups", ".moe-run/feedback"} {
 		if strings.Contains(codeStage, deny) {
-			t.Errorf("code-stage prompt must not name absolute bureaucracy path %q:\n%s", deny, codeStage)
+			t.Errorf("code-stage prompt still names shuttle path %q:\n%s", deny, codeStage)
 		}
 	}
 }

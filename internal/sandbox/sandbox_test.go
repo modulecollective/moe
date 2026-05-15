@@ -39,9 +39,10 @@ func TestEnsurePlainRepo(t *testing.T) {
 		t.Fatalf("code.txt: got=%q err=%v", got, err)
 	}
 
-	// The clone directory is a registered worktree of src.
-	if !worktreeRegistered(t, src, clone) {
-		t.Fatalf("expected worktree at %s registered against %s", clone, src)
+	// The clone has its own .git/ directory (plain-clone primitive),
+	// not a worktree gitfile into the canonical's gitdir.
+	if !isPlainCloneAt(t, clone) {
+		t.Fatalf("expected plain clone at %s, found gitfile", clone)
 	}
 
 	// Second call short-circuits to the same path.
@@ -53,7 +54,7 @@ func TestEnsurePlainRepo(t *testing.T) {
 		t.Fatalf("Ensure returned %s then %s", clone, clone2)
 	}
 
-	// Writes in the worktree must not leak into the source's working
+	// Writes in the clone must not leak into the source's working
 	// tree on disk — that's the whole point of the sandbox.
 	if err := os.WriteFile(filepath.Join(clone, "code.txt"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
@@ -65,10 +66,11 @@ func TestEnsurePlainRepo(t *testing.T) {
 
 // TestEnsureGitfileSubmodule exercises the real submodule layout:
 // `projects/<id>/.git` is a gitfile pointing at a sibling directory
-// holding the actual git data. Under the worktree primitive, git
-// follows the gitfile to the canonical gitdir, registers a new
-// linked-worktree under it, and writes a gitfile in the clone pointing
-// at .git/worktrees/<...>.
+// holding the actual git data. Under the plain-clone primitive, git
+// clone follows the gitfile to the canonical gitdir, clones into a
+// fresh `.git/` directory at the destination, and the result is a
+// standalone repo whose only link back to the canonical is the
+// `objects/info/alternates` shared-object reference.
 func TestEnsureGitfileSubmodule(t *testing.T) {
 	gittest.SetupEnv(t)
 	root := t.TempDir()
@@ -109,22 +111,20 @@ func TestEnsureGitfileSubmodule(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 
-	// The worktree's .git is a gitfile (any path, but with the
-	// gitdir: prefix) — we don't pin it to a specific shape because
-	// git owns where worktrees register themselves.
-	gitfile, err := os.ReadFile(filepath.Join(clone, ".git"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.HasPrefix(gitfile, []byte("gitdir: ")) {
-		t.Fatalf("expected gitfile, got %q", gitfile)
+	// The clone's .git is a real directory, not a gitfile pointing
+	// into the canonical's .git/modules/.../worktrees/. This is the
+	// load-bearing invariant for the cwd-inversion change: a plain
+	// `.git/` makes codex's apply_patch see the clone as a project
+	// of its own, not a worktree of the bureaucracy.
+	if !isPlainCloneAt(t, clone) {
+		t.Fatalf("expected plain clone .git dir at %s", clone)
 	}
 
 	gittest.Run(t, clone, "status")
 
-	// Commit in the worktree on detached HEAD: the source working
-	// tree on disk stays at v1, and main in the canonical gitdir is
-	// not advanced (the new commit is unreferenced by main).
+	// Commit in the clone on its own main: the source working tree on
+	// disk stays at v1, and main in the canonical gitdir is not
+	// advanced (the new commit lives in the clone's ref-db only).
 	if err := os.WriteFile(filepath.Join(clone, "code.txt"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +153,8 @@ func TestRemoveIdempotent(t *testing.T) {
 	}
 }
 
-// TestRemoveAfterEnsure confirms Remove deregisters the worktree from
-// the canonical and that Exists tracks both states.
+// TestRemoveAfterEnsure confirms Remove tears the clone down and that
+// Exists tracks both states.
 func TestRemoveAfterEnsure(t *testing.T) {
 	gittest.SetupEnv(t)
 	root := t.TempDir()
@@ -175,8 +175,8 @@ func TestRemoveAfterEnsure(t *testing.T) {
 	if !Exists(root, "thing", "req-a") {
 		t.Fatal("Exists false after Ensure")
 	}
-	if !worktreeRegistered(t, src, clone) {
-		t.Fatal("worktree not registered after Ensure")
+	if !isPlainCloneAt(t, clone) {
+		t.Fatal("clone not present after Ensure")
 	}
 	if err := Remove(root, "thing", "req-a"); err != nil {
 		t.Fatal(err)
@@ -184,19 +184,19 @@ func TestRemoveAfterEnsure(t *testing.T) {
 	if Exists(root, "thing", "req-a") {
 		t.Fatal("Exists true after Remove")
 	}
-	if worktreeRegistered(t, src, clone) {
-		t.Fatal("worktree still registered after Remove")
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("clone dir still present after Remove: %v", err)
 	}
 	if err := Remove(root, "thing", "req-a"); err != nil {
 		t.Fatalf("Remove idempotent: %v", err)
 	}
 }
 
-// TestRemoveWithDirtyWorktree pins the --force invariant inherited
-// from the worktree-bug fix: by the time Remove runs the run is
-// terminal, so any uncommitted state is intentionally being discarded.
-// Plain `git worktree remove` would refuse on a dirty tree.
-func TestRemoveWithDirtyWorktree(t *testing.T) {
+// TestRemoveWithDirtyClone confirms Remove tears down a clone with
+// uncommitted edits without complaint — by the time Remove runs the
+// run is terminal, so any uncommitted state is intentionally being
+// discarded.
+func TestRemoveWithDirtyClone(t *testing.T) {
 	gittest.SetupEnv(t)
 	root := t.TempDir()
 	src := filepath.Join(root, "projects", "thing", "src")
@@ -222,13 +222,10 @@ func TestRemoveWithDirtyWorktree(t *testing.T) {
 	}
 
 	if err := Remove(root, "thing", "req-a"); err != nil {
-		t.Fatalf("Remove on dirty worktree: %v", err)
+		t.Fatalf("Remove on dirty clone: %v", err)
 	}
 	if _, err := os.Stat(clone); !os.IsNotExist(err) {
-		t.Fatalf("expected worktree gone, stat err=%v", err)
-	}
-	if worktreeRegistered(t, src, clone) {
-		t.Fatal("worktree still registered after Remove of dirty tree")
+		t.Fatalf("expected clone gone, stat err=%v", err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(src, "code.txt")); string(got) != "v1" {
 		t.Fatalf("source code.txt = %q, want v1", got)
@@ -236,7 +233,7 @@ func TestRemoveWithDirtyWorktree(t *testing.T) {
 }
 
 // TestEnsureWritesGitignore confirms the lazy .moe/.gitignore is
-// created so worktrees never accidentally get staged into the
+// created so clones never accidentally get staged into the
 // bureaucracy.
 func TestEnsureWritesGitignore(t *testing.T) {
 	gittest.SetupEnv(t)
@@ -273,8 +270,8 @@ func TestEnsureRejectsMissingSource(t *testing.T) {
 // TestEnsureAutoInit covers the Linux-cloud-box foot-gun: the
 // bureaucracy was freshly cloned, .gitmodules declares a submodule,
 // but the submodule has never been initialised on this machine. The
-// sandbox primitive must materialise it before adding the worktree
-// rather than failing with a low-level stat error.
+// sandbox primitive must materialise it before cloning rather than
+// failing with a low-level stat error.
 func TestEnsureAutoInit(t *testing.T) {
 	gittest.SetupEnv(t)
 	tmp := t.TempDir()
@@ -358,21 +355,15 @@ func TestEnsureAutoInitFailureSurfacesTypedError(t *testing.T) {
 	}
 }
 
-// worktreeRegistered reports whether canonicalSrc has a worktree
-// registered at clone — used by tests as the load-bearing assertion
-// that swaps in for "the clone is a fully independent repo."
-func worktreeRegistered(t *testing.T, canonicalSrc, clone string) bool {
+// isPlainCloneAt reports whether the clone at path has a real `.git/`
+// directory rather than a worktree gitfile. The load-bearing invariant
+// for the plain-clone primitive — a worktree gitfile is what made
+// codex's apply_patch refuse cross-boundary writes.
+func isPlainCloneAt(t *testing.T, clone string) bool {
 	t.Helper()
-	out := gittest.Output(t, canonicalSrc, "worktree", "list", "--porcelain")
-	target := canonical(clone)
-	for _, line := range strings.Split(out, "\n") {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
-		if canonical(path) == target {
-			return true
-		}
+	info, err := os.Stat(filepath.Join(clone, ".git"))
+	if err != nil {
+		return false
 	}
-	return false
+	return info.IsDir()
 }

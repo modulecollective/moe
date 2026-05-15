@@ -161,6 +161,7 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 	got := strings.Join(args, " ")
 	for _, want := range []string{
 		"--add-dir /bureaucracy",
+		"--add-dir /bureaucracy/clone",
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
 		"--ask-for-approval never",
