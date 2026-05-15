@@ -221,18 +221,26 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 // that's always present — everything else in the prompt is optional
 // guidance layered on top.
 func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
-	// Code-bearing stages (clonePath != "") route the canvas through
-	// ./.moe-canvas.md inside the clone. The shuttle in clone_canvas.go
-	// owns pre-turn copy bureaucracy → clone and post-turn copy clone
-	// → bureaucracy; the agent only ever touches the in-cwd file, which
-	// keeps codex's apply_patch project-scope check happy. For
-	// document-only stages (clonePath == "") cwd is the bureaucracy
-	// root and the absolute bureaucracy path is still the right
-	// answer.
-	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+	// Code-bearing stages (clonePath != "") route every agent write —
+	// canvas, followups, twin feedback — through `./.moe-run/` inside
+	// the clone. The shuttle in clone_canvas.go owns pre-turn mirror
+	// bureaucracy → clone and post-turn copy clone → bureaucracy; the
+	// agent only ever touches in-cwd files, which keeps codex's
+	// apply_patch project-scope check happy. For document-only stages
+	// (clonePath == "") cwd is the bureaucracy root and the absolute
+	// bureaucracy paths are still the right answer.
+	var content, twinFeedback, followups string
 	if clonePath != "" {
-		content = "./" + CloneCanvasName
+		runRel := filepath.Join(".", CloneRunDir)
+		content = filepath.Join(runRel, "documents", docID, "content.md")
+		twinFeedback = filepath.Join(runRel, "feedback", "twin.md")
+		followups = filepath.Join(runRel, "followups.md")
+	} else {
+		content = filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+		twinFeedback = filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
+		followups = filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 	}
+
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for run %q (project %q) in a Ministry of Everything bureaucracy repo.
 
@@ -256,7 +264,15 @@ That's your code workspace — read and edit files there. The clone is
 yours for the lifetime of this run; your edits are isolated from
 other concurrent activities and from the canonical submodule until the
 run is pushed.
-`, clonePath)
+
+Your run-state mirror lives at `+"`./%s/`"+` inside this clone. MoE
+pre-syncs the bureaucracy run subtree there before each turn and
+copies your edits back after the turn commits. Write the canvas,
+`+"`followups.md`"+`, and `+"`feedback/twin.md`"+` under this
+directory only — they're the agent-writable surface. `+"`run.json`"+`
+and other stages' canvases under `+"`documents/`"+` are read-only;
+edits there are refused at post-sync.
+`, clonePath, CloneRunDir)
 	}
 
 	// Twin-feedback channel comes first so the more specific case
@@ -265,7 +281,6 @@ run is pushed.
 	// a digital-twin doc?) rather than philosophical, because the
 	// philosophical phrasing ("a decision the doc doesn't reflect")
 	// requires an abstraction the agent doesn't always perform.
-	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
 	out += "\n" +
 		"If you notice something about the project that belongs in the digital\n" +
 		"twin — would acting on this note edit `digital-twin/<project>/`\n" +
@@ -297,7 +312,6 @@ run is pushed.
 	// real work," to avoid replacing bare-line junk with body-padded
 	// junk. The closing backward link catches the agent who drafted a
 	// followup before reading the twin paragraph above.
-	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 	out += "\n" +
 		"If you notice something worth doing but out of scope for this cycle —\n" +
 		"adjacent cleanup, a deferred investigation, a reference to chase —\n" +
