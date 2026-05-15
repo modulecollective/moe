@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -164,5 +165,64 @@ func TestStageLocationSectionIdeaStage(t *testing.T) {
 		if strings.Contains(got, sub) {
 			t.Errorf("unexpected %q in:\n%s", sub, got)
 		}
+	}
+}
+
+// TestProjectAgentsGuidance pins the load-bearing function that replaced
+// codex's / claude's cwd-walk discovery of AGENTS.md and CLAUDE.md under
+// the cwd-inversion shape. The agent's cwd no longer reaches the clone,
+// so the prompt builder reads these files eagerly. Misroute = the
+// project's ground rules silently vanish from the agent's context.
+func TestProjectAgentsGuidance(t *testing.T) {
+	clone := t.TempDir()
+	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clone, "CLAUDE.md"), []byte("internal/git is the sole seam\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := projectAgentsGuidance(clone)
+	for _, want := range []string{
+		"## Project guidance (AGENTS.md)",
+		"stdlib only",
+		"## Project guidance (CLAUDE.md)",
+		"internal/git is the sole seam",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	// AGENTS.md is listed first, so its section must precede CLAUDE.md's.
+	if strings.Index(got, "AGENTS.md") > strings.Index(got, "CLAUDE.md") {
+		t.Errorf("AGENTS.md section must precede CLAUDE.md:\n%s", got)
+	}
+
+	emptyClone := t.TempDir()
+	if got := projectAgentsGuidance(emptyClone); got != "" {
+		t.Errorf("expected empty string when no files, got %q", got)
+	}
+
+	if got := projectAgentsGuidance(""); got != "" {
+		t.Errorf("expected empty string for empty clonePath, got %q", got)
+	}
+
+	onlyClaude := t.TempDir()
+	if err := os.WriteFile(filepath.Join(onlyClaude, "CLAUDE.md"), []byte("just claude\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = projectAgentsGuidance(onlyClaude)
+	if !strings.Contains(got, "CLAUDE.md") || !strings.Contains(got, "just claude") {
+		t.Errorf("single-file case: %q", got)
+	}
+	if strings.Contains(got, "AGENTS.md") {
+		t.Errorf("AGENTS.md section emitted when file absent: %q", got)
+	}
+
+	whitespaceOnly := t.TempDir()
+	if err := os.WriteFile(filepath.Join(whitespaceOnly, "AGENTS.md"), []byte("   \n\n   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := projectAgentsGuidance(whitespaceOnly); got != "" {
+		t.Errorf("whitespace-only file should be skipped, got %q", got)
 	}
 }
