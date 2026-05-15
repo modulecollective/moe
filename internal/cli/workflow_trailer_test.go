@@ -11,13 +11,12 @@ import (
 
 // TestCommitSessionStartCarriesWorkflowTrailer guards the MoE-Workflow
 // trailer added to the eager start-session commit. Paired with
-// TestCommitTurnCarriesWorkflowTrailer, they make a no-design `quick`
-// run distinguishable in merged history without re-loading run.json —
-// the same discriminator also lands on sdlc runs, for symmetry.
+// TestCommitTurnCarriesWorkflowTrailer, they make an sdlc run
+// distinguishable in merged history without re-loading run.json.
 func TestCommitSessionStartCarriesWorkflowTrailer(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	md := &run.Metadata{ID: "bump-timeout", Project: "tele", Workflow: "quick",
+	md := &run.Metadata{ID: "bump-timeout", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
 	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
@@ -29,7 +28,7 @@ func TestCommitSessionStartCarriesWorkflowTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	if !strings.Contains(body, "MoE-Workflow: quick") {
+	if !strings.Contains(body, "MoE-Workflow: sdlc") {
 		t.Fatalf("commit body missing MoE-Workflow trailer:\n%s", body)
 	}
 }
@@ -39,7 +38,7 @@ func TestCommitSessionStartCarriesWorkflowTrailer(t *testing.T) {
 func TestCommitTurnCarriesWorkflowTrailer(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	md := &run.Metadata{ID: "bump-timeout", Project: "tele", Workflow: "quick",
+	md := &run.Metadata{ID: "bump-timeout", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
 	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
@@ -58,7 +57,7 @@ func TestCommitTurnCarriesWorkflowTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	if !strings.Contains(body, "MoE-Workflow: quick") {
+	if !strings.Contains(body, "MoE-Workflow: sdlc") {
 		t.Fatalf("commit body missing MoE-Workflow trailer:\n%s", body)
 	}
 }

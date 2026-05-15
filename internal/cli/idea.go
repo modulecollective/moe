@@ -21,7 +21,7 @@ import (
 // that sit between nothing and a full run. Ideas are just runs in a
 // dedicated single-stage workflow (ideaWorkflow, ideaDocID) so the slug
 // namespace, dash bucketing, and trailer conventions are the same as
-// sdlc/kb/quick. The distinguishing discipline: `moe idea` verbs never
+// sdlc/kb. The distinguishing discipline: `moe idea` verbs never
 // launch Claude unless --chat is passed — capture stays cheap.
 //
 // idea is reached one way — `moe idea <verb>` — same as every other

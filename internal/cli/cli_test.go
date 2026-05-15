@@ -50,6 +50,17 @@ func TestRunUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestQuickCommandRemoved(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := Run([]string{"quick"}, &out, &errb)
+	if code == 0 {
+		t.Fatal("expected non-zero exit for removed quick command")
+	}
+	if !strings.Contains(errb.String(), `unknown command "quick"`) {
+		t.Fatalf("stderr=%q", errb.String())
+	}
+}
+
 func TestHelpListsRegisteredCommands(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := Run([]string{"help"}, &out, &errb)

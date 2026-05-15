@@ -120,7 +120,7 @@ func TestRunNewWithWorkspaceFlagRefusesIfClaimed(t *testing.T) {
 }
 
 // TestRunNewWithWorkspaceFlagRejectedOnNonSdlc confirms the flag is
-// gated to sdlc — the kb / quick / idea workflows have no code stage
+// gated to sdlc — the kb / idea workflows have no code stage
 // to use a workspace.
 func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	root := newTestBureaucracy(t)

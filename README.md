@@ -18,8 +18,8 @@ operator and the bots share a compounding model of the project.
 MoE runs [Claude Code](https://claude.com/claude-code) against living
 documents. Each document compresses its threaded discussion into a
 clean artifact that becomes context for the next step. Software
-development is the first workflow, with quick-fix, knowledge-base,
-hook-authoring, meta-review, and digital-twin workflows alongside.
+development is the first workflow, with knowledge-base, hook-authoring,
+meta-review, and digital-twin workflows alongside.
 
 There is no background worker, no TUI, no dashboard that updates on its
 own. Agents act only when you invoke a command. The UX problem is
@@ -98,7 +98,6 @@ The current workflows are:
 | Workflow   | Stages                                                     | For                                      |
 |------------|------------------------------------------------------------|------------------------------------------|
 | `sdlc`     | `design` → `code` → `test` → `push`                        | designed features with review and ship gates |
-| `quick`    | `code` → `push`                                            | small fixes that don't need a design     |
 | `kb`       | `research` → `summarize`                                   | knowledge-base articles                  |
 | `idea`     | `capture` / `refine`                                       | backlog without starting a run           |
 | `twin`     | `vision` → `architecture` → `patterns` → `operations` → `glossary` → `finalize` | project digital twin |
@@ -107,7 +106,7 @@ The current workflows are:
 
 Each stage is a subcommand that opens a Claude Code session on that
 stage's document. Each workflow is its own top-level verb — `moe sdlc`,
-`moe kb`, `moe quick`, `moe twin`. For example:
+`moe kb`, `moe twin`. For example:
 
 ```sh
 moe sdlc new tele "add batch support"       # open a new run

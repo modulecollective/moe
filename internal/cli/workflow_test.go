@@ -180,11 +180,9 @@ func TestWorkflowNextIgnoresOtherProjectSameSlug(t *testing.T) {
 // subject grep keeps session-start commits out of the match.
 func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	root := newTestBureaucracy(t)
-	wf, err := LookupWorkflow("quick")
-	if err != nil {
-		t.Fatal(err)
-	}
-	md := &run.Metadata{ID: "r", Project: "p", Workflow: "quick", Status: run.StatusInProgress,
+	wf := NewWorkflow("session-start-test")
+	wf.RegisterStage("code")
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "session-start-test", Status: run.StatusInProgress,
 		Documents: map[string]*run.Document{}}
 	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
 		t.Fatal(err)

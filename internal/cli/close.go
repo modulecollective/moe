@@ -255,9 +255,8 @@ func twinReflectNudge(root, projectID, runID, workflow string) string {
 // workspaces. Idempotent: a never-opened workspace (operator
 // abandoned before the code stage) is a no-op either way.
 //
-// Used by both sdlc close and quick close — both stages run code in a
-// per-run sandbox, so neither can be allowed to leave a dead clone
-// behind.
+// Used by sdlc close to release the run workspace after abandoning code
+// work. It is idempotent so closing before first code attach is still safe.
 func releaseWorkspaceCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 	if err := releaseRunWorkspace(root, md); err != nil {
 		return fmt.Errorf("release workspace: %w", err)

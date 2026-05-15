@@ -177,7 +177,7 @@ func TestSDLCReopenRefusesMissingRun(t *testing.T) {
 }
 
 // TestSDLCReopenRefusesNonSDLC: reopen lives under the sdlc verb and
-// only seeds a "design" doc. A kb/quick prior would either error at
+// only seeds a "design" doc. A kb prior would either error at
 // run.New (no design stage) or silently land in the wrong workflow.
 // Refuse early and explicitly.
 func TestSDLCReopenRefusesNonSDLC(t *testing.T) {
@@ -282,7 +282,7 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 }
 
 // TestDashClosedNonSDLCHasNoReopenMarker: reopen is an sdlc verb;
-// surfacing the marker on kb/quick rows would advertise an action the
+// surfacing the marker on kb rows would advertise an action the
 // operator can't take.
 func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 	root := newTestBureaucracy(t)

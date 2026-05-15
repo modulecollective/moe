@@ -94,7 +94,7 @@ func TestNewDerivedSlugAutoSuffixesPastHistory(t *testing.T) {
 	// Open run commit from earlier stays on main.
 	deleteRunDir(t, root, "tele", "fix-it")
 
-	second, err := New(root, "tele", "Fix it", Options{Workflow: "quick"})
+	second, err := New(root, "tele", "Fix it", Options{Workflow: "kb"})
 	if err != nil {
 		t.Fatalf("second New: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestNewExplicitSlugRefusesHistoryWithSuggestion(t *testing.T) {
 	}
 	deleteRunDir(t, root, "tele", "fix-it")
 
-	_, err := New(root, "tele", "Fix it", Options{Workflow: "quick", ID: "fix-it"})
+	_, err := New(root, "tele", "Fix it", Options{Workflow: "kb", ID: "fix-it"})
 	if err == nil {
 		t.Fatal("expected error reusing a historical slug explicitly, got nil")
 	}
