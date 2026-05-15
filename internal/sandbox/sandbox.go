@@ -265,28 +265,18 @@ func gitmodulesDeclares(path, want string) (bool, error) {
 }
 
 // cloneAlreadyAt reports whether absDst is a usable existing clone —
-// the directory exists and contains a `.git/` directory or gitfile.
-// EnsureAt's idempotency check: a fresh `git clone` would refuse to
-// run against a non-empty destination, so we short-circuit on a
-// previously-materialised clone.
+// the destination has a `.git/` directory. EnsureAt's idempotency
+// check: a fresh `git clone` would refuse to run against a non-empty
+// destination, so we short-circuit on a previously-materialised clone.
+// A `.git` gitfile (left over from a legacy worktree-shaped sandbox)
+// is rejected by the caller so the operator notices instead of the
+// new code silently reusing the wrong shape.
 func cloneAlreadyAt(absDst string) bool {
-	if _, err := os.Stat(filepath.Join(absDst, ".git")); err == nil {
-		return true
+	info, err := os.Stat(filepath.Join(absDst, ".git"))
+	if err != nil {
+		return false
 	}
-	return false
-}
-
-// canonical resolves p as far as it can — symlinks first, abs as a
-// fallback — so equality checks in tests aren't thrown by
-// /tmp -> /private/tmp on macOS or other symlink prefixes.
-func canonical(p string) string {
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	return p
+	return info.IsDir()
 }
 
 func indent(s, prefix string) string {

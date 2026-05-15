@@ -22,9 +22,16 @@ fold into architecture.md:
   or referenced via `objects/info/alternates`." Drop the "OS-
   level sandbox / gitdir lives outside the working tree" sentence
   — gitdir is now inside the clone at `<dst>/.git/`. The
-  `executor` bullet's `--settings` widening for the gitdir is
-  dead code under the new primitive (kept for legacy probe code
-  paths but never triggered); the bullet should note it.
+  `executor` bullet's `--settings` widening for the gitdir was
+  removed: `sandboxSettingsJSON` is now a single constant emitting
+  `{"sandbox":{"enabled":true}}`. The bullet's "additionally widens
+  `sandbox.filesystem.allowWrite` to the worktree's gitdir"
+  sentence should come out — under the plain-clone primitive the
+  clone's gitdir lives inside the clone at `<clonePath>/.git/`
+  (reachable via `--add-dir <clonePath>`), and the bureaucracy
+  session worktree's gitdir at `<root>/.git/worktrees/<uuid>/` is
+  reachable via the `--add-dir <root>` claude already passes. No
+  per-payload widening is needed for index-mutating git operations.
 - ## Decisions → `**Per-run sandbox worktree.**` bullet: rename
   to `**Per-run sandbox plain clone.**`. Replace the "git
   worktree linked off the canonical" line with the plain-clone

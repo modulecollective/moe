@@ -7,12 +7,10 @@ package claude
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/run"
@@ -27,73 +25,20 @@ func init() {
 // dispatch hook the registry hands back.
 type Agent struct{}
 
-// sandboxSettingsJSON builds the `--settings` payload that pins the
+// sandboxSettingsJSON is the `--settings` payload that pins the
 // claude subprocess into the built-in sandbox regardless of the
 // operator's personal configuration. Array fields (filesystem /
-// network allowlists) merge across settings scopes, so anything we
-// add here extends the operator's allowlists rather than narrowing
-// them.
+// network allowlists) merge across settings scopes, so this enables
+// the sandbox without narrowing the operator's allowlists.
 //
-// When clonePath is non-empty, the payload also widens
-// `sandbox.filesystem.allowWrite` to include the worktree's gitdir.
-// The default sandbox grants write access to cwd and its
-// subdirectories only, which under the post-May-10 worktree layout
-// excludes `<root>/.git/modules/.../worktrees/<name>/` — the path
-// every index-mutating git command writes `index.lock` to. Without
-// this widening, the first `git add` (or any cousin) of every code
-// turn fails "Read-only file system" and Claude Code's auto-retry
-// re-runs it with the sandbox disabled.
-//
-// We resolve the gitdir by reading the worktree's in-tree `.git`
-// gitfile rather than reconstructing the path from project/run IDs.
-// That keeps this honest across both per-run sandboxes
-// (`.moe/clones/<project>/<run>/`) and named workspaces
-// (`.moe/named/<project>/<name>/`), whose worktree basenames differ;
-// it also means no formula to maintain when the layout shifts.
-//
-// If clonePath is empty (document-only turns, headless calls) or the
-// gitfile can't be read (a misconfigured clone, a stub in a test),
-// the bare `{"sandbox":{"enabled":true}}` is emitted — same behavior
-// the old constant gave, so we never regress past the prior baseline.
-func sandboxSettingsJSON(clonePath string) string {
-	const bare = `{"sandbox":{"enabled":true}}`
-	if clonePath == "" {
-		return bare
-	}
-	gitdir, err := readWorktreeGitdir(clonePath)
-	if err != nil || gitdir == "" {
-		return bare
-	}
-	payload := map[string]any{
-		"sandbox": map[string]any{
-			"enabled": true,
-			"filesystem": map[string]any{
-				"allowWrite": []string{gitdir},
-			},
-		},
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return bare
-	}
-	return string(b)
-}
-
-// readWorktreeGitdir parses the `gitdir: <path>` line out of the
-// worktree's in-tree `.git` gitfile. Returns ("", nil) when the file
-// exists but isn't shaped like a gitfile (e.g. a real `.git`
-// directory) — the caller treats that as "no widening needed".
-func readWorktreeGitdir(clonePath string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(clonePath, ".git"))
-	if err != nil {
-		return "", err
-	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:")
-	if !ok {
-		return "", nil
-	}
-	return strings.TrimSpace(rest), nil
-}
+// No gitdir widening: under the plain-clone primitive the clone's
+// gitdir lives inside the clone at `<clonePath>/.git/`, which is
+// already in the writable scope via `--add-dir <clonePath>`. The
+// bureaucracy session worktree's gitdir at
+// `<root>/.git/worktrees/<uuid>/` is reachable via the
+// `--add-dir <root>` claude executor also passes. Both index-mutating
+// paths work without per-payload widening.
+const sandboxSettingsJSON = `{"sandbox":{"enabled":true}}`
 
 // executeArgs builds the interactive `claude` flag set. Kept separate
 // from Execute so the argument shape can be exercised in tests without
@@ -128,7 +73,7 @@ func executeArgs(r agent.Request) []string {
 		args = append(args, "--add-dir", d)
 	}
 	args = append(args,
-		"--settings", sandboxSettingsJSON(r.ClonePath),
+		"--settings", sandboxSettingsJSON,
 		"--append-system-prompt", r.Prompt,
 	)
 	// A positional prompt launches claude interactively but auto-sends
@@ -177,7 +122,7 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 		args = append(args, "--add-dir", d)
 	}
 	args = append(args,
-		"--settings", sandboxSettingsJSON(r.ClonePath),
+		"--settings", sandboxSettingsJSON,
 		"--append-system-prompt", r.Prompt,
 		r.UserPrompt,
 	)
@@ -342,7 +287,7 @@ func (Agent) ExecuteHeadless(r agent.HeadlessRequest) ([]byte, error) {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
-	args = append(args, "--settings", sandboxSettingsJSON(""))
+	args = append(args, "--settings", sandboxSettingsJSON)
 	if r.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", r.SystemPrompt)
 	}
