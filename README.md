@@ -80,10 +80,11 @@ moe project add <repo-url>
 ```
 
 Pick a default agent backend if you want one (optional — defaults to
-`claude`; `$MOE_AGENT` still wins for a one-shell experiment):
+`claude`; set `MOE_AGENT` in your shell rc, or pass `--agent codex` on
+`moe sdlc new` for a single run):
 
 ```sh
-moe config set default_agent codex
+export MOE_AGENT=codex
 ```
 
 `moe help` is the source of truth for the command surface.

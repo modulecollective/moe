@@ -151,10 +151,9 @@ type Options struct {
 	// Agent, when non-empty, names the agent backend that should
 	// drive stage turns on this run. Persisted to Metadata.Agent.
 	// Stage callers thread this through stageSessionOpts.Agent so
-	// resolveAgentName picks it up over $MOE_AGENT / the operator's
-	// .moe/config.json default_agent / the "claude" hard default. Empty
-	// leaves Metadata.Agent unset; the same precedence then runs
-	// unchanged.
+	// resolveAgentName picks it up over $MOE_AGENT / the "claude"
+	// hard default. Empty leaves Metadata.Agent unset; the same
+	// precedence then runs unchanged.
 	Agent string
 
 	// AllowDirty bypasses the working-tree-clean precondition. The

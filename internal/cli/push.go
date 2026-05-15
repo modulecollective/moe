@@ -136,14 +136,12 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 		// default kicks in, which under steady state means "claude" /
 		// "sonnet", preserving the historical pin.
 		runDefault := ""
-		configRoot := ""
 		if root, err := findRoot(stderr); err == nil {
-			configRoot = root
 			if md, err := run.Load(root, projectID, runID); err == nil {
 				runDefault = md.Agent
 			}
 		}
-		opts.Model = pushSynthesisDefaultModel[resolveAgentName("", runDefault, configRoot)]
+		opts.Model = pushSynthesisDefaultModel[resolveAgentName("", runDefault)]
 	} else {
 		opts.InitialPrompt = pushSynthesisKickoff
 	}
