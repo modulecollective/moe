@@ -416,6 +416,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				FinalizeRunTitle: md.Title,
 				SkipFinalize:     opts.SkipFinalize,
 				ExtraEnv:         mapToEnv(devEnv),
+				AddDirs:          devEnvWritableDirs(devEnv),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
 					if err != nil {
@@ -581,6 +582,13 @@ type wikiTurnSpec struct {
 	// projects that ship no dev-env hooks. Routed unchanged to
 	// executor.Request.ExtraEnv / executor.OneShotRequest.ExtraEnv.
 	ExtraEnv []string
+	// AddDirs are the dev-env directories the agent should be allowed
+	// to write to alongside the sandbox clone and bureaucracy root —
+	// MOE_HOME and MOE_DEV_TMPDIR for the moe project's own hooks.
+	// Empty for stages without a working tree and for projects that
+	// emit no recognised directory env vars. Routed unchanged to
+	// agent.Request.AddDirs / agent.OneShotRequest.AddDirs.
+	AddDirs []string
 }
 
 // closeBootstrapFailedSession runs closeSess on an early-exit path
@@ -703,6 +711,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Stdout:     stdout,
 			Stderr:     stderr,
 			ExtraEnv:   spec.ExtraEnv,
+			AddDirs:    spec.AddDirs,
 		})
 	} else {
 		returnedSid, runErr = a.Execute(agent.Request{
@@ -719,6 +728,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Stdout:        os.Stdout,
 			Stderr:        stderr,
 			ExtraEnv:      spec.ExtraEnv,
+			AddDirs:       spec.AddDirs,
 		})
 	}
 

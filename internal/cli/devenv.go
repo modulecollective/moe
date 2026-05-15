@@ -333,6 +333,49 @@ func devEnvBaseEnv(workTree string, md *run.Metadata) []string {
 	return base
 }
 
+// devEnvWritableDirKeys names the dev-env env vars whose values are
+// expected to be local directories the agent should be allowed to
+// write to during code/test stages. The list is intentionally small:
+// each key has to earn its slot by being a real isolated-runtime
+// directory, not a URL, token, or command fragment. Both MOE_HOME and
+// MOE_DEV_TMPDIR are emitted by the moe project's own dev-env hooks —
+// MOE_HOME is the isolated bureaucracy the test-stage `moe` subprocess
+// writes into; MOE_DEV_TMPDIR carries the seed bare repo
+// (`$MOE_DEV_TMPDIR/widget.git`) that `moe project add file://...`
+// test-stage commands target with file-protocol git ops.
+var devEnvWritableDirKeys = []string{"MOE_HOME", "MOE_DEV_TMPDIR"}
+
+// devEnvWritableDirs filters env down to the values of
+// devEnvWritableDirKeys that look like absolute local directories,
+// cleaned and deduplicated while preserving the key declaration order.
+// Empty values, relative paths, and missing keys are dropped silently
+// — the dev-env hook owns directory creation, so a missing entry is
+// the project's "no isolated runtime needed" signal rather than an
+// error. The returned slice is nil when no key contributed a path.
+func devEnvWritableDirs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	for _, k := range devEnvWritableDirKeys {
+		v := env[k]
+		if v == "" {
+			continue
+		}
+		if !filepath.IsAbs(v) {
+			continue
+		}
+		clean := filepath.Clean(v)
+		if _, dup := seen[clean]; dup {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
 // mapToEnv returns m flattened into the "KEY=VALUE" form os.Environ
 // produces — caller appends it to a cmd.Env slice. Keys aren't sorted
 // because cmd.Env order doesn't matter to exec; if a key appears

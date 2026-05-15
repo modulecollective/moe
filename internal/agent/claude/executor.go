@@ -95,6 +95,86 @@ func readWorktreeGitdir(clonePath string) (string, error) {
 	return strings.TrimSpace(rest), nil
 }
 
+// executeArgs builds the interactive `claude` flag set. Kept separate
+// from Execute so the argument shape can be exercised in tests without
+// shelling out to the binary.
+//
+// Ordering rule: `--add-dir` is variadic (<directories...>), so any
+// `--add-dir <path>` pair must sit before `--settings` /
+// `--append-system-prompt` and the optional positional prompt;
+// otherwise claude eats the next flag's value as another directory
+// and the session launches with nothing to send.
+func executeArgs(r agent.Request) []string {
+	// Claude Code uses --session-id to create and --resume to continue.
+	// NewSession was set upstream by EnsureDocument exactly when the
+	// UUID was minted this turn.
+	sessionFlag := "--resume"
+	if r.NewSession {
+		sessionFlag = "--session-id"
+	}
+	// --add-dir <root> grants access to the bureaucracy repo even when
+	// cwd is the sandbox clone, so the canvas and upstream documents
+	// stay reachable without per-call permission prompts. Stage-provided
+	// AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) ride alongside so the
+	// test-stage `moe` subprocess can write to its isolated bureaucracy.
+	args := []string{sessionFlag, r.SessionID, "--add-dir", r.Root}
+	for _, d := range r.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	args = append(args,
+		"--settings", sandboxSettingsJSON(r.ClonePath),
+		"--append-system-prompt", r.Prompt,
+	)
+	// A positional prompt launches claude interactively but auto-sends
+	// it as the first user message, so the operator lands in a session
+	// that's already in motion.
+	if r.InitialPrompt != "" {
+		args = append(args, r.InitialPrompt)
+	}
+	return args
+}
+
+// executeOneShotArgs builds the `claude -p` flag set. Same ordering
+// rule as executeArgs: --add-dir pairs sit before --settings /
+// --append-system-prompt / positional prompt.
+//
+// --output-format stream-json (with mandatory --verbose) makes claude
+// emit one JSON event per tool call / message instead of buffering a
+// final text response, so the translator can surface progress as it
+// happens. --include-partial-messages adds fine-grained delta events;
+// we don't render them today, but the flag set matches the design's
+// recommendation so future progress vocabulary (token counts,
+// thinking) can layer on without re-plumbing claude's output mode.
+//
+// --permission-mode bypassPermissions: one-shot has no operator on
+// stdin to approve per-call write/edit/bash prompts, so the default
+// "default" mode silently denies them and the agent's edits never
+// land. Bypass mode skips the per-call prompt; safety still comes
+// from --settings enabling the built-in sandbox plus --add-dir
+// scoping filesystem reach to the worktree/clone.
+func executeOneShotArgs(r agent.OneShotRequest) []string {
+	args := []string{"-p"}
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
+	args = append(args,
+		"--permission-mode", "bypassPermissions",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--add-dir", r.Root,
+	)
+	for _, d := range r.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	args = append(args,
+		"--settings", sandboxSettingsJSON(r.ClonePath),
+		"--append-system-prompt", r.Prompt,
+		r.UserPrompt,
+	)
+	return args
+}
+
 // Execute shells out to `claude`, wires stdio to the operator's
 // terminal, and mirrors the session's on-disk JSONL into the
 // document's thread file when the turn ends. The returned string is
@@ -109,31 +189,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 
-	// Claude Code uses --session-id to create and --resume to continue.
-	// NewSession was set upstream by EnsureDocument exactly when the
-	// UUID was minted this turn.
-	sessionFlag := "--resume"
-	if r.NewSession {
-		sessionFlag = "--session-id"
-	}
-	// --add-dir <root> grants access to the bureaucracy repo even when
-	// cwd is the sandbox clone, so the canvas and upstream documents
-	// stay reachable without per-call permission prompts. It's variadic
-	// (<directories...>), so it must not be the last flag before the
-	// positional prompt — otherwise claude parses the prompt as a second
-	// directory and the session launches with nothing to send.
-	args := []string{
-		sessionFlag, r.SessionID,
-		"--add-dir", r.Root,
-		"--settings", sandboxSettingsJSON(r.ClonePath),
-		"--append-system-prompt", r.Prompt,
-	}
-	// A positional prompt launches claude interactively but auto-sends
-	// it as the first user message, so the operator lands in a session
-	// that's already in motion.
-	if r.InitialPrompt != "" {
-		args = append(args, r.InitialPrompt)
-	}
+	args := executeArgs(r)
 	cmd := exec.Command(bin, args...)
 	switch {
 	case r.ClonePath != "":
@@ -201,41 +257,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
-	// --add-dir is variadic, so --settings/--append-system-prompt
-	// must sit between it and the positional user prompt — same
-	// ordering as Execute and ExecuteHeadless. Otherwise claude eats
-	// the prompt as another directory and the turn launches with
-	// nothing to do.
-	//
-	// --output-format stream-json (with mandatory --verbose) makes
-	// claude emit one JSON event per tool call / message instead of
-	// buffering a final text response, so the translator below can
-	// surface progress as it happens. --include-partial-messages adds
-	// fine-grained delta events; we don't render them today, but the
-	// flag set matches the design's recommendation so future progress
-	// vocabulary (token counts, thinking) can layer on without
-	// re-plumbing claude's output mode.
-	//
-	// --permission-mode bypassPermissions: one-shot has no operator on
-	// stdin to approve per-call write/edit/bash prompts, so the default
-	// "default" mode silently denies them and the agent's edits never
-	// land. Bypass mode skips the per-call prompt; safety still comes
-	// from --settings enabling the built-in sandbox plus --add-dir
-	// scoping filesystem reach to the worktree/clone.
-	args := []string{"-p"}
-	if r.Model != "" {
-		args = append(args, "--model", r.Model)
-	}
-	args = append(args,
-		"--permission-mode", "bypassPermissions",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		"--add-dir", r.Root,
-		"--settings", sandboxSettingsJSON(r.ClonePath),
-		"--append-system-prompt", r.Prompt,
-		r.UserPrompt,
-	)
+	args := executeOneShotArgs(r)
 	ctx := context.Background()
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc

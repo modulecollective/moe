@@ -114,6 +114,82 @@ func TestDevEnvCacheRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDevEnvWritableDirsHappyPath: both recognised keys point at
+// absolute, disjoint directories — both come back, cleaned, in key
+// declaration order (MOE_HOME before MOE_DEV_TMPDIR).
+func TestDevEnvWritableDirsHappyPath(t *testing.T) {
+	env := map[string]string{
+		"MOE_HOME":       "/tmp/bureaucracy/",
+		"MOE_DEV_TMPDIR": "/tmp/devtmp//abc",
+	}
+	got := devEnvWritableDirs(env)
+	want := []string{"/tmp/bureaucracy", "/tmp/devtmp/abc"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+// TestDevEnvWritableDirsSkipsEmptyAndUnrelated: empty values and
+// values for keys outside the allowlist are silently dropped — the
+// allowlist is the only contract.
+func TestDevEnvWritableDirsSkipsEmptyAndUnrelated(t *testing.T) {
+	env := map[string]string{
+		"MOE_HOME":     "",
+		"DATABASE_URL": "/tmp/db",
+		"PORT":         "8080",
+	}
+	if got := devEnvWritableDirs(env); got != nil {
+		t.Fatalf("expected nil for empty/unrelated values, got %v", got)
+	}
+}
+
+// TestDevEnvWritableDirsRejectsRelativePaths: a relative value would
+// be ambiguous under a subprocess (cwd-relative? root-relative?), so
+// the filter drops it rather than widening the sandbox unsafely.
+func TestDevEnvWritableDirsRejectsRelativePaths(t *testing.T) {
+	env := map[string]string{
+		"MOE_HOME":       "relative/path",
+		"MOE_DEV_TMPDIR": "/tmp/keepme",
+	}
+	got := devEnvWritableDirs(env)
+	if len(got) != 1 || got[0] != "/tmp/keepme" {
+		t.Fatalf("got %v, want [/tmp/keepme]", got)
+	}
+}
+
+// TestDevEnvWritableDirsDeduplicates: a project that points both keys
+// at the same directory (or one nested via path-equivalent cleaning)
+// gets a single entry — repeated --add-dir <same-path> is harmless
+// but noisy.
+func TestDevEnvWritableDirsDeduplicates(t *testing.T) {
+	env := map[string]string{
+		"MOE_HOME":       "/tmp/shared",
+		"MOE_DEV_TMPDIR": "/tmp/shared/",
+	}
+	got := devEnvWritableDirs(env)
+	if len(got) != 1 || got[0] != "/tmp/shared" {
+		t.Fatalf("got %v, want [/tmp/shared]", got)
+	}
+}
+
+// TestDevEnvWritableDirsEmptyMap: a project that ships no dev-env
+// hooks (or one whose hooks emit no recognised keys) returns nil —
+// stage callers branch on the nil-vs-non-nil signal to decide whether
+// to widen the sandbox at all.
+func TestDevEnvWritableDirsEmptyMap(t *testing.T) {
+	if got := devEnvWritableDirs(nil); got != nil {
+		t.Fatalf("expected nil for nil map, got %v", got)
+	}
+	if got := devEnvWritableDirs(map[string]string{}); got != nil {
+		t.Fatalf("expected nil for empty map, got %v", got)
+	}
+}
+
 // TestDevEnvSetupEnvCachesScriptOutput: a project with a single
 // dev-env.d/* script runs it on first call, caches the parsed output,
 // and re-sources the cache on subsequent calls without re-running.

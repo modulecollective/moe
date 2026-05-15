@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/agent"
 )
 
 // TestSandboxSettingsJSONBare covers the document-only / headless path:
@@ -125,6 +127,95 @@ func TestRenameLegacyThreadJSONLDropsLegacyWhenNewAlreadyExists(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(newPath); string(got) != "fresh" {
 		t.Fatalf("new path should be untouched; got %q want fresh", got)
+	}
+}
+
+// TestExecuteArgsIncludesAddDirsBeforeSettings pins the variadic-flag
+// safety: each AddDirs entry becomes a `--add-dir <dir>` pair, the
+// pairs sit before `--settings` (so the JSON payload isn't eaten as
+// another directory), and the positional InitialPrompt — when set —
+// lands at the very end after `--append-system-prompt`.
+func TestExecuteArgsIncludesAddDirsBeforeSettings(t *testing.T) {
+	args := executeArgs(agent.Request{
+		SessionID:     "sid-1",
+		NewSession:    true,
+		Root:          "/bureaucracy",
+		AddDirs:       []string{"/tmp/moe-home", "/tmp/moe-devtmp"},
+		Prompt:        "system",
+		InitialPrompt: "go",
+	})
+	// First flag is --session-id (NewSession=true), then --add-dir Root,
+	// then each AddDirs pair, then --settings, --append-system-prompt,
+	// and the positional prompt last.
+	want := []string{
+		"--session-id", "sid-1",
+		"--add-dir", "/bureaucracy",
+		"--add-dir", "/tmp/moe-home",
+		"--add-dir", "/tmp/moe-devtmp",
+		"--settings", `{"sandbox":{"enabled":true}}`,
+		"--append-system-prompt", "system",
+		"go",
+	}
+	assertArgsEqual(t, args, want)
+}
+
+// TestExecuteArgsResumeWhenNotNewSession swaps --session-id for
+// --resume on a returning session and omits InitialPrompt when empty.
+func TestExecuteArgsResumeWhenNotNewSession(t *testing.T) {
+	args := executeArgs(agent.Request{
+		SessionID:  "sid-2",
+		NewSession: false,
+		Root:       "/bureaucracy",
+		Prompt:     "system",
+	})
+	want := []string{
+		"--resume", "sid-2",
+		"--add-dir", "/bureaucracy",
+		"--settings", `{"sandbox":{"enabled":true}}`,
+		"--append-system-prompt", "system",
+	}
+	assertArgsEqual(t, args, want)
+}
+
+// TestExecuteOneShotArgsIncludesAddDirsBeforeSettings: the -p path
+// must place AddDirs entries before --settings / --append-system-prompt
+// and the positional UserPrompt — same variadic-flag rule as the
+// interactive path. Otherwise claude eats the JSON settings blob or
+// the user prompt as a directory.
+func TestExecuteOneShotArgsIncludesAddDirsBeforeSettings(t *testing.T) {
+	args := executeOneShotArgs(agent.OneShotRequest{
+		Root:       "/bureaucracy",
+		AddDirs:    []string{"/tmp/moe-home"},
+		Prompt:     "system",
+		UserPrompt: "user",
+	})
+	want := []string{
+		"-p",
+		"--permission-mode", "bypassPermissions",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--add-dir", "/bureaucracy",
+		"--add-dir", "/tmp/moe-home",
+		"--settings", `{"sandbox":{"enabled":true}}`,
+		"--append-system-prompt", "system",
+		"user",
+	}
+	assertArgsEqual(t, args, want)
+}
+
+// assertArgsEqual reports the entire mismatch when args differ — a
+// single index error in a 15-element slice is easier to debug as the
+// pair of slices than as a single failing field.
+func assertArgsEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len(args) = %d, want %d\ngot:  %v\nwant: %v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q\ngot:  %v\nwant: %v", i, got[i], want[i], got, want)
+		}
 	}
 }
 

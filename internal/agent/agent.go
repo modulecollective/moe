@@ -120,6 +120,13 @@ type Request struct {
 	// parsed output (DATABASE_URL, MOE_HOME, etc.) so the agent's
 	// shell tool calls run against the project's isolated runtime.
 	ExtraEnv []string
+	// AddDirs are extra read/write paths the agent backend should
+	// expose alongside the bureaucracy root and (when set) the
+	// sandbox clone. Stage callers populate this from
+	// `devEnvWritableDirs(devEnv)` so the test-stage `moe` subprocess
+	// can write to the isolated MOE_HOME / MOE_DEV_TMPDIR the dev-env
+	// hook emitted. Empty for stages that don't open a working tree.
+	AddDirs []string
 }
 
 // OneShotRequest drives a single non-interactive streaming turn: the
@@ -155,6 +162,9 @@ type OneShotRequest struct {
 	// ExtraEnv is appended to os.Environ() before the agent
 	// subprocess is spawned — same shape as Request.ExtraEnv.
 	ExtraEnv []string
+	// AddDirs are extra read/write paths the agent backend should
+	// expose. Same shape and contract as Request.AddDirs.
+	AddDirs []string
 }
 
 // HeadlessRequest drives a one-shot, non-interactive call whose

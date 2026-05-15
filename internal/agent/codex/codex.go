@@ -71,31 +71,9 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
+	cmdArgs, err := executeArgs(r)
 	if err != nil {
 		return r.SessionID, err
-	}
-	// Interactive mode: on-request approval is the codex equivalent of
-	// claude's default permission flow. The operator can confirm or
-	// deny each agent-proposed write/bash from the TUI.
-	args = append(args, "--ask-for-approval", "on-request")
-
-	var cmdArgs []string
-	if r.NewSession {
-		// First turn: no resume. codex generates its own id; we read
-		// it back below via the rollout file glob.
-		cmdArgs = args
-		if r.InitialPrompt != "" {
-			cmdArgs = append(cmdArgs, r.InitialPrompt)
-		}
-	} else {
-		// Subsequent turn: `codex resume <sid> [prompt]`. The session
-		// id was stored on r.SessionID after the first turn returned
-		// what codex generated.
-		cmdArgs = append([]string{"resume", r.SessionID}, args...)
-		if r.InitialPrompt != "" {
-			cmdArgs = append(cmdArgs, r.InitialPrompt)
-		}
 	}
 
 	cmd := exec.Command(bin, cmdArgs...)
@@ -158,16 +136,10 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		return "", fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
+	cmdArgs, err := executeOneShotArgs(r)
 	if err != nil {
 		return "", err
 	}
-	if r.Model != "" {
-		args = append(args, "--model", r.Model)
-	}
-
-	cmdArgs := append([]string{"exec", "--json", "--skip-git-repo-check"}, args...)
-	cmdArgs = append(cmdArgs, r.UserPrompt)
 
 	ctx := context.Background()
 	if r.Timeout > 0 {
@@ -358,6 +330,57 @@ func rolloutPath(sessionID string) (string, error) {
 		return "", nil
 	}
 	return matches[0], nil
+}
+
+// executeArgs builds the full codex argv for the interactive path —
+// `codex …` for a new session, `codex resume <sid> …` for a returning
+// one. Kept separate from Execute so the argument shape (and its
+// dependence on AddDirs) is unit-testable without shelling out.
+func executeArgs(r agent.Request) ([]string, error) {
+	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	// Stage-provided AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) widen
+	// the writable scope alongside the bureaucracy root commonArgs
+	// passes. Loop shape mirrors ExecuteHeadless's so the three call
+	// sites stay structurally identical.
+	for _, d := range r.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	// Interactive mode: on-request approval is the codex equivalent of
+	// claude's default permission flow. The operator can confirm or
+	// deny each agent-proposed write/bash from the TUI.
+	args = append(args, "--ask-for-approval", "on-request")
+	if !r.NewSession {
+		// Subsequent turn: `codex resume <sid> [prompt]`. The session
+		// id was stored on r.SessionID after the first turn returned
+		// what codex generated.
+		args = append([]string{"resume", r.SessionID}, args...)
+	}
+	if r.InitialPrompt != "" {
+		args = append(args, r.InitialPrompt)
+	}
+	return args, nil
+}
+
+// executeOneShotArgs builds the full codex argv for the non-interactive
+// streaming path (`codex exec --json …`). Same testability rationale
+// as executeArgs.
+func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
+	args, err := commonArgs(r.Root, r.ClonePath, r.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
+	for _, d := range r.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	cmdArgs := append([]string{"exec", "--json", "--skip-git-repo-check"}, args...)
+	cmdArgs = append(cmdArgs, r.UserPrompt)
+	return cmdArgs, nil
 }
 
 // commonArgs builds the codex flag set shared across exec / interactive

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/agent"
 )
 
 // TestParseSessionIDFromFilename pins the codex rollout filename
@@ -137,6 +139,114 @@ func TestDiscoverSessionIDPicksNewestSinceTurnStart(t *testing.T) {
 	if got := discoverSessionID(turnStart); got != newSid {
 		t.Errorf("discoverSessionID = %q, want %q", got, newSid)
 	}
+}
+
+// TestExecuteArgsAppendsAddDirsBeforeApproval pins the codex
+// interactive-path shape: every AddDirs entry becomes a `--add-dir <dir>`
+// pair, the pairs land after commonArgs (which already adds `--add-dir
+// <root>`) and before `--ask-for-approval`, and on first-turn we don't
+// prepend `resume`.
+func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
+	args, err := executeArgs(agent.Request{
+		Root:          "/bureaucracy",
+		ClonePath:     "/bureaucracy/clone",
+		NewSession:    true,
+		AddDirs:       []string{"/tmp/moe-home", "/tmp/moe-devtmp"},
+		Prompt:        "system",
+		InitialPrompt: "go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"--add-dir /bureaucracy",
+		"--add-dir /tmp/moe-home",
+		"--add-dir /tmp/moe-devtmp",
+		"--ask-for-approval on-request",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args missing %q: %s", want, got)
+		}
+	}
+	// Order: each AddDirs --add-dir must precede --ask-for-approval.
+	idxApproval := indexOf(args, "--ask-for-approval")
+	for _, d := range []string{"/tmp/moe-home", "/tmp/moe-devtmp"} {
+		idx := indexOf(args, d)
+		if idx < 0 || idx > idxApproval {
+			t.Errorf("AddDir %q at idx %d should precede --ask-for-approval at idx %d (args: %v)", d, idx, idxApproval, args)
+		}
+	}
+	// First turn: no `resume <sid>` prefix. The positional InitialPrompt
+	// lands at the end.
+	if args[0] == "resume" {
+		t.Fatalf("first turn should not prepend `resume`: %v", args)
+	}
+	if args[len(args)-1] != "go" {
+		t.Errorf("InitialPrompt should be the last positional arg, got %q", args[len(args)-1])
+	}
+}
+
+// TestExecuteArgsResumePrependsSid: a returning session prepends
+// `resume <sid>` to the flag set; the positional prompt still lands
+// after all flags.
+func TestExecuteArgsResumePrependsSid(t *testing.T) {
+	args, err := executeArgs(agent.Request{
+		Root:          "/bureaucracy",
+		NewSession:    false,
+		SessionID:     "sid-1",
+		Prompt:        "system",
+		InitialPrompt: "follow-up",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) < 2 || args[0] != "resume" || args[1] != "sid-1" {
+		t.Fatalf("expected leading `resume sid-1`, got %v", args)
+	}
+	if args[len(args)-1] != "follow-up" {
+		t.Errorf("InitialPrompt should be the last positional arg, got %q", args[len(args)-1])
+	}
+}
+
+// TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt: every AddDirs
+// entry becomes a `--add-dir <dir>` pair sitting after commonArgs and
+// before the trailing positional UserPrompt.
+func TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt(t *testing.T) {
+	args, err := executeOneShotArgs(agent.OneShotRequest{
+		Root:       "/bureaucracy",
+		AddDirs:    []string{"/tmp/moe-home"},
+		Prompt:     "system",
+		UserPrompt: "user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args[0] != "exec" || args[1] != "--json" || args[2] != "--skip-git-repo-check" {
+		t.Fatalf("expected `exec --json --skip-git-repo-check` prefix, got %v", args[:3])
+	}
+	if args[len(args)-1] != "user" {
+		t.Fatalf("UserPrompt should be the last positional arg, got %q", args[len(args)-1])
+	}
+	got := strings.Join(args, " ")
+	if !strings.Contains(got, "--add-dir /tmp/moe-home") {
+		t.Errorf("args missing --add-dir for AddDirs entry: %s", got)
+	}
+	// The --add-dir for AddDirs must precede the trailing UserPrompt.
+	idx := indexOf(args, "/tmp/moe-home")
+	if idx < 0 || idx >= len(args)-1 {
+		t.Errorf("AddDir at idx %d not before final UserPrompt at idx %d", idx, len(args)-1)
+	}
+}
+
+// indexOf returns the first index of needle in args, or -1.
+func indexOf(args []string, needle string) int {
+	for i, a := range args {
+		if a == needle {
+			return i
+		}
+	}
+	return -1
 }
 
 func writeFakeRollout(t *testing.T, codexHome, shard, sid, body string) string {
