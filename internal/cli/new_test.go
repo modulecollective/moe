@@ -295,3 +295,19 @@ func TestRunNewRequiresTitleWithoutFromIdea(t *testing.T) {
 		t.Fatalf("expected usage hint, got: %q", errb.String())
 	}
 }
+
+func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--help"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected help exit (2), got %d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+	got := errb.String()
+	want := "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT then claude"
+	if !strings.Contains(got, want) {
+		t.Fatalf("help missing agent persistence boundary %q:\n%s", want, got)
+	}
+	if strings.Contains(got, "Persisted to run.json; defaults to $MOE_AGENT then claude") {
+		t.Fatalf("help still contains misleading old agent text:\n%s", got)
+	}
+}

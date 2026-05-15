@@ -59,7 +59,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// shared `new` facade and we reject it for non-sdlc workflows
 	// below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc only) attach this run to the named per-project workspace at .moe/named/<project>/<name>/ instead of a fresh per-run sandbox")
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Persisted to run.json; defaults to $MOE_AGENT then claude")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT then claude")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--workspace <name>] [--agent <name>] <project> [\"title\"]\n", workflowName)
 		fs.PrintDefaults()
