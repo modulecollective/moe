@@ -193,9 +193,16 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 	}
 	out, err := git.Output(cfg.ProjectRepoPath, args...)
 	if err != nil {
-		// Git can fail if the SHA is unreachable (history rewrite,
-		// shallow clone). Degrade silently rather than block reflect.
-		return nil, 0, nil
+		if incremental {
+			// Git can fail if the SHA is unreachable (history rewrite,
+			// shallow clone). Degrade silently rather than block reflect.
+			return nil, 0, nil
+		}
+		// First-reflect path has no SHA in args, so a git failure here
+		// is not the SHA-unreachable edge — it's git itself failing on
+		// a healthy repo. Propagate rather than render an empty events
+		// block that hides the breakage.
+		return nil, 0, fmt.Errorf("wiki: project commit log: %w", err)
 	}
 	var commits []string
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
