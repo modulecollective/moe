@@ -125,6 +125,38 @@ func TestSetupEnv_AppliesIsolationWithoutRepo(t *testing.T) {
 	Run(t, dir, "commit", "--allow-empty", "-m", "ok")
 }
 
+// TestIsolateConfig_DisablesBackgroundWork confirms the seeded global
+// gitconfig suppresses every git background-work path that has been
+// known to spawn a detached grandchild after a foreground git CLI
+// exits. Future tidy-up PRs that thin the config block must keep CI
+// green; this test exists to make a regression here unmissable.
+//
+// The failure mode this prevents — `unlinkat .git/objects: directory
+// not empty` during `testing.TempDir` cleanup — is rare enough to
+// reflake intermittently on CI without anyone noticing the gitconfig
+// changed, so a behavioural test would be slow and unreliable. A
+// config-presence assertion is cheap and exact.
+func TestIsolateConfig_DisablesBackgroundWork(t *testing.T) {
+	dir := Init(t)
+
+	for _, tc := range []struct {
+		key, want string
+	}{
+		{"gc.auto", "0"},
+		{"gc.autoDetach", "false"},
+		{"gc.writeCommitGraph", "false"},
+		{"maintenance.auto", "false"},
+		{"maintenance.strategy", "none"},
+		{"fetch.writeCommitGraph", "false"},
+		{"core.fsmonitor", "false"},
+		{"core.commitGraph", "false"},
+	} {
+		if got := Output(t, dir, "config", "--get", tc.key); got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+}
+
 // TestOutput_TrimsTrailingNewline confirms Output strips git's trailing
 // newline so callers can compare against literals without TrimSpace.
 func TestOutput_TrimsTrailingNewline(t *testing.T) {

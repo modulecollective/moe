@@ -27,11 +27,14 @@
 package gittest
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // Init creates an initialized git repo in t.TempDir() and returns its
@@ -48,6 +51,33 @@ func Init(t *testing.T) string {
 	return dir
 }
 
+// scheduleRepoCleanup registers a t.Cleanup that runs *before* the
+// surrounding t.TempDir cleanup (LIFO order). It RemoveAll's repoDir
+// with a short retry loop, swallowing only ENOTEMPTY — which is exactly
+// the class TempDir's single-shot cleanup surfaces as a test failure
+// when git spawns a background task (commit-graph, maintenance, gc)
+// that races our teardown. The seeded gitconfig in isolateConfig should
+// already make this impossible; this is suspenders to (1)'s belt, so
+// a future git release that adds a new post-command background path
+// doesn't immediately reflake CI.
+func scheduleRepoCleanup(t *testing.T, repoDir string) {
+	t.Helper()
+	t.Cleanup(func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			err := os.RemoveAll(repoDir)
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, syscall.ENOTEMPTY) || time.Now().After(deadline) {
+				t.Logf("cleanup %s: %v", repoDir, err)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+}
+
 // InitAt initializes a git repo at dir (which must already exist).
 // Used when the caller wants the repo inside a larger fixture tree
 // rather than at the root of t.TempDir().
@@ -56,6 +86,7 @@ func InitAt(t *testing.T, dir string) {
 	requireGit(t)
 	isolateConfig(t)
 	Run(t, dir, "init", "-q")
+	scheduleRepoCleanup(t, dir)
 }
 
 // InitBare creates an initialized bare repo in t.TempDir() and returns
@@ -66,6 +97,7 @@ func InitBare(t *testing.T) string {
 	isolateConfig(t)
 	dir := t.TempDir()
 	Run(t, dir, "init", "--bare", "-q")
+	scheduleRepoCleanup(t, dir)
 	return dir
 }
 
@@ -184,9 +216,22 @@ func isolateConfig(t *testing.T) {
 	// init.defaultBranch is pinned so tests don't depend on whether the
 	// host git defaults to `main` or `master` — production root branches
 	// are `main`, so that's the fixture default too.
+	//
+	// The gc/maintenance/fetch/core block disables every git path that
+	// can spawn a detached grandchild after `cmd.Run` returns. Without
+	// this, `git commit` and friends can leave a background gc /
+	// commit-graph / maintenance task touching `.git/objects` after the
+	// foreground git CLI exits — which then races `testing.TempDir`'s
+	// single-shot RemoveAll and surfaces as `unlinkat .git/objects:
+	// directory not empty` on CI.
 	body := "[user]\n\temail = test@example.com\n\tname = test\n" +
 		"[commit]\n\tgpgsign = false\n" +
-		"[init]\n\tdefaultBranch = main\n"
+		"[init]\n\tdefaultBranch = main\n" +
+		"[gc]\n\tauto = 0\n\tautoDetach = false\n\twriteCommitGraph = false\n" +
+		"[maintenance]\n\tauto = false\n\tstrategy = none\n" +
+		"[fetch]\n\twriteCommitGraph = false\n" +
+		"[core]\n\tfsmonitor = false\n\tcommitGraph = false\n" +
+		"[commitGraph]\n\tgenerationVersion = 1\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatalf("seed gitconfig: %v", err)
 	}
