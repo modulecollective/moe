@@ -12,9 +12,9 @@ import (
 // the shape lands on this test and re-eyeballs scrollback.
 func TestStageEntryGolden(t *testing.T) {
 	var buf bytes.Buffer
-	StageEntry(&buf, "sdlc", "design", "moe", "nice-banners")
+	StageEntry(&buf, "claude", "sdlc", "design", "moe", "nice-banners")
 	got := buf.String()
-	want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  sdlc · design  ·  moe nice-banners\n"
+	want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  [claude] sdlc · design  ·  moe nice-banners\n"
 	if got != want {
 		t.Fatalf("StageEntry =\n%q\nwant\n%q", got, want)
 	}

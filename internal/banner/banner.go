@@ -31,11 +31,11 @@ const (
 	barClose = "▓▒░"
 )
 
-// StageEntry prints the top-of-stage banner: gradient mark, workflow ·
-// stage, project + run. Fired once at the start of every stage session
-// — the one place every stage-using verb funnels through.
-func StageEntry(w io.Writer, workflow, stage, project, run string) {
-	cliout.Printf(w, "%s  %s · %s  ·  %s %s\n", bar, workflow, stage, project, run)
+// StageEntry prints the top-of-stage banner: gradient mark, agent,
+// workflow · stage, project + run. Fired once at the start of every
+// stage session — the one place every stage-using verb funnels through.
+func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
+	cliout.Printf(w, "%s  [%s] %s · %s  ·  %s %s\n", bar, agent, workflow, stage, project, run)
 }
 
 // StageExit prints the stage-bottom footer. Flipped gradient blocks

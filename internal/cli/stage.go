@@ -217,7 +217,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	banner.StageEntry(stdout, md.Workflow, docID, md.Project, md.ID)
+	agentName := resolveAgentName(opts.Agent, md.Agent, root)
+	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
 	// committed flips true when CommitStager returns a clean nil —
 	// the same branch reportWikiSessionExit treats as "committed turn".
 	// A ErrNothingToCommit return leaves it false so the exit footer
@@ -342,7 +343,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					resumeCwd = sessionCwd
 				}
 				if resumeCwd != "" {
-					a, agentErr := agent.Get(resolveAgentName(opts.Agent, md.Agent, workRoot))
+					a, agentErr := agent.Get(agentName)
 					if agentErr != nil {
 						return wikiTurnSpec{}, agentErr
 					}
@@ -388,7 +389,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
 				Model:            opts.Model,
-				Agent:            resolveAgentName(opts.Agent, md.Agent, workRoot),
+				Agent:            agentName,
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				SkipFinalize:     opts.SkipFinalize,
