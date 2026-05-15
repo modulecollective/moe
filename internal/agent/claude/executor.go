@@ -5,7 +5,6 @@
 package claude
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -264,60 +263,6 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		return "", fmt.Errorf("claude: -p timed out after %s", r.Timeout)
 	}
 	return "", waitErr
-}
-
-// ExecuteHeadless runs a single non-interactive `claude -p` call under
-// a timeout and returns the subprocess's stdout as bytes. A non-nil
-// error means claude exited non-zero, the timeout fired, or the binary
-// can't be found — the stdout bytes collected up to that point are
-// still returned so the caller can log them for debugging.
-func (Agent) ExecuteHeadless(r agent.HeadlessRequest) ([]byte, error) {
-	bin, err := exec.LookPath("claude")
-	if err != nil {
-		return nil, fmt.Errorf("claude: CLI not found on PATH: %w", err)
-	}
-
-	args := []string{"-p"}
-	if r.Model != "" {
-		args = append(args, "--model", r.Model)
-	}
-	if r.AllowedTools != "" {
-		args = append(args, "--allowed-tools", r.AllowedTools)
-	}
-	for _, d := range r.AddDirs {
-		args = append(args, "--add-dir", d)
-	}
-	args = append(args, "--settings", sandboxSettingsJSON)
-	if r.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", r.SystemPrompt)
-	}
-	// Positional prompt is the single user turn. --add-dir is variadic,
-	// so the --settings/--append-system-prompt flags must sit between
-	// --add-dir and the positional prompt to avoid claude eating it as
-	// another directory.
-	args = append(args, r.UserPrompt)
-
-	ctx := context.Background()
-	if r.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
-		defer cancel()
-	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = r.WorkDir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = r.Stderr
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return out.Bytes(), fmt.Errorf("claude: -p timed out after %s", r.Timeout)
-		}
-		return out.Bytes(), fmt.Errorf("claude: -p: %w", err)
-	}
-	return out.Bytes(), nil
 }
 
 // CopyTranscript is the Agent method form of the package-level

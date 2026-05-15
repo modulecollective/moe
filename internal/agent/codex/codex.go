@@ -1,29 +1,29 @@
 // Package codex is the agent.Agent implementation for the OpenAI
-// Codex CLI (`codex`). It owns three subprocess shapes — interactive
-// (`codex`), one-shot streaming (`codex exec --json`), and headless
-// captured (`codex exec`) — plus the per-session rollout file glob
-// that mirrors codex's transcripts into the document directory.
+// Codex CLI (`codex`). It owns two subprocess shapes — interactive
+// (`codex`) and one-shot streaming (`codex exec --json`) — plus the
+// per-session rollout file glob that mirrors codex's transcripts into
+// the document directory.
 //
 // Two structural differences from claude shape the implementation:
 //
 //   - Codex generates session ids itself and does not (yet) accept a
 //     caller-supplied id. The first turn runs without `--resume`;
 //     subsequent turns pass `codex resume <sid>` (interactive) or
-//     `codex exec resume <sid>` (one-shot/headless). The first turn
-//     reads the id back from the `thread.started` JSON event (one-shot,
-//     verified in 0.130.0) or from the rollout file's name suffix
-//     (interactive — TUI has no stdout stream to read). Callers persist
-//     the returned id when it differs from what they passed in.
+//     `codex exec resume <sid>` (one-shot). The first turn reads the
+//     id back from the `thread.started` JSON event (one-shot, verified
+//     in 0.130.0) or from the rollout file's name suffix (interactive
+//     — TUI has no stdout stream to read). Callers persist the returned
+//     id when it differs from what they passed in.
 //
 //   - Codex has no `--ask-for-approval` on `codex exec`. We pin the
-//     headless approval policy explicitly with `-c approval_policy=never`
-//     so a non-`never` policy in `~/.codex/config.toml` can't abort a
-//     headless turn at the approval gate (the symptom: "patch rejected:
+//     one-shot approval policy explicitly with `-c approval_policy=never`
+//     so a non-`never` policy in `~/.codex/config.toml` can't abort the
+//     turn at the approval gate (the symptom: "patch rejected:
 //     writing outside of the project; rejected by user approval
 //     settings"). The sandbox stays on — `workspace-write` plus the
 //     bureaucracy-root `--add-dir` is still what bounds writes; this
-//     change only removes the human-in-the-loop expectation that
-//     headless can't satisfy. On interactive `codex` and on `codex
+//     change only removes the human-in-the-loop expectation that the
+//     one-shot path can't satisfy. On interactive `codex` and on `codex
 //     resume`, we pass `--ask-for-approval never` so MoE-managed
 //     interactive Codex has the same approval posture while keeping the
 //     same sandbox boundary.
@@ -37,7 +37,6 @@ package codex
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -143,7 +142,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 // ExecuteOneShot runs `codex exec --json` non-interactively, translates
 // the JSON event stream into one-line-per-tool progress on r.Stdout,
 // and returns the session id read from the `thread.started` event.
-// `codex exec` has no `--ask-for-approval` flag, so the headless
+// `codex exec` has no `--ask-for-approval` flag, so the one-shot
 // approval policy is pinned with `-c approval_policy=never` (see the
 // package doc).
 func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
@@ -209,59 +208,6 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	default:
 	}
 	return sid, waitErr
-}
-
-// ExecuteHeadless runs a one-shot `codex exec` and returns stdout as
-// bytes. No session id is tracked (the curation calls this serves
-// don't have one). Stderr streams through to the caller's
-// r.Stderr if set.
-func (Agent) ExecuteHeadless(r agent.HeadlessRequest) ([]byte, error) {
-	bin, err := exec.LookPath("codex")
-	if err != nil {
-		return nil, fmt.Errorf("codex: CLI not found on PATH: %w", err)
-	}
-
-	args, err := commonArgs(r.WorkDir, r.WorkDir, r.SystemPrompt)
-	if err != nil {
-		return nil, err
-	}
-	if r.Model != "" {
-		args = append(args, "--model", r.Model)
-	}
-	for _, d := range r.AddDirs {
-		args = append(args, "--add-dir", d)
-	}
-	// Pin approval to "never": `codex exec` has no flag for it, so a
-	// non-`never` `approval_policy` in `~/.codex/config.toml` would
-	// abort headless turns at the approval gate. The sandbox still
-	// enforces add-dirs.
-	args = append(args, "-c", "approval_policy=never")
-
-	cmdArgs := append([]string{"exec", "--skip-git-repo-check"}, args...)
-	cmdArgs = append(cmdArgs, r.UserPrompt)
-
-	ctx := context.Background()
-	if r.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
-		defer cancel()
-	}
-	cmd := exec.CommandContext(ctx, bin, cmdArgs...)
-	cmd.Dir = r.WorkDir
-	cmd.Stdin = nil
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = r.Stderr
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return out.Bytes(), fmt.Errorf("codex: exec timed out after %s", r.Timeout)
-		}
-		return out.Bytes(), fmt.Errorf("codex: exec: %w", err)
-	}
-	return out.Bytes(), nil
 }
 
 // CopyTranscript globs `~/.codex/sessions/*/*/*/rollout-*-<sid>.jsonl`
@@ -365,14 +311,15 @@ func executeArgs(r agent.Request) ([]string, error) {
 	}
 	// Stage-provided AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) widen
 	// the writable scope alongside the bureaucracy root commonArgs
-	// passes. Loop shape mirrors ExecuteHeadless's so the three call
+	// passes. Loop shape mirrors executeOneShotArgs's so the two call
 	// sites stay structurally identical.
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
-	// Interactive mode uses the same approval posture as headless Codex.
-	// The sandbox and add-dir set remain the write boundary; failures
-	// return to the model/operator instead of asking for approval.
+	// Interactive mode uses the same approval posture as the one-shot
+	// path. The sandbox and add-dir set remain the write boundary;
+	// failures return to the model/operator instead of asking for
+	// approval.
 	args = append(args, "--ask-for-approval", "never")
 	if !r.NewSession {
 		// Subsequent turn: `codex resume <sid> [prompt]`. The session
@@ -400,7 +347,10 @@ func executeOneShotArgs(r agent.OneShotRequest) ([]string, error) {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
-	// Pin approval to "never" — see ExecuteHeadless for the rationale.
+	// Pin approval to "never": `codex exec` has no `--ask-for-approval`
+	// flag, so a non-`never` `approval_policy` in `~/.codex/config.toml`
+	// would abort the turn at the approval gate. The sandbox still
+	// enforces add-dirs.
 	args = append(args, "-c", "approval_policy=never")
 	cmdArgs := append([]string{"exec", "--json", "--skip-git-repo-check"}, args...)
 	cmdArgs = append(cmdArgs, r.UserPrompt)

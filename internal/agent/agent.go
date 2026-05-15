@@ -1,12 +1,12 @@
 // Package agent is the seam between the CLI's stage orchestration
 // and the agent binary that actually drives a stage turn (claude or
-// codex today). The three executor entry points (Execute,
-// ExecuteOneShot, ExecuteHeadless) plus the transcript mirror sit
-// behind Agent so stage.go doesn't need to know which binary is on
-// the other side. Implementations register themselves via Register
-// in init(); callers look one up with Get.
+// codex today). The two executor entry points (Execute,
+// ExecuteOneShot) plus the transcript mirror sit behind Agent so
+// stage.go doesn't need to know which binary is on the other side.
+// Implementations register themselves via Register in init();
+// callers look one up with Get.
 //
-// Request, OneShotRequest, HeadlessRequest are kept here (not on the
+// Request and OneShotRequest are kept here (not on the
 // implementation side) so a future third backend can be added by
 // dropping a sibling package next to claude/ and codex/ without
 // touching any call site.
@@ -22,10 +22,10 @@ import (
 )
 
 // Agent runs one stage turn against a backend binary and mirrors its
-// per-session transcript into the document directory. The three
-// modes — interactive, one-shot streaming, headless captured — exist
-// because the stage and curation call sites have different
-// requirements for stdio, session resume, and output handling.
+// per-session transcript into the document directory. The two modes
+// — interactive and one-shot streaming — exist because the stage and
+// curation call sites have different requirements for stdio, session
+// resume, and output handling.
 //
 // The interactive and one-shot methods return (sessionID, err): the
 // claude implementation echoes the UUID it was passed; the codex
@@ -35,7 +35,7 @@ import (
 // it is open). Callers persist the returned id when it differs from
 // what they passed in.
 //
-// All four methods are safe to call from one goroutine at a time;
+// All methods are safe to call from one goroutine at a time;
 // they do not assume concurrent invocation.
 type Agent interface {
 	// Execute is the interactive stage turn: stdio wired to the
@@ -48,10 +48,6 @@ type Agent interface {
 	// caller's stdout. Returns the session id the same way Execute
 	// does.
 	ExecuteOneShot(OneShotRequest) (string, error)
-	// ExecuteHeadless is the headless captured path: stdout returned
-	// as bytes for the caller to parse. No session state, no
-	// transcript mirror — for bounded curation calls.
-	ExecuteHeadless(HeadlessRequest) ([]byte, error)
 	// CopyTranscript copies the agent's per-session JSONL into dest.
 	// Returns (found, err): found=false means the agent has no
 	// transcript for sessionID yet (a legitimate no-op state, e.g.
@@ -165,32 +161,6 @@ type OneShotRequest struct {
 	// AddDirs are extra read/write paths the agent backend should
 	// expose. Same shape and contract as Request.AddDirs.
 	AddDirs []string
-}
-
-// HeadlessRequest drives a one-shot, non-interactive call whose
-// stdout is captured and returned as bytes. No session, no
-// transcript, no progress translation — for bounded
-// question-and-answer curation calls.
-type HeadlessRequest struct {
-	// WorkDir is the cwd for the agent subprocess.
-	WorkDir string
-	// Model, if non-empty, names the model to use.
-	Model string
-	// AllowedTools is a per-agent tool-scoping hint (claude:
-	// `--allowed-tools`; codex: ignored — codex has no per-tool
-	// flag, scoping is the coarser sandbox+approval pair).
-	AllowedTools string
-	// SystemPrompt is the system prompt for this turn.
-	SystemPrompt string
-	// UserPrompt is the single user turn.
-	UserPrompt string
-	// AddDirs are additional read/write paths the agent needs.
-	AddDirs []string
-	// Timeout bounds the whole invocation. Zero means no timeout,
-	// which no caller should actually choose.
-	Timeout time.Duration
-	// Stderr, if non-nil, streams the subprocess's stderr.
-	Stderr io.Writer
 }
 
 var (
