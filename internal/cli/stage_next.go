@@ -629,8 +629,7 @@ type cascadeResult struct {
 // inner promptNextStage so the cascade owns routing.
 //
 // At push in yolo mode the dispatch is the merge path (pushCmd.Run with
-// no flags). `!!` defaults to fast-forward merge; runPushTyped still
-// runs the shared synthesis preflight before deterministic hooks and
+// no flags). `!!` defaults to fast-forward merge; runPushTyped writes the merge-path push note after deterministic hooks and
 // shipping.
 func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult

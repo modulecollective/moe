@@ -81,7 +81,7 @@ type stageSessionOpts struct {
 	// claude invocation. Empty string defers to the operator's
 	// configured default — the right answer for stage turns where the
 	// agent's work isn't bounded. Bounded curation stages (push
-	// synthesis) set this to "sonnet" so the cost stays predictable.
+	// synthesis) can set this when a caller needs a model override.
 	// Ignored when Headless is false.
 	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the

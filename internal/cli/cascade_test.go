@@ -197,7 +197,7 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 // through openSdlcStage (headless), push goes through pushFromCascade
 // (the typed entry that wraps runPushTyped — merge path, no flags).
 // There is no separate cascade synthesis step: `!!` defaults to
-// fast-forward merge and runPushTyped owns the shared synthesis preflight.
+// fast-forward merge and runPushTyped writes the merge-path push note.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	openCaptured := stubOpenSdlcStage(t, nil)
 	pushCaptured := stubPushFromCascade(t, 0, nil)

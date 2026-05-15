@@ -144,7 +144,7 @@ type OneShotRequest struct {
 	ClonePath string
 	// Model, if non-empty, names the model to use. Empty defers to
 	// the agent's configured default. Bounded curation tasks (push
-	// synthesis) pass a cheap-tier model; full stage turns leave it
+	// synthesis) may pass a model override; full stage turns leave it
 	// empty.
 	Model string
 	// Stdout streams agent output (progress translation) to the

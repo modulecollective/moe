@@ -62,11 +62,10 @@ func (e *PushDeferredError) Error() string {
 	return fmt.Sprintf("push deferred to recovery (%s) for %s/%s", e.Recovery, e.Project, e.Run)
 }
 
-// pushCanvasSkeleton is the fixed structural shape every push canvas
-// opens with. Synthesis fills it from code/content.md and (when
-// present) test/content.md. The `## PR body` section is what lands on
-// an actual PR; the rest of the canvas is the durable shipping record
-// for both the PR and fast-forward merge paths.
+// pushCanvasSkeleton is the fixed structural shape every synthesized
+// push canvas opens with. The `## PR body` section is what lands on an
+// actual PR; fast-forward merge writes a deterministic note instead of
+// running synthesis.
 const pushCanvasSkeleton = `# Push
 
 ## PR body
@@ -92,35 +91,15 @@ const pushSynthesisKickoff = "The operator just opened this push synthesis sessi
 	"what's actually been drafted and verified. In one or two sentences, acknowledge where synthesis " +
 	"stands (fresh start vs. resumed) and ask what they'd like to refine. Then wait for their reply."
 
-// pushSynthesisDefaultModel maps an agent name to the cheap-tier model
-// the push synthesis headless turn should pin. Synthesis is a bounded
-// curation task (read code + test canvases, fill in three skeleton
-// sections, flag any contradictions); Opus / GPT-5 reasoning depth
-// would be overkill at the operator's default cost. A registered
-// agent without an entry here gets "" — same as omitting --model on
-// the agent's CLI, which falls back to the agent's own default.
-//
-// Slug source of truth: ~/.codex/models_cache.json for codex, claude's
-// CLI for claude. When a vendor renames a slug (e.g. `gpt-5-mini` →
-// `gpt-5.4-mini`), this map is the one-line fix.
-var pushSynthesisDefaultModel = map[string]string{
-	"claude": "sonnet",
-	"codex":  "gpt-5.4-mini",
-}
-
 // runPushSynthesisSession opens the push stage session that curates
-// code's draft and test's findings into push/content.md. runPushTyped
-// invokes the headless variant before the shared ship gate so both the
-// PR path and the fast-forward merge path leave the same final push
-// canvas. The interactive variant (headless=false) lives on for a
+// code's draft and test's findings into push/content.md. The PR path
+// invokes the headless variant because PR creation needs body text
+// synchronously; the fast-forward merge path writes a mechanical note
+// instead. The interactive variant (headless=false) lives on for a
 // future `moe sdlc <whatever>` verb that lets the operator iterate on
 // the canvas by hand; no caller wires it today. SkipNextStage suppresses
 // the post-session chain prompt — synthesis sits inside the push action,
 // which owns its own routing.
-//
-// The headless path pins a cheap-tier model per agent: see
-// pushSynthesisDefaultModel above. If a future agent needs the
-// floor adjusted, that map is the one-line change.
 func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 	opts := stageSessionOpts{
 		NeedsSandbox:   true,
@@ -128,21 +107,7 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 		SkipNextStage:  true,
 		CanvasSkeleton: pushCanvasSkeleton,
 	}
-	if headless {
-		// Resolve the agent the same way runStageSession will, so the
-		// model lookup matches what actually runs. md may be unreadable
-		// (test stubs, freshly-checked-out tree mid-rebase) — fall
-		// through to resolveAgentName's runDefault=""; the env / hard
-		// default kicks in, which under steady state means "claude" /
-		// "sonnet", preserving the historical pin.
-		runDefault := ""
-		if root, err := findRoot(stderr); err == nil {
-			if md, err := run.Load(root, projectID, runID); err == nil {
-				runDefault = md.Agent
-			}
-		}
-		opts.Model = pushSynthesisDefaultModel[resolveAgentName("", runDefault)]
-	} else {
+	if !headless {
 		opts.InitialPrompt = pushSynthesisKickoff
 	}
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
@@ -249,10 +214,6 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 		return 1, nil
 	}
 
-	if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
-		return code, nil
-	}
-
 	hooks := hookEnv{
 		Project:      md.Project,
 		Run:          md.ID,
@@ -292,6 +253,9 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 	}
 
 	if *prFlag {
+		if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
+			return code, nil
+		}
 		return openPRPath(root, md, pj, branch, stdout, stderr), nil
 	}
 	return mergePath(root, md, pj, clonePath, branch, stdout, stderr), nil
@@ -483,6 +447,13 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
+	pushCanvasPath, err := writeMechanicalPushNote(root, md)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	paths = append(paths, pushCanvasPath)
+
 	msg := fmt.Sprintf("push: %s %s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:      md.ID,
@@ -506,6 +477,40 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 	moePrintf(stdout, "merged %s %s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
 	return 0
+}
+
+// writeMechanicalPushNote leaves an explicit push canvas for the
+// fast-forward merge path without running synthesis. The note points
+// future readers at the canonical records and names the test canvas
+// only when that stage actually wrote one.
+func writeMechanicalPushNote(root string, md *run.Metadata) (string, error) {
+	rel := run.ContentPath(md.Project, md.ID, "push")
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("push: create push canvas dir: %w", err)
+	}
+
+	codeRel := run.ContentPath(md.Project, md.ID, "code")
+	testRel := run.ContentPath(md.Project, md.ID, "test")
+	testLine := fmt.Sprintf("- No test-stage canvas was present at `%s`.\n", testRel)
+	if _, err := os.Stat(filepath.Join(root, testRel)); err == nil {
+		testLine = fmt.Sprintf("- Test-stage record: `%s`.\n", testRel)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("push: stat test canvas: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Push\n\n")
+	b.WriteString("Shipped by fast-forward merge. No push synthesis was run for this path.\n\n")
+	b.WriteString("Authoritative records:\n")
+	fmt.Fprintf(&b, "- Code-stage record: `%s`.\n", codeRel)
+	b.WriteString(testLine)
+	b.WriteString("- Target git history and the terminal commit trailers on this push record.\n")
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return "", fmt.Errorf("push: write push canvas: %w", err)
+	}
+	return rel, nil
 }
 
 // writePRBodyFile reads the push canvas, slices out the `## PR body`

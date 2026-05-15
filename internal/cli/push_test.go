@@ -143,7 +143,7 @@ func (f *pushFixture) runInRoot(args ...string) (string, string, int) {
 // TestPushMergeFFAdvancesOriginAndMarksMerged is the happy-path
 // default-merge test: origin/main moves to moe/<run>'s tip, the run
 // flips to StatusMerged, the sandbox is gone, the remote branch is
-// deleted, and shared push synthesis left a final push canvas.
+// deleted, and the merge path leaves a deterministic push note.
 func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	f := newPushFixture(t)
 
@@ -174,8 +174,18 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read push canvas: %v", err)
 	}
-	if !strings.Contains(string(canvas), "Synthesized body for review.") {
-		t.Fatalf("merge path should write synthesized push canvas, got:\n%s", canvas)
+	gotCanvas := string(canvas)
+	for _, want := range []string{
+		"Shipped by fast-forward merge. No push synthesis was run for this path.",
+		"Code-stage record: `projects/tele/runs/fix-it/documents/code/content.md`.",
+		"No test-stage canvas was present at `projects/tele/runs/fix-it/documents/test/content.md`.",
+	} {
+		if !strings.Contains(gotCanvas, want) {
+			t.Fatalf("merge push canvas missing %q:\n%s", want, canvas)
+		}
+	}
+	if strings.Contains(gotCanvas, "Synthesized body") {
+		t.Fatalf("merge path should not synthesize push canvas, got:\n%s", canvas)
 	}
 }
 
@@ -772,13 +782,42 @@ func TestWritePRBodyFileMissingSection(t *testing.T) {
 	}
 }
 
-// TestRunPushSynthesisSessionPinsCheapClaudeModel asserts the headless
-// synthesis session opts the executor sees pass Model="sonnet" when
-// the resolved agent is claude. The cost argument is the load-bearing
-// reason synthesis can now run inside every `--pr`: bounded curation,
-// predictable spend. Catching a future inadvertent drop back to Opus
-// matters.
-func TestRunPushSynthesisSessionPinsCheapClaudeModel(t *testing.T) {
+func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	testPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
+	if err := os.MkdirAll(filepath.Dir(testPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(testPath, []byte("## What was verified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rel, err := writeMechanicalPushNote(root, md)
+	if err != nil {
+		t.Fatalf("writeMechanicalPushNote: %v", err)
+	}
+	if rel != run.ContentPath(md.Project, md.ID, "push") {
+		t.Fatalf("rel path = %q, want push content path", rel)
+	}
+	canvas, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("read push note: %v", err)
+	}
+	got := string(canvas)
+	if !strings.Contains(got, "Test-stage record: `projects/tele/runs/fix-it/documents/test/content.md`.") {
+		t.Fatalf("push note should name present test canvas, got:\n%s", got)
+	}
+	if strings.Contains(got, "No test-stage canvas") {
+		t.Fatalf("push note should not claim test canvas is absent, got:\n%s", got)
+	}
+}
+
+// TestRunPushSynthesisSessionLeavesModelToAgentDefault asserts the
+// headless synthesis session no longer carries a push-specific cheap
+// model override. PR synthesis uses the same agent model policy as
+// normal code/test execution.
+func TestRunPushSynthesisSessionLeavesModelToAgentDefault(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
 	t.Setenv("MOE_AGENT", "claude")
 
@@ -796,34 +835,8 @@ func TestRunPushSynthesisSessionPinsCheapClaudeModel(t *testing.T) {
 	if code := runPushSynthesisSession("tele", "fix-it", true, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("synthesis session exit=%d, want 0", code)
 	}
-	if got, want := captured.Model, "sonnet"; got != want {
-		t.Fatalf("Model = %q, want %q", got, want)
-	}
-	if !captured.Headless {
-		t.Errorf("Headless: want true")
-	}
-}
-
-func TestRunPushSynthesisSessionPinsCheapCodexModel(t *testing.T) {
-	t.Setenv("MOE_HOME", newTestBureaucracy(t))
-	t.Setenv("MOE_AGENT", "codex")
-
-	var captured stageSessionOpts
-	prev := runStageSession
-	runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
-		if docID != "push" {
-			t.Fatalf("unexpected docID %q", docID)
-		}
-		captured = opts
-		return 0
-	}
-	t.Cleanup(func() { runStageSession = prev })
-
-	if code := runPushSynthesisSession("tele", "fix-it", true, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("synthesis session exit=%d, want 0", code)
-	}
-	if got, want := captured.Model, "gpt-5.4-mini"; got != want {
-		t.Fatalf("Model = %q, want %q", got, want)
+	if captured.Model != "" {
+		t.Fatalf("Model = %q, want empty agent default", captured.Model)
 	}
 	if !captured.Headless {
 		t.Errorf("Headless: want true")
@@ -834,8 +847,8 @@ func TestRunPushSynthesisSessionPinsCheapCodexModel(t *testing.T) {
 // writes the given canvas content to push/content.md and returns 0 —
 // what `runPushSynthesisSession` does on the happy path, minus the
 // actual claude turn. Tests that drive push through runPush use this so
-// the shared synthesis preflight produces the canvas writePRBodyFile
-// expects without spinning up a real session worktree.
+// PR-only synthesis produces the canvas writePRBodyFile expects
+// without spinning up a real session worktree.
 // Restores the original on cleanup. Canvas content should be a full
 // canvas including `## PR body` so writePRBodyFile finds a section to
 // extract.
@@ -950,10 +963,10 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	}
 }
 
-// TestPushSynthesisFailureBlocksShip: synthesis is now the shared
-// push-stage canvas, so a failed synthesis must refuse shipping before
-// hooks, branch push, merge, or PR creation.
-func TestPushSynthesisFailureBlocksShip(t *testing.T) {
+// TestPushPRSynthesisFailureBlocksPRCreation: PR-only synthesis runs
+// after the branch is pushed but before PR creation. A failed synthesis
+// must leave origin/main untouched and keep the run in progress.
+func TestPushPRSynthesisFailureBlocksPRCreation(t *testing.T) {
 	f := newPushFixture(t)
 
 	canary := filepath.Join(t.TempDir(), "hook-ran")
@@ -971,15 +984,15 @@ touch "`+canary+`"
 	t.Cleanup(func() { runStageSession = prev })
 
 	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
 	if code != 42 {
 		t.Fatalf("exit=%d, want synthesis exit 42\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
 	if got := f.originHead(); got != mainBefore {
-		t.Fatalf("origin/main must not advance when synthesis fails: want %s, got %s", mainBefore, got)
+		t.Fatalf("origin/main must not advance when PR synthesis fails: want %s, got %s", mainBefore, got)
 	}
-	if _, err := os.Stat(canary); !os.IsNotExist(err) {
-		t.Fatalf("pre-push hook should not run after synthesis failure; stat err=%v", err)
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("pre-push hook should run before PR synthesis; stat err=%v", err)
 	}
 	if md := f.reloadRun(); md.Status != run.StatusInProgress {
 		t.Fatalf("status should remain in_progress after synthesis failure, got %s", md.Status)
@@ -1593,8 +1606,8 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 
 // TestPushSynthesisDispatchesHeadlessStage verifies the headless
 // push-synthesis session is wired with the right stageSessionOpts
-// shape: headless, sandboxed, cheap-model-pinned, post-turn chain prompt
-// suppressed, canvas skeleton seeded. Stubs runStageSession at the
+// shape: headless, sandboxed, post-turn chain prompt suppressed, canvas
+// skeleton seeded, and no push-specific model override. Stubs runStageSession at the
 // seam runPushSynthesisSession goes through.
 func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
@@ -1629,8 +1642,8 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	if capturedOpts.CanvasSkeleton == "" {
 		t.Errorf("CanvasSkeleton: want non-empty (push canvas seeded with structural headings)")
 	}
-	if capturedOpts.Model != "sonnet" {
-		t.Errorf("Model: want sonnet for claude (bounded curation task), got %q", capturedOpts.Model)
+	if capturedOpts.Model != "" {
+		t.Errorf("Model: want empty agent default, got %q", capturedOpts.Model)
 	}
 }
 
