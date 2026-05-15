@@ -303,9 +303,11 @@ func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 		t.Fatalf("expected help exit (2), got %d stdout=%q stderr=%q", code, out.String(), errb.String())
 	}
 	got := errb.String()
-	want := "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT then claude"
-	if !strings.Contains(got, want) {
-		t.Fatalf("help missing agent persistence boundary %q:\n%s", want, got)
+	if !strings.Contains(got, "Explicit values persist to run.json; omitted values resolve at stage time") {
+		t.Fatalf("help missing agent persistence boundary:\n%s", got)
+	}
+	if !strings.Contains(got, "moe config get default_agent") {
+		t.Fatalf("help missing default_agent fallback step:\n%s", got)
 	}
 	if strings.Contains(got, "Persisted to run.json; defaults to $MOE_AGENT then claude") {
 		t.Fatalf("help still contains misleading old agent text:\n%s", got)

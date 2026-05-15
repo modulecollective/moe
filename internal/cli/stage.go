@@ -27,6 +27,7 @@ import (
 	_ "github.com/modulecollective/moe/internal/agent/codex"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/config"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -126,17 +127,24 @@ type stageSessionOpts struct {
 	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
 	// Agent names the backend (claude / codex) that should drive this
 	// turn. Empty falls through resolveAgentName's precedence ladder:
-	// $MOE_AGENT, else "claude". Stage callers populate this from the
-	// run.json field when present, or from a --agent flag override.
+	// $MOE_AGENT, else .moe/config.json's default_agent, else "claude".
+	// Stage callers populate this from the run.json field when present,
+	// or from a --agent flag override.
 	Agent string
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
 // explicit per-call override (--agent flag on this verb) → run-level
-// persisted default (run.json.Agent) → $MOE_AGENT → "claude". The
-// same ladder is the operator-facing contract; keep this helper as
-// the single source.
-func resolveAgentName(explicit, runDefault string) string {
+// persisted default (run.json.Agent) → $MOE_AGENT → operator-local
+// config.default_agent (.moe/config.json) → "claude". The same ladder
+// is the operator-facing contract; keep this helper as the single
+// source.
+//
+// root, when non-empty, is the bureaucracy root used to read
+// .moe/config.json for the config layer. Empty root skips the config
+// step — test paths and fallback call sites without a root in scope
+// stay correct by falling through to "claude".
+func resolveAgentName(explicit, runDefault, root string) string {
 	if explicit != "" {
 		return explicit
 	}
@@ -145,6 +153,15 @@ func resolveAgentName(explicit, runDefault string) string {
 	}
 	if v := os.Getenv("MOE_AGENT"); v != "" {
 		return v
+	}
+	if root != "" {
+		// A malformed config.json shouldn't ground the stage — fall
+		// through to "claude" the same way an unset key would. The
+		// operator already sees parse errors from `moe config list`
+		// at the surface where they can fix it.
+		if c, err := config.Read(root); err == nil && c.DefaultAgent != "" {
+			return c.DefaultAgent
+		}
 	}
 	return "claude"
 }
@@ -325,7 +342,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					resumeCwd = sessionCwd
 				}
 				if resumeCwd != "" {
-					a, agentErr := agent.Get(resolveAgentName(opts.Agent, md.Agent))
+					a, agentErr := agent.Get(resolveAgentName(opts.Agent, md.Agent, workRoot))
 					if agentErr != nil {
 						return wikiTurnSpec{}, agentErr
 					}
@@ -371,7 +388,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				InitialPrompt:    initialPrompt,
 				Headless:         opts.Headless,
 				Model:            opts.Model,
-				Agent:            resolveAgentName(opts.Agent, md.Agent),
+				Agent:            resolveAgentName(opts.Agent, md.Agent, workRoot),
 				FinalizeRunID:    md.ID,
 				FinalizeRunTitle: md.Title,
 				SkipFinalize:     opts.SkipFinalize,
@@ -512,7 +529,7 @@ type wikiTurnSpec struct {
 	// non-empty in production paths (runStageSession resolves it via
 	// resolveAgentName before populating this struct); test callers
 	// that build wikiTurnSpec directly leave it empty and runWikiSession
-	// falls back to resolveAgentName("") at dispatch time.
+	// falls back to resolveAgentName("", "", workRoot) at dispatch time.
 	Agent string
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg
@@ -640,7 +657,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// dispatch never sees an empty key.
 	agentName := spec.Agent
 	if agentName == "" {
-		agentName = resolveAgentName("", "")
+		agentName = resolveAgentName("", "", workRoot)
 	}
 	a, err := agent.Get(agentName)
 	if err != nil {
