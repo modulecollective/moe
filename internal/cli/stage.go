@@ -133,12 +133,34 @@ type stageSessionOpts struct {
 	Agent string
 }
 
+// stageAgentName resolves the agent backend for a stage turn. It is
+// the contract layer between the per-stage call sites in
+// runStageSession and the precedence ladder in resolveAgentName.
+//
+// root must be the canonical bureaucracy root — the directory holding
+// .moe/config.json — not the session worktree. A session worktree
+// (created via `git worktree add`) has no .moe/ of its own, since
+// .moe/ is operator-local and gitignored. config.Read against a
+// worktree path silently returns an empty Config{}, and the config
+// layer of the ladder is skipped. That was the bug this helper exists
+// to make hard to repeat: the call site asks for "the agent for this
+// stage turn" and can't accidentally hand the wrong root in.
+func stageAgentName(opts stageSessionOpts, md *run.Metadata, root string) string {
+	runDefault := ""
+	if md != nil {
+		runDefault = md.Agent
+	}
+	return resolveAgentName(opts.Agent, runDefault, root)
+}
+
 // resolveAgentName picks the backend for this turn. Precedence:
 // explicit per-call override (--agent flag on this verb) → run-level
 // persisted default (run.json.Agent) → $MOE_AGENT → operator-local
 // config.default_agent (.moe/config.json) → "claude". The same ladder
 // is the operator-facing contract; keep this helper as the single
-// source.
+// source. Stage call sites should go through stageAgentName instead
+// of calling this directly, so the root argument is built from the
+// right context.
 //
 // root, when non-empty, is the bureaucracy root used to read
 // .moe/config.json for the config layer. Empty root skips the config
@@ -217,7 +239,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	agentName := resolveAgentName(opts.Agent, md.Agent, root)
+	agentName := stageAgentName(opts, md, root)
 	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
 	// committed flips true when CommitStager returns a clean nil —
 	// the same branch reportWikiSessionExit treats as "committed turn".
@@ -528,9 +550,9 @@ type wikiTurnSpec struct {
 	SkipFinalize bool
 	// Agent names the backend the executor should dispatch to. Always
 	// non-empty in production paths (runStageSession resolves it via
-	// resolveAgentName before populating this struct); test callers
+	// stageAgentName before populating this struct); test callers
 	// that build wikiTurnSpec directly leave it empty and runWikiSession
-	// falls back to resolveAgentName("", "", workRoot) at dispatch time.
+	// falls back to resolveAgentName("", "", root) at dispatch time.
 	Agent string
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg
@@ -652,13 +674,16 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 
-	// spec.Agent is populated by runStageSession via resolveAgentName;
+	// spec.Agent is populated by runStageSession via stageAgentName;
 	// test callers that build wikiTurnSpec directly may leave it empty.
 	// Fall back through the same ladder with no run default so the
-	// dispatch never sees an empty key.
+	// dispatch never sees an empty key. root is the canonical
+	// bureaucracy root passed to runWikiSession — workRoot is the
+	// session worktree (no .moe/) and would silently skip the config
+	// step.
 	agentName := spec.Agent
 	if agentName == "" {
-		agentName = resolveAgentName("", "", workRoot)
+		agentName = resolveAgentName("", "", root)
 	}
 	a, err := agent.Get(agentName)
 	if err != nil {

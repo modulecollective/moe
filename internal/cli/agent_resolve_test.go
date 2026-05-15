@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // TestResolveAgentNamePrecedence pins the ladder design.md describes:
@@ -88,6 +90,61 @@ func TestResolveAgentNameEmptyRoot(t *testing.T) {
 	t.Setenv("MOE_AGENT", "codex")
 	if got := resolveAgentName("", "", ""); got != "codex" {
 		t.Fatalf("empty root, MOE_AGENT=codex: got %q, want codex", got)
+	}
+}
+
+// TestStageAgentNameUsesCanonicalRoot pins the call-site contract
+// that resolveAgentName's unit tests don't reach: the production
+// stage call sites must hand stageAgentName the canonical bureaucracy
+// root (the dir holding .moe/config.json), not the session worktree
+// (which has no .moe/ of its own). The first pass of this run
+// shipped the wrong variable at all three call sites, and the unit
+// tests above passed because they build a tempdir and pass it
+// directly — they can't catch "the caller picked the wrong dir."
+//
+// Failure mode this regression catches: when a caller hands in a
+// path with no .moe/ at it, config.Read silently returns an empty
+// Config{} and the helper drops through to "claude". The operator's
+// configured default_agent is ignored. The test asserts both halves:
+// canonical root resolves the configured value; a worktree-shaped
+// path falls through to the hard default.
+func TestStageAgentNameUsesCanonicalRoot(t *testing.T) {
+	root := t.TempDir()
+	worktree := t.TempDir() // simulate a session worktree: no .moe/
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".moe", "config.json"), []byte(`{"default_agent": "codex"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOE_AGENT", "")
+
+	md := &run.Metadata{}
+	opts := stageSessionOpts{}
+
+	if got := stageAgentName(opts, md, root); got != "codex" {
+		t.Fatalf("canonical root: got %q, want codex (config should resolve)", got)
+	}
+	if got := stageAgentName(opts, md, worktree); got != "claude" {
+		t.Fatalf("worktree path: got %q, want claude (no .moe/ at worktree — config silently misses)", got)
+	}
+}
+
+// TestStageAgentNameNilMetadata covers the early-bootstrap path
+// where md hasn't been loaded yet. The helper must not deref a nil
+// metadata pointer, and the run-default rung of the ladder is
+// simply skipped.
+func TestStageAgentNameNilMetadata(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".moe", "config.json"), []byte(`{"default_agent": "codex"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOE_AGENT", "")
+	if got := stageAgentName(stageSessionOpts{}, nil, root); got != "codex" {
+		t.Fatalf("nil md: got %q, want codex", got)
 	}
 }
 
