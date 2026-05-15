@@ -85,7 +85,15 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	}
 
 	cmd := exec.Command(bin, cmdArgs...)
-	cmd.Dir = resolveCwd(r.ClonePath, r.SessionCwd, r.Root)
+	// cwd-inversion shape: codex always runs cwd = r.Root (the
+	// bureaucracy session worktree). Code-bearing stages reach the
+	// project clone via --add-dir; document-only stages have no clone
+	// and write the canvas directly under root. Unlike claude, codex
+	// doesn't encode cwd in its session id, so there's no
+	// per-document-cwd stability to preserve — and any other shape
+	// (e.g. cwd under a sibling git worktree) trips apply_patch's
+	// worktree-boundary check.
+	cmd.Dir = r.Root
 	if len(r.ExtraEnv) > 0 {
 		cmd.Env = append(os.Environ(), r.ExtraEnv...)
 	}
@@ -156,7 +164,8 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, bin, cmdArgs...)
-	cmd.Dir = resolveCwd(r.ClonePath, "", r.Root)
+	// Same cwd rule as Execute: always r.Root. See the comment there.
+	cmd.Dir = r.Root
 	if len(r.ExtraEnv) > 0 {
 		cmd.Env = append(os.Environ(), r.ExtraEnv...)
 	}
@@ -418,10 +427,10 @@ func commonArgs(root, clonePath, systemPrompt string) ([]string, error) {
 	// explicit add-dir set. read-only would block the canvas write
 	// every stage needs.
 	args = append(args, "--sandbox", "workspace-write")
-	// Always make the bureaucracy root reachable. Code stages have
-	// cwd = root (so the add-dir is redundant but harmless); doc
-	// stages have cwd = sessionCwd which sits under root, and need
-	// the explicit add-dir to write the canvas.
+	// Always make the bureaucracy root reachable. cwd = root in all
+	// shapes, so the add-dir is redundant but harmless — keeping it
+	// explicit means any future cwd shift doesn't silently lose the
+	// canvas's writable surface.
 	if root != "" {
 		args = append(args, "--add-dir", root)
 	}
@@ -435,25 +444,6 @@ func commonArgs(root, clonePath, systemPrompt string) ([]string, error) {
 		args = append(args, "--add-dir", clonePath)
 	}
 	return args, nil
-}
-
-// resolveCwd picks the codex subprocess cwd. Code-bearing stages
-// (clonePath set) land in the bureaucracy session worktree (root) so
-// the agent's canvas writes target absolute bureaucracy paths
-// natively; the clone is reachable via add-dir. Document-only stages
-// land in the stable per-document sessionCwd to keep claude-style
-// session-id encoding stable across turns (codex doesn't care about
-// cwd for its own session resume, but the executor interface is
-// shared).
-func resolveCwd(clonePath, sessionCwd, root string) string {
-	switch {
-	case clonePath != "":
-		return root
-	case sessionCwd != "":
-		return sessionCwd
-	default:
-		return root
-	}
 }
 
 // tomlMultilineBasic encodes s as a TOML multi-line basic string
