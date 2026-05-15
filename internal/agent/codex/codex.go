@@ -125,11 +125,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	}
 
 	// Transcript copy is best-effort, same shape as claude's path.
-	// Codex doesn't get a legacy-rename pass: any pre-existing
-	// `thread.jsonl` next to the document is claude's history, so it
-	// belongs to claude's slot (the claude agent's first turn after
-	// this commit will rename it). Codex always writes to its own
-	// agent-tagged file.
+	// Codex always writes to its own agent-tagged file.
 	if r.Metadata != nil && sid != "" {
 		threadPath := filepath.Join(r.Root, run.ThreadPathFor("codex", r.Metadata.Project, r.Metadata.ID, r.DocID))
 		if _, err := CopyTranscript(sid, threadPath); err != nil && r.Stderr != nil {

@@ -91,10 +91,11 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
 	// Cheap os.Stat first so a missing-canvas turn fails before any
-	// git invocation and leaves the index untouched. thread.jsonl is
-	// mirrored every turn, so without this guard the staging set is
-	// non-empty and the turn would commit a transcript-only snapshot
-	// — the failure mode the missing-canvas-doc run was opened against.
+	// git invocation and leaves the index untouched. The per-agent
+	// thread file is mirrored every turn, so without this guard the
+	// staging set is non-empty and the turn would commit a
+	// transcript-only snapshot — the failure mode the missing-canvas-doc
+	// run was opened against.
 	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
 	switch info, err := os.Stat(canvas); {
 	case errors.Is(err, fs.ErrNotExist):

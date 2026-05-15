@@ -366,14 +366,6 @@ func ContentPath(projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "content.md")
 }
 
-// ThreadPath returns the legacy single-agent transcript path
-// (`thread.jsonl`). New code should prefer ThreadPathFor; this
-// function is kept for tests and any caller that needs to locate
-// pre-multi-agent files written before the agent suffix landed.
-func ThreadPath(projectID, id, docID string) string {
-	return filepath.Join(DocDir(projectID, id, docID), "thread.jsonl")
-}
-
 // ThreadPathFor returns the per-agent conversation transcript path
 // (`thread-<agent>.jsonl`) relative to the bureaucracy root. Every
 // stage turn mirrors its agent's per-session JSONL here. A document

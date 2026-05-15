@@ -179,16 +179,8 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	// and other I/O errors don't block the caller's post-run commit.
 	// Run-less sessions (Metadata nil) skip the copy entirely — there
 	// is no per-document thread file to mirror into.
-	//
-	// We also rename any legacy `thread.jsonl` (single-agent layout,
-	// pre-codex) into `thread-claude.jsonl` so old documents roll
-	// forward on first touch. The rename is best-effort: errors fall
-	// through to a stderr line, never blocking the operator's commit.
 	if r.Metadata != nil {
 		threadPath := filepath.Join(r.Root, run.ThreadPathFor("claude", r.Metadata.Project, r.Metadata.ID, r.DocID))
-		if err := renameLegacyThreadJSONL(threadPath); err != nil && r.Stderr != nil {
-			fmt.Fprintf(r.Stderr, "rename legacy thread.jsonl: %v\n", err)
-		}
 		if _, err := CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
 			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
 		}
@@ -293,26 +285,3 @@ func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
 
 // Compile-time check that Agent satisfies the interface.
 var _ agent.Agent = Agent{}
-
-// renameLegacyThreadJSONL migrates the pre-multi-agent layout: if a
-// sibling `thread.jsonl` exists where we're about to write the new
-// per-agent file, rename it so the next Copy overwrites the same
-// file. Old git history keeps the old path intact; the working tree
-// rolls forward. A missing legacy file is the steady-state case.
-func renameLegacyThreadJSONL(newPath string) error {
-	legacy := filepath.Join(filepath.Dir(newPath), "thread.jsonl")
-	if _, err := os.Stat(legacy); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	// If the new path already exists, the rename would clobber it
-	// (os.Rename's behavior is replace-on-Unix, error-on-Windows).
-	// Either way we want the most recent transcript content to win,
-	// which is what the upcoming Copy provides — drop the legacy.
-	if _, err := os.Stat(newPath); err == nil {
-		return os.Remove(legacy)
-	}
-	return os.Rename(legacy, newPath)
-}

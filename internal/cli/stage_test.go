@@ -638,7 +638,7 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 }
 
 // TestCommitTurnRequiresCanvas guards the post-stage assertion: a turn
-// that produced a thread.jsonl but no content.md must fail loudly
+// that produced a thread file but no content.md must fail loudly
 // rather than silently committing a transcript-only snapshot. This is
 // the failure mode the missing-canvas-doc run was opened against.
 func TestCommitTurnRequiresCanvas(t *testing.T) {
@@ -656,9 +656,9 @@ func TestCommitTurnRequiresCanvas(t *testing.T) {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
-	// Simulate the failure mode: thread.jsonl is mirrored but no
+	// Simulate the failure mode: the agent's thread is mirrored but no
 	// content.md is ever written.
-	threadRel := run.ThreadPath("tele", "fix-it", "design")
+	threadRel := run.ThreadPathFor("claude", "tele", "fix-it", "design")
 	if err := os.WriteFile(filepath.Join(root, threadRel), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
