@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -325,15 +324,10 @@ func TestEventsSinceCheckpointClosedRunsKeyOnGitHistory(t *testing.T) {
 func commitWithRunTrailer(t *testing.T, root, subject, runID, when string) {
 	t.Helper()
 	msg := subject + "\n\nMoE-Run: " + runID + "\n"
-	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_DATE="+when,
-		"GIT_COMMITTER_DATE="+when,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit %s: %v\n%s", runID, err, out)
-	}
+	gittest.RunWithEnv(t, root, []string{
+		"GIT_AUTHOR_DATE=" + when,
+		"GIT_COMMITTER_DATE=" + when,
+	}, "commit", "--allow-empty", "-m", msg)
 }
 
 // TestProjectCommitsSince_StatErrorPropagates pins the design fix for

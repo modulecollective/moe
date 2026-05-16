@@ -3,11 +3,11 @@ package bureaucracy
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
@@ -104,9 +104,7 @@ func TestInitScaffoldsAndCommits(t *testing.T) {
 		t.Errorf("Find=%q want %q", absGot, dir)
 	}
 	// Init stages but does not commit — HEAD shouldn't resolve on a fresh repo.
-	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
-	cmd.Dir = dir
-	if err := cmd.Run(); err == nil {
+	if git.Probe(dir, "rev-parse", "--verify", "HEAD") {
 		t.Errorf("expected HEAD to be unborn after init, but it resolved")
 	}
 	staged := gittest.Output(t, dir, "diff", "--cached", "--name-only")

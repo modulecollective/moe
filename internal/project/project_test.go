@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // fixedTime is injected into Register so Created is deterministic.
@@ -354,11 +356,5 @@ func TestListWarnsOnMalformedJSON(t *testing.T) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-	return string(out)
+	return gittest.Output(t, dir, args...)
 }

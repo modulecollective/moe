@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -109,8 +108,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 // originHasRef reports whether the bare origin has a given ref.
 func (f *pushFixture) originHasRef(ref string) bool {
 	f.t.Helper()
-	cmd := exec.Command("git", "-C", f.origin, "rev-parse", "--verify", "--quiet", ref)
-	return cmd.Run() == nil
+	return git.HasRef(f.origin, ref)
 }
 
 // originHead returns the SHA at origin's main.
@@ -226,7 +224,7 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	if headOut == movedBaseSHA {
 		t.Fatalf("origin/main should have advanced past the divergent commit after the rebased ff-push, still at %s", movedBaseSHA)
 	}
-	if anc := exec.Command("git", "-C", f.origin, "merge-base", "--is-ancestor", movedBaseSHA, "main"); anc.Run() != nil {
+	if !git.Probe(f.origin, "merge-base", "--is-ancestor", movedBaseSHA, "main") {
 		t.Fatalf("origin/main should still contain the divergent commit %s", movedBaseSHA)
 	}
 	if f.originHasRef("refs/heads/" + f.branch) {

@@ -10,10 +10,10 @@
 // the primary dogfood site; routing through internal/git would create
 // a circular dependency. Second, internal/git's error shape (formatted
 // errors with retry-aware context) is wrong for tests, which want the
-// raw git output folded into a t.Fatalf message. Test files are
-// already exempted from the CI lint that forbids raw `exec.Command`
-// outside internal/git, so this package's git invocations don't
-// violate the boundary.
+// raw git output folded into a t.Fatalf message. This package is the
+// test fixture exception to the lint that forbids raw `exec.Command`
+// outside internal/git; test code elsewhere should route git setup
+// through gittest instead.
 //
 // Every exported helper takes *testing.T and fails the test on error.
 // Fixtures don't compose with error returns — the caller's only

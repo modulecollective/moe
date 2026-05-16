@@ -23,21 +23,7 @@ jobs:
         run: go vet ./...
 
       - name: forbid raw exec.Command("git") outside internal/git
-        run: |
-          # Every git invocation must go through internal/git so the
-          # index-lock retry, error shape, and tracing hook stay in
-          # one place. Test files and the internal/git package itself
-          # are exempt. `--exclude-dir=NAME` only matches by basename,
-          # so we filter the internal/git path with a follow-up grep.
-          hits=$(grep -RnE 'exec\.Command(Context)?\("git"' \
-                      --include='*.go' \
-                      --exclude='*_test.go' \
-                      . | grep -v '^\./internal/git/' || true)
-          if [ -n "$hits" ]; then
-            echo "Forbidden raw git invocations (route through internal/git):"
-            echo "$hits"
-            exit 1
-          fi
+        run: make check-git-boundary
 
       - name: gofmt
         run: |

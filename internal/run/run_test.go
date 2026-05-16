@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -312,18 +311,16 @@ func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string, when time.Time) {
 		t.Helper()
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
-		cmd.Dir = root
+		args := []string{"commit", "--allow-empty", "-m", subject + "\n\n" + body}
 		if !when.IsZero() {
 			stamp := when.Format(time.RFC3339)
-			cmd.Env = append(os.Environ(),
-				"GIT_AUTHOR_DATE="+stamp,
-				"GIT_COMMITTER_DATE="+stamp,
-			)
+			gittest.RunWithEnv(t, root, []string{
+				"GIT_AUTHOR_DATE=" + stamp,
+				"GIT_COMMITTER_DATE=" + stamp,
+			}, args...)
+			return
 		}
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %v\n%s", err, out)
-		}
+		gittest.Run(t, root, args...)
 	}
 	// Two slugs, multiple commits each, including a backdated commit on
 	// HEAD — that's the case `git log -1 --grep` resolves topologically
@@ -361,11 +358,7 @@ func TestJournalIndexCapturesPromotedToAndPRURL(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string) {
 		t.Helper()
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %v\n%s", err, out)
-		}
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
 	// idea promoted to a run; the promotion commit carries both trailers.
 	commitWith("Promote idea p/idea-x → p/run-y",
@@ -401,18 +394,16 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string, when time.Time) {
 		t.Helper()
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
-		cmd.Dir = root
+		args := []string{"commit", "--allow-empty", "-m", subject + "\n\n" + body}
 		if !when.IsZero() {
 			stamp := when.Format(time.RFC3339)
-			cmd.Env = append(os.Environ(),
-				"GIT_AUTHOR_DATE="+stamp,
-				"GIT_COMMITTER_DATE="+stamp,
-			)
+			gittest.RunWithEnv(t, root, []string{
+				"GIT_AUTHOR_DATE=" + stamp,
+				"GIT_COMMITTER_DATE=" + stamp,
+			}, args...)
+			return
 		}
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %v\n%s", err, out)
-		}
+		gittest.Run(t, root, args...)
 	}
 	workTurn := func(projectID, runID, docID string, when time.Time) {
 		commitWith(
@@ -471,11 +462,7 @@ func TestJournalIndexPicksMostRecentTrailerValue(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string) {
 		t.Helper()
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %v\n%s", err, out)
-		}
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
 	commitWith("push: first attempt", "MoE-Run: r\nMoE-PR: https://example.com/pr/1\n")
 	commitWith("push: re-pushed after close", "MoE-Run: r\nMoE-PR: https://example.com/pr/2\n")
@@ -498,11 +485,7 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string) {
 		t.Helper()
-		cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject+"\n\n"+body)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %v\n%s", err, out)
-		}
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
 	// A reopen lands as an open commit on the new slug carrying
 	// MoE-Reopen-Of pointing back at the prior slug.
