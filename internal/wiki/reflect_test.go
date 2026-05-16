@@ -336,6 +336,150 @@ func commitWithRunTrailer(t *testing.T, root, subject, runID, when string) {
 	}
 }
 
+// TestProjectCommitsSince_StatErrorPropagates pins the design fix for
+// site 1: a non-NotExist stat error on cfg.ProjectRepoPath must surface
+// rather than smooth into an empty events block. We nest ProjectRepoPath
+// under a regular file so os.Stat returns ENOTDIR — errors.Is treats
+// that as distinct from fs.ErrNotExist, so the propagate branch fires.
+// This shape also runs unchanged whether the test user is root or not.
+func TestProjectCommitsSince_StatErrorPropagates(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	writeFile(t, blocker, "")
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ProjectRepoPath: filepath.Join(blocker, "repo"),
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	_, err := EventsSinceCheckpoint(cfg)
+	if err == nil {
+		t.Fatal("expected stat error to propagate, got nil")
+	}
+	if !strings.Contains(err.Error(), "stat project repo") {
+		t.Errorf("expected wrapped 'stat project repo' in error, got: %v", err)
+	}
+}
+
+// TestProjectCommitsSince_StatNotExistStillSilent pins the legitimate
+// case the design preserves: a project repo path that simply doesn't
+// exist (twin running before the repo lands) returns empty without
+// erroring. Regression guard so a future "always propagate" refactor
+// can't accidentally break the first-time-twin flow.
+func TestProjectCommitsSince_StatNotExistStillSilent(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ProjectRepoPath: filepath.Join(t.TempDir(), "missing"),
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	got, err := EventsSinceCheckpoint(cfg)
+	if err != nil {
+		t.Fatalf("expected nil error on missing project repo, got: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty events block, got:\n%s", got)
+	}
+}
+
+// TestProjectCommitsSince_IncrementalGitFailurePropagates pins the
+// design fix for site 2: when the checkpoint SHA is unreachable in the
+// project repo (history rewrite, shallow clone), `git log SHA..HEAD`
+// failure must surface so the operator can reset the checkpoint or
+// deepen the clone — not silently render an empty commits block.
+func TestProjectCommitsSince_IncrementalGitFailurePropagates(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectRepo := newGitRepo(t)
+	writeFile(t, filepath.Join(projectRepo, "x.txt"), "x\n")
+	gittest.Run(t, projectRepo, "add", "x.txt")
+	gittest.Run(t, projectRepo, "commit", "-m", "x")
+
+	unreachable := "0123456789abcdef0123456789abcdef01234567"
+	cp := Checkpoint{
+		Version:        CheckpointVersion,
+		LastIngestAt:   "2026-04-01T12:00:00Z",
+		LastIngestRun:  "prior-reflect",
+		Project:        "p",
+		ProjectRepoSHA: &unreachable,
+	}
+	if err := WriteCheckpoint(twinDir, cp); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ProjectRepoPath: projectRepo,
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	_, err := EventsSinceCheckpoint(cfg)
+	if err == nil {
+		t.Fatal("expected unreachable-SHA git failure to propagate, got nil")
+	}
+	if !strings.Contains(err.Error(), "project commit log") {
+		t.Errorf("expected wrapped 'project commit log' in error, got: %v", err)
+	}
+}
+
+// TestClosedRunsSince_MalformedLastIngestAtPropagates pins the design
+// fix for site 4: a non-RFC3339 LastIngestAt on the checkpoint must
+// surface as a parse error rather than silently leaving threshold at
+// zero (which would surface every terminal run as new and corrupt the
+// reflect agent's view of the tail).
+func TestClosedRunsSince_MalformedLastIngestAtPropagates(t *testing.T) {
+	root := newGitRepo(t)
+	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cp := Checkpoint{
+		Version:       CheckpointVersion,
+		LastIngestAt:  "not-a-timestamp",
+		LastIngestRun: "prior-reflect",
+		Project:       "p",
+	}
+	if err := WriteCheckpoint(twinDir, cp); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Mode:            Closed,
+		ContentDir:      twinDir,
+		BureaucracyPath: root,
+		Project:         "p",
+		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+	}
+	_, err := EventsSinceCheckpoint(cfg)
+	if err == nil {
+		t.Fatal("expected malformed LastIngestAt to propagate as parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "LastIngestAt") {
+		t.Errorf("expected 'LastIngestAt' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not-a-timestamp") {
+		t.Errorf("expected bad value quoted in error, got: %v", err)
+	}
+}
+
 func TestReadHistorySummaryMissingIsEmpty(t *testing.T) {
 	root := t.TempDir()
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")

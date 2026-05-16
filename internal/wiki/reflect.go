@@ -1,7 +1,9 @@
 package wiki
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sort"
 	"strconv"
@@ -182,8 +184,13 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 		return nil, 0, nil
 	}
 	if _, err := os.Stat(cfg.ProjectRepoPath); err != nil {
-		// Best-effort — a missing project repo just means no commits to list.
-		return nil, 0, nil
+		// NotExist is legitimate — a twin can run before its project
+		// repo exists. Any other stat error (permission, I/O, broken
+		// symlink) is real and should surface.
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, 0, nil
+		}
+		return nil, 0, fmt.Errorf("wiki: stat project repo %s: %w", cfg.ProjectRepoPath, err)
 	}
 	incremental := hasCheckpoint && cp.ProjectRepoSHA != nil && *cp.ProjectRepoSHA != ""
 	args := []string{"log", "--no-merges", "--format=%h %s"}
@@ -196,15 +203,13 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 	}
 	out, err := git.Output(cfg.ProjectRepoPath, args...)
 	if err != nil {
-		if incremental {
-			// Git can fail if the SHA is unreachable (history rewrite,
-			// shallow clone). Degrade silently rather than block reflect.
-			return nil, 0, nil
-		}
-		// First-reflect path has no SHA in args, so a git failure here
-		// is not the SHA-unreachable edge — it's git itself failing on
-		// a healthy repo. Propagate rather than render an empty events
-		// block that hides the breakage.
+		// Both branches propagate. On incremental, a failure usually
+		// means the checkpoint SHA is unreachable (history rewrite,
+		// shallow clone) — surfacing the git error lets the operator
+		// reset the checkpoint or deepen the clone rather than walk
+		// docs against an empty events block. On first reflect, a
+		// failure on a healthy repo with no SHA in args is git itself
+		// breaking and likewise needs to surface.
 		return nil, 0, fmt.Errorf("wiki: project commit log: %w", err)
 	}
 	var commits []string
@@ -219,9 +224,11 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 	}
 	total, err := projectCommitTotal(cfg.ProjectRepoPath)
 	if err != nil {
-		// Degrade: render the capped slice with no footer rather than
-		// block reflect on a count failure.
-		return commits[:firstReflectCommitCap], 0, nil
+		// `git log` succeeded a few lines above; if `rev-list --count`
+		// fails right after, something is genuinely wrong on this repo.
+		// Surfacing it beats rendering a capped slice with no footer,
+		// which would read as a complete list to the agent.
+		return nil, 0, fmt.Errorf("wiki: project commit count: %w", err)
 	}
 	return commits[:firstReflectCommitCap], total - firstReflectCommitCap, nil
 }
@@ -256,9 +263,11 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	}
 	var threshold time.Time
 	if hasCheckpoint && cp.LastIngestAt != "" {
-		if t, err := time.Parse(time.RFC3339, cp.LastIngestAt); err == nil {
-			threshold = t
+		t, err := time.Parse(time.RFC3339, cp.LastIngestAt)
+		if err != nil {
+			return nil, fmt.Errorf("wiki: parse checkpoint LastIngestAt %q: %w", cp.LastIngestAt, err)
 		}
+		threshold = t
 	}
 	type entry struct {
 		id, title string
