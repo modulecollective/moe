@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,31 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
+
+// markRunStatus rewrites run.json's status field directly. Test helper
+// for tests that need a "merged" or "closed" run without driving the
+// full close path.
+func markRunStatus(t *testing.T, root, projectID, runID, status string) {
+	t.Helper()
+	path := filepath.Join(root, "projects", projectID, "runs", runID, "run.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var md map[string]any
+	if err := json.Unmarshal(b, &md); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	md["status"] = status
+	out, err := json.MarshalIndent(md, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
 
 func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
 	root := newTestBureaucracy(t)
