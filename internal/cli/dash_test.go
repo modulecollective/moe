@@ -13,7 +13,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
-	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
@@ -1142,99 +1141,6 @@ func TestDashTwinRecentScopedToProject(t *testing.T) {
 	}
 }
 
-// TestDashQueuedRunGetsMarker: with two active runs, only the one in
-// .moe/queue.json picks up the "[queued]" suffix on its note column.
-func TestDashQueuedRunGetsMarker(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "queued-one", "sdlc", run.StatusInProgress)
-	trailerstest.SeedRun(t, root, "tele", "loose-one", "sdlc", run.StatusInProgress)
-	if err := queue.Save(root, []queue.Item{
-		{Workflow: "sdlc", Project: "tele", Run: "queued-one"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "sdlc:design [queued]") {
-		t.Fatalf("expected 'sdlc:design [queued]' on the queued row, got:\n%s", got)
-	}
-	// The non-queued row's note should be plain "sdlc:design" — find
-	// the row line and assert no "[queued]" appears on it.
-	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "loose-one") && strings.Contains(line, "[queued]") {
-			t.Fatalf("non-queued row should not be marked, got line: %q", line)
-		}
-	}
-}
-
-// TestDashMissingQueueFileNoError: an absent .moe/queue.json is the
-// common case (no queue ever used) and must produce no markers and no
-// error printed to stderr.
-func TestDashMissingQueueFileNoError(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if errb.Len() != 0 {
-		t.Fatalf("expected silent stderr with missing queue.json, got: %q", errb.String())
-	}
-	if strings.Contains(out.String(), "[queued]") {
-		t.Fatalf("expected no markers when queue.json is missing, got:\n%s", out.String())
-	}
-}
-
-// TestDashCorruptQueueFileSilent: a corrupt queue.json is best-effort
-// — dash drops the marker pass and renders the rest of the output
-// without printing an error. Loud handling of a corrupt queue belongs
-// in `moe queue add/list/run`, where the operator can act.
-func TestDashCorruptQueueFileSilent(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-
-	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(queue.Path(root), []byte("{not valid json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if errb.Len() != 0 {
-		t.Fatalf("expected silent stderr with corrupt queue.json, got: %q", errb.String())
-	}
-	if !strings.Contains(out.String(), "ACTIVE (1)") {
-		t.Fatalf("expected dash to render despite corrupt queue.json, got:\n%s", out.String())
-	}
-	if strings.Contains(out.String(), "[queued]") {
-		t.Fatalf("expected no markers when queue.json is corrupt, got:\n%s", out.String())
-	}
-}
-
 // TestDashOpenSessionSameDocMarksRunning: a stage session whose doc
 // matches the run's parked stage gets a terse "[running]" suffix —
 // the parked-stage prefix already names the doc, so a "[code running]"
@@ -1298,39 +1204,6 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "sdlc:design [code running]") {
 		t.Fatalf("expected 'sdlc:design [code running]' on the active row, got:\n%s", out.String())
-	}
-}
-
-// TestDashOpenSessionAndQueuedStackInOrder: when a run is both queued
-// and has an open session on a different doc, both markers render and
-// the liveness signal lands in front — "[code running]" before
-// "[queued]" — so the "what's happening now" answer arrives ahead of
-// the playlist membership.
-func TestDashOpenSessionAndQueuedStackInOrder(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	if err := queue.Save(root, []queue.Item{
-		{Workflow: "sdlc", Project: "tele", Run: "fix-it"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sess, err := session.Open(root, "tele", "fix-it", "code")
-	if err != nil {
-		t.Fatalf("session.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Abandon(sess) })
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "sdlc:design [code running] [queued]") {
-		t.Fatalf("expected '[code running]' before '[queued]', got:\n%s", out.String())
 	}
 }
 

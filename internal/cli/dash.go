@@ -12,7 +12,6 @@ import (
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/queue"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -27,9 +26,9 @@ func init() {
 }
 
 // runDash is the cli/handler. Loads the inputs the dash package
-// needs (run scan, journal index, queue membership, open-session
-// list, per-run next-stage decisions, per-project twin configs) and
-// hands them to dash for assembly + render.
+// needs (run scan, journal index, open-session list, per-run
+// next-stage decisions, per-project twin configs) and hands them to
+// dash for assembly + render.
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -71,17 +70,8 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 
 	now := time.Now().UTC()
 
-	// Queue membership is best-effort decoration: a corrupt or missing
-	// queue.json silently yields no markers and the dash still renders.
-	// Loud errors on bad queue state belong in queue add/list/run.
-	queuedSet := make(map[dash.QueueKey]struct{})
-	if items, err := queue.Load(root); err == nil {
-		for _, it := range items {
-			queuedSet[dash.QueueKey{Workflow: it.Workflow, Project: it.Project, Run: it.Run}] = struct{}{}
-		}
-	}
-	// Open-session liveness is best-effort the same way: a `git
-	// worktree list` failure silently yields no markers.
+	// Open-session liveness is best-effort: a `git worktree list`
+	// failure silently yields no markers.
 	sessionDocsByRun := make(map[string][]string)
 	if ss, err := session.List(root); err == nil {
 		for _, s := range ss {
@@ -125,7 +115,6 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		WorkflowFilter:   *workflow,
 		Runs:             mds,
 		Index:            idx,
-		QueuedSet:        queuedSet,
 		SessionDocsByRun: sessionDocsByRun,
 		NextByRun:        nextByRun,
 	})

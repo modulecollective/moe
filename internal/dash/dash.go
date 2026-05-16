@@ -1,8 +1,8 @@
 // Package dash assembles the home-screen dashboard: runs, ideas, and
 // twin status, plus the factory-art header. The cli/dash.go entry
-// point gathers inputs (run scan, journal index, queue membership,
-// open-session list, per-run next-stage decisions, per-project twin
-// configs) and hands them to BuildRows / BuildTwinRows / Render here.
+// point gathers inputs (run scan, journal index, open-session list,
+// per-run next-stage decisions, per-project twin configs) and hands
+// them to BuildRows / BuildTwinRows / Render here.
 //
 // The package is pure over its inputs (with a couple of exceptions
 // that shell out to git for journal queries — RecentTwinSessions,
@@ -77,15 +77,6 @@ type Row struct {
 	Bucket     Bucket
 }
 
-// QueueKey identifies a queued (workflow, project, run) triple — the
-// shape `cli/queue.go` writes to .moe/queue.json. BuildRows uses it
-// to mark active rows that sit on the operator's playlist.
-type QueueKey struct {
-	Workflow string
-	Project  string
-	Run      string
-}
-
 // NextDecision is the per-run "what's next" decision the caller
 // pre-computes by asking its workflow registry. Stage is the bare
 // stage name (e.g. "code") when Done is false; both fields are zero
@@ -96,9 +87,9 @@ type NextDecision struct {
 }
 
 // Inputs is everything BuildRows needs. The caller computes most of
-// these once (run.Scan, run.BuildJournalIndex, the queue load, the
-// session list, the workflow-resolution loop) and threads the same
-// values into BuildTwinRows / Render to keep the hot path off-disk.
+// these once (run.Scan, run.BuildJournalIndex, the session list, the
+// workflow-resolution loop) and threads the same values into
+// BuildTwinRows / Render to keep the hot path off-disk.
 type Inputs struct {
 	Now              time.Time
 	All              bool
@@ -106,7 +97,6 @@ type Inputs struct {
 	WorkflowFilter   string
 	Runs             []*run.Metadata
 	Index            *run.JournalIndex
-	QueuedSet        map[QueueKey]struct{}
 	SessionDocsByRun map[string][]string
 	NextByRun        map[string]NextDecision // populated only for in-progress, non-idea runs.
 }
@@ -135,11 +125,6 @@ func BuildRows(in Inputs) ([]Row, error) {
 		b, note, stage, runningDoc := classify(md, last, in.Now, in.All, byRunKey, in.Index, in.SessionDocsByRun[md.ID], in.NextByRun)
 		if b == BucketNone {
 			continue
-		}
-		if b == BucketActiveRuns {
-			if _, ok := in.QueuedSet[QueueKey{Workflow: md.Workflow, Project: md.Project, Run: md.ID}]; ok {
-				note += " [queued]"
-			}
 		}
 		rows = append(rows, Row{
 			Project:    md.Project,
