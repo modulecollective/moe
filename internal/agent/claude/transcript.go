@@ -62,7 +62,7 @@ func CanonicalTranscriptPath(cwd, sessionID string) string {
 // <config>/projects/*/<sessionID>.jsonl rather than reconstructing the
 // encoded-cwd path: sessionID is a UUID so collisions across project
 // dirs are impossible, and the glob keeps the per-turn save into
-// thread.jsonl resilient to any drift in claude's cwd-encoding scheme.
+// thread-<agent>.jsonl resilient to any drift in claude's cwd-encoding scheme.
 func TranscriptPath(sessionID string) (string, error) {
 	root := ConfigDir()
 	if root == "" {
@@ -104,14 +104,14 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 	}
 	out, err := os.Create(dest)
 	if err != nil {
-		return false, fmt.Errorf("claude: create thread.jsonl: %w", err)
+		return false, fmt.Errorf("claude: create thread file: %w", err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		return false, fmt.Errorf("claude: copy transcript: %w", err)
 	}
 	if err := out.Close(); err != nil {
-		return false, fmt.Errorf("claude: close thread.jsonl: %w", err)
+		return false, fmt.Errorf("claude: close thread file: %w", err)
 	}
 	return true, nil
 }
