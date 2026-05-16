@@ -297,9 +297,8 @@ const testCanvasSkeleton = `# Test
 
 // runResume drives an already-opened sdlc run forward through whichever
 // of design/code/test is still pending and hands off to the next chain
-// prompt. Useful as a first-class operator verb (pick up an opened run
-// and ride it to the next gate without typing two stage commands) and
-// as the per-item entry point for `moe queue run`.
+// prompt. Useful as a first-class operator verb: pick up an opened run
+// and ride it to the next gate without typing two stage commands.
 //
 // Always interactive: invokes the next pending stage interactively;
 // the stage's existing chain prompt (`[Y/n/o…]` / `[N/m/p…]`) walks

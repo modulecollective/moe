@@ -2,19 +2,17 @@ package cli
 
 import (
 	"bufio"
-	"io"
 	"os"
 	"os/signal"
 	"sync"
-	"time"
 )
 
-// SIGINT in cooked mode (queue countdown, stage `[Y/n/o]`/`[N/m/p]` prompts)
-// gets the operator's "stop the queue / abort the chain" intent, not a
-// runtime-default process tear-down. Inside an interactive Claude session
-// the tty is in raw mode and Ctrl-C is delivered to claude as a byte —
-// that stays untouched by design (the operator's Ctrl-C inside an agent
-// is meant for the agent).
+// SIGINT in cooked mode (stage `[Y/n/o]`/`[N/m/p]` prompts) gets the
+// operator's "abort the chain" intent, not a runtime-default process
+// tear-down. Inside an interactive Claude session the tty is in raw
+// mode and Ctrl-C is delivered to claude as a byte — that stays
+// untouched by design (the operator's Ctrl-C inside an agent is
+// meant for the agent).
 //
 // The two helpers below are the shared shape: register a scoped
 // signal.Notify channel, select between it and stdin / a timer, return
@@ -98,35 +96,3 @@ var (
 	stdinReaderCached *bufio.Reader
 	stdinReaderBound  *os.File
 )
-
-// queueCountdownTick is the per-tick interval the walker uses between
-// countdown frames. var rather than const so tests can speed it up to
-// milliseconds; production stays at one second.
-var queueCountdownTick = 1 * time.Second
-
-// runCountdown ticks a counter from `seconds` down to zero, repainting
-// the line returned by `lineFn(n)` on each tick. Returns true if sigCh
-// fired during the wait (caller stops), false if the countdown ran to
-// completion (caller proceeds).
-//
-// Each tick rewrites the same line in place via \r so the countdown
-// collapses to one visible line. On signal or completion a final
-// newline is emitted so any subsequent output starts cleanly.
-//
-// `lineFn` owns the surrounding text — queue passes
-// `"queue: starting <head> in N…  (Ctrl-C to stop)"`, follow passes
-// `"follow: re-checking in N…  (Ctrl-C to exit)"`. Both shapes share
-// this dwell+ticker but their prefixes and trailers differ.
-func runCountdown(seconds int, lineFn func(n int) string, stdout io.Writer, sigCh <-chan os.Signal) bool {
-	for n := seconds; n > 0; n-- {
-		moePrintf(stdout, "\r%s", lineFn(n))
-		select {
-		case <-sigCh:
-			moePrintln(stdout, "")
-			return true
-		case <-time.After(queueCountdownTick):
-		}
-	}
-	moePrintln(stdout, "")
-	return false
-}

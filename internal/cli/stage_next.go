@@ -354,7 +354,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
-		// so the queue walker (or a standalone chain) can unwind.
+		// so the chain can unwind.
 		moePrintln(stdout, "^C")
 		return 0
 	}

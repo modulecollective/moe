@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -103,68 +102,6 @@ func TestReadLineWithSignalReturnsOnSignal(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("readLineWithSignal did not return after interrupt")
-	}
-}
-
-// queueCountdownLine is the production line shape queue's countdown
-// renders. Tests reuse it so an assertion drift is caught here, not in
-// the production format string.
-func queueCountdownLine(label string) func(n int) string {
-	return func(n int) string {
-		return fmt.Sprintf("queue: starting %s in %d…  (Ctrl-C to stop)", label, n)
-	}
-}
-
-// TestRunCountdownTicksThenReturnsFalse is the happy path: the
-// countdown runs to completion and reports stopped=false. With the
-// per-tick interval shrunk to 1ms, three ticks complete in milliseconds.
-func TestRunCountdownTicksThenReturnsFalse(t *testing.T) {
-	old := queueCountdownTick
-	queueCountdownTick = 1 * time.Millisecond
-	defer func() { queueCountdownTick = old }()
-
-	sig := make(chan os.Signal, 1)
-	var buf bytes.Buffer
-	stopped := runCountdown(3, queueCountdownLine("tele/x"), &buf, sig)
-	if stopped {
-		t.Fatalf("expected stopped=false on completed countdown")
-	}
-	for _, want := range []string{"in 3", "in 2", "in 1"} {
-		if !strings.Contains(buf.String(), want) {
-			t.Errorf("missing frame %q in output:\n%s", want, buf.String())
-		}
-	}
-}
-
-// TestRunCountdownReturnsTrueOnSignal pins the stop path: a write to
-// sigCh during the countdown causes runCountdown to return stopped=true
-// without printing all frames. The label is included so the operator
-// sees which item was about to dispatch.
-func TestRunCountdownReturnsTrueOnSignal(t *testing.T) {
-	old := queueCountdownTick
-	queueCountdownTick = 100 * time.Millisecond
-	defer func() { queueCountdownTick = old }()
-
-	sig := make(chan os.Signal, 1)
-	var buf bytes.Buffer
-	out := make(chan bool, 1)
-	go func() {
-		out <- runCountdown(3, queueCountdownLine("tele/x"), &buf, sig)
-	}()
-	// Let the countdown print its first frame and enter the select.
-	time.Sleep(50 * time.Millisecond)
-	sig <- os.Interrupt
-
-	select {
-	case stopped := <-out:
-		if !stopped {
-			t.Fatalf("expected stopped=true on signal")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("countdown did not return after signal")
-	}
-	if !strings.Contains(buf.String(), "tele/x") {
-		t.Errorf("expected label in output:\n%s", buf.String())
 	}
 }
 

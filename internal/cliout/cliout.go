@@ -4,9 +4,9 @@
 // these helpers and stays unstyled, so the operator can tell at a
 // glance which lines are moe talking vs. a subprocess.
 //
-// Lives in its own package so domain packages (push, sync, dash,
-// queue) can emit the same styled progress as cli without importing
-// cli or duplicating the SGR-aware writer detection.
+// Lives in its own package so domain packages (push, sync, dash)
+// can emit the same styled progress as cli without importing cli
+// or duplicating the SGR-aware writer detection.
 package cliout
 
 import (

@@ -223,16 +223,12 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 // promoteIdeaToSdlcRun opens a fresh sdlc run seeded by an idea's
 // canvas, marks the idea promoted, and returns the new run's metadata.
 // Mirrors the --from-idea path inside runNew without the --id /
-// title-override / one-shot-chain plumbing — the caller (queue add)
-// has no use for those today, and keeping this helper narrow makes the
-// shared promote semantics easy to reason about.
+// title-override / one-shot-chain plumbing — keeping this helper
+// narrow makes the shared promote semantics easy to reason about.
 //
 // agentName, when non-empty, is stamped onto the new run's
-// run.json.Agent — the queue-walker passes through whatever the
-// idea entry carried so an idea queued with `--agent codex` opens
-// a codex-driven sdlc run. Empty leaves the field unset and the
-// usual $MOE_AGENT → "claude" precedence ladder runs at first
-// stage turn.
+// run.json.Agent. Empty leaves the field unset and the usual
+// $MOE_AGENT → "claude" precedence ladder runs at first stage turn.
 func promoteIdeaToSdlcRun(root, projectID, ideaSlug, agentName string) (*run.Metadata, error) {
 	wf, err := LookupWorkflow("sdlc")
 	if err != nil {
@@ -274,8 +270,7 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug, agentName string) (*run.Met
 	if err := markIdeaPromoted(root, src, md); err != nil {
 		// New run already opened. Surface the warning via the returned
 		// metadata + error pair so callers can decide whether to abort
-		// or continue (queue add chooses to continue: the run is open
-		// and queueable, the idea is just not yet flipped to promoted).
+		// or continue.
 		return md, fmt.Errorf("warning: could not mark idea %s %s promoted: %w", src.Project, src.ID, err)
 	}
 	return md, nil

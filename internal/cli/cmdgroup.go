@@ -7,14 +7,15 @@ import (
 )
 
 // CommandGroup is a top-level verb that dispatches to nested
-// subcommands, e.g. `moe queue add` or `moe sdlc design`. It owns the
-// per-verb usage line and the subcommand dispatch table; nothing more.
-// The DAG of stages a workflow walks lives separately in Workflow —
-// CommandGroup carries no stage order, no prereqs, no dash presence.
+// subcommands, e.g. `moe sdlc design` or `moe project new`. It owns
+// the per-verb usage line and the subcommand dispatch table; nothing
+// more. The DAG of stages a workflow walks lives separately in
+// Workflow — CommandGroup carries no stage order, no prereqs, no
+// dash presence.
 //
 // Workflows pair a CommandGroup (for dispatch) with a Workflow (for
-// the stage ladder); non-workflow verbs like `queue` or `project` only
-// have a CommandGroup. See projects/moe/runs/arch-2-workflow-overload-*
+// the stage ladder); non-workflow verbs like `project` only have a
+// CommandGroup. See projects/moe/runs/arch-2-workflow-overload-*
 // for the design that split these.
 type CommandGroup struct {
 	Name     string

@@ -19,7 +19,7 @@ import (
 //  2. has a stage ladder Next can walk
 //  3. shows up in `moe dash`
 //
-// Verbs that miss any leg of the test (queue, project, session, twin)
+// Verbs that miss any leg of the test (project, session, twin)
 // live as plain CommandGroups; they have no Workflow at all.
 type Workflow struct {
 	Name       string
@@ -187,7 +187,7 @@ func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error)
 // M×N git forks (plus one journal-wide BuildJournalIndex scan) to
 // just the one scan. Passing nil restores the per-call fork shape,
 // which is the right answer for one-off callers (stage prompt,
-// follow, queue walker) that don't keep an index in scope. Same
+// follow) that don't keep an index in scope. Same
 // satisfaction rule either way: see stageSatisfied.
 func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.JournalIndex) (string, NextKind, error) {
 	switch md.Status {
