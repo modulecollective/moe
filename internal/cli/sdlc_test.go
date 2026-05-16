@@ -154,7 +154,7 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	code := openSdlcDesign("tele", "noop-cascade", true, "", &out, &errb)
+	code := openSdlcDesign("tele", "noop-cascade", true, false, "", &out, &errb)
 	// Non-zero exit is the cascade-blocking signal: runStageSession
 	// short-circuits before promptNextStage when the inner runWiki
 	// session returns non-zero, so the chain prompt never fires and

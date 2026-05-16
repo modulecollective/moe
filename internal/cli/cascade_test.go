@@ -108,13 +108,15 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 }
 
 // openSdlcStageInvocation records one openSdlcStage dispatch — the
-// stage name plus the (project, run) tuple. Tests assert on these
-// directly instead of an args slice; the rename run carved away the
+// stage name, the (project, run) tuple, and the next-stage
+// suppression flag. Tests assert on these directly instead of an
+// args slice; the rename run carved away the
 // `--one-shot` prefix that used to be the assertion target.
 type openSdlcStageInvocation struct {
-	stage     string
-	projectID string
-	runID     string
+	stage             string
+	projectID         string
+	runID             string
+	suppressNextStage bool
 }
 
 // stubOpenSdlcStage replaces openSdlcStage with a recorder for the
@@ -125,8 +127,8 @@ func stubOpenSdlcStage(t *testing.T, perStageExit map[string]int) *[]openSdlcSta
 	t.Helper()
 	var captured []openSdlcStageInvocation
 	prev := openSdlcStage
-	openSdlcStage = func(stage, projectID, runID string, _, _ io.Writer) int {
-		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID})
+	openSdlcStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openSdlcStage = prev })
@@ -182,8 +184,8 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 		}
 	}
 	for _, inv := range *captured {
-		if inv.projectID != "tele" || inv.runID != "fix-it" {
-			t.Fatalf("openSdlcStage args = %+v, want (tele, fix-it)", inv)
+		if inv.projectID != "tele" || inv.runID != "fix-it" || !inv.suppressNextStage {
+			t.Fatalf("openSdlcStage args = %+v, want (tele, fix-it, suppressNextStage=true)", inv)
 		}
 	}
 	// push was NOT dispatched.
@@ -228,6 +230,11 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	}
 	if got := countInvocations(*openCaptured, "push"); got != 0 {
 		t.Fatalf("push must not dispatch via openSdlcStage: got %d", got)
+	}
+	for _, inv := range *openCaptured {
+		if !inv.suppressNextStage {
+			t.Fatalf("cascade openSdlcStage args = %+v, want suppressNextStage=true", inv)
+		}
 	}
 	// push ship is a pushFromCascade call with the bare (project, run)
 	// args — merge path, no --pr flag.

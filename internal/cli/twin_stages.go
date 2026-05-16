@@ -56,23 +56,25 @@ func openTwinStageInteractive(stage, projectID, runID string, stdout, stderr io.
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	return runTwinStageSession(stage, projectID, runID, false, stdout, stderr)
+	return runTwinStageSession(stage, projectID, runID, false, false, stdout, stderr)
 }
 
 // openTwinStage is the Go-level seam behind the chain prompt's `o`
 // keystroke and the `!<stage>` / `!!` cascade driver for twin runs.
 // Identical contract to openSdlcStage one workflow over: switch on the
-// stage name, hand to the right helper, run headless. A `default`
-// branch surfaces an unknown-stage call as a stderr line rather than
+// stage name, hand to the right helper, run headless, and carry
+// suppressNextStage through to stageSessionOpts.SkipNextStage. A
+// `default` branch surfaces an unknown-stage call as a stderr line
+// rather than
 // silently routing somewhere wrong.
 //
 // Declared as a var and assigned in init() so the static reference
 // chain doesn't trip Go's init-order cycle checker — same shape
 // openSdlcStage uses, same reason.
-var openTwinStage func(stage, projectID, runID string, stdout, stderr io.Writer) int
+var openTwinStage func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
 
 func init() {
-	openTwinStage = func(stage, projectID, runID string, stdout, stderr io.Writer) int {
+	openTwinStage = func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
 		switch stage {
 		case "vision", "architecture", "patterns", "operations", "roadmap", "glossary", "finalize":
 			if code := requireTwinRun("twin "+stage, projectID, runID, stderr); code != 0 {
@@ -82,7 +84,7 @@ func init() {
 				moePrintf(stderr, "%v\n", err)
 				return 1
 			}
-			return runTwinStageSession(stage, projectID, runID, true, stdout, stderr)
+			return runTwinStageSession(stage, projectID, runID, true, suppressNextStage, stdout, stderr)
 		default:
 			moePrintf(stderr, "twin: openTwinStage: unknown stage %q\n", stage)
 			return 1
@@ -91,8 +93,8 @@ func init() {
 	// Register the dispatcher so generic chain-prompt / cascade code
 	// can reach twin stages via workflow name, not via a hardcoded
 	// switch on "sdlc".
-	registerHeadlessDispatcher("twin", func(stage, projectID, runID string, stdout, stderr io.Writer) int {
-		return openTwinStage(stage, projectID, runID, stdout, stderr)
+	registerHeadlessDispatcher("twin", func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
+		return openTwinStage(stage, projectID, runID, suppressNextStage, stdout, stderr)
 	})
 }
 
@@ -109,7 +111,7 @@ func init() {
 // InitialPrompt. Each stage sees the same payload — the design's "no
 // in-session iteration across docs, every stage reads the same
 // events list" contract.
-func runTwinStageSession(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+func runTwinStageSession(stage, projectID, runID string, headless bool, suppressNextStage bool, stdout, stderr io.Writer) int {
 	kickoff, err := buildTwinStageKickoff(stage, projectID, headless)
 	if err != nil {
 		moePrintf(stderr, "twin %s: %v\n", stage, err)
@@ -117,6 +119,7 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, stdout, 
 	}
 	opts := stageSessionOpts{
 		Headless:      headless,
+		SkipNextStage: suppressNextStage,
 		InitialPrompt: kickoff,
 		WikiBuilder: func(root string, md *run.Metadata) (*wiki.Config, error) {
 			return twinWikiBuilder(root, projectID)

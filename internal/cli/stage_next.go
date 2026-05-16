@@ -261,7 +261,7 @@ func renderPromptLegend(opts []promptOption) string {
 // shortcut jumps straight to the push prompt), and optional /x and /b
 // suffixes when scuttle / back are non-nil. Y still defaults so a
 // reflex Enter chains the next stage interactively, the same as before.
-// `o` invokes the next stage headless via openSdlcStage.
+// `o` invokes the next stage headless via the workflow dispatcher.
 // `b` re-invokes the just-finished stage interactively. `x` dispatches
 // the workflow's close command for the current run — the "abandon
 // ship" path the operator forms at the same surface they decline from.
@@ -370,7 +370,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
 	}
 	if offerOneShot && answer == "o" {
-		return dispatcher(next.Name, md.Project, md.ID, stdout, stderr)
+		return dispatcher(next.Name, md.Project, md.ID, false, stdout, stderr)
 	}
 	if offerSkipToPush && answer == "s" {
 		// Skip-to-push opens the push prompt directly without
@@ -622,11 +622,12 @@ type cascadeResult struct {
 // A destination at or behind startStage produces a no-op cascade and
 // exit 0.
 //
-// Each headless dispatch goes through openSdlcStage — same Go-level
-// seam the chain prompt's `o` keystroke uses — so stage-specific
+// Each headless dispatch goes through the workflow's registered
+// dispatcher — same Go-level seam the chain prompt's `o` keystroke
+// uses — so stage-specific
 // pre-flight (requireDesignCanvas, requireCodeCanvas, canvas skeleton
-// seeding) still fires. The inCascade flag suppresses each stage's
-// inner promptNextStage so the cascade owns routing.
+// seeding) still fires. The suppressNextStage flag suppresses each
+// stage's inner promptNextStage so the cascade owns routing.
 //
 // At push in yolo mode the dispatch is the merge path (pushCmd.Run with
 // no flags). `!!` defaults to fast-forward merge; runPushTyped writes the merge-path push note after deterministic hooks and
@@ -664,9 +665,6 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		moePrintf(stderr, "cascade: workflow %q has no headless dispatcher\n", md.Workflow)
 		return res, 1
 	}
-	prev := inCascade
-	inCascade = true
-	defer func() { inCascade = prev }()
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
@@ -707,7 +705,7 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 			res.shipped = true
 			continue
 		}
-		code := dispatcher(stage, md.Project, md.ID, stdout, stderr)
+		code := dispatcher(stage, md.Project, md.ID, true, stdout, stderr)
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code
@@ -789,9 +787,9 @@ func indexOfString(xs []string, s string) int {
 // registers so the chain prompt's `o` keystroke and the cascade driver
 // can drive a stage headless without a hardcoded switch on workflow
 // name. The contract matches openSdlcStage / openTwinStage exactly:
-// take (stage, projectID, runID, stdout, stderr), invoke the right
-// per-stage helper headless, return its exit code.
-type headlessDispatcher func(stage, projectID, runID string, stdout, stderr io.Writer) int
+// take (stage, projectID, runID, suppressNextStage, stdout, stderr),
+// invoke the right per-stage helper headless, return its exit code.
+type headlessDispatcher func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
 
 var headlessDispatchers = map[string]headlessDispatcher{}
 

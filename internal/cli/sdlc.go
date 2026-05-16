@@ -87,7 +87,7 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
+	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
@@ -108,7 +108,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
+	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
@@ -130,7 +130,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, *agentOverride, stdout, stderr)
+	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
@@ -142,13 +142,13 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 // path that used to be `--one-shot`; the flag is gone, but the Go
 // function still distinguishes the two so internal callers can ask
 // for the bounded one-turn variant without re-entering the parser.
-func openSdlcDesign(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc design", projectID, runID, stderr); code != 0 {
 		return code
 	}
 	if headless {
 		return runStageSession(projectID, runID, "design",
-			stageSessionOpts{Headless: true, Agent: agentOverride}, stdout, stderr)
+			stageSessionOpts{Headless: true, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
 	}
 	// The agent produces the user-facing cue itself: the interactive TUI
 	// has no way to pre-seed the input box with editable text, so instead
@@ -160,7 +160,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 		"design stands (fresh start vs. resumed) and ask what they'd like to " +
 		"work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "design",
-		stageSessionOpts{InitialPrompt: kickoff, Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{InitialPrompt: kickoff, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcCode is the Go-level seam behind `moe sdlc code`. See
@@ -170,7 +170,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 // run-validation step runs *before* the canvas check so a wrong-
 // project typo surfaces as "run not found" instead of sending the
 // operator off to run a design stage that's also going to fail.
-func openSdlcCode(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+func openSdlcCode(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc code", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -180,7 +180,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 	}
 	if headless {
 		return runStageSession(projectID, runID, "code",
-			stageSessionOpts{NeedsSandbox: true, Headless: true, Agent: agentOverride}, stdout, stderr)
+			stageSessionOpts{NeedsSandbox: true, Headless: true, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this code session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
@@ -188,7 +188,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 		"implementation stands (fresh start vs. resumed) and ask what they'd " +
 		"like to work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "code",
-		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff, Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
@@ -196,7 +196,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 // stands in for requireDesignCanvas, and the canvas skeleton wires
 // in so the agent's first read sees the structural shape it has to
 // fill.
-func openSdlcTest(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc test", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -209,6 +209,7 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 			stageSessionOpts{
 				NeedsSandbox:   true,
 				Headless:       true,
+				SkipNextStage:  suppressNextStage,
 				CanvasSkeleton: testCanvasSkeleton,
 				Agent:          agentOverride,
 			}, stdout, stderr)
@@ -222,6 +223,7 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 		stageSessionOpts{
 			NeedsSandbox:   true,
 			InitialPrompt:  kickoff,
+			SkipNextStage:  suppressNextStage,
 			CanvasSkeleton: testCanvasSkeleton,
 			Agent:          agentOverride,
 		}, stdout, stderr)
@@ -229,8 +231,10 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 
 // openSdlcStage routes the chain prompt's `o` keystroke and the
 // cascade driver's pre-push iteration to the right per-stage helper,
-// headless. Knowing the stage names statically (sdlc has three
-// headlessable stages — push is not one of them) is what lets a
+// headless, carrying suppressNextStage through to
+// stageSessionOpts.SkipNextStage. Knowing the stage names statically
+// (sdlc has three headlessable stages — push is not one of them) is
+// what lets a
 // switch beat a registry: the alternative is a typed-CLI re-entry
 // via `cmd.Run` with a flag prepended, which is the pattern the run
 // that removed `--one-shot` set out to retire.
@@ -248,27 +252,27 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 // checker. Closing the loop with a direct func declaration tipped
 // it into an init-cycle error; the var has no initializer
 // expression for the checker to follow.
-var openSdlcStage func(stage, projectID, runID string, stdout, stderr io.Writer) int
+var openSdlcStage func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
 
 func init() {
-	openSdlcStage = func(stage, projectID, runID string, stdout, stderr io.Writer) int {
+	openSdlcStage = func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
 		// Chain / cascade entry: no per-call --agent override. The run's
 		// persisted agent (from run.json) takes over inside
 		// runStageSession.
 		switch stage {
 		case "design":
-			return openSdlcDesign(projectID, runID, true, "", stdout, stderr)
+			return openSdlcDesign(projectID, runID, true, suppressNextStage, "", stdout, stderr)
 		case "code":
-			return openSdlcCode(projectID, runID, true, "", stdout, stderr)
+			return openSdlcCode(projectID, runID, true, suppressNextStage, "", stdout, stderr)
 		case "test":
-			return openSdlcTest(projectID, runID, true, "", stdout, stderr)
+			return openSdlcTest(projectID, runID, true, suppressNextStage, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "sdlc: openSdlcStage: unknown stage %q\n", stage)
 			return 1
 		}
 	}
-	registerHeadlessDispatcher("sdlc", func(stage, projectID, runID string, stdout, stderr io.Writer) int {
-		return openSdlcStage(stage, projectID, runID, stdout, stderr)
+	registerHeadlessDispatcher("sdlc", func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
+		return openSdlcStage(stage, projectID, runID, suppressNextStage, stdout, stderr)
 	})
 }
 
