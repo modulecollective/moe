@@ -362,6 +362,17 @@ func commonArgs(clonePath, systemPrompt string) []string {
 	// explicit add-dir set. read-only would block the canvas write
 	// every stage needs.
 	args = append(args, "--sandbox", "workspace-write")
+	// Interactive codex applies a stricter sandbox than `codex exec`
+	// for the project's `.git/` subtree — even with `--add-dir <clone>`,
+	// writes to `<clone>/.git/index.lock` fail EROFS during commit
+	// (verified across approval form, trust state, and stripped user
+	// config — the divergence is internal to codex). Selecting the
+	// `workspace-git` permissions profile re-grants `.git` writes
+	// inside project roots. The profile lives in the operator's
+	// `~/.codex/config.toml`; see README "Codex setup". `codex exec`
+	// doesn't need the override, but applying it uniformly keeps the
+	// operator-side config single-shape.
+	args = append(args, "-c", "default_permissions=workspace-git")
 	if clonePath != "" {
 		args = append(args, "--add-dir", clonePath)
 	}

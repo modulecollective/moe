@@ -89,6 +89,30 @@ export MOE_AGENT=codex
 
 `moe help` is the source of truth for the command surface.
 
+### Codex setup
+
+If you'll use the `codex` backend, add this profile block to
+`~/.codex/config.toml`:
+
+```toml
+[permissions.workspace-git.filesystem]
+":root" = "read"
+":tmpdir" = "write"
+
+[permissions.workspace-git.filesystem.":project_roots"]
+"." = "write"
+".git" = "write"
+```
+
+MoE selects it on every codex invocation with
+`-c default_permissions=workspace-git`. Without the block, interactive
+codex sessions in code stages fail EROFS on `<clone>/.git/index.lock`
+when committing — its sandbox protects the project's `.git/` subtree
+more strictly than the `codex exec` path does, and the per-run clone
+needs that subtree writable so the agent can commit. Headless
+(`codex exec`) and `claude` are unaffected; the profile is harmless
+for them.
+
 ---
 
 ## Workflows

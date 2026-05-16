@@ -162,6 +162,7 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
 		"--ask-for-approval never",
+		"-c default_permissions=workspace-git",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("args missing %q: %s", want, got)
@@ -254,6 +255,12 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 	if !containsPair(args, "--sandbox", "workspace-write") {
 		t.Errorf("args missing `--sandbox workspace-write` pair: %v", args)
 	}
+	// The workspace-git permissions profile must select even on the
+	// exec path — applied uniformly so the operator's config has a
+	// single shape.
+	if !containsPair(args, "-c", "default_permissions=workspace-git") {
+		t.Errorf("args missing `-c default_permissions=workspace-git` pair: %v", args)
+	}
 }
 
 // TestExecuteArgsInteractiveUsesApprovalNever: the interactive path
@@ -275,6 +282,13 @@ func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 	}
 	if !containsPair(args, "--sandbox", "workspace-write") {
 		t.Errorf("interactive path lost `--sandbox workspace-write`: %v", args)
+	}
+	// Sandbox-loosening fix for interactive codex: the workspace-git
+	// permissions profile must be selected so `.git/index.lock` writes
+	// during commit don't EROFS. Without this, the agent can edit but
+	// can't `git commit` inside the per-run clone.
+	if !containsPair(args, "-c", "default_permissions=workspace-git") {
+		t.Errorf("interactive path missing `-c default_permissions=workspace-git`: %v", args)
 	}
 	if strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Errorf("interactive path should keep sandbox enabled: %s", got)
