@@ -790,42 +790,46 @@ func TestPromptPushNextStageBangBangShips(t *testing.T) {
 	}
 }
 
-// TestPromptPushNextStageBangStageIsNoOp: `!<stage>` at the push
-// gate is a no-op — every stage is at or behind. The push command
-// must not dispatch; stderr surfaces a hint.
+// TestPromptPushNextStageBangStageIsNoOp: `!<stage>` and bare `!`
+// at the push gate are no-ops — every stage is at or behind. The
+// push command must not dispatch; stderr surfaces a hint.
 func TestPromptPushNextStageBangStageIsNoOp(t *testing.T) {
-	var ran bool
-	next := &Command{
-		Name: "push",
-		Run: func(_ []string, _, _ io.Writer) int {
-			ran = true
-			return 0
-		},
-	}
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	for _, input := range []string{"!test", "!"} {
+		t.Run(input, func(t *testing.T) {
+			var ran bool
+			next := &Command{
+				Name: "push",
+				Run: func(_ []string, _, _ io.Writer) int {
+					ran = true
+					return 0
+				},
+			}
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if _, err := io.WriteString(w, "!test\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if _, err := io.WriteString(w, input+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			oldStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = oldStdin })
 
-	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("push prompt exit=%d", code)
-	}
-	if ran {
-		t.Fatalf("!<stage> at push gate must not dispatch ship")
-	}
-	if !strings.Contains(stderr.String(), "at or behind the push gate") {
-		t.Fatalf("expected no-op hint on stderr, got: %q", stderr.String())
+			var stdout, stderr bytes.Buffer
+			if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+				t.Fatalf("push prompt exit=%d", code)
+			}
+			if ran {
+				t.Fatalf("%q at push gate must not dispatch ship", input)
+			}
+			if !strings.Contains(stderr.String(), "at or behind the push gate") {
+				t.Fatalf("expected no-op hint on stderr, got: %q", stderr.String())
+			}
+		})
 	}
 }
 
