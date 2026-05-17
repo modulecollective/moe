@@ -1,0 +1,11 @@
+{"type":"permission-mode","permissionMode":"auto","sessionId":"sess-1"}
+{"type":"file-history-snapshot","messageId":"m1","snapshot":{}}
+{"type":"user","timestamp":"2026-05-16T21:17:27.689Z","message":{"role":"user","content":"please look at the canvas"}}
+{"type":"assistant","timestamp":"2026-05-16T21:17:30.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"considering…"}]}}
+{"type":"assistant","timestamp":"2026-05-16T21:17:31.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-1","name":"Read","input":{"file_path":"/abs/path/canvas.md"}}]}}
+{"type":"user","timestamp":"2026-05-16T21:17:31.500Z","message":{"role":"user","content":[{"tool_use_id":"tu-1","type":"tool_result","content":"line1\nline2\nline3"}]}}
+{"type":"assistant","timestamp":"2026-05-16T21:17:32.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-2","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"user","timestamp":"2026-05-16T21:17:33.000Z","message":{"role":"user","content":[{"tool_use_id":"tu-2","type":"tool_result","content":"exit code 1\noops","is_error":true}]}}
+{"type":"assistant","timestamp":"2026-05-16T21:17:34.000Z","message":{"role":"assistant","content":[{"type":"text","text":"All set."}]}}
+{"type":"system","timestamp":"2026-05-16T21:17:35.000Z","subtype":"bridge_status","content":"/remote-control is active"}
+{"type":"queue-operation","operation":"enqueue","sessionId":"sess-1"}
