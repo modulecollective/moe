@@ -2,11 +2,9 @@ package cli
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/modulecollective/moe/internal/banner"
@@ -14,7 +12,6 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 func init() {
@@ -129,16 +126,6 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	twinConfigs, err := loadTwinConfigs(root, *project)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	twinRows, err := dash.BuildTwinRows(root, mds, idx, *project, twinConfigs)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
 	// Count *projects with at least one active run*, not active rows.
 	// The footer sentence is "N project(s) registered · M with active
 	// runs" — both numbers count projects. Bucketing (not md.Status)
@@ -161,29 +148,6 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	// are frequent, so we keep it to one line instead of a multi-line
 	// block.
 	banner.Dash(stdout, now)
-	dash.Render(stdout, now, rows, twinRows, projectCount, activeCount, *all, state, r)
+	dash.Render(stdout, now, rows, projectCount, activeCount, *all, state, r)
 	return 0
-}
-
-// loadTwinConfigs builds the per-project wiki.Config slice that
-// dash.BuildTwinRows consumes. Filters out projects whose
-// twinWikiBuilder errors or returns nil (no twin yet).
-func loadTwinConfigs(root, projectFilter string) ([]wiki.Config, error) {
-	matches, err := filepath.Glob(filepath.Join(root, "projects", "*", "project.json"))
-	if err != nil {
-		return nil, fmt.Errorf("dash: glob projects: %w", err)
-	}
-	var configs []wiki.Config
-	for _, m := range matches {
-		projectID := filepath.Base(filepath.Dir(m))
-		if projectFilter != "" && projectID != projectFilter {
-			continue
-		}
-		cfg, err := twinWikiBuilder(root, projectID)
-		if err != nil || cfg == nil {
-			continue
-		}
-		configs = append(configs, *cfg)
-	}
-	return configs, nil
 }

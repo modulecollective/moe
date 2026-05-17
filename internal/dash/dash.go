@@ -1,33 +1,27 @@
 // Package dash assembles the home-screen dashboard: runs, ideas, and
-// twin status, plus the factory-art header. The cli/dash.go entry
-// point gathers inputs (run scan, journal index, open-session list,
-// per-run next-stage decisions, per-project twin configs) and hands
-// them to BuildRows / BuildTwinRows / Render here.
+// the factory-art header. The cli/dash.go entry point gathers inputs
+// (run scan, journal index, open-session list, per-run next-stage
+// decisions) and hands them to BuildRows / Render here.
 //
-// The package is pure over its inputs (with a couple of exceptions
-// that shell out to git for journal queries — RecentTwinSessions,
-// CountProjects, and a glob inside BuildTwinRows). Refactoring the
-// cli command into thin glue lets a second caller (an HTTP shim, an
-// IDE plugin, a screen-recording snapshot) compose the same data
-// without going through `cli.Run`.
+// The package is pure over its inputs except for CountProjects, which
+// globs the projects/ tree. Refactoring the cli command into thin glue
+// lets a second caller (an HTTP shim, an IDE plugin, a screen-
+// recording snapshot) compose the same data without going through
+// `cli.Run`.
 package dash
 
 import (
 	"fmt"
 	"io"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/modulecollective/moe/internal/cliout"
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // IdeaWorkflow is the workflow name that the idea workflow uses on
@@ -46,10 +40,6 @@ const DormantCutoff = 30 * 24 * time.Hour
 // shows the newest N and lets the bureaucracy repo itself be the
 // archive.
 const CompletedCap = 10
-
-// TwinRecentCap is the per-project limit on the "recent: …" sub-line
-// under each TWIN row.
-const TwinRecentCap = 3
 
 // Bucket labels a row's section. Active runs (next stage to run) and
 // completed runs (pushed or terminal) live on different rails from
@@ -88,8 +78,8 @@ type NextDecision struct {
 
 // Inputs is everything BuildRows needs. The caller computes most of
 // these once (run.Scan, run.BuildJournalIndex, the session list, the
-// workflow-resolution loop) and threads the same values into
-// BuildTwinRows / Render to keep the hot path off-disk.
+// workflow-resolution loop) and threads the same values into Render
+// to keep the hot path off-disk.
 type Inputs struct {
 	Now              time.Time
 	All              bool
@@ -205,7 +195,13 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 		return BucketNone, "", "", ""
 	}
 	if dec.Done {
-		return BucketCompletedRuns, prefix + "done", "", ""
+		// The run has walked every stage but isn't terminal yet — it
+		// still needs an operator action (`moe <wf> close`) to land in
+		// COMPLETED. Keep it in ACTIVE with a `· close?` action hint,
+		// same shape as the `· reopen?` hint on closed sdlc runs.
+		// Twin is the canonical case (`done → close` is the only path);
+		// sdlc-without-push and kb hit the same shape.
+		return BucketActiveRuns, prefix + "done · close?", "done", ""
 	}
 	runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
 	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
@@ -319,201 +315,6 @@ func CountProjects(root string) (int, error) {
 	return len(matches), nil
 }
 
-// TwinRow is one project's twin status for the TWIN section. Kept
-// flat (not part of Row) because the twin is project-scoped, not
-// run-scoped.
-type TwinRow struct {
-	Project string
-	Note    string
-	Recents []TwinRecent // newest first, ≤ TwinRecentCap.
-}
-
-// TwinRecent is one twin session surfaced under a TwinRow. Sessions
-// have no run.json — they're identified by a synthetic
-// `<verb>-<timestamp>` slug recorded on commit trailers — so the dash
-// reads them straight off the journal.
-type TwinRecent struct {
-	Verb string    // "reflect" | "claim" — the slug prefix.
-	When time.Time // commit time of the latest commit in this session.
-}
-
-// BuildTwinRows scans the supplied per-project twin configs and emits
-// one row per project whose twin earns surfacing. Projects without an
-// on-disk twin contribute nothing — they're projects that haven't
-// bootstrapped yet, and the dash shouldn't pester the operator about
-// a feature they haven't opted into.
-//
-// configs is the cli's per-project wiki.Config (built via
-// twinWikiBuilder). projectFilter narrows the view to a single
-// project (empty = all); mds and idx are the cached scan + index
-// produced once in cli's runDash.
-func BuildTwinRows(root string, mds []*run.Metadata, idx *run.JournalIndex, projectFilter string, configs []wiki.Config) ([]TwinRow, error) {
-	var rows []TwinRow
-	for _, cfg := range configs {
-		if projectFilter != "" && cfg.Project != projectFilter {
-			continue
-		}
-		if _, err := os.Stat(cfg.ContentDir); err != nil {
-			continue
-		}
-		// Two independent signals can earn a row: an attention note
-		// (unrecorded edits / never reflected / staleness) and recent
-		// twin activity. Compute both, then admit the row if either
-		// has content — a healthy twin with recent reflects shouldn't
-		// vanish just because nothing needs the operator's attention.
-		recents, _ := RecentTwinSessions(root, cfg.Project, TwinRecentCap)
-		note := TwinStatusNote(cfg, mds, idx)
-		if note == "" && len(recents) == 0 {
-			continue
-		}
-		rows = append(rows, TwinRow{Project: cfg.Project, Note: note, Recents: recents})
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Project < rows[j].Project })
-	return rows, nil
-}
-
-// TwinStatusNote inspects a twin's checkpoint and unrecorded-edits
-// state and returns the line to render (or "" to suppress the row
-// entirely when the twin is fresh and has no decided edits pending).
-// Priority: unrecorded edits > never-reflected > stale > fresh.
-func TwinStatusNote(cfg wiki.Config, mds []*run.Metadata, idx *run.JournalIndex) string {
-	det, err := wiki.DetectUnrecordedEdits(cfg)
-	if err == nil && len(det.UnrecordedDocs) > 0 {
-		return fmt.Sprintf("unrecorded edits to %s — run `moe twin claim %s`",
-			strings.Join(det.UnrecordedDocs, ", "), cfg.Project)
-	}
-	cp, ok, err := wiki.ReadCheckpoint(cfg.ContentDir)
-	if err != nil {
-		return ""
-	}
-	if !ok || cp.LastIngestAt == "" {
-		return fmt.Sprintf("never reflected — run `moe twin reflect %s`", cfg.Project)
-	}
-	last, err := time.Parse(time.RFC3339, cp.LastIngestAt)
-	if err != nil {
-		return ""
-	}
-	since := ClosedRunsSinceCount(mds, idx, cfg.Project, last)
-	if since == 0 {
-		return ""
-	}
-	noun := "closed runs"
-	if since == 1 {
-		noun = "closed run"
-	}
-	return fmt.Sprintf("last reflected %s — %d %s since",
-		last.Format("2006-01-02"), since, noun)
-}
-
-// ClosedRunsSinceCount counts the project's closed/merged/promoted
-// runs whose last activity post-dates threshold. Pure over the cached
-// metadata + journal index.
-func ClosedRunsSinceCount(mds []*run.Metadata, idx *run.JournalIndex, projectID string, threshold time.Time) int {
-	count := 0
-	for _, md := range mds {
-		if md.Project != projectID {
-			continue
-		}
-		switch md.Status {
-		case run.StatusClosed, run.StatusMerged, run.StatusPromoted:
-		default:
-			continue
-		}
-		when := idx.LastActivity[md.ID]
-		if when.IsZero() {
-			continue
-		}
-		if when.After(threshold) {
-			count++
-		}
-	}
-	return count
-}
-
-// RecentTwinSessions reads twin sessions for a project off the journal
-// and returns the most recent `limit`, newest first. A session is a
-// group of commits sharing a `MoE-Run: <verb>-<timestamp>` slug; the
-// session's time is the latest commit time in the group. Path-scoped
-// to the project's twin dir so unrelated commits don't match.
-func RecentTwinSessions(root, projectID string, limit int) ([]TwinRecent, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	twinDir := filepath.Join("projects", projectID, wiki.TwinDirRel)
-	out, err := git.Output(root, "log", "--all",
-		"--all-match",
-		"--grep", "MoE-Workflow: twin",
-		"--grep", "MoE-Project: "+projectID,
-		"--format=%ct%x00%B%x1e",
-		"--", twinDir,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dash: git log twin sessions: %w", err)
-	}
-	type group struct {
-		when time.Time
-		verb string
-	}
-	groups := make(map[string]group)
-	for _, record := range strings.Split(out, "\x1e") {
-		record = strings.TrimLeft(record, "\n")
-		if record == "" {
-			continue
-		}
-		nul := strings.IndexByte(record, 0)
-		if nul < 0 {
-			continue
-		}
-		ts, err := strconv.ParseInt(record[:nul], 10, 64)
-		if err != nil {
-			continue
-		}
-		body := record[nul+1:]
-		slug := ""
-		for _, line := range strings.Split(body, "\n") {
-			line = strings.TrimSpace(line)
-			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
-				slug = strings.TrimSpace(v)
-				break
-			}
-		}
-		if slug == "" {
-			continue
-		}
-		verb := slug
-		if i := strings.IndexByte(slug, '-'); i > 0 {
-			verb = slug[:i]
-		}
-		when := time.Unix(ts, 0).UTC()
-		if cur, ok := groups[slug]; !ok || when.After(cur.when) {
-			groups[slug] = group{when: when, verb: verb}
-		}
-	}
-	out2 := make([]TwinRecent, 0, len(groups))
-	for _, g := range groups {
-		out2 = append(out2, TwinRecent{Verb: g.verb, When: g.when})
-	}
-	sort.Slice(out2, func(i, j int) bool { return out2[i].When.After(out2[j].When) })
-	if len(out2) > limit {
-		out2 = out2[:limit]
-	}
-	return out2, nil
-}
-
-// FormatRecents renders the "recent: …" continuation cell for a
-// TwinRow. Each entry is "<verb> <HumanAgo>"; entries are joined with
-// ", " in the order passed in (caller guarantees newest-first).
-func FormatRecents(now time.Time, recents []TwinRecent) string {
-	if len(recents) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(recents))
-	for _, r := range recents {
-		parts = append(parts, fmt.Sprintf("%s %s", r.Verb, HumanAgo(now, r.When)))
-	}
-	return "recent: " + strings.Join(parts, ", ")
-}
-
 // FactoryStateFromRows folds dashboard rows into the data the art
 // reads. Active stations come straight off the rows in their existing
 // recency-sorted order, carrying both the parked stage and (when a
@@ -538,21 +339,20 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 }
 
 // Render prints the full dashboard: factory art, three sections
-// (ACTIVE, BACKLOG, COMPLETED), the optional TWIN section, and the
-// footer. tabwriter aligns columns per section so a long idea title
-// doesn't widen the run rows. COMPLETED is capped at CompletedCap
-// unless showAll is set.
+// (ACTIVE, BACKLOG, COMPLETED), and the footer. tabwriter aligns
+// columns per section so a long idea title doesn't widen the run
+// rows. COMPLETED is capped at CompletedCap unless showAll is set.
 //
 // The dash banner (rendered upstream of Render by the CLI handler)
 // carries the render timestamp; Render itself no longer prints a
-// title line. `now` is still threaded through for HumanAgo /
-// FormatRecents inside the per-row decoration.
+// title line. `now` is still threaded through for HumanAgo inside
+// the per-row decoration.
 //
 // activeCount is the number of *projects* with at least one active
 // run — not the count of active rows. The footer reads "N project(s)
 // registered · M with active runs", so both numbers count projects.
 // The ACTIVE section header already exposes the row count.
-func Render(w io.Writer, now time.Time, rows []Row, twinRows []TwinRow, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
+func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
 	for _, line := range BuildFactoryArt(state, ArtWidth, r) {
 		fmt.Fprintln(w, line)
 	}
@@ -613,24 +413,6 @@ func Render(w io.Writer, now time.Time, rows []Row, twinRows []TwinRow, projectC
 		tw.Flush()
 	}
 	fmt.Fprintln(w)
-
-	if len(twinRows) > 0 {
-		cliout.Printf(w, "TWIN (%d)\n", len(twinRows))
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, r := range twinRows {
-			recentLine := FormatRecents(now, r.Recents)
-			if r.Note == "" {
-				fmt.Fprintf(tw, "  %s\t%s\n", r.Project, recentLine)
-				continue
-			}
-			fmt.Fprintf(tw, "  %s\t%s\n", r.Project, r.Note)
-			if recentLine != "" {
-				fmt.Fprintf(tw, "  %s\t%s\n", "", recentLine)
-			}
-		}
-		tw.Flush()
-		fmt.Fprintln(w)
-	}
 
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
 }

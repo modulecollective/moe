@@ -665,6 +665,11 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		moePrintf(stderr, "cascade: workflow %q has no headless dispatcher\n", md.Workflow)
 		return res, 1
 	}
+	g, err := LookupGroup(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return res, 1
+	}
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
@@ -709,6 +714,24 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code
+		}
+	}
+	// `!!` for a workflow without push (twin today) auto-closes the run
+	// after the last stage commits — same operator intent as the sdlc
+	// push branch above ("cascade and terminate"), just routed through
+	// close instead of push. sdlc set res.shipped=true in the push branch
+	// already, so the gate skips it there. --no-edit keeps the close
+	// non-interactive (followups.md harvests as-is); a hands-off cascade
+	// should never block on an editor.
+	if yolo && !res.shipped {
+		if closeCmd := g.Lookup("close"); closeCmd != nil {
+			moePrintf(stdout, "cascade: close (headless)\n")
+			code := closeCmd.Run([]string{"--no-edit", md.Project, md.ID}, stdout, stderr)
+			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: code})
+			if code != 0 {
+				return res, code
+			}
+			res.shipped = true
 		}
 	}
 	return res, 0

@@ -246,6 +246,165 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	}
 }
 
+// openTwinStageInvocation mirrors openSdlcStageInvocation for the
+// twin headless dispatcher: stage name, (project, run), suppression.
+type openTwinStageInvocation struct {
+	stage             string
+	projectID         string
+	runID             string
+	suppressNextStage bool
+}
+
+// stubOpenTwinStage swaps openTwinStage for a recorder so cascade tests
+// can drive twin yolo runs without invoking real stage sessions.
+// perStageExit pins a non-zero exit for a named stage when needed.
+func stubOpenTwinStage(t *testing.T, perStageExit map[string]int) *[]openTwinStageInvocation {
+	t.Helper()
+	var captured []openTwinStageInvocation
+	prev := openTwinStage
+	openTwinStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, suppressNextStage})
+		return perStageExit[stage]
+	}
+	t.Cleanup(func() { openTwinStage = prev })
+	return &captured
+}
+
+// closeCommandInvocation records one cascade-side close dispatch — the
+// args the cascade passed (today: ["--no-edit", project, run]) and the
+// stub's chosen exit.
+type closeCommandInvocation struct {
+	args []string
+	exit int
+}
+
+// stubGroupCloseCommand replaces the workflow group's close command
+// with a recorder. The cascade reaches close via LookupGroup → Lookup,
+// so swapping the entry on the live group is the smallest seam that
+// catches the dispatch without standing up the real close machinery
+// (state guards, repo lock, commit).
+func stubGroupCloseCommand(t *testing.T, workflow string, exit int) *[]closeCommandInvocation {
+	t.Helper()
+	g, err := LookupGroup(workflow)
+	if err != nil {
+		t.Fatalf("LookupGroup(%q): %v", workflow, err)
+	}
+	prev := g.commands["close"]
+	var captured []closeCommandInvocation
+	g.commands["close"] = &Command{
+		Name: "close",
+		Run: func(args []string, _, _ io.Writer) int {
+			captured = append(captured, closeCommandInvocation{args: append([]string(nil), args...), exit: exit})
+			return exit
+		},
+	}
+	t.Cleanup(func() { g.commands["close"] = prev })
+	return &captured
+}
+
+// TestCascadeFromGateTwinYoloAutoCloses pins the twin `!!` shape: a
+// twin cascade walks every reflect stage and then auto-closes the run.
+// sdlc's push branch is the equivalent terminator; twin has no push, so
+// the post-loop close dispatch handles "cascade and terminate" for
+// workflows where `done → close` is the only path. --no-edit keeps
+// the close non-interactive (followups harvested as-is).
+func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
+	stageCaptured := stubOpenTwinStage(t, nil)
+	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
+	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "", md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("twin !! cascade must ship via close: %+v", res)
+	}
+	wantSteps := []string{"vision", "architecture", "patterns", "operations", "roadmap", "glossary", "finalize", "close"}
+	if len(res.ran) != len(wantSteps) {
+		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
+	}
+	for i, s := range wantSteps {
+		if res.ran[i].stage != s {
+			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+		}
+	}
+	// Each reflect stage dispatched once via openTwinStage.
+	for _, stage := range wantSteps[:len(wantSteps)-1] {
+		got := 0
+		for _, inv := range *stageCaptured {
+			if inv.stage == stage {
+				got++
+			}
+		}
+		if got != 1 {
+			t.Fatalf("stage %s dispatched %d times via openTwinStage, want 1", stage, got)
+		}
+	}
+	// close must NOT go through openTwinStage — it's not a reflect stage.
+	for _, inv := range *stageCaptured {
+		if inv.stage == "close" {
+			t.Fatalf("close must not dispatch via openTwinStage: %+v", inv)
+		}
+	}
+	// close received --no-edit plus the (project, run) tuple.
+	if len(*closeCaptured) != 1 {
+		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
+	}
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe reflect-2026-05-17"; got != want {
+		t.Fatalf("close args = %q, want %q", got, want)
+	}
+	// Summary ends with the close step and the shipped marker.
+	wantSummary := "cascade: vision ok · architecture ok · patterns ok · operations ok · roadmap ok · glossary ok · finalize ok · close ok — shipped"
+	if got := renderCascadeSummary(res); got != wantSummary {
+		t.Fatalf("summary = %q, want %q", got, wantSummary)
+	}
+}
+
+// TestCascadeFromGateTwinBangStageDoesNotClose: a non-yolo
+// `!<stage>` cascade for twin must not dispatch close — the operator
+// asked for a partial walk, not a "complete the run" gesture. close is
+// reserved for `!!`.
+func TestCascadeFromGateTwinBangStageDoesNotClose(t *testing.T) {
+	stubOpenTwinStage(t, nil)
+	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
+	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "finalize", md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if res.shipped {
+		t.Fatalf("!<stage> cascade must not ship: %+v", res)
+	}
+	if len(*closeCaptured) != 0 {
+		t.Fatalf("close must not dispatch on !<stage>: %+v", *closeCaptured)
+	}
+}
+
+// TestCascadeFromGateTwinYoloStopsOnStageFailure: a failing reflect
+// stage stops the cascade — close must not fire. Mirrors the
+// sdlc-stops-on-failure invariant one workflow over.
+func TestCascadeFromGateTwinYoloStopsOnStageFailure(t *testing.T) {
+	stubOpenTwinStage(t, map[string]int{"patterns": 1})
+	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
+	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "", md, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
+	}
+	if res.shipped {
+		t.Fatalf("a stopped cascade must not mark shipped: %+v", res)
+	}
+	if len(*closeCaptured) != 0 {
+		t.Fatalf("close must not dispatch after a stage failure: %+v", *closeCaptured)
+	}
+}
+
 // TestCascadeFromGateStopsOnFailure: the first non-zero exit stops
 // the cascade and surfaces the failure in the summary. Stages
 // downstream of the failure never dispatch.

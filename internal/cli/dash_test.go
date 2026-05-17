@@ -12,11 +12,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 func writeContent(t *testing.T, root, projectID, runID, docID, body string) {
@@ -254,13 +252,13 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	}
 }
 
-// TestDashKBRunAfterSummarizeShowsDone is the regression for the
-// disappearing-KB-run bug: a KB run that's walked the full ladder
-// (research + summarize) has Next()==Done but Status==InProgress (KB
-// has no push), and must still render as "done" — landing in
-// COMPLETED. summarize is the terminal stage in the wiki-engine
-// reshape; signing it is publication.
-func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
+// TestDashKBRunAfterSummarizeShowsDoneNeedsClose: a KB run that's
+// walked the full ladder (research + summarize) has Next()==Done but
+// Status==InProgress (KB has no push). The run still needs an operator
+// action (`moe kb close`) to land in COMPLETED, so dash surfaces it in
+// ACTIVE with a `· close?` action hint — same shape as the `· reopen?`
+// hint on closed sdlc runs.
+func TestDashKBRunAfterSummarizeShowsDoneNeedsClose(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -277,11 +275,11 @@ func TestDashKBRunAfterSummarizeShowsDone(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED (1)") {
-		t.Fatalf("expected KB run to stay visible after summarize, got:\n%s", got)
+	if !strings.Contains(got, "ACTIVE (1)") {
+		t.Fatalf("expected done KB run to surface in ACTIVE awaiting close, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "lookup", "kb:done") {
-		t.Fatalf("expected KB run row with stage 'kb:done', got:\n%s", got)
+	if !strings.Contains(got, "kb:done · close?") {
+		t.Fatalf("expected 'kb:done · close?' action hint, got:\n%s", got)
 	}
 }
 
@@ -790,354 +788,6 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 		if !strings.Contains(got, slug) {
 			t.Fatalf("expected %q to render under --all, got:\n%s", slug, got)
 		}
-	}
-}
-
-// seedTwinSession writes a touched file under projects/<project>/digital-twin/
-// and commits it with a twin-rail trailer block, simulating one of the
-// commits a real reflect/lint/claim session lays down. dash's
-// recentTwinSessions scans these by `MoE-Workflow: twin` plus the
-// project path scope, so the trailer set has to match what the
-// production facades commit.
-func seedTwinSession(t *testing.T, root, projectID, slug, docID string, when time.Time) {
-	t.Helper()
-	twinDir := filepath.Join(root, "projects", projectID, "digital-twin")
-	if err := os.MkdirAll(twinDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// One file per commit so each twin session is a real path-scoped
-	// commit, not an --allow-empty stub. Use the slug as the marker so
-	// repeated calls to the same slug append distinct content.
-	marker := filepath.Join(twinDir, "log.md")
-	body := fmt.Sprintf("- %s touched %s\n", slug, when.Format(time.RFC3339))
-	f, err := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(body); err != nil {
-		f.Close()
-		t.Fatal(err)
-	}
-	f.Close()
-	gittest.Run(t, root, "add",
-		filepath.Join("projects", projectID, "digital-twin", "log.md"))
-	trailers := fmt.Sprintf("MoE-Run: %s\nMoE-Project: %s\nMoE-Workflow: twin\nMoE-Document: %s",
-		slug, projectID, docID)
-	trailerstest.CommitTrailer(t, root, "twin: "+slug, trailers, when)
-}
-
-// seedTwinProject sets up a project.json + bare digital-twin/ dir so
-// buildTwinRows emits a row for it. Without a checkpoint the row's
-// note is "never reflected", which is enough to exercise the recent
-// sub-line.
-func seedTwinProject(t *testing.T, root, projectID string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "projects", projectID, "digital-twin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(root, "projects", projectID, "project.json"),
-		[]byte(`{"id":"`+projectID+`"}`),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestDashTwinNoSessionsSuppressesContinuation: a project with a twin
-// dir but no twin commits renders the freshness line only — no
-// "recent: …" continuation line.
-func TestDashTwinNoSessionsSuppressesContinuation(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "TWIN (1)") {
-		t.Fatalf("expected TWIN section, got:\n%s", got)
-	}
-	if !strings.Contains(got, "never reflected") {
-		t.Fatalf("expected freshness line for unbootstrapped twin, got:\n%s", got)
-	}
-	if strings.Contains(got, "recent:") {
-		t.Fatalf("did not expect a recent sub-line with no twin commits, got:\n%s", got)
-	}
-}
-
-// TestDashTwinFreshTwinShowsRecents: a project with a valid checkpoint
-// (no unrecorded edits, no closed runs since) and recent twin commits
-// renders a single TWIN row with the recents inline. The attention
-// path is silent, so the recents line *is* the row — no synthetic
-// "fresh — last reflected …" prefix, no two-line shape.
-func TestDashTwinFreshTwinShowsRecents(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-	// Checkpoint dated yesterday: twinStatusNote returns "" because
-	// there are no closed runs since and DetectUnrecordedEdits sees no
-	// managed-doc commits in the bureaucracy.
-	if err := wiki.WriteCheckpoint(
-		filepath.Join(root, "projects", "moe", "digital-twin"),
-		wiki.Checkpoint{
-			Version:      wiki.CheckpointVersion,
-			LastIngestAt: time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339),
-			Project:      "moe",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	now := time.Now().UTC()
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "reflect", now.Add(-3*time.Hour))
-	seedTwinSession(t, root, "moe", "lint-2026-04-29-110000", "lint", now.Add(-2*time.Hour))
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-120000", "reflect", now.Add(-1*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "TWIN (1)") {
-		t.Fatalf("expected TWIN section for fresh twin with recents, got:\n%s", got)
-	}
-	if !strings.Contains(got, "recent:") {
-		t.Fatalf("expected recents line on the fresh row, got:\n%s", got)
-	}
-	for _, banned := range []string{"never reflected", "last reflected", "unrecorded edits"} {
-		if strings.Contains(got, banned) {
-			t.Fatalf("unexpected attention text %q on a fresh row, got:\n%s", banned, got)
-		}
-	}
-	// The single-line shape puts the project id and the recents text on
-	// the same line — no continuation row with a blank project column.
-	var freshLine string
-	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "recent:") {
-			freshLine = line
-			break
-		}
-	}
-	fields := strings.Fields(freshLine)
-	if len(fields) == 0 || fields[0] != "moe" {
-		t.Fatalf("expected the recents line to lead with the project id 'moe', got %q in:\n%s", freshLine, got)
-	}
-}
-
-// TestDashTwinFreshAndNoRecentsSuppressesRow: a fresh checkpoint and
-// no twin commits in the journal — both signals are empty — drops the
-// row. With moe as the only twin project, the whole TWIN section
-// vanishes. Pins the both-empty case so a future change can't bring
-// back a content-less row.
-func TestDashTwinFreshAndNoRecentsSuppressesRow(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-	if err := wiki.WriteCheckpoint(
-		filepath.Join(root, "projects", "moe", "digital-twin"),
-		wiki.Checkpoint{
-			Version:      wiki.CheckpointVersion,
-			LastIngestAt: time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339),
-			Project:      "moe",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if strings.Contains(got, "TWIN (") {
-		t.Fatalf("expected no TWIN section when both signals are empty, got:\n%s", got)
-	}
-}
-
-// TestDashTwinRecentListsVerbsNewestFirst: three twin sessions
-// (reflect, lint, claim) at distinct times produce a "recent: …"
-// continuation line listing the verbs newest-first.
-func TestDashTwinRecentListsVerbsNewestFirst(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-
-	now := time.Now().UTC()
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "reflect", now.Add(-3*time.Hour))
-	seedTwinSession(t, root, "moe", "lint-2026-04-29-110000", "lint", now.Add(-2*time.Hour))
-	seedTwinSession(t, root, "moe", "claim-2026-04-29-120000", "claim", now.Add(-1*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	tail := recentLine(got)
-	if tail == "" {
-		t.Fatalf("expected a recent sub-line, got:\n%s", got)
-	}
-	claimIdx := strings.Index(tail, "claim ")
-	lintIdx := strings.Index(tail, "lint ")
-	reflectIdx := strings.Index(tail, "reflect ")
-	if claimIdx < 0 || lintIdx < 0 || reflectIdx < 0 {
-		t.Fatalf("missing one of the verbs claim=%d lint=%d reflect=%d in %q",
-			claimIdx, lintIdx, reflectIdx, tail)
-	}
-	if !(claimIdx < lintIdx && lintIdx < reflectIdx) {
-		t.Fatalf("expected newest-first ordering claim < lint < reflect, got %d %d %d in %q",
-			claimIdx, lintIdx, reflectIdx, tail)
-	}
-}
-
-// recentLine returns the first "recent: …" sub-line in dash output,
-// trimmed to that line. Returns "" if no such line exists.
-func recentLine(out string) string {
-	idx := strings.Index(out, "recent:")
-	if idx < 0 {
-		return ""
-	}
-	tail := out[idx:]
-	if nl := strings.Index(tail, "\n"); nl >= 0 {
-		tail = tail[:nl]
-	}
-	return tail
-}
-
-// TestDashTwinRecentCapsAtThree: more than three twin sessions still
-// renders only the three newest. Older sessions stay on the journal —
-// the cap is hard, no `--all` lift, since twin activity isn't
-// "dormant" the way runs are.
-func TestDashTwinRecentCapsAtThree(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-
-	now := time.Now().UTC()
-	// Five sessions; oldest two should drop. Distinct slugs so each
-	// counts as its own session group.
-	seedTwinSession(t, root, "moe", "reflect-2026-04-25-100000", "reflect", now.Add(-5*time.Hour))
-	seedTwinSession(t, root, "moe", "reflect-2026-04-26-100000", "reflect", now.Add(-4*time.Hour))
-	seedTwinSession(t, root, "moe", "lint-2026-04-27-100000", "lint", now.Add(-3*time.Hour))
-	seedTwinSession(t, root, "moe", "claim-2026-04-28-100000", "claim", now.Add(-2*time.Hour))
-	seedTwinSession(t, root, "moe", "lint-2026-04-29-100000", "lint", now.Add(-1*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	recentIdx := strings.Index(got, "recent:")
-	if recentIdx < 0 {
-		t.Fatalf("expected a recent sub-line, got:\n%s", got)
-	}
-	// Slice off the rest of the recent line through the next newline.
-	tail := got[recentIdx:]
-	if nl := strings.Index(tail, "\n"); nl >= 0 {
-		tail = tail[:nl]
-	}
-	// Three verb tokens, separated by ", " — count commas as the proxy
-	// (two commas → three entries). Anything more means the cap leaked.
-	if got, want := strings.Count(tail, ", "), 2; got != want {
-		t.Fatalf("expected %d separators (3 verbs), got %d in %q", want, got, tail)
-	}
-}
-
-// TestDashTwinGroupsCommitsBySlug: multiple commits sharing the same
-// MoE-Run slug count as one session. The session's "when" is the
-// latest commit's time, so the verb appears once at that timestamp,
-// not three times.
-func TestDashTwinGroupsCommitsBySlug(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "moe")
-
-	now := time.Now().UTC()
-	// One reflect session lays three commits across its run (per-doc
-	// turns + the finalize commit). The dash should fold them into one
-	// "reflect" entry, not three.
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "vision", now.Add(-3*time.Hour))
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "architecture", now.Add(-2*time.Hour))
-	seedTwinSession(t, root, "moe", "reflect-2026-04-29-100000", "operations", now.Add(-1*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	recentIdx := strings.Index(got, "recent:")
-	if recentIdx < 0 {
-		t.Fatalf("expected a recent sub-line, got:\n%s", got)
-	}
-	tail := got[recentIdx:]
-	if nl := strings.Index(tail, "\n"); nl >= 0 {
-		tail = tail[:nl]
-	}
-	if n := strings.Count(tail, "reflect "); n != 1 {
-		t.Fatalf("expected exactly one 'reflect' entry, got %d in %q", n, tail)
-	}
-	if strings.Contains(tail, ", ") {
-		t.Fatalf("expected single grouped entry, got list in %q", tail)
-	}
-}
-
-// TestDashTwinRecentScopedToProject: a twin commit on a different
-// project must not leak into another project's recent sub-line. Each
-// row is keyed by project, and the path-scope on the git query should
-// guarantee that.
-func TestDashTwinRecentScopedToProject(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	seedTwinProject(t, root, "alpha")
-	seedTwinProject(t, root, "beta")
-
-	now := time.Now().UTC()
-	seedTwinSession(t, root, "alpha", "reflect-2026-04-29-100000", "reflect", now.Add(-1*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	// alpha's row should have a recent line; beta's row should not —
-	// the path-scoped git query on each project's twin dir keeps them
-	// independent. Counting "recent:" lines is the cheap proof.
-	if n := strings.Count(got, "recent:"); n != 1 {
-		t.Fatalf("expected exactly one recent: line (alpha only), got %d in:\n%s", n, got)
-	}
-	tail := recentLine(got)
-	if !strings.Contains(tail, "reflect ") {
-		t.Fatalf("expected alpha's recent line to mention reflect, got %q", tail)
 	}
 }
 
