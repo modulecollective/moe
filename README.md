@@ -56,8 +56,6 @@ The feedback loop is the product:
 - Future humans and agents start with better context than the last run
   had.
 
----
-
 ## Install
 
 Requires Go 1.26+ and [Claude Code](https://claude.com/claude-code) on
@@ -114,8 +112,6 @@ needs that subtree writable so the agent can commit. Headless
 (`codex exec`) and `claude` are unaffected; the profile is harmless
 for them.
 
----
-
 ## Workflows
 
 A workflow is a short stage DAG with one canonical document per stage.
@@ -146,8 +142,6 @@ moe sdlc push --pr tele add-batch-support   # open a PR against the target repo
 loose ideas without starting a run. Followups discovered during work
 can flow back into the backlog, and twin/kb passes keep project memory
 fresh without turning documentation into a separate manual job.
-
----
 
 ## How it works
 
@@ -184,8 +178,6 @@ fresh without turning documentation into a separate manual job.
   `claude -p`. Either way it is the real CLI, real OAuth, and one
   human driver.
 
----
-
 ## Status
 
 Pre-1.0 and under active development. The command surface, file
@@ -195,14 +187,12 @@ but expect sharp edges.
 
 ## Contributing
 
-Not accepting issues or PRs right now. This is one operator's tool,
-shared in case it's useful.
+Don't :-) Not accepting issues or PRs right now. This is one firm's
+internal tool, shared in case it's useful.
 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
-
----
 
 ## References
 
