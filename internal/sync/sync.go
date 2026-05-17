@@ -28,6 +28,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 // GitmoduleEntry is the parsed shape of one [submodule "..."] stanza
@@ -199,9 +200,20 @@ func GitlinkSHA(root, subPath string) (string, error) {
 // or with local commits diverged from origin.
 func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (*Bump, error) {
 	subAbs := filepath.Join(root, e.Path)
+	// Cold submodule: materialize it before fetching. Without this,
+	// sync silently no-ops on projects that no one has opened a stage
+	// against yet, and the operator only finds out at first stage open.
+	// project.EnsureMaterialized is the universal "ensure before touch"
+	// gate (see internal/project/materialize.go); it short-circuits when
+	// src is already populated.
+	if id := ProjectIDForSubmodulePath(e.Path); id != "" {
+		if err := project.EnsureMaterialized(root, id); err != nil {
+			return nil, fmt.Errorf("moe sync: %w", err)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(subAbs, ".git")); err != nil {
-		// Submodule not checked out. Skip — `git submodule update --init`
-		// is the operator's move, not ours.
+		// Not a projects/<id>/src layout (or materialize didn't take):
+		// nothing to fast-forward.
 		return nil, nil
 	}
 

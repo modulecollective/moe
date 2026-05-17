@@ -193,6 +193,18 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
+	// Materialize the project's submodule before anything else. Every
+	// stage either reads source directly (twin/kb wiki ingest), drives
+	// a sandbox clone (code/test), or kicks off an agent whose first
+	// action is usually a project-side read. Cold projects hit one
+	// `git submodule update --init --recursive`; warm projects pay one
+	// os.ReadDir. Failures surface as *project.SubmoduleInitError with
+	// the verbatim retry command — same shape sandbox used to emit.
+	if err := project.EnsureMaterialized(root, projectID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
 	// Run-scoped state captured by closure. md is pre-loaded from the
 	// canonical root so the entry banner can name md.Workflow before
 	// the session worktree opens; BuildSpec uses the same pointer and

@@ -23,13 +23,14 @@
 // into `.git/modules/...`), so the agent can write across cwd /
 // add-dir freely.
 //
-// First-touch on a fresh machine: if `<root>/projects/<project>/src/`
-// is an empty submodule mountpoint and the bureaucracy's .gitmodules
-// declares its url, Ensure runs `git submodule update --init` for that
-// one submodule before cloning. A failed init surfaces a
-// SubmoduleInitError carrying the verbatim retry command, so the
-// operator can copy it into a shell once the underlying issue (auth,
-// network, URL) is resolved.
+// First-touch on a fresh machine: project.EnsureMaterialized owns the
+// auto-init pre-flight — if `<root>/projects/<project>/src/` is an
+// empty submodule mountpoint and the bureaucracy's .gitmodules
+// declares its url, it runs `git submodule update --init --recursive`
+// for that one submodule. A failed init surfaces a
+// project.SubmoduleInitError carrying the verbatim retry command, so
+// the operator can copy it into a shell once the underlying issue
+// (auth, network, URL) is resolved.
 package sandbox
 
 import (
@@ -37,37 +38,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 )
 
-// SubmoduleInitError is returned by Ensure / EnsureAt when the source
-// submodule mount-point exists but is not initialised on this machine
-// and the auto-init shell-out failed. The CLI catches it via errors.As
-// to print a retry hint that the operator can paste into a shell.
-type SubmoduleInitError struct {
-	Root      string
-	ProjectID string
-	Output    string
-	Err       error
-}
-
-func (e *SubmoduleInitError) Error() string {
-	cmd := "git submodule update --init projects/" + e.ProjectID + "/src"
-	msg := fmt.Sprintf(
-		"sandbox: project %q submodule could not be initialised.\n"+
-			"  %s\n"+
-			"  failed: %v",
-		e.ProjectID, cmd, e.Err)
-	if trimmed := strings.TrimSpace(e.Output); trimmed != "" {
-		msg += "\n  output:\n" + indent(trimmed, "    ")
-	}
-	msg += fmt.Sprintf("\nRun that command manually in %s once the underlying issue is resolved, then retry.", e.Root)
-	return msg
-}
-
-func (e *SubmoduleInitError) Unwrap() error { return e.Err }
+// SubmoduleInitError is the typed error EnsureAt forwards when the
+// project's submodule could not be initialised. Aliased to
+// project.SubmoduleInitError so existing callers / tests that do
+// `errors.As(err, &sandbox.SubmoduleInitError{})` keep working after
+// the materialisation gate moved to internal/project.
+type SubmoduleInitError = project.SubmoduleInitError
 
 // Path returns the clone directory for this run, whether or not it
 // currently exists.
@@ -91,7 +72,7 @@ func Ensure(root, projectID, runID string) (string, error) {
 func EnsureAt(root, projectID, dst string) (string, error) {
 	src := filepath.Join(root, "projects", projectID, "src")
 
-	if err := autoInitSubmodule(root, projectID, src); err != nil {
+	if err := project.EnsureMaterialized(root, projectID); err != nil {
 		return "", err
 	}
 
@@ -191,79 +172,6 @@ func Exists(root, projectID, runID string) bool {
 	return err == nil
 }
 
-// autoInitSubmodule materialises the project's submodule when src is
-// the empty mount-point left by an uncloned `git submodule add`.
-// Returns nil when nothing needs doing (src missing, src non-empty,
-// submodule not declared). On failure returns *SubmoduleInitError so
-// callers can format the actionable retry message via errors.As.
-func autoInitSubmodule(root, projectID, src string) error {
-	info, err := os.Stat(src)
-	if err != nil {
-		return nil
-	}
-	if !info.IsDir() {
-		return nil
-	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return fmt.Errorf("sandbox: read %s: %w", src, err)
-	}
-	if len(entries) > 0 {
-		return nil
-	}
-
-	declared, err := gitmodulesDeclares(filepath.Join(root, ".gitmodules"), "projects/"+projectID+"/src")
-	if err != nil {
-		return err
-	}
-	if !declared {
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "sandbox: initialising submodule projects/%s/src ...\n", projectID)
-	out, err := git.Combined(root, "submodule", "update", "--init", "projects/"+projectID+"/src")
-	if err != nil {
-		return &SubmoduleInitError{
-			Root:      root,
-			ProjectID: projectID,
-			Output:    out,
-			Err:       err,
-		}
-	}
-	if strings.TrimSpace(out) != "" {
-		fmt.Fprintln(os.Stderr, out)
-	}
-	return nil
-}
-
-// gitmodulesDeclares parses .gitmodules looking for `path = want`.
-// Returns false (no error) when .gitmodules is missing — that's the
-// "not a bureaucracy / no submodules declared" shape and the auto-init
-// pre-flight should silently skip in that case.
-func gitmodulesDeclares(path, want string) (bool, error) {
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("sandbox: read %s: %w", path, err)
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "path") {
-			continue
-		}
-		_, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(val) == want {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // cloneAlreadyAt reports whether absDst is a usable existing clone —
 // the destination has a `.git/` directory. EnsureAt's idempotency
 // check: a fresh `git clone` would refuse to run against a non-empty
@@ -277,14 +185,6 @@ func cloneAlreadyAt(absDst string) bool {
 		return false
 	}
 	return info.IsDir()
-}
-
-func indent(s, prefix string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = prefix + l
-	}
-	return strings.Join(lines, "\n")
 }
 
 // ensureGitignore drops a `*` .gitignore under .moe/ so clones, locks,
