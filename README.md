@@ -30,8 +30,6 @@ own. Agents act only when you invoke a command. The UX problem is
 
 ![MoE dashboard — open runs and backlog](docs/dash.png)
 
----
-
 ## At a glance
 
 MoE is a small CLI wrapped around a durable operating journal:
