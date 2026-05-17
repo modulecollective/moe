@@ -241,8 +241,12 @@ func renderPromptLabel(opts []promptOption) string {
 }
 
 // renderPromptLegend returns the one-line legend printed below the
-// label: two-space indent, "K=hint" pairs joined with " · ". Lowercase
-// verbs read consistently across the three prompts.
+// label: two-space indent, "K = hint" pairs joined with " · ". The space
+// padding around `=` keeps the bare `!` entry from rendering as `≠`
+// under programming ligatures (Fira Code, JetBrains Mono, Cascadia
+// Code, Iosevka, …); padding every entry costs nothing and reads
+// better across the board. Lowercase verbs read consistently across
+// the three prompts.
 func renderPromptLegend(opts []promptOption) string {
 	var b strings.Builder
 	b.WriteString("  ")
@@ -250,7 +254,7 @@ func renderPromptLegend(opts []promptOption) string {
 		if i > 0 {
 			b.WriteString(" · ")
 		}
-		fmt.Fprintf(&b, "%c=%s", o.key, o.hint)
+		fmt.Fprintf(&b, "%c = %s", o.key, o.hint)
 	}
 	return b.String()
 }
@@ -260,10 +264,10 @@ func renderPromptLegend(opts []promptOption) string {
 // (the skip shortcut jumps straight to the push prompt), and optional
 // /x and /b suffixes when scuttle / back are non-nil. Y still defaults
 // so a reflex Enter chains the next stage interactively, the same as
-// before. The cascade vocabulary (`!`, `!<stage>`, `!!`) is advertised
-// in the legend below the label for sdlc / twin workflows: `!` runs
-// the next stage headless (one cascade step), `!<stage>` cascades to
-// a named gate, `!!` cascades and ships. `b` re-invokes the
+// before. Workflows with a registered headless dispatcher (sdlc, twin)
+// also surface `!` as a peer in the bracket and main legend — single
+// keystroke, dispatch one stage headless — while `!<stage>` and `!!`
+// stay on a second cascade-extras line below. `b` re-invokes the
 // just-finished stage interactively. `x` dispatches the workflow's
 // close command for the current run — the "abandon ship" path the
 // operator forms at the same surface they decline from. `s` opens
@@ -339,11 +343,18 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if len(back) > 0 {
 		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
 	}
+	if dispatcher != nil {
+		// `!` is a single-keystroke peer to Y/n/x/s/b — it dispatches
+		// exactly one stage headless. Living in the main legend (and
+		// the bracket) is what keeps it visible; the cascade-extras
+		// line below only covers the genuinely multi-character forms.
+		opts = append(opts, promptOption{key: '!', hint: "cascade one stage"})
+	}
 	label := renderPromptLabel(opts)
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if dispatcher != nil {
-		moePrintln(stdout, "  !=advance one stage · !<stage>=cascade to gate · !!=cascade and ship")
+		moePrintln(stdout, "  !<stage> = cascade to gate · !! = cascade and ship")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -469,7 +480,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if md.Workflow == "sdlc" {
-		moePrintln(stdout, "  !!=ship now (same as m)")
+		moePrintln(stdout, "  !! = ship now (same as m)")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()

@@ -711,14 +711,21 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
-	if !strings.Contains(stdout.String(), "!=advance one stage") {
+	if !strings.Contains(stdout.String(), "! = cascade one stage") {
 		t.Fatalf("expected bare-! legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!<stage>=cascade to gate") {
+	if !strings.Contains(stdout.String(), "!<stage> = cascade to gate") {
 		t.Fatalf("expected cascade legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!!=cascade and ship") {
+	if !strings.Contains(stdout.String(), "!! = cascade and ship") {
 		t.Fatalf("expected !! legend in stdout, got: %q", stdout.String())
+	}
+	// The cascade-extras line is reserved for the genuinely multi-char
+	// forms now; bare `!` lives in the main legend instead. Guards
+	// against re-merging the old "!=advance one stage" prefix into the
+	// extras line.
+	if strings.Contains(stdout.String(), "cascade one stage · !<stage>") {
+		t.Fatalf("bare-! must not appear on the cascade-extras line: %q", stdout.String())
 	}
 }
 
@@ -745,7 +752,7 @@ func TestPromptStageNextStageNoCascadeLegendForNonSdlc(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
-	if strings.Contains(stdout.String(), "!=advance") || strings.Contains(stdout.String(), "!<stage>") || strings.Contains(stdout.String(), "!!=") {
+	if strings.Contains(stdout.String(), "! = cascade") || strings.Contains(stdout.String(), "!<stage>") || strings.Contains(stdout.String(), "!! =") {
 		t.Fatalf("non-sdlc prompt must not advertise cascade legend, got: %q", stdout.String())
 	}
 }
@@ -856,7 +863,7 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d", code)
 	}
-	if !strings.Contains(stdout.String(), "!!=ship now") {
+	if !strings.Contains(stdout.String(), "!! = ship now") {
 		t.Fatalf("expected !! legend at push gate, got: %q", stdout.String())
 	}
 }

@@ -194,10 +194,10 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	// guards the bytes.Buffer so this poll doesn't race the helper's
 	// concurrent Write.
 	deadline := time.Now().Add(2 * time.Second)
-	for !strings.Contains(stdout.String(), "[Y/n]") && time.Now().Before(deadline) {
+	for !strings.Contains(stdout.String(), "[Y/n/!]") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(stdout.String(), "[Y/n]") {
+	if !strings.Contains(stdout.String(), "[Y/n/!]") {
 		t.Fatalf("prompt label never printed: %q", stdout.String())
 	}
 	if err := raiseSIGINT(); err != nil {

@@ -1341,9 +1341,9 @@ func capturePromptDispatch(t *testing.T, input string) *promptDispatchRecord {
 
 // TestPromptPushNextStageOffersBackWhenJustFinished: a non-nil back at
 // the push prompt grows the label to [N/m/p/b] and the legend to
-// "N=decline · m=fast-forward merge · p=open PR · b=back to code". Typing
-// `b` dispatches back.Run with [project, run]. Pins the rule that the
-// new option is appended (so the existing N-as-default stays).
+// "N = decline · m = fast-forward merge · p = open PR · b = back to code".
+// Typing `b` dispatches back.Run with [project, run]. Pins the rule that
+// the new option is appended (so the existing N-as-default stays).
 func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
@@ -1387,7 +1387,7 @@ func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !strings.Contains(got, "[N/m/p/b]") {
 		t.Fatalf("expected [N/m/p/b] label in prompt, got: %q", got)
 	}
-	if !strings.Contains(got, "N=decline · m=fast-forward merge · p=open PR · b=back to code") {
+	if !strings.Contains(got, "N = decline · m = fast-forward merge · p = open PR · b = back to code") {
 		t.Fatalf("expected legend with back target in prompt, got: %q", got)
 	}
 	if rec.ran {
@@ -1439,7 +1439,7 @@ func TestPromptPushNextStageNoBackWhenNil(t *testing.T) {
 	if strings.Contains(got, "/b]") {
 		t.Fatalf("expected no /b in label, got: %q", got)
 	}
-	if strings.Contains(got, "b=back") {
+	if strings.Contains(got, "b = back") {
 		t.Fatalf("expected legend without back entry, got: %q", got)
 	}
 	if rec.ran {
@@ -1496,7 +1496,7 @@ func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
 	if !strings.Contains(got, "[N/x/m/p]") {
 		t.Fatalf("expected [N/x/m/p] label, got: %q", got)
 	}
-	if !strings.Contains(got, "x=scuttle (close)") {
+	if !strings.Contains(got, "x = scuttle (close)") {
 		t.Fatalf("expected legend entry for scuttle, got: %q", got)
 	}
 	if rec.ran {
@@ -1549,7 +1549,7 @@ func TestPromptPushNextStageScuttleWithBack(t *testing.T) {
 	if !strings.Contains(got, "[N/x/m/p/b]") {
 		t.Fatalf("expected [N/x/m/p/b] label, got: %q", got)
 	}
-	if !strings.Contains(got, "N=decline · x=scuttle (close) · m=fast-forward merge · p=open PR · b=back to code") {
+	if !strings.Contains(got, "N = decline · x = scuttle (close) · m = fast-forward merge · p = open PR · b = back to code") {
 		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
 	}
 }
@@ -1594,7 +1594,7 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 	if strings.Contains(got, "/x/") || strings.Contains(got, "/x]") {
 		t.Fatalf("expected no /x in label, got: %q", got)
 	}
-	if strings.Contains(got, "x=scuttle") {
+	if strings.Contains(got, "x = scuttle") {
 		t.Fatalf("expected legend without scuttle entry, got: %q", got)
 	}
 	if rec.ran {
