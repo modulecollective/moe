@@ -1,14 +1,11 @@
-# Ministry of Everything (MoE)
-
-**A Git-backed command system for one person supervising an army of
-agents.**
+# ▓▒░ MINISTRY OF EVERYTHING ░▒▓
 
 *An anti-social agent harness — one operator, a gaggle of bots.*
 
-MoE helps one operator turn intent into parallel agent work without
-losing context or control. Agents work in bounded threads attached to
-markdown documents; every conversation, decision, and artifact is saved
-back into a Git journal so the project keeps an improving memory of
+Ministry of Everything (MoE) helps one operator turn intent into parallel
+agent work without losing context or control. Agents work in bounded threads
+attached to markdown documents; every conversation, decision, and artifact
+is saved back into a Git journal so the project keeps an improving memory of
 itself.
 
 The goal is not autonomous magic. The human remains the strategist,
