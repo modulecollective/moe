@@ -746,6 +746,33 @@ func TestRunFollowIdleNonZeroExit(t *testing.T) {
 	}
 }
 
+// TestRunFollowIdleShellEmitsFalse: on the idle path with --shell,
+// stdout carries exactly `false\n` so `eval "$(moe follow --shell)"`
+// returns non-zero. Without this token, eval would return 0 (no
+// command run = success), letting `&& moe log ...` proceed after an
+// idle and producing a confusing second error line. The idle status
+// itself stays on stderr — putting it on stdout would feed a human
+// sentence into eval. Exit code stays 1 so `--path`-style while-loops
+// also keep terminating.
+func TestRunFollowIdleShellEmitsFalse(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var stdout, stderr bytes.Buffer
+	code := runFollow([]string{"--shell"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1", code)
+	}
+	if got := stdout.String(); got != "false\n" {
+		t.Fatalf("--shell idle stdout = %q, want \"false\\n\"", got)
+	}
+	if !strings.Contains(stderr.String(), "no run in play") {
+		t.Fatalf("idle line missing from stderr: %q", stderr.String())
+	}
+}
+
 // TestRunFollowMutuallyExclusiveFlags: --path/--base/--dir/--shell
 // can't combine. The CLI rejects with exit 2 and a usage error; this
 // keeps the contract that a single invocation produces one output

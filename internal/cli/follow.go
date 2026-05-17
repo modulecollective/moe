@@ -100,6 +100,15 @@ func runFollow(args []string, stdout, stderr io.Writer) int {
 	}
 	if target.Dir == "" {
 		moePrintln(stderr, idleLine(summary))
+		if *shellF {
+			// Emit a `false` token so `eval "$(moe follow --shell)"`
+			// propagates the idle exit non-zero — eval's status is the
+			// last command it ran, and "no command" is 0, which would
+			// let `&& moe log ...` proceed after an idle. The human-
+			// readable idle line stays on stderr (above) so eval doesn't
+			// try to run it as shell.
+			fmt.Fprintln(stdout, "false")
+		}
 		return 1
 	}
 
@@ -459,11 +468,16 @@ func printFollowHuman(w io.Writer, t followTarget) {
 // capture the whole tuple in one shot:
 //
 //	eval "$(moe follow --shell)" || return $?
+//	eval "$(moe follow --shell)" && moe log "$MOE_FOLLOW_PROJECT" "$MOE_FOLLOW_RUN" "$MOE_FOLLOW_STAGE"
 //
 // Values are POSIX single-quoted; embedded single-quotes are escaped
 // via the standard close-quote / backslash-quote / re-open-quote
 // dance (see shellQuote), so paths containing spaces or quotes
 // round-trip through `eval` cleanly.
+//
+// On idle (no run in play), the caller emits `false` on stdout so
+// `eval "$(...)"` returns non-zero — both the `||` and `&&`
+// composition idioms short-circuit as the operator expects.
 func printFollowShell(w io.Writer, t followTarget) {
 	pairs := []struct{ k, v string }{
 		{"MOE_FOLLOW_PATH", t.Canvas},
