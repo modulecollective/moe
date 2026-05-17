@@ -36,6 +36,11 @@ deliberately slow — a quiet pass is healthy.
 - **Don't theorise.** Patterns name what the project *does*, not
   what it *should* do. Speculation lives in feedback notes for
   the operator, not in `patterns.md`.
+- **Don't restate what another doc owns.** Patterns owns the
+  named shape and its rule. The boundary or component the shape
+  involves lives in architecture; the ritual that exercises it
+  lives in operations. Link by section heading instead of
+  duplicating the rule here.
 
 ## Canvas shape
 

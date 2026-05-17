@@ -29,6 +29,10 @@ If operations hasn't moved this pass, say so.
   what you wish it did. Aspirational rituals belong in roadmap.
 - **Don't rewrite without a sighting.** A rewrite needs at least
   one recent event that justifies the new shape.
+- **Don't restate what another doc owns.** Operations owns the
+  ritual and the tool. The named shape it exercises lives in
+  patterns; the boundary it touches lives in architecture. Link
+  by section heading instead of repeating the rule here.
 
 ## Canvas shape
 

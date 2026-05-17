@@ -33,6 +33,11 @@ the canvas. A quiet pass is a valid pass.
   it's wrong is a claim, not a reflect.
 - **Don't rename or retire files.** Closed-schema means the doc
   set is fixed.
+- **Don't restate what another doc owns.** Architecture owns
+  shape and boundaries; patterns owns named recurring or refused
+  shapes; operations owns rituals and tools. If a rule already
+  lives in one of those, link by section heading instead of
+  rewording it here.
 
 ## Canvas shape
 
