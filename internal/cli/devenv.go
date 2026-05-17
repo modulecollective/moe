@@ -28,8 +28,10 @@ import (
 //
 // Teardown scripts under projects/<p>/hooks/dev-env-teardown.d/* run
 // with the cached env sourced; sandbox runs invoke them at run close
-// (alongside sandbox removal), and a future workspace teardown verb
-// will invoke them when the operator scuttles a workspace.
+// (alongside sandbox removal), `moe workspace remove` invokes them
+// before deleting the workspace dir, and `moe workspace refresh`
+// invokes them before clearing the cache so the rebuild starts from
+// a torn-down slate.
 //
 // The hook directory layout matches pre-push: lex-sorted, executable
 // only, dotfiles skipped, missing-or-empty is a no-op.
