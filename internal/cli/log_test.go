@@ -6,15 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
-// writeThread drops a minimal claude thread file into the run/stage's
-// documents dir, with one user message and one assistant reply so the
-// renderer has something to print.
+// writeThread drops a minimal thread file into the run/stage's
+// documents dir so the renderer has something to print.
 func writeThread(t *testing.T, root, project, runID, stage, agent string, lines []string) {
 	t.Helper()
 	dir := filepath.Join(root, run.DocDir(project, runID, stage))
@@ -27,19 +25,61 @@ func writeThread(t *testing.T, root, project, runID, stage, agent string, lines 
 	}
 }
 
-func TestMoeLog_NoRuns(t *testing.T) {
+func TestMoeLog_RequiresThreePositionals(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	for _, args := range [][]string{
+		{"log"},
+		{"log", "moe"},
+		{"log", "moe", "demo-run"},
+		{"log", "moe", "demo-run", "design", "extra"},
+	} {
+		var out, errb bytes.Buffer
+		code := Run(args, &out, &errb)
+		if code != 2 {
+			t.Errorf("args=%v: exit=%d, want 2; stderr=%q", args, code, errb.String())
+		}
+		if !strings.Contains(errb.String(), "usage:") {
+			t.Errorf("args=%v: expected usage in stderr, got %q", args, errb.String())
+		}
+	}
+}
+
+func TestMoeLog_UnknownRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// project.json exists but the named run does not.
+	trailerstest.SeedRun(t, root, "moe", "some-other-run", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"log", "moe", "missing-run", "design"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "does not exist") {
+		t.Errorf("expected 'does not exist' in stderr, got %q", errb.String())
+	}
+}
+
+func TestMoeLog_UnknownProject(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log"}, &out, &errb)
+	code := Run([]string{"log", "nope", "demo-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "no run found") {
-		t.Errorf("expected 'no run found' in stderr, got %q", errb.String())
+	if !strings.Contains(errb.String(), "not registered") {
+		t.Errorf("expected 'not registered' in stderr, got %q", errb.String())
 	}
 }
 
@@ -56,7 +96,7 @@ func TestMoeLog_RendersClaudeThread(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log"}, &out, &errb)
+	code := Run([]string{"log", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -68,7 +108,7 @@ func TestMoeLog_RendersClaudeThread(t *testing.T) {
 	}
 }
 
-func TestMoeLog_StageArgPicksThatStage(t *testing.T) {
+func TestMoeLog_StagePicksThatStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -83,7 +123,7 @@ func TestMoeLog_StageArgPicksThatStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "code"}, &out, &errb)
+	code := Run([]string{"log", "moe", "demo-run", "code"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -96,7 +136,7 @@ func TestMoeLog_StageArgPicksThatStage(t *testing.T) {
 	}
 }
 
-func TestMoeLog_UnknownStage(t *testing.T) {
+func TestMoeLog_NoTranscriptForStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -108,7 +148,7 @@ func TestMoeLog_UnknownStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "code"}, &out, &errb)
+	code := Run([]string{"log", "moe", "demo-run", "code"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -132,7 +172,7 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "--agent", "claude", "design"}, &out, &errb)
+	code := Run([]string{"log", "--agent", "claude", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d; stderr=%q", code, errb.String())
 	}
@@ -145,40 +185,48 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 	}
 }
 
-func TestPickLogThread_PrefersNewerMtime(t *testing.T) {
+func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
-
 	writeThread(t, root, "moe", "demo-run", "design", "claude", []string{
-		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"old"}}`,
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"claude-side"}}`,
 	})
-	// Backdate the older one so the design-stage claude is clearly
-	// older than the code-stage claude written next.
-	older := filepath.Join(root, run.ThreadPathFor("claude", "moe", "demo-run", "design"))
-	ago := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(older, ago, ago); err != nil {
-		t.Fatal(err)
-	}
-	writeThread(t, root, "moe", "demo-run", "code", "claude", []string{
-		`{"type":"user","timestamp":"2026-05-16T11:00:00Z","message":{"role":"user","content":"newer"}}`,
+	writeThread(t, root, "moe", "demo-run", "design", "codex", []string{
+		`{"timestamp":"2026-05-16T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"codex-side"}]}}`,
 	})
 
-	md, err := pickLogRun(root, "", "")
-	if err != nil {
-		t.Fatalf("pickLogRun: %v", err)
+	var out, errb bytes.Buffer
+	code := Run([]string{"log", "moe", "demo-run", "design"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
-	if md == nil {
-		t.Fatal("pickLogRun returned nil run")
+	if !strings.Contains(errb.String(), "both claude and codex transcripts") {
+		t.Errorf("expected ambiguity refusal in stderr, got %q", errb.String())
 	}
-	path, agent, err := pickLogThread(root, md, "", "")
-	if err != nil {
-		t.Fatalf("pickLogThread: %v", err)
+	if !strings.Contains(errb.String(), "--agent") {
+		t.Errorf("expected --agent hint in stderr, got %q", errb.String())
 	}
-	if !strings.HasSuffix(path, filepath.Join("code", "thread-claude.jsonl")) {
-		t.Errorf("expected newer code-stage path, got %q", path)
+	if out.Len() != 0 {
+		t.Errorf("expected no stdout on refusal, got %q", out.String())
 	}
-	if agent != "claude" {
-		t.Errorf("expected agent=claude, got %q", agent)
+}
+
+func TestMoeLog_BadAgentFlag(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"log", "--agent", "gpt", "moe", "demo-run", "design"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "--agent must be claude or codex") {
+		t.Errorf("expected agent rejection, got %q", errb.String())
 	}
 }
