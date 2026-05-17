@@ -17,6 +17,11 @@ coverage.*
 # Agent / dev-env runtime drop site
 .moe/
 
+# Agent run artifacts — written into the repo root by the MoE
+# workflow; not part of the published surface.
+.moe-run/
+.moe-canvas.md
+
 # Sandbox runtime bind-mounts. fly.io / similar runtimes shadow host
 # config files at the cwd / writable-add-dir scope by bind-mounting
 # /dev/null as character devices with these basenames. They aren't
