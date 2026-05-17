@@ -51,16 +51,46 @@ with the operator before writing them. Apply fixes inline once
 agreed. Skim docs that look untouched and don't manufacture work —
 a quiet section is fine.
 
-Vision is asymmetric — flag drift between project state and the
-stated vision, but don't rewrite vision yourself. Vision changes
-are the operator's call (decided edits — see ` + "`moe twin claim`" + `).
+Twin docs are written for a reader who doesn't already know the
+project. Primer-plus-reference, not changelog. Durable rules,
+terse prose, examples used in service of the rule. When a feature
+was tried and removed, the rule it taught stays (YAGNI in this
+corner of the system, surface area earned scrutiny, this kind of
+speculation didn't pay off); the section about the removed
+feature does not. Extract the rule, drop the example. Compress
+over preserve. ` + "`history-summary.md`" + ` keeps the chronological
+narrative; finalize folds events in there.
 
-Roadmap convention: roadmap.md uses four ` + "`##`" + ` sections — Near
-term, Mid term, Long term, Parked. On a fresh roadmap.md (just
-` + "`# Roadmap`" + ` and nothing else), establish the four headings at
-this pass. On subsequent passes, walk the prior content with the
-operator and promote / demote / retire entries against the idea
-backlog and recent activity.
+Single-home discipline: each rule, principle, or named shape has
+one home in the twin. If a rule already lives in another managed
+doc, point there (by section heading) instead of restating it.
+Architecture owns shape and boundaries; patterns owns named
+recurring or refused shapes; operations owns rituals and tools;
+roadmap owns intent over time. A line that could plausibly live
+in two docs lives in one — pick by which doc the reader would
+search first.
+
+Vision is asymmetric — but split into two registers.
+**Reference drift** (terminology, examples, names of tools or
+people, broken pointers, stale lists of "currently we use X")
+can be fixed in place when drift has ≥2 sightings in recent
+events and the edit *tightens* an existing statement rather
+than reversing one. **Intent drift** (stated bets, non-goals,
+problem statement, scope) stays surface-only — flag it; the
+operator runs ` + "`moe twin claim`" + ` if they agree. If you can't tell
+which register a drift belongs to, flag for the operator
+instead of editing.
+
+Roadmap convention: roadmap.md uses five ` + "`##`" + ` sections — Near
+term, Mid term, Long term, Directions, Parked. Near/Mid/Long are
+committed intent across horizons; Directions holds uncommitted
+"places the project could plausibly grow" (recorded so reflect
+conversations can promote them as appetite shifts); Parked is
+items the project deliberately is not doing. On a fresh
+roadmap.md (just ` + "`# Roadmap`" + ` and nothing else), establish the
+five headings at this pass. On subsequent passes, walk the prior
+content with the operator and promote / demote / retire entries
+against the idea backlog and recent activity.
 
 Glossary convention: glossary.md is a single alphabetical list of
 project-specific terms. Each entry is a ` + "`### Term`" + ` heading

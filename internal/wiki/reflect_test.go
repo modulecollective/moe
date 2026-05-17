@@ -234,10 +234,15 @@ func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
 		"Roadmap convention",
 		"Mid term",
 		"Long term",
+		"Directions",
 		"Parked",
 		"Hygiene findings",
 		"refuses to seal",
 		"don't manufacture work",
+		"Primer-plus-reference",
+		"Single-home discipline",
+		"Reference drift",
+		"Intent drift",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
