@@ -191,11 +191,16 @@ func (Agent) Execute(r agent.Request) (string, error) {
 // ExecuteOneShot runs `claude -p` non-interactively and surfaces a
 // one-line-per-tool-call progress stream to the operator's terminal so
 // the long agent turn doesn't look hung. The agent gets one turn to do
-// its work; transcript mirroring is intentionally skipped (the canvas
-// + per-turn commit are the durable artifacts — one-shot runs don't
-// carry a thread file). Returns the empty session id and a non-nil
-// error on subprocess failure; callers still commit whatever the
-// agent landed on disk because partial work is salvage.
+// its work. When r.ThreadPath is set, the per-session JSONL is
+// mirrored into it after the turn returns so the operator (and the
+// post-headless auto-tail) can read what happened — claude's session
+// id is plucked off the first `system / init` event in the stream and
+// used to find the right rollout.
+//
+// Returns the session id captured from the stream (empty when no init
+// event fired before the turn died) and a non-nil error on subprocess
+// failure; callers still commit whatever the agent landed on disk
+// because partial work is salvage.
 //
 // Implementation: claude is invoked with `--output-format stream-json
 // --verbose --include-partial-messages` so its stdout is a JSON event
@@ -244,17 +249,33 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("claude: -p start: %w", err)
 	}
+	sidCh := make(chan string, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		pipeOneShotProgress(pipe, stdout, r.Root)
+		pipeOneShotProgress(pipe, stdout, r.Root, sidCh)
 	}()
 	waitErr := cmd.Wait()
 	<-done
-	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("claude: -p timed out after %s", r.Timeout)
+	close(sidCh)
+	var sid string
+	select {
+	case sid = <-sidCh:
+	default:
 	}
-	return "", waitErr
+	// Mirror the per-session JSONL when the caller asked for one and
+	// we managed to learn the session id. A copy error surfaces on
+	// r.Stderr (same shape as Execute's mirror) but doesn't override
+	// the subprocess exit status.
+	if r.ThreadPath != "" && sid != "" {
+		if _, err := CopyTranscript(sid, r.ThreadPath); err != nil && r.Stderr != nil {
+			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
+		}
+	}
+	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
+		return sid, fmt.Errorf("claude: -p timed out after %s", r.Timeout)
+	}
+	return sid, waitErr
 }
 
 // CopyTranscript is the Agent method form of the package-level

@@ -32,6 +32,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/sync"
+	"github.com/modulecollective/moe/internal/transcript"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -689,6 +690,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	var runErr error
 	var returnedSid string
 	if spec.Headless {
+		// ThreadPath enables transcript mirroring on one-shot so the
+		// post-Wait auto-tail has something to render. Empty for
+		// run-less callers (e.g. the rebase-resolve fallback).
+		var threadPath string
+		if spec.Metadata != nil && spec.DocID != "" {
+			threadPath = filepath.Join(workRoot, run.ThreadPathFor(in.Agent, spec.Metadata.Project, spec.Metadata.ID, spec.DocID))
+		}
 		returnedSid, runErr = a.ExecuteOneShot(agent.OneShotRequest{
 			Root:       workRoot,
 			Prompt:     prompt,
@@ -699,7 +707,16 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Stderr:     stderr,
 			ExtraEnv:   spec.ExtraEnv,
 			AddDirs:    spec.AddDirs,
+			ThreadPath: threadPath,
 		})
+		// Auto-tail: render the last few normalised events to stderr
+		// so the operator sees "what just happened" without having
+		// to `moe log` after every headless exit. Best-effort — a
+		// missing or parse-broken transcript is reported softly and
+		// doesn't override the executor's exit status.
+		if threadPath != "" {
+			tailHeadlessTranscript(in.Agent, threadPath, stderr)
+		}
 	} else {
 		returnedSid, runErr = a.Execute(agent.Request{
 			Root:          workRoot,
@@ -929,4 +946,45 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 // session to the worktree.
 func sessionDocCwd(root, projectID, runID, docID string) string {
 	return filepath.Join(root, ".moe", "sessions", projectID, runID, docID)
+}
+
+// headlessTailLines is the default count for the post-headless
+// auto-tail. Tuned by eyeball — about what fits on a laptop terminal
+// without scrolling, while still showing the conversational arc
+// (operator's prompt, the agent's last message or two, the final tool
+// call and its result). The design left the exact number open ("~20
+// is a guess; tune once we see real output"); revisit once we have
+// real-world feedback.
+const headlessTailLines = 20
+
+// tailHeadlessTranscript reads threadPath, parses it with the
+// per-agent adapter, and renders the last few normalised events to w
+// so the operator sees what just happened after a one-shot exit. All
+// failure paths are soft: a missing transcript (one-shot agent died
+// before writing anything), a parse error, a render write error each
+// produce a short note rather than overriding the executor's exit
+// status. The auto-tail is "extra context", not a gate.
+func tailHeadlessTranscript(agentName, threadPath string, w io.Writer) {
+	f, err := os.Open(threadPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		moePrintf(w, "auto-tail: %v\n", err)
+		return
+	}
+	defer f.Close()
+	events, err := transcript.Parse(agentName, f)
+	if err != nil {
+		moePrintf(w, "auto-tail parse: %v\n", err)
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+	moePrintln(w, "")
+	moePrintf(w, "--- last %d transcript events (moe log for full) ---\n", min(headlessTailLines, len(events)))
+	if err := transcript.Render(w, transcript.Tail(events, headlessTailLines), transcript.RenderOptions{}); err != nil {
+		moePrintf(w, "auto-tail render: %v\n", err)
+	}
 }

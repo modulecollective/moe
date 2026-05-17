@@ -197,6 +197,15 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	case sid = <-sidCh:
 	default:
 	}
+	// Mirror the per-session JSONL when the caller asked for one and
+	// we managed to capture the session id. A copy error surfaces on
+	// r.Stderr but doesn't override the subprocess exit status — same
+	// shape as Execute's mirror.
+	if r.ThreadPath != "" && sid != "" {
+		if _, err := CopyTranscript(sid, r.ThreadPath); err != nil && r.Stderr != nil {
+			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
+		}
+	}
 	return sid, waitErr
 }
 

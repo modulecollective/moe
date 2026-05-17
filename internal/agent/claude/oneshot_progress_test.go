@@ -39,7 +39,7 @@ func TestPipeOneShotProgressRendersToolCalls(t *testing.T) {
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
-	pipeOneShotProgress(strings.NewReader(input), &out, root)
+	pipeOneShotProgress(strings.NewReader(input), &out, root, nil)
 
 	got := out.String()
 	want := []string{
@@ -73,6 +73,28 @@ func TestPipeOneShotProgressRendersToolCalls(t *testing.T) {
 	}
 }
 
+// TestPipeOneShotProgressCapturesSessionID asserts the first
+// system/init event's session_id is pushed on sidCh so
+// ExecuteOneShot's post-Wait mirror finds the right per-session
+// JSONL. A second init event (claude doesn't emit one, but the
+// channel is cap-1 so even if it did, the first id wins) gets dropped
+// rather than overwriting.
+func TestPipeOneShotProgressCapturesSessionID(t *testing.T) {
+	input := strings.Join([]string{
+		`{"type":"system","subtype":"init","session_id":"sess-abc","tools":[]}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+		`{"type":"system","subtype":"init","session_id":"sess-zzz"}`,
+	}, "\n") + "\n"
+	sidCh := make(chan string, 1)
+	var out bytes.Buffer
+	pipeOneShotProgress(strings.NewReader(input), &out, "", sidCh)
+	close(sidCh)
+	sid := <-sidCh
+	if sid != "sess-abc" {
+		t.Fatalf("session id: got %q, want sess-abc", sid)
+	}
+}
+
 // TestPipeOneShotProgressTruncatesLongCommands keeps the operator's
 // terminal readable when an agent runs a multi-kilobyte heredoc — one
 // long bash line shouldn't wrap into a wall of text. The truncated
@@ -81,7 +103,7 @@ func TestPipeOneShotProgressTruncatesLongCommands(t *testing.T) {
 	cmd := strings.Repeat("a", 500)
 	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"` + cmd + `"}}]}}` + "\n"
 	var out bytes.Buffer
-	pipeOneShotProgress(strings.NewReader(line), &out, "")
+	pipeOneShotProgress(strings.NewReader(line), &out, "", nil)
 	got := out.String()
 	if !strings.HasPrefix(got, "> bash: ") {
 		t.Fatalf("expected `> bash: ` prefix, got: %q", got)

@@ -161,6 +161,15 @@ type OneShotRequest struct {
 	// AddDirs are extra read/write paths the agent backend should
 	// expose. Same shape and contract as Request.AddDirs.
 	AddDirs []string
+	// ThreadPath, when non-empty, is the bureaucracy-relative
+	// destination the agent should copy its per-session JSONL to
+	// after the turn returns. The post-headless auto-tail in stage.go
+	// reads it for the "what just happened?" render the operator sees
+	// when a one-shot bails. Empty means skip the mirror (e.g. the
+	// rebase-resolve fallback that has no run document to mirror
+	// into). Best-effort: a copy failure surfaces on r.Stderr but
+	// doesn't override the turn's exit status.
+	ThreadPath string
 }
 
 var (
