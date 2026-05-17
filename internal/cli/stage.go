@@ -736,13 +736,21 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		})
 	}
 
-	// Codex generates its session id itself; on first turn the agent
-	// reads it back post-launch (from the rollout file's filename
-	// suffix or, for one-shot, from the `thread.started` JSON event).
-	// When the returned id differs from what we passed in, persist
-	// it so the next turn's `codex resume <sid>` finds the rollout.
-	// Claude always echoes the id we minted, so this is a no-op
-	// there. Run-less callers (lint) carry no document to mutate.
+	// Codex generates its session id itself and reads it back post-
+	// launch (rollout filename suffix for interactive, `thread.started`
+	// JSON event for one-shot). Claude one-shot is the same shape —
+	// it doesn't accept `--session-id` so it mints a fresh id that we
+	// pull off the first `system/init` stream event. Interactive
+	// Claude echoes the id we minted, so the `returnedSid !=
+	// spec.SessionUUID` guard keeps it a no-op there.
+	//
+	// Persisting the returned id lets the next turn's `--resume`
+	// point at the right transcript. The interactive pre-flight
+	// re-mints with a warning when the cwd-encoded path doesn't
+	// resolve (e.g. headless one-shot ran with workRoot but the
+	// follow-up interactive turn uses SessionCwd), so a mismatch
+	// degrades gracefully rather than wedging the resume. Run-less
+	// callers (lint) carry no document to mutate.
 	if spec.Metadata != nil && returnedSid != "" && returnedSid != spec.SessionUUID {
 		if doc, ok := spec.Metadata.Documents[spec.DocID]; ok {
 			doc.Session = returnedSid
