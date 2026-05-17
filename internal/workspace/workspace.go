@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -170,6 +171,143 @@ func Acquire(root, projectID, name, runRef string) (string, error) {
 		return "", err
 	}
 	return wp, nil
+}
+
+// Info is a per-workspace row, populated by List. Carries everything
+// the operator-visible `moe workspace list` table needs without making
+// the caller re-issue git probes per row.
+type Info struct {
+	Project      string
+	Name         string
+	Path         string
+	Branch       string // current symbolic ref, or "" / "HEAD" on detached
+	Claim        string // claim.Run, or "" when unclaimed
+	Dirty        bool   // any uncommitted change or untracked file
+	DevEnvCached bool   // <wp>/.moe/dev-env.env exists
+}
+
+// List enumerates named workspaces, optionally filtered to a single
+// projectID. With projectID == "", every project's workspaces under
+// .moe/named/*/ are returned. Results are sorted by (Project, Name)
+// for stable output.
+//
+// Stale entries (a workspace dir whose parent project no longer has a
+// .moe/named/<project>/ entry) and entries that aren't directories
+// are silently skipped. The new precondition on `project remove`
+// makes orphans unreachable from the happy path; the silent-skip is
+// just defence against hand-edits or migration from before that
+// guard landed.
+func List(root, projectID string) ([]Info, error) {
+	base := filepath.Join(root, ".moe", "named")
+	var projects []string
+	if projectID != "" {
+		projects = []string{projectID}
+	} else {
+		entries, err := os.ReadDir(base)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("workspace: read %s: %w", base, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			projects = append(projects, e.Name())
+		}
+	}
+	var out []Info
+	for _, p := range projects {
+		dir := filepath.Join(base, p)
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("workspace: read %s: %w", dir, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if err := ValidateName(name); err != nil {
+				continue
+			}
+			info, err := describe(root, p, name)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, info)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Project != out[j].Project {
+			return out[i].Project < out[j].Project
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+// describe builds an Info for one workspace by probing its on-disk
+// state. Errors propagate so List surfaces a real filesystem problem
+// rather than silently dropping the row.
+func describe(root, projectID, name string) (Info, error) {
+	wp := Path(root, projectID, name)
+	info := Info{Project: projectID, Name: name, Path: wp}
+
+	branch, err := git.Output(wp, "rev-parse", "--abbrev-ref", "HEAD")
+	if err == nil {
+		info.Branch = strings.TrimSpace(branch)
+	}
+	claim, err := readClaim(wp)
+	if err != nil {
+		return info, err
+	}
+	if claim != nil {
+		info.Claim = claim.Run
+	}
+	entries, err := git.Status(wp)
+	if err == nil && len(entries) > 0 {
+		info.Dirty = true
+	}
+	if _, err := os.Stat(filepath.Join(wp, ".moe", "dev-env.env")); err == nil {
+		info.DevEnvCached = true
+	}
+	return info, nil
+}
+
+// Remove deletes the workspace directory after refusing if a claim
+// exists. The dev-env teardown is the CLI's responsibility — this
+// primitive only owns the claim check and the dir removal, so tests
+// of the workspace package don't need to grow a dev-env fixture.
+//
+// Missing workspace is a no-op (nil). A workspace that carries a
+// claim is refused with *AlreadyClaimedError so callers can branch
+// on the same error type Acquire returns.
+func Remove(root, projectID, name string) error {
+	if err := ValidateName(name); err != nil {
+		return err
+	}
+	wp := Path(root, projectID, name)
+	if _, err := os.Stat(wp); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("workspace: stat %s: %w", wp, err)
+	}
+	claim, err := readClaim(wp)
+	if err != nil {
+		return err
+	}
+	if claim != nil {
+		return &AlreadyClaimedError{Holder: *claim}
+	}
+	if err := os.RemoveAll(wp); err != nil {
+		return fmt.Errorf("workspace: remove %s: %w", wp, err)
+	}
+	return nil
 }
 
 // Release drops the claim on the workspace. Idempotent — releasing a
