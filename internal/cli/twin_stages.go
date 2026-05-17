@@ -59,8 +59,8 @@ func openTwinStageInteractive(stage, projectID, runID string, stdout, stderr io.
 	return runTwinStageSession(stage, projectID, runID, false, false, stdout, stderr)
 }
 
-// openTwinStage is the Go-level seam behind the chain prompt's `o`
-// keystroke and the `!<stage>` / `!!` cascade driver for twin runs.
+// openTwinStage is the Go-level seam behind the chain prompt's
+// cascade driver (`!` / `!<stage>` / `!!`) for twin runs.
 // Identical contract to openSdlcStage one workflow over: switch on the
 // stage name, hand to the right helper, run headless, and carry
 // suppressNextStage through to stageSessionOpts.SkipNextStage. A

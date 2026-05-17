@@ -86,7 +86,7 @@ esac
 // Headless design (via openSdlcDesign) lands the canvas without an
 // interactive turn. The run title flows through as the user prompt
 // (not the interactive kickoff string), so the agent gets the same
-// context the cascade and `o` keystroke produce.
+// context the cascade driver (`!` / `!<stage>` / `!!`) produces.
 func TestRunDesignOneShot(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -271,13 +271,13 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 	}
 }
 
-// promptStageNextStage offers [Y/n/o] for sdlc non-push stages and
-// `o` invokes the next stage headless via openSdlcStage. Non-sdlc
-// workflows keep the [Y/n] label and never see the o option. Mirrors
-// capturePromptDispatch's shape: stub the headless seam (and the
-// interactive next.Run) for the test, pipe stdin, call the helper
-// directly so the test isn't bound to stdinIsTerminal().
-func TestPromptNextStageOfferOneShot(t *testing.T) {
+// promptStageNextStage carries a [Y/n] label for every workflow now
+// that `o` is gone. Bare `!` at an sdlc gate dispatches the next stage
+// headless via openSdlcStage (one cascade step, suppressNextStage=true).
+// Non-sdlc workflows (no headless dispatcher) treat `!` as a typo —
+// the prefix-match falls through dispatchCascade's unknown-stage path
+// or, when no dispatcher is registered, never even reaches it.
+func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 	cases := []struct {
 		name      string
 		workflow  string
@@ -289,11 +289,11 @@ func TestPromptNextStageOfferOneShot(t *testing.T) {
 		wantArgs     []string
 		wantHeadless string
 	}{
-		{name: "sdlc-o-runs-headless", workflow: "sdlc", input: "o\n", wantLabel: "[Y/n/o]", wantHeadless: "code"},
-		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
-		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/o]", wantArgs: []string{"tele", "fix-it"}},
-		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/o]"},
-		{name: "kb-no-o-option", workflow: "kb", input: "o\n", wantLabel: "[Y/n]"},
+		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n]", wantHeadless: "code"},
+		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n]"},
+		{name: "kb-no-bang-option", workflow: "kb", input: "!\n", wantLabel: "[Y/n]"},
 		{name: "kb-default-runs", workflow: "kb", input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
 	}
 	for _, tc := range cases {
@@ -331,11 +331,11 @@ func TestPromptNextStageOfferOneShot(t *testing.T) {
 				t.Fatalf("expected label %q in prompt, got: %q", tc.wantLabel, stdout.String())
 			}
 			if tc.wantHeadless != "" {
-				if len(*headless) != 1 || (*headless)[0].stage != tc.wantHeadless || (*headless)[0].projectID != "tele" || (*headless)[0].runID != "fix-it" || (*headless)[0].suppressNextStage {
-					t.Fatalf("openSdlcStage want one call for stage %q with (tele, fix-it, suppressNextStage=false), got: %+v", tc.wantHeadless, *headless)
+				if len(*headless) != 1 || (*headless)[0].stage != tc.wantHeadless || (*headless)[0].projectID != "tele" || (*headless)[0].runID != "fix-it" || !(*headless)[0].suppressNextStage {
+					t.Fatalf("openSdlcStage want one call for stage %q with (tele, fix-it, suppressNextStage=true), got: %+v", tc.wantHeadless, *headless)
 				}
 				if rec.ran {
-					t.Fatalf("interactive next.Run must not fire on `o`; got args=%v", rec.args)
+					t.Fatalf("interactive next.Run must not fire on `!`; got args=%v", rec.args)
 				}
 				return
 			}

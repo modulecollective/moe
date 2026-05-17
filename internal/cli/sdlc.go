@@ -135,13 +135,13 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
 // typed `Command.Run` parses args and hands to this helper; the chain
-// prompt's `o` keystroke and the cascade driver reach it directly via
-// openSdlcStage. The contract is identical either way: requireRun
-// guards the run, then runStageSession opens an interactive (or
-// headless) session against the design canvas. headless=true is the
-// path that used to be `--one-shot`; the flag is gone, but the Go
-// function still distinguishes the two so internal callers can ask
-// for the bounded one-turn variant without re-entering the parser.
+// prompt's cascade driver reaches it directly via openSdlcStage. The
+// contract is identical either way: requireRun guards the run, then
+// runStageSession opens an interactive (or headless) session against
+// the design canvas. headless=true is the path that used to be
+// `--one-shot`; the flag is gone, but the Go function still
+// distinguishes the two so internal callers can ask for the bounded
+// one-turn variant without re-entering the parser.
 func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("sdlc design", projectID, runID, stderr); code != 0 {
 		return code
@@ -229,12 +229,12 @@ func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool
 		}, stdout, stderr)
 }
 
-// openSdlcStage routes the chain prompt's `o` keystroke and the
-// cascade driver's pre-push iteration to the right per-stage helper,
-// headless, carrying suppressNextStage through to
-// stageSessionOpts.SkipNextStage. Knowing the stage names statically
-// (sdlc has three headlessable stages — push is not one of them) is
-// what lets a
+// openSdlcStage routes the chain prompt's cascade driver
+// (`!` / `!<stage>` / `!!`) and the cascade's pre-push iteration to
+// the right per-stage helper, headless, carrying suppressNextStage
+// through to stageSessionOpts.SkipNextStage. Knowing the stage names
+// statically (sdlc has three headlessable stages — push is not one
+// of them) is what lets a
 // switch beat a registry: the alternative is a typed-CLI re-entry
 // via `cmd.Run` with a flag prepended, which is the pattern the run
 // that removed `--one-shot` set out to retire.
@@ -305,7 +305,7 @@ const testCanvasSkeleton = `# Test
 // and ride it to the next gate without typing two stage commands.
 //
 // Always interactive: invokes the next pending stage interactively;
-// the stage's existing chain prompt (`[Y/n/o…]` / `[N/m/p…]`) walks
+// the stage's existing chain prompt (`[Y/n…]` / `[N/m/p…]`) walks
 // the rest. Headless cascade is no longer a `resume` flag — the
 // operator types `!<stage>` or `!!` at the chain prompt once they've
 // seen the canvas, the same vocabulary every other headless decision
@@ -321,7 +321,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Picks up the run at its first pending stage and opens it")
 		moePrintln(stderr, "interactively. The stage's post-turn chain prompt drives the rest:")
-		moePrintln(stderr, "`o` runs the next stage headless, `!<stage>` cascades to a named gate,")
+		moePrintln(stderr, "`!` runs the next stage headless, `!<stage>` cascades to a named gate,")
 		moePrintln(stderr, "`!!` cascades and ships. Refuses runs that are missing or already")
 		moePrintln(stderr, "terminal.")
 		fs.PrintDefaults()

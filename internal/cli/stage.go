@@ -61,8 +61,8 @@ type stageSessionOpts struct {
 	// terminal (no stdin), the workflow's oneshot.md fragment is
 	// appended to the system prompt, and transcript mirroring is
 	// skipped (the canvas + per-turn commit are the durable
-	// artifacts). Set by the chain prompt's `o` keystroke and the
-	// `!<stage>` / `!!` cascade driver.
+	// artifacts). Set by the chain prompt's cascade driver
+	// (`!` / `!<stage>` / `!!`).
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by the cascade driver, which composes
@@ -360,7 +360,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 
 			// Headless mode has no operator on stdin to type the seed
 			// prompt, so default it to the run title — the same shape
-			// the cascade driver and `o` keystroke depend on.
+			// the cascade driver depends on.
 			// Callers that pass an explicit InitialPrompt keep theirs.
 			initialPrompt := opts.InitialPrompt
 			if opts.Headless && initialPrompt == "" {

@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// SIGINT in cooked mode (stage `[Y/n/o]`/`[N/m/p]` prompts) gets the
+// SIGINT in cooked mode (stage `[Y/n]`/`[N/m/p]` prompts) gets the
 // operator's "abort the chain" intent, not a runtime-default process
 // tear-down. Inside an interactive Claude session the tty is in raw
 // mode and Ctrl-C is delivered to claude as a byte — that stays

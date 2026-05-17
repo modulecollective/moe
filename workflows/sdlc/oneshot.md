@@ -1,9 +1,8 @@
 # One-shot
 
-You are running headless: the chain prompt's `o` keystroke or the
-`!<stage>` / `!!` cascade driver invoked this stage. There is no
-operator on stdin and you only get one turn — the runner exits as
-soon as your turn ends.
+You are running headless: the `!` / `!<stage>` / `!!` cascade driver
+invoked this stage. There is no operator on stdin and you only get
+one turn — the runner exits as soon as your turn ends.
 
 Treat the canvas as your single, complete deliverable for this stage.
 Write the full artifact in one pass — the same standard the interactive

@@ -255,35 +255,36 @@ func renderPromptLegend(opts []promptOption) string {
 	return b.String()
 }
 
-// promptStageNextStage offers the non-push stage prompt: [Y/n] for most
-// workflows, [Y/n/o] for sdlc non-push stages where headless dispatch
-// is supported, [Y/n/o/s] when the next stage is sdlc's test (the skip
-// shortcut jumps straight to the push prompt), and optional /x and /b
-// suffixes when scuttle / back are non-nil. Y still defaults so a
-// reflex Enter chains the next stage interactively, the same as before.
-// `o` invokes the next stage headless via the workflow dispatcher.
-// `b` re-invokes the just-finished stage interactively. `x` dispatches
-// the workflow's close command for the current run — the "abandon
-// ship" path the operator forms at the same surface they decline from.
-// `s` opens the push prompt early without satisfying the test stage:
-// useful for doc-only diffs and trivial fixes where the anti-theater
-// rule that test stage enforces would just produce a rubber-stamp
-// canvas. Hardcoding the sdlc gate keeps the prompt honest — no other
-// workflow has a headless `o` keystroke or a test stage today, and
-// we'd rather widen deliberately than offer affordances that don't
-// exist.
+// promptStageNextStage offers the non-push stage prompt: [Y/n] for
+// most workflows, with `s` appended when the next stage is sdlc's test
+// (the skip shortcut jumps straight to the push prompt), and optional
+// /x and /b suffixes when scuttle / back are non-nil. Y still defaults
+// so a reflex Enter chains the next stage interactively, the same as
+// before. The cascade vocabulary (`!`, `!<stage>`, `!!`) is advertised
+// in the legend below the label for sdlc / twin workflows: `!` runs
+// the next stage headless (one cascade step), `!<stage>` cascades to
+// a named gate, `!!` cascades and ships. `b` re-invokes the
+// just-finished stage interactively. `x` dispatches the workflow's
+// close command for the current run — the "abandon ship" path the
+// operator forms at the same surface they decline from. `s` opens
+// the push prompt early without satisfying the test stage: useful
+// for doc-only diffs and trivial fixes where the anti-theater rule
+// that test stage enforces would just produce a rubber-stamp canvas.
+// Hardcoding the sdlc gate keeps the prompt honest — no other
+// workflow has a test stage today, and we'd rather widen deliberately
+// than offer affordances that don't exist.
 //
 // `x` is positioned adjacent to `n` (decline) because both read as "no":
 // scuttle is "no, and also close this run." Grouping the two negatives
 // reads better than appending `x` at the tail, and it leaves the
-// forward-leaning `o` / `s` / `b` slots in their familiar positions.
+// forward-leaning `s` / `b` slots in their familiar positions.
 //
 // When the next stage is code, the just-finished design canvas is
 // printed above the prompt — same shape as promptPushNextStage prints
 // the code canvas above [N/m/p]. follow no longer surfaces the design
 // canvas once the design session closes, so this is the canvas's one
 // chance to land in front of the operator at the design→code gate.
-// The [Y/n/o] default stays Y: design→code is reversible (re-design
+// The [Y/n] default stays Y: design→code is reversible (re-design
 // after a botched code run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
@@ -325,10 +326,6 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
 	dispatcher := lookupHeadlessDispatcher(md.Workflow)
-	offerOneShot := dispatcher != nil
-	if offerOneShot {
-		opts = append(opts, promptOption{key: 'o', hint: "run headless"})
-	}
 	// `s` is the cascade-only shortcut to jump from post-code straight
 	// to the push prompt, skipping test. Gated to sdlc + next.Name ==
 	// "test" so the option only shows up at the exact gate it makes
@@ -346,7 +343,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if dispatcher != nil {
-		moePrintln(stdout, "  !<stage>=cascade to gate · !!=cascade and ship")
+		moePrintln(stdout, "  !=advance one stage · !<stage>=cascade to gate · !!=cascade and ship")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -368,9 +365,6 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	}
 	if scuttle != nil && answer == "x" {
 		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
-	}
-	if offerOneShot && answer == "o" {
-		return dispatcher(next.Name, md.Project, md.ID, false, stdout, stderr)
 	}
 	if offerSkipToPush && answer == "s" {
 		// Skip-to-push opens the push prompt directly without
@@ -526,21 +520,30 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	return 0
 }
 
-// dispatchCascade parses the operator's `!<stage>` or `!!` answer at
-// a non-push chain prompt, validates the destination against the
+// dispatchCascade parses the operator's `!`, `!<stage>`, or `!!` answer
+// at a non-push chain prompt, validates the destination against the
 // workflow's stage ladder, walks the cascade, and either re-enters
 // the chain at the destination gate or returns 0 if the cascade
 // shipped. answer is already lowercased and trimmed. startStage is
 // the next-to-run stage at the current gate (promptStageNextStage's
 // next.Name) — the cascade's first dispatch.
 //
+// Bare `!` dispatches exactly one stage (startStage) and re-prompts
+// at the resulting gate. `!<stage>` walks up to but not including
+// the named stage. `!!` walks every remaining stage and ships
+// (or auto-closes, for workflows without push).
+//
 // Returns the exit code to bubble up: the failing stage's code on a
 // cascade failure, 0 on a successful park-at-gate or ship.
 func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	var destination string
-	if answer == "!!" {
+	oneStep := false
+	switch {
+	case answer == "!!":
 		destination = ""
-	} else {
+	case answer == "!":
+		oneStep = true
+	default:
 		destination = strings.TrimPrefix(answer, "!")
 		wf, err := LookupWorkflow(md.Workflow)
 		if err != nil {
@@ -555,7 +558,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 			return 0
 		}
 	}
-	res, code := cascadeFromGate(startStage, destination, md, stdout, stderr)
+	res, code := cascadeFromGate(startStage, destination, oneStep, md, stdout, stderr)
 	if summary := renderCascadeSummary(res); summary != "" {
 		moePrintln(stdout, summary)
 	}
@@ -615,6 +618,10 @@ type cascadeResult struct {
 // cascadeFromGate dispatches stages headless from startStage up to,
 // but not including, destination. An empty destination is the yolo
 // variant (`!!`): it walks every remaining stage and ships at push.
+// When oneStep is true, destination is ignored and the cascade
+// dispatches exactly one stage (startStage) — the bare-`!` form.
+// oneStep at the terminal stage still dispatches that stage without
+// shipping or auto-closing; that's what distinguishes it from `!!`.
 //
 // startStage is the next-to-run stage at the operator's current
 // gate. destination is the stage the operator named in `!<stage>`;
@@ -623,16 +630,17 @@ type cascadeResult struct {
 // exit 0.
 //
 // Each headless dispatch goes through the workflow's registered
-// dispatcher — same Go-level seam the chain prompt's `o` keystroke
-// uses — so stage-specific
-// pre-flight (requireDesignCanvas, requireCodeCanvas, canvas skeleton
-// seeding) still fires. The suppressNextStage flag suppresses each
-// stage's inner promptNextStage so the cascade owns routing.
+// dispatcher — the Go-level seam the cascade driver (`!` / `!<stage>`
+// / `!!`) reaches into — so stage-specific pre-flight
+// (requireDesignCanvas, requireCodeCanvas, canvas skeleton seeding)
+// still fires. The suppressNextStage flag
+// suppresses each stage's inner promptNextStage so the cascade owns
+// routing.
 //
 // At push in yolo mode the dispatch is the merge path (pushCmd.Run with
 // no flags). `!!` defaults to fast-forward merge; runPushTyped writes the merge-path push note after deterministic hooks and
 // shipping.
-func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
+func cascadeFromGate(startStage, destination string, oneStep bool, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -646,8 +654,15 @@ func cascadeFromGate(startStage, destination string, md *run.Metadata, stdout, s
 		return res, 1
 	}
 	endIdx := len(stages)
-	yolo := destination == ""
-	if !yolo {
+	yolo := !oneStep && destination == ""
+	switch {
+	case oneStep:
+		// Dispatch exactly one stage. The terminal-stage case (twin's
+		// finalize from post-glossary) falls through naturally: endIdx
+		// = startIdx + 1 still walks one stage and the !yolo gate
+		// below skips the post-loop auto-close.
+		endIdx = startIdx + 1
+	case !yolo:
 		destIdx := indexOfString(stages, destination)
 		if destIdx < 0 {
 			moePrintf(stderr, "cascade: unknown destination stage %q for %s\n", destination, md.Workflow)
@@ -807,11 +822,12 @@ func indexOfString(xs []string, s string) int {
 }
 
 // headlessDispatcher is the Go-level seam a workflow's per-stage init
-// registers so the chain prompt's `o` keystroke and the cascade driver
-// can drive a stage headless without a hardcoded switch on workflow
-// name. The contract matches openSdlcStage / openTwinStage exactly:
-// take (stage, projectID, runID, suppressNextStage, stdout, stderr),
-// invoke the right per-stage helper headless, return its exit code.
+// registers so the chain prompt's cascade driver (`!` / `!<stage>` /
+// `!!`) can drive a stage headless without a hardcoded switch on
+// workflow name. The contract matches openSdlcStage / openTwinStage
+// exactly: take (stage, projectID, runID, suppressNextStage, stdout,
+// stderr), invoke the right per-stage helper headless, return its
+// exit code.
 type headlessDispatcher func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
 
 var headlessDispatchers = map[string]headlessDispatcher{}
@@ -830,8 +846,8 @@ func registerHeadlessDispatcher(workflow string, d headlessDispatcher) {
 
 // lookupHeadlessDispatcher returns the registered dispatcher for
 // workflow, or nil if none. nil means "this workflow has no headless
-// dispatch wired" — the chain prompt suppresses the `o` keystroke and
-// the cascade refuses to walk.
+// dispatch wired" — the chain prompt suppresses the cascade legend
+// and the cascade refuses to walk.
 func lookupHeadlessDispatcher(workflow string) headlessDispatcher {
 	return headlessDispatchers[workflow]
 }
