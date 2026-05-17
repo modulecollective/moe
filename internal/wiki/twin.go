@@ -85,7 +85,7 @@ substantive work:
   prose-form eval suite.
 - operations.md — how the project runs day-to-day.
 - roadmap.md — what's next: prioritized intent across near, mid,
-  long term, and parked.
+  long term, directions, and parked.
 - glossary.md — project-specific vocabulary; terse entries
   pointing back to the home doc where each term is anchored.
 
