@@ -4,10 +4,12 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 func init() {
@@ -125,6 +127,26 @@ func runProjectRemove(args []string, stdout, stderr io.Writer) int {
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	// Refuse if any named workspace still exists under .moe/named/<id>/*.
+	// Removing the project would orphan those dirs from the CLI surface
+	// — the operator has to clear them first via `moe workspace remove`.
+	// Cross-package guard lives in the CLI wrapper so internal/project
+	// doesn't grow a dep on internal/workspace just for this check.
+	infos, err := workspace.List(root, id)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if len(infos) > 0 {
+		names := make([]string, 0, len(infos))
+		for _, info := range infos {
+			names = append(names, info.Name)
+		}
+		moePrintf(stderr, "project %s has %d named workspace(s): %s\n",
+			id, len(infos), strings.Join(names, ", "))
+		moePrintf(stderr, "       remove each with `moe workspace remove %s <name>` first\n", id)
 		return 1
 	}
 	err = withRepoLock(root, repolock.Options{Purpose: "project-remove"}, func() error {
