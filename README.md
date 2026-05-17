@@ -3,8 +3,7 @@
 **A Git-backed command system for one person supervising an army of
 agents.**
 
-*An anti-social agent harness — one operator, a gaggle of bots, no
-contributor surface.*
+*An anti-social agent harness — one operator, a gaggle of bots.*
 
 MoE helps one operator turn intent into parallel agent work without
 losing context or control. Agents work in bounded threads attached to
@@ -18,12 +17,12 @@ coordination tax between thought and execution: backlog, runs,
 followups, knowledge base, and digital twin all feed each other so the
 operator and the bots share a compounding model of the project.
 
-MoE runs [Claude Code](https://claude.com/claude-code) against living
-markdown documents. The document is the compact handoff between
-stages; the conversation that produced it is saved underneath but
-rarely needs to be re-read. Software development is the first
-workflow, with knowledge-base, hook-authoring, meta-review, and
-digital-twin workflows alongside.
+MoE runs [Claude Code](https://claude.com/claude-code) or
+[Codex](https://chatgpt.com/codex/) against living markdown documents.
+The document is the compact handoff between stages; the conversation
+that produced it is saved underneath but rarely needs to be re-read.
+Software development is the first workflow, with knowledge-base,
+hook-authoring, meta-review, and digital-twin workflows alongside.
 
 There is no background worker, no TUI, no dashboard that updates on its
 own. Agents act only when you invoke a command. The UX problem is
@@ -182,11 +181,10 @@ fresh without turning documentation into a separate manual job.
   dangerous permissions (`Edit`, `Write`, `Bash`), confined to its
   sandbox worktree. Enforcement rides on Claude Code's sandbox and
   tool controls, not a custom isolation engine.
-- **Backend is Claude Code as a subprocess.** Interactive turns resume
-  normal Claude Code sessions; chained and bounded turns use
+- **Backend is an agent as a subprocess.** Interactive turns resume
+  normal agent sessions; chained and bounded turns use commands like
   `claude -p`. Either way it is the real CLI, real OAuth, and one
-  human driver. Scheduled or unattended runs must route to the Claude
-  API under Commercial Terms instead.
+  human driver.
 
 ---
 
