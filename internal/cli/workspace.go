@@ -83,9 +83,9 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // die alongside the sandbox), then removing the clone — the branch
 // and worktree go with it. For named workspaces that means releasing
 // the claim and leaving the directory in place for the next run to
-// reuse; teardown is deferred to `moe workspace dev-env-refresh` or a
-// future workspace-teardown verb, since the workspace's env is
-// expected to outlive the run.
+// reuse; teardown happens at explicit `moe workspace refresh` or
+// `moe workspace remove`, since the workspace's env is expected to
+// outlive the run.
 //
 // Idempotent: a run that never reached `sdlc code` (no clone, no
 // claim) is a no-op either way. Teardown is invoked best-effort —
