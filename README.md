@@ -3,6 +3,9 @@
 **A Git-backed command system for one person supervising an army of
 agents.**
 
+*An anti-social agent harness — one operator, a gaggle of bots, no
+contributor surface.*
+
 MoE helps one operator turn intent into parallel agent work without
 losing context or control. Agents work in bounded threads attached to
 markdown documents; every conversation, decision, and artifact is saved
@@ -16,10 +19,11 @@ followups, knowledge base, and digital twin all feed each other so the
 operator and the bots share a compounding model of the project.
 
 MoE runs [Claude Code](https://claude.com/claude-code) against living
-documents. Each document compresses its threaded discussion into a
-clean artifact that becomes context for the next step. Software
-development is the first workflow, with knowledge-base, hook-authoring,
-meta-review, and digital-twin workflows alongside.
+markdown documents. The document is the compact handoff between
+stages; the conversation that produced it is saved underneath but
+rarely needs to be re-read. Software development is the first
+workflow, with knowledge-base, hook-authoring, meta-review, and
+digital-twin workflows alongside.
 
 There is no background worker, no TUI, no dashboard that updates on its
 own. Agents act only when you invoke a command. The UX problem is
@@ -35,10 +39,10 @@ MoE is a small CLI wrapped around a durable operating journal:
 
 - **`moe/`** (this repo) — the Go CLI. Stdlib only, shells out to
   `git` and `claude`.
-- **`bureaucracy/`** — your private state: projects, runs, documents,
-  backlog, digital twins, and the markdown fragments that steer agents.
-  Discovered via a `bureaucracy.conf` marker file found by walking up
-  from `$PWD`, or via `$MOE_HOME`.
+- **`bureaucracy/`** — the operator's personal journal: projects,
+  runs, documents, backlog, digital twins, and the markdown fragments
+  that steer agents. Discovered via a `bureaucracy.conf` marker file
+  found by walking up from `$PWD`, or via `$MOE_HOME`.
 
 Every turn lands as one commit on the bureaucracy's `main` branch, with
 trailers (`MoE-Run`, `MoE-Document`, `MoE-Session`, …) that scope the
@@ -154,6 +158,10 @@ fresh without turning documentation into a separate manual job.
   judgment with autonomy. It gives the operator fast verbs for opening,
   resuming, chaining, closing, and shipping agent work while keeping
   every thread attached to an auditable project artifact.
+- **Three engagement modes.** Drive each stage yourself, hand the
+  whole chain to the agent and review on completion, or sit in the
+  middle — the verb is the same; the difference is whether you stay
+  in the session.
 - **Guidance is markdown, not config.** Agent behavior comes from
   concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
   fragments into a single `--append-system-prompt`. Every agent
@@ -187,12 +195,22 @@ fresh without turning documentation into a separate manual job.
 Pre-1.0 and under active development. The command surface, file
 layout, and commit-trailer conventions are subject to change. If
 you're reading this because you're considering trying it — welcome,
-but expect sharp edges. Issue triage is best-effort; this is a
-one-operator project, not a supported product.
+but expect sharp edges.
+
+## Contributing
+
+Not accepting issues or PRs right now. This is one operator's tool,
+shared in case it's useful.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
 
 ---
 
 ## References
 
+- [Module Collective: Building a Ministry of Everything](https://www.modulecollective.com/posts/building-a-ministry-of-everything/)
 - [Anthropic: Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html)
+- [Karpathy: LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
