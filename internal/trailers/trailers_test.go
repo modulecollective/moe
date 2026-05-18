@@ -10,18 +10,19 @@ func TestBlockEmpty(t *testing.T) {
 
 func TestBlockCanonicalOrderAllFields(t *testing.T) {
 	b := Block{
-		Run:        "r",
-		Project:    "p",
-		Workflow:   "w",
-		Document:   "d",
-		Session:    "s",
-		PR:         "pr",
-		Merged:     "m",
-		Closed:     "c",
-		PromotedTo: "pt",
-		FromRun:    "fr",
-		Idea:       "i",
-		ReopenOf:   "ro",
+		Run:           "r",
+		Project:       "p",
+		Workflow:      "w",
+		Document:      "d",
+		Session:       "s",
+		PR:            "pr",
+		Merged:        "m",
+		Closed:        "c",
+		PromotedTo:    "pt",
+		FromRun:       "fr",
+		Idea:          "i",
+		IdeaMovedFrom: "imf",
+		ReopenOf:      "ro",
 	}
 	want := "MoE-Run: r\n" +
 		"MoE-Project: p\n" +
@@ -34,6 +35,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		"MoE-Promoted-To: pt\n" +
 		"MoE-From-Run: fr\n" +
 		"MoE-Idea: i\n" +
+		"MoE-Idea-Moved-From: imf\n" +
 		"MoE-Reopen-Of: ro\n"
 	if got := b.String(); got != want {
 		t.Fatalf("String() mismatch:\n got: %q\nwant: %q", got, want)

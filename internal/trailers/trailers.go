@@ -20,18 +20,19 @@ import "strings"
 // with '\n', so `subject + "\n\n" + block.String()` yields a commit
 // message ending in '\n'.
 type Block struct {
-	Run        string
-	Project    string
-	Workflow   string
-	Document   string
-	Session    string
-	PR         string
-	Merged     string
-	Closed     string
-	PromotedTo string
-	FromRun    string
-	Idea       string
-	ReopenOf   string
+	Run           string
+	Project       string
+	Workflow      string
+	Document      string
+	Session       string
+	PR            string
+	Merged        string
+	Closed        string
+	PromotedTo    string
+	FromRun       string
+	Idea          string
+	IdeaMovedFrom string
+	ReopenOf      string
 }
 
 // String renders the block. Empty fields are skipped; field
@@ -49,6 +50,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Promoted-To", b.PromotedTo)
 	write(&sb, "MoE-From-Run", b.FromRun)
 	write(&sb, "MoE-Idea", b.Idea)
+	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
 	return sb.String()
 }
