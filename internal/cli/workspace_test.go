@@ -197,9 +197,11 @@ func TestShellRunWorkspaceLandsInClonePath(t *testing.T) {
 }
 
 // TestShellNamedWorkspaceCreatesLazily covers the standalone form.
-// Without any run involved, `moe sdlc shell tele --workspace dev`
-// materialises the workspace dir on first call and lands the shell
-// in it.
+// Without any run involved, `moe workspace shell tele dev` materialises
+// the workspace dir on first call and lands the shell in it. Promoted
+// from the previous `moe sdlc shell --workspace dev` flag form;
+// workspaces aren't sdlc-specific, so the verb sits with the rest of
+// the workspace admin verbs.
 func TestShellNamedWorkspaceCreatesLazily(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell stub uses POSIX shell semantics")
@@ -214,7 +216,7 @@ func TestShellNamedWorkspaceCreatesLazily(t *testing.T) {
 	t.Setenv("SHELL", stubShell)
 
 	var out, errb bytes.Buffer
-	if code := runShell([]string{"--workspace=dev", "tele"}, &out, &errb); code != 0 {
+	if code := runWorkspaceShell([]string{"tele", "dev"}, &out, &errb); code != 0 {
 		t.Fatalf("shell: exit=%d stderr=%q", code, errb.String())
 	}
 	wantPath, err := filepath.EvalSymlinks(filepath.Join(root, ".moe", "named", "tele", "dev"))
@@ -231,6 +233,24 @@ func TestShellNamedWorkspaceCreatesLazily(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "unclaimed") {
 		t.Fatalf("expected unclaimed marker in stdout, got: %q", out.String())
+	}
+}
+
+// TestSdlcShellRejectsWorkspaceFlag pins the removal: the
+// `--workspace` flag form on `moe sdlc shell` is gone — workspaces
+// aren't sdlc-specific, so `moe workspace shell` owns that shape now.
+// The flag should parse-error rather than silently no-op.
+func TestSdlcShellRejectsWorkspaceFlag(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runShell([]string{"--workspace=dev", "tele"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on --workspace under sdlc shell; stdout=%q stderr=%q", out.String(), errb.String())
 	}
 }
 

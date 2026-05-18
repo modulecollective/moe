@@ -12,23 +12,10 @@ import (
 )
 
 // runShell drops the operator into an interactive shell rooted at a
-// project workspace. Two shapes share one verb so the operator can use
-// the same name regardless of whether they're poking at a specific
-// run's tree or at a long-lived workspace they're using to keep a dev
-// server warm:
-//
-//   - moe sdlc shell <project> <run>
-//     The run's working tree — per-run sandbox or named workspace,
-//     whichever it was opened with. Refuses if `moe sdlc code` was
-//     never run (no clone on disk).
-//
-//   - moe sdlc shell <project> --workspace <name>
-//     A named workspace directly, no run involved. Lazily creates the
-//     workspace on first use (same git-worktree mechanic as `moe sdlc
-//     code`'s first attach), then drops into the shell without
-//     touching branches or claims. Whatever's currently checked out
-//     is what the operator sees — exactly the warm-state property the
-//     named-workspace mode exists to provide.
+// run's working tree. The named-workspace shape lives under
+// `moe workspace shell <project> <name>` — workspaces aren't
+// sdlc-specific, so the verb sits with the rest of the workspace
+// admin verbs. Single-operator, no-config-knobs: one verb per shape.
 //
 // The shell is whatever $SHELL says, defaulting to /bin/sh. Stdin /
 // stdout / stderr are wired straight through, so the operator gets
@@ -37,19 +24,18 @@ import (
 func runShell(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc shell", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	workspaceName := fs.String("workspace", "", "drop into the named workspace at .moe/named/<project>/<name>/ instead of a specific run's clone")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe sdlc shell <project> <run>")
-		moePrintln(stderr, "       moe sdlc shell <project> --workspace <name>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Drops into a shell rooted at a project workspace. The first form")
-		moePrintln(stderr, "uses the run's working tree (per-run sandbox or named workspace,")
-		moePrintln(stderr, "whichever it was opened with). The second form uses a named")
-		moePrintln(stderr, "workspace directly, lazily creating it — useful for warming a dev")
-		moePrintln(stderr, "server in advance and reusing it across runs.")
-		fs.PrintDefaults()
+		moePrintln(stderr, "Drops into a shell rooted at the run's working tree (per-run sandbox")
+		moePrintln(stderr, "or named workspace, whichever it was opened with). For a shell into")
+		moePrintln(stderr, "a named workspace directly, use `moe workspace shell <project> <name>`.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
 		return 2
 	}
 
@@ -57,21 +43,7 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-
-	switch {
-	case *workspaceName != "":
-		if fs.NArg() != 1 {
-			fs.Usage()
-			return 2
-		}
-		return shellNamedWorkspace(root, fs.Arg(0), *workspaceName, stdout, stderr)
-	default:
-		if fs.NArg() != 2 {
-			fs.Usage()
-			return 2
-		}
-		return shellRunWorkspace(root, fs.Arg(0), fs.Arg(1), stdout, stderr)
-	}
+	return shellRunWorkspace(root, fs.Arg(0), fs.Arg(1), stdout, stderr)
 }
 
 // shellRunWorkspace resolves the run's workspace path and execs a

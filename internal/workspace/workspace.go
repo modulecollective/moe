@@ -8,9 +8,9 @@
 // Lifecycle:
 //
 //   - Lazily created on first use, by either `moe sdlc new
-//     --workspace <name>` or `moe sdlc shell <project> --workspace
-//     <name>`. The working tree reuses sandbox.EnsureAt — a `git
-//     worktree` linked off the canonical submodule, with the auto-init
+//     --workspace <name>` or `moe workspace shell <project> <name>`.
+//     The working tree reuses sandbox.EnsureAt — a `git worktree`
+//     linked off the canonical submodule, with the auto-init
 //     pre-flight for fresh checkouts.
 //   - Claimed by the run that's currently using it. The claim file
 //     (claim.json inside the workspace dir) names the holding run;
@@ -112,7 +112,7 @@ func (e *AlreadyClaimedError) Unwrap() error { return ErrAlreadyClaimed }
 
 // ReadClaim returns the workspace's current claim, or (nil, nil) if no
 // workspace exists or if the workspace exists but carries no claim
-// (e.g. created via `moe sdlc shell --workspace`).
+// (e.g. created via `moe workspace shell`).
 func ReadClaim(root, projectID, name string) (*Claim, error) {
 	wp := Path(root, projectID, name)
 	if _, err := os.Stat(wp); errors.Is(err, os.ErrNotExist) {
@@ -147,10 +147,9 @@ func readClaim(workspacePath string) (*Claim, error) {
 // turn against the same run reaches this path).
 //
 // Acquire does NOT switch branches or touch the working tree — that is
-// Attach's job. Splitting them lets `sdlc shell --workspace` create
-// the workspace without needing a run to claim it (Acquire isn't
-// called in that path) while still presenting one entry point per
-// concern.
+// Attach's job. Splitting them lets `moe workspace shell` create the
+// workspace without needing a run to claim it (Acquire isn't called
+// in that path) while still presenting one entry point per concern.
 func Acquire(root, projectID, name, runRef string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
@@ -330,7 +329,7 @@ func Release(root, projectID, name string) error {
 // Ensure makes sure the workspace directory exists and returns its
 // absolute path. First call registers the project's submodule as a
 // worktree via sandbox.EnsureAt; subsequent calls are a no-op. Used by
-// Acquire and directly by the standalone `sdlc shell --workspace` path.
+// Acquire and directly by the standalone `moe workspace shell` path.
 func Ensure(root, projectID, name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
