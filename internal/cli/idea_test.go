@@ -47,7 +47,7 @@ func TestIdeaRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "edit", "close", "list", "cat"} {
+	for _, want := range []string{"new", "edit", "close", "list", "cat", "move"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("idea usage missing subcommand %q: %q", want, out.String())
 		}
@@ -899,4 +899,317 @@ func fakeClaudeOnPath(t *testing.T, script string) {
 func gitLog(t *testing.T, root string, args ...string) string {
 	t.Helper()
 	return gittest.Output(t, root, append([]string{"log"}, args...)...)
+}
+
+// TestIdeaMoveRehomesRunAndCommits is the happy path: capture an idea
+// in project A, move it to project B, and assert the on-disk run dir
+// relocated, run.json's project field rewrote, the source dir is gone,
+// and HEAD carries the move subject + canonical trailers including
+// MoE-Idea-Moved-From.
+func TestIdeaMoveRehomesRunAndCommits(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Belongs to moe"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "belongs-to-moe", "moe"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "moved idea tele/belongs-to-moe to moe/belongs-to-moe") {
+		t.Fatalf("missing move confirmation: %q", out.String())
+	}
+
+	// Source dir gone, destination dir holds the canvas.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "belongs-to-moe")); !os.IsNotExist(err) {
+		t.Fatalf("source dir should be gone, stat err=%v", err)
+	}
+	body, err := os.ReadFile(ideaCanvas(root, "moe", "belongs-to-moe"))
+	if err != nil {
+		t.Fatalf("destination canvas missing: %v", err)
+	}
+	if string(body) != "# Belongs to moe\n" {
+		t.Fatalf("canvas body changed by move: %q", body)
+	}
+
+	// run.json under the destination names the new project.
+	mdBody, err := os.ReadFile(filepath.Join(root, "projects", "moe", "runs", "belongs-to-moe", "run.json"))
+	if err != nil {
+		t.Fatalf("destination run.json missing: %v", err)
+	}
+	if !strings.Contains(string(mdBody), `"project": "moe"`) {
+		t.Fatalf("run.json project not rewritten:\n%s", mdBody)
+	}
+	if !strings.Contains(string(mdBody), `"status": "in_progress"`) {
+		t.Fatalf("run.json status should stay in_progress:\n%s", mdBody)
+	}
+
+	// HEAD subject + trailers.
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "Move idea tele belongs-to-moe to moe") {
+		t.Fatalf("commit subject wrong:\n%s", head)
+	}
+	for _, want := range []string{
+		"MoE-Run: belongs-to-moe",
+		"MoE-Project: moe",
+		"MoE-Workflow: idea",
+		"MoE-Idea-Moved-From: tele/belongs-to-moe",
+	} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("commit missing trailer %q:\n%s", want, head)
+		}
+	}
+
+	// Clean tree afterwards.
+	entries, err := git.Status(root)
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("tree should be clean after move, got:\n%v", entries)
+	}
+}
+
+// TestIdeaMoveRefusesUnknownDestProject: dest project must be registered.
+func TestIdeaMoveRefusesUnknownDestProject(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Stuck here"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "stuck-here", "ghost"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on missing dest project, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not registered") {
+		t.Fatalf("expected unregistered-project error, got: %q", errb.String())
+	}
+	// Source untouched.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "stuck-here")); err != nil {
+		t.Fatalf("source dir should be untouched on refusal: %v", err)
+	}
+}
+
+// TestIdeaMoveRefusesSameProject: src == dest is a no-op, refused.
+func TestIdeaMoveRefusesSameProject(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Stays put"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	beforeHead := gitLog(t, root, "-1", "--format=%H")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "stays-put", "tele"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on same-project move, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "same") {
+		t.Fatalf("expected same-project error, got: %q", errb.String())
+	}
+	// No commit created.
+	afterHead := gitLog(t, root, "-1", "--format=%H")
+	if beforeHead != afterHead {
+		t.Fatalf("same-project move should not commit:\nbefore=%safter=%s", beforeHead, afterHead)
+	}
+}
+
+// TestIdeaMoveRefusesSlugCollision: a run already at the destination
+// slug forces a refusal so the operator picks (close or rename) instead
+// of having two runs silently fight for the path.
+func TestIdeaMoveRefusesSlugCollision(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture A failed")
+	}
+	if code := Run([]string{"idea", "new", "moe", "Twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture B failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "twin", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on slug collision, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "already exists") {
+		t.Fatalf("expected collision error, got: %q", errb.String())
+	}
+	// Both run dirs intact.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "twin")); err != nil {
+		t.Fatalf("source dir should still exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "moe", "runs", "twin")); err != nil {
+		t.Fatalf("dest dir should still exist: %v", err)
+	}
+}
+
+// TestIdeaMoveRefusesClosedIdea: closed status is terminal — moving it
+// would update its home without changing what it represents, so refuse.
+func TestIdeaMoveRefusesClosedIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if code := Run([]string{"idea", "close", "tele", "done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup close failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "done", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on closed idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not open") {
+		t.Fatalf("expected wrong-status error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaMoveRefusesPromotedIdea: promoted ideas carry a provenance
+// pointer on their downstream sdlc run; moving the source after promote
+// would silently invalidate that link, so refuse.
+func TestIdeaMoveRefusesPromotedIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Promote me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if code := runNew("sdlc", []string{"--from-idea=promote-me", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup promote failed")
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "promote-me", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on promoted idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not open") {
+		t.Fatalf("expected wrong-status error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaMoveRefusesNonIdeaRun: a slug that names a non-idea run
+// (sdlc, kb, …) is not an idea move target, even when the slug shape
+// matches. Guard the workflow check the same way idea edit does.
+func TestIdeaMoveRefusesNonIdeaRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := runNew("sdlc", []string{"tele", "Real run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup sdlc run failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "real-run", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on non-idea run, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not an idea") {
+		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaMoveMissingSourceSlug: source slug must resolve to an idea
+// run that exists.
+func TestIdeaMoveMissingSourceSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "ghost", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on missing source, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "does not exist") {
+		t.Fatalf("expected missing-idea error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaMoveRefusesDirtyWorkingTree: a stray edit would ride along on
+// the move commit. The clean-tree gate must trip before any move work.
+func TestIdeaMoveRefusesDirtyWorkingTree(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele", "Dirty"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "dirty", "moe"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "uncommitted changes") {
+		t.Fatalf("expected dirty-tree error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaMoveUsageErrors: wrong arity exits 2.
+func TestIdeaMoveUsageErrors(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "move", "tele", "slug"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected exit=2 on missing args, got %d; stderr=%q", code, errb.String())
+	}
 }

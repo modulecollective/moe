@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -65,6 +66,11 @@ func init() {
 		Name:    "cat",
 		Summary: "dump an idea's canvas to stdout",
 		Run:     runIdeaCat,
+	})
+	g.Register(&Command{
+		Name:    "move",
+		Summary: "re-home an open idea under a different project",
+		Run:     runIdeaMove,
 	})
 	RegisterGroup(g)
 
@@ -407,6 +413,108 @@ func runIdeaCat(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+// runIdeaMove re-homes an open idea run from <project>/<slug> to
+// <to-project>/<slug>. Slug is unchanged — slugs are project-scoped on
+// disk and keeping it stable means any stored reference (followups
+// notes, prior canvases) doesn't silently break. Refuses on wrong
+// workflow, non-open status, missing destination project, slug
+// collision at destination, or same-project no-op. See design doc
+// move-ideas-between-projects-or-at-capture for rationale.
+func runIdeaMove(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea move", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea move <project> <slug> <to-project>\n")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 3 {
+		fs.Usage()
+		return 2
+	}
+	fromProject := fs.Arg(0)
+	slug := fs.Arg(1)
+	toProject := fs.Arg(2)
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, fromProject); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if err := requireProject(root, toProject); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if fromProject == toProject {
+		moePrintf(stderr, "idea: source and destination project are the same (%s) — nothing to move\n", fromProject)
+		return 1
+	}
+	if err := requireCleanTree(root); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	md, err := loadIdeaRun(root, fromProject, slug)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if md.Status != run.StatusInProgress {
+		moePrintf(stderr, "idea %s %s is %s, not open — refusing to move\n", fromProject, slug, md.Status)
+		return 1
+	}
+
+	fromRel := run.Dir(fromProject, slug)
+	destRel := run.Dir(toProject, slug)
+	if _, err := os.Stat(filepath.Join(root, destRel)); err == nil {
+		moePrintf(stderr,
+			"idea: %s already exists; close or rename it before moving %s here\n",
+			destRel, slug)
+		return 1
+	}
+
+	msg := fmt.Sprintf("Move idea %s %s to %s\n\n", fromProject, slug, toProject) +
+		trailers.Block{
+			Run:           slug,
+			Project:       toProject,
+			Workflow:      ideaWorkflow,
+			IdeaMovedFrom: fromProject + "/" + slug,
+		}.String()
+
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "idea-move",
+		Run:     toProject + "/" + slug,
+	}, func() error {
+		// git mv refuses if the destination's parent dir doesn't exist,
+		// and a project that has never opened a run has no runs/ yet.
+		if err := os.MkdirAll(filepath.Join(root, "projects", toProject, "runs"), 0o755); err != nil {
+			return fmt.Errorf("mkdir destination runs/: %w", err)
+		}
+		if err := git.Run(root, "mv", fromRel, destRel); err != nil {
+			return fmt.Errorf("git mv: %w", err)
+		}
+		md.Project = toProject
+		if err := run.Save(root, md); err != nil {
+			return fmt.Errorf("save run.json: %w", err)
+		}
+		runJSONRel := filepath.Join(destRel, "run.json")
+		if err := git.Run(root, "add", "--", runJSONRel); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		return git.Run(root, "commit", "-m", msg)
+	})
+	if err != nil {
+		moePrintf(stderr, "idea: move: %v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "moved idea %s/%s to %s/%s\n", fromProject, slug, toProject, slug)
 	return 0
 }
 
