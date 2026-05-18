@@ -272,11 +272,11 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 }
 
 // promptStageNextStage carries [Y/n/!] for workflows with a headless
-// dispatcher (sdlc, twin) and [Y/n] for those without (kb). Bare `!`
-// at an sdlc gate dispatches the next stage headless via openSdlcStage
-// (one cascade step, suppressNextStage=true). Non-sdlc workflows (no
-// headless dispatcher) treat `!` as a typo — the option is absent from
-// the bracket and the prefix-match falls through to the decline arm.
+// dispatcher and [Y/n] for those without. Bare `!` at an sdlc gate
+// dispatches the next stage headless via openSdlcStage (one cascade
+// step, suppressNextStage=true). Workflows without a dispatcher — idea
+// today — treat `!` as a typo: the option is absent from the bracket
+// and the prefix-match falls through to the decline arm.
 func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -293,8 +293,8 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele", "fix-it"}},
 		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele", "fix-it"}},
 		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/!]"},
-		{name: "kb-no-bang-option", workflow: "kb", input: "!\n", wantLabel: "[Y/n]"},
-		{name: "kb-default-runs", workflow: "kb", input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "idea-no-bang-option", workflow: ideaWorkflow, input: "!\n", wantLabel: "[Y/n]"},
+		{name: "idea-default-runs", workflow: ideaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

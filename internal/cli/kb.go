@@ -104,13 +104,27 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	return openKbResearch(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+}
+
+// openKbResearch is the Go-level seam behind `moe kb research`. The
+// typed `Command.Run` parses args and hands to this helper; the chain
+// prompt's cascade driver (`!` / `!<stage>` / `!!`) reaches it directly
+// via openKbStage. headless=true selects the bounded one-turn variant
+// (`claude -p` plus the workflow's oneshot.md fragment), the same path
+// the equivalent twin / sdlc seams take.
+func openKbResearch(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	const kickoff = "The operator just opened this research session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
 		"what's actually on it. In one or two sentences, acknowledge where the " +
 		"source list stands (fresh start vs. resumed) and ask what topic or " +
 		"angle they'd like you to search for. Then wait for their reply."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "research",
-		stageSessionOpts{InitialPrompt: kickoff}, stdout, stderr)
+	return runStageSession(projectID, runID, "research",
+		stageSessionOpts{
+			InitialPrompt: kickoff,
+			Headless:      headless,
+			SkipNextStage: suppressNextStage,
+		}, stdout, stderr)
 }
 
 func runSummarize(args []string, stdout, stderr io.Writer) int {
@@ -131,15 +145,24 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	return openKbSummarize(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+}
+
+// openKbSummarize is the Go-level seam behind `moe kb summarize`. Same
+// contract as openKbResearch one stage downstream — adds the wiki
+// engine wiring kbWikiBuilder produces.
+func openKbSummarize(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	const kickoff = "The operator just opened this kb ingest session. " +
 		"Read the run's research bibliography and the project's wiki under " +
 		"projects/<project>/knowledge/ before replying. In one or two sentences, " +
 		"acknowledge where the wiki stands (fresh vs. populated) and propose " +
 		"how you'd work the new sources in — which existing topic docs you'd " +
 		"extend, where you might add new ones — then wait for the operator's go-ahead."
-	return runStageSession(fs.Arg(0), fs.Arg(1), "summarize",
+	return runStageSession(projectID, runID, "summarize",
 		stageSessionOpts{
 			InitialPrompt: kickoff,
+			Headless:      headless,
+			SkipNextStage: suppressNextStage,
 			WikiBuilder:   kbWikiBuilder,
 		}, stdout, stderr)
 }

@@ -56,7 +56,15 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, runID := fs.Arg(0), fs.Arg(1)
+	return openHooksCode(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+}
+
+// openHooksCode is the Go-level seam behind `moe hooks code`. Mirrors
+// the equivalent seams in sdlc / twin / kb / meta-moe: the typed
+// Command.Run parses args; this helper does the requireRun guard and
+// hands to runStageSession. The chain prompt's cascade driver reaches
+// it through openHooksStage in hooks_stages.go.
+func openHooksCode(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	if code := requireRun("hooks code", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -69,6 +77,8 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, hooksCodeDoc, stageSessionOpts{
 		NeedsSandbox:    false,
 		InitialPrompt:   kickoff,
+		Headless:        headless,
+		SkipNextStage:   suppressNextStage,
 		ExtraStagePaths: hooksStageHooksDir,
 	}, stdout, stderr)
 }

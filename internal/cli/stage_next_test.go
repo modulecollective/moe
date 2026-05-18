@@ -341,14 +341,16 @@ func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageBackForNonSdlc: a non-sdlc workflow with
-// a back target produces [Y/n/b] and the legend reads
-// "Y = run · n = decline · b = back to <stage>". Non-sdlc workflows
-// never surface the cascade legend either, and the bracket stays
-// /!-free because non-sdlc has no headless dispatcher.
-func TestPromptStageNextStageBackForNonSdlc(t *testing.T) {
+// TestPromptStageNextStageBackForWorkflowWithoutDispatcher: a workflow
+// with no registered headless dispatcher produces [Y/n/b] (no /!) and
+// the legend omits the cascade entry. Idea is the only such workflow
+// today — every other workflow registered a dispatcher when the
+// terminal-close prompt design landed — so the assertion is in
+// practice "the prompt drops /! when lookupHeadlessDispatcher returns
+// nil." Use idea to test the genuine no-dispatcher case.
+func TestPromptStageNextStageBackForWorkflowWithoutDispatcher(t *testing.T) {
 	next := &Command{
-		Name: "ingest",
+		Name: ideaDocID,
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	var backRan bool
@@ -359,7 +361,7 @@ func TestPromptStageNextStageBackForNonSdlc(t *testing.T) {
 			return 0
 		},
 	}
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: ideaWorkflow, Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -375,7 +377,7 @@ func TestPromptStageNextStageBackForNonSdlc(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe idea outline moe lingering-workflows", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -383,10 +385,10 @@ func TestPromptStageNextStageBackForNonSdlc(t *testing.T) {
 		t.Fatalf("expected [Y/n/b] label, got: %q", got)
 	}
 	if strings.Contains(got, "! = cascade") {
-		t.Fatalf("non-sdlc workflow must not advertise cascade legend, got: %q", got)
+		t.Fatalf("workflow without dispatcher must not advertise cascade legend, got: %q", got)
 	}
 	if strings.Contains(got, "/!") {
-		t.Fatalf("non-sdlc workflow must not put ! in the bracket, got: %q", got)
+		t.Fatalf("workflow without dispatcher must not put ! in the bracket, got: %q", got)
 	}
 	if !strings.Contains(got, "b = back to outline") {
 		t.Fatalf("expected legend naming back target, got: %q", got)
@@ -914,5 +916,106 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	}
 	if !testRan {
 		t.Fatalf("expected test to fire after `b` then `t`")
+	}
+}
+
+// TestPromptCloseNextStageDispatchesOnAccept pins the new
+// terminal-stage close prompt: the helper offers [Y/n/x], and Y, the
+// default (blank), and x all dispatch close with [project, run] (no
+// --no-edit — the operator just typed Y, so opening the followups
+// editor is correct). n declines without firing close. The TTY gate
+// lives in the caller (promptNextStage); this helper is exercised
+// directly via pipe-stdin, mirroring how promptStageNextStage /
+// promptPushNextStage are tested.
+func TestPromptCloseNextStageDispatchesOnAccept(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		wantDispatch bool
+	}{
+		{name: "default-y", input: "\n", wantDispatch: true},
+		{name: "explicit-y", input: "y\n", wantDispatch: true},
+		{name: "alias-x", input: "x\n", wantDispatch: true},
+		{name: "decline-n", input: "n\n", wantDispatch: false},
+		{name: "typo-declines", input: "wat\n", wantDispatch: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var ran bool
+			var gotArgs []string
+			closeCmd := &Command{
+				Name: "close",
+				Run: func(args []string, _, _ io.Writer) int {
+					ran = true
+					gotArgs = append([]string(nil), args...)
+					return 0
+				},
+			}
+			md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if _, err := io.WriteString(w, tc.input); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			oldStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = oldStdin })
+
+			var stdout, stderr bytes.Buffer
+			if code := promptCloseNextStage(closeCmd, "finalize", md, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+			}
+			if ran != tc.wantDispatch {
+				t.Fatalf("close dispatched=%v, want %v (stdout=%q)", ran, tc.wantDispatch, stdout.String())
+			}
+			if tc.wantDispatch {
+				if got, want := strings.Join(gotArgs, " "), "moe reflect-2026-05-17"; got != want {
+					t.Fatalf("close args = %q, want %q (no --no-edit — interactive Y opens the followups editor)", got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestPromptCloseNextStageRendersLabelAndLegend pins the on-screen
+// shape: "<stage> sealed — close run now? [Y/n/x]" with the legend
+// "Y = close · n = decline · x = close (alias)" below. Same render
+// helpers (renderPromptLabel / renderPromptLegend) the other chain
+// prompts use, so adding/reordering options stays one-edit safe.
+func TestPromptCloseNextStageRendersLabelAndLegend(t *testing.T) {
+	closeCmd := &Command{
+		Name: "close",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptCloseNextStage(closeCmd, "finalize", md, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "finalize sealed — close run now? [Y/n/x]") {
+		t.Fatalf("expected '<stage> sealed — close run now? [Y/n/x]' in stdout, got: %q", got)
+	}
+	if !strings.Contains(got, "Y = close · n = decline · x = close (alias)") {
+		t.Fatalf("expected legend with close/decline/alias entries, got: %q", got)
 	}
 }

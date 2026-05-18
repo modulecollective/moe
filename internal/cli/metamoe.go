@@ -71,23 +71,30 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	projectID, runID := fs.Arg(0), fs.Arg(1)
+	return openMetaMoeReport(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+}
 
+// openMetaMoeReport is the Go-level seam behind `moe meta-moe report`.
+// Mirrors openSdlcDesign / openKbResearch / etc.: the typed Command.Run
+// parses args, this helper does the per-stage scan, builds the kickoff,
+// and hands to runStageSession. The chain prompt's cascade driver
+// reaches it through openMetaMoeStage in metamoe_stages.go.
+func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
 	}
-
 	scan, err := metaMoeScanProject(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	kickoff := metaMoeRenderKickoff(scan)
-
 	return runStageSession(projectID, runID, metaMoeReportDoc, stageSessionOpts{
 		NeedsSandbox:    false,
 		InitialPrompt:   kickoff,
+		Headless:        headless,
+		SkipNextStage:   suppressNextStage,
 		ExtraStagePaths: metaMoePublishCanvas,
 	}, stdout, stderr)
 }

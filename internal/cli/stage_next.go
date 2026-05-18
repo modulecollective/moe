@@ -51,15 +51,21 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 		if stage == "" {
 			// Terminal stage — no successor to offer. If the workflow
 			// has a close command and the run is still in_progress,
-			// nudge the operator at it. Twin's finalize is the only
-			// stage today that hits this path; sdlc's last stage is
-			// push, which is its own ship command and never gets here.
+			// offer the operator the same `[Y/n/x]` shape every other
+			// chain prompt uses, with `Y` dispatching close. Non-TTY
+			// callers (`moe twin reflect ... < /dev/null`) keep the
+			// print-only nudge — anti-silent-close, same rule the
+			// cascade's auto-close honours.
 			if md.Status == run.StatusInProgress {
 				if g, err := LookupGroup(md.Workflow); err == nil {
-					if cmd := g.Lookup("close"); cmd != nil {
-						moePrintf(stdout,
-							"%s sealed — run `moe %s close %s %s` to mark the run terminal.\n",
-							justFinished, md.Workflow, md.Project, md.ID)
+					if closeCmd := g.Lookup("close"); closeCmd != nil {
+						if !stdinIsTerminal() {
+							moePrintf(stdout,
+								"%s sealed — run `moe %s close %s %s` to mark the run terminal.\n",
+								justFinished, md.Workflow, md.Project, md.ID)
+							return 0
+						}
+						return promptCloseNextStage(closeCmd, justFinished, md, stdout, stderr)
 					}
 				}
 			}
@@ -413,6 +419,51 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return 0
 	}
 	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+}
+
+// promptCloseNextStage is the terminal-stage analogue of
+// promptStageNextStage / promptPushNextStage: the last committed stage
+// left the run `done` but `in_progress`, and the workflow has a `close`
+// command, so the chain prompt asks `[Y/n/x]` instead of printing a
+// copy-paste hint. Y dispatches close interactively (no `--no-edit` —
+// the operator just typed Y, so opening the followups editor is the
+// right behaviour); n leaves the run at done · close? for the operator
+// to come back to; x is an alias for Y (muscle-memory consistency with
+// the other prompts, where `x` is "scuttle (close)" — at this gate
+// close IS the next step, so the alias collapses to the same dispatch).
+//
+// Caller responsibility: gate on stdinIsTerminal() before invoking. The
+// non-TTY branch retains the print-only nudge so headless callers
+// (`moe twin reflect ... < /dev/null`) never close silently.
+func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metadata, stdout, stderr io.Writer) int {
+	opts := []promptOption{
+		{key: 'Y', hint: "close"},
+		{key: 'n', hint: "decline"},
+		{key: 'x', hint: "close (alias)"},
+	}
+	label := renderPromptLabel(opts)
+	moePrintf(stdout, "%s sealed — close run now? %s\n", justFinished, label)
+	moePrintln(stdout, renderPromptLegend(opts))
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	if interrupted {
+		// SIGINT at this prompt collapses to decline, same shape the
+		// other chain prompts use — the operator can always re-run
+		// `moe <wf> close` later.
+		moePrintln(stdout, "^C")
+		return 0
+	}
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	accepted := answer == "" || strings.HasPrefix(answer, "y") || answer == "x"
+	if !accepted {
+		return 0
+	}
+	return closeCmd.Run([]string{md.Project, md.ID}, stdout, stderr)
 }
 
 // promptPushNextStage offers three choices: decline (default), merge

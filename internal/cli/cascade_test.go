@@ -729,11 +729,15 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageNoCascadeLegendForNonSdlc: kb (non-sdlc)
-// prompts must not advertise the cascade syntax — it's sdlc-only.
-func TestPromptStageNextStageNoCascadeLegendForNonSdlc(t *testing.T) {
-	next := &Command{Name: "ingest", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+// TestPromptStageNextStageNoCascadeLegendWithoutDispatcher: a workflow
+// without a registered headless dispatcher must not advertise the
+// cascade syntax. After the lingering-workflows design landed,
+// idea is the only such workflow today (canvas-only, no Command for
+// its stage) — every other workflow registers a dispatcher, so the
+// cascade legend is workflow-by-presence, not workflow-by-name.
+func TestPromptStageNextStageNoCascadeLegendWithoutDispatcher(t *testing.T) {
+	next := &Command{Name: ideaDocID, Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: ideaWorkflow, Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -749,11 +753,11 @@ func TestPromptStageNextStageNoCascadeLegendForNonSdlc(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe kb ingest tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe idea idea moe lingering-workflows", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
 	if strings.Contains(stdout.String(), "! = cascade") || strings.Contains(stdout.String(), "!<stage>") || strings.Contains(stdout.String(), "!! =") {
-		t.Fatalf("non-sdlc prompt must not advertise cascade legend, got: %q", stdout.String())
+		t.Fatalf("workflow without dispatcher must not advertise cascade legend, got: %q", stdout.String())
 	}
 }
 
@@ -951,6 +955,214 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// openKbStageInvocation, openMetaMoeStageInvocation, and
+// openHooksStageInvocation mirror openSdlcStageInvocation /
+// openTwinStageInvocation for the kb / meta-moe / hooks headless
+// dispatchers. Same three fields — the cascade exercises identical
+// shapes across workflows, so a tighter type-share would lose more
+// in test readability than it'd save in lines.
+type openKbStageInvocation struct {
+	stage             string
+	projectID         string
+	runID             string
+	suppressNextStage bool
+}
+
+type openMetaMoeStageInvocation struct {
+	stage             string
+	projectID         string
+	runID             string
+	suppressNextStage bool
+}
+
+type openHooksStageInvocation struct {
+	stage             string
+	projectID         string
+	runID             string
+	suppressNextStage bool
+}
+
+// stubOpenKbStage / stubOpenMetaMoeStage / stubOpenHooksStage mirror
+// stubOpenSdlcStage / stubOpenTwinStage: replace the workflow's
+// dispatcher var with a recorder for the duration of the test.
+func stubOpenKbStage(t *testing.T, perStageExit map[string]int) *[]openKbStageInvocation {
+	t.Helper()
+	var captured []openKbStageInvocation
+	prev := openKbStage
+	openKbStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openKbStageInvocation{stage, projectID, runID, suppressNextStage})
+		return perStageExit[stage]
+	}
+	t.Cleanup(func() { openKbStage = prev })
+	return &captured
+}
+
+func stubOpenMetaMoeStage(t *testing.T, perStageExit map[string]int) *[]openMetaMoeStageInvocation {
+	t.Helper()
+	var captured []openMetaMoeStageInvocation
+	prev := openMetaMoeStage
+	openMetaMoeStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, suppressNextStage})
+		return perStageExit[stage]
+	}
+	t.Cleanup(func() { openMetaMoeStage = prev })
+	return &captured
+}
+
+func stubOpenHooksStage(t *testing.T, perStageExit map[string]int) *[]openHooksStageInvocation {
+	t.Helper()
+	var captured []openHooksStageInvocation
+	prev := openHooksStage
+	openHooksStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openHooksStageInvocation{stage, projectID, runID, suppressNextStage})
+		return perStageExit[stage]
+	}
+	t.Cleanup(func() { openHooksStage = prev })
+	return &captured
+}
+
+// TestCascadeFromGateKbYoloAutoCloses pins the kb `!!` shape: cascade
+// walks the kb ladder (research → summarize) then auto-closes the
+// run. Copy of TestCascadeFromGateTwinYoloAutoCloses one workflow over
+// — kb is the multi-stage no-push case the lingering-workflows design
+// added a dispatcher for. close lands via --no-edit so the hands-off
+// cascade never blocks on an editor.
+func TestCascadeFromGateKbYoloAutoCloses(t *testing.T) {
+	stageCaptured := stubOpenKbStage(t, nil)
+	closeCaptured := stubGroupCloseCommand(t, "kb", 0)
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("research", "", false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("kb !! cascade must ship via close: %+v", res)
+	}
+	wantSteps := []string{"research", "summarize", "close"}
+	if len(res.ran) != len(wantSteps) {
+		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
+	}
+	for i, s := range wantSteps {
+		if res.ran[i].stage != s {
+			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+		}
+	}
+	for _, stage := range []string{"research", "summarize"} {
+		got := 0
+		for _, inv := range *stageCaptured {
+			if inv.stage == stage {
+				got++
+			}
+		}
+		if got != 1 {
+			t.Fatalf("stage %s dispatched %d times via openKbStage, want 1", stage, got)
+		}
+	}
+	for _, inv := range *stageCaptured {
+		if inv.stage == "close" {
+			t.Fatalf("close must not dispatch via openKbStage: %+v", inv)
+		}
+	}
+	if len(*closeCaptured) != 1 {
+		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
+	}
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele dns-basics"; got != want {
+		t.Fatalf("close args = %q, want %q", got, want)
+	}
+	wantSummary := "cascade: research ok · summarize ok · close ok — shipped"
+	if got := renderCascadeSummary(res); got != wantSummary {
+		t.Fatalf("summary = %q, want %q", got, wantSummary)
+	}
+}
+
+// TestCascadeFromGateMetaMoeYoloAutoCloses: meta-moe is single-stage;
+// `!!` from its one gate dispatches report then auto-closes. The
+// dispatcher exists for symmetry with the multi-stage workflows — the
+// operator's mental model is "every workflow with a dispatcher has
+// `!!`," not "only multi-stage workflows do."
+func TestCascadeFromGateMetaMoeYoloAutoCloses(t *testing.T) {
+	stageCaptured := stubOpenMetaMoeStage(t, nil)
+	closeCaptured := stubGroupCloseCommand(t, metaMoeWorkflow, 0)
+	md := &run.Metadata{ID: "meta-moe-2026-05-17", Project: "moe", Workflow: metaMoeWorkflow, Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate(metaMoeReportDoc, "", false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("meta-moe !! cascade must ship via close: %+v", res)
+	}
+	wantSteps := []string{metaMoeReportDoc, "close"}
+	if len(res.ran) != len(wantSteps) {
+		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
+	}
+	for i, s := range wantSteps {
+		if res.ran[i].stage != s {
+			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+		}
+	}
+	dispatched := 0
+	for _, inv := range *stageCaptured {
+		if inv.stage == metaMoeReportDoc {
+			dispatched++
+		}
+	}
+	if dispatched != 1 {
+		t.Fatalf("%s dispatched %d times, want 1", metaMoeReportDoc, dispatched)
+	}
+	if len(*closeCaptured) != 1 {
+		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
+	}
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe meta-moe-2026-05-17"; got != want {
+		t.Fatalf("close args = %q, want %q", got, want)
+	}
+}
+
+// TestCascadeFromGateHooksYoloAutoCloses: same shape as meta-moe one
+// workflow over. hooks is also single-stage; `!!` from its one gate
+// dispatches code then auto-closes.
+func TestCascadeFromGateHooksYoloAutoCloses(t *testing.T) {
+	stageCaptured := stubOpenHooksStage(t, nil)
+	closeCaptured := stubGroupCloseCommand(t, hooksWorkflow, 0)
+	md := &run.Metadata{ID: "hooks-2026-05-17", Project: "moe", Workflow: hooksWorkflow, Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate(hooksCodeDoc, "", false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("hooks !! cascade must ship via close: %+v", res)
+	}
+	wantSteps := []string{hooksCodeDoc, "close"}
+	if len(res.ran) != len(wantSteps) {
+		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
+	}
+	for i, s := range wantSteps {
+		if res.ran[i].stage != s {
+			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+		}
+	}
+	dispatched := 0
+	for _, inv := range *stageCaptured {
+		if inv.stage == hooksCodeDoc {
+			dispatched++
+		}
+	}
+	if dispatched != 1 {
+		t.Fatalf("%s dispatched %d times, want 1", hooksCodeDoc, dispatched)
+	}
+	if len(*closeCaptured) != 1 {
+		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
+	}
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe hooks-2026-05-17"; got != want {
+		t.Fatalf("close args = %q, want %q", got, want)
 	}
 }
 
