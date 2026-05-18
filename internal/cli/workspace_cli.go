@@ -60,7 +60,7 @@ func writeAlignedRows(w io.Writer, rows [][]string) {
 // at the top level.
 
 func init() {
-	g := NewCommandGroup("workspace", "named-workspace administration: new, list, remove, release, refresh")
+	g := NewCommandGroup("workspace", "named-workspace administration: new, list, shell, remove, release, refresh")
 	g.Register(&Command{
 		Name:    "new",
 		Summary: "create a named workspace for a project (idempotent)",
@@ -70,6 +70,11 @@ func init() {
 		Name:    "list",
 		Summary: "list named workspaces (optionally filtered by project)",
 		Run:     runWorkspaceList,
+	})
+	g.Register(&Command{
+		Name:    "shell",
+		Summary: "drop into a shell rooted at a named workspace (lazily creates)",
+		Run:     runWorkspaceShell,
 	})
 	g.Register(&Command{
 		Name:    "remove",
@@ -89,9 +94,47 @@ func init() {
 	RegisterGroup(g)
 }
 
+// runWorkspaceShell drops the operator into the named workspace
+// directly, no run involved. Thin wrapper over shellNamedWorkspace —
+// same lazy create, same cached dev-env sourcing, same claim-aware
+// status message as the previous `moe sdlc shell --workspace <name>`
+// form. Promoted from a flag form to a top-level verb because
+// workspaces aren't sdlc-specific; single-operator, no-config-knobs,
+// one verb per shape.
+func runWorkspaceShell(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("workspace shell", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe workspace shell <project> <name>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Drops into a shell rooted at .moe/named/<project>/<name>/, lazily")
+		moePrintln(stderr, "creating the workspace on first use. Doesn't switch branches and")
+		moePrintln(stderr, "doesn't take a claim — useful for warming a dev server in advance")
+		moePrintln(stderr, "and reusing it across runs.")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	projectID, name := fs.Arg(0), fs.Arg(1)
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	return shellNamedWorkspace(root, projectID, name, stdout, stderr)
+}
+
 // runWorkspaceNew materialises a named workspace eagerly. Same
 // primitive as the lazy creation path used by `sdlc new --workspace`
-// and `sdlc shell --workspace`, exposed so the operator can warm a
+// and `moe workspace shell`, exposed so the operator can warm a
 // dev server / run `pnpm install` before any run attaches. Idempotent
 // — second call on an existing workspace prints a "already exists"
 // note and exits 0 without touching the claim or the working tree.
@@ -201,7 +244,12 @@ func runWorkspaceRelease(args []string, stdout, stderr io.Writer) int {
 
 // runWorkspaceList prints a table of named workspaces. Without
 // arguments: every project's workspaces. With a project argument: just
-// that project's. Columns: NAME / BRANCH / CLAIM / DIRTY / DEV-ENV.
+// that project's. Columns: PROJECT / NAME / BRANCH / CLAIM / DIRTY /
+// DEV-ENV. PROJECT stays in the header even when a single-project
+// filter is in play — predictable headers beat saving one column on
+// the filtered path, and the result is a copy-pasteable identifier
+// (`moe workspace remove <project> <name>`) instead of the slash form
+// that doesn't parse anywhere else.
 //
 // Empty result exits 0 with no output — same posture `project list`
 // takes for empty state.
@@ -238,12 +286,8 @@ func runWorkspaceList(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	rows := make([][]string, 0, len(infos)+1)
-	rows = append(rows, []string{"NAME", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV"})
+	rows = append(rows, []string{"PROJECT", "NAME", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV"})
 	for _, info := range infos {
-		name := info.Project + "/" + info.Name
-		if filter != "" {
-			name = info.Name
-		}
 		claim := "unclaimed"
 		if info.Claim != "" {
 			claim = info.Claim
@@ -256,7 +300,7 @@ func runWorkspaceList(args []string, stdout, stderr io.Writer) int {
 		if info.DevEnvCached {
 			devenv = "cached"
 		}
-		rows = append(rows, []string{name, info.Branch, claim, dirty, devenv})
+		rows = append(rows, []string{info.Project, info.Name, info.Branch, claim, dirty, devenv})
 	}
 	writeAlignedRows(stdout, rows)
 	return 0
