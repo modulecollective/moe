@@ -44,6 +44,56 @@ func Find(startDir string, getenv func(string) string) (string, error) {
 		return abs, nil
 	}
 
+	return walkUp(startDir)
+}
+
+// FindCwdFirst is the inverse of Find: walk up from startDir first,
+// and only fall back to $MOE_HOME when the walk turns up nothing.
+//
+// Returns the resolved root and, if $MOE_HOME was set *and* differs
+// from the cwd-walked root, the absolute path $MOE_HOME would have
+// resolved to (so the caller can warn). When the cwd walk fails and
+// $MOE_HOME also has no marker, the $MOE_HOME error wins — same
+// surface as Find — so the operator sees an actionable message instead
+// of a generic ErrNotFound.
+//
+// The narrow use case is `moe hook fire`, where "exercise these hooks
+// right here, right now" maps onto cwd-wins rather than the project-
+// wide MOE_HOME pin.
+func FindCwdFirst(startDir string, getenv func(string) string) (root, ignoredHome string, err error) {
+	cwdRoot, cwdErr := walkUp(startDir)
+	home := getenv(EnvHome)
+	var homeAbs string
+	var homeErr error
+	if home != "" {
+		homeAbs, homeErr = filepath.Abs(home)
+		if homeErr == nil {
+			if _, statErr := os.Stat(filepath.Join(homeAbs, Marker)); statErr != nil {
+				homeErr = fmt.Errorf("bureaucracy: %s=%q has no %s: %w", EnvHome, home, Marker, statErr)
+			}
+		} else {
+			homeErr = fmt.Errorf("bureaucracy: resolve %s=%q: %w", EnvHome, home, homeErr)
+		}
+	}
+
+	if cwdErr == nil {
+		if homeErr == nil && homeAbs != "" && homeAbs != cwdRoot {
+			return cwdRoot, homeAbs, nil
+		}
+		return cwdRoot, "", nil
+	}
+	if homeErr == nil && homeAbs != "" {
+		return homeAbs, "", nil
+	}
+	if homeErr != nil {
+		return "", "", homeErr
+	}
+	return "", "", cwdErr
+}
+
+// walkUp searches startDir and its ancestors for Marker. Shared by
+// Find and FindCwdFirst so the two paths agree on the walk.
+func walkUp(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("bureaucracy: resolve start dir: %w", err)

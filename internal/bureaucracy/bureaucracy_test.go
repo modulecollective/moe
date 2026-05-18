@@ -81,6 +81,103 @@ func TestFindErrorsWhenMoeHomeLacksMarker(t *testing.T) {
 	}
 }
 
+func TestFindCwdFirstPrefersCwdOverMoeHome(t *testing.T) {
+	cwdRoot := t.TempDir()
+	writeMarker(t, cwdRoot)
+	homeRoot := t.TempDir()
+	writeMarker(t, homeRoot)
+
+	got, ignored, err := FindCwdFirst(cwdRoot, func(k string) string {
+		if k == EnvHome {
+			return homeRoot
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbs, _ := filepath.Abs(cwdRoot)
+	if got != wantAbs {
+		t.Fatalf("got root %q want %q", got, wantAbs)
+	}
+	wantIgnored, _ := filepath.Abs(homeRoot)
+	if ignored != wantIgnored {
+		t.Fatalf("got ignored %q want %q", ignored, wantIgnored)
+	}
+}
+
+func TestFindCwdFirstSilentWhenMoeHomeMatchesCwdWalk(t *testing.T) {
+	root := t.TempDir()
+	writeMarker(t, root)
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ignored, err := FindCwdFirst(nested, func(k string) string {
+		if k == EnvHome {
+			return root
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbs, _ := filepath.Abs(root)
+	if got != wantAbs {
+		t.Fatalf("got %q want %q", got, wantAbs)
+	}
+	if ignored != "" {
+		t.Fatalf("ignored should be empty when home and cwd agree, got %q", ignored)
+	}
+}
+
+func TestFindCwdFirstFallsBackToMoeHome(t *testing.T) {
+	homeRoot := t.TempDir()
+	writeMarker(t, homeRoot)
+	// startDir has no marker on its ancestor chain.
+	startDir := t.TempDir()
+
+	got, ignored, err := FindCwdFirst(startDir, func(k string) string {
+		if k == EnvHome {
+			return homeRoot
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbs, _ := filepath.Abs(homeRoot)
+	if got != wantAbs {
+		t.Fatalf("got %q want %q", got, wantAbs)
+	}
+	if ignored != "" {
+		t.Fatalf("ignored should be empty on fallback, got %q", ignored)
+	}
+}
+
+func TestFindCwdFirstNotFoundWhenNeitherResolves(t *testing.T) {
+	startDir := t.TempDir()
+	_, _, err := FindCwdFirst(startDir, noEnv)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err=%v want ErrNotFound", err)
+	}
+}
+
+func TestFindCwdFirstReportsMoeHomeError(t *testing.T) {
+	startDir := t.TempDir() // no marker anywhere
+	emptyHome := t.TempDir()
+	_, _, err := FindCwdFirst(startDir, func(k string) string {
+		if k == EnvHome {
+			return emptyHome
+		}
+		return ""
+	})
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected descriptive $MOE_HOME error, got %v", err)
+	}
+}
+
 func TestInitScaffoldsAndCommits(t *testing.T) {
 	gittest.SetupEnv(t)
 	dir := t.TempDir()

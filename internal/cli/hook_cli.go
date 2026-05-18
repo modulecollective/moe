@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -92,7 +93,7 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	root, err := findRoot(stderr)
+	root, err := findHookFireRoot(stderr)
 	if err != nil {
 		return 1
 	}
@@ -132,6 +133,30 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 	exit := dispatchHookFire(root, sandboxPath, pj, md, event, stdout, stderr)
 	moePrintf(stdout, "sandbox: %s\n", sandboxPath)
 	return exit
+}
+
+// findHookFireRoot is the cwd-first variant of findRoot used by
+// `moe hook fire`. The verb is "exercise these hooks right here,
+// right now" — the operator's in-flight edits live on whatever
+// bureaucracy worktree their cwd is inside, so cwd-walkup wins over
+// $MOE_HOME. When both are set and disagree, a one-line note on
+// stderr keeps the new behaviour self-documenting on first hit.
+func findHookFireRoot(stderr io.Writer) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", err
+	}
+	root, ignored, err := bureaucracy.FindCwdFirst(cwd, os.Getenv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", err
+	}
+	if ignored != "" {
+		moePrintf(stderr, "hook fire: using cwd bureaucracy %s; $%s=%s ignored\n",
+			root, bureaucracy.EnvHome, ignored)
+	}
+	return root, nil
 }
 
 // mintHookFireSandbox calls sandbox.EnsureAt against a per-fire path

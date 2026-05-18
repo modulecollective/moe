@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -208,6 +210,89 @@ func TestHookFireRejectsUnknownEventBeforeMint(t *testing.T) {
 		if strings.HasPrefix(e.Name(), hookFirePrefix) {
 			t.Errorf("hook-fire sandbox %s minted despite typo'd event", e.Name())
 		}
+	}
+}
+
+// TestHookFireCwdWinsOverMoeHome pins proposal #1 of hook-dev-cleanup:
+// `moe hook fire` walks up from cwd first and ignores $MOE_HOME when
+// the two disagree. The operator's in-flight edits live on the cwd
+// worktree, so the verb has to read them — not the pinned home tree.
+// On disagreement, the verb prints a one-line note on stderr so the
+// new behaviour is self-documenting on first hit.
+func TestHookFireCwdWinsOverMoeHome(t *testing.T) {
+	cwdRoot := t.TempDir()
+	homeRoot := t.TempDir()
+	for _, root := range []string{cwdRoot, homeRoot} {
+		if err := os.WriteFile(filepath.Join(root, "bureaucracy.conf"), []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projID := "tele"
+	projDir := filepath.Join(cwdRoot, "projects", projID)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projJSON := `{"id":"tele","status":"incubating","submodule":"projects/tele/src","remote":"git@example.com:x/tele.git","default_branch":"main"}`
+	if err := os.WriteFile(filepath.Join(projDir, "project.json"), []byte(projJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Plant the edit-under-test on the cwd-root: a dev-env.d script
+	// that emits a sentinel. If hook fire read the home tree, the
+	// sentinel wouldn't surface on stdout.
+	hookDir := filepath.Join(cwdRoot, project.Dir(projID), "hooks", devEnvDirRel)
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+echo "CWD_SENTINEL=found"
+`
+	if err := os.WriteFile(filepath.Join(hookDir, "10-seed.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stub the sandbox mint so we don't need a real submodule on disk.
+	// `moe hook fire` checks out a per-run branch after the mint, so the
+	// stubbed dir needs a real git repo on a default branch.
+	gittest.SetupEnv(t)
+	prev := mintHookFireSandbox
+	t.Cleanup(func() { mintHookFireSandbox = prev })
+	mintHookFireSandbox = func(root, projectID, runID string) (string, error) {
+		sb := t.TempDir()
+		if err := git.Run(sb, "init", "-b", "main"); err != nil {
+			return "", err
+		}
+		if err := git.Run(sb, "commit", "--allow-empty", "-m", "init"); err != nil {
+			return "", err
+		}
+		return sb, nil
+	}
+
+	// chdir into cwdRoot for the duration of the test so os.Getwd
+	// resolves there. The runner caller's cwd is what FindCwdFirst
+	// walks from.
+	origCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+	if err := os.Chdir(cwdRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOE_HOME", homeRoot)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"hook", "fire", projID, "dev-env"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "CWD_SENTINEL=found") {
+		t.Errorf("stdout missing cwd sentinel — fire read the wrong tree:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "hook fire: using cwd bureaucracy") {
+		t.Errorf("stderr missing cwd-wins nag:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MOE_HOME") {
+		t.Errorf("stderr nag should name $MOE_HOME:\n%s", stderr.String())
 	}
 }
 
