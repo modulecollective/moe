@@ -103,18 +103,38 @@ func TestEnsureMaterializedFailureSurfacesTypedError(t *testing.T) {
 // protocol.file.allow=always` on the `submodule update` call, modern
 // git (>=2.38.1) rejects the file transport with "fatal: transport
 // 'file' not allowed" and the gate dies.
+//
+// The fixture nests a sub-submodule inside the donor on purpose:
+// git's "user" mode (the default since 2.38.1) lets a user-initiated
+// `submodule update --init` clone its top-level file:// submodule, but
+// the *recursive* walk into nested submodules runs as a non-user
+// fetch and is rejected. The recursive walk is what actually breaks
+// for MoE workspace layouts, so the regression has to exercise it —
+// without the nested submodule, the test would pass even with the
+// fix removed.
 func TestEnsureMaterializedAllowsFileURL(t *testing.T) {
 	gittest.SetupEnv(t)
 
-	// Donor repo with one commit — the upstream the file:// URL points
-	// at, mirroring how MoE workspace plumbing rewrites submodule URLs
-	// to local clones.
+	// Leaf repo: the sub-submodule the donor points at via file://.
+	// Reached only via the recursive walk inside EnsureMaterialized.
+	leaf := t.TempDir()
+	gittest.Run(t, leaf, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(leaf, "leaf.txt"), []byte("leaf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, leaf, "add", "leaf.txt")
+	gittest.Run(t, leaf, "commit", "-m", "leaf")
+
+	// Donor repo with one commit and a nested submodule pointing at
+	// the leaf via file://. The top-level upstream the bureaucracy's
+	// submodule URL points at.
 	donor := t.TempDir()
 	gittest.Run(t, donor, "init", "-b", "main")
 	if err := os.WriteFile(filepath.Join(donor, "code.txt"), []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gittest.Run(t, donor, "add", "code.txt")
+	gittest.Run(t, donor, "-c", "protocol.file.allow=always", "submodule", "add", "file://"+leaf, "nested")
 	gittest.Run(t, donor, "commit", "-m", "v1")
 
 	// Bureaucracy root with the submodule added via file:// then
@@ -138,5 +158,11 @@ func TestEnsureMaterializedAllowsFileURL(t *testing.T) {
 	}
 	if got, err := os.ReadFile(filepath.Join(src, "code.txt")); err != nil || string(got) != "v1" {
 		t.Fatalf("auto-init didn't populate src: got=%q err=%v", got, err)
+	}
+	// Nested submodule must also be populated — that's the leg the
+	// recursive walk exercises and the flag exists to unblock.
+	nested := filepath.Join(src, "nested", "leaf.txt")
+	if got, err := os.ReadFile(nested); err != nil || string(got) != "leaf" {
+		t.Fatalf("recursive walk didn't populate nested submodule: got=%q err=%v", got, err)
 	}
 }
