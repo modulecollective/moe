@@ -2,10 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // TestHooksWorkflowRegistered partners with TestSDLCRegistered: a
@@ -68,6 +72,109 @@ func TestBuildSystemPromptInjectsHooksCodeFragment(t *testing.T) {
 	}
 	if !strings.Contains(got, "moe hook fire") {
 		t.Fatalf("hooks code.md should mention the fire verb:\n%s", got)
+	}
+}
+
+// TestHooksNewAcceptsWorkspaceAsLabel pins proposal #2 of
+// hook-dev-cleanup: `moe hooks new --workspace=<name>` is allowed and
+// records the name on run.json as a no-claim label. The workspace
+// claim pre-flight is sdlc-only — a hooks run binding to a workspace
+// that an sdlc run already claims is the explicit non-conflict the
+// design names.
+func TestHooksNewAcceptsWorkspaceAsLabel(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	// Pre-claim the workspace under a fake sdlc run; the hooks new
+	// path must ignore the claim because it's a label, not a binding.
+	if _, err := workspace.Acquire(root, "tele", "www-dev", "tele/some-sdlc-run"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runNew(hooksWorkflow, []string{"--workspace=www-dev", "tele", "Tighten dev-env"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	// run.json's workspace field is populated with the label.
+	slug := "tighten-dev-env"
+	mdPath := filepath.Join(root, "projects", "tele", "runs", slug, "run.json")
+	body, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatalf("read run.json: %v", err)
+	}
+	if !strings.Contains(string(body), `"workspace": "www-dev"`) {
+		t.Errorf("run.json missing workspace label:\n%s", body)
+	}
+
+	// Claim is unchanged — hooks didn't touch it.
+	holder, err := workspace.ReadClaim(root, "tele", "www-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if holder == nil || holder.Run != "tele/some-sdlc-run" {
+		t.Fatalf("hooks new should not touch the existing claim; holder=%+v", holder)
+	}
+}
+
+// TestHooksCodeKickoffMentionsWorkspace verifies the hooks code
+// kickoff prompt names the bound workspace path when the run was opened
+// with --workspace, so the agent can answer "where do I cd to fire
+// hooks?" without the operator spelling out the layout.
+func TestHooksCodeKickoffMentionsWorkspace(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+
+	md, err := run.New(root, "tele", "Tighten dev-env", run.Options{
+		Workflow:  hooksWorkflow,
+		Workspace: "www-dev",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := buildHooksCodeKickoff(md.Project, md.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "www-dev") {
+		t.Errorf("kickoff missing workspace name:\n%s", got)
+	}
+	wsPath := workspace.Path(root, "tele", "www-dev")
+	if !strings.Contains(got, wsPath) {
+		t.Errorf("kickoff missing workspace path %q:\n%s", wsPath, got)
+	}
+}
+
+// TestHooksCodeKickoffOmitsWorkspaceWhenUnset confirms the kickoff is
+// the unadorned base when the run has no workspace label.
+func TestHooksCodeKickoffOmitsWorkspaceWhenUnset(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+
+	md, err := run.New(root, "tele", "Plain hooks run", run.Options{
+		Workflow: hooksWorkflow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := buildHooksCodeKickoff(md.Project, md.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "named workspace") {
+		t.Errorf("kickoff should not mention workspace when unset:\n%s", got)
 	}
 }
 

@@ -2,11 +2,13 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // The hooks workflow journals edits to projects/<p>/hooks/<event>.d/*
@@ -68,12 +70,11 @@ func openHooksCode(projectID, runID string, headless, suppressNextStage bool, st
 	if code := requireRun("hooks code", projectID, runID, stderr); code != 0 {
 		return code
 	}
-	const kickoff = "The operator just opened this hooks code session. " +
-		"Read the canvas before replying so your acknowledgement reflects what's " +
-		"actually on it; skim the project's hooks/ directory to see what scripts " +
-		"already exist. In one or two sentences, acknowledge where the work stands " +
-		"(fresh start vs. resumed) and ask what they'd like to change next. Then " +
-		"wait for their reply."
+	kickoff, err := buildHooksCodeKickoff(projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	return runStageSession(projectID, runID, hooksCodeDoc, stageSessionOpts{
 		NeedsSandbox:    false,
 		InitialPrompt:   kickoff,
@@ -81,6 +82,38 @@ func openHooksCode(projectID, runID string, headless, suppressNextStage bool, st
 		SkipNextStage:   suppressNextStage,
 		ExtraStagePaths: hooksStageHooksDir,
 	}, stdout, stderr)
+}
+
+// buildHooksCodeKickoff is the first-turn prompt for `moe hooks code`.
+// When the run was opened with --workspace, the kickoff names the
+// workspace path so the agent can answer "where should I cd to fire
+// hooks?" without the operator having to remember the layout. Once
+// proposal #1 of hook-dev-cleanup shipped, firing from inside the
+// workspace dir Just Works.
+func buildHooksCodeKickoff(projectID, runID string) (string, error) {
+	const base = "The operator just opened this hooks code session. " +
+		"Read the canvas before replying so your acknowledgement reflects what's " +
+		"actually on it; skim the project's hooks/ directory to see what scripts " +
+		"already exist. In one or two sentences, acknowledge where the work stands " +
+		"(fresh start vs. resumed) and ask what they'd like to change next. Then " +
+		"wait for their reply."
+	root, err := findRoot(io.Discard)
+	if err != nil {
+		return base, nil
+	}
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		return base, nil
+	}
+	if md.Workspace == "" {
+		return base, nil
+	}
+	wsPath := workspace.Path(root, md.Project, md.Workspace)
+	return base + fmt.Sprintf(
+		" This run is bound to the named workspace %q (at %s) — that's the cwd "+
+			"the operator wants `moe hook fire` to read edits from. If they ask "+
+			"where to fire from, point them there.",
+		md.Workspace, wsPath), nil
 }
 
 // hooksStageHooksDir tells commitTurn to also stage the project's

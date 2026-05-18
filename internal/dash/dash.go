@@ -116,6 +116,14 @@ func BuildRows(in Inputs) ([]Row, error) {
 		if b == BucketNone {
 			continue
 		}
+		// A run bound to a named workspace surfaces it as "@<name>" on
+		// the active row so the operator can see at a glance which
+		// workspace the row iterates against. For sdlc that's the run's
+		// working tree; for hooks it's a no-claim label. Either way the
+		// label is the cwd the operator's about to type into.
+		if md.Workspace != "" && b == BucketActiveRuns {
+			note = note + " @" + md.Workspace
+		}
 		rows = append(rows, Row{
 			Project:    md.Project,
 			Run:        md.ID,
