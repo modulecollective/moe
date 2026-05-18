@@ -350,7 +350,7 @@ func TestEnsureAutoInitFailureSurfacesTypedError(t *testing.T) {
 	if sie.ProjectID != "thing" {
 		t.Errorf("ProjectID = %q, want thing", sie.ProjectID)
 	}
-	if !strings.Contains(err.Error(), "git submodule update --init --recursive projects/thing/src") {
+	if !strings.Contains(err.Error(), "git -c protocol.file.allow=always submodule update --init --recursive projects/thing/src") {
 		t.Errorf("error should name the retry command: %v", err)
 	}
 }

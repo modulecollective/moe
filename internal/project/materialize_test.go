@@ -90,8 +90,53 @@ func TestEnsureMaterializedFailureSurfacesTypedError(t *testing.T) {
 	if sie.ProjectID != "thing" {
 		t.Errorf("ProjectID = %q, want thing", sie.ProjectID)
 	}
-	want := "git submodule update --init --recursive projects/thing/src"
+	want := "git -c protocol.file.allow=always submodule update --init --recursive projects/thing/src"
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("error should name the recursive retry command (%q): %v", want, err)
+	}
+}
+
+// TestEnsureMaterializedAllowsFileURL pins the CVE-2022-39253 escape
+// hatch: a submodule whose URL is a file:// path — the shape MoE's
+// workspace plumbing produces when parallel runs share a local clone
+// under .moe/clones/ — auto-inits cleanly. Without `-c
+// protocol.file.allow=always` on the `submodule update` call, modern
+// git (>=2.38.1) rejects the file transport with "fatal: transport
+// 'file' not allowed" and the gate dies.
+func TestEnsureMaterializedAllowsFileURL(t *testing.T) {
+	gittest.SetupEnv(t)
+
+	// Donor repo with one commit — the upstream the file:// URL points
+	// at, mirroring how MoE workspace plumbing rewrites submodule URLs
+	// to local clones.
+	donor := t.TempDir()
+	gittest.Run(t, donor, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(donor, "code.txt"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, donor, "add", "code.txt")
+	gittest.Run(t, donor, "commit", "-m", "v1")
+
+	// Bureaucracy root with the submodule added via file:// then
+	// deinit'd, leaving the empty-mountpoint shape EnsureMaterialized
+	// looks for. The `submodule add` needs the same protocol.file.allow
+	// flag this test is exercising — that's the established fixture
+	// pattern (see sandbox_test.go:297, session_test.go:96).
+	root := t.TempDir()
+	gittest.Run(t, root, "init", "-b", "main")
+	gittest.Run(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "file://"+donor, "projects/thing/src")
+	gittest.Run(t, root, "commit", "-m", "add submodule")
+	gittest.Run(t, root, "submodule", "deinit", "--force", "projects/thing/src")
+
+	src := filepath.Join(root, SubmoduleDir("thing"))
+	if entries, _ := os.ReadDir(src); len(entries) != 0 {
+		t.Fatalf("expected empty mountpoint, got %d entries", len(entries))
+	}
+
+	if err := EnsureMaterialized(root, "thing"); err != nil {
+		t.Fatalf("EnsureMaterialized over file:// URL: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(src, "code.txt")); err != nil || string(got) != "v1" {
+		t.Fatalf("auto-init didn't populate src: got=%q err=%v", got, err)
 	}
 }
