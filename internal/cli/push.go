@@ -151,6 +151,14 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 	}
 	projectID, runID := fs.Arg(0), fs.Arg(1)
 
+	if workflow == "sdlc" {
+		resolved, code := resolveSDLCRunSlug(workflow+" push", projectID, runID, stdout, stderr)
+		if code != 0 {
+			return code, nil
+		}
+		runID = resolved
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

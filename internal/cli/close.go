@@ -67,6 +67,14 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	projectID := fs.Arg(0)
 	runID := fs.Arg(1)
 
+	if workflow == "sdlc" {
+		resolved, code := resolveSDLCRunSlug(workflow+" close", projectID, runID, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		runID = resolved
+	}
+
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1

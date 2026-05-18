@@ -136,16 +136,19 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
 // typed `Command.Run` parses args and hands to this helper; the chain
 // prompt's cascade driver reaches it directly via openSdlcStage. The
-// contract is identical either way: requireRun guards the run, then
+// contract is identical either way: resolveSDLCRunSlug guards the run
+// (with the promoted/reopened descendant fallback baked in), then
 // runStageSession opens an interactive (or headless) session against
 // the design canvas. headless=true is the path that used to be
 // `--one-shot`; the flag is gone, but the Go function still
 // distinguishes the two so internal callers can ask for the bounded
 // one-turn variant without re-entering the parser.
 func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	if code := requireRun("sdlc design", projectID, runID, stderr); code != 0 {
+	resolved, code := resolveSDLCRunSlug("sdlc design", projectID, runID, stdout, stderr)
+	if code != 0 {
 		return code
 	}
+	runID = resolved
 	if headless {
 		return runStageSession(projectID, runID, "design",
 			stageSessionOpts{Headless: true, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
@@ -171,9 +174,11 @@ func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bo
 // project typo surfaces as "run not found" instead of sending the
 // operator off to run a design stage that's also going to fail.
 func openSdlcCode(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	if code := requireRun("sdlc code", projectID, runID, stderr); code != 0 {
+	resolved, code := resolveSDLCRunSlug("sdlc code", projectID, runID, stdout, stderr)
+	if code != 0 {
 		return code
 	}
+	runID = resolved
 	if err := requireDesignCanvas(projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -197,9 +202,11 @@ func openSdlcCode(projectID, runID string, headless bool, suppressNextStage bool
 // in so the agent's first read sees the structural shape it has to
 // fill.
 func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	if code := requireRun("sdlc test", projectID, runID, stderr); code != 0 {
+	resolved, code := resolveSDLCRunSlug("sdlc test", projectID, runID, stdout, stderr)
+	if code != 0 {
 		return code
 	}
+	runID = resolved
 	if err := requireCodeCanvas(projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -334,6 +341,12 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	projectID, runID := fs.Arg(0), fs.Arg(1)
+
+	resolved, code := resolveSDLCRunSlug("sdlc resume", projectID, runID, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+	runID = resolved
 
 	root, err := findRoot(stderr)
 	if err != nil {
