@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
@@ -90,40 +91,46 @@ func EnsureAt(root, projectID, dst string) (string, error) {
 	}
 
 	// Idempotency: if the destination already exists with a usable
-	// `.git/` directory, treat it as already cloned.
-	if cloneAlreadyAt(absDst) {
-		return absDst, nil
-	}
-	if _, err := os.Stat(absDst); err == nil {
-		return "", fmt.Errorf(
-			"sandbox: %s exists but is not a usable clone of %s; "+
-				"remove it manually before retrying", absDst, src)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("sandbox: stat %s: %w", absDst, err)
+	// `.git/` directory, treat it as already cloned and skip the
+	// fresh-clone work. The exclude reconciliation below still runs,
+	// so pre-existing clones get the `.moe/` ignore line backfilled
+	// on their next stage open without a separate migration step.
+	if !cloneAlreadyAt(absDst) {
+		if _, err := os.Stat(absDst); err == nil {
+			return "", fmt.Errorf(
+				"sandbox: %s exists but is not a usable clone of %s; "+
+					"remove it manually before retrying", absDst, src)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("sandbox: stat %s: %w", absDst, err)
+		}
+
+		if err := ensureGitignore(root); err != nil {
+			return "", err
+		}
+
+		if err := os.MkdirAll(filepath.Dir(absDst), 0o755); err != nil {
+			return "", fmt.Errorf("sandbox: mkdir %s: %w", filepath.Dir(absDst), err)
+		}
+
+		// `git clone --local --shared --no-checkout` against the submodule
+		// path: hardlinks objects from the canonical, sets up
+		// `objects/info/alternates` for shared object access, no network.
+		// `--no-checkout` defers the working-tree population to the
+		// explicit checkout below so we can route any post-clone branch
+		// dance through CheckoutBranch's idempotent path.
+		if out, err := git.Combined("", "clone", "--local", "--shared", "--no-checkout", src, absDst); err != nil {
+			return "", fmt.Errorf("sandbox: git clone %s → %s: %w (%s)", src, absDst, err, out)
+		}
+		if out, err := git.Combined(absDst, "checkout", "HEAD"); err != nil {
+			// Best-effort cleanup so a half-cloned dir doesn't poison the
+			// next attempt.
+			_ = os.RemoveAll(absDst)
+			return "", fmt.Errorf("sandbox: git checkout HEAD in %s: %w (%s)", absDst, err, out)
+		}
 	}
 
-	if err := ensureGitignore(root); err != nil {
+	if err := ensureCloneExclude(absDst); err != nil {
 		return "", err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(absDst), 0o755); err != nil {
-		return "", fmt.Errorf("sandbox: mkdir %s: %w", filepath.Dir(absDst), err)
-	}
-
-	// `git clone --local --shared --no-checkout` against the submodule
-	// path: hardlinks objects from the canonical, sets up
-	// `objects/info/alternates` for shared object access, no network.
-	// `--no-checkout` defers the working-tree population to the
-	// explicit checkout below so we can route any post-clone branch
-	// dance through CheckoutBranch's idempotent path.
-	if out, err := git.Combined("", "clone", "--local", "--shared", "--no-checkout", src, absDst); err != nil {
-		return "", fmt.Errorf("sandbox: git clone %s → %s: %w (%s)", src, absDst, err, out)
-	}
-	if out, err := git.Combined(absDst, "checkout", "HEAD"); err != nil {
-		// Best-effort cleanup so a half-cloned dir doesn't poison the
-		// next attempt.
-		_ = os.RemoveAll(absDst)
-		return "", fmt.Errorf("sandbox: git checkout HEAD in %s: %w (%s)", absDst, err, out)
 	}
 
 	return absDst, nil
@@ -185,6 +192,40 @@ func cloneAlreadyAt(absDst string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+// ensureCloneExclude appends `.moe/` to the clone's
+// `.git/info/exclude` if not already present. The clone's own `.moe/`
+// is harness-private (the dev-env cache today, anything the harness
+// drops here in the future) and must not gate the push pre-flight or
+// contaminate the operator's local `git status`. The clone's git
+// layer is the right boundary for these artifacts — putting the
+// pattern in the project's tracked `.gitignore` would bake a harness
+// implementation detail into every project that ever runs through
+// MoE. Whole-directory pattern, not just `dev-env.env`, so future
+// clone-local harness artifacts inherit the right treatment.
+func ensureCloneExclude(clonePath string) error {
+	p := filepath.Join(clonePath, ".git", "info", "exclude")
+	existing, err := os.ReadFile(p)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sandbox: read %s: %w", p, err)
+	}
+	for _, line := range strings.Split(string(existing), "\n") {
+		if strings.TrimSpace(line) == ".moe/" {
+			return nil
+		}
+	}
+	sep := ""
+	if n := len(existing); n > 0 && existing[n-1] != '\n' {
+		sep = "\n"
+	}
+	out := append([]byte(nil), existing...)
+	out = append(out, sep...)
+	out = append(out, ".moe/\n"...)
+	if err := os.WriteFile(p, out, 0o644); err != nil {
+		return fmt.Errorf("sandbox: write %s: %w", p, err)
+	}
+	return nil
 }
 
 // ensureGitignore drops a `*` .gitignore under .moe/ so clones, locks,

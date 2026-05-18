@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 // TestFilterSandboxBindMountsDropsCharDevices pins the bind-mount
@@ -59,6 +61,38 @@ func TestFilterSandboxBindMountsKeepsMissingEntries(t *testing.T) {
 	got := filterSandboxBindMounts(clone, entries)
 	if len(got) != 1 || got[0].Path != "gone.go" {
 		t.Fatalf("filterSandboxBindMounts dropped a missing entry: %v", got)
+	}
+}
+
+// TestCheckCleanWorkTreeIgnoresMoeDir locks in the loop the original
+// incident exposed: harness-private artifacts dropped into
+// `<clone>/.moe/` (the dev-env cache being the first one) must not
+// gate the push pre-flight. EnsureAt adds `.moe/` to the clone's
+// `.git/info/exclude`, so `git status` doesn't even report the file,
+// and CheckCleanWorkTree sees a clean tree.
+func TestCheckCleanWorkTreeIgnoresMoeDir(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	src := filepath.Join(root, "projects", "thing", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
+
+	clone, err := sandbox.Ensure(root, "thing", "req-a")
+	if err != nil {
+		t.Fatalf("sandbox.Ensure: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(clone, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clone, ".moe", "dev-env.env"), []byte("FOO=bar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CheckCleanWorkTree(clone, "thing"); err != nil {
+		t.Fatalf("CheckCleanWorkTree: %v", err)
 	}
 }
 

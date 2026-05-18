@@ -355,6 +355,128 @@ func TestEnsureAutoInitFailureSurfacesTypedError(t *testing.T) {
 	}
 }
 
+// TestEnsureWritesCloneExclude pins the exclude reconciliation: a
+// fresh clone produced by EnsureAt has `.moe/` in
+// `.git/info/exclude`, so harness-private artifacts dropped into
+// `<clone>/.moe/` (the dev-env cache, etc.) don't show up as
+// untracked and don't gate the push pre-flight.
+func TestEnsureWritesCloneExclude(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	src := filepath.Join(root, "projects", "thing", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
+
+	clone, err := Ensure(root, "thing", "req-a")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(clone, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	if !containsExcludeLine(string(b), ".moe/") {
+		t.Fatalf("exclude missing .moe/ line:\n%s", b)
+	}
+}
+
+// TestEnsureCloneExcludeIdempotent confirms a second EnsureAt against
+// the same clone doesn't duplicate the `.moe/` line — the helper has
+// to be safe to run on every stage open.
+func TestEnsureCloneExcludeIdempotent(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	src := filepath.Join(root, "projects", "thing", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
+
+	clone, err := Ensure(root, "thing", "req-a")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if _, err := Ensure(root, "thing", "req-a"); err != nil {
+		t.Fatalf("Ensure (reuse): %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(clone, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	if got := countExcludeLine(string(b), ".moe/"); got != 1 {
+		t.Fatalf("exclude has %d .moe/ lines, want 1:\n%s", got, b)
+	}
+}
+
+// TestEnsureCloneExcludeAppendsToHandEdited covers the backfill path:
+// EnsureAt against a pre-existing clone whose `.git/info/exclude` was
+// hand-edited with unrelated patterns appends `.moe/` without touching
+// those lines.
+func TestEnsureCloneExcludeAppendsToHandEdited(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	src := filepath.Join(root, "projects", "thing", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, src, "init", "-b", "main")
+	gittest.Run(t, src, "commit", "--allow-empty", "-m", "init")
+
+	clone, err := Ensure(root, "thing", "req-a")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// Overwrite the exclude with unrelated hand-edited content (no
+	// trailing newline, exercising the line-ending fix-up).
+	hand := "# operator notes\nlocal-scratch/\n*.tmp"
+	excludePath := filepath.Join(clone, ".git", "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Re-EnsureAt should backfill `.moe/`.
+	if _, err := Ensure(root, "thing", "req-a"); err != nil {
+		t.Fatalf("Ensure (backfill): %v", err)
+	}
+	b, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "# operator notes") || !strings.Contains(got, "local-scratch/") || !strings.Contains(got, "*.tmp") {
+		t.Fatalf("backfill clobbered hand-edited lines:\n%s", got)
+	}
+	if !containsExcludeLine(got, ".moe/") {
+		t.Fatalf("backfill didn't add .moe/ line:\n%s", got)
+	}
+}
+
+// containsExcludeLine reports whether content has `pattern` as a
+// whole exclude line (ignoring leading/trailing whitespace).
+func containsExcludeLine(content, pattern string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+// countExcludeLine returns the number of times `pattern` appears as a
+// whole exclude line. Used by the idempotency assertion.
+func countExcludeLine(content, pattern string) int {
+	n := 0
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == pattern {
+			n++
+		}
+	}
+	return n
+}
+
 // isPlainCloneAt reports whether the clone at path has a real `.git/`
 // directory rather than a worktree gitfile. The load-bearing invariant
 // for the plain-clone primitive — a worktree gitfile is what made
