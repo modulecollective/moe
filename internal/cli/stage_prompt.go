@@ -53,6 +53,13 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 		sections = append(sections, ref)
 	}
 
+	// Lore-as-context: portable, cross-project facts catalog. Lands
+	// right after the twin so project-specific intent is read before
+	// the project-agnostic operational facts that build on it.
+	if ref := wiki.LoreReferenceSectionAt(root); ref != "" {
+		sections = append(sections, ref)
+	}
+
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
 
 	// Project-specific AGENTS.md / CLAUDE.md from the clone. Codex /
@@ -242,6 +249,7 @@ func operationalCore(root string, md *run.Metadata, docID, clonePath string) str
 	// MoE's commit-turn logic reads back from.
 	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
 	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
+	loreFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore"))
 	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
@@ -306,6 +314,34 @@ read-only context; do not edit those paths.
 		"The next `moe twin reflect` picks these up as kickoff context — the\n" +
 		"note arrives where the work actually happens.\n"
 
+	// Lore-feedback channel: portable facts that would help future runs
+	// on *any* project, not just this one. The operator triages these
+	// at run close — most get dropped; the few that pass the bar are
+	// promoted by hand to `lore/<slug>.md` at the bureaucracy root.
+	// No automated promotion, no new verb — same shape as the twin
+	// feedback bucket above, one rung wider in scope.
+	out += "\n" +
+		"If you notice a portable fact that belongs in `lore/` — something\n" +
+		"discovered here that would help future runs on *any* project, not\n" +
+		"just this one — append a note to:\n" +
+		"  " + loreFeedback + "\n" +
+		"Free-form prose; separate notes with `---`. Bar for inclusion:\n" +
+		"portable (true in 2+ projects), non-derivable from a project's\n" +
+		"own files, operational (changes what gets written or run), and\n" +
+		"stable (still true in 12 months). Project-specific facts go in\n" +
+		"the twin bucket above instead; operator preferences go in user\n" +
+		"memory. Example:\n" +
+		"\n" +
+		"  Under userspace tailscale on fly with no `fly.toml` services,\n" +
+		"  compose `0.0.0.0` binds aren't exposed to the tailnet. The\n" +
+		"  canonical pattern is `127.0.0.1:HOST:CONTAINER` in compose +\n" +
+		"  `tailscale ssh -L HOST:localhost:HOST dev@<box>` from the\n" +
+		"  laptop. True for every fly-box + compose + tailscale project.\n" +
+		"\n" +
+		"The operator promotes the few that pass the bar to\n" +
+		"`lore/<slug>.md` by hand; the next stage prompt's catalog picks\n" +
+		"the new entry up automatically.\n"
+
 	// Capture-as-you-go: the close-time harvester turns each unchecked
 	// entry of this file into an idea run, threading any indented body
 	// into the new idea's seed canvas. Worded so the agent appends
@@ -336,7 +372,8 @@ read-only context; do not edit those paths.
 		"canvas.\n" +
 		"\n" +
 		"If acting on this entry would edit a digital-twin doc, it belongs\n" +
-		"in `feedback/twin.md` above instead.\n"
+		"in `feedback/twin.md` above instead. If it's a portable fact that\n" +
+		"would apply to other projects, it belongs in `feedback/lore.md`.\n"
 	return out
 }
 

@@ -152,6 +152,9 @@ func buildClaimSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	if ref := wiki.TwinReferenceSection(*worktreeWiki); ref != "" {
 		sections = append(sections, ref)
 	}
+	if ref := wiki.LoreReferenceSection(*worktreeWiki); ref != "" {
+		sections = append(sections, ref)
+	}
 	body, err := wiki.ClaimPromptSection(*worktreeWiki)
 	if err != nil {
 		return "", err

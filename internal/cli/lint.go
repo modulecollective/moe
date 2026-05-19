@@ -138,6 +138,9 @@ func buildLintSystemPrompt(worktreeWiki *wiki.Config) (string, error) {
 	if ref := wiki.TwinReferenceSection(*worktreeWiki); ref != "" {
 		sections = append(sections, ref)
 	}
+	if ref := wiki.LoreReferenceSection(*worktreeWiki); ref != "" {
+		sections = append(sections, ref)
+	}
 	sections = append(sections, wiki.LintPromptSection(*worktreeWiki))
 	return strings.Join(sections, "\n---\n\n"), nil
 }

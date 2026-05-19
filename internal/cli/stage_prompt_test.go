@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // TestStageLocationSectionSDLC pins the rendered header for each sdlc
@@ -88,6 +89,56 @@ func TestStageLocationSectionUnknownStage(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPromptInjectsLoreAfterTwin pins the design contract:
+// the lore catalog appears right after the twin reference, before the
+// operational core, so the agent reads project-specific intent first,
+// then project-agnostic operational facts that build on it.
+func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loreDir := wiki.LoreDir(root)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "entry.md"),
+		[]byte("---\ntitle: Sentinel Lore Entry\napplies-when: testing prompt placement\n---\n\nbody\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	twinIdx := strings.Index(got, "## Project digital twin")
+	loreIdx := strings.Index(got, "## Lore (cross-project)")
+	opIdx := strings.Index(got, "You are collaborating with the operator")
+	if twinIdx < 0 || loreIdx < 0 || opIdx < 0 {
+		t.Fatalf("missing one of the expected sections; twin=%d lore=%d op=%d in:\n%s",
+			twinIdx, loreIdx, opIdx, got)
+	}
+	if !(twinIdx < loreIdx && loreIdx < opIdx) {
+		t.Errorf("expected twin < lore < operational-core ordering; got twin=%d lore=%d op=%d",
+			twinIdx, loreIdx, opIdx)
+	}
+	if !strings.Contains(got, "Sentinel Lore Entry") {
+		t.Errorf("lore catalog missing entry title; got:\n%s", got)
+	}
+	if !strings.Contains(got, "testing prompt placement") {
+		t.Errorf("lore catalog missing applies-when hint; got:\n%s", got)
+	}
+}
+
 // TestStageLocationSectionUnknownWorkflow returns "" for an unregistered
 // workflow rather than a partial header. Symmetric with the unknown-
 // stage case — both are upstream data bugs and both should surface as
@@ -114,6 +165,7 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	wantAbsolute := []string{
 		filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")),
 		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
+		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore")),
 		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
 	}
 	docOnly := operationalCore(root, md, "design", "")
@@ -126,6 +178,7 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	wantCode := []string{
 		filepath.Join(root, run.ContentPath(md.Project, md.ID, "code")),
 		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
+		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore")),
 		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
 	}
 	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
