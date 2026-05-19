@@ -47,7 +47,7 @@ The feedback loop is the product:
 
 - Ideas become backlog items without forcing a run.
 - Runs turn backlog into designed, coded, tested, and shipped work.
-- Agent-discovered loose ends harvest back into followups.
+- Agent-discovered loose ends flow back into followups.
 - Knowledge-base and twin workflows fold completed work into durable
   project memory.
 - Future humans and agents start with better context than the last run
