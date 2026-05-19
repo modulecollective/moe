@@ -246,6 +246,17 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if err != nil {
 				return wikiTurnSpec{}, err
 			}
+			// Materialise the moe-bureaucracy skill into the session
+			// worktree's .claude/skills/ and .codex/skills/ trees so
+			// both backends discover it via progressive disclosure.
+			// The skill carries the twin/lore/followups trace-recording
+			// guidance that used to inline ~90 lines into operationalCore
+			// on every turn. Refresh on every BuildSpec is cheap; the
+			// paths are session-stable but rewriting is faster than
+			// reasoning about staleness across resumes.
+			if err := materializeMoeBureaucracySkill(workRoot, md); err != nil {
+				return wikiTurnSpec{}, err
+			}
 			if mutated {
 				if err := run.Save(workRoot, md); err != nil {
 					return wikiTurnSpec{}, err
@@ -404,6 +415,17 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						if frag := moe.OneShot(md.Workflow); frag != "" {
 							p += oneShotPromptDelimiter + frag
 						}
+					}
+					// Persist the assembled prompt alongside the canvas
+					// and thread JSONL so the operator can see what the
+					// agent actually received. Overwrite each turn;
+					// commitTurn stages docDir wholesale and picks the
+					// file up automatically. Best-effort write — a
+					// failure here surfaces to stderr and lets the turn
+					// proceed (the prompt itself is the load-bearing
+					// payload; the on-disk copy is a debug surface).
+					if err := writePromptSnapshot(workRoot, agentName, md, docID, p); err != nil {
+						moePrintf(stderr, "prompt snapshot: %v\n", err)
 					}
 					return p, nil
 				},
@@ -954,6 +976,30 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		return 1
 	}
 	return 0
+}
+
+// writePromptSnapshot persists the assembled `--append-system-prompt`
+// payload to <workRoot>/<docDir>/prompt-<agent>.md so the operator can
+// inspect what the agent actually received. Same dir as the canvas
+// and per-agent thread JSONL; commitTurn stages docDir wholesale, so
+// the snapshot rides along in the per-turn commit without extra
+// wiring. Overwrites each turn — the git history is the per-turn
+// record; the file on disk is the latest.
+//
+// Soft-failure design: callers swallow the error to a stderr line so a
+// debug-surface write doesn't break the agent's turn. The prompt has
+// already been handed to the executor by then; the on-disk copy is
+// strictly for the operator.
+func writePromptSnapshot(workRoot, agent string, md *run.Metadata, docID, prompt string) error {
+	rel := run.PromptPathFor(agent, md.Project, md.ID, docID)
+	path := filepath.Join(workRoot, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(prompt), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // sessionDocCwd is the cwd document-only stages hand to claude — a

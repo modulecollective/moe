@@ -983,32 +983,48 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 	}
 }
 
-// The operational core prompt teaches the agent two adjacent
-// channels: followups.md (operator) and feedback/twin.md (twin). The
+// The moe-bureaucracy skill teaches the agent three trace-recording
+// channels: twin observations, portable lore, and followups. The
 // split is the whole point — the existing dashboard pollution is
-// category confusion between the two — so pin both paragraphs, the
-// fact that they sit next to each other in twin-first order, the
-// mechanical trigger that names the twin docs, and the backward link
-// from followups that catches an agent who drafted there first.
-func TestOperationalCoreNamesBothFollowupsAndFeedback(t *testing.T) {
+// category confusion between them — so pin all three paragraphs,
+// the twin-first ordering (an agent who has already mentally drafted
+// a followup never re-checks), the mechanical trigger that names the
+// twin docs, and the backward link from followups that catches an
+// agent who drafted there first.
+//
+// Previously this block lived in operationalCore and got asserted
+// against the prompt directly. After the moe-bureaucracy skill
+// extraction the materialised SKILL.md is the surface to pin — the
+// per-turn prompt no longer carries the prose.
+func TestMoeBureaucracySkillCarriesAllThreeTraceChannels(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
-	got := operationalCore(root, md, "design", "")
+	if err := materializeMoeBureaucracySkill(root, md); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read materialised skill: %v", err)
+	}
+	got := string(body)
 
 	followups := filepath.Join(root, run.FollowupsPath("tele", "fix-it"))
-	feedback := filepath.Join(root, run.FeedbackPath("tele", "fix-it", "twin"))
-	if !strings.Contains(got, followups) {
-		t.Errorf("prompt missing followups path %q:\n%s", followups, got)
+	twin := filepath.Join(root, run.FeedbackPath("tele", "fix-it", "twin"))
+	lore := filepath.Join(root, run.FeedbackPath("tele", "fix-it", "lore"))
+	for _, want := range []string{followups, twin, lore} {
+		if !strings.Contains(got, want) {
+			t.Errorf("skill missing path %q:\n%s", want, got)
+		}
 	}
-	if !strings.Contains(got, feedback) {
-		t.Errorf("prompt missing twin feedback path %q:\n%s", feedback, got)
-	}
-	// Twin first: primacy matters because an agent who has already
-	// mentally drafted a followup entry never re-checks. Pin the
-	// order by path position so reordering the paragraphs is a
-	// deliberate change.
-	if fi, ti := strings.Index(got, followups), strings.Index(got, feedback); ti < 0 || fi < 0 || ti > fi {
-		t.Errorf("twin feedback paragraph must precede followups (twin=%d, followups=%d):\n%s", ti, fi, got)
+	// Ordering: twin first, lore second, followups last. Reordering
+	// is a deliberate change — pin by path position so a regression
+	// shows up as a failing test.
+	ti := strings.Index(got, twin)
+	li := strings.Index(got, lore)
+	fi := strings.Index(got, followups)
+	if !(ti >= 0 && li >= 0 && fi >= 0 && ti < li && li < fi) {
+		t.Errorf("expected twin < lore < followups ordering; got twin=%d lore=%d followups=%d:\n%s", ti, li, fi, got)
 	}
 	// Mechanical trigger: enumerate the twin docs the agent should
 	// recognize. Philosophical phrasing ("a decision the doc doesn't
@@ -1022,8 +1038,8 @@ func TestOperationalCoreNamesBothFollowupsAndFeedback(t *testing.T) {
 	// Backward link from the followups paragraph closes the
 	// asymmetric-redirect hole: an agent who reads only the
 	// followups paragraph still gets sent to feedback/twin.md.
-	if !strings.Contains(got, "belongs\nin `feedback/twin.md` above instead") {
-		t.Errorf("prompt missing followups→twin backward link:\n%s", got)
+	if !strings.Contains(got, "feedback/twin.md") {
+		t.Errorf("followups paragraph missing backward link to feedback/twin.md:\n%s", got)
 	}
 }
 

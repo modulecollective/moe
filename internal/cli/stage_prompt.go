@@ -239,6 +239,15 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 // file, clone workspace (if any), run title. It's the one section
 // that's always present — everything else in the prompt is optional
 // guidance layered on top.
+//
+// Trace-recording guidance (twin observations, portable lore,
+// followups) used to live here too, repeating ~90 lines on every
+// turn even when nothing got recorded. That block moved to the
+// moe-bureaucracy skill (skills/moe-bureaucracy/SKILL.md, materialised
+// into the session worktree's .claude/skills/ and .codex/skills/ at
+// session open) so both backends load it via progressive disclosure
+// and pay the prose cost only on turns where the agent actually
+// reaches for it.
 func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
 	// Every agent-writable path is now its natural absolute bureaucracy
 	// path. Code-bearing stages run with cwd = bureaucracy session
@@ -248,9 +257,6 @@ func operationalCore(root string, md *run.Metadata, docID, clonePath string) str
 	// followups, and twin feedback land at the same absolute paths
 	// MoE's commit-turn logic reads back from.
 	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
-	twinFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin"))
-	loreFeedback := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore"))
-	followups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 
 	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
 for run %q (project %q) in a Ministry of Everything bureaucracy repo.
@@ -284,139 +290,52 @@ canvases, digital-twin docs, and other bureaucracy paths are
 read-only context; do not edit those paths.
 `, clonePath)
 	}
-
-	// Twin-feedback channel comes first so the more specific case
-	// gets read while the agent is still classifying — followups is
-	// the fallback. Trigger is mechanical (would acting on this edit
-	// a digital-twin doc?) rather than philosophical, because the
-	// philosophical phrasing ("a decision the doc doesn't reflect")
-	// requires an abstraction the agent doesn't always perform.
-	out += "\n" +
-		"If you notice something about the project that belongs in the digital\n" +
-		"twin — would acting on this note edit `digital-twin/<project>/`\n" +
-		"(architecture.md, vision.md, patterns.md, operations.md, roadmap.md)? —\n" +
-		"append a note to:\n" +
-		"  " + twinFeedback + "\n" +
-		"Free-form prose; separate notes with `---`. Name the twin doc and\n" +
-		"any file:line refs so the next `moe twin reflect` knows where to\n" +
-		"look. Example:\n" +
-		"\n" +
-		"  architecture.md says the universal gate is the only path into\n" +
-		"  claim/, but cli/claim.go:84 takes an explicit-path shortcut that\n" +
-		"  bypasses it. Either the gate isn't universal anymore, or claim.go\n" +
-		"  needs to route through it.\n" +
-		"\n" +
-		"  ---\n" +
-		"\n" +
-		"  patterns.md \"fail loud\" claims handlers panic on bad input, but\n" +
-		"  cli/foo.go:42 silently returns nil now. Decide which is canon.\n" +
-		"\n" +
-		"The next `moe twin reflect` picks these up as kickoff context — the\n" +
-		"note arrives where the work actually happens.\n"
-
-	// Lore-feedback channel: portable facts that would help future runs
-	// on *any* project, not just this one. The operator triages these
-	// at run close — most get dropped; the few that pass the bar get
-	// promoted to `lore/<slug>.md` at the bureaucracy root. Same
-	// checklist shape followups uses so the close-time harvester parses
-	// it identically and the operator's gesture (delete a line to skip,
-	// leave it to promote) is the same across both buckets.
-	out += "\n" +
-		"If you notice a portable fact that belongs in `lore/` — something\n" +
-		"discovered here that would help future runs on *any* project, not\n" +
-		"just this one — append an entry to:\n" +
-		"  " + loreFeedback + "\n" +
-		"Bar for inclusion: portable (true in 2+ projects), non-derivable\n" +
-		"from a project's own files, operational (changes what gets written\n" +
-		"or run), and stable (still true in 12 months). Project-specific\n" +
-		"facts go in the twin bucket above instead; operator preferences go\n" +
-		"in user memory.\n" +
-		"\n" +
-		"Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,\n" +
-		"terse title), followed by an indented body (two-space indent) whose\n" +
-		"first paragraph is the `applies-when:` heuristic and whose\n" +
-		"remaining paragraphs are the lore entry prose:\n" +
-		"\n" +
-		"  - [ ] `compose-tailscale-binds` — Reaching compose ports from the laptop\n" +
-		"\n" +
-		"    applies-when: project uses docker-compose on a fly-box reached\n" +
-		"    via tailscale, with no fly.toml services\n" +
-		"\n" +
-		"    Under userspace tailscale on fly with no `fly.toml` services,\n" +
-		"    compose `0.0.0.0` binds aren't exposed to the tailnet. The\n" +
-		"    canonical pattern is `127.0.0.1:HOST:CONTAINER` in compose +\n" +
-		"    `tailscale ssh -L HOST:localhost:HOST dev@<box>` from the\n" +
-		"    laptop. True for every fly-box + compose + tailscale project.\n" +
-		"\n" +
-		"The operator reviews these at close; surviving unchecked entries\n" +
-		"become `lore/<slug>.md` files and the next stage prompt's catalog\n" +
-		"picks them up automatically.\n"
-
-	// Capture-as-you-go: the close-time harvester turns each unchecked
-	// entry of this file into an idea run, threading any indented body
-	// into the new idea's seed canvas. Worded so the agent appends
-	// rather than rewrites — the file accumulates across stages — and
-	// so the body steer is "only when it would save a future agent
-	// real work," to avoid replacing bare-line junk with body-padded
-	// junk. The closing backward link catches the agent who drafted a
-	// followup before reading the twin paragraph above.
-	out += "\n" +
-		"If you notice something worth doing but out of scope for this cycle —\n" +
-		"adjacent cleanup, a deferred investigation, a reference to chase —\n" +
-		"append an entry to:\n" +
-		"  " + followups + "\n" +
-		"Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,\n" +
-		"terse title), optionally followed by an indented body of one or\n" +
-		"more paragraphs (two-space indent, blank lines between paragraphs):\n" +
-		"\n" +
-		"  - [ ] `cleanup-foo` — Clean up foo helper\n" +
-		"\n" +
-		"    Why: bar/baz both reach into foo's internals; foo.go:42 is\n" +
-		"    the load-bearing assumption. Fix sketch: <one sentence>.\n" +
-		"\n" +
-		"Use the body only when context would save a future agent real\n" +
-		"work — the *why*, file:line refs, or a one-sentence approach\n" +
-		"sketch. Skip the body when the title is self-explanatory. The\n" +
-		"operator reviews and prunes these at termination; unchecked\n" +
-		"entries become idea runs with the body carried into the seed\n" +
-		"canvas.\n" +
-		"\n" +
-		"If acting on this entry would edit a digital-twin doc, it belongs\n" +
-		"in `feedback/twin.md` above instead. If it's a portable fact that\n" +
-		"would apply to other projects, it belongs in `feedback/lore.md`.\n"
 	return out
 }
 
-// projectAgentsGuidance reads project-specific agent guidance from the
-// clone — `AGENTS.md` (codex convention) and `CLAUDE.md` (claude
-// convention). Returns a system-prompt section concatenating any that
-// exist, with a one-line header naming the source path so the agent
-// knows which file the guidance came from. Empty string when neither
-// file exists or clonePath is empty.
+// projectAgentsGuidance emits a path-mention section pointing the agent
+// at the project's AGENTS.md / CLAUDE.md inside the clone. Under the
+// cwd-inversion shape cwd is the bureaucracy session worktree, not the
+// clone, so codex's / claude's native cwd-walk discovery doesn't reach
+// these files; the prompt tells the agent where they live and trusts
+// it to read them on its first relevant action.
 //
-// Reading them eagerly into the prompt replaces the cwd-walk discovery
-// codex and claude both do natively: under the cwd-inversion shape cwd
-// is the bureaucracy session worktree, not the clone, so the walk
-// doesn't reach the project's AGENTS.md / CLAUDE.md. Without this
-// section the agent would miss project-specific rules ("all git calls
-// go through internal/git", "stdlib only", etc.) that the operator
-// committed alongside the project.
+// Only paths that actually exist on disk are mentioned, so a project
+// without these files gets no prompt cost and no false instruction.
+// Returns "" when clonePath is empty or neither file exists — the
+// caller drops empty sections.
+//
+// This replaces the prior body-inline approach: AGENTS.md / CLAUDE.md
+// can run hundreds of lines (moe's own AGENTS.md is the existence
+// proof) and inlining it on every turn paid the cost even when the
+// guidance never got read. The path-mention is one short paragraph
+// the agent reads once.
 func projectAgentsGuidance(clonePath string) string {
 	if clonePath == "" {
 		return ""
 	}
-	var parts []string
+	var existing []string
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		path := filepath.Join(clonePath, name)
-		body, err := os.ReadFile(path)
-		if err != nil {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
 			continue
 		}
-		trimmed := strings.TrimSpace(string(body))
-		if trimmed == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("## Project guidance (%s)\n\n%s", name, trimmed))
+		existing = append(existing, path)
 	}
-	return strings.Join(parts, "\n\n")
+	if len(existing) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Project guidance\n\n")
+	b.WriteString("The project's source tree is at:\n")
+	fmt.Fprintf(&b, "  %s\n", clonePath)
+	b.WriteString("A project-specific agent guidance file exists at:\n")
+	for _, p := range existing {
+		fmt.Fprintf(&b, "  %s\n", p)
+	}
+	b.WriteString("Read it before substantive project work — it carries\n")
+	b.WriteString("project-specific rules (build conventions, internal seams,\n")
+	b.WriteString("etc.) that override general defaults.\n")
+	return b.String()
 }

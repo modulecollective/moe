@@ -150,48 +150,82 @@ func TestStageLocationSectionUnknownWorkflow(t *testing.T) {
 	}
 }
 
-// TestOperationalCoreCanvasPathIsAbsoluteAcrossStages pins the
-// agent-writable paths operationalCore renders. Under the cwd-inversion
-// shape both code-bearing and document-only stages name the canvas,
-// followups, and twin feedback at their absolute bureaucracy paths
-// — code stages reach those paths because cwd is the bureaucracy
-// session worktree (the clone is reached via --add-dir for source
-// edits), so the agent's natural write target matches the path MoE
-// reads back at commit time.
+// TestOperationalCoreCanvasPathIsAbsoluteAcrossStages pins the canvas
+// path operationalCore renders. Under the cwd-inversion shape both
+// code-bearing and document-only stages name the canvas at its
+// absolute bureaucracy path — code stages reach it because cwd is
+// the bureaucracy session worktree (the clone is reached via
+// --add-dir for source edits), so the agent's natural write target
+// matches the path MoE reads back at commit time.
+//
+// Trace-recording paths (followups, twin feedback, lore feedback)
+// used to be checked here too; that guidance now lives in the
+// moe-bureaucracy skill so the prompt itself only carries the
+// always-on framing.
 func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
 
-	wantAbsolute := []string{
-		filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")),
-		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
-		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore")),
-		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
-	}
+	wantDocOnly := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
 	docOnly := operationalCore(root, md, "design", "")
-	for _, want := range wantAbsolute {
-		if !strings.Contains(docOnly, want) {
-			t.Errorf("doc-only prompt missing absolute path %q:\n%s", want, docOnly)
-		}
+	if !strings.Contains(docOnly, wantDocOnly) {
+		t.Errorf("doc-only prompt missing absolute canvas path %q:\n%s", wantDocOnly, docOnly)
 	}
 
-	wantCode := []string{
-		filepath.Join(root, run.ContentPath(md.Project, md.ID, "code")),
-		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
-		filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore")),
-		filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
-	}
+	wantCode := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
 	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
-	for _, want := range wantCode {
-		if !strings.Contains(codeStage, want) {
-			t.Errorf("code-stage prompt missing absolute path %q:\n%s", want, codeStage)
-		}
+	if !strings.Contains(codeStage, wantCode) {
+		t.Errorf("code-stage prompt missing absolute canvas path %q:\n%s", wantCode, codeStage)
 	}
 	// The legacy `./.moe-run/` shuttle paths must not leak back into
 	// the prompt — they belong to the removed clone-canvas indirection.
 	for _, deny := range []string{"./.moe-run/", ".moe-run/documents", ".moe-run/followups", ".moe-run/feedback"} {
 		if strings.Contains(codeStage, deny) {
 			t.Errorf("code-stage prompt still names shuttle path %q:\n%s", deny, codeStage)
+		}
+	}
+}
+
+// TestOperationalCoreNoLongerCarriesTraceBlocks pins the moe-bureaucracy
+// skill extraction: the three trace-recording paragraphs (twin
+// observations, portable lore, followups) are out of the per-turn
+// prompt and live in the skill's progressive-disclosure body. A
+// regression that reinlines them undoes the token savings the
+// adopt-agent-skills run shipped to claw back.
+func TestOperationalCoreNoLongerCarriesTraceBlocks(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+
+	for _, stage := range []string{"design", "code"} {
+		clone := ""
+		if stage == "code" {
+			clone = "/sandbox/clones/tele/fix-it"
+		}
+		got := operationalCore(root, md, stage, clone)
+		// Phrases that anchor the three extracted paragraphs.
+		for _, deny := range []string{
+			"belongs in the digital",
+			"`moe twin reflect`",
+			"belongs in `lore/`",
+			"applies-when:",
+			"out of scope for this cycle",
+			"compose-tailscale-binds",
+		} {
+			if strings.Contains(got, deny) {
+				t.Errorf("stage %q: trace-recording phrase %q reinlined into operationalCore:\n%s", stage, deny, got)
+			}
+		}
+		// Negative path check: the trace-recording file paths must not
+		// appear in operationalCore either, since they only made sense
+		// alongside their now-extracted prose.
+		for _, deny := range []string{
+			filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "twin")),
+			filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore")),
+			filepath.Join(root, run.FollowupsPath(md.Project, md.ID)),
+		} {
+			if strings.Contains(got, deny) {
+				t.Errorf("stage %q: trace-recording path %q reinlined into operationalCore:\n%s", stage, deny, got)
+			}
 		}
 	}
 }
@@ -221,11 +255,16 @@ func TestStageLocationSectionIdeaStage(t *testing.T) {
 	}
 }
 
-// TestProjectAgentsGuidance pins the load-bearing function that replaced
-// codex's / claude's cwd-walk discovery of AGENTS.md and CLAUDE.md under
-// the cwd-inversion shape. The agent's cwd no longer reaches the clone,
-// so the prompt builder reads these files eagerly. Misroute = the
-// project's ground rules silently vanish from the agent's context.
+// TestProjectAgentsGuidance pins the path-mention shape that replaced
+// the body-inline approach. The agent's cwd doesn't reach the clone
+// under the cwd-inversion shape, so the prompt names the absolute
+// path to the project's AGENTS.md / CLAUDE.md and trusts the agent
+// to read it on its first relevant action. Inlining the body would
+// pay the cost on every turn even when the guidance never got read;
+// the path mention is one short paragraph.
+//
+// Misroute = the project's ground rules silently vanish from the
+// agent's context.
 func TestProjectAgentsGuidance(t *testing.T) {
 	clone := t.TempDir()
 	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
@@ -236,18 +275,26 @@ func TestProjectAgentsGuidance(t *testing.T) {
 	}
 	got := projectAgentsGuidance(clone)
 	for _, want := range []string{
-		"## Project guidance (AGENTS.md)",
-		"stdlib only",
-		"## Project guidance (CLAUDE.md)",
-		"internal/git is the sole seam",
+		"## Project guidance",
+		clone,
+		filepath.Join(clone, "AGENTS.md"),
+		filepath.Join(clone, "CLAUDE.md"),
+		"Read it before",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	// AGENTS.md is listed first, so its section must precede CLAUDE.md's.
+	// AGENTS.md listed first so its path mention precedes CLAUDE.md's.
 	if strings.Index(got, "AGENTS.md") > strings.Index(got, "CLAUDE.md") {
-		t.Errorf("AGENTS.md section must precede CLAUDE.md:\n%s", got)
+		t.Errorf("AGENTS.md must precede CLAUDE.md:\n%s", got)
+	}
+	// The file bodies must NOT be inlined — that's the whole reason
+	// for the path-mention rewrite.
+	for _, deny := range []string{"stdlib only", "internal/git is the sole seam"} {
+		if strings.Contains(got, deny) {
+			t.Errorf("file body %q must not be inlined into prompt:\n%s", deny, got)
+		}
 	}
 
 	emptyClone := t.TempDir()
@@ -264,18 +311,10 @@ func TestProjectAgentsGuidance(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = projectAgentsGuidance(onlyClaude)
-	if !strings.Contains(got, "CLAUDE.md") || !strings.Contains(got, "just claude") {
-		t.Errorf("single-file case: %q", got)
+	if !strings.Contains(got, filepath.Join(onlyClaude, "CLAUDE.md")) {
+		t.Errorf("single-file case missing CLAUDE.md path: %q", got)
 	}
 	if strings.Contains(got, "AGENTS.md") {
-		t.Errorf("AGENTS.md section emitted when file absent: %q", got)
-	}
-
-	whitespaceOnly := t.TempDir()
-	if err := os.WriteFile(filepath.Join(whitespaceOnly, "AGENTS.md"), []byte("   \n\n   \n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := projectAgentsGuidance(whitespaceOnly); got != "" {
-		t.Errorf("whitespace-only file should be skipped, got %q", got)
+		t.Errorf("AGENTS.md path mentioned when file absent: %q", got)
 	}
 }

@@ -376,6 +376,17 @@ func ThreadPathFor(agent, projectID, id, docID string) string {
 	return filepath.Join(DocDir(projectID, id, docID), "thread-"+agent+".jsonl")
 }
 
+// PromptPathFor returns the per-agent assembled-prompt snapshot path
+// (`prompt-<agent>.md`) relative to the bureaucracy root. Stage
+// sessions overwrite this file each turn with the full
+// `--append-system-prompt` payload (soul, stage fragment, operational
+// core, project guidance, banners, …) so the operator can see what
+// the agent actually received. The per-turn diff lands in git history
+// via commitTurn's docDir staging.
+func PromptPathFor(agent, projectID, id, docID string) string {
+	return filepath.Join(DocDir(projectID, id, docID), "prompt-"+agent+".md")
+}
+
 // FollowupsPath returns the path (relative to the bureaucracy root) of
 // a run's follow-ups scratch file: a markdown checklist sibling of
 // run.json that grows during stages and is harvested into ideas at

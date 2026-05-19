@@ -18,6 +18,9 @@ var soulContent string
 //go:embed workflows
 var workflowsFS embed.FS
 
+//go:embed skills/moe-bureaucracy/SKILL.md
+var moeBureaucracySkill string
+
 // Soul returns the embedded soul.md content. Never empty in a correctly
 // built binary; an empty return means the embed directive is broken.
 func Soul() string {
@@ -35,6 +38,16 @@ func Stage(workflow, docID string) string {
 		return ""
 	}
 	return string(b)
+}
+
+// MoeBureaucracySkill returns the embedded SKILL.md template for the
+// moe-bureaucracy skill. The body carries `{{.TwinFeedback}}`,
+// `{{.LoreFeedback}}`, and `{{.Followups}}` placeholders that the
+// session materialization step substitutes with per-run absolute
+// paths before writing into the session worktree's .claude/skills/
+// and .codex/skills/ trees. Never empty in a correctly built binary.
+func MoeBureaucracySkill() string {
+	return moeBureaucracySkill
 }
 
 // OneShot returns the embedded workflows/<workflow>/oneshot.md fragment
