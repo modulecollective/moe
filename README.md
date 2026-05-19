@@ -154,10 +154,10 @@ fresh without turning documentation into a separate manual job.
   concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
   fragments into a single `--append-system-prompt`. Every agent
   mistake becomes a fragment edit; the next invocation picks it up.
-- **Project memory compounds.** Runs, canvases, followups, knowledge
-  base entries, and digital-twin docs are all normal files in the same
-  journal. The output of one pass becomes context for the next, for
-  both the human and the agents.
+- **Project memory compounds.** Runs, canvases, followups,
+  knowledge-base entries, and digital-twin docs are all normal files in
+  the same journal. The output of one pass becomes context for the
+  next, for both the human and the agents.
 - **Per-run sandbox worktrees.** Code work runs inside a private `git
   worktree` of the target repo at `.moe/clones/<project>/<run>/`,
   linked off the canonical submodule and pre-positioned on a
