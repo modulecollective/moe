@@ -84,14 +84,16 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 	// Idea closes have no follow-ups dance — the run *is* the capture.
-	// For everything else, the operator's local edits to followups.md
-	// are expected (that's where stage-time captures land), so the
-	// clean-tree gate ignores changes on that path. Anything else
-	// dirty stays a refusal.
+	// For everything else, the operator's local edits to the harvest
+	// scratch files (followups.md, feedback/lore.md) are expected —
+	// that's where stage-time captures land — so the clean-tree gate
+	// ignores changes on those paths. Anything else dirty stays a
+	// refusal.
 	harvest := workflow != ideaWorkflow
 	followupsRel := run.FollowupsPath(projectID, runID)
+	loreRel := run.FeedbackPath(projectID, runID, "lore")
 	if harvest {
-		dirty, derr := dirtyOutsidePath(root, followupsRel)
+		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel)
 		if derr != nil {
 			moePrintf(stderr, "%v\n", derr)
 			return 1

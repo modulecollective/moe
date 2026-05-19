@@ -316,31 +316,41 @@ read-only context; do not edit those paths.
 
 	// Lore-feedback channel: portable facts that would help future runs
 	// on *any* project, not just this one. The operator triages these
-	// at run close — most get dropped; the few that pass the bar are
-	// promoted by hand to `lore/<slug>.md` at the bureaucracy root.
-	// No automated promotion, no new verb — same shape as the twin
-	// feedback bucket above, one rung wider in scope.
+	// at run close — most get dropped; the few that pass the bar get
+	// promoted to `lore/<slug>.md` at the bureaucracy root. Same
+	// checklist shape followups uses so the close-time harvester parses
+	// it identically and the operator's gesture (delete a line to skip,
+	// leave it to promote) is the same across both buckets.
 	out += "\n" +
 		"If you notice a portable fact that belongs in `lore/` — something\n" +
 		"discovered here that would help future runs on *any* project, not\n" +
-		"just this one — append a note to:\n" +
+		"just this one — append an entry to:\n" +
 		"  " + loreFeedback + "\n" +
-		"Free-form prose; separate notes with `---`. Bar for inclusion:\n" +
-		"portable (true in 2+ projects), non-derivable from a project's\n" +
-		"own files, operational (changes what gets written or run), and\n" +
-		"stable (still true in 12 months). Project-specific facts go in\n" +
-		"the twin bucket above instead; operator preferences go in user\n" +
-		"memory. Example:\n" +
+		"Bar for inclusion: portable (true in 2+ projects), non-derivable\n" +
+		"from a project's own files, operational (changes what gets written\n" +
+		"or run), and stable (still true in 12 months). Project-specific\n" +
+		"facts go in the twin bucket above instead; operator preferences go\n" +
+		"in user memory.\n" +
 		"\n" +
-		"  Under userspace tailscale on fly with no `fly.toml` services,\n" +
-		"  compose `0.0.0.0` binds aren't exposed to the tailnet. The\n" +
-		"  canonical pattern is `127.0.0.1:HOST:CONTAINER` in compose +\n" +
-		"  `tailscale ssh -L HOST:localhost:HOST dev@<box>` from the\n" +
-		"  laptop. True for every fly-box + compose + tailscale project.\n" +
+		"Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,\n" +
+		"terse title), followed by an indented body (two-space indent) whose\n" +
+		"first paragraph is the `applies-when:` heuristic and whose\n" +
+		"remaining paragraphs are the lore entry prose:\n" +
 		"\n" +
-		"The operator promotes the few that pass the bar to\n" +
-		"`lore/<slug>.md` by hand; the next stage prompt's catalog picks\n" +
-		"the new entry up automatically.\n"
+		"  - [ ] `compose-tailscale-binds` — Reaching compose ports from the laptop\n" +
+		"\n" +
+		"    applies-when: project uses docker-compose on a fly-box reached\n" +
+		"    via tailscale, with no fly.toml services\n" +
+		"\n" +
+		"    Under userspace tailscale on fly with no `fly.toml` services,\n" +
+		"    compose `0.0.0.0` binds aren't exposed to the tailnet. The\n" +
+		"    canonical pattern is `127.0.0.1:HOST:CONTAINER` in compose +\n" +
+		"    `tailscale ssh -L HOST:localhost:HOST dev@<box>` from the\n" +
+		"    laptop. True for every fly-box + compose + tailscale project.\n" +
+		"\n" +
+		"The operator reviews these at close; surviving unchecked entries\n" +
+		"become `lore/<slug>.md` files and the next stage prompt's catalog\n" +
+		"picks them up automatically.\n"
 
 	// Capture-as-you-go: the close-time harvester turns each unchecked
 	// entry of this file into an idea run, threading any indented body

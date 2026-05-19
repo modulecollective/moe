@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // enterTerminal advances md to newStatus (merged or closed), running
@@ -39,6 +40,23 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 		rel := run.FollowupsPath(md.Project, md.ID)
 		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
 			paths = append(paths, rel)
+		}
+		// Lore harvest is the parallel pop on feedback/lore.md: same
+		// shape, same idempotency, different destination
+		// (lore/<slug>.md at the bureaucracy root instead of an idea
+		// run). The promoted files plus the rewritten feedback file
+		// ride along on the close commit; stage lore/ as a dir so
+		// every newly-written slug gets picked up without enumerating
+		// them here.
+		if err := harvestLore(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+			return nil, err
+		}
+		loreRel := run.FeedbackPath(md.Project, md.ID, "lore")
+		if _, err := os.Stat(filepath.Join(root, loreRel)); err == nil {
+			paths = append(paths, loreRel)
+		}
+		if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel)); err == nil {
+			paths = append(paths, wiki.LoreDirRel)
 		}
 	}
 	md.Status = newStatus

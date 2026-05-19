@@ -32,6 +32,20 @@ import (
 // title H1. Already-checked lines are pass-through, which makes a
 // retry after a partial-failure idempotent.
 
+// followupsHeader is the editor-pop banner auto-injected onto
+// followups.md before $EDITOR opens. Companion to loreHeader in
+// lore.go — both follow the convention described above
+// injectEditorPopHeader: HTML comment (invisible in any markdown
+// renderer), file-specific phrasing for what the gesture does, and a
+// closing "remove freely" line so the operator can silence it.
+const followupsHeader = `<!--
+followups.md — out-of-scope items captured this run.
+Save this file to spin each unchecked ` + "`- [ ]`" + ` entry into a new idea
+run. Delete the line to skip. Lines marked ` + "`- [x]`" + ` are already
+promoted; leave them alone.
+This header is auto-injected on editor pop; remove it freely.
+-->`
+
 // followupOpenRE matches an unchecked entry. Captures the indent + box
 // prefix (group 1), the slug (group 2), and the title (group 3 — may
 // be empty after trim, in which case parseFollowups raises a more
@@ -206,6 +220,9 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 	absPath := filepath.Join(root, relPath)
 
 	if !skipEdit && hasUncheckedEntry(absPath) {
+		if err := injectEditorPopHeader(absPath, followupsHeader); err != nil {
+			return err
+		}
 		if err := launchEditorOrFail(absPath); err != nil {
 			return err
 		}
@@ -282,6 +299,43 @@ func hasUncheckedEntry(absPath string) bool {
 	return false
 }
 
+// injectEditorPopHeader prepends headerText to absPath if the file
+// doesn't already start with an HTML comment. The header explains the
+// editor pop's gesture (save-to-promote, delete-to-skip) in-place so
+// the operator doesn't have to remember context across stage outputs.
+//
+// Idempotent on the no-op-when-present check: if the operator removed
+// the comment mid-edit, the next pop on the next close will re-inject
+// — useful when months go by between encounters with a rarely-touched
+// bucket. Absent file is also a no-op; the caller's
+// hasUncheckedEntry gate keeps us off the inject path when there's
+// nothing to review.
+func injectEditorPopHeader(absPath, headerText string) error {
+	body, err := os.ReadFile(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", absPath, err)
+	}
+	// Skip leading blank lines when looking for an existing comment —
+	// the operator might have added a blank line above a previous
+	// header without realising.
+	trimmed := strings.TrimLeft(string(body), "\n")
+	if strings.HasPrefix(trimmed, "<!--") {
+		return nil
+	}
+	out := headerText
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	if len(body) > 0 {
+		out += "\n"
+		out += string(body)
+	}
+	return os.WriteFile(absPath, []byte(out), 0o644)
+}
+
 // launchEditorOrFail mirrors launchEditor but returns an error rather
 // than printing-and-exiting, so the caller can wrap context. Editor
 // gating ($EDITOR/$VISUAL) is enforced upstream by the close handler.
@@ -323,18 +377,22 @@ func commitHarvestProgress(root, projectID, runID, workflow, relPath string, lin
 	return run.StageAndCommit(root, msg, relPath)
 }
 
-// dirtyOutsidePath returns true if the working tree has uncommitted
-// changes anywhere except exceptRel (relative to root). The harvester
-// allows an operator's local edits to followups.md to ride along on
-// the close commit, but anything else dirty in the tree is still a
-// guardrail violation.
-func dirtyOutsidePath(root, exceptRel string) (bool, error) {
+// dirtyOutsidePaths returns true if the working tree has uncommitted
+// changes anywhere except the named paths (relative to root). The
+// close handler uses this to tolerate local edits to the harvest
+// scratch files — followups.md and feedback/lore.md — while still
+// refusing on anything else dirty.
+func dirtyOutsidePaths(root string, exceptRels ...string) (bool, error) {
 	entries, err := git.Status(root)
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
 	}
+	allowed := make(map[string]struct{}, len(exceptRels))
+	for _, p := range exceptRels {
+		allowed[p] = struct{}{}
+	}
 	for _, e := range entries {
-		if e.Path == exceptRel {
+		if _, ok := allowed[e.Path]; ok {
 			continue
 		}
 		return true, nil
