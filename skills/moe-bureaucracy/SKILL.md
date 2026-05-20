@@ -6,21 +6,28 @@ description: How to leave traces for downstream MoE runs — twin observations (
 # Leaving traces for downstream MoE runs
 
 You are inside a Ministry of Everything (MoE) bureaucracy session. While doing
-your stage's work, you may notice things that are *out of scope* for this turn
-but worth recording for future runs. Three channels handle this, each landing
-in a different file the bureaucracy already knows how to harvest at run close
-or on the next reflect pass. The paths below are pre-substituted for this run;
-append to the named file using the format described in its section.
+your stage's work, you may notice things *out of scope* for this turn but
+worth recording for future runs. MoE keeps three places for this:
 
-Trigger order: read top-down and stop at the first match. The more specific
-case (twin) sits above the fallback (followups) so an agent who has already
-mentally drafted a followup gets redirected once they notice the twin
-applies — the backward link in the followups section catches the
-asymmetric-redirect hole.
+- **The digital twin** (`digital-twin/<project>/`) records what a project *is*
+  and *how it works* — vision, architecture, named patterns, operations,
+  roadmap, glossary. Code is the implementation; the twin is the intent. When
+  the two disagree, the twin wins until someone updates it. Notes that would
+  edit a twin doc go to twin feedback, below.
+- **Lore** (`lore/`) records portable operational facts that apply across
+  multiple projects, not just this one — things like "this kind of sandbox
+  needs that kind of proxy." One fact per file with an `applies-when:`
+  heuristic so future agents know whether to open it.
+- **Followups** (`followups.md`) records work that's worth doing but out of
+  scope for the current canvas. The operator triages at close; survivors
+  become idea runs.
+
+The paths below are pre-substituted for this run. Read top-down and append to
+the first matching channel.
 
 ---
 
-## Twin observations — `{{.TwinFeedback}}`
+## Twin observations
 
 If you notice something about the project that belongs in the digital
 twin — would acting on this note edit `digital-twin/<project>/`
@@ -33,22 +40,20 @@ Free-form prose; separate notes with `---`. Name the twin doc and
 any file:line refs so the next `moe twin reflect` knows where to
 look. Example:
 
-  architecture.md says the universal gate is the only path into
-  claim/, but cli/claim.go:84 takes an explicit-path shortcut that
-  bypasses it. Either the gate isn't universal anymore, or claim.go
-  needs to route through it.
+  <doc>.md says X is invariant, but <pkg>/<file>.go:<N> does Y.
+  Decide which is canon.
 
   ---
 
   patterns.md "fail loud" claims handlers panic on bad input, but
-  cli/foo.go:42 silently returns nil now. Decide which is canon.
+  <some-handler>.go silently returns nil. Decide which is canon.
 
 The next `moe twin reflect` picks these up as kickoff context — the
 note arrives where the work actually happens.
 
 ---
 
-## Portable lore — `{{.LoreFeedback}}`
+## Portable lore
 
 If you notice a portable fact that belongs in `lore/` — something
 discovered here that would help future runs on *any* project, not
@@ -84,7 +89,7 @@ picks them up automatically.
 
 ---
 
-## Followups — `{{.Followups}}`
+## Followups
 
 If you notice something worth doing but out of scope for this cycle —
 adjacent cleanup, a deferred investigation, a reference to chase —
