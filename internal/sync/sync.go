@@ -333,6 +333,52 @@ func BumpProjectPointers(root string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// BumpOne is the single-project variant of BumpProjectPointers: it
+// brings projects/<projectID>/src up to its tracking branch on origin
+// and, when the gitlink moved, commits a "sync: bump project pointers"
+// record for just that project. Returns nil — without committing —
+// when projectID is absent from .gitmodules or the bump is a no-op.
+//
+// Called from the push merge path so the gitlink advances in lockstep
+// with the ff-push that just landed, without sweeping in unrelated
+// submodules whose dirty or diverged state could shadow the bump for
+// the project the operator actually shipped.
+func BumpOne(root, projectID string, stdout, stderr io.Writer) error {
+	entries, err := ParseGitmodules(filepath.Join(root, ".gitmodules"))
+	if err != nil {
+		return err
+	}
+	target := "projects/" + projectID + "/src"
+	var entry *GitmoduleEntry
+	for i := range entries {
+		if entries[i].Path == target {
+			entry = &entries[i]
+			break
+		}
+	}
+	if entry == nil {
+		return nil
+	}
+
+	bump, err := AdvanceSubmodule(root, *entry, stdout, stderr)
+	if err != nil {
+		return err
+	}
+	if bump == nil {
+		return nil
+	}
+
+	if out, err := git.Combined(root, "add", bump.Path); err != nil {
+		return fmt.Errorf("moe sync: git add %s: %w (%s)", bump.Path, err, out)
+	}
+	commitArgs := []string{"commit", "-m", PointerBumpCommitMessage([]Bump{*bump}), "--", bump.Path}
+	if out, err := git.Combined(root, commitArgs...); err != nil {
+		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
+	}
+	cliout.Printf(stdout, "moe sync: bumped %d project pointer(s)\n", 1)
+	return nil
+}
+
 // PointerBumpCommitMessage formats a bump set as a sync commit body.
 // Format:
 //

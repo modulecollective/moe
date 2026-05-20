@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -477,7 +478,17 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		if err := releaseRunWorkspace(root, md); err != nil {
 			moePrintf(stderr, "warning: release workspace: %v\n", err)
 		}
-		return run.StageAndCommit(root, msg, paths...)
+		if err := run.StageAndCommit(root, msg, paths...); err != nil {
+			return err
+		}
+		// Advance the bureaucracy's gitlink for this project now that
+		// origin's default branch has moved to the merged tip. Soft-warn
+		// on failure: the remote merge already landed, so the operator
+		// can recover with an explicit `moe sync`.
+		if err := sync.BumpOne(root, md.Project, stdout, stderr); err != nil {
+			moePrintf(stderr, "warning: auto-bump project pointer: %v\n", err)
+		}
+		return nil
 	})
 	if err != nil {
 		moePrintf(stderr, "commit merge record: %v\n", err)

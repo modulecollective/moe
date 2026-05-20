@@ -163,10 +163,24 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	if md.Status != run.StatusMerged {
 		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
 	}
-	// MoE-Merged trailer carries the tip SHA.
-	body := lastCommitMessage(t, f.root)
-	if !strings.Contains(body, "MoE-Merged: "+f.tipSHA) {
-		t.Fatalf("MoE-Merged trailer missing tip SHA:\n%s", body)
+	// Two commits land under the push-merge lock: the merge record
+	// (HEAD~1) and the auto-bump that advances projects/<id>/src to
+	// the new origin tip (HEAD).
+	mergeBody := gittest.Output(t, f.root, "log", "-1", "--format=%B", "HEAD~1")
+	if !strings.Contains(mergeBody, "MoE-Merged: "+f.tipSHA) {
+		t.Fatalf("MoE-Merged trailer missing tip SHA on HEAD~1:\n%s", mergeBody)
+	}
+	bumpBody := lastCommitMessage(t, f.root)
+	if !strings.Contains(bumpBody, "sync: bump project pointers") {
+		t.Fatalf("expected sync bump commit at HEAD, got:\n%s", bumpBody)
+	}
+	if !strings.Contains(bumpBody, f.projectID+":") {
+		t.Fatalf("bump commit should name project %q:\n%s", f.projectID, bumpBody)
+	}
+	// Gitlink in bureaucracy's HEAD now matches origin's new default-branch tip.
+	gitlinkSHA := gittest.Output(t, f.root, "ls-tree", "HEAD", "projects/"+f.projectID+"/src")
+	if !strings.Contains(gitlinkSHA, f.tipSHA) {
+		t.Fatalf("gitlink at HEAD should record tip SHA %s, got:\n%s", f.tipSHA, gitlinkSHA)
 	}
 	canvas, err := os.ReadFile(filepath.Join(f.root, run.ContentPath(f.projectID, f.runID, "push")))
 	if err != nil {
