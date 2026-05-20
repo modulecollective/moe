@@ -11,8 +11,10 @@ itself.
 The goal is not autonomous magic. The human remains the strategist,
 scheduler, reviewer, and source of judgment. MoE removes the
 coordination tax between thought and execution: backlog, runs,
-followups, knowledge base, and digital twin all feed each other so the
-operator and the bots share a compounding model of the project.
+followups, lore, and digital twin all feed each other so the operator
+and the bots share a compounding model of the project — see
+[Feedback paths](#feedback-paths) below for the channels that close
+those loops.
 
 MoE runs [Claude Code](https://claude.com/claude-code) or
 [Codex](https://chatgpt.com/codex/) against living markdown documents.
@@ -150,10 +152,6 @@ fresh without turning documentation into a separate manual job.
   whole chain to the agent and review on completion, or sit in the
   middle — the verb is the same; the difference is whether you stay
   in the session.
-- **Guidance is markdown, not config.** Agent behavior comes from
-  concatenating `soul.md`, `workflows/<wf>/<stage>.md`, and `docs/<slug>.md`
-  fragments into a single `--append-system-prompt`. Every agent
-  mistake becomes a fragment edit; the next invocation picks it up.
 - **Project memory compounds.** Runs, canvases, followups,
   knowledge-base entries, and digital-twin docs are all normal files in
   the same journal. The output of one pass becomes context for the
@@ -174,6 +172,130 @@ fresh without turning documentation into a separate manual job.
   normal agent sessions; chained and bounded turns use commands like
   `claude -p`. Either way it is the real CLI, real OAuth, and one
   human driver.
+
+## Prompt assembly
+
+Alongside the operator's message, the agent receives an assembled
+instruction preamble. MoE composes that preamble fresh for every turn
+by concatenating a fixed set of markdown fragments, in order. Each
+fragment answers a different question for the agent.
+
+- **Philosophy and quality bar.** A single workflow-agnostic file
+  ([`soul.md`](soul.md)) — how to make tradeoffs, when to push back,
+  what "done" means. Same content for every turn in every workflow.
+- **Where you are in the workflow.** A generated header naming the
+  current stage, the stages before and after, and the exact
+  `moe …` invocation the operator will be offered next if this turn
+  closes cleanly. Lets the stage's lens (next bullet) stay on-topic
+  and not repeat the location.
+- **The stage's lens.** A workflow-and-stage-specific file from
+  [`workflows/`](workflows/) (e.g. `workflows/sdlc/design.md`) — what
+  the agent should be *doing* at this phase, what counts as ready
+  to hand back, what to avoid here specifically.
+- **The project's intent.** When the project has a digital twin (a
+  small set of intent documents — see [Feedback paths](#feedback-paths)
+  below), a reference block points the agent at the directory so it
+  reads recorded intent before touching code.
+- **Portable cross-project facts.** A one-line catalog of the
+  bureaucracy's `lore/` entries — facts discovered on past runs of
+  other projects that might apply here. The full bodies stay on disk;
+  the agent opens an entry only when its "applies when" hint matches
+  the task. Lore is also described in
+  [Feedback paths](#feedback-paths).
+- **Where to leave traces.** A short cue naming this run's
+  `followups.md` file and pointing at the skill that knows how to
+  write to it (see [Skills](#skills) below).
+- **What this specific turn is doing.** Run id, the canvas file the
+  agent is editing, the project clone the agent can change, what is
+  read-only.
+- **Project-specific rules.** The project's own `AGENTS.md` (or
+  `CLAUDE.md`) is mentioned by path. Because the agent's working
+  directory is the bureaucracy and not the project, the agent
+  backend's own discovery rules wouldn't otherwise find these files;
+  the prompt closes that gap.
+- **What moved since last time.** When an earlier-stage document
+  (the design, say, for a code-stage turn) has been re-committed
+  since this stage last ran, a banner names the document and the
+  previous commit so the agent can diff and re-read what changed.
+
+Every piece above is a plain markdown file. Fixing how the agent
+behaves usually means editing a fragment, not the Go code.
+
+## Skills
+
+Claude Code and Codex both support *skills* — small named markdown
+files the agent can choose to load when a situation matches their
+description. The backend handles the loading; the operator doesn't
+have to bake the content into the prompt. That makes skills a second
+channel, parallel to the assembled preamble above, for shipping
+reusable know-how to the agent.
+
+MoE ships one skill today, `moe-bureaucracy`, and uses it as the
+agent's interface for *leaving traces* for future runs — twin
+observations, portable lore, and followups (all described in
+[Feedback paths](#feedback-paths) below). The skill's markdown is
+embedded in the `moe` binary; when MoE opens a session, it writes
+the file into the session's `.claude/skills/` and `.codex/skills/`
+trees with per-run paths already substituted in. The agent reads the
+skill's description, sees when it applies, and invokes it without
+further prompting.
+
+## Feedback paths
+
+MoE's compounding property — the "project memory that improves
+itself" pitch from the intro — comes from a small set of durable
+feedback channels. Three improve the project being worked on; one
+improves MoE itself.
+
+- **Followups — work noticed but not done.** During any run an agent
+  may spot something worth doing that's out of scope for the current
+  stage. Instead of acting on it, the agent appends a one-line entry
+  (slug, title, optional context) to that run's `followups.md` via
+  the `moe-bureaucracy` skill. When the operator closes the run,
+  they triage the list; surviving entries open as new `idea` runs
+  with the original context carried into the seed canvas. The next
+  time an agent works in this area, the captured intent is part of
+  its starting context rather than lost in chat history.
+
+- **Lore — portable facts across projects.** Some operational facts
+  apply to more than one project — for example, "this kind of
+  sandbox requires that kind of proxy." MoE keeps a bureaucracy-wide
+  `lore/` directory (a sibling of `projects/`) where each such fact
+  lives in its own short markdown file with a `title:` and an
+  `applies-when:` heuristic in its frontmatter. On every stage that
+  touches the wiki layer, MoE injects a one-line catalog of these
+  entries into the prompt; the full bodies stay on disk, and the
+  agent opens an entry only when the heuristic matches the task at
+  hand. Agents propose new entries via the `moe-bureaucracy` skill
+  and the operator merges them at close. The next project to hit the
+  same problem starts with the answer already on hand.
+
+- **Digital twin — recorded project intent.** Each project has a
+  `digital-twin/` directory of short intent documents (vision,
+  architecture, patterns, operations, roadmap, glossary) — the *why*
+  and *shape* of the project, separate from the code that
+  implements it. Every project stage's prompt includes a reference
+  to this directory so the agent reads intent before code. When an
+  agent notices that the recorded intent and the actual code
+  disagree (`patterns.md` says X, but the implementation does Y),
+  it writes the observation into a per-run feedback file rather
+  than silently picking a side. A later `moe twin reflect` pass
+  walks those observations into proposed edits to the twin
+  documents themselves. The rule is: the twin is the intent, the
+  code is the implementation, and when they disagree, the twin
+  wins until someone updates it.
+
+- **Meta-moe — feedback to MoE itself.** The same compounding
+  shape, pointed at MoE's own development. The `meta-moe` workflow
+  walks one project's run history and produces a maintainer-facing
+  report — repeated work the operator had to redo, corrections
+  given more than once across runs, agent-authored suggestions for
+  the harness itself. It is how the harness eats its own dogfood:
+  a project that uses MoE generates the evidence that improves MoE
+  the next time it is built.
+
+Each channel turns one run's discovery into the next run's default
+context, for both the operator and the agent.
 
 ## Status
 
