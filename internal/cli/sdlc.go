@@ -45,6 +45,11 @@ func init() {
 	})
 	g.Register(closeCommand("sdlc", "Close sdlc run %s %s", releaseWorkspaceCleanup))
 	g.Register(&Command{
+		Name:    "cat",
+		Summary: "dump a stage canvas to stdout (sdlc cat <project> <run> <stage>)",
+		Run:     runCat("sdlc", ""),
+	})
+	g.Register(&Command{
 		Name:    "reopen",
 		Summary: "open a fresh sdlc run seeded with the design canvas of a terminal prior run",
 		Run:     runSDLCReopen,

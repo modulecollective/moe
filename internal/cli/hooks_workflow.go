@@ -33,6 +33,11 @@ func init() {
 	// moe/<run> branch — pass nil cleanup and ride the standard
 	// state-guard / harvest / status-flip path.
 	g.Register(closeCommand(hooksWorkflow, "Close hooks run %s %s", nil))
+	g.Register(&Command{
+		Name:    "cat",
+		Summary: "dump the run's code canvas to stdout",
+		Run:     runCat(hooksWorkflow, hooksCodeDoc),
+	})
 	RegisterGroup(g)
 
 	w := NewWorkflow(hooksWorkflow)

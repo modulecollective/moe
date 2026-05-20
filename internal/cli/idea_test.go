@@ -698,8 +698,8 @@ func TestIdeaCatUnknownSlug(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit=1 on missing slug, got %d; stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "does not exist") {
-		t.Fatalf("expected missing-idea error, got: %q", errb.String())
+	if !strings.Contains(errb.String(), "no such run: tele/ghost") {
+		t.Fatalf("expected missing-run error, got: %q", errb.String())
 	}
 	if out.Len() != 0 {
 		t.Fatalf("expected empty stdout on failure, got: %q", out.String())
@@ -725,8 +725,8 @@ func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow slug, got %d; stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "not an idea") {
-		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
+	if !strings.Contains(errb.String(), "real-run is a sdlc run, use 'moe sdlc cat'") {
+		t.Fatalf("expected wrong-workflow error pointing at sdlc, got: %q", errb.String())
 	}
 }
 
