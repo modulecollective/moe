@@ -60,6 +60,12 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 		sections = append(sections, ref)
 	}
 
+	// Followups has no read-shaped reference block of its own, so a
+	// nudge section names the per-run path and points at the skill.
+	// Sibling of twin/lore: each of the three trace channels gets one
+	// recognise-and-contribute cue before operationalCore.
+	sections = append(sections, followupsReferenceSection(root, md))
+
 	sections = append(sections, operationalCore(root, md, docID, clonePath))
 
 	// Project-specific AGENTS.md / CLAUDE.md from the clone. Codex /
@@ -233,6 +239,26 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 	b.WriteString("before continuing. If the change invalidates the approach, surface it to\n")
 	b.WriteString("the operator rather than smuggling a deviation in.\n")
 	return b.String(), nil
+}
+
+// followupsReferenceSection emits a one-paragraph nudge naming the
+// run's followups path and pointing at the moe-bureaucracy skill.
+// Sibling of TwinReferenceSection / LoreReferenceSection: each of the
+// three trace channels gets one recognise-and-contribute cue in the
+// stage prompt so the agent has *capture* as a live category, while
+// the skill body retains the *how* (format, inclusion bar) and only
+// loads when the agent reaches for it.
+func followupsReferenceSection(root string, md *run.Metadata) string {
+	if root == "" || md == nil || md.Project == "" || md.ID == "" {
+		return ""
+	}
+	path := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
+	var b strings.Builder
+	b.WriteString("## Out-of-scope work\n\n")
+	b.WriteString("If you spot work worth doing but out of scope for this canvas,\n")
+	b.WriteString("leave it via the `moe-bureaucracy` skill at:\n")
+	fmt.Fprintf(&b, "  %s\n", path)
+	return b.String()
 }
 
 // operationalCore is the "what are you doing right now" framing: canvas

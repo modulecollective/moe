@@ -137,10 +137,11 @@ func TestSdlcTestFragmentAllowsScopedMoeInvocations(t *testing.T) {
 // TestBuildSystemPromptMissingFragmentIsNotAnError registers a
 // throwaway workflow with a stage that has no embedded fragment and
 // confirms buildSystemPrompt still returns (no error, no ghost empty
-// section). Soul and the stage-location header are both unconditional
-// for a registered stage, so we expect three sections joined by two
-// separators (soul → location → core). A regression that re-introduced
-// an empty fragment insert would push the count to three in a row.
+// section). Soul, the stage-location header, the followups nudge, and
+// the operational core are all unconditional for a registered stage,
+// so we expect four sections joined by three separators
+// (soul → location → followups → core). A regression that re-introduced
+// an empty fragment insert would push the count to four in a row.
 func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf := registerThrowawayWorkflow(t, "noFragment")
@@ -156,10 +157,10 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	if !strings.Contains(got, "## Stage location") {
 		t.Fatalf("stage-location header missing:\n%s", got)
 	}
-	// Three sections (soul, location, core) → two separators. If
-	// Stage() had leaked an empty section we'd see three.
-	if strings.Count(got, "\n---\n") != 2 {
-		t.Fatalf("expected exactly two separators (soul→location→core), got %d:\n%s",
+	// Four sections (soul, location, followups, core) → three separators.
+	// If Stage() had leaked an empty section we'd see four.
+	if strings.Count(got, "\n---\n") != 3 {
+		t.Fatalf("expected exactly three separators (soul→location→followups→core), got %d:\n%s",
 			strings.Count(got, "\n---\n"), got)
 	}
 }

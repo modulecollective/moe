@@ -108,6 +108,7 @@ doing — the bodies stay on disk; this catalog is the budgeted summary.
 		fmt.Fprintf(&b, "- [%s](%s) — %s\n",
 			e.Title, filepath.Join(dir, e.Filename), e.AppliesWhen)
 	}
+	b.WriteString("\nIf you discover a portable fact worth adding to this catalog, leave\nan entry via the `moe-bureaucracy` skill.\n")
 	if len(entries) > LoreSoftCap {
 		fmt.Fprintf(&b, "\n> ⚠ %d lore entries (soft cap %d) — consider pruning or splitting.\n",
 			len(entries), LoreSoftCap)

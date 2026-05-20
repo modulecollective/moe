@@ -94,6 +94,9 @@ architecture.md, name the conflict before continuing. When you'd
 deviate from a recorded pattern, name the deviation. The twin
 records intent; code is implementation. When they conflict, the
 twin wins until a decided edit updates it (` + "`moe twin claim`" + `).
+
+If you notice something that should edit one of these docs, leave
+a note via the ` + "`moe-bureaucracy`" + ` skill.
 `)
 	return b.String()
 }

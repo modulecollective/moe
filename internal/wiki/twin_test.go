@@ -332,6 +332,7 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"roadmap.md",
 		"glossary.md",
 		"`moe twin claim`",
+		"`moe-bureaucracy`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("twin reference missing %q in:\n%s", want, got)

@@ -139,6 +139,55 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 }
 
+// TestFollowupsReferenceSection pins the followups nudge: a short
+// "Out-of-scope work" block naming the per-run followups path and the
+// moe-bureaucracy skill by name. Sibling of TwinReferenceSection /
+// LoreReferenceSection — each trace channel gets one recognise-and-
+// contribute cue in the prompt so the agent has *capture* as a live
+// category. The skill body retains the *how*.
+func TestFollowupsReferenceSection(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: "sdlc"}
+	got := followupsReferenceSection(root, md)
+	wantPath := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
+	for _, want := range []string{
+		"## Out-of-scope work",
+		"`moe-bureaucracy`",
+		wantPath,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("followups reference missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// TestBuildSystemPromptIncludesFollowupsNudge pins that the assembled
+// prompt for a code-stage session contains the followups nudge block,
+// landing between the lore catalog and operationalCore so the three
+// trace-channel nudges (twin, lore, followups) sit together as siblings
+// before the per-turn framing.
+func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	followupsIdx := strings.Index(got, "## Out-of-scope work")
+	opIdx := strings.Index(got, "You are collaborating with the operator")
+	if followupsIdx < 0 || opIdx < 0 {
+		t.Fatalf("missing sections; followups=%d op=%d in:\n%s", followupsIdx, opIdx, got)
+	}
+	if !(followupsIdx < opIdx) {
+		t.Errorf("followups nudge must precede operationalCore; followups=%d op=%d",
+			followupsIdx, opIdx)
+	}
+	wantPath := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
+	if !strings.Contains(got, wantPath) {
+		t.Errorf("followups nudge missing per-run path %q in:\n%s", wantPath, got)
+	}
+}
+
 // TestStageLocationSectionUnknownWorkflow returns "" for an unregistered
 // workflow rather than a partial header. Symmetric with the unknown-
 // stage case — both are upstream data bugs and both should surface as
