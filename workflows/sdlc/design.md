@@ -61,6 +61,21 @@ Design is ready to hand back when:
 
 If you're polishing prose, you're done. Stop and hand it over.
 
+## The project sandbox is read-only
+
+You have the same per-run sandbox clone code and test stages get,
+plus the project's dev-env (so `go doc`, `git log`, running the
+existing tests, etc. all work). The point is to **verify facts** —
+check an API shape, confirm a command's output, sanity-check an
+assumption — not to start implementing.
+
+The stage refuses to close if the sandbox shows any tracked-file
+change at exit. Concretely: don't `git commit` in the sandbox, don't
+leave modified or deleted tracked files behind. Untracked scratch
+files are fine — scribble freely outside the tracked set. If you
+need to demonstrate something concrete, do it in prose on the canvas
+or in an untracked file, not as a half-committed spike.
+
 ## Only edit this run
 
 The canvas for this stage lives under this run's `documents/` tree.

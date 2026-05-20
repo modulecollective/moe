@@ -59,6 +59,13 @@ The existing dev-env.d/* scripts set the bar; new scripts match it:
   `MOE_TARGET_BRANCH`) — they're the contract for "which run is this,
   where is its tree, what branch is it about to push against." Don't
   reach outside that contract.
+- `dev-env.d/*` must not mutate tracked files in the project repo
+  (`$MOE_SANDBOX`). Setup work belongs in external locations the
+  script owns — emit a path on stdout (e.g. `MOE_DEV_TMPDIR=...`) and
+  write into there. The design stage's sandbox-boundary check
+  snapshots HEAD after dev-env runs and refuses the close if the tree
+  is dirty; a hook that touches tracked files would false-positive
+  that gate.
 
 ## What the canvas should hold
 

@@ -27,6 +27,7 @@ import (
 	_ "github.com/modulecollective/moe/internal/agent/codex"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -48,8 +49,19 @@ const oneShotPromptDelimiter = "\n---\n\n"
 // staging, and FinalizeIngest hook all wire up automatically.
 type stageSessionOpts struct {
 	// NeedsSandbox switches the per-run sandbox clone on. Code stages
-	// require it; document-only stages leave it false.
+	// require it; document-only stages leave it false. Design stage
+	// also opts in (read-only) so the agent can verify facts about the
+	// code while drafting — see EnforceSandboxBoundary for the guard.
 	NeedsSandbox bool
+	// EnforceSandboxBoundary, when true, snapshots the sandbox HEAD at
+	// stage open and refuses (with a non-zero exit) once the executor
+	// returns if the sandbox HEAD has moved or any tracked file shows
+	// a modification, addition, or deletion. The bureaucracy-side
+	// canvas commit still lands — only the cascade to the next stage
+	// is suppressed. Used by design to keep code changes from leaking
+	// in as a spike-as-handoff artifact. Requires NeedsSandbox: true;
+	// no-op otherwise.
+	EnforceSandboxBoundary bool
 	// InitialPrompt is auto-sent as the session's first user message
 	// — typically a "greet the operator and ask what they want"
 	// kickoff. Empty drops the auto-send and lands the operator in a
@@ -225,6 +237,13 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// footer fires (non-zero exit code below).
 	var committed bool
 
+	// Sandbox-boundary snapshot, populated by BuildSpec when
+	// opts.EnforceSandboxBoundary is set. checkSandboxBoundary
+	// reads these after the executor returns to refuse the cascade
+	// if the agent left a half-implementation behind. Empty when
+	// the stage opts out (most stages).
+	var sandboxBoundaryClone, sandboxBoundaryEntryHEAD string
+
 	in := wikiSessionInputs{
 		Project:     projectID,
 		RunSlug:     runID,
@@ -314,6 +333,19 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					return wikiTurnSpec{}, fmt.Errorf("dev-env: %w", err)
 				}
 				devEnv = env
+				if opts.EnforceSandboxBoundary {
+					// Snapshot post-dev-env so the boundary check
+					// tolerates dev-env hooks that may legitimately touch
+					// the worktree (e.g. cache writes outside tracked
+					// files). Hooks are contracted to leave tracked files
+					// alone — see workflows/hooks/code.md.
+					head, err := git.HEAD(clonePath)
+					if err != nil {
+						return wikiTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
+					}
+					sandboxBoundaryClone = clonePath
+					sandboxBoundaryEntryHEAD = head
+				}
 			}
 
 			// Document-only stages need a cwd that's stable across
@@ -467,6 +499,17 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return code
 	}
 	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
+	// Boundary check runs AFTER the bureaucracy commit (canvas + run
+	// state ride along regardless) but BEFORE the cascade prompt, so a
+	// barfing design stage doesn't drag downstream stages forward
+	// against a dirty sandbox. The check is best-effort wrt recovery:
+	// the operator resets the sandbox clone and re-runs design.
+	if opts.EnforceSandboxBoundary && sandboxBoundaryClone != "" {
+		if err := checkSandboxBoundary(sandboxBoundaryClone, sandboxBoundaryEntryHEAD); err != nil {
+			moePrintf(stderr, "%s: %v\n", docID, err)
+			return 1
+		}
+	}
 	if opts.SkipNextStage {
 		return 0
 	}

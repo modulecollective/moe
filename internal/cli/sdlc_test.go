@@ -197,6 +197,156 @@ func findFirstRunID(t *testing.T, root, projectID string) string {
 	return ""
 }
 
+// TestCheckSandboxBoundaryClean: the happy path — no commits, no
+// tracked-file changes — returns nil so design's cascade can proceed.
+// Untracked scribbles are explicitly tolerated (the design stage lets
+// agents poke around freely as long as they don't touch tracked
+// state).
+func TestCheckSandboxBoundaryClean(t *testing.T) {
+	repo := gittest.Init(t)
+	entry := gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+
+	// Untracked file present — must NOT trip the check.
+	if err := os.WriteFile(filepath.Join(repo, "scratch.txt"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatalf("write scratch: %v", err)
+	}
+
+	if err := checkSandboxBoundary(repo, entry); err != nil {
+		t.Fatalf("expected clean sandbox to pass, got: %v", err)
+	}
+}
+
+// TestCheckSandboxBoundaryHeadAdvancedFails: an agent that commits to
+// the sandbox during design tripping the gate is the primary thing
+// this check exists to catch. The error names the entry and current
+// SHAs so the operator can reset deliberately.
+func TestCheckSandboxBoundaryHeadAdvancedFails(t *testing.T) {
+	repo := gittest.Init(t)
+	entry := gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+	gittest.WriteAndCommit(t, repo, "extra.txt", "spike\n", "spike commit during design")
+
+	err := checkSandboxBoundary(repo, entry)
+	if err == nil {
+		t.Fatalf("expected HEAD-advanced check to fail")
+	}
+	if !strings.Contains(err.Error(), "HEAD advanced") {
+		t.Fatalf("error should name the advance, got: %v", err)
+	}
+}
+
+// TestCheckSandboxBoundaryDirtyTrackedFails: modifications to a
+// tracked file (without a commit) also trip the gate — the agent
+// can't "design" by leaving uncommitted edits behind as a hint.
+func TestCheckSandboxBoundaryDirtyTrackedFails(t *testing.T) {
+	repo := gittest.Init(t)
+	entry := gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("design-spike modification\n"), 0o644); err != nil {
+		t.Fatalf("rewrite README: %v", err)
+	}
+
+	err := checkSandboxBoundary(repo, entry)
+	if err == nil {
+		t.Fatalf("expected dirty-tracked check to fail")
+	}
+	if !strings.Contains(err.Error(), "uncommitted tracked-file changes") {
+		t.Fatalf("error should name the dirty-tracked path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "README.md") {
+		t.Fatalf("error should name the offending path, got: %v", err)
+	}
+}
+
+// TestCheckSandboxBoundaryDeletedTrackedFails: a deletion of a
+// tracked file is also a tracked-file change — same outcome as
+// modification.
+func TestCheckSandboxBoundaryDeletedTrackedFails(t *testing.T) {
+	repo := gittest.Init(t)
+	entry := gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+
+	if err := os.Remove(filepath.Join(repo, "README.md")); err != nil {
+		t.Fatalf("delete README: %v", err)
+	}
+
+	err := checkSandboxBoundary(repo, entry)
+	if err == nil {
+		t.Fatalf("expected deletion check to fail")
+	}
+	if !strings.Contains(err.Error(), "uncommitted tracked-file changes") {
+		t.Fatalf("error should name the dirty-tracked path, got: %v", err)
+	}
+}
+
+// TestSDLCDesignSandboxBoundaryRefusesCommit: end-to-end coverage for
+// the design exit check. A fake claude that commits inside the
+// sandbox during design must (a) keep the bureaucracy-side canvas
+// commit (so the operator's design work isn't lost) but (b) exit
+// non-zero so the cascade halts — same shape as the no-op session
+// gate's cascade-blocking behaviour.
+func TestSDLCDesignSandboxBoundaryRefusesCommit(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	// Fake claude writes to the design canvas (so the canvas-untouched
+	// gate doesn't fire first) AND drops a tracked-file commit in the
+	// sandbox clone (parsed from the prompt). Either failure mode (HEAD
+	// advance OR dirty tree) is enough to trip the boundary check; this
+	// picks HEAD advance because it's the spike-as-handoff path the
+	// design closed off. Cwd is the bureaucracy session worktree under
+	// the cwd-inversion shape, so the sandbox path has to come from the
+	// prompt — same pattern the existing fake-claude scripts use for
+	// the canvas path.
+	fakeClaudeOnPath(t, `#!/bin/sh
+prompt=
+next=0
+for a in "$@"; do
+  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
+  case "$a" in --append-system-prompt) next=1 ;; esac
+done
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+sandbox=$(printf '%s' "$prompt" | awk '/exposed as an additional writable/ {getline; getline; gsub(/^ +| +$/, ""); print; exit}')
+if [ -n "$canvas" ]; then printf 'design canvas content\n' >> "$canvas"; fi
+if [ -n "$sandbox" ]; then
+  (cd "$sandbox" && printf 'spike code\n' > spike.txt && git add spike.txt && git commit -m 'spike during design') >/dev/null 2>&1
+fi
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"--id", "boundary", "tele",
+		"Design boundary check"},
+		&out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	code := openSdlcDesign("tele", "boundary", true, false, "", &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit when agent commits to sandbox; stderr=%q stdout=%q", errb.String(), out.String())
+	}
+	if !strings.Contains(errb.String(), "HEAD advanced") {
+		t.Errorf("expected stderr to name the boundary violation, got: %q", errb.String())
+	}
+
+	// The bureaucracy-side canvas commit must still have landed —
+	// losing the agent's design work on top of the spike would be a
+	// double-punishment recovery path.
+	canvasPath := filepath.Join(root, run.ContentPath("tele", "boundary", "design"))
+	body, err := os.ReadFile(canvasPath)
+	if err != nil {
+		t.Fatalf("design canvas missing after boundary refusal: %v", err)
+	}
+	if !strings.Contains(string(body), "design canvas content") {
+		t.Errorf("canvas should preserve agent's design work even after boundary refusal: %q", body)
+	}
+}
+
 // TestSDLCCodeWrongProjectSaysRunNotFound: on `sdlc code` with a typo,
 // the operator must see "run not found" and not "design canvas
 // missing" — the latter sends them off to run a design stage that's

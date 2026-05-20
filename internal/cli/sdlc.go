@@ -151,7 +151,13 @@ func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bo
 	runID = resolved
 	if headless {
 		return runStageSession(projectID, runID, "design",
-			stageSessionOpts{Headless: true, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
+			stageSessionOpts{
+				NeedsSandbox:           true,
+				EnforceSandboxBoundary: true,
+				Headless:               true,
+				SkipNextStage:          suppressNextStage,
+				Agent:                  agentOverride,
+			}, stdout, stderr)
 	}
 	// The agent produces the user-facing cue itself: the interactive TUI
 	// has no way to pre-seed the input box with editable text, so instead
@@ -163,7 +169,13 @@ func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bo
 		"design stands (fresh start vs. resumed) and ask what they'd like to " +
 		"work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "design",
-		stageSessionOpts{InitialPrompt: kickoff, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{
+			NeedsSandbox:           true,
+			EnforceSandboxBoundary: true,
+			InitialPrompt:          kickoff,
+			SkipNextStage:          suppressNextStage,
+			Agent:                  agentOverride,
+		}, stdout, stderr)
 }
 
 // openSdlcCode is the Go-level seam behind `moe sdlc code`. See
@@ -511,6 +523,58 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 	if headBlob == kickoffBlob {
 		return fmt.Errorf("%s canvas unchanged from kickoff — run `moe sdlc %s %s %s` and write to the canvas before `moe sdlc %s`",
 			priorStage, priorStage, projectID, runID, currentStage)
+	}
+	return nil
+}
+
+// checkSandboxBoundary refuses the design→code transition when the
+// project sandbox has moved past the snapshot taken at design open.
+// Two failure modes; either trips the gate:
+//
+//  1. HEAD has advanced — the agent committed to the project repo
+//     during design. The spike-as-handoff path the design closed off.
+//  2. `git status` shows any modified, added, or deleted tracked
+//     file — the agent left dirty work behind. Untracked files are
+//     deliberately allowed; the agent is free to scribble outside
+//     the tracked set.
+//
+// Caller writes the canvas commit first and then runs this; a failure
+// here returns a non-zero exit (suppressing the cascade) but the
+// canvas changes are already preserved on the session branch.
+//
+// Hooks-side contract: project dev-env hooks (under
+// `projects/<project>/hooks/dev-env.d/*`) must leave tracked files
+// in the project repo alone — they should write to MOE_DEV_TMPDIR /
+// MOE_HOME or other extern locations. A hook that mutates the work
+// tree would false-positive this check.
+func checkSandboxBoundary(clonePath, entryHEAD string) error {
+	currentHEAD, err := git.HEAD(clonePath)
+	if err != nil {
+		return fmt.Errorf("sandbox boundary: read HEAD: %w", err)
+	}
+	if entryHEAD != "" && currentHEAD != entryHEAD {
+		return fmt.Errorf(
+			"sandbox HEAD advanced during design (was %s, now %s); design must not commit to the project repo — reset the sandbox and re-run",
+			git.ShortSHA(entryHEAD), git.ShortSHA(currentHEAD))
+	}
+	entries, err := git.Status(clonePath)
+	if err != nil {
+		return fmt.Errorf("sandbox boundary: git status: %w", err)
+	}
+	var dirty []string
+	for _, e := range entries {
+		// Untracked entries carry XY=="??"; everything else is a
+		// tracked-file change that the design stage is contracted
+		// not to leave behind.
+		if e.XY == "??" {
+			continue
+		}
+		dirty = append(dirty, e.XY+" "+e.Path)
+	}
+	if len(dirty) > 0 {
+		return fmt.Errorf(
+			"sandbox has uncommitted tracked-file changes (design must not modify the project repo):\n  %s\nreset the sandbox and re-run",
+			strings.Join(dirty, "\n  "))
 	}
 	return nil
 }
