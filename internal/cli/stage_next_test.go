@@ -52,10 +52,9 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 
 // TestPromptStageNextStagePrintsDesignCanvas: when the next stage is
 // code and a design canvas exists on disk, its bytes appear above the
-// [Y/n/!] prompt verbatim (no header, no decoration). follow no longer
-// surfaces the design canvas once the design session closes, so this is
-// the canvas's one chance to land in front of the operator at the
-// design→code gate.
+// [Y/n/!] prompt verbatim (no header, no decoration). This is the
+// operator's one chance to read the canvas at the design→code gate
+// before authorising the next stage.
 func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{

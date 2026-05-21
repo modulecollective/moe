@@ -1059,12 +1059,10 @@ func TestPromptPushNextStageBlankDeclines(t *testing.T) {
 
 // TestPromptPushNextStagePrintsTestCanvas: when the test canvas
 // exists on disk, its bytes appear above the [N/m/p] prompt verbatim
-// (no header, no decoration). follow no longer surfaces stage
-// canvases once their sessions close, so this is the canvas's one
-// chance to land in front of the operator at the merge decision.
-// The test canvas is the just-finished narrative — the more direct
-// "should we ship?" framing than the code canvas (which holds the PR
-// body but is one stage back).
+// (no header, no decoration). This is the operator's one chance to
+// read the canvas at the merge decision. The test canvas is the
+// just-finished narrative — the more direct "should we ship?" framing
+// than the code canvas (which holds the PR body but is one stage back).
 func TestPromptPushNextStagePrintsCodeCanvas(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{

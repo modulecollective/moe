@@ -186,9 +186,9 @@ func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error)
 // WorkTurnTime map lookup — dash with M runs and N stages drops from
 // M×N git forks (plus one journal-wide BuildJournalIndex scan) to
 // just the one scan. Passing nil restores the per-call fork shape,
-// which is the right answer for one-off callers (stage prompt,
-// follow) that don't keep an index in scope. Same
-// satisfaction rule either way: see stageSatisfied.
+// which is the right answer for one-off callers (the stage prompt)
+// that don't keep an index in scope. Same satisfaction rule either
+// way: see stageSatisfied.
 func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.JournalIndex) (string, NextKind, error) {
 	switch md.Status {
 	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:

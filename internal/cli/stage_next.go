@@ -291,10 +291,9 @@ func renderPromptLegend(opts []promptOption) string {
 //
 // When the next stage is code, the just-finished design canvas is
 // printed above the prompt — same shape as promptPushNextStage prints
-// the code canvas above [N/m/p]. follow no longer surfaces the design
-// canvas once the design session closes, so this is the canvas's one
-// chance to land in front of the operator at the design→code gate.
-// The [Y/n] default stays Y: design→code is reversible (re-design
+// the code canvas above [N/m/p]. This is the operator's one chance to
+// read the canvas at the design→code gate before authorising the next
+// stage. The [Y/n] default stays Y: design→code is reversible (re-design
 // after a botched code run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
@@ -489,9 +488,8 @@ func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metada
 // shortcut, or invoked `moe sdlc push` directly without test having
 // landed), fall back to the code canvas: the operator's last reading
 // material before the ship decision should still be the most recent
-// thing the agent wrote. follow no longer surfaces stage canvases
-// once their sessions close, so this is the canvas's one chance to
-// land in front of the operator. By the time promptNextStage fires,
+// thing the agent wrote. This is the operator's one chance to read
+// the canvas at this gate. By the time promptNextStage fires,
 // session.Close has already rebased the session onto main, so root is
 // the right base for the read. If both canvases are missing or
 // whitespace-only, the prompt prints bare — no header or decoration.

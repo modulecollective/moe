@@ -30,7 +30,7 @@ import (
 // given pre-rendered trailers block. When non-zero, when is set as
 // both GIT_AUTHOR_DATE and GIT_COMMITTER_DATE so the commit lands on
 // the requested date — tests that exercise timeline-shaped behaviour
-// (dash banner ordering, follow's latest-work selection) need this.
+// (dash banner ordering) need this.
 //
 // trailers is a raw string for now: ~25 call sites across cli/ pass
 // arbitrary trailer combinations by string concatenation. Migrating

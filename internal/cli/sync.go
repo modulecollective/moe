@@ -72,8 +72,8 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// --rebase --autostash so the two-machines case (operator commits
 	// turns on machine A and B between syncs) reconciles to a linear
 	// sequence. Rebase preserves MoE-* trailers on replayed commits,
-	// which is what every trailer-aware reader (dash, follow, sync's
-	// own reconcile walk) relies on. Skipped on a brand-new branch
+	// which is what every trailer-aware reader (dash, sync's own
+	// reconcile walk) relies on. Skipped on a brand-new branch
 	// with no upstream — nothing to pull from. On rebase conflict, git
 	// leaves the worktree mid-rebase; we surface a recovery block
 	// rather than git's raw stderr.
