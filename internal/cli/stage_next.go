@@ -61,7 +61,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 					if closeCmd := g.Lookup("close"); closeCmd != nil {
 						if !stdinIsTerminal() {
 							moePrintf(stdout,
-								"%s sealed — run `moe %s close %s %s` to mark the run terminal.\n",
+								"%s sealed — run `moe %s close %s/%s` to mark the run terminal.\n",
 								justFinished, md.Workflow, md.Project, md.ID)
 							return 0
 						}
@@ -104,7 +104,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 	// (none today, but the prompt should stay honest) simply don't see
 	// the option.
 	scuttle := g.Lookup("close")
-	hint := fmt.Sprintf("moe %s %s %s %s", wf.Name, next.Name, md.Project, md.ID)
+	hint := fmt.Sprintf("moe %s %s %s/%s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
 		return 0
@@ -160,7 +160,7 @@ func dispatchBack(back []*Command, md *run.Metadata, stdout, stderr io.Writer) i
 		return 0
 	}
 	if len(back) == 1 {
-		return back[0].Run([]string{md.Project, md.ID}, stdout, stderr)
+		return back[0].Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	}
 	keys := make(map[rune]*Command, len(back))
 	parts := make([]string, 0, len(back))
@@ -189,7 +189,7 @@ func dispatchBack(back []*Command, md *run.Metadata, stdout, stderr io.Writer) i
 	if !ok {
 		return 0
 	}
-	return cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
+	return cmd.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 }
 
 // backHint formats the legend phrase for the `b` option. Single target
@@ -380,7 +380,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return dispatchCascade(answer, next.Name, root, md, stdout, stderr)
 	}
 	if scuttle != nil && answer == "x" {
-		return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
+		return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	}
 	if offerSkipToPush && answer == "s" {
 		// Skip-to-push opens the push prompt directly without
@@ -407,7 +407,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		// the same path as the natural post-test cascade: straight to the
 		// ship gate, where the operator chooses and the push command runs
 		// synthesis if they actually ship.
-		pushHint := fmt.Sprintf("moe %s %s %s %s", md.Workflow, pushCmd.Name, md.Project, md.ID)
+		pushHint := fmt.Sprintf("moe %s %s %s/%s", md.Workflow, pushCmd.Name, md.Project, md.ID)
 		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
 	}
 	if len(back) > 0 && answer == "b" {
@@ -417,7 +417,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if !accepted {
 		return 0
 	}
-	return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+	return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 }
 
 // promptCloseNextStage is the terminal-stage analogue of
@@ -462,7 +462,7 @@ func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metada
 	if !accepted {
 		return 0
 	}
-	return closeCmd.Run([]string{md.Project, md.ID}, stdout, stderr)
+	return closeCmd.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
@@ -550,12 +550,12 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		// `!!` at the push gate ships the same way `m` does — the
 		// cascade vocabulary is the same here, just with no stages
 		// left to walk before the ship.
-		return next.Run([]string{md.Project, md.ID}, stdout, stderr)
+		return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	case "p":
-		return next.Run([]string{"--pr", md.Project, md.ID}, stdout, stderr)
+		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
 		if scuttle != nil {
-			return scuttle.Run([]string{md.Project, md.ID}, stdout, stderr)
+			return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 		}
 	case "b":
 		if len(back) > 0 {
@@ -763,7 +763,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, md *run.Metad
 			// channel, a recovery session that exits 0 would look
 			// identical to a real ship and the cascade summary would
 			// claim "shipped" when nothing was pushed.
-			ship, err := pushFromCascade(md.Workflow, []string{md.Project, md.ID}, stdout, stderr)
+			ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, stdout, stderr)
 			var deferred *PushDeferredError
 			if errors.As(err, &deferred) {
 				res.ran = append(res.ran, cascadeStepResult{
@@ -801,7 +801,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, md *run.Metad
 	if yolo && !res.shipped {
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
-			code := closeCmd.Run([]string{"--no-edit", md.Project, md.ID}, stdout, stderr)
+			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: code})
 			if code != 0 {
 				return res, code

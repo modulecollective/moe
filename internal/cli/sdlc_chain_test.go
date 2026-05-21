@@ -157,7 +157,7 @@ func TestSDLCCodeNotFoundLineageHintsNoTTY(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele", "foo"}, &out, &errb)
+	code := Run([]string{"sdlc", "code", "tele/foo"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
@@ -181,7 +181,7 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele", "foo"}, &out, &errb)
+	code := Run([]string{"sdlc", "code", "tele/foo"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
@@ -220,7 +220,7 @@ func TestSDLCCodeNotFoundZeroDescendants(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "code", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}

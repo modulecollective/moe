@@ -74,7 +74,7 @@ func TestMoeLog_UnknownRun(t *testing.T) {
 	trailerstest.SeedRun(t, root, "moe", "some-other-run", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "moe", "missing-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe/missing-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -90,7 +90,7 @@ func TestMoeLog_UnknownProject(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "nope", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "nope/demo-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -112,7 +112,7 @@ func TestMoeLog_RendersClaudeThread(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe/demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -139,7 +139,7 @@ func TestMoeLog_StagePicksThatStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "moe", "demo-run", "code"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe/demo-run", "code"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -164,7 +164,7 @@ func TestMoeLog_NoTranscriptForStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "moe", "demo-run", "code"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe/demo-run", "code"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -188,7 +188,7 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "--agent", "claude", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "--agent", "claude", "moe/demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d; stderr=%q", code, errb.String())
 	}
@@ -216,7 +216,7 @@ func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe/demo-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -238,7 +238,7 @@ func TestMoeLog_BadAgentFlag(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "--agent", "gpt", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "--agent", "gpt", "moe/demo-run", "design"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}
@@ -259,7 +259,7 @@ func TestMoeLog_WrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "log", "tele", "fix-it", "research"}, &out, &errb)
+	code := Run([]string{"kb", "log", "tele/fix-it", "research"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
 	}
@@ -279,7 +279,7 @@ func TestMoeLog_UnknownStage(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "tele", "fix-it", "bogus"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "tele/fix-it", "bogus"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
 	}
@@ -303,7 +303,7 @@ func TestMoeLog_SingleStageDefaults(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "log", "tele", "report-2026"}, &out, &errb)
+	code := Run([]string{"meta-moe", "log", "tele/report-2026"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -334,7 +334,7 @@ func TestMoeLog_LatestSentinel(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "log", "tele", "@latest", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "tele/@latest", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

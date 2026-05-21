@@ -254,18 +254,21 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	chat := fs.Bool("chat", false, "open a Claude Code session on the idea instead of $EDITOR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit [--chat] <project> <slug>\n")
+		moePrintf(stderr, "usage: moe idea edit [--chat] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID := fs.Arg(0)
-	slug := fs.Arg(1)
+	projectID, slug, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "idea edit: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -386,18 +389,21 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea move", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea move <project> <slug> <to-project>\n")
+		moePrintf(stderr, "usage: moe idea move <project>/<slug> <to-project>\n")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 3 {
+	if fs.NArg() != 2 {
 		fs.Usage()
 		return 2
 	}
-	fromProject := fs.Arg(0)
-	slug := fs.Arg(1)
-	toProject := fs.Arg(2)
+	fromProject, slug, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "idea move: %v\n", err)
+		return 2
+	}
+	toProject := fs.Arg(1)
 
 	root, err := findRoot(stderr)
 	if err != nil {

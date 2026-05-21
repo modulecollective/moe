@@ -41,31 +41,34 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 		fs.SetOutput(stderr)
 		fs.Usage = func() {
 			if defaultStage == "" {
-				moePrintf(stderr, "usage: moe %s cat <project> <run> <stage>\n", workflow)
+				moePrintf(stderr, "usage: moe %s cat <project>/<run> <stage>\n", workflow)
 			} else {
-				moePrintf(stderr, "usage: moe %s cat <project> <run> [<stage>]\n", workflow)
+				moePrintf(stderr, "usage: moe %s cat <project>/<run> [<stage>]\n", workflow)
 			}
 		}
 		if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 			return 2
 		}
 		n := fs.NArg()
-		// Two args is always valid (stage defaults when allowed); three
-		// args is valid for either flavour. One arg or four+ is a usage
-		// error; two args with no defaultStage is also a usage error.
-		if n < 2 || n > 3 {
+		// One arg is always valid (stage defaults when allowed); two
+		// args is valid for either flavour. Zero or three+ is a usage
+		// error; one arg with no defaultStage is also a usage error.
+		if n < 1 || n > 2 {
 			fs.Usage()
 			return 2
 		}
-		if n == 2 && defaultStage == "" {
+		if n == 1 && defaultStage == "" {
 			fs.Usage()
 			return 2
 		}
-		projectID := fs.Arg(0)
-		runID := fs.Arg(1)
+		projectID, runID, err := splitProjectRun(fs.Arg(0))
+		if err != nil {
+			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
+			return 2
+		}
 		stage := defaultStage
-		if n == 3 {
-			stage = fs.Arg(2)
+		if n == 2 {
+			stage = fs.Arg(1)
 		}
 
 		root, err := findRoot(stderr)

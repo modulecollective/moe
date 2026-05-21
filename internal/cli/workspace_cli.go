@@ -105,7 +105,7 @@ func runWorkspaceShell(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("workspace shell", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace shell <project> <name>")
+		moePrintln(stderr, "usage: moe workspace shell <project>/<name>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Drops into a shell rooted at .moe/named/<project>/<name>/, lazily")
 		moePrintln(stderr, "creating the workspace on first use. Doesn't switch branches and")
@@ -115,11 +115,15 @@ func runWorkspaceShell(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, name := fs.Arg(0), fs.Arg(1)
+	projectID, name, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "workspace shell: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -142,7 +146,7 @@ func runWorkspaceNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("workspace new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace new <project> <name>")
+		moePrintln(stderr, "usage: moe workspace new <project>/<name>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Creates the named workspace directory under .moe/named/<project>/<name>/.")
 		moePrintln(stderr, "Idempotent — a workspace that already exists prints a note and exits 0.")
@@ -150,11 +154,15 @@ func runWorkspaceNew(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, name := fs.Arg(0), fs.Arg(1)
+	projectID, name, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "workspace new: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -194,7 +202,7 @@ func runWorkspaceRelease(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("workspace release", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace release <project> <name>")
+		moePrintln(stderr, "usage: moe workspace release <project>/<name>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Clears claim.json on the named workspace so a new run can attach.")
 		moePrintln(stderr, "Use when the holding run is stuck or abandoned — moe does not check.")
@@ -202,11 +210,15 @@ func runWorkspaceRelease(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, name := fs.Arg(0), fs.Arg(1)
+	projectID, name, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "workspace release: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -321,7 +333,7 @@ func runWorkspaceRemove(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("workspace remove", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace remove <project> <name>")
+		moePrintln(stderr, "usage: moe workspace remove <project>/<name>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs dev-env-teardown.d/* against the cached env, then deletes the")
 		moePrintln(stderr, "workspace directory. Refuses while claim.json names a holding run —")
@@ -330,11 +342,15 @@ func runWorkspaceRemove(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, name := fs.Arg(0), fs.Arg(1)
+	projectID, name, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "workspace remove: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {
@@ -399,7 +415,7 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("workspace refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace refresh <project> <name>")
+		moePrintln(stderr, "usage: moe workspace refresh <project>/<name>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the project's dev-env-teardown.d/* against the cached env, clears")
 		moePrintln(stderr, "<workspace>/.moe/dev-env.env, then runs dev-env.d/* to rebuild it now.")
@@ -407,11 +423,15 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, name := fs.Arg(0), fs.Arg(1)
+	projectID, name, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "workspace refresh: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {

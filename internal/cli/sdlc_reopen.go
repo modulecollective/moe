@@ -46,7 +46,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc reopen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen <project> <slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -57,11 +57,15 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, priorSlug := fs.Arg(0), fs.Arg(1)
+	projectID, priorSlug, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc reopen: %v\n", err)
+		return 2
+	}
 
 	root, err := findRoot(stderr)
 	if err != nil {

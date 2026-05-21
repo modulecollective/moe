@@ -26,7 +26,7 @@ func seedClosedSDLCRun(t *testing.T, projectID, runID, designBody string) string
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", projectID, runID}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "--no-edit", projectID + "/" + runID}, &out, &errb); code != 0 {
 		t.Fatalf("close failed: exit=%d stderr=%q", code, errb.String())
 	}
 	return root
@@ -42,7 +42,7 @@ func TestSDLCReopenSeedsDesignAndCarriesTrailer(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/fix-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -100,13 +100,13 @@ func TestSDLCReopenSeedsKickoffWhenSourceEmpty(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele", "blank"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/blank"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup close failed")
 	}
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "blank"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/blank"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -145,7 +145,7 @@ func TestSDLCReopenRefusesInProgress(t *testing.T) {
 
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "still-here"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/still-here"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -167,7 +167,7 @@ func TestSDLCReopenRefusesMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -186,7 +186,7 @@ func TestSDLCReopenRefusesNonSDLC(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "kb-prior"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/kb-prior"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -205,7 +205,7 @@ func TestSDLCReopenStripsDatedSuffix(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele", "search-2025-12-01"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/search-2025-12-01"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -260,7 +260,7 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 
 	// Reopen.
 	suppressNextStagePrompt(t)
-	if code := Run([]string{"sdlc", "reopen", "tele", "fix-it"}, &bytes.Buffer{}, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "reopen", "tele/fix-it"}, &bytes.Buffer{}, &errb); code != 0 {
 		t.Fatalf("reopen exit failed: stderr=%q", errb.String())
 	}
 

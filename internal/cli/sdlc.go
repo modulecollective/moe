@@ -85,7 +85,7 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc design [--agent <name>] <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc design [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive agent session on the design canvas.")
 		moePrintln(stderr, "First use on a run creates the document; re-runs resume the session.")
@@ -93,11 +93,16 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcDesign(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc design: %v\n", err)
+		return 2
+	}
+	return openSdlcDesign(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
@@ -105,7 +110,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc code [--agent <name>] <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc code [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive agent session on the code canvas. The agent")
 		moePrintln(stderr, "works inside a private sandbox clone of the project's submodule, isolated")
@@ -114,11 +119,16 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcCode(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc code: %v\n", err)
+		return 2
+	}
+	return openSdlcCode(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
@@ -126,7 +136,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc test [--agent <name>] <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc test [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive agent session on the test canvas. The agent")
 		moePrintln(stderr, "verifies the code stage's work — running the project's checks, driving")
@@ -136,11 +146,16 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openSdlcTest(fs.Arg(0), fs.Arg(1), false, false, *agentOverride, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc test: %v\n", err)
+		return 2
+	}
+	return openSdlcTest(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
@@ -346,7 +361,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc resume", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc resume <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc resume <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Picks up the run at its first pending stage and opens it")
 		moePrintln(stderr, "interactively. The stage's post-turn chain prompt drives the rest:")
@@ -358,11 +373,15 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID, runID := fs.Arg(0), fs.Arg(1)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc resume: %v\n", err)
+		return 2
+	}
 
 	resolved, code := resolveSDLCRunSlug("sdlc resume", projectID, runID, stdout, stderr)
 	if code != 0 {
@@ -433,7 +452,7 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "sdlc resume: workflow %s has no command for stage %q\n", md.Workflow, nextStage)
 		return 1
 	}
-	return cmd.Run([]string{md.Project, md.ID}, stdout, stderr)
+	return cmd.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 }
 
 // requireRun fails the stage entry point fast when the run doesn't
@@ -509,7 +528,7 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 	canvas := filepath.Join(root, canvasRel)
 	info, err := os.Stat(canvas)
 	if err != nil || info.Size() == 0 {
-		return fmt.Errorf("%s canvas missing — run `moe sdlc %s %s %s` before `moe sdlc %s`",
+		return fmt.Errorf("%s canvas missing — run `moe sdlc %s %s/%s` before `moe sdlc %s`",
 			priorStage, priorStage, projectID, runID, currentStage)
 	}
 	// Compare the blob at HEAD to the blob at the canvas's kickoff
@@ -531,7 +550,7 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 		return nil
 	}
 	if headBlob == kickoffBlob {
-		return fmt.Errorf("%s canvas unchanged from kickoff — run `moe sdlc %s %s %s` and write to the canvas before `moe sdlc %s`",
+		return fmt.Errorf("%s canvas unchanged from kickoff — run `moe sdlc %s %s/%s` and write to the canvas before `moe sdlc %s`",
 			priorStage, priorStage, projectID, runID, currentStage)
 	}
 	return nil

@@ -145,7 +145,7 @@ func (f *pushFixture) runInRoot(args ...string) (string, string, int) {
 func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -221,7 +221,7 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	gittest.Run(t, work, "push", "origin", "main")
 	movedBaseSHA := gittest.HeadSHA(t, work)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -283,7 +283,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on rebase conflict; stdout=%s stderr=%s", stdout, stderr)
 	}
@@ -392,7 +392,7 @@ func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, err := runPushTyped("sdlc", []string{f.projectID, f.runID}, &stdout, &stderr)
+		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -411,7 +411,7 @@ func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
 		// The standalone CLI contract: pushCmd.Run wraps runPushTyped
 		// and discards the error. Exit 0 flows through; the typed
 		// signal is invisible at the shell boundary.
-		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 		if cliCode != 0 {
 			t.Fatalf("pushCmd.Run (clean recovery) exit: want 0, got %d; stdout=%s stderr=%s",
 				cliCode, stdoutBuf, stderrBuf)
@@ -439,7 +439,7 @@ exit 7
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, err := runPushTyped("sdlc", []string{f.projectID, f.runID}, &stdout, &stderr)
+		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -455,7 +455,7 @@ exit 7
 				f.projectID, f.runID, deferred.Project, deferred.Run)
 		}
 
-		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+		stdoutBuf, stderrBuf, cliCode := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 		if cliCode != 0 {
 			t.Fatalf("pushCmd.Run (clean recovery) exit: want 0, got %d; stdout=%s stderr=%s",
 				cliCode, stdoutBuf, stderrBuf)
@@ -471,7 +471,7 @@ exit 7
 func TestPushNoRebaseNeededFastPath(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -513,7 +513,7 @@ func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
 		"",
 	}, "\n"))
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -559,7 +559,7 @@ func TestPushFailsCleanlyWhenNoEditorAtMerge(t *testing.T) {
 		"- [ ] `chase-it` — Chase the thing\n")
 
 	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit when no editor is configured; stdout=%s stderr=%s", stdout, stderr)
 	}
@@ -598,7 +598,7 @@ func TestPushPRPathOpensPRAndKeepsSandbox(t *testing.T) {
 
 	mainBefore := f.originHead()
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -661,7 +661,7 @@ func TestPushPRPathSynthesizesBeforeExistingPR(t *testing.T) {
 	t.Cleanup(func() { runStageSession = prev })
 	fakeGhExistingPR(t, existingURL)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -934,13 +934,13 @@ exit 2
 func TestPushIdempotentOnMergedRun(t *testing.T) {
 	f := newPushFixture(t)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("first push: exit=%d stderr=%s", code, stderr)
 	}
 	_ = stdout
 
-	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -966,7 +966,7 @@ func TestPushIdempotentOnClosedRun(t *testing.T) {
 	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "runs", f.runID, "run.json"))
 	gittest.Run(t, f.root, "commit", "-m", "sync: close\n\nMoE-Run: "+f.runID+"\nMoE-Closed: https://example.com/pr/1\n")
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("rerun: exit=%d stderr=%s", code, stderr)
 	}
@@ -996,7 +996,7 @@ touch "`+canary+`"
 	t.Cleanup(func() { runStageSession = prev })
 
 	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
 	if code != 42 {
 		t.Fatalf("exit=%d, want synthesis exit 42\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -1018,8 +1018,8 @@ func TestPromptPushNextStageAcceptsMergeChoice(t *testing.T) {
 	if !got.ran {
 		t.Fatalf("expected push to be dispatched")
 	}
-	if len(got.args) != 2 || got.args[0] != "tele" || got.args[1] != "fix-it" {
-		t.Fatalf("merge path: expected [project, run], got %v", got.args)
+	if len(got.args) != 1 || got.args[0] != "tele/fix-it" {
+		t.Fatalf("merge path: expected [project/run], got %v", got.args)
 	}
 }
 
@@ -1030,8 +1030,8 @@ func TestPromptPushNextStageAcceptsPRChoice(t *testing.T) {
 	if !got.ran {
 		t.Fatalf("expected push to be dispatched")
 	}
-	if len(got.args) != 3 || got.args[0] != "--pr" {
-		t.Fatalf("pr path: expected [--pr, project, run], got %v", got.args)
+	if len(got.args) != 2 || got.args[0] != "--pr" || got.args[1] != "tele/fix-it" {
+		t.Fatalf("pr path: expected [--pr, project/run], got %v", got.args)
 	}
 }
 
@@ -1408,7 +1408,7 @@ func TestPromptPushNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !backRan {
 		t.Fatalf("expected back to be dispatched, but it was not")
 	}
-	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(backArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("back args = %q, want %q", got, want)
 	}
 }
@@ -1517,7 +1517,7 @@ func TestPromptPushNextStageOffersScuttleWhenRegistered(t *testing.T) {
 	if !scuttleRan {
 		t.Fatalf("expected scuttle to dispatch on `x`")
 	}
-	if got, want := strings.Join(scuttleArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(scuttleArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("scuttle args = %q, want %q", got, want)
 	}
 }
@@ -1752,7 +1752,7 @@ func TestPushProjectHookSeesSandboxAndEnv(t *testing.T) {
 `, canary)
 	writeHookScript(t, f.root, f.projectID, "pre-push", "10-canary.sh", body)
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -1822,7 +1822,7 @@ func TestPushRunsBuiltinsBeforeProjectHooks(t *testing.T) {
 echo "script" >> %q
 `, orderFile))
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
@@ -1861,7 +1861,7 @@ exit 7
 	t.Cleanup(func() { openCodeSessionForHookFailure = prev })
 
 	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on hook failure; stdout=%s stderr=%s", stdout, stderr)
 	}
@@ -2025,7 +2025,7 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 		t.Fatalf("fixture should not have a hooks dir; stat err=%v", err)
 	}
 
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID, f.runID)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}

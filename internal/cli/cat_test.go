@@ -41,7 +41,7 @@ func TestSdlcCatPrintsDesignCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "fix-it", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/fix-it", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -62,7 +62,7 @@ func TestCatUnknownProject(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "ghost", "fix-it", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "cat", "ghost/fix-it", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on missing project, got %d; stderr=%q", code, errb.String())
 	}
@@ -84,7 +84,7 @@ func TestCatUnknownRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "ghost", "design"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/ghost", "design"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on missing run, got %d; stderr=%q", code, errb.String())
 	}
@@ -104,7 +104,7 @@ func TestCatWrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"kb", "cat", "tele", "fix-it", "research"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"kb", "cat", "tele/fix-it", "research"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
 	}
@@ -125,7 +125,7 @@ func TestCatUnknownStage(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "fix-it", "bogus"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/fix-it", "bogus"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
 	}
@@ -150,7 +150,7 @@ func TestCatNoCanvasYet(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "fix-it", "design"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/fix-it", "design"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 when canvas missing, got %d; stderr=%q", code, errb.String())
 	}
@@ -172,7 +172,7 @@ func TestCatSingleStageDefaultsStage(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "cat", "tele", "report-2026"}, &out, &errb)
+	code := Run([]string{"meta-moe", "cat", "tele/report-2026"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -193,7 +193,7 @@ func TestCatMultiStageRequiresStage(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "fix-it"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/fix-it"}, &bytes.Buffer{}, &errb)
 	if code != 2 {
 		t.Fatalf("expected exit=2 on missing stage, got %d; stderr=%q", code, errb.String())
 	}
@@ -231,7 +231,7 @@ func TestCatSessionWorktreeWins(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "fix-it", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/fix-it", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -260,7 +260,7 @@ func TestCatLatestSentinelResolvesMostRecent(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "@latest", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/@latest", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -279,7 +279,7 @@ func TestCatLatestSentinelEmptyPool(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"sdlc", "cat", "tele", "@latest", "design"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"sdlc", "cat", "tele/@latest", "design"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on empty @latest pool, got %d; stderr=%q", code, errb.String())
 	}

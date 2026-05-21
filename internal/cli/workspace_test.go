@@ -183,7 +183,7 @@ func TestShellRunWorkspaceLandsInClonePath(t *testing.T) {
 	t.Setenv("SHELL", stubShell)
 
 	var out, errb bytes.Buffer
-	if code := runShell([]string{"tele", "fix-it"}, &out, &errb); code != 0 {
+	if code := runShell([]string{"tele/fix-it"}, &out, &errb); code != 0 {
 		t.Fatalf("shell: exit=%d stderr=%q", code, errb.String())
 	}
 	got, err := os.ReadFile(cwdLog)
@@ -216,7 +216,7 @@ func TestShellNamedWorkspaceCreatesLazily(t *testing.T) {
 	t.Setenv("SHELL", stubShell)
 
 	var out, errb bytes.Buffer
-	if code := runWorkspaceShell([]string{"tele", "dev"}, &out, &errb); code != 0 {
+	if code := runWorkspaceShell([]string{"tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("shell: exit=%d stderr=%q", code, errb.String())
 	}
 	wantPath, err := filepath.EvalSymlinks(filepath.Join(root, ".moe", "named", "tele", "dev"))

@@ -66,7 +66,7 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("meta-moe report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe meta-moe report <project> <run>")
+		moePrintln(stderr, "usage: moe meta-moe report <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the report canvas.")
 		moePrintln(stderr, "The agent walks this project's run history (design canvases, transcripts,")
@@ -74,14 +74,19 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "On session-end, the canvas is published to projects/<project>/meta-moe.md")
 		moePrintln(stderr, "in the same commit; the per-pass canvas under the run is the audit record.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openMetaMoeReport(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "meta-moe report: %v\n", err)
+		return 2
+	}
+	return openMetaMoeReport(projectID, runID, false, false, stdout, stderr)
 }
 
 // openMetaMoeReport is the Go-level seam behind `moe meta-moe report`.

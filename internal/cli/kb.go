@@ -102,19 +102,24 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb research", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb research <project> <run>")
+		moePrintln(stderr, "usage: moe kb research <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the research bibliography.")
 		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openKbResearch(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "kb research: %v\n", err)
+		return 2
+	}
+	return openKbResearch(projectID, runID, false, false, stdout, stderr)
 }
 
 // openKbResearch is the Go-level seam behind `moe kb research`. The
@@ -141,21 +146,26 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb summarize", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb summarize <project> <run>")
+		moePrintln(stderr, "usage: moe kb summarize <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
 		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")
 		moePrintln(stderr, "— editing existing topic docs, creating new ones, and maintaining index.md.")
 		moePrintln(stderr, "Per-run canvas is a scratchpad; the wiki diff is the artifact.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openKbSummarize(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "kb summarize: %v\n", err)
+		return 2
+	}
+	return openKbSummarize(projectID, runID, false, false, stdout, stderr)
 }
 
 // openKbSummarize is the Go-level seam behind `moe kb summarize`. Same

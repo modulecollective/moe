@@ -25,7 +25,7 @@ func TestSDLCDesignWrongProjectFailsFast(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "design", "wrongproj", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "design", "wrongproj/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on wrong-project typo, stdout=%q", out.String())
 	}
@@ -72,7 +72,7 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 	// (requirePriorCanvas walks up from cwd).
 	t.Chdir(root)
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele", runID}, &out, &errb)
+	code := Run([]string{"sdlc", "code", "tele/" + runID}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on unchanged-kickoff canvas, stdout=%q errb=%q", out.String(), errb.String())
 	}
@@ -80,8 +80,8 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 	if !strings.Contains(msg, "unchanged from kickoff") {
 		t.Fatalf("expected unchanged-from-kickoff error, got: %q", msg)
 	}
-	if !strings.Contains(msg, "moe sdlc design tele "+runID) {
-		t.Fatalf("expected error to point at `moe sdlc design tele %s`, got: %q", runID, msg)
+	if !strings.Contains(msg, "moe sdlc design tele/"+runID) {
+		t.Fatalf("expected error to point at `moe sdlc design tele/%s`, got: %q", runID, msg)
 	}
 }
 
@@ -360,7 +360,7 @@ func TestSDLCCodeWrongProjectSaysRunNotFound(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "wrongproj", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "code", "wrongproj/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on wrong-project typo, stdout=%q", out.String())
 	}

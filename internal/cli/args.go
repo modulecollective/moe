@@ -2,8 +2,37 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"strings"
 )
+
+// splitProjectRun parses a `project/run` token into its parts. The
+// slash form is the canonical identifier shape across moe — paths,
+// trailers, session ids, commit subjects — so verbs that take a run
+// take one positional `<project>/<run>` rather than two positionals.
+//
+// Validation is deliberately thin: exactly one `/`, both halves
+// non-empty, no whitespace in either half. Slug-shape policing
+// (kebab-case, dated suffixes, …) is left to downstream `run.Load`
+// so a malformed slug produces a "no such run" error from a single
+// source rather than two slightly-different validations diverging.
+func splitProjectRun(s string) (proj, run string, err error) {
+	if s == "" {
+		return "", "", fmt.Errorf("expected <project>/<run>, got empty string")
+	}
+	i := strings.IndexByte(s, '/')
+	if i < 0 {
+		return "", "", fmt.Errorf("expected <project>/<run>, got %q", s)
+	}
+	proj, run = s[:i], s[i+1:]
+	if proj == "" || run == "" || strings.ContainsRune(proj, '/') || strings.ContainsRune(run, '/') {
+		return "", "", fmt.Errorf("expected <project>/<run>, got %q", s)
+	}
+	if strings.ContainsAny(proj, " \t\n") || strings.ContainsAny(run, " \t\n") {
+		return "", "", fmt.Errorf("expected <project>/<run>, got %q", s)
+	}
+	return proj, run, nil
+}
 
 // reorderFlags moves flag-looking tokens ("-x", "--x", "--x=y") to the
 // front of the slice, preserving original order within each group. The

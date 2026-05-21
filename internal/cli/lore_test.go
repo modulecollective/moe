@@ -239,7 +239,7 @@ func TestSDLCCloseHarvestsLore(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -310,7 +310,7 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -334,7 +334,7 @@ func TestSDLCCloseAbortsOnMalformedLore(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on malformed lore, stdout=%q", out.String())
 	}
@@ -369,7 +369,7 @@ func TestSDLCCloseSkipsAlreadyCheckedLore(t *testing.T) {
 	}, "\n")+"\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -393,7 +393,7 @@ func TestSDLCCloseOpensEditorWhenLoreUnchecked(t *testing.T) {
 		"- [ ] `fact` — A portable fact\n\n  applies-when: now\n\n  body\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -438,7 +438,7 @@ func TestSDLCCloseSkipsEditorOnTrivialLore(t *testing.T) {
 			}
 
 			var out, errb bytes.Buffer
-			code := Run([]string{"sdlc", "close", "tele", "ship-it"}, &out, &errb)
+			code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 			if code != 0 {
 				t.Fatalf("exit=%d stderr=%q", code, errb.String())
 			}
@@ -462,7 +462,7 @@ func TestSDLCCloseTreatsLoreFileAsCleanForGate(t *testing.T) {
 		"- [ ] `late-add` — Late entry\n\n  applies-when: now\n\n  body\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("expected close to tolerate untracked feedback/lore.md, got exit=%d stderr=%q",
 			code, errb.String())
@@ -476,7 +476,7 @@ func TestSDLCCloseTreatsLoreFileAsCleanForGate(t *testing.T) {
 	}
 	out.Reset()
 	errb.Reset()
-	code = Run([]string{"sdlc", "close", "--no-edit", "tele", "ship-it-2"}, &out, &errb)
+	code = Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it-2"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected close to refuse on unrelated dirty file, stdout=%q", out.String())
 	}

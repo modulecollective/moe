@@ -24,7 +24,7 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 		fs := flag.NewFlagSet("twin "+stage, flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		fs.Usage = func() {
-			moePrintf(stderr, "usage: moe twin %s <project> <run>\n", stage)
+			moePrintf(stderr, "usage: moe twin %s <project>/<run>\n", stage)
 			moePrintln(stderr, "")
 			moePrintf(stderr, "Opens an interactive Claude Code session on the %s-stage canvas\n", stage)
 			moePrintln(stderr, "of a twin reflect run. First use on a run creates the document;")
@@ -33,11 +33,16 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 		if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 			return 2
 		}
-		if fs.NArg() != 2 {
+		if fs.NArg() != 1 {
 			fs.Usage()
 			return 2
 		}
-		return openTwinStageInteractive(stage, fs.Arg(0), fs.Arg(1), stdout, stderr)
+		projectID, runID, err := splitProjectRun(fs.Arg(0))
+		if err != nil {
+			moePrintf(stderr, "twin %s: %v\n", stage, err)
+			return 2
+		}
+		return openTwinStageInteractive(stage, projectID, runID, stdout, stderr)
 	}
 }
 
@@ -261,7 +266,7 @@ func requireTwinPriorCanvas(stage, projectID, runID string) error {
 	info, err := os.Stat(filepath.Join(root, canvasRel))
 	switch {
 	case errors.Is(err, fs.ErrNotExist), err == nil && info.Size() == 0:
-		return fmt.Errorf("%s canvas missing — run `moe twin %s %s %s` before `moe twin %s`",
+		return fmt.Errorf("%s canvas missing — run `moe twin %s %s/%s` before `moe twin %s`",
 			prior, prior, projectID, runID, stage)
 	case err != nil:
 		return fmt.Errorf("stat %s canvas: %w", prior, err)

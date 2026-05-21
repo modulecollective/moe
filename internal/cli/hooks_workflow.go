@@ -54,21 +54,26 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hooks code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe hooks code <project> <run>")
+		moePrintln(stderr, "usage: moe hooks code <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the run's code canvas.")
 		moePrintln(stderr, "The agent edits scripts under projects/<project>/hooks/<event>.d/* and")
 		moePrintln(stderr, "iterates via `moe hook fire <project> <event>`. Edits commit alongside")
 		moePrintln(stderr, "the canvas on session close.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	return openHooksCode(fs.Arg(0), fs.Arg(1), false, false, stdout, stderr)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "hooks code: %v\n", err)
+		return 2
+	}
+	return openHooksCode(projectID, runID, false, false, stdout, stderr)
 }
 
 // openHooksCode is the Go-level seam behind `moe hooks code`. Mirrors

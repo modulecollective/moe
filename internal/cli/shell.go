@@ -25,17 +25,22 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc shell", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc shell <project> <run>")
+		moePrintln(stderr, "usage: moe sdlc shell <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Drops into a shell rooted at the run's working tree (per-run sandbox")
 		moePrintln(stderr, "or named workspace, whichever it was opened with). For a shell into")
-		moePrintln(stderr, "a named workspace directly, use `moe workspace shell <project> <name>`.")
+		moePrintln(stderr, "a named workspace directly, use `moe workspace shell <project>/<name>`.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
+		return 2
+	}
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "sdlc shell: %v\n", err)
 		return 2
 	}
 
@@ -43,7 +48,7 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	return shellRunWorkspace(root, fs.Arg(0), fs.Arg(1), stdout, stderr)
+	return shellRunWorkspace(root, projectID, runID, stdout, stderr)
 }
 
 // shellRunWorkspace resolves the run's workspace path and execs a

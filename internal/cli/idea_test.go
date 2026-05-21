@@ -343,7 +343,7 @@ func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 			t.Fatalf("setup capture failed for %q", title)
 		}
 	}
-	if code := Run([]string{"idea", "close", "tele", "will-be-closed"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "close", "tele/will-be-closed"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("close failed")
 	}
 	if code := runNew("sdlc", []string{"--from-idea=will-be-promoted", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -407,7 +407,7 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 	t.Setenv("EDITOR", script)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "starter"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/starter"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -455,7 +455,7 @@ func TestIdeaEditNoChangeDoesNotCommit(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "leave-it"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/leave-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -478,7 +478,7 @@ func TestIdeaEditMissingSlug(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing idea, got 0; stdout=%q", out.String())
 	}
@@ -501,7 +501,7 @@ func TestIdeaEditRequiresEditor(t *testing.T) {
 	noEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "ed-gate"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/ed-gate"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero with no editor, got 0; stdout=%q", out.String())
 	}
@@ -525,7 +525,7 @@ func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "busy"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/busy"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
 	}
@@ -550,7 +550,7 @@ func TestIdeaEditRefusesNonIdeaRun(t *testing.T) {
 		t.Fatal("setup run failed")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "tele", "real-run"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "tele/real-run"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero editing a non-idea run, stdout=%q", out.String())
 	}
@@ -572,7 +572,7 @@ func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "close", "tele", "close-me"}, &out, &errb)
+	code := Run([]string{"idea", "close", "tele/close-me"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -612,7 +612,7 @@ func TestIdeaCloseMissingSlug(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "close", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"idea", "close", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing idea, got 0; stdout=%q", out.String())
 	}
@@ -632,12 +632,12 @@ func TestIdeaCloseRejectsAlreadyClosed(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele", "One shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if code := Run([]string{"idea", "close", "tele", "one-shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "close", "tele/one-shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("first close failed")
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "close", "tele", "one-shot"}, &out, &errb)
+	code := Run([]string{"idea", "close", "tele/one-shot"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on already-closed idea, got 0")
 	}
@@ -673,7 +673,7 @@ func TestIdeaCatPrintsCanvas(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "cat", "tele", "read-me-back"}, &out, &errb)
+	code := Run([]string{"idea", "cat", "tele/read-me-back"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -694,7 +694,7 @@ func TestIdeaCatUnknownSlug(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "cat", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"idea", "cat", "tele/ghost"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on missing slug, got %d; stderr=%q", code, errb.String())
 	}
@@ -721,7 +721,7 @@ func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
 		t.Fatal("setup run failed")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "cat", "tele", "real-run"}, &out, &errb)
+	code := Run([]string{"idea", "cat", "tele/real-run"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow slug, got %d; stderr=%q", code, errb.String())
 	}
@@ -743,12 +743,12 @@ func TestIdeaCatStatusAgnostic(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele", "Closed but cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if code := Run([]string{"idea", "close", "tele", "closed-but-cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "close", "tele/closed-but-cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup close failed")
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "cat", "tele", "closed-but-cat-able"}, &out, &errb)
+	code := Run([]string{"idea", "cat", "tele/closed-but-cat-able"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -865,7 +865,7 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "--chat", "tele", "chat-refine"}, &out, &errb)
+	code := Run([]string{"idea", "edit", "--chat", "tele/chat-refine"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -920,7 +920,7 @@ func TestIdeaMoveRehomesRunAndCommits(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "belongs-to-moe", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/belongs-to-moe", "moe"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -991,7 +991,7 @@ func TestIdeaMoveRefusesUnknownDestProject(t *testing.T) {
 		t.Fatalf("setup capture failed")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "stuck-here", "ghost"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/stuck-here", "ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing dest project, got 0; stdout=%q", out.String())
 	}
@@ -1019,7 +1019,7 @@ func TestIdeaMoveRefusesSameProject(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "stays-put", "tele"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/stays-put", "tele"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on same-project move, got 0; stdout=%q", out.String())
 	}
@@ -1053,7 +1053,7 @@ func TestIdeaMoveRefusesSlugCollision(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "twin", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/twin", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on slug collision, got 0; stdout=%q", out.String())
 	}
@@ -1083,12 +1083,12 @@ func TestIdeaMoveRefusesClosedIdea(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele", "Done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if code := Run([]string{"idea", "close", "tele", "done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "close", "tele/done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup close failed")
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "done", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/done", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on closed idea, got 0; stdout=%q", out.String())
 	}
@@ -1118,7 +1118,7 @@ func TestIdeaMoveRefusesPromotedIdea(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "promote-me", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/promote-me", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on promoted idea, got 0; stdout=%q", out.String())
 	}
@@ -1144,7 +1144,7 @@ func TestIdeaMoveRefusesNonIdeaRun(t *testing.T) {
 		t.Fatal("setup sdlc run failed")
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "real-run", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/real-run", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on non-idea run, got 0; stdout=%q", out.String())
 	}
@@ -1164,7 +1164,7 @@ func TestIdeaMoveMissingSourceSlug(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "ghost", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/ghost", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing source, got 0; stdout=%q", out.String())
 	}
@@ -1191,7 +1191,7 @@ func TestIdeaMoveRefusesDirtyWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "dirty", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/dirty", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
 	}
@@ -1208,7 +1208,7 @@ func TestIdeaMoveUsageErrors(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele", "slug"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/slug"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected exit=2 on missing args, got %d; stderr=%q", code, errb.String())
 	}

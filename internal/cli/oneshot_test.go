@@ -240,7 +240,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		{
 			label: "runCode interactive",
 			run: func(o, e *bytes.Buffer) int {
-				return runCode([]string{"tele", "no-design"}, o, e)
+				return runCode([]string{"tele/no-design"}, o, e)
 			},
 		},
 		{
@@ -258,7 +258,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		if !strings.Contains(errb.String(), "design canvas missing") {
 			t.Fatalf("expected design-canvas error for %s, got stderr=%q", call.label, errb.String())
 		}
-		if !strings.Contains(errb.String(), "moe sdlc design tele no-design") {
+		if !strings.Contains(errb.String(), "moe sdlc design tele/no-design") {
 			t.Fatalf("expected guidance to run design first for %s, got stderr=%q", call.label, errb.String())
 		}
 	}
@@ -290,11 +290,11 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 		wantHeadless string
 	}{
 		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n/!]", wantHeadless: "code"},
-		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele", "fix-it"}},
-		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
+		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
 		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/!]"},
 		{name: "idea-no-bang-option", workflow: ideaWorkflow, input: "!\n", wantLabel: "[Y/n]"},
-		{name: "idea-default-runs", workflow: ideaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele", "fix-it"}},
+		{name: "idea-default-runs", workflow: ideaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele/fix-it"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

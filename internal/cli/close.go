@@ -51,21 +51,24 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
 	fs.Usage = func() {
 		if workflow == ideaWorkflow {
-			moePrintf(stderr, "usage: moe idea close <project> <run>\n")
+			moePrintf(stderr, "usage: moe idea close <project>/<run>\n")
 		} else {
-			moePrintf(stderr, "usage: moe %s close [--no-edit] <project> <run>\n", workflow)
+			moePrintf(stderr, "usage: moe %s close [--no-edit] <project>/<run>\n", workflow)
 		}
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID := fs.Arg(0)
-	runID := fs.Arg(1)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "moe %s close: %v\n", workflow, err)
+		return 2
+	}
 
 	if workflow == "sdlc" {
 		resolved, code := resolveSDLCRunSlug(workflow+" close", projectID, runID, stdout, stderr)

@@ -43,9 +43,9 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 		agentF := fs.String("agent", "", "render claude or codex (required when the stage has both)")
 		fs.Usage = func() {
 			if defaultStage == "" {
-				moePrintf(stderr, "usage: moe %s log <project> <run> <stage> [--agent claude|codex]\n", workflow)
+				moePrintf(stderr, "usage: moe %s log <project>/<run> <stage> [--agent claude|codex]\n", workflow)
 			} else {
-				moePrintf(stderr, "usage: moe %s log <project> <run> [<stage>] [--agent claude|codex]\n", workflow)
+				moePrintf(stderr, "usage: moe %s log <project>/<run> [<stage>] [--agent claude|codex]\n", workflow)
 			}
 			moePrintln(stderr, "")
 			moePrintln(stderr, "Renders the agent's per-session JSONL transcript for a stage as plain")
@@ -57,19 +57,22 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			return 2
 		}
 		n := fs.NArg()
-		if n < 2 || n > 3 {
+		if n < 1 || n > 2 {
 			fs.Usage()
 			return 2
 		}
-		if n == 2 && defaultStage == "" {
+		if n == 1 && defaultStage == "" {
 			fs.Usage()
 			return 2
 		}
-		projectID := fs.Arg(0)
-		runID := fs.Arg(1)
+		projectID, runID, err := splitProjectRun(fs.Arg(0))
+		if err != nil {
+			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
+			return 2
+		}
 		stage := defaultStage
-		if n == 3 {
-			stage = fs.Arg(2)
+		if n == 2 {
+			stage = fs.Arg(1)
 		}
 
 		switch *agentF {

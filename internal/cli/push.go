@@ -137,7 +137,7 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s push [--pr] <project> <run>\n", workflow)
+		moePrintf(stderr, "usage: moe %s push [--pr] <project>/<run>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
 		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
@@ -146,11 +146,15 @@ func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2, nil
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2, nil
 	}
-	projectID, runID := fs.Arg(0), fs.Arg(1)
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "moe %s push: %v\n", workflow, err)
+		return 2, nil
+	}
 
 	if workflow == "sdlc" {
 		resolved, code := resolveSDLCRunSlug(workflow+" push", projectID, runID, stdout, stderr)

@@ -45,7 +45,7 @@ func TestWorkspaceNewIsIdempotent(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "new", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "new", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("first new: exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "created") {
@@ -57,7 +57,7 @@ func TestWorkspaceNewIsIdempotent(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"workspace", "new", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "new", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("second new: exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "already exists") {
@@ -131,7 +131,7 @@ func TestWorkspaceRemoveRefusesClaimed(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "remove", "tele", "dev"}, &out, &errb); code == 0 {
+	if code := Run([]string{"workspace", "remove", "tele/dev"}, &out, &errb); code == 0 {
 		t.Fatalf("expected non-zero on claimed workspace, stdout=%q", out.String())
 	}
 	if !strings.Contains(errb.String(), "tele/run-a") {
@@ -173,7 +173,7 @@ func TestWorkspaceRemoveDeletesAndRunsTeardown(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "remove", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "remove", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("remove: exit=%d stderr=%q", code, errb.String())
 	}
 	if workspace.Exists(root, "tele", "dev") {
@@ -198,7 +198,7 @@ func TestWorkspaceRemoveMissingIsNoop(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "remove", "tele", "ghost"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "remove", "tele/ghost"}, &out, &errb); code != 0 {
 		t.Fatalf("expected exit 0 on missing workspace, got %d (stderr=%q)", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "does not exist") {
@@ -220,7 +220,7 @@ func TestWorkspaceReleaseNamesPriorHolder(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "release", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "release", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("release: exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "tele/run-a") {
@@ -249,7 +249,7 @@ func TestWorkspaceReleaseUnclaimedIsClear(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "release", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "release", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("release: exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "no claim") {
@@ -286,7 +286,7 @@ func TestWorkspaceRefreshRebuildsCacheEagerly(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"workspace", "refresh", "tele", "dev"}, &out, &errb); code != 0 {
+	if code := Run([]string{"workspace", "refresh", "tele/dev"}, &out, &errb); code != 0 {
 		t.Fatalf("refresh: exit=%d stderr=%q", code, errb.String())
 	}
 	body, err := os.ReadFile(cache)

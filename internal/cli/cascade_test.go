@@ -241,7 +241,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push ship dispatched %d times, want 1: %v", len(*pushCaptured), *pushCaptured)
 	}
-	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/fix-it"; got != want {
 		t.Fatalf("push ship args = %q, want %q (merge path, no flags)", got, want)
 	}
 }
@@ -352,7 +352,7 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 	if len(*closeCaptured) != 1 {
 		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
 	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe reflect-2026-05-17"; got != want {
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe/reflect-2026-05-17"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 	// Summary ends with the close step and the shipped marker.
@@ -796,7 +796,7 @@ func TestPromptPushNextStageBangBangShips(t *testing.T) {
 	if !ran {
 		t.Fatalf("!! at push gate must dispatch the merge path")
 	}
-	if got, want := strings.Join(gotArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(gotArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("push args = %q, want %q (merge path, no flags)", got, want)
 	}
 }
@@ -1071,7 +1071,7 @@ func TestCascadeFromGateKbYoloAutoCloses(t *testing.T) {
 	if len(*closeCaptured) != 1 {
 		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
 	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele dns-basics"; got != want {
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele/dns-basics"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 	wantSummary := "cascade: research ok · summarize ok · close ok — shipped"
@@ -1119,7 +1119,7 @@ func TestCascadeFromGateMetaMoeYoloAutoCloses(t *testing.T) {
 	if len(*closeCaptured) != 1 {
 		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
 	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe meta-moe-2026-05-17"; got != want {
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe/meta-moe-2026-05-17"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 }
@@ -1161,7 +1161,7 @@ func TestCascadeFromGateHooksYoloAutoCloses(t *testing.T) {
 	if len(*closeCaptured) != 1 {
 		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
 	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe hooks-2026-05-17"; got != want {
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe/hooks-2026-05-17"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 }

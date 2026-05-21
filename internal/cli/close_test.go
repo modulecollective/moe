@@ -43,7 +43,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "abandon-me"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/abandon-me"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -87,7 +87,7 @@ func TestSDLCCloseWithoutSandboxIsFine(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "never-opened"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/never-opened"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -116,7 +116,7 @@ func TestSDLCCloseRefusesPushed(t *testing.T) {
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 			var out, errb bytes.Buffer
-			code := Run([]string{"sdlc", "close", "--no-edit", "tele", "done-" + tc.name}, &out, &errb)
+			code := Run([]string{"sdlc", "close", "--no-edit", "tele/done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -156,7 +156,7 @@ func TestSDLCCloseWorkflowMismatch(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "not-sdlc"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/not-sdlc"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on workflow mismatch, stdout=%q", out.String())
 	}
@@ -175,7 +175,7 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
 	}
@@ -196,7 +196,7 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele", "dead-end"}, &out, &errb)
+	code := Run([]string{"kb", "close", "--no-edit", "tele/dead-end"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -242,7 +242,7 @@ func TestKBCloseLeavesUnrelatedPathsAlone(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-run"}, &out, &errb)
+	code := Run([]string{"kb", "close", "--no-edit", "tele/kb-run"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -270,7 +270,7 @@ func TestKBCloseRefusesTerminal(t *testing.T) {
 
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 			var out, errb bytes.Buffer
-			code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-done-" + tc.name}, &out, &errb)
+			code := Run([]string{"kb", "close", "--no-edit", "tele/kb-done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -327,7 +327,7 @@ func TestMetaMoeCloseBumpsStatusAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele", "abandon-mm"}, &out, &errb)
+	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/abandon-mm"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -369,7 +369,7 @@ func TestMetaMoeCloseMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele", "ghost"}, &out, &errb)
+	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
 	}
@@ -426,7 +426,7 @@ func TestSDLCCloseRefusesEmptyDesignCanvas(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "empty-design"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/empty-design"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -460,7 +460,7 @@ func TestSDLCCloseRefusesEmptyCodeCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "empty-code"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/empty-code"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -480,7 +480,7 @@ func TestSDLCCloseAllowsNeverStartedCode(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele", "design-only"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/design-only"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -498,7 +498,7 @@ func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele", "kb-empty"}, &out, &errb)
+	code := Run([]string{"kb", "close", "--no-edit", "tele/kb-empty"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -519,7 +519,7 @@ func TestMetaMoeCloseRefusesEmptyCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele", "mm-empty"}, &out, &errb)
+	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/mm-empty"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -539,7 +539,7 @@ func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "close", "tele", "idea-empty"}, &out, &errb)
+	code := Run([]string{"idea", "close", "tele/idea-empty"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

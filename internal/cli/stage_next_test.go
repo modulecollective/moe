@@ -291,7 +291,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !backRan {
 		t.Fatalf("expected back to be dispatched, but it was not")
 	}
-	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(backArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("back args = %q, want %q", got, want)
 	}
 }
@@ -454,7 +454,7 @@ func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
 	if !scuttleRan {
 		t.Fatalf("expected scuttle to dispatch on `x`")
 	}
-	if got, want := strings.Join(scuttleArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(scuttleArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("scuttle args = %q, want %q", got, want)
 	}
 }
@@ -703,7 +703,7 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 	if !strings.Contains(got, "[N/m/p]") {
 		t.Fatalf("expected push prompt's [N/m/p] label after `s`, got: %q", got)
 	}
-	if !strings.Contains(got, "moe sdlc push tele fix-it") {
+	if !strings.Contains(got, "moe sdlc push tele/fix-it") {
 		t.Fatalf("expected push prompt hint with project/run, got: %q", got)
 	}
 	// The test prompt's [Y/n/s/!] label must still appear before the
@@ -756,7 +756,7 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 	if !backRan {
 		t.Fatalf("expected back to fire at the push prompt's `b`")
 	}
-	if got, want := strings.Join(backArgs, " "), "tele fix-it"; got != want {
+	if got, want := strings.Join(backArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("back args = %q, want %q", got, want)
 	}
 	got := stdout.String()
@@ -973,7 +973,7 @@ func TestPromptCloseNextStageDispatchesOnAccept(t *testing.T) {
 				t.Fatalf("close dispatched=%v, want %v (stdout=%q)", ran, tc.wantDispatch, stdout.String())
 			}
 			if tc.wantDispatch {
-				if got, want := strings.Join(gotArgs, " "), "moe reflect-2026-05-17"; got != want {
+				if got, want := strings.Join(gotArgs, " "), "moe/reflect-2026-05-17"; got != want {
 					t.Fatalf("close args = %q, want %q (no --no-edit — interactive Y opens the followups editor)", got, want)
 				}
 			}

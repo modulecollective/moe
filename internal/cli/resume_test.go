@@ -55,7 +55,7 @@ func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	code := runResume([]string{"tele", "will-be-merged"}, &out, &errb)
+	code := runResume([]string{"tele/will-be-merged"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected refusal on merged run; stdout=%q", out.String())
 	}
@@ -78,7 +78,7 @@ func TestSdlcResumeRefusesMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := runResume([]string{"tele", "no-such-run"}, &out, &errb)
+	code := runResume([]string{"tele/no-such-run"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected refusal on missing run; stdout=%q", out.String())
 	}
@@ -123,10 +123,10 @@ func TestSdlcResumeInteractiveInvokesNextStage(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := runResume([]string{"tele", "interactive-resume"}, &out, &errb); code != 0 {
+	if code := runResume([]string{"tele/interactive-resume"}, &out, &errb); code != 0 {
 		t.Fatalf("interactive resume exit=%d stderr=%q", code, errb.String())
 	}
-	if len(gotArgs) != 2 || gotArgs[0] != "tele" || gotArgs[1] != "interactive-resume" {
-		t.Fatalf("interactive resume should invoke design with [project, run]; got %v", gotArgs)
+	if len(gotArgs) != 1 || gotArgs[0] != "tele/interactive-resume" {
+		t.Fatalf("interactive resume should invoke design with [project/run]; got %v", gotArgs)
 	}
 }
