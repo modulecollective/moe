@@ -324,7 +324,7 @@ func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 	if code := Run([]string{"idea", "close", "tele/will-be-closed"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("close failed")
 	}
-	if code := runNew("sdlc", []string{"--from-idea=will-be-promoted", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"--from-idea=tele/will-be-promoted"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("promote failed")
 	}
 
@@ -1091,7 +1091,7 @@ func TestIdeaMoveRefusesPromotedIdea(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele/promote-me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if code := runNew("sdlc", []string{"--from-idea=promote-me", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"--from-idea=tele/promote-me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup promote failed")
 	}
 

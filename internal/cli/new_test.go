@@ -67,7 +67,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	captureIdea(t, "tele", "cross-project-search")
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--from-idea=cross-project-search", "tele"}, &out, &errb)
+	code := runNew("sdlc", []string{"--from-idea=tele/cross-project-search"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -148,7 +148,7 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	captureIdea(t, "tele", "dns-basics")
 
 	var out, errb bytes.Buffer
-	code := runNew("kb", []string{"--from-idea=dns-basics", "tele"}, &out, &errb)
+	code := runNew("kb", []string{"--from-idea=tele/dns-basics"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -168,7 +168,7 @@ func TestRunNewFromIdeaErrorsOnMissingIdea(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--from-idea=nope", "tele"}, &out, &errb)
+	code := runNew("sdlc", []string{"--from-idea=tele/nope"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing idea, got 0; stdout=%q", out.String())
 	}
@@ -189,11 +189,11 @@ func TestRunNewFromIdeaRefusesPromotedIdea(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	captureIdea(t, "tele", "twice-over")
-	if code := runNew("sdlc", []string{"--from-idea=twice-over", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"--from-idea=tele/twice-over"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("first promote failed")
 	}
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--from-idea=twice-over", "tele"}, &out, &errb)
+	code := runNew("sdlc", []string{"--from-idea=tele/twice-over"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on second promote, got 0; stdout=%q", out.String())
 	}
@@ -202,11 +202,12 @@ func TestRunNewFromIdeaRefusesPromotedIdea(t *testing.T) {
 	}
 }
 
-// Regression: the operator typed `moe sdlc new tele --from-idea=x` and
-// stdlib `flag` stopped at the first positional, so `--from-idea=x`
-// became part of the title. After reorderFlags this shape seeds the
-// first-stage doc just like the --from-idea-first form does.
-func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
+// Smoke test of the flag-only invocation: --from-idea takes a full
+// `<project>/<slug>` value and no positional. (Originally a regression
+// for stdlib `flag` stopping at the first positional, when the shape
+// included a trailing `<project>` positional; the shape collapsed when
+// the run reference moved onto the flag value.)
+func TestRunNewFromIdeaFlagOnlyInvocation(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -218,7 +219,7 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 	captureIdea(t, "tele", "flag-ordering")
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"tele", "--from-idea=flag-ordering"}, &out, &errb)
+	code := runNew("sdlc", []string{"--from-idea=tele/flag-ordering"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
