@@ -55,12 +55,13 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	fromIdea := fs.String("from-idea", "", "promote an open idea run (by slug) into a new run, seeding the first-stage doc from its canvas")
 	// --workspace means two things across workflows: sdlc binds the run
-	// to the named workspace as its working tree (claim taken on first
-	// attach); hooks records it as a no-claim label so the operator can
-	// see "this hooks run iterates against <name>" on the dash. The flag
-	// parses on every workflow's shared `new` facade and we reject it
-	// for the other workflows below before doing any work.
-	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken); hooks records it as a no-claim label")
+	// to the named workspace as its working tree (claim taken at first
+	// stage attach — sdlc design under the sdlc workflow); hooks records
+	// it as a no-claim label so the operator can see "this hooks run
+	// iterates against <name>" on the dash. The flag parses on every
+	// workflow's shared `new` facade and we reject it for the other
+	// workflows below before doing any work.
+	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT, then claude")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--workspace <name>] [--agent <name>] <project> [\"title\"]\n", workflowName)

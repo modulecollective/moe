@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // runSDLCReopen opens a fresh sdlc run seeded by a prior run's design
@@ -26,7 +28,9 @@ import (
 //     names the prior slug and prompts the operator for the goal of the
 //     retake — the verb's slug-base + workspace inheritance is the value,
 //     not the canvas carry-forward.
-//   - Title and workspace inherited verbatim.
+//   - Title inherited verbatim. Workspace and agent inherit from the
+//     prior by default; --workspace/--agent override and
+//     --no-workspace/--no-agent detach.
 //
 // What's left behind:
 //   - Code-stage canvas (sandbox-specific by the time a run terminates).
@@ -45,8 +49,12 @@ import (
 func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc reopen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	workspaceName := fs.String("workspace", "", "bind the new run to the named workspace at .moe/named/<project>/<name>/ (claim taken at first stage attach — sdlc design). When omitted, the prior run's workspace is inherited.")
+	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
+	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual $MOE_AGENT → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen <project>/<slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -60,6 +68,26 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *workspaceName != "" && *noWorkspace {
+		moePrintln(stderr, "sdlc reopen: --workspace and --no-workspace are mutually exclusive")
+		return 2
+	}
+	if *agentOverride != "" && *noAgent {
+		moePrintln(stderr, "sdlc reopen: --agent and --no-agent are mutually exclusive")
+		return 2
+	}
+	if *workspaceName != "" {
+		if err := workspace.ValidateName(*workspaceName); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID, priorSlug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -115,13 +143,38 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		designSeed = string(canvasBody)
 	}
 
+	// Resolve workspace and agent: omitted = inherit prior; --X=NAME =
+	// override; --no-X = detach (empty). The flag pairs are mutually
+	// exclusive (checked above), so at most one branch fires per pair.
+	wsName := prior.Workspace
+	switch {
+	case *noWorkspace:
+		wsName = ""
+	case *workspaceName != "":
+		wsName = *workspaceName
+	}
+	agentName := prior.Agent
+	switch {
+	case *noAgent:
+		agentName = ""
+	case *agentOverride != "":
+		agentName = *agentOverride
+	}
+
+	if wsName != "" {
+		if code := preflightWorkspaceClaim(root, projectID, wsName, stderr); code != 0 {
+			return code
+		}
+	}
+
 	opts := run.Options{
 		Workflow:    prior.Workflow,
 		IDBase:      stripDateSuffix(priorSlug),
 		SeedDocs:    map[string]string{"design": designSeed},
 		SubjectFrom: "reopen of " + priorSlug,
 		Trailers:    trailers.Block{ReopenOf: priorSlug},
-		Workspace:   prior.Workspace,
+		Workspace:   wsName,
+		Agent:       agentName,
 	}
 
 	var md *run.Metadata

@@ -2,14 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
+	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // seedClosedSDLCRun composes a closed sdlc run with a populated design
@@ -20,7 +23,29 @@ import (
 // working tree.
 func seedClosedSDLCRun(t *testing.T, projectID, runID, designBody string) string {
 	t.Helper()
+	return seedClosedSDLCRunWithFields(t, projectID, runID, designBody, nil)
+}
+
+// seedClosedSDLCRunWithFields is seedClosedSDLCRun plus a hook to stamp
+// extra metadata (Workspace, Agent, …) onto the prior run.json before
+// close. Used by reopen tests that need to assert inherit / override /
+// detach semantics against a non-default prior state.
+func seedClosedSDLCRunWithFields(t *testing.T, projectID, runID, designBody string, mutate func(*run.Metadata)) string {
+	t.Helper()
 	root := seedCloseFixture(t, projectID, runID, "sdlc", run.StatusInProgress)
+	if mutate != nil {
+		md, err := run.Load(root, projectID, runID)
+		if err != nil {
+			t.Fatalf("run.Load: %v", err)
+		}
+		mutate(md)
+		if err := run.Save(root, md); err != nil {
+			t.Fatalf("run.Save: %v", err)
+		}
+		runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
+		gittest.Run(t, root, "add", runJSONRel)
+		gittest.Run(t, root, "commit", "-m", "stamp metadata on "+runID)
+	}
 	addDocEntryAndCommit(t, root, projectID, runID, "design", designBody)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
@@ -30,6 +55,23 @@ func seedClosedSDLCRun(t *testing.T, projectID, runID, designBody string) string
 		t.Fatalf("close failed: exit=%d stderr=%q", code, errb.String())
 	}
 	return root
+}
+
+// loadDatedRunJSON reads the freshly-opened reopen successor's run.json
+// (slug = base + "-" + todayDateSuffix()) and returns the parsed
+// metadata. Tests use it to assert Workspace / Agent inherit / override.
+func loadDatedRunJSON(t *testing.T, root, projectID, base string) run.Metadata {
+	t.Helper()
+	slug := base + "-" + todayDateSuffix()
+	body, err := os.ReadFile(filepath.Join(root, "projects", projectID, "runs", slug, "run.json"))
+	if err != nil {
+		t.Fatalf("read successor run.json: %v", err)
+	}
+	var md run.Metadata
+	if err := json.Unmarshal(body, &md); err != nil {
+		t.Fatalf("parse successor run.json: %v", err)
+	}
+	return md
 }
 
 // TestSDLCReopenSeedsDesignAndCarriesTrailer pins the happy path: a
@@ -317,5 +359,228 @@ func TestSDLCReopenRegisteredInUsage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "reopen") {
 		t.Fatalf("sdlc usage missing 'reopen':\n%s", out.String())
+	}
+}
+
+// TestSDLCReopenWorkspaceFlagOverridesPrior pins the override path: a
+// prior without a workspace (or with a different one) + --workspace=dev
+// lands dev in the successor's run.json. This is the "switch on a
+// retake" story from the design.
+func TestSDLCReopenWorkspaceFlagOverridesPrior(t *testing.T) {
+	root := seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Workspace != "dev" {
+		t.Fatalf("Workspace = %q, want %q", md.Workspace, "dev")
+	}
+}
+
+// TestSDLCReopenWorkspaceFlagInheritedWhenOmitted regresses the
+// inherit-by-default behavior on the workspace field. Prior carried
+// "foo"; no flag → successor reads "foo".
+func TestSDLCReopenWorkspaceFlagInheritedWhenOmitted(t *testing.T) {
+	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {
+		md.Workspace = "foo"
+	})
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Workspace != "foo" {
+		t.Fatalf("Workspace = %q, want inherited %q", md.Workspace, "foo")
+	}
+}
+
+// TestSDLCReopenNoWorkspaceClearsInheritedName covers the detach form.
+// Prior used "dev"; --no-workspace lands an empty Workspace so the
+// successor gets a fresh per-run sandbox.
+func TestSDLCReopenNoWorkspaceClearsInheritedName(t *testing.T) {
+	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {
+		md.Workspace = "dev"
+	})
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--no-workspace", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Workspace != "" {
+		t.Fatalf("Workspace = %q, want empty", md.Workspace)
+	}
+}
+
+// TestSDLCReopenWorkspaceAndNoWorkspaceConflict: the flag pair is
+// mutually exclusive, exit 2 if both set. No state mutated.
+func TestSDLCReopenWorkspaceAndNoWorkspaceConflict(t *testing.T) {
+	_ = seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "--no-workspace", "tele/fix-it"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "mutually exclusive") {
+		t.Fatalf("expected mutually-exclusive error, got: %q", errb.String())
+	}
+}
+
+// TestSDLCReopenWorkspaceFlagRefusesClaimed: the override name is
+// already claimed by another run. The pre-flight must refuse with the
+// shared wording (proving the helper is shared with `new`).
+func TestSDLCReopenWorkspaceFlagRefusesClaimed(t *testing.T) {
+	root := seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	// Plant a claim directly on disk — the reopen pre-flight just
+	// reads it (no need for a real submodule under the workspace).
+	plantClaim(t, root, "tele", "dev", "tele/other")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "tele/fix-it"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "run tele/other") {
+		t.Fatalf("expected error to name the holder, got: %q", errb.String())
+	}
+}
+
+// plantClaim writes a workspace claim file under the layout
+// workspace.ReadClaim expects, without requiring a project submodule on
+// disk. Use in tests that only need to exercise the claim-refusal path.
+func plantClaim(t *testing.T, root, projectID, name, runRef string) {
+	t.Helper()
+	wp := workspace.Path(root, projectID, name)
+	if err := os.MkdirAll(filepath.Join(wp, ".moe"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	c := workspace.Claim{Project: projectID, Name: name, Run: runRef}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal claim: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wp, ".moe", "claim.json"), b, 0o644); err != nil {
+		t.Fatalf("write claim: %v", err)
+	}
+}
+
+// TestSDLCReopenWorkspaceFlagRejectsInvalidName: workspace.ValidateName
+// runs up-front so a typo surfaces at the verb the operator typed
+// rather than at first stage attach.
+func TestSDLCReopenWorkspaceFlagRejectsInvalidName(t *testing.T) {
+	_ = seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--workspace=NOT VALID", "tele/fix-it"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "workspace") {
+		t.Fatalf("expected workspace error, got: %q", errb.String())
+	}
+}
+
+// TestSDLCReopenAgentFlagOverridesPrior: prior carried claude; the
+// reopen flag overrides to codex on the successor.
+func TestSDLCReopenAgentFlagOverridesPrior(t *testing.T) {
+	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {
+		md.Agent = "claude"
+	})
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--agent=codex", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Agent != "codex" {
+		t.Fatalf("Agent = %q, want %q", md.Agent, "codex")
+	}
+}
+
+// TestSDLCReopenAgentFlagInheritsPriorWhenOmitted pins the new
+// inherit-by-default semantics: the prior silent-drop bug is fixed.
+// Prior had codex, no --agent flag, successor reads codex.
+func TestSDLCReopenAgentFlagInheritsPriorWhenOmitted(t *testing.T) {
+	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {
+		md.Agent = "codex"
+	})
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Agent != "codex" {
+		t.Fatalf("Agent = %q, want inherited %q", md.Agent, "codex")
+	}
+}
+
+// TestSDLCReopenNoAgentClearsInheritedAgent: --no-agent leaves the
+// successor's Agent empty so the usual $MOE_AGENT → claude precedence
+// runs at first stage turn.
+func TestSDLCReopenNoAgentClearsInheritedAgent(t *testing.T) {
+	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {
+		md.Agent = "codex"
+	})
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--no-agent", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md := loadDatedRunJSON(t, root, "tele", "fix-it")
+	if md.Agent != "" {
+		t.Fatalf("Agent = %q, want empty", md.Agent)
+	}
+}
+
+// TestSDLCReopenAgentAndNoAgentConflict: the agent flag pair is
+// mutually exclusive, exit 2 if both set.
+func TestSDLCReopenAgentAndNoAgentConflict(t *testing.T) {
+	_ = seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--agent=codex", "--no-agent", "tele/fix-it"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "mutually exclusive") {
+		t.Fatalf("expected mutually-exclusive error, got: %q", errb.String())
+	}
+}
+
+// TestSDLCReopenAgentFlagRejectsUnknown: an agent name not in the
+// registry is refused at the verb instead of at first stage turn.
+func TestSDLCReopenAgentFlagRejectsUnknown(t *testing.T) {
+	_ = seedClosedSDLCRun(t, "tele", "fix-it", "# design\n")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--agent=nope", "tele/fix-it"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "unknown backend") {
+		t.Fatalf("expected unknown-backend error, got: %q", errb.String())
 	}
 }

@@ -144,8 +144,8 @@ type Options struct {
 	// routes off the same flag. The shared `runNew` validates the
 	// name (lower-kebab, see workspace.ValidateName) and refuses to
 	// open a second run against an already-claimed name; the
-	// workspace itself is materialised lazily on first attach
-	// (sdlc code) or shell drop-in.
+	// workspace itself is materialised lazily on first stage attach
+	// (sdlc design under the sdlc workflow) or shell drop-in.
 	Workspace string
 
 	// Agent, when non-empty, names the agent backend that should
