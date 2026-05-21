@@ -224,14 +224,14 @@ func requireTwinRun(verb, projectID, runID string, stderr io.Writer) int {
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s: run not found: %s %s\n", verb, projectID, runID)
+			moePrintf(stderr, "%s: run not found: %s/%s\n", verb, projectID, runID)
 			return 1
 		}
 		moePrintf(stderr, "%s: %v\n", verb, err)
 		return 1
 	}
 	if md.Workflow != "twin" {
-		moePrintf(stderr, "%s: run %s %s is a %s run, not twin\n", verb, projectID, runID, md.Workflow)
+		moePrintf(stderr, "%s: run %s/%s is a %s run, not twin\n", verb, projectID, runID, md.Workflow)
 		return 1
 	}
 	return 0

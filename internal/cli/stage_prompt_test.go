@@ -29,7 +29,7 @@ func TestStageLocationSectionSDLC(t *testing.T) {
 				"Workflow: sdlc — **design** → code → test → push",
 				"You are at: design",
 				"Next stage: code",
-				"`moe sdlc code p r`.",
+				"`moe sdlc code p/r`.",
 			},
 			deny: []string{"Previous stage"},
 		},
@@ -40,7 +40,7 @@ func TestStageLocationSectionSDLC(t *testing.T) {
 				"You are at: code",
 				"Previous stage: design",
 				"Next stage: test",
-				"`moe sdlc test p r`.",
+				"`moe sdlc test p/r`.",
 			},
 		},
 		{
@@ -50,7 +50,7 @@ func TestStageLocationSectionSDLC(t *testing.T) {
 				"You are at: test",
 				"Previous stage: code",
 				"Next stage: push",
-				"`moe sdlc push p r`.",
+				"`moe sdlc push p/r`.",
 			},
 		},
 		{

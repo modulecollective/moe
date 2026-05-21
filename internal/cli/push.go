@@ -450,7 +450,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
 		}
 		moePrintf(stderr, "%v\n", err)
-		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe %s push %s %s`\n",
+		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe %s push %s/%s`\n",
 			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
 		return 1
 	}
@@ -605,12 +605,12 @@ func checkCodeContent(root string, md *run.Metadata) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe %s code %s %s` first", md.Workflow, md.Project, md.ID)
+			return fmt.Errorf("push: code document not written yet; run `moe %s code %s/%s` first", md.Workflow, md.Project, md.ID)
 		}
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe %s code %s %s` and produce a PR body first", md.Workflow, md.Project, md.ID)
+		return fmt.Errorf("push: code document is empty; run `moe %s code %s/%s` and produce a PR body first", md.Workflow, md.Project, md.ID)
 	}
 	return nil
 }

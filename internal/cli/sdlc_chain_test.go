@@ -164,10 +164,10 @@ func TestSDLCCodeNotFoundLineageHintsNoTTY(t *testing.T) {
 	// Typed slug is the idea itself, so the resolver names the
 	// workflow mismatch rather than a bare "run not found". The hint
 	// line still points at the live descendant.
-	if !strings.Contains(errb.String(), "sdlc code: tele foo is a idea run, not sdlc") {
+	if !strings.Contains(errb.String(), "sdlc code: tele/foo is a idea run, not sdlc") {
 		t.Fatalf("missing workflow-mismatch preamble:\n%s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "hint: moe sdlc code tele foo-2026-05-14") {
+	if !strings.Contains(errb.String(), "hint: moe sdlc code tele/foo-2026-05-14") {
 		t.Fatalf("missing hint:\n%s", errb.String())
 	}
 }
@@ -194,7 +194,7 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	var order []string
 	for _, line := range strings.Split(errb.String(), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "moe sdlc code tele foo") {
+		if !strings.HasPrefix(trimmed, "moe sdlc code tele/foo") {
 			continue
 		}
 		order = append(order, trimmed)
@@ -202,10 +202,10 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	if len(order) != 2 {
 		t.Fatalf("expected 2 suggested invocations, got %d:\n%s", len(order), errb.String())
 	}
-	if order[0] != "moe sdlc code tele foo-2026-05-14-2" {
+	if order[0] != "moe sdlc code tele/foo-2026-05-14-2" {
 		t.Fatalf("most-recent first: order[0]=%q, want foo-2026-05-14-2", order[0])
 	}
-	if order[1] != "moe sdlc code tele foo-2026-05-14" {
+	if order[1] != "moe sdlc code tele/foo-2026-05-14" {
 		t.Fatalf("order[1]=%q, want foo-2026-05-14", order[1])
 	}
 }
@@ -224,7 +224,7 @@ func TestSDLCCodeNotFoundZeroDescendants(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "sdlc code: run not found: tele ghost") {
+	if !strings.Contains(errb.String(), "sdlc code: run not found: tele/ghost") {
 		t.Fatalf("missing not-found:\n%s", errb.String())
 	}
 	if strings.Contains(errb.String(), "hint:") || strings.Contains(errb.String(), "did you mean") {
@@ -289,7 +289,7 @@ func TestResolveSDLCRunSlugTTYDeclinesOnN(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero on decline, stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "sdlc code: tele foo is a idea run, not sdlc") {
+	if !strings.Contains(errb.String(), "sdlc code: tele/foo is a idea run, not sdlc") {
 		t.Fatalf("decline should surface the workflow-mismatch error for the typed slug:\n%s", errb.String())
 	}
 }

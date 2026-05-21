@@ -400,15 +400,15 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if md.Workflow != "sdlc" {
-		moePrintf(stderr, "sdlc resume: %s %s is a %s run, not sdlc\n", projectID, runID, md.Workflow)
+		moePrintf(stderr, "sdlc resume: %s/%s is a %s run, not sdlc\n", projectID, runID, md.Workflow)
 		return 1
 	}
 	switch md.Status {
 	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		moePrintf(stderr, "sdlc resume: %s %s is %s; nothing to resume\n", projectID, runID, md.Status)
+		moePrintf(stderr, "sdlc resume: %s/%s is %s; nothing to resume\n", projectID, runID, md.Status)
 		return 1
 	case run.StatusPushed:
-		moePrintf(stderr, "sdlc resume: %s %s already pushed; resume cannot drive a pushed run\n", projectID, runID)
+		moePrintf(stderr, "sdlc resume: %s/%s already pushed; resume cannot drive a pushed run\n", projectID, runID)
 		return 1
 	}
 
@@ -469,7 +469,7 @@ func requireRun(verb, projectID, runID string, stderr io.Writer) int {
 	}
 	if _, err := run.Load(root, projectID, runID); err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s: run not found: %s %s\n", verb, projectID, runID)
+			moePrintf(stderr, "%s: run not found: %s/%s\n", verb, projectID, runID)
 			return 1
 		}
 		moePrintf(stderr, "%s: %v\n", verb, err)

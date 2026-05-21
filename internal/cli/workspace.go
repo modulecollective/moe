@@ -65,13 +65,13 @@ func attachRunWorkspace(root string, md *run.Metadata, branch string) (string, e
 func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 	if md.Workspace == "" {
 		if !sandbox.Exists(root, md.Project, md.ID) {
-			return "", fmt.Errorf("no sandbox clone for %s %s; run `moe %s code %s %s` first",
+			return "", fmt.Errorf("no sandbox clone for %s/%s; run `moe %s code %s/%s` first",
 				md.Project, md.ID, md.Workflow, md.Project, md.ID)
 		}
 		return sandbox.Ensure(root, md.Project, md.ID)
 	}
 	if !workspace.Exists(root, md.Project, md.Workspace) {
-		return "", fmt.Errorf("workspace %q for project %q does not exist on disk; run `moe %s code %s %s` first",
+		return "", fmt.Errorf("workspace %q for project %q does not exist on disk; run `moe %s code %s/%s` first",
 			md.Workspace, md.Project, md.Workflow, md.Project, md.ID)
 	}
 	return workspace.Path(root, md.Project, md.Workspace), nil

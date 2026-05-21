@@ -113,14 +113,14 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s %s %s does not exist\n", workflow, projectID, runID)
+			moePrintf(stderr, "%s %s/%s does not exist\n", workflow, projectID, runID)
 			return 1
 		}
 		moePrintf(stderr, "%s: %v\n", workflow, err)
 		return 1
 	}
 	if md.Workflow != workflow {
-		moePrintf(stderr, "run %s %s is a %s run, not %s\n", projectID, runID, md.Workflow, workflow)
+		moePrintf(stderr, "run %s/%s is a %s run, not %s\n", projectID, runID, md.Workflow, workflow)
 		return 1
 	}
 
@@ -132,14 +132,14 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		// (GitHub → sync); letting local close race the remote state
 		// risks divergence on partial failure.
 		moePrintf(stderr,
-			"%s %s %s is pushed — close the PR on GitHub and run `moe sync` to reconcile\n",
+			"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile\n",
 			workflow, projectID, runID)
 		return 1
 	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		moePrintf(stderr, "%s %s %s already %s\n", workflow, projectID, runID, md.Status)
+		moePrintf(stderr, "%s %s/%s already %s\n", workflow, projectID, runID, md.Status)
 		return 1
 	default:
-		moePrintf(stderr, "%s %s %s has unexpected status %q\n", workflow, projectID, runID, md.Status)
+		moePrintf(stderr, "%s %s/%s has unexpected status %q\n", workflow, projectID, runID, md.Status)
 		return 1
 	}
 
@@ -167,8 +167,8 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 			info, err := os.Stat(filepath.Join(root, canvasRel))
 			if err != nil || info.Size() == 0 {
 				moePrintf(stderr,
-					"%s %s %s: canvas %s is empty\n"+
-						"  reopen the session (`moe %s %s %s %s`) and write to the canvas,\n"+
+					"%s %s/%s: canvas %s is empty\n"+
+						"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+
 						"  or restore the file from git history\n",
 					workflow, projectID, runID, canvasRel,
 					workflow, docID, projectID, runID)

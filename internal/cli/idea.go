@@ -432,7 +432,7 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if md.Status != run.StatusInProgress {
-		moePrintf(stderr, "idea %s %s is %s, not open — refusing to move\n", fromProject, slug, md.Status)
+		moePrintf(stderr, "idea %s/%s is %s, not open — refusing to move\n", fromProject, slug, md.Status)
 		return 1
 	}
 
@@ -525,12 +525,12 @@ func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, fmt.Errorf("idea %s %s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
+			return nil, fmt.Errorf("idea %s/%s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
 		}
 		return nil, err
 	}
 	if md.Workflow != ideaWorkflow {
-		return nil, fmt.Errorf("run %s %s is a %s run, not an idea", projectID, slug, md.Workflow)
+		return nil, fmt.Errorf("run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
 	return md, nil
 }

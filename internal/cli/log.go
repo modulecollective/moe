@@ -106,7 +106,7 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 		md, err := run.Load(root, projectID, runID)
 		if err != nil {
 			if errors.Is(err, run.ErrRunNotFound) {
-				moePrintf(stderr, "moe %s log: %s %s does not exist\n", workflow, projectID, runID)
+				moePrintf(stderr, "moe %s log: %s/%s does not exist\n", workflow, projectID, runID)
 				return 1
 			}
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)

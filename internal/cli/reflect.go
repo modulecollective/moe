@@ -113,7 +113,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return 1
 	} else if existing != "" {
 		moePrintf(stderr,
-			"twin reflect: a pass is already in progress (%s %s) — resume it with `moe twin <stage> %s %s` or close it before starting another\n",
+			"twin reflect: a pass is already in progress (%s/%s) — resume it with `moe twin <stage> %s/%s` or close it before starting another\n",
 			projectID, existing, projectID, existing)
 		return 1
 	}

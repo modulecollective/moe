@@ -141,7 +141,7 @@ func stageLocationSection(md *run.Metadata, docID string) string {
 		if g, err := LookupGroup(wf.Name); err == nil {
 			if cmd := g.Lookup(next); cmd != nil {
 				fmt.Fprintf(&b,
-					"  When this turn closes, the chain prompt will offer\n  `moe %s %s %s %s`.\n",
+					"  When this turn closes, the chain prompt will offer\n  `moe %s %s %s/%s`.\n",
 					wf.Name, next, md.Project, md.ID)
 			}
 		}

@@ -75,27 +75,27 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	prior, err := run.Load(root, projectID, priorSlug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "sdlc reopen: run not found: %s %s\n", projectID, priorSlug)
+			moePrintf(stderr, "sdlc reopen: run not found: %s/%s\n", projectID, priorSlug)
 			return 1
 		}
 		moePrintf(stderr, "sdlc reopen: %v\n", err)
 		return 1
 	}
 	if prior.Workflow != "sdlc" {
-		moePrintf(stderr, "sdlc reopen: %s %s is a %s run, not sdlc\n", projectID, priorSlug, prior.Workflow)
+		moePrintf(stderr, "sdlc reopen: %s/%s is a %s run, not sdlc\n", projectID, priorSlug, prior.Workflow)
 		return 1
 	}
 	switch prior.Status {
 	case run.StatusClosed, run.StatusMerged, run.StatusPromoted:
 		// Terminal — proceed.
 	case run.StatusInProgress:
-		moePrintf(stderr, "sdlc reopen: %s %s is in_progress; just keep working\n", projectID, priorSlug)
+		moePrintf(stderr, "sdlc reopen: %s/%s is in_progress; just keep working\n", projectID, priorSlug)
 		return 1
 	case run.StatusPushed:
-		moePrintf(stderr, "sdlc reopen: %s %s is pushed; resolve via GitHub + `moe sync` before reopening\n", projectID, priorSlug)
+		moePrintf(stderr, "sdlc reopen: %s/%s is pushed; resolve via GitHub + `moe sync` before reopening\n", projectID, priorSlug)
 		return 1
 	default:
-		moePrintf(stderr, "sdlc reopen: %s %s has unexpected status %q\n", projectID, priorSlug, prior.Status)
+		moePrintf(stderr, "sdlc reopen: %s/%s has unexpected status %q\n", projectID, priorSlug, prior.Status)
 		return 1
 	}
 

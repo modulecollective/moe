@@ -183,7 +183,7 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 	// promoted-idea fallback, which emits the design/code/test "run
 	// not found" shape rather than close's prior "does not exist"
 	// wording. Same exit-code contract, more consistent wording.
-	if !strings.Contains(errb.String(), "sdlc close: run not found: tele ghost") {
+	if !strings.Contains(errb.String(), "sdlc close: run not found: tele/ghost") {
 		t.Fatalf("expected run-not-found error, got: %q", errb.String())
 	}
 }
@@ -433,7 +433,7 @@ func TestSDLCCloseRefusesEmptyDesignCanvas(t *testing.T) {
 	if !strings.Contains(errb.String(), "canvas projects/tele/runs/empty-design/documents/design/content.md is empty") {
 		t.Fatalf("missing canvas-empty error: %q", errb.String())
 	}
-	if !strings.Contains(errb.String(), "moe sdlc design tele empty-design") {
+	if !strings.Contains(errb.String(), "moe sdlc design tele/empty-design") {
 		t.Fatalf("missing reopen hint: %q", errb.String())
 	}
 	if afterHead := gitLog(t, root, "-1", "--format=%H"); beforeHead != afterHead {
@@ -505,7 +505,7 @@ func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
 	if !strings.Contains(errb.String(), "documents/research/content.md is empty") {
 		t.Fatalf("kb refusal should name research canvas: %q", errb.String())
 	}
-	if !strings.Contains(errb.String(), "moe kb research tele kb-empty") {
+	if !strings.Contains(errb.String(), "moe kb research tele/kb-empty") {
 		t.Fatalf("kb refusal should suggest the kb verb: %q", errb.String())
 	}
 }

@@ -290,15 +290,15 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, "", fmt.Errorf("--from-idea: run %s %s does not exist", projectID, slug)
+			return nil, "", fmt.Errorf("--from-idea: run %s/%s does not exist", projectID, slug)
 		}
 		return nil, "", fmt.Errorf("--from-idea: %w", err)
 	}
 	if md.Workflow != ideaWorkflow {
-		return nil, "", fmt.Errorf("--from-idea: run %s %s is a %s run, not an idea", projectID, slug, md.Workflow)
+		return nil, "", fmt.Errorf("--from-idea: run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
 	if md.Status != run.StatusInProgress {
-		return nil, "", fmt.Errorf("--from-idea: idea %s %s is already %s", projectID, slug, md.Status)
+		return nil, "", fmt.Errorf("--from-idea: idea %s/%s is already %s", projectID, slug, md.Status)
 	}
 	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
 	b, err := os.ReadFile(filepath.Join(root, canvasRel))

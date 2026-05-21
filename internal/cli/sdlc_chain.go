@@ -186,10 +186,10 @@ func resolveSDLCRunSlugWithMode(verb, projectID, runID string, tty bool, stdout,
 			// Typed slug exists but in another workflow (today: an idea
 			// that was never promoted). "run not found" would mislead;
 			// say what's actually wrong.
-			moePrintf(stderr, "%s: %s %s is a %s run, not sdlc\n", verb, projectID, runID, md.Workflow)
+			moePrintf(stderr, "%s: %s/%s is a %s run, not sdlc\n", verb, projectID, runID, md.Workflow)
 			return
 		}
-		moePrintf(stderr, "%s: run not found: %s %s\n", verb, projectID, runID)
+		moePrintf(stderr, "%s: run not found: %s/%s\n", verb, projectID, runID)
 	}
 
 	switch len(descendants) {
@@ -200,10 +200,10 @@ func resolveSDLCRunSlugWithMode(verb, projectID, runID string, tty bool, stdout,
 		d := descendants[0]
 		if !tty {
 			notFound()
-			moePrintf(stderr, "hint: moe %s %s %s\n", verb, projectID, d.slug)
+			moePrintf(stderr, "hint: moe %s %s/%s\n", verb, projectID, d.slug)
 			return "", 1
 		}
-		moePrintf(stdout, "%s: %s %s not found — did you mean %s? [Y/n] ", verb, projectID, runID, d.slug)
+		moePrintf(stdout, "%s: %s/%s not found — did you mean %s? [Y/n] ", verb, projectID, runID, d.slug)
 		accepted, code := readChainAccept(stderr)
 		if code != 0 {
 			return "", code
@@ -222,7 +222,7 @@ func resolveSDLCRunSlugWithMode(verb, projectID, runID string, tty bool, stdout,
 		notFound()
 		moePrintf(stderr, "did you mean one of:\n")
 		for _, d := range descendants {
-			moePrintf(stderr, "  moe %s %s %s\n", verb, projectID, d.slug)
+			moePrintf(stderr, "  moe %s %s/%s\n", verb, projectID, d.slug)
 		}
 		return "", 1
 	}
