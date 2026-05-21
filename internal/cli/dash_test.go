@@ -588,8 +588,8 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "idea:promoted → search-impl") {
-		t.Fatalf("expected 'idea:promoted → search-impl' on the promoted row, got:\n%s", got)
+	if !strings.Contains(got, "idea:promoted → tele/search-impl") {
+		t.Fatalf("expected 'idea:promoted → tele/search-impl' on the promoted row, got:\n%s", got)
 	}
 }
 

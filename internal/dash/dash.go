@@ -243,8 +243,8 @@ func openSessionMarker(runningDoc, parkedDoc string) string {
 	return " [running]"
 }
 
-// promotedToRun returns the slug (run ID) of the successor run
-// recorded on a promoted idea's MoE-Promoted-To trailer.
+// promotedToRun returns project/slug of the successor run recorded on
+// a promoted idea's MoE-Promoted-To trailer.
 func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
 	v := idx.PromotedTo[runID]
 	if v == "" {
@@ -254,7 +254,7 @@ func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run
 	if !ok {
 		return "", false
 	}
-	return dest.ID, true
+	return dest.Project + "/" + dest.ID, true
 }
 
 // hasBeenReopened reports whether any run in the journal claims slug
