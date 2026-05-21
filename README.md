@@ -6,26 +6,19 @@ Ministry of Everything (MoE) helps one operator turn intent into parallel
 agent work without losing context or control. Agents work in bounded threads
 attached to markdown documents; every conversation, decision, and artifact
 is saved back into a Git journal so the project keeps an improving memory of
-itself.
-
-The goal is not autonomous magic. The human remains the strategist,
-scheduler, reviewer, and source of judgment. MoE removes the
-coordination tax between thought and execution: backlog, runs,
-followups, lore, and digital twin all feed each other so the operator
-and the bots share a compounding model of the project — see
-[Feedback paths](#feedback-paths) below for the channels that close
-those loops.
+itself. The human stays strategist, scheduler, reviewer, and source of
+judgment — MoE removes the coordination tax between thought and execution so
+the operator and the bots share a compounding model of the project.
 
 MoE runs [Claude Code](https://claude.com/claude-code) or
-[Codex](https://chatgpt.com/codex/) against living markdown documents.
-The document is the compact handoff between stages; the conversation
-that produced it is saved underneath but rarely needs to be re-read.
-Software development is the first workflow, with knowledge-base,
-hook-authoring, meta-review, and digital-twin workflows alongside.
-
-There is no background worker, no TUI, no dashboard that updates on its
-own. Agents act only when you invoke a command. The UX problem is
-**prioritization, supervision, and resumption**, not real-time updates.
+[Codex](https://chatgpt.com/codex/) against living markdown documents. The
+document is the compact handoff between stages; the conversation that
+produced it is saved underneath but rarely needs to be re-read. Software
+development is the first workflow, with knowledge-base, hook-authoring,
+meta-review, and digital-twin workflows alongside. There is no background
+worker, no TUI, no dashboard that updates on its own — agents act only when
+you invoke a command, and the UX problem is **prioritization, supervision,
+and resumption**, not real-time updates.
 
 ![MoE dashboard — open runs and backlog](docs/dash.png)
 
@@ -45,15 +38,11 @@ trailers (`MoE-Run`, `MoE-Document`, `MoE-Session`, …) that scope the
 journal. Rewinding is `git reset --soft`; reverting is `git revert`.
 Git is the checkpoint.
 
-The feedback loop is the product:
-
-- Ideas become backlog items without forcing a run.
-- Runs turn backlog into designed, coded, tested, and shipped work.
-- Agent-discovered loose ends flow back into followups.
-- Knowledge-base and twin workflows fold completed work into durable
-  project memory.
-- Future humans and agents start with better context than the last run
-  had.
+The feedback loop is the product: followups noticed mid-run flow into
+the idea backlog, runs turn that backlog into shipped work, and twin /
+kb / lore fold what each pass learned into the next run's starting
+context. See [Feedback paths](#feedback-paths) for the channels that
+close those loops.
 
 ## Install
 
@@ -84,6 +73,19 @@ Pick a default agent backend if you want one (optional — defaults to
 ```sh
 export MOE_AGENT=codex
 ```
+
+Then open a run and walk it through the stages. Runs are addressed as
+`<project>/<slug>`:
+
+```sh
+moe sdlc new tele/add-batch-support
+moe sdlc design tele/add-batch-support
+```
+
+At the end of each stage MoE prints a chain prompt. The keystrokes `!`
+(run the next stage headless), `!<stage>` (cascade up to a stage), and
+`!!` (cascade all the way to ship) hand the rest of the chain to the
+agent without re-typing the verb.
 
 `moe help` is the source of truth for the command surface.
 
@@ -120,8 +122,8 @@ The current workflows are:
 |------------|------------------------------------------------------------|------------------------------------------|
 | `sdlc`     | `design` → `code` → `test` → `push`                        | designed features with review and ship gates |
 | `kb`       | `research` → `summarize`                                   | knowledge-base articles                  |
-| `idea`     | `capture` / `refine`                                       | backlog without starting a run           |
-| `twin`     | `vision` → `architecture` → `patterns` → `operations` → `glossary` → `finalize` | project digital twin |
+| `idea`     | single canvas — verbs `new` / `edit` / `close`             | backlog without starting a run           |
+| `twin`     | `vision` → `architecture` → `patterns` → `operations` → `roadmap` → `glossary` → `finalize` | project digital twin |
 | `hooks`    | `code`                                                     | project-specific automation hooks        |
 | `meta-moe` | `report`                                                   | inspect the bureaucracy itself           |
 
@@ -134,7 +136,7 @@ moe sdlc new tele/add-batch-support         # open a new run
 moe sdlc design tele/add-batch-support      # threaded chat on design/content.md
 moe sdlc code tele/add-batch-support        # agent codes inside a sandbox clone
 moe sdlc test tele/add-batch-support        # agent verifies and records what passed
-moe sdlc push --pr tele/add-batch-support   # open a PR against the target repo
+moe sdlc push tele/add-batch-support        # fast-forward to the target repo; --pr opens one instead
 ```
 
 `moe dash` shows your open runs and backlog. `moe idea` captures
@@ -147,31 +149,165 @@ fresh without turning documentation into a separate manual job.
 - **One operator, many bounded threads.** MoE does not try to replace
   judgment with autonomy. It gives the operator fast verbs for opening,
   resuming, chaining, closing, and shipping agent work while keeping
-  every thread attached to an auditable project artifact.
-- **Three engagement modes.** Drive each stage yourself, hand the
-  whole chain to the agent and review on completion, or sit in the
-  middle — the verb is the same; the difference is whether you stay
-  in the session.
-- **Project memory compounds.** Runs, canvases, followups,
-  knowledge-base entries, and digital-twin docs are all normal files in
-  the same journal. The output of one pass becomes context for the
-  next, for both the human and the agents.
-- **Per-run sandbox worktrees.** Code work runs inside a private `git
-  worktree` of the target repo at `.moe/clones/<project>/<run>/`,
-  linked off the canonical submodule and pre-positioned on a
-  `moe/<run-id>` branch. Two runs on the same project get two
-  independent working trees and indexes; only the per-run branch is
-  shared with the canonical submodule's ref DB.
-- **Tool scoping via Claude Code.** Non-code documents get `Read`,
-  `Grep`, `WebSearch`, and a scoped `Edit` — the worst a bad turn
-  does is write a bad paragraph. The `code` document gets the
-  dangerous permissions (`Edit`, `Write`, `Bash`), confined to its
-  sandbox worktree. Enforcement rides on Claude Code's sandbox and
-  tool controls, not a custom isolation engine.
-- **Backend is an agent as a subprocess.** Interactive turns resume
-  normal agent sessions; chained and bounded turns use commands like
-  `claude -p`. Either way it is the real CLI, real OAuth, and one
-  human driver.
+  every thread attached to an auditable canvas.
+- **Project memory compounds across runs.** Four channels do the
+  compounding: per-run **followups** caught mid-flight, the **idea**
+  backlog they promote into, the project's **digital twin** of
+  recorded intent, and bureaucracy-wide **lore** of facts that apply
+  across projects. The output of one pass becomes context for the
+  next, for both the human and the agents — see
+  [Feedback paths](#feedback-paths) below.
+- **Git is the checkpoint.** Every turn lands as one commit on `main`
+  with trailers scoping the run, document, and session. Rewinding is
+  `git reset --soft`; reverting a turn is `git revert <sha>`.
+- **Markdown fragments steer the agent.** The instruction preamble
+  the agent sees on each turn is assembled fresh from a fixed set of
+  plain markdown files ([`soul.md`](soul.md),
+  `workflows/<wf>/<stage>.md`, the project's digital twin, and so on).
+  Fixing how the agent behaves usually means editing a fragment, not
+  the Go code — the full assembly is described in
+  [Prompt assembly](#prompt-assembly) below.
+
+## Features
+
+The verb catalog, grouped by what each one solves. `moe help` and the
+per-verb usage lines have the full detail; this section is the
+signpost.
+
+### Runs and stages
+
+The primitive is a thread of stage canvases attached to a project,
+and the dashboard is the re-entry point when you walk away.
+
+- `moe dash` — pick what to resume; lists open runs, the idea
+  backlog, and any stale sessions that need cleanup.
+- `moe <wf> new <project>/<slug>` — open a run in any workflow
+  (`sdlc` / `kb` / `idea` / `hooks` / `twin` / `meta-moe`).
+  `--from-idea <project>/<slug>` seeds the new run from an existing
+  idea canvas, `--workspace <name>` (sdlc and hooks) attaches the run
+  to a named workspace, `--agent claude|codex` pins the backend for
+  this run only.
+- `moe sdlc design|code|test|push` — drive the sdlc stages one at a
+  time. The chain prompt at exit offers `!` (run the next stage
+  headless), `!<stage>` (cascade up to a gate), and `!!` (cascade all
+  the way to ship). `moe sdlc push` fast-forwards the target repo's
+  default branch to the run's branch; `--pr` opens a pull request
+  instead.
+- `moe sdlc resume <project>/<run>` — pick up a parked run at
+  whichever stage is pending without having to remember which verb is
+  next.
+- `moe sdlc reopen <project>/<slug>` — start a fresh run seeded with
+  a terminal prior run's design canvas, for when you decide a closed
+  problem actually wasn't.
+- `moe <wf> cat` / `moe <wf> log` — dump a stage canvas, or render
+  the recorded agent transcript, so you can audit a past turn.
+
+### Project memory and follow-ups
+
+The project should know more after each run than before it. See
+[Feedback paths](#feedback-paths) for the channels themselves; these
+are the verbs that drive them.
+
+- Followups are captured inside a run via the `moe-bureaucracy`
+  skill — the agent appends loose ends to the run's `followups.md`
+  and the operator triages them at close. Surviving entries open as
+  fresh `idea` runs with their context carried in.
+- `moe idea new|edit|close|list|move` — the backlog surface;
+  intentionally light (no agent unless `--chat`). `move` rehomes an
+  idea to a different project; `list` shows the same backlog as the
+  dash.
+- `moe twin reflect <project>` — walk the seven-stage twin ladder to
+  fold this round's twin-feedback observations forward into the
+  recorded-intent documents.
+- `moe twin claim <project>` — record a decided edit to the twin
+  out-of-band (no run, no ladder), for when you already know what you
+  want it to say.
+- `moe kb research <project>/<slug>` / `moe kb summarize <project>/<slug>` —
+  open-schema wiki for project knowledge that doesn't belong in code.
+- `moe kb lint <project>` — run the open-schema hygiene check
+  without driving a run.
+- `moe meta-moe new` / `moe meta-moe report` — feedback to MoE
+  itself, sourced from one project's run history.
+
+### Workspaces and sandboxes
+
+Code work happens in isolated working trees of the target repo, but a
+dev server's warm state shouldn't die at every branch switch.
+
+- **Per-run sandbox clones** at `.moe/clones/<project>/<run>/` —
+  created automatically when a run's `code` stage first opens, one
+  per run, isolated from every other run on the same project. Each
+  is a `git clone --local --shared --no-checkout` of the canonical
+  submodule (not a `git worktree` — that exposed a submodule /
+  superproject gitdir boundary that codex's `apply_patch` tripped
+  on).
+- `moe workspace new <project> <name>` — eagerly create a long-lived
+  working tree before any run attaches, e.g. to warm a dev server
+  whose startup is slow.
+- `moe workspace list` / `info` / `shell` — inspect named workspaces
+  or drop into one.
+- `moe workspace refresh <project> <name>` — re-run the project's
+  `dev-env.d/*` scripts in place when the cached env breaks.
+- `moe workspace remove` / `release` — tear down a workspace, or
+  clear a stuck claim left behind by a crash.
+- `moe sdlc shell <project>/<run>` — drop into a shell rooted at the
+  run's working tree (the sandbox clone, or the named workspace it
+  attached to).
+
+### Backends and tool scoping
+
+Not every operator wants the same agent, and not every stage should
+have the same tool surface.
+
+- Two backends: `claude` (default) and `codex`. Selection is a
+  four-rung ladder: `--agent` flag → `run.json` → `$MOE_AGENT` →
+  `"claude"`.
+- Document shapes the toolset. Non-code stages get `Read`, `Grep`,
+  `WebSearch`, and a scoped `Edit` — the worst a bad turn does is
+  write a bad paragraph. Code stages get the dangerous permissions
+  (`Edit`, `Write`, `Bash`), confined to the per-run sandbox clone.
+
+### Project hooks and project setup
+
+Every project's dev environment is different; MoE doesn't try to know
+how. Project-owned hook scripts live under
+`projects/<p>/hooks/<event>.d/*`.
+
+- `dev-env.d/*` — each script emits `KEY=VALUE` lines on stdout; the
+  merge is sourced into the agent subprocess (and into
+  `moe workspace shell`). The contract: hooks set up the working
+  tree's environment.
+- `dev-env-teardown.d/*` — cleanup at run close.
+- `pre-push.d/*` — invocation-time ship gates; the first non-zero
+  exit halts the chain and opens a fresh `code` session with the
+  failure as kickoff.
+- `moe hooks new|code|close` — the slow loop: a journaled run whose
+  `code` stage edits the scripts under review.
+- `moe hook fire <project> <event>` — the fast loop: a transient
+  sandbox that runs one event's scripts end-to-end, no run, no
+  journal, no dash row.
+- `moe project add|list|remove` — register, inspect, or unregister a
+  target project.
+
+### Cross-session machinery
+
+A single operator crossing machines, walking away mid-stage, or
+recovering from a crash shouldn't lose work.
+
+- **Auto-sync** runs on every session open and close — pull/rebase
+  the bureaucracy, bump project pointers, push. `moe sync` runs the
+  same machinery explicitly when you need it.
+- `moe session list` — see leftover stage-session worktrees and
+  branches.
+- `moe session abandon <session>` — drop a session's worktree and
+  branch without landing its commits.
+- `moe session resolve <session>` — retry the rebase+ff-merge that a
+  close failed on.
+- `moe where` — print the resolved bureaucracy path; handy in
+  scripts and from inside a sandbox clone where `$PWD` isn't
+  obviously inside the bureaucracy.
+- Every commit carries `MoE-*` trailers so the journal is grep-able
+  with `git log`, and `git revert <sha>` undoes a turn cleanly.
 
 ## Prompt assembly
 
