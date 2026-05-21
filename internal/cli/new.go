@@ -159,26 +159,8 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *workspaceName != "" && workflowName == "sdlc" {
-		// Pre-flight: refuse to open a run against a workspace that is
-		// already claimed. The actual claim is taken at first attach
-		// (sdlc code), but checking here gives the operator a fail-fast
-		// signal at the verb they actually typed instead of a confusing
-		// error several commands later. Stale claims (a run that crashed
-		// or was force-closed) can be cleared with `rm`; we don't paper
-		// over them automatically.
-		//
-		// Hooks runs don't take a claim — the workspace is a label, not
-		// a working tree — so this gate is sdlc-only.
-		holder, herr := workspace.ReadClaim(root, project, *workspaceName)
-		if herr != nil {
-			moePrintf(stderr, "%v\n", herr)
-			return 1
-		}
-		if holder != nil {
-			moePrintf(stderr,
-				"workspace %q for project %q is claimed by run %s; close that run first or pick a different workspace\n",
-				*workspaceName, project, holder.Run)
-			return 1
+		if code := preflightWorkspaceClaim(root, project, *workspaceName, stderr); code != 0 {
+			return code
 		}
 	}
 
@@ -333,4 +315,32 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 		}
 		return run.StageAndCommit(root, msg, runJSONRel)
 	})
+}
+
+// preflightWorkspaceClaim refuses to bind a run to a workspace that is
+// already claimed by another run. The actual claim is taken at first
+// stage attach (sdlc design under the sdlc workflow); checking at the
+// verb gives the operator a fail-fast signal at the command they typed
+// instead of a confusing error one stage later. Stale claims (a run
+// that crashed or was force-closed) clear with `moe workspace release`;
+// we don't paper over them automatically.
+//
+// Hooks runs don't take a claim — the workspace is a label, not a
+// working tree — so callers gate this on workflow themselves.
+//
+// Returns 0 to proceed; non-zero exit code (already printed to stderr)
+// otherwise.
+func preflightWorkspaceClaim(root, projectID, name string, stderr io.Writer) int {
+	holder, err := workspace.ReadClaim(root, projectID, name)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if holder != nil {
+		moePrintf(stderr,
+			"workspace %q for project %q is claimed by run %s; close that run first or pick a different workspace\n",
+			name, projectID, holder.Run)
+		return 1
+	}
+	return 0
 }
