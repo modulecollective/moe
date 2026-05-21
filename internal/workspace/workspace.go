@@ -13,9 +13,10 @@
 //     linked off the canonical submodule, with the auto-init
 //     pre-flight for fresh checkouts.
 //   - Claimed by the run that's currently using it. The claim file
-//     (claim.json inside the workspace dir) names the holding run;
-//     a second run that names the same workspace while it's claimed
-//     is refused at sdlc-new time with a pointer to the holder.
+//     (.moe/claim.json inside the workspace dir) names the holding
+//     run; a second run that names the same workspace while it's
+//     claimed is refused at sdlc-new time with a pointer to the
+//     holder.
 //   - Branch handoff is "switch via the project's default branch":
 //     when a new run's branch is created, Attach checks out the
 //     base branch first so the new branch isn't anchored to the
@@ -55,9 +56,20 @@ func Path(root, projectID, name string) string {
 }
 
 // claimPath is where a workspace's current owner is recorded. The file
-// lives inside the workspace dir so a workspace that doesn't exist on
-// disk is, by definition, unclaimed.
+// lives under `.moe/` inside the workspace dir so it shares the
+// `.git/info/exclude` umbrella with the rest of moe's per-workspace
+// artifacts (dev-env.env, etc.) and doesn't show up as untracked in
+// `git status`. A workspace that doesn't exist on disk is, by
+// definition, unclaimed.
 func claimPath(workspacePath string) string {
+	return filepath.Join(workspacePath, ".moe", "claim.json")
+}
+
+// legacyClaimPath is the pre-migration claim location, at the
+// workspace root. Read-only fallback used by readClaim to migrate
+// existing workspaces forward without operator intervention; also
+// cleaned by Release so a re-acquire doesn't resurrect it.
+func legacyClaimPath(workspacePath string) string {
 	return filepath.Join(workspacePath, "claim.json")
 }
 
@@ -125,8 +137,32 @@ func ReadClaim(root, projectID, name string) (*Claim, error) {
 
 // readClaim is the workspace-path-keyed sibling of ReadClaim, used
 // internally where the workspace path has already been resolved.
+//
+// If the new-layout claim is missing but a legacy `<wp>/claim.json`
+// exists, the claim is migrated forward (rewritten under `.moe/` and
+// the old file removed) before returning. After one read every
+// workspace is on the new layout; no compat shim survives past that.
 func readClaim(workspacePath string) (*Claim, error) {
 	b, err := os.ReadFile(claimPath(workspacePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return migrateLegacyClaim(workspacePath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("workspace: read claim: %w", err)
+	}
+	var c Claim
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("workspace: parse claim: %w", err)
+	}
+	return &c, nil
+}
+
+// migrateLegacyClaim reads `<wp>/claim.json` (the pre-`.moe/` layout),
+// rewrites it under `<wp>/.moe/claim.json`, and removes the old file.
+// Returns (nil, nil) if the legacy file isn't there either.
+func migrateLegacyClaim(workspacePath string) (*Claim, error) {
+	legacy := legacyClaimPath(workspacePath)
+	b, err := os.ReadFile(legacy)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -136,6 +172,12 @@ func readClaim(workspacePath string) (*Claim, error) {
 	var c Claim
 	if err := json.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("workspace: parse claim: %w", err)
+	}
+	if err := writeClaim(workspacePath, c); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(legacy); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("workspace: remove legacy claim: %w", err)
 	}
 	return &c, nil
 }
@@ -323,6 +365,9 @@ func Release(root, projectID, name string) error {
 	if err := os.Remove(claimPath(wp)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("workspace: remove claim: %w", err)
 	}
+	if err := os.Remove(legacyClaimPath(wp)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("workspace: remove legacy claim: %w", err)
+	}
 	return nil
 }
 
@@ -421,7 +466,11 @@ func writeClaim(workspacePath string, c Claim) error {
 		return fmt.Errorf("workspace: marshal claim: %w", err)
 	}
 	b = append(b, '\n')
-	if err := os.WriteFile(claimPath(workspacePath), b, 0o644); err != nil {
+	cp := claimPath(workspacePath)
+	if err := os.MkdirAll(filepath.Dir(cp), 0o755); err != nil {
+		return fmt.Errorf("workspace: mkdir claim parent: %w", err)
+	}
+	if err := os.WriteFile(cp, b, 0o644); err != nil {
 		return fmt.Errorf("workspace: write claim: %w", err)
 	}
 	return nil
