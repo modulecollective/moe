@@ -300,8 +300,8 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 		threshold = t
 	}
 	type entry struct {
-		id, title string
-		when      time.Time
+		id   string
+		when time.Time
 	}
 	var rows []entry
 	for _, md := range mds {
@@ -320,16 +320,12 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 		if !threshold.IsZero() && !when.After(threshold) {
 			continue
 		}
-		rows = append(rows, entry{id: md.ID, title: md.Title, when: when})
+		rows = append(rows, entry{id: md.ID, when: when})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].when.After(rows[j].when) })
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		title := r.title
-		if title == "" {
-			title = r.id
-		}
-		out = append(out, fmt.Sprintf("%s — %s (%s)", r.id, title, r.when.Format("2006-01-02")))
+		out = append(out, fmt.Sprintf("%s (%s)", r.id, r.when.Format("2006-01-02")))
 	}
 	return out, nil
 }

@@ -373,11 +373,7 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 			"real into the relevant managed doc on the appropriate " +
 			"stage, set aside what isn't.\n\n")
 		for _, fb := range feedback {
-			title := fb.runTitle
-			if title == "" {
-				title = fb.runID
-			}
-			fmt.Fprintf(&b, "#### %s — %s (%s)\n\n", fb.runID, title, fb.when.Format("2006-01-02"))
+			fmt.Fprintf(&b, "#### %s (%s)\n\n", fb.runID, fb.when.Format("2006-01-02"))
 			body := strings.TrimSpace(fb.body)
 			if body == "" {
 				b.WriteString("(empty feedback file)\n\n")
@@ -396,7 +392,7 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 			"folds these into the roadmap; earlier stages may reference " +
 			"them for context.\n\n")
 		for _, idea := range ideas {
-			fmt.Fprintf(&b, "#### %s — %s\n\n", idea.slug, idea.title)
+			fmt.Fprintf(&b, "#### %s\n\n", idea.slug)
 			body := strings.TrimSpace(idea.body)
 			if body == "" {
 				b.WriteString("(empty canvas)\n\n")

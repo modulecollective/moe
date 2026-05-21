@@ -57,8 +57,9 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 	// run.New with SeedDocs commits a kickoff stub at the design
 	// canvas as part of the `Open run` commit — the same shape the
 	// incident this run targets reproduced.
-	if _, err := run.New(root, "tele", "rename headless flags",
+	if _, err := run.New(root, "tele",
 		run.Options{
+			ID:       "rename-headless-flags",
 			Workflow: "sdlc",
 			SeedDocs: map[string]string{
 				"design": "# Design\n\n(operator: write the design here)\n",
@@ -98,8 +99,9 @@ func TestRequireDesignCanvasAcceptsEditedCanvas(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	if _, err := run.New(root, "tele", "rename headless flags",
+	if _, err := run.New(root, "tele",
 		run.Options{
+			ID:       "rename-headless-flags",
 			Workflow: "sdlc",
 			SeedDocs: map[string]string{
 				"design": "# Design\n\n(operator: write the design here)\n",
@@ -143,8 +145,7 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 	fakeClaudeOnPath(t, "#!/bin/sh\nexit 0\n")
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"--id", "noop-cascade", "tele",
-		"Design canvas no-op"},
+	if code := runNew("sdlc", []string{"tele/noop-cascade"},
 		&out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
@@ -318,8 +319,7 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"--id", "boundary", "tele",
-		"Design boundary check"},
+	if code := runNew("sdlc", []string{"tele/boundary"},
 		&out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}

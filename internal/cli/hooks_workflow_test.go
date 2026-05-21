@@ -60,7 +60,6 @@ func TestBuildSystemPromptInjectsHooksCodeFragment(t *testing.T) {
 	md := &run.Metadata{
 		ID:       "hook-development-2026-05-13",
 		Project:  "moe",
-		Title:    "hook-development",
 		Workflow: hooksWorkflow,
 	}
 	got, err := buildSystemPrompt(root, md, hooksCodeDoc, "", nil)
@@ -97,7 +96,7 @@ func TestHooksNewAcceptsWorkspaceAsLabel(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runNew(hooksWorkflow, []string{"--workspace=www-dev", "tele", "Tighten dev-env"}, &out, &errb)
+	code := runNew(hooksWorkflow, []string{"--workspace=www-dev", "tele/tighten-dev-env"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -133,7 +132,8 @@ func TestHooksCodeKickoffMentionsWorkspace(t *testing.T) {
 	seedProjectWithSubmodule(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 
-	md, err := run.New(root, "tele", "Tighten dev-env", run.Options{
+	md, err := run.New(root, "tele", run.Options{
+		ID:        "tighten-dev-env",
 		Workflow:  hooksWorkflow,
 		Workspace: "www-dev",
 	})
@@ -162,7 +162,8 @@ func TestHooksCodeKickoffOmitsWorkspaceWhenUnset(t *testing.T) {
 	trailerstest.SeedProject(t, root, "tele")
 	t.Setenv("MOE_HOME", root)
 
-	md, err := run.New(root, "tele", "Plain hooks run", run.Options{
+	md, err := run.New(root, "tele", run.Options{
+		ID:       "plain-hooks-run",
 		Workflow: hooksWorkflow,
 	})
 	if err != nil {

@@ -93,23 +93,25 @@ func init() {
 func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	chat := fs.Bool("chat", false, "open a Claude Code session on the new idea instead of $EDITOR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea new [--id <slug>] [--chat] <project> \"title\"\n")
+		moePrintf(stderr, "usage: moe idea new [--chat] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() < 2 {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
-	projectID := fs.Arg(0)
-	title := strings.TrimSpace(strings.Join(fs.Args()[1:], " "))
-	if title == "" {
-		moePrintln(stderr, "title is required")
+	projectID, slug, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "idea new: %v\n", err)
+		return 2
+	}
+	if canonical := run.Slugify(slug); canonical != slug {
+		moePrintf(stderr, "idea new: slug must match [a-z0-9-]+ (lowercase kebab), got %q\n", slug)
 		return 2
 	}
 
@@ -141,7 +143,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	}
 	defer os.RemoveAll(tmpDir)
 	tmpPath := filepath.Join(tmpDir, "content.md")
-	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("# %s\n", title)), 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("# %s\n", slug)), 0o644); err != nil {
 		moePrintf(stderr, "idea: write stub: %v\n", err)
 		return 1
 	}
@@ -162,41 +164,23 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// --id is a hard override: collisions are an error so the operator
-	// notices a typo. Without --id, fall through to createIdea which
-	// auto-disambiguates from Slugify(title) — same path the close-time
-	// followups harvester takes.
-	var md *run.Metadata
-	if *idOverride != "" {
-		opts := run.Options{
-			ID:       *idOverride,
-			Workflow: ideaWorkflow,
-			SeedDocs: map[string]string{ideaDocID: string(body)},
-		}
-		err = withRepoLock(root, repolock.Options{
-			Purpose: "idea-new",
-			Run:     projectID + "/" + *idOverride,
-		}, func() error {
-			m, err := run.New(root, projectID, title, opts)
-			if err != nil {
-				return err
-			}
-			md = m
-			return nil
-		})
-	} else {
-		err = withRepoLock(root, repolock.Options{
-			Purpose: "idea-new",
-			Run:     projectID,
-		}, func() error {
-			m, err := createIdea(root, projectID, run.Slugify(title), title, string(body), trailers.Block{})
-			if err != nil {
-				return err
-			}
-			md = m
-			return nil
-		})
+	opts := run.Options{
+		ID:       slug,
+		Workflow: ideaWorkflow,
+		SeedDocs: map[string]string{ideaDocID: string(body)},
 	}
+	var md *run.Metadata
+	err = withRepoLock(root, repolock.Options{
+		Purpose: "idea-new",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		m, err := run.New(root, projectID, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
 	if err != nil {
 		moePrintf(stderr, "idea: %v\n", err)
 		return 1
@@ -207,25 +191,26 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 
 // createIdea opens a new idea run with slug auto-disambiguated from
 // slugBase: if slugBase is taken, tries slugBase-2, slugBase-3, … until
-// one is free. Used by `moe idea new` (without --id) and by the
-// close-time followups harvester. Caller holds the bureaucracy lock —
-// createIdea does NOT take its own, so it can run inside an existing
-// repolock acquisition (e.g. the harvest loop inside runClose).
+// one is free. Used by the close-time followups harvester (idea new
+// goes through run.New directly with the operator-typed slug). Caller
+// holds the bureaucracy lock — createIdea does NOT take its own, so it
+// can run inside an existing repolock acquisition (e.g. the harvest
+// loop inside runClose).
 //
-// body is the seed canvas body ("# Title\n" is fine for bare follow-ups;
-// idea new threads the operator's edited body in instead). extra carries
-// optional trailers riding along on the open commit (e.g. MoE-From-Run
-// for harvested ideas). Returns the opened run's metadata so callers can
-// see the resolved slug.
-func createIdea(root, projectID, slugBase, title, body string, extra trailers.Block) (*run.Metadata, error) {
+// body is the seed canvas body; an empty body falls back to "# slug\n"
+// so the canvas isn't blank. extra carries optional trailers riding
+// along on the open commit (e.g. MoE-From-Run for harvested ideas).
+// Returns the opened run's metadata so callers can see the resolved
+// slug.
+func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*run.Metadata, error) {
 	if slugBase == "" {
-		return nil, fmt.Errorf("idea: cannot derive slug from title %q", title)
-	}
-	if body == "" {
-		body = fmt.Sprintf("# %s\n", title)
+		return nil, fmt.Errorf("idea: empty slug")
 	}
 	candidate := slugBase
 	for n := 2; ; n++ {
+		if body == "" {
+			body = fmt.Sprintf("# %s\n", candidate)
+		}
 		opts := run.Options{
 			ID:       candidate,
 			Workflow: ideaWorkflow,
@@ -238,7 +223,7 @@ func createIdea(root, projectID, slugBase, title, body string, extra trailers.Bl
 			// run's open commit clean.
 			AllowDirty: true,
 		}
-		md, err := run.New(root, projectID, title, opts)
+		md, err := run.New(root, projectID, opts)
 		if err == nil {
 			return md, nil
 		}
@@ -373,7 +358,7 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
 	for _, e := range entries {
-		fmt.Fprintf(stdout, "%s\t%s\n", e.slug, e.title)
+		fmt.Fprintln(stdout, e.slug)
 	}
 	return 0
 }
@@ -488,7 +473,6 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 type ideaEntry struct {
 	project string
 	slug    string
-	title   string
 }
 
 // scanOpenIdeas returns all in-progress idea runs for projectID. If
@@ -512,7 +496,6 @@ func scanOpenIdeas(root, projectID string) ([]ideaEntry, error) {
 		out = append(out, ideaEntry{
 			project: md.Project,
 			slug:    md.ID,
-			title:   md.Title,
 		})
 	}
 	return out, nil

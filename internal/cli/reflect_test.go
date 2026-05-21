@@ -242,10 +242,10 @@ func TestLoadTwinFeedbackFiltersByCheckpoint(t *testing.T) {
 	staleAt := threshold.Add(-1 * time.Hour)
 	freshAt := threshold.Add(1 * time.Hour)
 
-	writeRunMeta(t, root, "tele", "stale-run", "Stale run", "sdlc")
+	writeRunMeta(t, root, "tele", "stale-run", "sdlc")
 	writeFeedbackAndCommit(t, root, "tele", "stale-run", "twin", "stale note", staleAt)
 
-	writeRunMeta(t, root, "tele", "fresh-run", "Fresh run", "sdlc")
+	writeRunMeta(t, root, "tele", "fresh-run", "sdlc")
 	writeFeedbackAndCommit(t, root, "tele", "fresh-run", "twin", "fresh note", freshAt)
 
 	// Seed the checkpoint with LastIngestAt = threshold; only freshAt
@@ -292,9 +292,9 @@ func TestLoadTwinFeedbackNoCheckpointReturnsAll(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	writeRunMeta(t, root, "tele", "alpha", "Alpha", "sdlc")
+	writeRunMeta(t, root, "tele", "alpha", "sdlc")
 	writeFeedbackAndCommit(t, root, "tele", "alpha", "twin", "alpha note", t0)
-	writeRunMeta(t, root, "tele", "beta", "Beta", "sdlc")
+	writeRunMeta(t, root, "tele", "beta", "sdlc")
 	writeFeedbackAndCommit(t, root, "tele", "beta", "twin", "beta note", t0.Add(time.Hour))
 
 	cfg := wiki.Config{
@@ -328,9 +328,9 @@ func TestLoadTwinFeedbackIgnoresOtherProjects(t *testing.T) {
 	}
 
 	t0 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	writeRunMeta(t, root, "tele", "ours", "Ours", "sdlc")
+	writeRunMeta(t, root, "tele", "ours", "sdlc")
 	writeFeedbackAndCommit(t, root, "tele", "ours", "twin", "ours note", t0)
-	writeRunMeta(t, root, "other", "theirs", "Theirs", "sdlc")
+	writeRunMeta(t, root, "other", "theirs", "sdlc")
 	writeFeedbackAndCommit(t, root, "other", "theirs", "twin", "theirs note", t0)
 
 	cfg := wiki.Config{
@@ -360,7 +360,7 @@ func TestLoadTwinFeedbackSkipsUncommittedFiles(t *testing.T) {
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeRunMeta(t, root, "tele", "draft", "Draft", "sdlc")
+	writeRunMeta(t, root, "tele", "draft", "sdlc")
 	rel := run.FeedbackPath("tele", "draft", "twin")
 	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
 		t.Fatal(err)
@@ -389,12 +389,12 @@ func TestLoadTwinFeedbackSkipsUncommittedFiles(t *testing.T) {
 
 // writeRunMeta writes a minimal run.json under
 // projects/<projectID>/runs/<runID>/ and commits it on main, so the
-// run shows up in run.Scan. Title and workflow round out the metadata
+// run shows up in run.Scan. Workflow rounds out the metadata
 // loadTwinFeedback consults for provenance.
-func writeRunMeta(t *testing.T, root, projectID, runID, title, workflow string) {
+func writeRunMeta(t *testing.T, root, projectID, runID, workflow string) {
 	t.Helper()
 	md := run.Metadata{
-		ID: runID, Project: projectID, Title: title, Status: run.StatusInProgress,
+		ID: runID, Project: projectID, Status: run.StatusInProgress,
 		Workflow: workflow, Created: "2026-05-10",
 	}
 	body, err := json.MarshalIndent(md, "", "  ")
@@ -477,7 +477,7 @@ func TestFindInProgressTwinRunDetectsExisting(t *testing.T) {
 	} else if got != "" {
 		t.Errorf("findInProgressTwinRun on empty repo = %q, want \"\"", got)
 	}
-	writeRunMeta(t, root, "tele", "reflect-2026-05-14", "Twin reflect pass", "twin")
+	writeRunMeta(t, root, "tele", "reflect-2026-05-14", "twin")
 	got, err := findInProgressTwinRun(root, "tele")
 	if err != nil {
 		t.Fatalf("findInProgressTwinRun: %v", err)

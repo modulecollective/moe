@@ -75,7 +75,7 @@ func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "Faster dash load"}, &out, &errb)
+	code := Run([]string{"idea", "new", "tele/faster-dash-load"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -83,18 +83,19 @@ func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 		t.Fatalf("missing capture confirmation: %q", out.String())
 	}
 
-	// Canvas lands at the run's documents/idea path.
+	// Canvas lands at the run's documents/idea path. The stub seeds
+	// the H1 from the slug so the canvas isn't blank.
 	body, err := os.ReadFile(ideaCanvas(root, "tele", "faster-dash-load"))
 	if err != nil {
 		t.Fatalf("idea canvas not written: %v", err)
 	}
-	if string(body) != "# Faster dash load\n" {
+	if string(body) != "# faster-dash-load\n" {
 		t.Fatalf("unexpected canvas body: %q", body)
 	}
 
 	// The open-run commit is HEAD with the expected subject + trailers.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Open run tele faster-dash-load: Faster dash load") {
+	if !strings.Contains(head, "Open run tele/faster-dash-load") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{"MoE-Run: faster-dash-load", "MoE-Project: tele"} {
@@ -130,7 +131,7 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	t.Setenv("VISUAL", "")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"idea", "new", "tele", "With body"}, &out, &errb); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/with-body"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -156,7 +157,9 @@ func TestIdeaNewCommitsEditorEdits(t *testing.T) {
 	}
 }
 
-func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
+// Operator-typed slug collisions fail loud with a suggestion — the
+// old silent -2 auto-suffix is gone.
+func TestIdeaNewSlugCollisionFailsLoud(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -164,43 +167,27 @@ func TestIdeaNewAutoSuffixesOnCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	for _, want := range []string{"tele foo", "tele foo-2", "tele foo-3"} {
-		var out, errb bytes.Buffer
-		code := Run([]string{"idea", "new", "tele", "foo"}, &out, &errb)
-		if code != 0 {
-			t.Fatalf("exit=%d stderr=%q", code, errb.String())
-		}
-		if !strings.Contains(out.String(), "captured idea "+want) {
-			t.Fatalf("expected capture of %s, got: %q", want, out.String())
-		}
-	}
-}
-
-func TestIdeaNewIDOverrideErrorsOnCollision(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubEditor(t)
-
-	if code := Run([]string{"idea", "new", "--id=mine", "tele", "first"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("first new failed: code=%d", code)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "--id=mine", "tele", "second"}, &out, &errb)
+	code := Run([]string{"idea", "new", "tele/foo"}, &out, &errb)
 	if code == 0 {
-		t.Fatalf("expected non-zero on explicit-id collision, got 0; stderr=%q", errb.String())
+		t.Fatalf("expected non-zero on slug collision, got 0; stderr=%q", errb.String())
 	}
-	// run.New formats the collision error with "already used in project".
+	// run.New formats the collision error with "already used in project"
+	// and surfaces a free suggestion the operator can copy.
 	if !strings.Contains(errb.String(), "already used") {
 		t.Fatalf("expected collision error, got: %q", errb.String())
 	}
+	if !strings.Contains(errb.String(), `"foo-2"`) {
+		t.Fatalf("expected suggested free slug, got: %q", errb.String())
+	}
 }
 
-// Regression: --id placed after the project positional should still
-// be honored; reorderFlags hoists it to the front.
-func TestIdeaNewTolerantToFlagAfterPositional(t *testing.T) {
+// Non-canonical slug (uppercase, spaces, underscores) is rejected at
+// the verb boundary so silent slugify can't paper over operator typos.
+func TestIdeaNewRejectsNonCanonicalSlug(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -209,15 +196,9 @@ func TestIdeaNewTolerantToFlagAfterPositional(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "something", "--id=custom-slug"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "captured idea tele custom-slug") {
-		t.Fatalf("expected slug from --id override, got: %q", out.String())
-	}
-	if _, err := os.Stat(ideaCanvas(root, "tele", "custom-slug")); err != nil {
-		t.Fatalf("idea canvas should exist under override slug: %v", err)
+	code := Run([]string{"idea", "new", "tele/Foo Bar"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
 }
 
@@ -232,7 +213,7 @@ func TestIdeaNewRequiresEditor(t *testing.T) {
 	noEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "needs an editor"}, &out, &errb)
+	code := Run([]string{"idea", "new", "tele/needs-an-editor"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit with no editor set, got 0; stdout=%q", out.String())
 	}
@@ -260,7 +241,7 @@ func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "ghost", "anything"}, &out, &errb)
+	code := Run([]string{"idea", "new", "ghost/anything"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing project, got 0; stdout=%q", out.String())
 	}
@@ -282,7 +263,7 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "tele", "x"}, &out, &errb)
+	code := Run([]string{"idea", "new", "tele/x"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
 	}
@@ -291,7 +272,7 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 	}
 }
 
-func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
+func TestIdeaListPrintsSlugs(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -299,9 +280,9 @@ func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	for _, title := range []string{"Cross-project search", "Faster dash load", "Zzz last"} {
-		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-			t.Fatalf("setup capture failed for %q", title)
+	for _, slug := range []string{"cross-project-search", "faster-dash-load", "zzz-last"} {
+		if code := Run([]string{"idea", "new", "tele/" + slug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup capture failed for %q", slug)
 		}
 	}
 
@@ -323,9 +304,6 @@ func TestIdeaListPrintsSlugsAndTitles(t *testing.T) {
 		}
 		last = idx
 	}
-	if !strings.Contains(got, "cross-project-search\tCross-project search") {
-		t.Fatalf("expected slug<TAB>title format, got:\n%s", got)
-	}
 }
 
 func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
@@ -338,9 +316,9 @@ func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	// Three ideas, then close one and promote another.
-	for _, title := range []string{"still open", "will be closed", "will be promoted"} {
-		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-			t.Fatalf("setup capture failed for %q", title)
+	for _, slug := range []string{"still-open", "will-be-closed", "will-be-promoted"} {
+		if code := Run([]string{"idea", "new", "tele/" + slug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup capture failed for %q", slug)
 		}
 	}
 	if code := Run([]string{"idea", "close", "tele/will-be-closed"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -394,7 +372,7 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Starter"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/starter"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 
@@ -448,7 +426,7 @@ func TestIdeaEditNoChangeDoesNotCommit(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Leave it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/leave-it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 
@@ -495,7 +473,7 @@ func TestIdeaEditRequiresEditor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	stubEditor(t)
-	if code := Run([]string{"idea", "new", "tele", "Ed gate"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/ed-gate"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	noEditor(t)
@@ -518,7 +496,7 @@ func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Busy"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/busy"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
@@ -546,7 +524,7 @@ func TestIdeaEditRefusesNonIdeaRun(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	if code := runNew("sdlc", []string{"tele", "Real run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"tele/real-run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("setup run failed")
 	}
 	var out, errb bytes.Buffer
@@ -567,7 +545,7 @@ func TestIdeaCloseBumpsStatusAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Close me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/close-me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 
@@ -629,7 +607,7 @@ func TestIdeaCloseRejectsAlreadyClosed(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "One shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/one-shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if code := Run([]string{"idea", "close", "tele/one-shot"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -668,7 +646,7 @@ func TestIdeaCatPrintsCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Read me back"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/read-me-back"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 
@@ -677,7 +655,7 @@ func TestIdeaCatPrintsCanvas(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if out.String() != "# Read me back\n" {
+	if out.String() != "# read-me-back\n" {
 		t.Fatalf("unexpected canvas dump: %q", out.String())
 	}
 	if errb.Len() != 0 {
@@ -717,7 +695,7 @@ func TestIdeaCatRefusesNonIdeaRun(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	if code := runNew("sdlc", []string{"tele", "Real run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"tele/real-run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("setup run failed")
 	}
 	var out, errb bytes.Buffer
@@ -740,7 +718,7 @@ func TestIdeaCatStatusAgnostic(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Closed but cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/closed-but-cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if code := Run([]string{"idea", "close", "tele/closed-but-cat-able"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -752,7 +730,7 @@ func TestIdeaCatStatusAgnostic(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "Closed but cat-able") {
+	if !strings.Contains(out.String(), "closed-but-cat-able") {
 		t.Fatalf("expected canvas body in stdout, got: %q", out.String())
 	}
 }
@@ -827,7 +805,7 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "--chat", "tele", "Chat capture"}, &out, &errb)
+	code := Run([]string{"idea", "new", "--chat", "tele/chat-capture"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -851,7 +829,7 @@ func TestIdeaEditChatSkipsEditorGate(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	stubEditor(t)
-	if code := Run([]string{"idea", "new", "tele", "Chat refine"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/chat-refine"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	noEditor(t)
@@ -915,7 +893,7 @@ func TestIdeaMoveRehomesRunAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Belongs to moe"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/belongs-to-moe"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 
@@ -936,7 +914,7 @@ func TestIdeaMoveRehomesRunAndCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("destination canvas missing: %v", err)
 	}
-	if string(body) != "# Belongs to moe\n" {
+	if string(body) != "# belongs-to-moe\n" {
 		t.Fatalf("canvas body changed by move: %q", body)
 	}
 
@@ -987,7 +965,7 @@ func TestIdeaMoveRefusesUnknownDestProject(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Stuck here"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/stuck-here"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	var out, errb bytes.Buffer
@@ -1013,7 +991,7 @@ func TestIdeaMoveRefusesSameProject(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Stays put"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/stays-put"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
@@ -1045,10 +1023,10 @@ func TestIdeaMoveRefusesSlugCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture A failed")
 	}
-	if code := Run([]string{"idea", "new", "moe", "Twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "moe/twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture B failed")
 	}
 
@@ -1080,7 +1058,7 @@ func TestIdeaMoveRefusesClosedIdea(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if code := Run([]string{"idea", "close", "tele/done"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -1110,7 +1088,7 @@ func TestIdeaMoveRefusesPromotedIdea(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Promote me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/promote-me"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if code := runNew("sdlc", []string{"--from-idea=promote-me", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
@@ -1140,7 +1118,7 @@ func TestIdeaMoveRefusesNonIdeaRun(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	if code := runNew("sdlc", []string{"tele", "Real run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"tele/real-run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("setup sdlc run failed")
 	}
 	var out, errb bytes.Buffer
@@ -1184,7 +1162,7 @@ func TestIdeaMoveRefusesDirtyWorkingTree(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Dirty"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/dirty"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
 	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {

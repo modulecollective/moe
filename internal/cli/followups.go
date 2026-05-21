@@ -247,13 +247,14 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 	openTrailers := trailers.Block{FromRun: projectID + "/" + runID}
 
 	for hi, fu := range todo {
-		// Empty body falls through to createIdea's "# Title\n" default
-		// so there's one source of truth for the bare-line shape.
-		var canvasBody string
+		// followups.md preserves the prose title — render it as the H1
+		// so the harvested idea reads as the operator wrote it, even
+		// though the slug is what the namespace keys off.
+		canvasBody := fmt.Sprintf("# %s\n", fu.title)
 		if fu.body != "" {
 			canvasBody = fmt.Sprintf("# %s\n\n%s\n", fu.title, fu.body)
 		}
-		md, ierr := createIdea(root, projectID, fu.slug, fu.title, canvasBody, openTrailers)
+		md, ierr := createIdea(root, projectID, fu.slug, canvasBody, openTrailers)
 		if ierr != nil {
 			// If we already harvested some entries, persist their
 			// `- [x]` rewrites as a standalone bookkeeping commit so

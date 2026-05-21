@@ -130,11 +130,11 @@ stage's document. Each workflow is its own top-level verb — `moe sdlc`,
 `moe kb`, `moe twin`. For example:
 
 ```sh
-moe sdlc new tele "add batch support"       # open a new run
-moe sdlc design tele add-batch-support      # threaded chat on design/content.md
-moe sdlc code tele add-batch-support        # agent codes inside a sandbox clone
-moe sdlc test tele add-batch-support        # agent verifies and records what passed
-moe sdlc push --pr tele add-batch-support   # open a PR against the target repo
+moe sdlc new tele/add-batch-support         # open a new run
+moe sdlc design tele/add-batch-support      # threaded chat on design/content.md
+moe sdlc code tele/add-batch-support        # agent codes inside a sandbox clone
+moe sdlc test tele/add-batch-support        # agent verifies and records what passed
+moe sdlc push --pr tele/add-batch-support   # open a PR against the target repo
 ```
 
 `moe dash` shows your open runs and backlog. `moe idea` captures

@@ -46,12 +46,12 @@ func init() {
 	g.Register(closeCommand("sdlc", "Close sdlc run %s %s", releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
-		Summary: "dump a stage canvas to stdout (sdlc cat <project> <run> <stage>)",
+		Summary: "dump a stage canvas to stdout (sdlc cat <project>/<run> <stage>)",
 		Run:     runCat("sdlc", ""),
 	})
 	g.Register(&Command{
 		Name:    "log",
-		Summary: "render a stage's agent transcript (sdlc log <project> <run> <stage>)",
+		Summary: "render a stage's agent transcript (sdlc log <project>/<run> <stage>)",
 		Run:     runLog("sdlc", ""),
 	})
 	g.Register(&Command{

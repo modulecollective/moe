@@ -48,7 +48,7 @@ func TestSdlcResumeRefusesTerminalRun(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele", "Will be merged"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"tele/will-be-merged"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 	markRunStatus(t, root, "tele", "will-be-merged", run.StatusMerged)
@@ -97,7 +97,7 @@ func TestSdlcResumeInteractiveInvokesNextStage(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele", "Interactive resume"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"tele/interactive-resume"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 

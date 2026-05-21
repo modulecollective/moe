@@ -47,7 +47,11 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 				Budget:     30 * 1_000_000_000, // 30s in ns
 				BackoffCap: 10_000_000,         // 10ms
 			}, func() error {
-				md, err := run.New(root, "demo", "concurrent one", run.Options{Workflow: "sdlc"})
+				// IDBase collisions get a dated/numbered suffix so
+				// every goroutine resolves to a distinct slug under
+				// the same base — the concurrency check is that the
+				// lock serialises slug allocation.
+				md, err := run.New(root, "demo", run.Options{IDBase: "concurrent-one", Workflow: "sdlc"})
 				if err != nil {
 					return err
 				}
@@ -74,7 +78,7 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 	}
 	// Log should show n "Open run …" commits in the history.
 	out := gittest.Output(t, root, "log", "--format=%s")
-	gotOpens := strings.Count(out, "Open run demo ")
+	gotOpens := strings.Count(out, "Open run demo/")
 	if gotOpens != n {
 		t.Errorf("git history has %d open-run commits, want %d\n%s", gotOpens, n, out)
 	}

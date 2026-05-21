@@ -367,7 +367,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 			return 1
 		}
 		defer cleanup()
-		url, err = push.CreatePR(ghRepo, branch, pj.DefaultBranch, md.Title, bodyPath, stderr)
+		url, err = push.CreatePR(ghRepo, branch, pj.DefaultBranch, md.ID, bodyPath, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1

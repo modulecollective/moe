@@ -63,7 +63,6 @@ const (
 type Metadata struct {
 	ID       string `json:"id"`
 	Project  string `json:"project"`
-	Title    string `json:"title"`
 	Status   string `json:"status"`
 	Workflow string `json:"workflow"`
 	Created  string `json:"created"`
@@ -90,15 +89,17 @@ type Metadata struct {
 // Options carries user-supplied fields for New. Workflow is required;
 // the rest are optional.
 type Options struct {
-	// ID overrides the auto-derived slug. Must match idPattern if set.
+	// ID is the user-typed slug for the run. Must match idPattern. The
+	// caller has already validated it (canonical-slug check at the verb
+	// boundary); New refuses non-matching values defensively and refuses
+	// collisions loudly with a free-suggestion in the error message.
 	ID string
 	// IDBase, when non-empty and ID is empty, supplies the slug base
-	// instead of Slugify(title). Used by the --from-idea promote path
-	// to keep the run slug anchored to the idea's stable filename slug
-	// rather than the (editable) H1. On collision the suffix is the
-	// current date (YYYY-MM-DD), falling back to -YYYY-MM-DD-N if two
-	// promotes land on the same day — a dated suffix is honest about
-	// *when* the collision happened without pretending to explain *why*.
+	// for derived-slug paths (`--from-idea`, `sdlc reopen`). On collision
+	// the suffix is the current date (YYYY-MM-DD), falling back to
+	// -YYYY-MM-DD-N if two derivations land on the same day. Derived
+	// slugs disambiguate silently because the operator didn't pick them;
+	// user-typed slugs fail loud (see ID above).
 	IDBase string
 	// Workflow names the workflow this run belongs to. Required —
 	// fragment lookup in buildSystemPrompt keys on this, so there is no
@@ -125,10 +126,9 @@ type Options struct {
 	// git history.
 	RemovePaths []string
 
-	// SubjectFrom, when non-empty, inserts ` from <SubjectFrom>` into
-	// the open commit's subject after the run id, before the colon —
-	// so a promoted idea commits as `Open run p/r from idea slug: T`
-	// rather than the default `Open run p/r: T`.
+	// SubjectFrom, when non-empty, appends ` from <SubjectFrom>` to the
+	// open commit's subject so a promoted idea commits as
+	// `Open run p/r from idea slug` rather than the default `Open run p/r`.
 	SubjectFrom string
 
 	// Trailers carries optional MoE-* trailers to attach to the open
@@ -200,23 +200,18 @@ func Dir(projectID, id string) string {
 // New opens a fresh run: writes projects/<project>/runs/<id>/run.json
 // and commits it on main.
 //
-// The id is derived from the title (Slugify) unless opts.ID or
-// opts.IDBase is set. On collision a title-derived slug gets a -2, -3,
-// … suffix; an IDBase-derived slug gets a -YYYY-MM-DD suffix (today,
-// UTC) so promoted-idea slugs read as "same topic, opened on date X"
-// rather than arbitrary `-2`. An explicit opts.ID is never
-// auto-suffixed; collisions there are an error so the caller notices.
+// The id comes from opts.ID (user-typed slug — collisions fail loud
+// with a free-suggestion in the error) or opts.IDBase (derived slug
+// from --from-idea / sdlc reopen — collisions silently get a
+// -YYYY-MM-DD date suffix, falling back to -YYYY-MM-DD-N if two
+// derivations land on the same day). One of the two must be set.
 //
 // Refuses if the project is not registered, the explicit id collides, or
 // the working tree is dirty (a stray edit shouldn't ride along on the
 // "open run" commit).
-func New(root, projectID, title string, opts Options) (*Metadata, error) {
+func New(root, projectID string, opts Options) (*Metadata, error) {
 	if !idPattern.MatchString(projectID) {
 		return nil, fmt.Errorf("run: project id %q must match %s", projectID, idPattern)
-	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return nil, fmt.Errorf("run: title is required")
 	}
 	if opts.Workflow == "" {
 		return nil, fmt.Errorf("run: workflow is required")
@@ -233,7 +228,6 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	}
 
 	var id string
-	var autoSuffix bool
 	var dateSuffix bool
 	switch {
 	case opts.ID != "":
@@ -246,15 +240,9 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 			return nil, fmt.Errorf("run: id base %q must match %s", opts.IDBase, idPattern)
 		}
 		id = opts.IDBase
-		autoSuffix = true
 		dateSuffix = true
 	default:
-		base := Slugify(title)
-		if base == "" {
-			return nil, fmt.Errorf("run: cannot derive slug from title %q; pass --id to set one explicitly", title)
-		}
-		id = base
-		autoSuffix = true
+		return nil, fmt.Errorf("run: one of Options.ID or Options.IDBase is required")
 	}
 
 	taken, err := slugTaken(root, projectID, id)
@@ -262,18 +250,14 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		return nil, err
 	}
 	if taken {
-		if !autoSuffix {
+		if !dateSuffix {
 			suggestion, serr := nextFreeID(root, projectID, id)
 			if serr != nil {
 				return nil, serr
 			}
-			return nil, fmt.Errorf("%w: slug %q in project %s (existing run or prior history); try --id=%s", ErrSlugTaken, id, projectID, suggestion)
+			return nil, fmt.Errorf("%w: slug %q in project %s (existing run or prior history); try %q or pick a different name", ErrSlugTaken, id, projectID, suggestion)
 		}
-		if dateSuffix {
-			id, err = nextFreeDatedID(root, projectID, opts.IDBase, now())
-		} else {
-			id, err = nextFreeID(root, projectID, id)
-		}
+		id, err = nextFreeDatedID(root, projectID, opts.IDBase, now())
 		if err != nil {
 			return nil, err
 		}
@@ -293,7 +277,6 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 	md := &Metadata{
 		ID:        id,
 		Project:   projectID,
-		Title:     title,
 		Status:    StatusInProgress,
 		Workflow:  opts.Workflow,
 		Agent:     opts.Agent,
@@ -330,11 +313,10 @@ func New(root, projectID, title string, opts Options) (*Metadata, error) {
 		}
 	}
 
-	subject := fmt.Sprintf("Open run %s %s", projectID, id)
+	subject := fmt.Sprintf("Open run %s/%s", projectID, id)
 	if opts.SubjectFrom != "" {
 		subject += " from " + opts.SubjectFrom
 	}
-	subject += ": " + title
 
 	tr := opts.Trailers
 	tr.Run = id

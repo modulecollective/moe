@@ -187,7 +187,7 @@ func claimKickoff(det wiki.DetectionResult, diff string, recentRun *run.Metadata
 	}
 
 	if recentRun != nil && recentCtx != "" {
-		fmt.Fprintf(&b, "## Recent run context — %s (%s)\n\n", recentRun.ID, recentRun.Title)
+		fmt.Fprintf(&b, "## Recent run context — %s\n\n", recentRun.ID)
 		b.WriteString("Verbatim workflow document content from the most recently closed run for this " +
 			"project. Use it to pull motivation directly rather than asking the operator to retype it. " +
 			"If the operator names a different run as the driver, ignore this block.\n\n")

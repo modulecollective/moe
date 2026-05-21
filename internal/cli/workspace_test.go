@@ -73,7 +73,7 @@ func TestRunNewWithWorkspaceFlagPersistsToRunJSON(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"--workspace=dev", "tele", "Fix it"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"--workspace=dev", "tele/fix-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "fix-it", "run.json"))
@@ -110,7 +110,7 @@ func TestRunNewWithWorkspaceFlagRefusesIfClaimed(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--workspace=dev", "tele", "Fix it"}, &out, &errb)
+	code := runNew("sdlc", []string{"--workspace=dev", "tele/fix-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on conflicting claim, got 0; stdout=%q", out.String())
 	}
@@ -131,7 +131,7 @@ func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := runNew("kb", []string{"--workspace=dev", "tele", "DNS basics"}, &out, &errb)
+	code := runNew("kb", []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on --workspace with kb, got 0; stdout=%q", out.String())
 	}
@@ -157,7 +157,7 @@ func TestShellRunWorkspaceLandsInClonePath(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	if code := runNew("sdlc", []string{"tele", "Fix it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runNew("sdlc", []string{"tele/fix-it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("seed run failed")
 	}
 	// Pre-create the sandbox so the shell verb finds something on disk

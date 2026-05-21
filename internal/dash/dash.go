@@ -384,7 +384,7 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}
@@ -396,7 +396,7 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range backlog {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}
@@ -416,7 +416,7 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}

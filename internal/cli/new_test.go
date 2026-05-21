@@ -18,12 +18,14 @@ func todayDateSuffix() string {
 }
 
 // captureIdea is a small wrapper around `moe idea new` for tests that
-// need a pre-existing idea to promote.
-func captureIdea(t *testing.T, projectID, title string) {
+// need a pre-existing idea to promote. slug is the operator-typed
+// kebab slug — moe idea new takes `<project>/<slug>` as a single
+// positional now.
+func captureIdea(t *testing.T, projectID, slug string) {
 	t.Helper()
 	stubEditor(t)
-	if code := Run([]string{"idea", "new", projectID, title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-		t.Fatalf("setup capture failed for %q", title)
+	if code := Run([]string{"idea", "new", projectID + "/" + slug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed for %q", slug)
 	}
 }
 
@@ -62,7 +64,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	captureIdea(t, "tele", "Cross-project search")
+	captureIdea(t, "tele", "cross-project-search")
 
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"--from-idea=cross-project-search", "tele"}, &out, &errb)
@@ -76,12 +78,13 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 		t.Fatalf("expected slug %q in output, got: %q", dated, out.String())
 	}
 
-	// First-stage (design) doc is seeded with the idea canvas.
+	// First-stage (design) doc is seeded with the idea canvas. The
+	// idea was captured by its slug — the H1 echoes the slug.
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "design", "content.md"))
 	if err != nil {
 		t.Fatalf("seeded design doc missing: %v", err)
 	}
-	if string(body) != "# Cross-project search\n" {
+	if string(body) != "# cross-project-search\n" {
 		t.Fatalf("unexpected seeded body: %q", body)
 	}
 
@@ -104,7 +107,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 
 	// HEAD~1 is the sdlc run-open commit.
 	prev := gitLog(t, root, "-1", "HEAD~1", "--format=%s%n%b")
-	if !strings.Contains(prev, "Open run tele "+dated+" from idea cross-project-search:") {
+	if !strings.Contains(prev, "Open run tele/"+dated+" from idea cross-project-search") {
 		t.Fatalf("expected sdlc open commit below promote, got:\n%s", prev)
 	}
 	for _, want := range []string{
@@ -133,40 +136,6 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	}
 }
 
-func TestRunNewFromIdeaExplicitTitleOverridesIdeaTitle(t *testing.T) {
-	// Explicit title renames the run (commit subject + Metadata.Title)
-	// but the slug stays anchored to the idea's filename — that's the
-	// point of IDBase. If the operator wants a different slug on top of
-	// the rename, they pass --id.
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubEditor(t)
-	suppressNextStagePrompt(t)
-
-	captureIdea(t, "tele", "Original title")
-
-	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--from-idea=original-title", "tele", "Renamed at promote"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	// Slug is anchored to the idea filename; collides with the idea
-	// itself and date-suffixes.
-	dated := "original-title-" + todayDateSuffix()
-	if !strings.Contains(out.String(), "opened run tele "+dated) {
-		t.Fatalf("expected slug %q anchored to idea filename, got: %q", dated, out.String())
-	}
-	// HEAD is the promote commit; sdlc open commit is HEAD~1. Title still
-	// carries the explicit rename.
-	prev := gitLog(t, root, "-1", "HEAD~1", "--format=%s")
-	if !strings.Contains(prev, "Renamed at promote") {
-		t.Fatalf("sdlc open subject should carry explicit title, got: %q", prev)
-	}
-}
-
 func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -176,7 +145,7 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	captureIdea(t, "tele", "DNS basics")
+	captureIdea(t, "tele", "dns-basics")
 
 	var out, errb bytes.Buffer
 	code := runNew("kb", []string{"--from-idea=dns-basics", "tele"}, &out, &errb)
@@ -219,7 +188,7 @@ func TestRunNewFromIdeaRefusesPromotedIdea(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	captureIdea(t, "tele", "Twice over")
+	captureIdea(t, "tele", "twice-over")
 	if code := runNew("sdlc", []string{"--from-idea=twice-over", "tele"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("first promote failed")
 	}
@@ -246,7 +215,7 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 	stubEditor(t)
 	suppressNextStagePrompt(t)
 
-	captureIdea(t, "tele", "Flag ordering")
+	captureIdea(t, "tele", "flag-ordering")
 
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"tele", "--from-idea=flag-ordering"}, &out, &errb)
@@ -261,7 +230,7 @@ func TestRunNewTolerantToFlagsAfterPositional(t *testing.T) {
 
 // After reorderFlags hoists every --foo to the front, stdlib `flag`
 // rejects unknown ones outright rather than silently taking them as
-// titles. That's the belt-and-braces behavior the design called for.
+// slugs. That's the belt-and-braces behavior the design called for.
 func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -270,7 +239,7 @@ func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"tele", "Some title", "--bogus"}, &out, &errb)
+	code := runNew("sdlc", []string{"tele/some-slug", "--bogus"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
@@ -279,7 +248,9 @@ func TestRunNewRejectsUnknownFlagLookalike(t *testing.T) {
 	}
 }
 
-func TestRunNewRequiresTitleWithoutFromIdea(t *testing.T) {
+// Without --from-idea the positional must be `<project>/<slug>`; a
+// bare project token is the old shape and now rejected.
+func TestRunNewRequiresSlugPositional(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -291,8 +262,54 @@ func TestRunNewRequiresTitleWithoutFromIdea(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "usage:") {
-		t.Fatalf("expected usage hint, got: %q", errb.String())
+	if !strings.Contains(errb.String(), "<project>/<run>") {
+		t.Fatalf("expected slug-shape hint, got: %q", errb.String())
+	}
+}
+
+// A non-canonical slug (uppercase, spaces, …) must be rejected at the
+// verb boundary so silent slugify can't paper over operator typos.
+func TestRunNewRejectsNonCanonicalSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"tele/Foo_Bar"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "lowercase kebab") {
+		t.Fatalf("expected slug-shape error, got: %q", errb.String())
+	}
+}
+
+// Collision on an operator-typed slug fails loud with a suggestion
+// (no silent -2 auto-suffix).
+func TestRunNewSlugCollisionFailsLoudWithSuggestion(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := runNew("sdlc", []string{"tele/fix-the-thing"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("first runNew failed")
+	}
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"tele/fix-the-thing"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on slug collision, got 0; stdout=%q", out.String())
+	}
+	msg := errb.String()
+	for _, want := range []string{`"fix-the-thing"`, "tele", "fix-the-thing-2"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q:\n%s", want, msg)
+		}
 	}
 }
 

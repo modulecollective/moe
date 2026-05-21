@@ -384,9 +384,9 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 
 	// Capture two ideas via the CLI so the commit shape comes straight
 	// from production code paths.
-	for _, title := range []string{"Cross-project search", "Faster dash load"} {
-		if code := Run([]string{"idea", "new", "tele", title}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-			t.Fatalf("setup capture failed for %q", title)
+	for _, slug := range []string{"cross-project-search", "faster-dash-load"} {
+		if code := Run([]string{"idea", "new", "tele/" + slug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup capture failed for %q", slug)
 		}
 	}
 
@@ -576,11 +576,7 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	idea := trailerstest.SeedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
-	idea.Title = "Cross-project search"
-	if err := run.Save(root, idea); err != nil {
-		t.Fatal(err)
-	}
+	trailerstest.SeedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
 	trailerstest.SeedRun(t, root, "tele", "search-impl", "sdlc", run.StatusInProgress)
 	trailerstest.CommitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
 		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
@@ -1241,15 +1237,15 @@ func TestDashRendersFactoryArt(t *testing.T) {
 // containsRunRow checks that dash output has a row for (project, run)
 // whose last tabwriter field matches stage — ignores the humanAgo
 // middle column so tests can be written without pinning wall-clock
-// deltas. tabwriter pads with spaces so we scan each line for the
-// three tokens in order and require no other tokens after stage.
+// deltas. Project and run are joined in one slash-form column now.
 func containsRunRow(out, project, runID, stage string) bool {
+	target := project + "/" + runID
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		if len(fields) < 2 {
 			continue
 		}
-		if fields[0] != project || fields[1] != runID {
+		if fields[0] != target {
 			continue
 		}
 		if fields[len(fields)-1] == stage {

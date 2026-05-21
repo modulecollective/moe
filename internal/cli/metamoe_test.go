@@ -58,7 +58,6 @@ func TestBuildSystemPromptInjectsMetaMoeReportFragment(t *testing.T) {
 	md := &run.Metadata{
 		ID:       "meta-moe-2026-05-05",
 		Project:  "moe",
-		Title:    "meta-moe",
 		Workflow: metaMoeWorkflow,
 	}
 	got, err := buildSystemPrompt(root, md, metaMoeReportDoc, "", nil)

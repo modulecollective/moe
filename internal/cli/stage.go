@@ -414,12 +414,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			}
 
 			// Headless mode has no operator on stdin to type the seed
-			// prompt, so default it to the run title — the same shape
+			// prompt, so default it to the run slug — the same shape
 			// the cascade driver depends on.
 			// Callers that pass an explicit InitialPrompt keep theirs.
 			initialPrompt := opts.InitialPrompt
 			if opts.Headless && initialPrompt == "" {
-				initialPrompt = md.Title
+				initialPrompt = md.ID
 			}
 
 			return wikiTurnSpec{
@@ -434,7 +434,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				Model:            opts.Model,
 				Agent:            agentName,
 				FinalizeRunID:    md.ID,
-				FinalizeRunTitle: md.Title,
+				FinalizeRunTitle: "",
 				SkipFinalize:     opts.SkipFinalize,
 				ExtraEnv:         mapToEnv(devEnv),
 				AddDirs:          devEnvWritableDirs(devEnv),

@@ -44,7 +44,7 @@ func TestNewRequiresWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := New(root, "tele", "fix it", Options{Workflow: ""})
+	_, err := New(root, "tele", Options{ID: "fix-it", Workflow: ""})
 	if err == nil {
 		t.Fatal("expected error for empty workflow, got nil")
 	}
@@ -72,50 +72,21 @@ func seedProject(t *testing.T, root, projectID string) {
 	gittest.Run(t, root, "commit", "-m", "register project "+projectID)
 }
 
-// TestNewDerivedSlugAutoSuffixesPastHistory covers the delete-then-reopen
-// flow: a run gets created, its dir gets nuked, but the `Open run` commit
-// still sits on main with the original slug's MoE-Project / MoE-Run
-// trailers. A second run.New with the same title must auto-suffix past
-// that history, not hand the new run the ghost of the old one.
-func TestNewDerivedSlugAutoSuffixesPastHistory(t *testing.T) {
-	root := newTestRoot(t)
-	seedProject(t, root, "tele")
-
-	first, err := New(root, "tele", "Fix it", Options{Workflow: "sdlc"})
-	if err != nil {
-		t.Fatalf("first New: %v", err)
-	}
-	if first.ID != "fix-it" {
-		t.Fatalf("first id = %q, want %q", first.ID, "fix-it")
-	}
-
-	// Operator deletes the run dir and commits the removal; the
-	// Open run commit from earlier stays on main.
-	deleteRunDir(t, root, "tele", "fix-it")
-
-	second, err := New(root, "tele", "Fix it", Options{Workflow: "kb"})
-	if err != nil {
-		t.Fatalf("second New: %v", err)
-	}
-	if second.ID != "fix-it-2" {
-		t.Fatalf("second id = %q, want %q (history check should push past deleted slug)", second.ID, "fix-it-2")
-	}
-}
-
-// TestNewExplicitSlugRefusesHistoryWithSuggestion: --id is never
-// auto-suffixed, but if the caller picks a slug that's already in
-// history we should refuse loudly *and* hand back a free alternative
-// so the operator doesn't have to play the suffix game by hand.
+// TestNewExplicitSlugRefusesHistoryWithSuggestion: an operator-typed
+// slug is never auto-suffixed, but if the caller picks a slug that's
+// already in history we should refuse loudly *and* hand back a free
+// alternative so the operator doesn't have to play the suffix game by
+// hand.
 func TestNewExplicitSlugRefusesHistoryWithSuggestion(t *testing.T) {
 	root := newTestRoot(t)
 	seedProject(t, root, "tele")
 
-	if _, err := New(root, "tele", "Fix it", Options{Workflow: "sdlc", ID: "fix-it"}); err != nil {
+	if _, err := New(root, "tele", Options{Workflow: "sdlc", ID: "fix-it"}); err != nil {
 		t.Fatalf("first New: %v", err)
 	}
 	deleteRunDir(t, root, "tele", "fix-it")
 
-	_, err := New(root, "tele", "Fix it", Options{Workflow: "kb", ID: "fix-it"})
+	_, err := New(root, "tele", Options{Workflow: "kb", ID: "fix-it"})
 	if err == nil {
 		t.Fatal("expected error reusing a historical slug explicitly, got nil")
 	}
@@ -135,10 +106,10 @@ func TestNewSlugNotInOtherProject(t *testing.T) {
 	seedProject(t, root, "a")
 	seedProject(t, root, "b")
 
-	if _, err := New(root, "a", "Fix it", Options{Workflow: "sdlc"}); err != nil {
+	if _, err := New(root, "a", Options{ID: "fix-it", Workflow: "sdlc"}); err != nil {
 		t.Fatalf("project a New: %v", err)
 	}
-	md, err := New(root, "b", "Fix it", Options{Workflow: "sdlc"})
+	md, err := New(root, "b", Options{ID: "fix-it", Workflow: "sdlc"})
 	if err != nil {
 		t.Fatalf("project b New: %v", err)
 	}
@@ -165,7 +136,7 @@ func TestNewIDBaseFreeSlugNoSuffix(t *testing.T) {
 	root := newTestRoot(t)
 	seedProject(t, root, "tele")
 
-	md, err := New(root, "tele", "Whatever", Options{
+	md, err := New(root, "tele", Options{
 		Workflow: "sdlc",
 		IDBase:   "my-idea-slug",
 		Now:      fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)),
@@ -187,7 +158,7 @@ func TestNewIDBaseCollisionGetsDateSuffix(t *testing.T) {
 	seedProject(t, root, "tele")
 
 	// Seed the idea-shaped occupant at my-idea-slug.
-	if _, err := New(root, "tele", "First", Options{
+	if _, err := New(root, "tele", Options{
 		Workflow: "idea",
 		ID:       "my-idea-slug",
 	}); err != nil {
@@ -196,7 +167,7 @@ func TestNewIDBaseCollisionGetsDateSuffix(t *testing.T) {
 
 	// Promote-style call with IDBase set; collision should resolve to
 	// the dated form.
-	md, err := New(root, "tele", "Second", Options{
+	md, err := New(root, "tele", Options{
 		Workflow: "sdlc",
 		IDBase:   "my-idea-slug",
 		Now:      fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)),
@@ -220,13 +191,13 @@ func TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter(t *testing.T) {
 	fixedDay := fixedNow(time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC))
 
 	// Occupy both my-idea-slug and my-idea-slug-2026-04-22.
-	if _, err := New(root, "tele", "First", Options{
+	if _, err := New(root, "tele", Options{
 		Workflow: "idea",
 		ID:       "my-idea-slug",
 	}); err != nil {
 		t.Fatalf("seed base: %v", err)
 	}
-	if _, err := New(root, "tele", "Second", Options{
+	if _, err := New(root, "tele", Options{
 		Workflow: "sdlc",
 		IDBase:   "my-idea-slug",
 		Now:      fixedDay,
@@ -234,7 +205,7 @@ func TestNewIDBaseSameDayDoubleCollisionFallsBackToCounter(t *testing.T) {
 		t.Fatalf("seed dated: %v", err)
 	}
 
-	md, err := New(root, "tele", "Third", Options{
+	md, err := New(root, "tele", Options{
 		Workflow: "sdlc",
 		IDBase:   "my-idea-slug",
 		Now:      fixedDay,
@@ -280,7 +251,6 @@ func TestLoadRequiresWorkflow(t *testing.T) {
 	md := map[string]any{
 		"id":        "fix-it",
 		"project":   "tele",
-		"title":     "Fix it",
 		"status":    StatusInProgress,
 		"created":   "2026-04-01",
 		"documents": map[string]any{},
@@ -489,10 +459,10 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 	}
 	// A reopen lands as an open commit on the new slug carrying
 	// MoE-Reopen-Of pointing back at the prior slug.
-	commitWith("Open run p run-new from reopen of run-old: T",
+	commitWith("Open run p/run-new from reopen of run-old",
 		"MoE-Run: run-new\nMoE-Project: p\nMoE-Reopen-Of: run-old\n")
 	// An unrelated run with no Reopen-Of must not pollute the map.
-	commitWith("Open run p loose: T",
+	commitWith("Open run p/loose",
 		"MoE-Run: loose\nMoE-Project: p\n")
 
 	idx, err := BuildJournalIndex(root)

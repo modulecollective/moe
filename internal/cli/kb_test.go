@@ -151,7 +151,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 // test here rather than a silent prompt regression.
 func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb"}
 	got, err := buildSystemPrompt(root, md, "research", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 
 func TestBuildSystemPromptInjectsKBSummarizeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb"}
 	got, err := buildSystemPrompt(root, md, "summarize", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestBuildSystemPromptInjectsKBSummarizeFragment(t *testing.T) {
 // prompt without anything else exploding.
 func TestKBWikiBuilderPopulatesPromptAndPaths(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Title: "DNS basics", Workflow: "kb"}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb"}
 	cfg, err := kbWikiBuilder(root, md)
 	if err != nil {
 		t.Fatal(err)

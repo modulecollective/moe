@@ -357,7 +357,7 @@ func TestSDLCCloseAutoDisambiguatesSlugCollision(t *testing.T) {
 	stubEditor(t)
 
 	// Pre-create an idea named "foo" so the harvester has to bump.
-	if code := Run([]string{"idea", "new", "tele", "foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("seed idea creation failed")
 	}
 
@@ -627,7 +627,7 @@ func TestIdeaCloseDoesNotHarvestFollowups(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele", "Plain"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/plain"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("setup capture failed")
 	}
 

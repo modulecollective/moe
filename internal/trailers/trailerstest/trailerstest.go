@@ -109,7 +109,6 @@ func SeedRun(t *testing.T, root, projectID, runID, workflow, status string) *run
 	md := &run.Metadata{
 		ID:        runID,
 		Project:   projectID,
-		Title:     "T",
 		Status:    status,
 		Workflow:  workflow,
 		Created:   "2026-04-01",
@@ -121,7 +120,7 @@ func SeedRun(t *testing.T, root, projectID, runID, workflow, status string) *run
 	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
 	projectJSONRel := filepath.Join("projects", projectID, "project.json")
 	gittest.Run(t, root, "add", runJSONRel, projectJSONRel)
-	CommitTrailer(t, root, "Open run "+projectID+"/"+runID+": T",
+	CommitTrailer(t, root, "Open run "+projectID+"/"+runID,
 		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, time.Time{})
 	return md
 }

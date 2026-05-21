@@ -118,12 +118,10 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return 1
 	}
 
-	// Mint the run. workflow="twin"; title is the human label for the
-	// pass; the id-base "reflect" routes the slug through
-	// nextFreeDatedID, producing `reflect-YYYY-MM-DD` (or
-	// `reflect-YYYY-MM-DD-2` on same-day collision). Bare title is
-	// fine — the slug, not the title, is the operator-facing handle.
-	title := "Twin reflect pass — " + time.Now().Local().Format("2006-01-02")
+	// Mint the run. workflow="twin"; the id-base "reflect" routes the
+	// slug through nextFreeDatedID, producing `reflect-YYYY-MM-DD` (or
+	// `reflect-YYYY-MM-DD-2` on same-day collision). Slug is the
+	// operator-facing handle.
 	opts := run.Options{
 		IDBase:   "reflect",
 		Workflow: "twin",
@@ -133,7 +131,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		Purpose: "run-new",
 		Run:     projectID,
 	}, func() error {
-		m, err := run.New(root, projectID, title, opts)
+		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
 		}
@@ -229,27 +227,24 @@ func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 }
 
 // ideaSummary captures the minimum needed to render an open idea
-// into the reflect kickoff: the slug, title, and verbatim canvas
-// body. The agent uses this to decide which ideas belong on the
-// roadmap (and at which horizon) versus which stay on the idea
-// shelf.
+// into the reflect kickoff: the slug and verbatim canvas body. The
+// agent uses this to decide which ideas belong on the roadmap (and
+// at which horizon) versus which stay on the idea shelf.
 type ideaSummary struct {
-	slug  string
-	title string
-	body  string
+	slug string
+	body string
 }
 
 // twinFeedbackEntry is one note left under projects/<p>/runs/<slug>/
 // feedback/twin.md by a non-twin workflow agent, surfaced into the
-// next reflect's kickoff. Provenance (runID, runTitle) lets the agent
-// trace a note back to where it came from; `when` is the git-time of
-// the most recent commit touching the file, used to filter against
-// the reflect checkpoint.
+// next reflect's kickoff. Provenance (runID) lets the agent trace a
+// note back to where it came from; `when` is the git-time of the
+// most recent commit touching the file, used to filter against the
+// reflect checkpoint.
 type twinFeedbackEntry struct {
-	runID    string
-	runTitle string
-	body     string
-	when     time.Time
+	runID string
+	body  string
+	when  time.Time
 }
 
 // loadTwinFeedback walks projects/<projectID>/runs/*/feedback/twin.md
@@ -305,10 +300,9 @@ func loadTwinFeedback(root, projectID string, cfg wiki.Config) ([]twinFeedbackEn
 			continue
 		}
 		out = append(out, twinFeedbackEntry{
-			runID:    md.ID,
-			runTitle: md.Title,
-			body:     string(body),
-			when:     when,
+			runID: md.ID,
+			body:  string(body),
+			when:  when,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].when.After(out[j].when) })
@@ -339,7 +333,7 @@ func loadIdeaBacklog(root, projectID string) ([]ideaSummary, error) {
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read idea %s %s: %w", md.Project, md.ID, err)
 		}
-		out = append(out, ideaSummary{slug: md.ID, title: md.Title, body: string(body)})
+		out = append(out, ideaSummary{slug: md.ID, body: string(body)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].slug < out[j].slug })
 	return out, nil

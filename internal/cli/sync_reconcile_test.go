@@ -166,7 +166,6 @@ func newReconcileFixture(t *testing.T, status string) *reconcileFixture {
 	md := &run.Metadata{
 		ID:        runID,
 		Project:   projectID,
-		Title:     "T",
 		Status:    status,
 		Workflow:  "sdlc",
 		Created:   "2026-04-01",

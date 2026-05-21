@@ -121,7 +121,7 @@ func TestSeedRun_WritesMetadataAndCommitsWithTrailers(t *testing.T) {
 		t.Fatalf("project.json missing: %v", err)
 	}
 	hits := gittest.Output(t, root, "log", "--grep=MoE-Run: run-y", "--format=%s")
-	if !strings.Contains(hits, "Open run proj-x/run-y: T") {
+	if !strings.Contains(hits, "Open run proj-x/run-y") {
 		t.Fatalf("expected open-run commit in trailer-grep output, got:\n%s", hits)
 	}
 }

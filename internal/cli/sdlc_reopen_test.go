@@ -109,7 +109,7 @@ func TestSDLCReopenSeedsDesignAndCarriesTrailer(t *testing.T) {
 
 	// Open commit subject + trailers.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Open run tele "+dated+" from reopen of fix-it") {
+	if !strings.Contains(head, "Open run tele/"+dated+" from reopen of fix-it") {
 		t.Fatalf("open subject wrong:\n%s", head)
 	}
 	for _, want := range []string{

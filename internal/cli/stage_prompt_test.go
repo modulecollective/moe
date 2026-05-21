@@ -114,7 +114,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 // before the per-turn framing.
 func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 	got, err := buildSystemPrompt(root, md, "code", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestStageLocationSectionUnknownWorkflow(t *testing.T) {
 // always-on framing.
 func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
 	wantDocOnly := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
 	docOnly := operationalCore(root, md, "design", "")
@@ -243,7 +243,7 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 // adopt-agent-skills run shipped to claw back.
 func TestOperationalCoreNoLongerCarriesTraceBlocks(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Title: "Fix it", Workflow: "sdlc"}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
 	for _, stage := range []string{"design", "code"} {
 		clone := ""

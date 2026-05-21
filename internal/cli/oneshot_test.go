@@ -113,7 +113,7 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele", "Per-stage design"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"tele/per-stage-design"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 	out.Reset()
@@ -135,10 +135,10 @@ exit 0
 		t.Fatalf("argv dump missing: %v", err)
 	}
 	args := string(dump)
-	// Run title is the user prompt under -p; the interactive kickoff
+	// Run slug is the user prompt under -p; the interactive kickoff
 	// must not leak in.
-	if !strings.Contains(args, "Per-stage design") {
-		t.Fatalf("expected run title as user prompt, got argv:\n%s", args)
+	if !strings.Contains(args, "per-stage-design") {
+		t.Fatalf("expected run slug as user prompt, got argv:\n%s", args)
 	}
 	if strings.Contains(args, "greet the operator") {
 		t.Fatalf("interactive kickoff string leaked into headless argv:\n%s", args)
@@ -162,7 +162,7 @@ func TestRunCodeOneShot(t *testing.T) {
 	fakeOneShotClaude(t, "", 0, "written by fake claude")
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele", "Per-stage code"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"tele/per-stage-code"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 	// Land the design canvas first so the precheck passes and code has
@@ -228,7 +228,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele", "No design"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"tele/no-design"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
 

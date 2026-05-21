@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
@@ -34,25 +33,29 @@ func newRunCommand(workflowName string) *Command {
 }
 
 // runNew is the shared creator behind every workflow's `new` facade.
-// It parses --id and --from-idea, loads the bureaucracy root, writes
-// the run, commits it, and prints the first stage's invocation so the
-// operator can move straight into work. The workflow is baked in via
-// the caller — there is no --workflow flag here, because the workflow
-// is implicit in which workflow the operator typed (`moe sdlc new`
-// vs `moe kb new`).
+// It parses --from-idea, loads the bureaucracy root, writes the run,
+// commits it, and prints the first stage's invocation so the operator
+// can move straight into work. The workflow is baked in via the caller
+// — there is no --workflow flag here, because the workflow is implicit
+// in which workflow the operator typed (`moe sdlc new` vs `moe kb new`).
+//
+// Positional shape:
+//   - Normal:        `<project>/<slug>` — operator-typed slug, collisions
+//     fail loud with a free-suggestion in the error.
+//   - --from-idea:   `<project>`        — slug derived from the idea's
+//     filename via IDBase; date-suffixes on collision so two promotes
+//     of the same idea read as "same topic, opened on date X".
 //
 // --from-idea=<slug> promotes an idea run into a fresh run in the
-// target workflow: the idea's title and canvas seed the new run's
-// first-stage doc, and the idea run's status is bumped to
-// StatusPromoted with a MoE-Promoted-To trailer so the original is
-// still greppable and the dash can tell "handed off" from "dropped".
-// The new run carries a reciprocal MoE-Idea trailer on its open
-// commit. Two commits total — not one, since the status bump lives on
-// its own.
+// target workflow: the idea's canvas seeds the new run's first-stage
+// doc, and the idea run's status is bumped to StatusPromoted with a
+// MoE-Promoted-To trailer so the original is still greppable and the
+// dash can tell "handed off" from "dropped". The new run carries a
+// reciprocal MoE-Idea trailer on its open commit. Two commits total —
+// not one, since the status bump lives on its own.
 func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflowName+" new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	idOverride := fs.String("id", "", "explicit slug (default: derived from title, with -N suffix on collision)")
 	fromIdea := fs.String("from-idea", "", "promote an open idea run (by slug) into a new run, seeding the first-stage doc from its canvas")
 	// --workspace means two things across workflows: sdlc binds the run
 	// to the named workspace as its working tree (claim taken at first
@@ -64,15 +67,14 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT, then claude")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--id <slug>] [--from-idea <slug>] [--workspace <name>] [--agent <name>] <project> [\"title\"]\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] --from-idea <idea-slug> <project>\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	// Title is required normally, optional when --from-idea is set
-	// (the idea's title supplies it).
-	if fs.NArg() < 1 || (fs.NArg() < 2 && *fromIdea == "") {
+	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
 	}
@@ -95,8 +97,39 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
-	project := fs.Arg(0)
-	title := strings.Join(fs.Args()[1:], " ")
+
+	// Two positional shapes: `<project>/<slug>` for operator-typed
+	// slugs, and bare `<project>` paired with `--from-idea` for derived
+	// slugs. The shape is dictated by --from-idea's presence so a typo
+	// (`tele/foo` with --from-idea) surfaces as a usage error instead of
+	// silently being treated as the idea's slug.
+	var project, slug string
+	if *fromIdea != "" {
+		project = fs.Arg(0)
+		if project == "" {
+			fs.Usage()
+			return 2
+		}
+		// Reject the slash form here: with --from-idea the slug is
+		// derived from the idea, not chosen.
+		for _, r := range project {
+			if r == '/' {
+				moePrintf(stderr, "%s new: with --from-idea, the positional is just <project> (the slug is derived from the idea)\n", workflowName)
+				return 2
+			}
+		}
+	} else {
+		p, s, err := splitProjectRun(fs.Arg(0))
+		if err != nil {
+			moePrintf(stderr, "%s new: %v\n", workflowName, err)
+			return 2
+		}
+		if canonical := run.Slugify(s); canonical != s {
+			moePrintf(stderr, "%s new: slug must match [a-z0-9-]+ (lowercase kebab), got %q\n", workflowName, s)
+			return 2
+		}
+		project, slug = p, s
+	}
 
 	// Sanity check against the workflow registry. The facade's caller
 	// supplies a compile-time constant, so this should never fail in
@@ -121,7 +154,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	opts := run.Options{
-		ID:        *idOverride,
+		ID:        slug,
 		Workflow:  workflowName,
 		Workspace: *workspaceName,
 		Agent:     *agentOverride,
@@ -142,9 +175,6 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		if title == "" {
-			title = src.Title
-		}
 		stages := wf.Stages()
 		if len(stages) == 0 {
 			moePrintf(stderr, "workflow %q has no stages to seed from --from-idea\n", workflowName)
@@ -153,8 +183,8 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		opts.SeedDocs = map[string]string{stages[0]: seed}
 		opts.SubjectFrom = "idea " + *fromIdea
 		opts.Trailers = trailers.Block{Idea: *fromIdea}
-		// Anchor the run slug to the idea's filename, not its (editable)
-		// H1. run.New will date-suffix on collision.
+		// Anchor the run slug to the idea's filename. run.New will
+		// date-suffix on collision (the idea itself occupies the base).
 		opts.IDBase = *fromIdea
 		sourceIdea = src
 	}
@@ -166,18 +196,19 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Run-identifier for the lock record is advisory — use the
-	// project plus whatever slug we have so far (may be blank if the
-	// caller didn't pass --id; run.New will derive one inside the lock).
+	// project plus whatever slug we have so far. For --from-idea the
+	// final slug is derived inside the lock; the project alone is
+	// enough to scope the lock record.
 	runRef := project
-	if *idOverride != "" {
-		runRef = project + "/" + *idOverride
+	if slug != "" {
+		runRef = project + "/" + slug
 	}
 	var md *run.Metadata
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     runRef,
 	}, func() error {
-		m, err := run.New(root, project, title, opts)
+		m, err := run.New(root, project, opts)
 		if err != nil {
 			return err
 		}
@@ -210,9 +241,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 
 // promoteIdeaToSdlcRun opens a fresh sdlc run seeded by an idea's
 // canvas, marks the idea promoted, and returns the new run's metadata.
-// Mirrors the --from-idea path inside runNew without the --id /
-// title-override / one-shot-chain plumbing — keeping this helper
-// narrow makes the shared promote semantics easy to reason about.
+// Mirrors the --from-idea path inside runNew without the one-shot-chain
+// plumbing — keeping this helper narrow makes the shared promote
+// semantics easy to reason about.
 //
 // agentName, when non-empty, is stamped onto the new run's
 // run.json.Agent. Empty leaves the field unset and the usual
@@ -236,8 +267,8 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug, agentName string) (*run.Met
 		SubjectFrom: "idea " + ideaSlug,
 		Trailers:    trailers.Block{Idea: ideaSlug},
 		Agent:       agentName,
-		// Anchor the run slug to the idea's filename, not its (editable)
-		// H1. run.New will date-suffix on collision.
+		// Anchor the run slug to the idea's filename. run.New will
+		// date-suffix on collision (the idea itself occupies the base).
 		IDBase: ideaSlug,
 	}
 	var md *run.Metadata
@@ -245,7 +276,7 @@ func promoteIdeaToSdlcRun(root, projectID, ideaSlug, agentName string) (*run.Met
 		Purpose: "run-new",
 		Run:     projectID,
 	}, func() error {
-		m, err := run.New(root, projectID, src.Title, opts)
+		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
 		}

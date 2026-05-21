@@ -67,12 +67,12 @@ func init() {
 	g.Register(closeCommand("kb", "Close kb run %s %s", nil))
 	g.Register(&Command{
 		Name:    "cat",
-		Summary: "dump a stage canvas to stdout (kb cat <project> <run> <stage>)",
+		Summary: "dump a stage canvas to stdout (kb cat <project>/<run> <stage>)",
 		Run:     runCat("kb", ""),
 	})
 	g.Register(&Command{
 		Name:    "log",
-		Summary: "render a stage's agent transcript (kb log <project> <run> <stage>)",
+		Summary: "render a stage's agent transcript (kb log <project>/<run> <stage>)",
 		Run:     runLog("kb", ""),
 	})
 	// Lint is out-of-band relative to runs (no stage, no canvas,

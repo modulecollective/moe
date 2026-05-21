@@ -138,7 +138,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	}
 	var designSeed string
 	if len(canvasBody) == 0 {
-		designSeed = renderEmptyReopenSeed(prior.Title, priorSlug)
+		designSeed = renderEmptyReopenSeed(priorSlug)
 	} else {
 		designSeed = string(canvasBody)
 	}
@@ -182,7 +182,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		Purpose: "run-new",
 		Run:     projectID,
 	}, func() error {
-		m, err := run.New(root, projectID, prior.Title, opts)
+		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
 		}
@@ -203,10 +203,10 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 // and prompts the operator for the goal of the retake — strictly more
 // useful than a blank canvas and avoids the empty-canvas invariant
 // firing on open.
-func renderEmptyReopenSeed(title, priorSlug string) string {
+func renderEmptyReopenSeed(priorSlug string) string {
 	return fmt.Sprintf(
 		"# %s\n\n> Reopened from `%s`, which had no design content.\n> Operator: what's the goal of this retake?\n",
-		title, priorSlug,
+		priorSlug, priorSlug,
 	)
 }
 
