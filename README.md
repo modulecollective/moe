@@ -181,12 +181,13 @@ and the dashboard is the re-entry point when you walk away.
 
 - `moe dash` — pick what to resume; lists open runs, the idea
   backlog, and any stale sessions that need cleanup.
-- `moe <wf> new <project>/<slug>` — open a run in any workflow
-  (`sdlc` / `kb` / `idea` / `hooks` / `twin` / `meta-moe`).
-  `--from-idea <project>/<slug>` seeds the new run from an existing
-  idea canvas, `--workspace <name>` (sdlc and hooks) attaches the run
-  to a named workspace, `--agent claude|codex` pins the backend for
-  this run only.
+- `moe <wf> new <project>/<slug>` — open a run in any workflow that
+  takes operator-typed slugs (`sdlc` / `kb` / `idea` / `hooks` /
+  `meta-moe`; the `twin` workflow opens via `moe twin reflect`
+  instead, see below). `--from-idea <project>/<slug>` seeds the new
+  run from an existing idea canvas, `--workspace <name>` (sdlc and
+  hooks) attaches the run to a named workspace, `--agent claude|codex`
+  pins the backend for this run only.
 - `moe sdlc design|code|test|push` — drive the sdlc stages one at a
   time. The chain prompt at exit offers `!` (run the next stage
   headless), `!<stage>` (cascade up to a gate), and `!!` (cascade all
@@ -244,8 +245,9 @@ dev server's warm state shouldn't die at every branch switch.
 - `moe workspace new <project> <name>` — eagerly create a long-lived
   working tree before any run attaches, e.g. to warm a dev server
   whose startup is slow.
-- `moe workspace list` / `info` / `shell` — inspect named workspaces
-  or drop into one.
+- `moe workspace list [<project>]` / `moe workspace shell` — inspect
+  named workspaces (optionally filtered to one project) or drop into
+  one.
 - `moe workspace refresh <project> <name>` — re-run the project's
   `dev-env.d/*` scripts in place when the cached env breaks.
 - `moe workspace remove` / `release` — tear down a workspace, or
