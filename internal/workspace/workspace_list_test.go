@@ -86,6 +86,35 @@ func TestListReportsClaimAndDirty(t *testing.T) {
 	}
 }
 
+// TestListClaimedCleanIsNotDirty covers the `moe workspace list`
+// regression: before the claim moved under `.moe/`, every claimed
+// workspace surfaced as DIRTY because the root-level `claim.json`
+// showed up in `git.Status`. A claim alone — no scratch files, no
+// edits — must leave Dirty=false.
+func TestListClaimedCleanIsNotDirty(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+
+	if _, err := Acquire(root, "tele", "dev", "tele/run-a"); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	rows, err := List(root, "tele")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d want 1: %+v", len(rows), rows)
+	}
+	if rows[0].Claim != "tele/run-a" {
+		t.Fatalf("claim = %q, want tele/run-a", rows[0].Claim)
+	}
+	if rows[0].Dirty {
+		t.Fatalf("a claimed-but-otherwise-clean workspace should not be Dirty: %+v", rows[0])
+	}
+}
+
 // TestRemoveRefusesClaimed exercises the load-bearing safety
 // invariant: a claimed workspace cannot be removed.
 func TestRemoveRefusesClaimed(t *testing.T) {

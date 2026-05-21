@@ -1,12 +1,14 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
@@ -268,5 +270,131 @@ func TestAttachReusesExistingBranch(t *testing.T) {
 	got := gittest.Output(t, wp, "rev-parse", "HEAD")
 	if got != want {
 		t.Fatalf("Attach reuse drifted: want %s got %s", want, got)
+	}
+}
+
+// TestAcquireThenAttachOnFreshWorkspace is the load-bearing regression:
+// re-using a named workspace for a fresh run did `Acquire` (writes the
+// claim) then `Attach` (calls `refuseDirty` → `git.Status`) and Attach
+// errored because the claim file at the workspace root surfaced as `??`.
+// With the claim folded under `.moe/` (covered by the clone's
+// `.git/info/exclude`), Attach must succeed and `git.Status` must
+// return no entries.
+func TestAcquireThenAttachOnFreshWorkspace(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+
+	wp, err := Acquire(root, "tele", "dev", "tele/run-a")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := Attach(wp, "moe/run-a", "main"); err != nil {
+		t.Fatalf("Attach after Acquire: %v", err)
+	}
+	entries, err := git.Status(wp)
+	if err != nil {
+		t.Fatalf("git.Status: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("git.Status should be empty after Acquire+Attach, got %+v", entries)
+	}
+}
+
+// TestAcquireWritesClaimUnderDotMoe nails the new on-disk layout: the
+// claim must land at `<wp>/.moe/claim.json`, and `<wp>/claim.json` must
+// not exist. This is what stops the file from being flagged by
+// `git.Status` (and therefore by `refuseDirty` and the `Dirty` Info
+// field).
+func TestAcquireWritesClaimUnderDotMoe(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+
+	wp, err := Acquire(root, "tele", "dev", "tele/run-a")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wp, ".moe", "claim.json")); err != nil {
+		t.Fatalf("claim should live under .moe/: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wp, "claim.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy <wp>/claim.json must not exist, got err=%v", err)
+	}
+}
+
+// TestReadClaimMigratesLegacyLayout covers the in-the-wild workspaces
+// that already carry `<wp>/claim.json` from before this fix. The next
+// read must (a) return the holder, (b) leave the claim at the new
+// path, (c) remove the legacy file.
+func TestReadClaimMigratesLegacyLayout(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+
+	// Materialize the workspace dir but skip Acquire — we want a clean
+	// slate to seed the legacy claim directly.
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	seeded := Claim{Project: "tele", Name: "dev", Run: "tele/legacy-run"}
+	b, err := json.MarshalIndent(seeded, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = append(b, '\n')
+	if err := os.WriteFile(filepath.Join(wp, "claim.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadClaim(root, "tele", "dev")
+	if err != nil {
+		t.Fatalf("ReadClaim: %v", err)
+	}
+	if got == nil || *got != seeded {
+		t.Fatalf("ReadClaim returned %+v, want %+v", got, seeded)
+	}
+	// Migrated to the new path.
+	migrated, err := os.ReadFile(filepath.Join(wp, ".moe", "claim.json"))
+	if err != nil {
+		t.Fatalf("new-layout claim missing after migration: %v", err)
+	}
+	if string(migrated) != string(b) {
+		t.Fatalf("migrated claim contents drifted:\n got=%q\nwant=%q", migrated, b)
+	}
+	// Legacy file is gone.
+	if _, err := os.Stat(filepath.Join(wp, "claim.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy <wp>/claim.json should be removed, got err=%v", err)
+	}
+}
+
+// TestReleaseCleansBothLocations seeds a stale legacy claim alongside
+// the current-layout claim (the half-migrated state that could exist
+// if a run wrote the legacy file and an Acquire-by-the-same-run later
+// wrote the new one without an intervening read). Release must wipe
+// both so a fresh Acquire doesn't resurrect the legacy file.
+func TestReleaseCleansBothLocations(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+
+	wp, err := Acquire(root, "tele", "dev", "tele/run-a")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	// Seed a stale legacy claim alongside the new one.
+	if err := os.WriteFile(filepath.Join(wp, "claim.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Release(root, "tele", "dev"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wp, ".moe", "claim.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new-layout claim should be gone after Release, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wp, "claim.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy claim should be gone after Release, got err=%v", err)
 	}
 }
