@@ -70,6 +70,11 @@ func init() {
 		Summary: "dump a stage canvas to stdout (kb cat <project> <run> <stage>)",
 		Run:     runCat("kb", ""),
 	})
+	g.Register(&Command{
+		Name:    "log",
+		Summary: "render a stage's agent transcript (kb log <project> <run> <stage>)",
+		Run:     runLog("kb", ""),
+	})
 	// Lint is out-of-band relative to runs (no stage, no canvas,
 	// no run.json), so it lives alongside `new` and `close` as a
 	// non-stage group subcommand. Reuses kbWikiBuilder so the lint

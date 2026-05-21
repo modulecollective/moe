@@ -50,6 +50,11 @@ func init() {
 		Summary: "dump the run's report canvas to stdout",
 		Run:     runCat(metaMoeWorkflow, metaMoeReportDoc),
 	})
+	g.Register(&Command{
+		Name:    "log",
+		Summary: "render the run's report-stage agent transcript",
+		Run:     runLog(metaMoeWorkflow, metaMoeReportDoc),
+	})
 	RegisterGroup(g)
 
 	w := NewWorkflow(metaMoeWorkflow)

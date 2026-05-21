@@ -194,6 +194,11 @@ func init() {
 		Summary: "dump a stage canvas to stdout (twin cat <project> <run> <stage>)",
 		Run:     runCat("twin", ""),
 	})
+	g.Register(&Command{
+		Name:    "log",
+		Summary: "render a stage's agent transcript (twin log <project> <run> <stage>)",
+		Run:     runLog("twin", ""),
+	})
 	RegisterGroup(g)
 
 	w := NewWorkflow("twin")

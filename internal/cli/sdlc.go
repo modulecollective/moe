@@ -50,6 +50,11 @@ func init() {
 		Run:     runCat("sdlc", ""),
 	})
 	g.Register(&Command{
+		Name:    "log",
+		Summary: "render a stage's agent transcript (sdlc log <project> <run> <stage>)",
+		Run:     runLog("sdlc", ""),
+	})
+	g.Register(&Command{
 		Name:    "reopen",
 		Summary: "open a fresh sdlc run seeded with the design canvas of a terminal prior run",
 		Run:     runSDLCReopen,

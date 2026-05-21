@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
@@ -25,17 +26,32 @@ func writeThread(t *testing.T, root, project, runID, stage, agent string, lines 
 	}
 }
 
-func TestMoeLog_RequiresThreePositionals(t *testing.T) {
+// TestLogRegisteredOnEveryWorkflow: every workflow whose runs land a
+// thread-*.jsonl transcript grows a `log` subcommand on its group.
+// Skipping a workflow drops the shared shape — this test is the
+// tripwire, mirroring TestCatRegisteredOnEveryWorkflow.
+func TestLogRegisteredOnEveryWorkflow(t *testing.T) {
+	for _, wf := range []string{"idea", "sdlc", "kb", "meta-moe", "hooks", "twin"} {
+		g, err := LookupGroup(wf)
+		if err != nil {
+			t.Fatalf("workflow %q not registered as a group: %v", wf, err)
+		}
+		if g.Lookup("log") == nil {
+			t.Fatalf("workflow %q has no `log` subcommand registered", wf)
+		}
+	}
+}
+
+func TestMoeLog_RequiresStageForMultiStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	for _, args := range [][]string{
-		{"log"},
-		{"log", "moe"},
-		{"log", "moe", "demo-run"},
-		{"log", "moe", "demo-run", "design", "extra"},
+		{"sdlc", "log"},
+		{"sdlc", "log", "moe"},
+		{"sdlc", "log", "moe", "demo-run", "design", "extra"},
 	} {
 		var out, errb bytes.Buffer
 		code := Run(args, &out, &errb)
@@ -58,7 +74,7 @@ func TestMoeLog_UnknownRun(t *testing.T) {
 	trailerstest.SeedRun(t, root, "moe", "some-other-run", "sdlc", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "moe", "missing-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe", "missing-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -74,7 +90,7 @@ func TestMoeLog_UnknownProject(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "nope", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "nope", "demo-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -96,7 +112,7 @@ func TestMoeLog_RendersClaudeThread(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -123,7 +139,7 @@ func TestMoeLog_StagePicksThatStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "moe", "demo-run", "code"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe", "demo-run", "code"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -148,7 +164,7 @@ func TestMoeLog_NoTranscriptForStage(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "moe", "demo-run", "code"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe", "demo-run", "code"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -172,7 +188,7 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "--agent", "claude", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "--agent", "claude", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d; stderr=%q", code, errb.String())
 	}
@@ -200,7 +216,7 @@ func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
 	})
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -222,11 +238,110 @@ func TestMoeLog_BadAgentFlag(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"log", "--agent", "gpt", "moe", "demo-run", "design"}, &out, &errb)
+	code := Run([]string{"sdlc", "log", "--agent", "gpt", "moe", "demo-run", "design"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(errb.String(), "--agent must be claude or codex") {
 		t.Errorf("expected agent rejection, got %q", errb.String())
+	}
+}
+
+// TestMoeLog_WrongWorkflow: pointing `moe <wf> log` at a run that
+// belongs to another workflow refuses loudly and points at the right
+// verb — mirrors TestCatWrongWorkflow.
+func TestMoeLog_WrongWorkflow(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"kb", "log", "tele", "fix-it", "research"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "fix-it is a sdlc run, use 'moe sdlc log'") {
+		t.Fatalf("expected wrong-workflow error pointing at sdlc, got: %q", errb.String())
+	}
+}
+
+// TestMoeLog_UnknownStage: stage validation against the workflow's
+// registered ladder; mirrors TestCatUnknownStage.
+func TestMoeLog_UnknownStage(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "tele", "fix-it", "bogus"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no such stage: bogus") {
+		t.Fatalf("expected unknown-stage error, got: %q", errb.String())
+	}
+}
+
+// TestMoeLog_SingleStageDefaults: single-stage workflows accept the
+// two-arg form and route to the only registered stage — mirrors
+// TestCatSingleStageDefaultsStage.
+func TestMoeLog_SingleStageDefaults(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedRun(t, root, "tele", "report-2026", "meta-moe", run.StatusInProgress)
+	writeThread(t, root, "tele", "report-2026", "report", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"report body"}}`,
+	})
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"meta-moe", "log", "tele", "report-2026"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "report body") {
+		t.Fatalf("expected report body, got %q", out.String())
+	}
+}
+
+// TestMoeLog_LatestSentinel: `@latest` picks the run in (project,
+// workflow) with the freshest journal activity — mirrors
+// TestCatLatestSentinelResolvesMostRecent.
+func TestMoeLog_LatestSentinel(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	trailerstest.SeedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "newer", "sdlc", run.StatusInProgress)
+	writeThread(t, root, "tele", "older", "design", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"older transcript"}}`,
+	})
+	writeThread(t, root, "tele", "newer", "design", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"newer transcript"}}`,
+	})
+	t0 := time.Now().UTC().Add(-2 * time.Hour)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "older", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "newer", "sdlc", "design", t0.Add(time.Hour))
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "tele", "@latest", "design"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "newer transcript") {
+		t.Fatalf("expected @latest to resolve to newer, got: %q", out.String())
+	}
+	if strings.Contains(out.String(), "older transcript") {
+		t.Fatalf("did not expect older content when @latest pinned newer, got: %q", out.String())
 	}
 }

@@ -68,6 +68,11 @@ func init() {
 		Run:     runCat(ideaWorkflow, ideaDocID),
 	})
 	g.Register(&Command{
+		Name:    "log",
+		Summary: "render an idea's agent transcript",
+		Run:     runLog(ideaWorkflow, ideaDocID),
+	})
+	g.Register(&Command{
 		Name:    "move",
 		Summary: "re-home an open idea under a different project",
 		Run:     runIdeaMove,

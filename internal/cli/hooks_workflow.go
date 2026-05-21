@@ -38,6 +38,11 @@ func init() {
 		Summary: "dump the run's code canvas to stdout",
 		Run:     runCat(hooksWorkflow, hooksCodeDoc),
 	})
+	g.Register(&Command{
+		Name:    "log",
+		Summary: "render the run's code-stage agent transcript",
+		Run:     runLog(hooksWorkflow, hooksCodeDoc),
+	})
 	RegisterGroup(g)
 
 	w := NewWorkflow(hooksWorkflow)
