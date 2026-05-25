@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/run"
@@ -23,6 +24,41 @@ func init() {
 // per-turn data lives on the Request structs; this type is the
 // dispatch hook the registry hands back.
 type Agent struct{}
+
+// scrubbedKeys names the env vars stripped from every claude
+// subprocess's inherited environment. Both override Anthropic's OAuth
+// path silently: ANTHROPIC_API_KEY is documented to take precedence
+// over an active Claude subscription, and ANTHROPIC_AUTH_TOKEN is sent
+// as the Authorization bearer header with the same precedence. An
+// operator who set either for some other tool would otherwise have MoE
+// billing per-token API rates without warning.
+var scrubbedKeys = []string{
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+}
+
+// filteredEnv returns os.Environ() with scrubbedKeys removed, then
+// appends extra. Filtering (not setting to "") matters: an empty value
+// can read as "set but blank" to some clients and yield a 401 instead
+// of the OAuth fallback we want.
+func filteredEnv(extra []string) []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src)+len(extra))
+	for _, kv := range src {
+		drop := false
+		for _, k := range scrubbedKeys {
+			if strings.HasPrefix(kv, k+"=") {
+				drop = true
+				break
+			}
+		}
+		if drop {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, extra...)
+}
 
 // sandboxSettingsJSON is the `--settings` payload that pins the
 // claude subprocess into the built-in sandbox regardless of the
@@ -157,9 +193,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	default:
 		cmd.Dir = r.Root
 	}
-	if len(r.ExtraEnv) > 0 {
-		cmd.Env = append(os.Environ(), r.ExtraEnv...)
-	}
+	cmd.Env = filteredEnv(r.ExtraEnv)
 	cmd.Stdin = r.Stdin
 	cmd.Stdout = r.Stdout
 	cmd.Stderr = r.Stderr
@@ -224,9 +258,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	// session worktree for code stages, bureaucracy root for
 	// document-only). The project clone is reached via --add-dir.
 	cmd.Dir = r.Root
-	if len(r.ExtraEnv) > 0 {
-		cmd.Env = append(os.Environ(), r.ExtraEnv...)
-	}
+	cmd.Env = filteredEnv(r.ExtraEnv)
 	// No stdin: -p mode reads only flags + positional prompt. Wiring
 	// stdin would let claude block on a tty that nobody's typing into.
 	cmd.Stdin = nil

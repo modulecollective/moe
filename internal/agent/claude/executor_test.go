@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/agent"
@@ -110,6 +112,49 @@ func TestExecuteOneShotArgsIncludesAddDirsBeforeSettings(t *testing.T) {
 		"user",
 	}
 	assertArgsEqual(t, args, want)
+}
+
+// TestFilteredEnvDropsAPIKeys verifies the OAuth-precedence vars are
+// stripped from the inherited environment so the spawned claude falls
+// back to its OAuth Max-plan path. Other vars pass through unchanged
+// and ExtraEnv is appended last.
+func TestFilteredEnvDropsAPIKeys(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-be-dropped")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "bearer-should-be-dropped")
+	t.Setenv("ANTHROPIC_MODEL", "should-pass-through")
+	t.Setenv("MOE_TEST_PASSTHROUGH", "yes")
+
+	got := filteredEnv([]string{"EXTRA=1"})
+
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
+			t.Errorf("ANTHROPIC_API_KEY leaked into env: %q", kv)
+		}
+		if strings.HasPrefix(kv, "ANTHROPIC_AUTH_TOKEN=") {
+			t.Errorf("ANTHROPIC_AUTH_TOKEN leaked into env: %q", kv)
+		}
+	}
+	if !slices.Contains(got, "ANTHROPIC_MODEL=should-pass-through") {
+		t.Errorf("ANTHROPIC_MODEL should pass through (non-secret routing var): %v", got)
+	}
+	if !slices.Contains(got, "MOE_TEST_PASSTHROUGH=yes") {
+		t.Errorf("unrelated env var should pass through: %v", got)
+	}
+	if got[len(got)-1] != "EXTRA=1" {
+		t.Errorf("ExtraEnv should be appended last; got tail %q", got[len(got)-1])
+	}
+}
+
+// TestFilteredEnvEmptyExtra: even with no ExtraEnv, the filter still
+// runs so an inherited ANTHROPIC_API_KEY is scrubbed. This is the
+// case the old `if len(ExtraEnv) > 0` gate missed.
+func TestFilteredEnvEmptyExtra(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-be-dropped")
+	for _, kv := range filteredEnv(nil) {
+		if strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
+			t.Fatalf("ANTHROPIC_API_KEY leaked with nil ExtraEnv: %q", kv)
+		}
+	}
 }
 
 // assertArgsEqual reports the entire mismatch when args differ — a

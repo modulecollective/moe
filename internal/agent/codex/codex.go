@@ -57,6 +57,37 @@ func init() {
 	agent.Register("codex", Agent{})
 }
 
+// scrubbedKeys names the env vars stripped from every codex
+// subprocess's inherited environment. OPENAI_API_KEY is auto-read by
+// codex at startup and overrides the ChatGPT-plan OAuth token an
+// operator signed in with, silently switching the agent to per-token
+// API billing.
+var scrubbedKeys = []string{
+	"OPENAI_API_KEY",
+}
+
+// filteredEnv returns os.Environ() with scrubbedKeys removed, then
+// appends extra. Same shape as the claude backend's helper; kept
+// per-package so the drop list lives next to the backend that owns it.
+func filteredEnv(extra []string) []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src)+len(extra))
+	for _, kv := range src {
+		drop := false
+		for _, k := range scrubbedKeys {
+			if strings.HasPrefix(kv, k+"=") {
+				drop = true
+				break
+			}
+		}
+		if drop {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, extra...)
+}
+
 // Agent is the codex implementation of agent.Agent. Stateless — same
 // shape as claude.Agent.
 type Agent struct{}
@@ -90,9 +121,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	// (e.g. cwd under a sibling git worktree) trips apply_patch's
 	// worktree-boundary check.
 	cmd.Dir = r.Root
-	if len(r.ExtraEnv) > 0 {
-		cmd.Env = append(os.Environ(), r.ExtraEnv...)
-	}
+	cmd.Env = filteredEnv(r.ExtraEnv)
 	cmd.Stdin = r.Stdin
 	cmd.Stdout = r.Stdout
 	cmd.Stderr = r.Stderr
@@ -155,9 +184,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, cmdArgs...)
 	// Same cwd rule as Execute: always r.Root. See the comment there.
 	cmd.Dir = r.Root
-	if len(r.ExtraEnv) > 0 {
-		cmd.Env = append(os.Environ(), r.ExtraEnv...)
-	}
+	cmd.Env = filteredEnv(r.ExtraEnv)
 	// Codex blocks on stdin when invoked non-interactively with a
 	// non-tty stdin; explicitly close it.
 	cmd.Stdin = nil

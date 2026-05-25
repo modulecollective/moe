@@ -3,6 +3,7 @@ package codex
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -292,6 +293,45 @@ func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 	}
 	if strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Errorf("interactive path should keep sandbox enabled: %s", got)
+	}
+}
+
+// TestFilteredEnvDropsAPIKey strips OPENAI_API_KEY (codex auto-reads
+// it and silently switches off the ChatGPT-plan OAuth path), preserves
+// CODEX_ACCESS_TOKEN (that *is* the OAuth path) and other vars, and
+// appends ExtraEnv last.
+func TestFilteredEnvDropsAPIKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-should-be-dropped")
+	t.Setenv("CODEX_ACCESS_TOKEN", "oauth-should-pass")
+	t.Setenv("MOE_TEST_PASSTHROUGH", "yes")
+
+	got := filteredEnv([]string{"EXTRA=1"})
+
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "OPENAI_API_KEY=") {
+			t.Errorf("OPENAI_API_KEY leaked into env: %q", kv)
+		}
+	}
+	if !slices.Contains(got, "CODEX_ACCESS_TOKEN=oauth-should-pass") {
+		t.Errorf("CODEX_ACCESS_TOKEN must pass through (OAuth path): %v", got)
+	}
+	if !slices.Contains(got, "MOE_TEST_PASSTHROUGH=yes") {
+		t.Errorf("unrelated env var should pass through: %v", got)
+	}
+	if got[len(got)-1] != "EXTRA=1" {
+		t.Errorf("ExtraEnv should be appended last; got tail %q", got[len(got)-1])
+	}
+}
+
+// TestFilteredEnvEmptyExtra: filter still runs with nil ExtraEnv, so
+// an inherited OPENAI_API_KEY is scrubbed on a no-extras spawn (the
+// case the old `if len(ExtraEnv) > 0` gate missed).
+func TestFilteredEnvEmptyExtra(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-should-be-dropped")
+	for _, kv := range filteredEnv(nil) {
+		if strings.HasPrefix(kv, "OPENAI_API_KEY=") {
+			t.Fatalf("OPENAI_API_KEY leaked with nil ExtraEnv: %q", kv)
+		}
 	}
 }
 
