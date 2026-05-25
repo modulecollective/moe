@@ -88,13 +88,10 @@ func TestWorkspaceListPrintsRows(t *testing.T) {
 		t.Fatalf("list: exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"PROJECT", "NAME", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV", "tele", "dev", "tele/run-a", "*"} {
+	for _, want := range []string{"WORKSPACE", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV", "tele/dev", "tele/run-a", "*"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("list output missing %q: %q", want, got)
 		}
-	}
-	if strings.Contains(got, "tele/dev") {
-		t.Fatalf("list output should not pre-join project/name into one cell: %q", got)
 	}
 }
 

@@ -242,13 +242,14 @@ dev server's warm state shouldn't die at every branch switch.
   submodule (not a `git worktree` — that exposed a submodule /
   superproject gitdir boundary that codex's `apply_patch` tripped
   on).
-- `moe workspace new <project> <name>` — eagerly create a long-lived
+- `moe workspace new <project>/<name>` — eagerly create a long-lived
   working tree before any run attaches, e.g. to warm a dev server
   whose startup is slow.
 - `moe workspace list [<project>]` / `moe workspace shell` — inspect
   named workspaces (optionally filtered to one project) or drop into
-  one.
-- `moe workspace refresh <project> <name>` — re-run the project's
+  one. List prints a single `WORKSPACE` column in `<project>/<name>`
+  form so each row pastes straight into the other workspace verbs.
+- `moe workspace refresh <project>/<name>` — re-run the project's
   `dev-env.d/*` scripts in place when the cached env breaks.
 - `moe workspace remove` / `release` — tear down a workspace, or
   clear a stuck claim left behind by a crash.

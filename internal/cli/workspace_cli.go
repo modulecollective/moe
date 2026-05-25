@@ -256,12 +256,12 @@ func runWorkspaceRelease(args []string, stdout, stderr io.Writer) int {
 
 // runWorkspaceList prints a table of named workspaces. Without
 // arguments: every project's workspaces. With a project argument: just
-// that project's. Columns: PROJECT / NAME / BRANCH / CLAIM / DIRTY /
-// DEV-ENV. PROJECT stays in the header even when a single-project
-// filter is in play — predictable headers beat saving one column on
-// the filtered path, and the result is a copy-pasteable identifier
-// (`moe workspace remove <project> <name>`) instead of the slash form
-// that doesn't parse anywhere else.
+// that project's. Columns: WORKSPACE / BRANCH / CLAIM / DIRTY /
+// DEV-ENV, where WORKSPACE is the `<project>/<name>` identifier every
+// other workspace verb parses — paste a cell straight into `workspace
+// remove` / `shell` / `refresh` / `release`. Slash form holds in the
+// filtered case too: output shape stays the same regardless of
+// invocation.
 //
 // Empty result exits 0 with no output — same posture `project list`
 // takes for empty state.
@@ -298,7 +298,7 @@ func runWorkspaceList(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	rows := make([][]string, 0, len(infos)+1)
-	rows = append(rows, []string{"PROJECT", "NAME", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV"})
+	rows = append(rows, []string{"WORKSPACE", "BRANCH", "CLAIM", "DIRTY", "DEV-ENV"})
 	for _, info := range infos {
 		claim := "unclaimed"
 		if info.Claim != "" {
@@ -312,7 +312,7 @@ func runWorkspaceList(args []string, stdout, stderr io.Writer) int {
 		if info.DevEnvCached {
 			devenv = "cached"
 		}
-		rows = append(rows, []string{info.Project, info.Name, info.Branch, claim, dirty, devenv})
+		rows = append(rows, []string{info.Project + "/" + info.Name, info.Branch, claim, dirty, devenv})
 	}
 	writeAlignedRows(stdout, rows)
 	return 0
