@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>moe</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <h1>moe</h1>
+  </header>
+
+  <section class="dash-section">
+    <h2>active <span class="count">({{len .Active}})</span></h2>
+    {{if .Active}}
+    <ul class="rows">
+      {{range .Active}}
+      <li class="row">
+        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <span class="when">{{.When}}</span>
+        <span class="note">{{.Note}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(none)</p>{{end}}
+  </section>
+
+  <section class="dash-section">
+    <h2>backlog <span class="count">({{len .Backlog}})</span></h2>
+    {{if .Backlog}}
+    <ul class="rows">
+      {{range .Backlog}}
+      <li class="row">
+        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <span class="when">{{.When}}</span>
+        <span class="note">{{.Note}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(none)</p>{{end}}
+  </section>
+
+  <section class="dash-section">
+    <h2>completed
+      <span class="count">
+      {{if and (not .ShowAll) (gt .CompletedTotal (len .Completed))}}
+        ({{len .Completed}} of {{.CompletedTotal}})
+      {{else}}
+        ({{.CompletedTotal}})
+      {{end}}
+      </span>
+    </h2>
+    {{if .Completed}}
+    <ul class="rows">
+      {{range .Completed}}
+      <li class="row">
+        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <span class="when">{{.When}}</span>
+        <span class="note">{{.Note}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(none)</p>{{end}}
+  </section>
+
+  <footer class="page-footer">
+    <p>{{.ProjectCount}} project{{if ne .ProjectCount 1}}s{{end}} registered · {{.ActiveProjects}} with active runs</p>
+    {{if not .ShowAll}}<p><a href="?all=1">show all</a></p>{{end}}
+  </footer>
+</main>
+</body>
+</html>

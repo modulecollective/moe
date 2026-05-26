@@ -1,0 +1,7 @@
+/* placeholder — full stylesheet lands with the dash route */
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  max-width: 40rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
