@@ -74,7 +74,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	dated := "cross-project-search-" + todayDateSuffix()
 	// Namespace is shared — the sdlc run date-suffixes because the idea
 	// took "cross-project-search" first.
-	if !strings.Contains(out.String(), "opened run tele "+dated) {
+	if !strings.Contains(out.String(), "opened run tele/"+dated) {
 		t.Fatalf("expected slug %q in output, got: %q", dated, out.String())
 	}
 
@@ -91,7 +91,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	// HEAD is the idea-promote commit (status bump). Its predecessor
 	// is the sdlc open commit.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Promote idea tele cross-project-search → tele "+dated) {
+	if !strings.Contains(head, "Promote idea tele/cross-project-search → tele/"+dated) {
 		t.Fatalf("expected promote commit at HEAD, got:\n%s", head)
 	}
 	for _, want := range []string{
@@ -223,7 +223,7 @@ func TestRunNewFromIdeaFlagOnlyInvocation(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	want := "opened run tele flag-ordering-" + todayDateSuffix()
+	want := "opened run tele/flag-ordering-" + todayDateSuffix()
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("missing open confirmation %q: %q", want, out.String())
 	}

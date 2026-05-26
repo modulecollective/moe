@@ -44,7 +44,7 @@ func init() {
 	// branch (NeedsSandbox: false below), so the shared close skeleton
 	// has nothing to clean up — pass nil and ride the standard
 	// state-guard / harvest / status-flip path.
-	g.Register(closeCommand(metaMoeWorkflow, "Close meta-moe run %s %s", nil))
+	g.Register(closeCommand(metaMoeWorkflow, "Close meta-moe run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump the run's report canvas to stdout",

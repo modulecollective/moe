@@ -202,7 +202,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		moePrintf(stderr, "%s: close: %v\n", workflow, err)
 		return 1
 	}
-	moePrintf(stdout, "closed %s %s %s\n", workflow, projectID, runID)
+	moePrintf(stdout, "closed %s %s/%s\n", workflow, projectID, runID)
 	if nudge := twinReflectNudge(root, projectID, runID, workflow); nudge != "" {
 		moePrintf(stdout, "%s", nudge)
 	}

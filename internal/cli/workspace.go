@@ -98,7 +98,7 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 		if sandbox.Exists(root, md.Project, md.ID) {
 			workTree := sandbox.Path(root, md.Project, md.ID)
 			if err := devEnvRunTeardown(root, workTree, md, os.Stdout, os.Stderr); err != nil {
-				fmt.Fprintf(os.Stderr, "dev-env: teardown for %s %s: %v\n", md.Project, md.ID, err)
+				fmt.Fprintf(os.Stderr, "dev-env: teardown for %s/%s: %v\n", md.Project, md.ID, err)
 			}
 		}
 		return sandbox.Remove(root, md.Project, md.ID)

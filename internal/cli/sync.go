@@ -162,12 +162,12 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 	if prURL == "" {
 		// No MoE-PR trailer on record despite StatusPushed. Flag and
 		// skip rather than guess — the operator can untangle by hand.
-		moePrintf(stderr, "moe sync: %s %s is pushed but has no MoE-PR trailer; skipping\n", md.Project, md.ID)
+		moePrintf(stderr, "moe sync: %s/%s is pushed but has no MoE-PR trailer; skipping\n", md.Project, md.ID)
 		return nil
 	}
 	state, err := sync.PRStateOf(prURL)
 	if err != nil {
-		moePrintf(stderr, "moe sync: %s %s: %v; skipping\n", md.Project, md.ID, err)
+		moePrintf(stderr, "moe sync: %s/%s: %v; skipping\n", md.Project, md.ID, err)
 		return nil
 	}
 	switch strings.ToUpper(state.State) {
@@ -176,7 +176,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 	case "MERGED":
 		mergeSHA := state.MergeCommit.OID
 		if mergeSHA == "" {
-			moePrintf(stderr, "moe sync: %s %s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
+			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
 			return nil
 		}
 		ok, err := finalizePushedRun(root, md, run.StatusMerged, trailers.Block{Merged: mergeSHA}, stderr)
@@ -195,7 +195,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stdout, "%s: pushed -> closed\n", md.ID)
 		}
 	default:
-		moePrintf(stderr, "moe sync: %s %s has unexpected PR state %q; skipping\n", md.Project, md.ID, state.State)
+		moePrintf(stderr, "moe sync: %s/%s has unexpected PR state %q; skipping\n", md.Project, md.ID, state.State)
 	}
 	return nil
 }
@@ -215,22 +215,22 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 func finalizePushedRun(root string, md *run.Metadata, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
 	paths, err := enterTerminal(root, md, status, true)
 	if err != nil {
-		moePrintf(stderr, "moe sync: %s %s harvest failed: %v; retry next sync\n", md.Project, md.ID, err)
+		moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", md.Project, md.ID, err)
 		return false, nil
 	}
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
-		moePrintf(stderr, "warning: %s %s: %v\n", md.Project, md.ID, err)
+		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
 	}
 	if err := releaseRunWorkspace(root, md); err != nil {
-		moePrintf(stderr, "warning: %s %s: release workspace: %v\n", md.Project, md.ID, err)
+		moePrintf(stderr, "warning: %s/%s: release workspace: %v\n", md.Project, md.ID, err)
 	}
 	extra.Run = md.ID
 	extra.Project = md.Project
 	extra.Document = "push"
-	msg := fmt.Sprintf("sync: %s %s %s\n\n", md.Project, md.ID, strings.ToLower(status)) +
+	msg := fmt.Sprintf("sync: %s/%s %s\n\n", md.Project, md.ID, strings.ToLower(status)) +
 		extra.String()
 	if err := run.StageAndCommit(root, msg, paths...); err != nil {
-		return false, fmt.Errorf("moe sync: commit %s for %s %s: %w", strings.ToLower(status), md.Project, md.ID, err)
+		return false, fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
 	}
 	return true, nil
 }

@@ -772,7 +772,7 @@ func TestReportWikiSessionExitNonZeroOnFinalizeError(t *testing.T) {
 	// Per-turn commit succeeded (commitErr nil), so the operator still
 	// sees the "committed turn" line — finalize failure is loud but
 	// doesn't masquerade as a commit failure.
-	if !strings.Contains(stdout.String(), "committed reflect turn for moe r") {
+	if !strings.Contains(stdout.String(), "committed reflect turn for moe/r") {
 		t.Errorf("stdout missing committed-turn line: %q", stdout.String())
 	}
 }

@@ -124,7 +124,7 @@ func seedChainedFixture(t *testing.T, withReopen bool) string {
 	// Idea run (promoted). Original capture lands oldest; the promote
 	// commit pins LastActivity for `foo` to -72h.
 	trailerstest.SeedRun(t, root, "tele", "foo", "idea", run.StatusPromoted)
-	trailerstest.CommitTrailer(t, root, "Promote idea tele foo → tele foo-2026-05-14",
+	trailerstest.CommitTrailer(t, root, "Promote idea tele/foo → tele/foo-2026-05-14",
 		"MoE-Run: foo\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/foo-2026-05-14",
 		now.Add(-72*time.Hour))
 

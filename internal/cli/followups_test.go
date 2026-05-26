@@ -341,7 +341,7 @@ func TestSDLCCloseHarvestsFollowups(t *testing.T) {
 
 	// The followups.md update rides along on the close commit.
 	headBody := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(headBody, "Close sdlc run tele ship-it") {
+	if !strings.Contains(headBody, "Close sdlc run tele/ship-it") {
 		t.Fatalf("HEAD not the close commit:\n%s", headBody)
 	}
 	headPaths := gitLog(t, root, "-1", "--name-only", "--format=")

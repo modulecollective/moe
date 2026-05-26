@@ -43,7 +43,7 @@ func init() {
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
 		Run:     runShell,
 	})
-	g.Register(closeCommand("sdlc", "Close sdlc run %s %s", releaseWorkspaceCleanup))
+	g.Register(closeCommand("sdlc", "Close sdlc run %s/%s", releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (sdlc cat <project>/<run> <stage>)",

@@ -223,11 +223,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "opened run %s %s\n", md.Project, md.ID)
+	moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
 
 	if sourceIdea != nil {
 		if err := markIdeaPromoted(root, sourceIdea, md); err != nil {
-			moePrintf(stderr, "warning: could not mark idea %s %s promoted: %v\n", sourceIdea.Project, sourceIdea.ID, err)
+			moePrintf(stderr, "warning: could not mark idea %s/%s promoted: %v\n", sourceIdea.Project, sourceIdea.ID, err)
 			// The new run is already open; surface the warning but
 			// don't fail the command, since the idea->run transition
 			// is still greppable via the new run's MoE-Idea trailer.
@@ -279,7 +279,7 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf("Promote idea %s %s → %s %s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
+	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
 		trailers.Block{
 			Run:        md.ID,
 			Project:    md.Project,

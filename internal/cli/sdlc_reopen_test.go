@@ -89,7 +89,7 @@ func TestSDLCReopenSeedsDesignAndCarriesTrailer(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	dated := "fix-it-" + todayDateSuffix()
-	if !strings.Contains(out.String(), "opened run tele "+dated+" (reopen of fix-it)") {
+	if !strings.Contains(out.String(), "opened run tele/"+dated+" (reopen of fix-it)") {
 		t.Fatalf("missing open confirmation for %q in %q", dated, out.String())
 	}
 
@@ -153,7 +153,7 @@ func TestSDLCReopenSeedsKickoffWhenSourceEmpty(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	dated := "blank-" + todayDateSuffix()
-	if !strings.Contains(out.String(), "opened run tele "+dated+" (reopen of blank)") {
+	if !strings.Contains(out.String(), "opened run tele/"+dated+" (reopen of blank)") {
 		t.Fatalf("missing open confirmation for %q in %q", dated, out.String())
 	}
 
@@ -252,7 +252,7 @@ func TestSDLCReopenStripsDatedSuffix(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	dated := "search-" + todayDateSuffix()
-	if !strings.Contains(out.String(), "opened run tele "+dated) {
+	if !strings.Contains(out.String(), "opened run tele/"+dated) {
 		t.Fatalf("expected dated suffix stripped to %q, got: %q", dated, out.String())
 	}
 }
@@ -333,7 +333,7 @@ func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "kb-dead", "kb", run.StatusClosed)
-	trailerstest.CommitTrailer(t, root, "Close kb run tele kb-dead",
+	trailerstest.CommitTrailer(t, root, "Close kb run tele/kb-dead",
 		"MoE-Run: kb-dead\nMoE-Project: tele\nMoE-Workflow: kb",
 		time.Now().UTC().Add(-2*24*time.Hour))
 

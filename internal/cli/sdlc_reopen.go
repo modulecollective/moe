@@ -193,7 +193,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "opened run %s %s (reopen of %s)\n", md.Project, md.ID, priorSlug)
+	moePrintf(stdout, "opened run %s/%s (reopen of %s)\n", md.Project, md.ID, priorSlug)
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

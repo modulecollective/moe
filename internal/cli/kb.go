@@ -64,7 +64,7 @@ func init() {
 		Summary: "open a Claude Code ingest session on the project's wiki",
 		Run:     runSummarize,
 	})
-	g.Register(closeCommand("kb", "Close kb run %s %s", nil))
+	g.Register(closeCommand("kb", "Close kb run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (kb cat <project>/<run> <stage>)",

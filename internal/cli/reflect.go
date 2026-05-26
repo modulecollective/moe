@@ -142,7 +142,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "opened twin reflect %s %s\n", md.Project, md.ID)
+	moePrintf(stdout, "opened twin reflect %s/%s\n", md.Project, md.ID)
 
 	// Hand off to the chain prompt's fresh-run path. justFinished="" so
 	// promptNextStage falls back to Workflow.Next, which returns the
@@ -284,11 +284,11 @@ func loadTwinFeedback(root, projectID string, cfg wiki.Config) ([]twinFeedbackEn
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("read feedback %s %s: %w", md.Project, md.ID, err)
+			return nil, fmt.Errorf("read feedback %s/%s: %w", md.Project, md.ID, err)
 		}
 		when, err := run.LastFileActivity(root, rel)
 		if err != nil {
-			return nil, fmt.Errorf("git time %s %s: %w", md.Project, md.ID, err)
+			return nil, fmt.Errorf("git time %s/%s: %w", md.Project, md.ID, err)
 		}
 		if when.IsZero() {
 			// Present on disk but never committed — invisible to the
@@ -331,7 +331,7 @@ func loadIdeaBacklog(root, projectID string) ([]ideaSummary, error) {
 		}
 		body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, ideaDocID)))
 		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read idea %s %s: %w", md.Project, md.ID, err)
+			return nil, fmt.Errorf("read idea %s/%s: %w", md.Project, md.ID, err)
 		}
 		out = append(out, ideaSummary{slug: md.ID, body: string(body)})
 	}

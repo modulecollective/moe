@@ -1009,7 +1009,7 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		moePrintf(stderr, "commit turn: %v\n", commitErr)
 		return 1
 	default:
-		moePrintf(stdout, "committed %s turn for %s %s\n", in.DocID, in.Project, in.RunSlug)
+		moePrintf(stdout, "committed %s turn for %s/%s\n", in.DocID, in.Project, in.RunSlug)
 	}
 	if closeErr != nil {
 		moePrintf(stderr, "session close: %v\n", closeErr)

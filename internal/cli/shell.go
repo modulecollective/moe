@@ -83,7 +83,7 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	moePrintf(stdout, "shell in %s (run %s %s)\n", wp, md.Project, md.ID)
+	moePrintf(stdout, "shell in %s (run %s/%s)\n", wp, md.Project, md.ID)
 	return execShell(wp, mapToEnv(extraEnv), stderr)
 }
 
