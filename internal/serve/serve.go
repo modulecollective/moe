@@ -168,6 +168,7 @@ func (s *Server) registerRoutes() {
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
+	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.

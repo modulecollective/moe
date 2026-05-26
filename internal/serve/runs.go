@@ -129,6 +129,16 @@ type runVM struct {
 	Live        bool
 	Tail        string // PTY stdout, stripped to plain text
 	CanvasLinks []canvasLink
+	Buttons     []promptButton // chain-prompt buttons when one is active
+}
+
+// promptButton is one renderable button for the per-run page. Key
+// is what gets POSTed to /key; Label is what the operator sees;
+// Class lets the CSS color-code by intent (benign / accent / warn).
+type promptButton struct {
+	Key   string // "Y", "n", "!", "!!", ...
+	Label string // typically same as Key but readable
+	Class string // "benign" | "accent" | "warn"
 }
 
 type canvasLink struct {
@@ -147,7 +157,7 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tail, exited, exitErr := c.snapshot()
+	tail, prompt, exited, exitErr := c.snapshot()
 	now := time.Now()
 	vm := runVM{
 		ID:      id,
@@ -166,7 +176,105 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 		vm.Status = "exited cleanly"
 	}
 	vm.CanvasLinks = canvasLinksFor(s.opts.Root, projectID, slug, now)
+	if prompt.Active {
+		vm.Buttons = buttonsFor(prompt.Options)
+	}
 	s.render(w, r, "run.html", vm)
+}
+
+// handleRunKey writes one chain-prompt answer (single byte or "!!")
+// to the child's PTY stdin, then 303-redirects back to the run page.
+// Validates that the requested key is in the currently-active prompt
+// option set so a stale POST can't push an unsolicited byte into the
+// child.
+func (s *Server) handleRunKey(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	c, ok := s.children.get(id)
+	if !ok {
+		http.Error(w, "run "+id+" not live in this serve", http.StatusNotFound)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(r.FormValue("key"))
+	if key == "" {
+		http.Error(w, "missing key", http.StatusBadRequest)
+		return
+	}
+
+	_, prompt, exited, _ := c.snapshot()
+	if exited {
+		http.Error(w, "run already exited", http.StatusConflict)
+		return
+	}
+	if !prompt.Active {
+		http.Error(w, "no active chain prompt; refresh", http.StatusConflict)
+		return
+	}
+	if !keyAllowed(key, prompt.Options) {
+		http.Error(w, "key "+key+" not in current option set "+prompt.Options, http.StatusBadRequest)
+		return
+	}
+
+	if err := c.writeKeys(key); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+// keyAllowed checks that key is admissible given the live prompt's
+// option set. Single-char keys must appear verbatim in options; the
+// "!!" multi-char cascade is permitted whenever "!" is in options,
+// since they ride the same dispatcher.
+func keyAllowed(key, options string) bool {
+	if key == "!!" {
+		return strings.Contains(options, "!")
+	}
+	if len(key) != 1 {
+		return false
+	}
+	return strings.IndexByte(options, key[0]) >= 0
+}
+
+// buttonsFor maps an option string to renderable buttons. Keeps the
+// always-visible cascade extra (!!) right after the single ! so the
+// row reads left-to-right as "more aggressive". Class assignments
+// follow the design's color rule: Y/!/N benign, !! accent, x warn.
+func buttonsFor(options string) []promptButton {
+	out := make([]promptButton, 0, len(options)+1)
+	for i := 0; i < len(options); i++ {
+		k := string(options[i])
+		out = append(out, promptButton{
+			Key:   k,
+			Label: k,
+			Class: buttonClass(k),
+		})
+		if k == "!" {
+			out = append(out, promptButton{
+				Key:   "!!",
+				Label: "!!",
+				Class: "accent",
+			})
+		}
+	}
+	return out
+}
+
+func buttonClass(key string) string {
+	switch key {
+	case "x":
+		return "warn"
+	case "!":
+		return "benign"
+	default:
+		return "benign"
+	}
 }
 
 // canvasLinksFor enumerates the run's stage canvas files (under

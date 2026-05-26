@@ -6,16 +6,42 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/modulecollective/moe/internal/serve/pty"
 )
 
+// chainPromptRegex matches the moe chain-prompt line and captures the
+// option set between the square brackets. Format printed at
+// internal/cli/stage_next.go:359 is:
+//
+//	next: <hint> — run now? [Y/n/x/b/!]
+//
+// We capture just the bracket contents so the button renderer can
+// enumerate the keys without re-parsing the legend that follows.
+var chainPromptRegex = regexp.MustCompile(`— run now\? \[([A-Za-z!/]+)\]`)
+
+// promptWindow is the byte-window at the tail of the ring buffer
+// where a matching prompt is treated as "active". A prompt detected
+// deeper in history is stale — moe printed the prompt earlier, the
+// operator answered, and progress output has since pushed the
+// prompt out of the window.
+const promptWindow = 1024
+
 // tailBytes is the per-child ring-buffer cap on PTY stdout retained
 // for the activity log. Big enough for the chain-prompt context and
 // a few claude turns; small enough not to grow without bound.
 const tailBytes = 64 * 1024
+
+// Prompt is the chain-prompt state currently detected at the tail
+// of the child's PTY output. Active is true when a prompt line sits
+// in the last `promptWindow` bytes of the ring buffer.
+type Prompt struct {
+	Options string // single characters from the bracket set, e.g. "Ynxb!"
+	Active  bool
+}
 
 // child is one PTY-backed moe run the server is parenting.
 type child struct {
@@ -143,19 +169,25 @@ func (c *child) appendTail(data []byte) {
 	}
 }
 
-// writeKey writes a single byte to the child's stdin via the master.
-// Chain-prompt buttons send "Y", "!", "n", etc. one byte at a time.
-func (c *child) writeKey(b byte) error {
-	_, err := c.pty.File().Write([]byte{b})
+// writeKeys writes the given string (typically one or two bytes —
+// "Y", "!", "!!") followed by a newline so moe's line-buffered
+// readLine consumes it. Returns the underlying Write error.
+func (c *child) writeKeys(s string) error {
+	if len(s) == 0 {
+		return fmt.Errorf("serve: empty key")
+	}
+	_, err := c.pty.File().Write([]byte(s + "\n"))
 	return err
 }
 
-// snapshot returns a copy of the current tail plus the child's exit
-// state. Safe to call from request handlers; doesn't block the reader.
-func (c *child) snapshot() (tail []byte, exited bool, exitErr error) {
+// snapshot returns a copy of the current tail, the active chain-prompt
+// (if any), and the child's exit state. Safe to call from request
+// handlers; doesn't block the reader.
+func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr error) {
 	c.mu.Lock()
 	tail = append([]byte(nil), c.tail...)
 	c.mu.Unlock()
+	prompt = detectPrompt(tail)
 	select {
 	case <-c.done:
 		exited = true
@@ -163,4 +195,35 @@ func (c *child) snapshot() (tail []byte, exited bool, exitErr error) {
 	default:
 	}
 	return
+}
+
+// detectPrompt scans the tail for a chain-prompt match. Returns
+// Active=false unless the match sits in the last promptWindow bytes
+// of tail — a deeper match is stale (the operator already answered
+// and moe has since printed past it).
+func detectPrompt(tail []byte) Prompt {
+	if len(tail) == 0 {
+		return Prompt{}
+	}
+	matches := chainPromptRegex.FindAllSubmatchIndex(tail, -1)
+	if len(matches) == 0 {
+		return Prompt{}
+	}
+	// FindAll returns matches in order; take the last (most recent).
+	last := matches[len(matches)-1]
+	matchEnd := last[1]
+	if len(tail)-matchEnd > promptWindow {
+		// Prompt printed too far back to still be live.
+		return Prompt{}
+	}
+	// Group 1 holds the bracket contents, e.g. "Y/n/x/b/!". Strip
+	// slashes; what remains is the option-key alphabet.
+	raw := string(tail[last[2]:last[3]])
+	var keys []byte
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '/' {
+			keys = append(keys, raw[i])
+		}
+	}
+	return Prompt{Options: string(keys), Active: true}
 }

@@ -208,6 +208,70 @@ func TestNewRunMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestDetectPromptHappyPath(t *testing.T) {
+	tail := []byte("blah blah\nnext: moe sdlc design alpha/foo — run now? [Y/n/x/b/!]\n  Y = run · n = decline · x = scuttle (close) · b = back to stage · ! = cascade one stage\n  !<stage> = cascade to gate · !! = cascade and ship\n")
+	got := detectPrompt(tail)
+	if !got.Active {
+		t.Fatalf("expected active prompt, got %+v", got)
+	}
+	if got.Options != "Ynxb!" {
+		t.Errorf("Options = %q, want Ynxb!", got.Options)
+	}
+}
+
+func TestDetectPromptStaleMatch(t *testing.T) {
+	prompt := "next: moe sdlc design alpha/foo — run now? [Y/n/!]\n"
+	// Pad with > promptWindow bytes of post-prompt progress so the
+	// match falls outside the live window.
+	tail := []byte(prompt + strings.Repeat("progress\n", 200))
+	got := detectPrompt(tail)
+	if got.Active {
+		t.Errorf("prompt is stale, expected !Active; got %+v", got)
+	}
+}
+
+func TestDetectPromptNoMatch(t *testing.T) {
+	got := detectPrompt([]byte("just some normal output\n"))
+	if got.Active {
+		t.Errorf("expected !Active, got %+v", got)
+	}
+}
+
+func TestKeyAllowed(t *testing.T) {
+	cases := []struct {
+		key, opts string
+		want      bool
+	}{
+		{"Y", "Yn!", true},
+		{"n", "Yn!", true},
+		{"x", "Yn!", false},
+		{"!", "Yn!", true},
+		{"!!", "Yn!", true}, // !! permitted when ! is in options
+		{"!!", "Yn", false}, // and refused when it isn't
+		{"YY", "Yn!", false},
+		{"", "Yn!", false},
+	}
+	for _, c := range cases {
+		got := keyAllowed(c.key, c.opts)
+		if got != c.want {
+			t.Errorf("keyAllowed(%q, %q) = %v, want %v", c.key, c.opts, got, c.want)
+		}
+	}
+}
+
+func TestButtonsForOrdering(t *testing.T) {
+	got := buttonsFor("Yn!xb")
+	want := []string{"Y", "n", "!", "!!", "x", "b"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d buttons, want %d: %+v", len(got), len(want), got)
+	}
+	for i, b := range got {
+		if b.Key != want[i] {
+			t.Errorf("button[%d] = %q, want %q", i, b.Key, want[i])
+		}
+	}
+}
+
 func newTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
 	if opts.Logger == nil {

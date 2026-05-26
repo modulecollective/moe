@@ -29,7 +29,7 @@ func TestSpawnFillsTailAndReapsChild(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("child never exited")
 	}
-	tail, exited, exitErr := c.snapshot()
+	tail, _, exited, exitErr := c.snapshot()
 	if !exited {
 		t.Fatal("expected child to report exited")
 	}
@@ -139,6 +139,86 @@ func TestRunPageRendersAndCanvasLinks(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
+	}
+}
+
+func TestRunPageRendersButtonsForActivePrompt(t *testing.T) {
+	root := t.TempDir()
+	cs := newChildren()
+	// Spawn a sleeper so the child stays live; manually inject a
+	// prompt-shaped line into the tail so detectPrompt picks it up.
+	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := cs.get("p/r")
+	defer c.pty.Close()
+	c.appendTail([]byte("next: moe sdlc design p/r — run now? [Y/n/x/b/!]\n"))
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s.children = cs
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/p/r", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`name="key" value="Y"`,
+		`name="key" value="!"`,
+		`name="key" value="!!"`,
+		`name="key" value="x"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("button missing: %q\n%s", want, body)
+		}
+	}
+}
+
+func TestPostKeyRefusesUnknownKey(t *testing.T) {
+	root := t.TempDir()
+	cs := newChildren()
+	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := cs.get("p/r")
+	defer c.pty.Close()
+	c.appendTail([]byte("next: moe sdlc design p/r — run now? [Y/n/!]\n"))
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s.children = cs
+
+	form := url.Values{}
+	form.Set("key", "x") // not in [Y/n/!]
+	req := httptest.NewRequest("POST", "/run/p/r/key", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for off-set key, got %d", rr.Code)
+	}
+}
+
+func TestPostKeyRefusesIfNoActivePrompt(t *testing.T) {
+	root := t.TempDir()
+	cs := newChildren()
+	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := cs.get("p/r")
+	defer c.pty.Close()
+	// no prompt in tail
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s.children = cs
+
+	form := url.Values{}
+	form.Set("key", "Y")
+	req := httptest.NewRequest("POST", "/run/p/r/key", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d", rr.Code)
 	}
 }
 

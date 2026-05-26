@@ -24,10 +24,23 @@
   </section>
   {{end}}
 
+  {{if .Buttons}}
+  <section class="prompt">
+    <h2>chain prompt</h2>
+    <div class="buttons">
+      {{range .Buttons}}
+      <form method="post" action="/run/{{$.Project}}/{{$.Slug}}/key" class="key-form">
+        <input type="hidden" name="key" value="{{.Key}}">
+        <button type="submit" class="key {{.Class}}">{{.Label}}</button>
+      </form>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+
   <section class="activity">
     <h2>activity</h2>
     <pre class="log">{{.Tail}}</pre>
-    <p class="hint">chain-prompt buttons land in the next slice.</p>
   </section>
 </main>
 </body>
