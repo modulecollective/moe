@@ -81,18 +81,24 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // terminal status. For per-run sandboxes that means running the
 // project's dev-env teardown hooks (so postgres dbs / tmpdirs / etc.
 // die alongside the sandbox), then removing the clone — the branch
-// and worktree go with it. For named workspaces that means releasing
-// the claim and leaving the directory in place for the next run to
-// reuse; teardown happens at explicit `moe workspace refresh` or
-// `moe workspace remove`, since the workspace's env is expected to
-// outlive the run.
+// and worktree go with it. For named workspaces that means parking
+// the working tree on the project's default branch at the merged tip
+// (so the next claim doesn't anchor itself to a stale view), deleting
+// the local run branch, then releasing the claim. The directory
+// itself stays for the next run to reuse; dev-env teardown happens at
+// explicit `moe workspace refresh` or `moe workspace remove`, since
+// the workspace's env is expected to outlive the run.
 //
 // Idempotent: a run that never reached `sdlc code` (no clone, no
 // claim) is a no-op either way. Teardown is invoked best-effort —
 // a non-zero exit is logged but doesn't block sandbox removal,
 // because a half-removed sandbox is worse than a half-cleaned dev
 // resource (the operator can re-run cleanup; they can't undo
-// "sandbox stuck in a corrupt state").
+// "sandbox stuck in a corrupt state"). The workspace reposition is
+// similarly best-effort: the merge has already landed by the time
+// this is called, so any failure is logged and the claim is still
+// released. The operator can recover by hand with `moe workspace
+// shell` and a manual `git checkout <default> && git pull`.
 func releaseRunWorkspace(root string, md *run.Metadata) error {
 	if md.Workspace == "" {
 		if sandbox.Exists(root, md.Project, md.ID) {
@@ -102,6 +108,17 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 			}
 		}
 		return sandbox.Remove(root, md.Project, md.ID)
+	}
+	if workspace.Exists(root, md.Project, md.Workspace) {
+		if defaultBranch, err := defaultBranchForProject(root, md.Project); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reposition workspace: %v\n", err)
+		} else {
+			wp := workspace.Path(root, md.Project, md.Workspace)
+			runBranch := branchPrefix + md.ID
+			if err := workspace.ResetToDefault(wp, defaultBranch, runBranch); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: reposition workspace: %v\n", err)
+			}
+		}
 	}
 	return workspace.Release(root, md.Project, md.Workspace)
 }

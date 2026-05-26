@@ -17,14 +17,12 @@ import (
 const rebaseAutoResolveTimeout = 5 * time.Minute
 
 // launchRebaseResolve fires the one-shot agent inside a worktree to
-// resolve a stalled rebase. Two callers share this entry point:
-// session-close (the bureaucracy-side session worktree) and workspace
-// rebase (a named-workspace clone of a project's submodule). Both want
-// the same tight system prompt and the same 5-minute budget; the
-// per-caller kickoff carries the branch / conflict context.
-//
-// Overridable in tests so callers can be exercised end-to-end without
-// spinning a real claude subprocess.
+// resolve a stalled rebase. The session-close path (bureaucracy-side
+// session worktree) is the only caller today; the workspace verb's
+// rebase variant was retired once post-merge reposition folded into
+// the push-merge release path. Kept as a function-typed var so future
+// callers and tests can swap a stub without spinning a real claude
+// subprocess.
 var launchRebaseResolve = func(worktreePath, userPrompt string, stdout, stderr io.Writer) error {
 	// The chain-back rebase resolver is single-binary by construction
 	// (it's a recovery fallback, not a stage turn), so it pins claude
@@ -57,9 +55,9 @@ Scope:
 - You are inside the worktree (a session worktree or a named workspace).
   cwd is the worktree root.
 - Your single job is to get the current branch rebased onto main with a
-  clean working tree, then exit. The outer caller ("moe session close" or
-  "moe workspace rebase") will retry the rebase after you exit; if your
-  work is correct, the retry is a no-op.
+  clean working tree, then exit. The outer caller ("moe session close")
+  will retry the rebase after you exit; if your work is correct, the
+  retry is a no-op.
 
 Do:
 - Read git status first to see what state the worktree is in.

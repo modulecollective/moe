@@ -369,6 +369,195 @@ func TestReadClaimMigratesLegacyLayout(t *testing.T) {
 	}
 }
 
+// allowFFPushIntoCanonical configures the canonical src to accept a
+// push into its currently-checked-out main. The fixture canonical is
+// a working repo (not bare), so git's default `denyCurrentBranch=refuse`
+// would block the ff-push that simulates a real merge. The canonical's
+// worktree becoming inconsistent after the push is harmless — the
+// fixture never reads it again — and the alternative (advancing main
+// via WriteAndCommit then back-fetching) would diverge from what the
+// production push path actually does.
+func allowFFPushIntoCanonical(t *testing.T, root, projectID string) {
+	t.Helper()
+	src := filepath.Join(root, "projects", projectID, "src")
+	gittest.Run(t, src, "config", "receive.denyCurrentBranch", "ignore")
+}
+
+// TestResetToDefaultParksOnDefaultAfterMerge is the load-bearing case:
+// after a push-merge fast-forward (simulated here by pushing the run
+// branch into the canonical's default), ResetToDefault must leave the
+// workspace on the default branch at the merged tip with no local run
+// branch left behind.
+func TestResetToDefaultParksOnDefaultAfterMerge(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+	allowFFPushIntoCanonical(t, root, "tele")
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Attach(wp, "moe/run-a", "main"); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	// One feature commit so the merge has something to advance with.
+	if err := os.WriteFile(filepath.Join(wp, "feature.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, wp, "add", "feature.txt")
+	gittest.Run(t, wp, "commit", "-m", "feature")
+	mergedTip := gittest.Output(t, wp, "rev-parse", "HEAD")
+
+	// Simulate the push-merge: ff-push the run branch into origin/main.
+	// This is the same operation push.FastForwardToDefault performs from
+	// the workspace's origin (the canonical submodule).
+	gittest.Run(t, wp, "push", "origin", "moe/run-a:main")
+
+	if err := ResetToDefault(wp, "main", "moe/run-a"); err != nil {
+		t.Fatalf("ResetToDefault: %v", err)
+	}
+
+	// HEAD on main at the merged tip.
+	head := gittest.Output(t, wp, "rev-parse", "HEAD")
+	if head != mergedTip {
+		t.Errorf("HEAD = %s, want merged tip %s", head, mergedTip)
+	}
+	branch, err := git.Output(wp, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(branch) != "main" {
+		t.Errorf("current branch = %q, want main", strings.TrimSpace(branch))
+	}
+	// Local main matches the merged tip.
+	localMain := gittest.Output(t, wp, "rev-parse", "refs/heads/main")
+	if localMain != mergedTip {
+		t.Errorf("local main = %s, want %s", localMain, mergedTip)
+	}
+	// Run branch is gone.
+	if err := git.Run(wp, "rev-parse", "--verify", "--quiet", "refs/heads/moe/run-a"); err == nil {
+		t.Error("local moe/run-a should be deleted after ResetToDefault")
+	}
+	// Feature file is present in the worktree (carried by the merge).
+	if _, err := os.Stat(filepath.Join(wp, "feature.txt")); err != nil {
+		t.Errorf("feature.txt missing after ResetToDefault: %v", err)
+	}
+}
+
+// TestResetToDefaultIsIdempotent re-runs the verb against an already-
+// parked workspace and asserts every step is a no-op chain — same
+// guarantee Rebase carried.
+func TestResetToDefaultIsIdempotent(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+	allowFFPushIntoCanonical(t, root, "tele")
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Attach(wp, "moe/run-a", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wp, "feature.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, wp, "add", "feature.txt")
+	gittest.Run(t, wp, "commit", "-m", "feature")
+	gittest.Run(t, wp, "push", "origin", "moe/run-a:main")
+
+	if err := ResetToDefault(wp, "main", "moe/run-a"); err != nil {
+		t.Fatalf("ResetToDefault (first): %v", err)
+	}
+	headAfterFirst := gittest.Output(t, wp, "rev-parse", "HEAD")
+
+	if err := ResetToDefault(wp, "main", "moe/run-a"); err != nil {
+		t.Fatalf("ResetToDefault (second): %v", err)
+	}
+	headAfterSecond := gittest.Output(t, wp, "rev-parse", "HEAD")
+	if headAfterFirst != headAfterSecond {
+		t.Errorf("HEAD drifted on idempotent re-run: %s -> %s", headAfterFirst, headAfterSecond)
+	}
+}
+
+// TestResetToDefaultRefusesDirty pins fail-loud at the post-merge call
+// site: the merge has already landed, so an uncommitted edit here is a
+// real bug; the caller surfaces it as a warning rather than papering
+// over the inconsistent state.
+func TestResetToDefaultRefusesDirty(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Attach(wp, "moe/run-a", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wp, "stray.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = ResetToDefault(wp, "main", "moe/run-a")
+	if err == nil {
+		t.Fatal("expected ResetToDefault to refuse a dirty workspace")
+	}
+	if !strings.Contains(err.Error(), "uncommitted") {
+		t.Errorf("error should name the uncommitted state: %v", err)
+	}
+}
+
+// TestResetToDefaultMissingBranchIsSkipped covers the partial-retry
+// path: the local run branch was already cleaned by a prior attempt,
+// so the delete step is a silent skip rather than an error.
+func TestResetToDefaultMissingBranchIsSkipped(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Workspace already parked on main; never opened a run branch.
+	gittest.Run(t, wp, "checkout", "main")
+
+	if err := ResetToDefault(wp, "main", "moe/never-existed"); err != nil {
+		t.Errorf("ResetToDefault should tolerate a missing run branch: %v", err)
+	}
+}
+
+// TestResetToDefaultMissingWorkspaceIsNoop matches the no-op shape of
+// Release on a workspace that never materialised — the caller is
+// best-effort and shouldn't fail if `sdlc code` never ran.
+func TestResetToDefaultMissingWorkspaceIsNoop(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	if err := ResetToDefault(filepath.Join(root, "ghost"), "main", "moe/run-a"); err != nil {
+		t.Errorf("ResetToDefault on missing dir should be a no-op: %v", err)
+	}
+}
+
+// TestResetToDefaultRequiresDefaultBranch fails early on a missing
+// default — same shape Rebase carried. The caller (releaseRunWorkspace)
+// shouldn't be able to elide it by accident.
+func TestResetToDefaultRequiresDefaultBranch(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	seedSrc(t, root, "tele")
+	wp, err := Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ResetToDefault(wp, "", "moe/run-a")
+	if err == nil {
+		t.Fatal("expected ResetToDefault to refuse an empty default branch")
+	}
+	if !strings.Contains(err.Error(), "default branch is required") {
+		t.Errorf("error should name the empty default branch: %v", err)
+	}
+}
+
 // TestReleaseCleansBothLocations seeds a stale legacy claim alongside
 // the current-layout claim (the half-migrated state that could exist
 // if a run wrote the legacy file and an Acquire-by-the-same-run later

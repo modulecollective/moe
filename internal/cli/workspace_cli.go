@@ -1,13 +1,10 @@
 package cli
 
 import (
-	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"strings"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
 )
@@ -55,16 +52,20 @@ func writeAlignedRows(w io.Writer, rows [][]string) {
 //   - remove    — tear down dev-env, then delete the dir
 //   - release   — clear a stuck claim
 //   - refresh   — rebuild the cached dev-env in place
-//   - rebase    — advance workspace branch onto the canonical's main
 //
 // The verb sits at the top level rather than under `moe sdlc shell`
 // because the workspace concept spans workflows — a future workflow
 // that uses named workspaces (none today, but the shape is in place)
 // would share the same admin surface. Same reason `moe project` sits
 // at the top level.
+//
+// Post-merge reposition (fetch, ff local default, drop the run branch)
+// is folded into `releaseRunWorkspace` so the workspace is parked on
+// the merged tip as part of the push-merge flow — no operator-driven
+// `workspace rebase` verb needed for the common case.
 
 func init() {
-	g := NewCommandGroup("workspace", "named-workspace administration: new, list, shell, remove, release, refresh, rebase")
+	g := NewCommandGroup("workspace", "named-workspace administration: new, list, shell, remove, release, refresh")
 	g.Register(&Command{
 		Name:    "new",
 		Summary: "create a named workspace for a project (idempotent)",
@@ -94,11 +95,6 @@ func init() {
 		Name:    "refresh",
 		Summary: "rebuild a workspace's cached dev-env in place",
 		Run:     runWorkspaceRefresh,
-	})
-	g.Register(&Command{
-		Name:    "rebase",
-		Summary: "advance a workspace branch onto the canonical's current main",
-		Run:     runWorkspaceRebase,
 	})
 	RegisterGroup(g)
 }
@@ -497,159 +493,4 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "dev-env refreshed for workspace %s/%s\n", projectID, name)
 	return 0
-}
-
-// runWorkspaceRebase brings the workspace's view of the canonical's
-// default branch forward, then rebases the workspace's current branch
-// onto it. The verb is operator-driven: the long-lived workspace dir
-// holds a branch indefinitely, and `moe push` / `moe sync` keep the
-// canonical fresh — but nothing else propagates that movement into a
-// claimed workspace until this verb runs.
-//
-// Two layers of resolution share one entry:
-//
-//   - Workspace path missing on disk → refuse with a pointer to
-//     `moe workspace new`. Same shape as release / refresh.
-//   - Dirty working tree or detached HEAD → workspace.Rebase refuses;
-//     surface the error verbatim. The operator commits or checks out a
-//     branch and retries.
-//   - Rebase conflicts → workspace.Rebase returns
-//     *workspace.RebaseFailureError. Fire the shared one-shot resolver
-//     (same agent the session-close path uses) and retry once. Single-
-//     shot: if the second attempt still fails the typed error surfaces
-//     and the operator resolves by hand.
-func runWorkspaceRebase(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("workspace rebase", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe workspace rebase <project>/<name>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Fetches the canonical's current default branch into the workspace,")
-		moePrintln(stderr, "fast-forwards the workspace's local default branch, then rebases the")
-		moePrintln(stderr, "currently-checked-out branch onto it. Refuses on dirty workspaces and")
-		moePrintln(stderr, "detached HEAD. On rebase conflicts, a one-shot agent gets one attempt")
-		moePrintln(stderr, "to resolve before the conflict surfaces back to you.")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	projectID, name, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "workspace rebase: %v\n", err)
-		return 2
-	}
-
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if err := workspace.ValidateName(name); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if !workspace.Exists(root, projectID, name) {
-		moePrintf(stderr, "workspace %q for project %q does not exist on disk; create it with `moe workspace new`\n", name, projectID)
-		return 1
-	}
-	defaultBranch, err := defaultBranchForProject(root, projectID)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	wp := workspace.Path(root, projectID, name)
-
-	res, err := workspace.Rebase(wp, defaultBranch)
-	if err == nil {
-		printWorkspaceRebaseResult(stdout, projectID, name, res)
-		return 0
-	}
-	var rebaseFail *workspace.RebaseFailureError
-	if !errors.As(err, &rebaseFail) {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
-	// Single-shot recovery: fire the resolver agent inside the
-	// workspace, then retry once. The retry calls workspace.Rebase
-	// again rather than just `git rebase main`, because the resolver
-	// may have left the branch in a state where the FF/fetch dance
-	// still has work to do — re-running the whole sequence is cheaper
-	// than reasoning about which steps the agent already completed.
-	moePrintf(stderr, "workspace rebase: %v\n", err)
-	moePrintln(stderr, "  launching an agent to resolve the rebase; single-shot — if it can't, the message above is what you'll see again")
-
-	prompt := buildWorkspaceRebaseResolveKickoff(rebaseFail)
-	if agentErr := launchRebaseResolve(rebaseFail.WorkspacePath, prompt, stdout, stderr); agentErr != nil {
-		moePrintf(stderr, "  auto-resolve agent: %v\n", agentErr)
-	}
-	res, err = workspace.Rebase(wp, defaultBranch)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	printWorkspaceRebaseResult(stdout, projectID, name, res)
-	return 0
-}
-
-// printWorkspaceRebaseResult renders the success summary. Three shapes
-// keyed off what moved: nothing (already up to date), main only (HEAD
-// was the default branch or no feature commits past it), or both
-// main and the feature branch.
-func printWorkspaceRebaseResult(w io.Writer, projectID, name string, res workspace.RebaseResult) {
-	id := projectID + "/" + name
-	mainMoved := res.MainBefore != res.MainAfter
-	branchMoved := res.BranchBefore != res.BranchAfter
-	if !mainMoved && !branchMoved {
-		moePrintf(w, "workspace %s: already up to date with %s\n", id, res.DefaultBranch)
-		return
-	}
-	if res.Branch == res.DefaultBranch {
-		moePrintf(w, "workspace %s: %s fast-forwarded %s -> %s\n",
-			id, res.DefaultBranch, git.ShortSHA(res.MainBefore), git.ShortSHA(res.MainAfter))
-		return
-	}
-	if !branchMoved {
-		moePrintf(w, "workspace %s: %s fast-forwarded %s -> %s; %s already on top of %s\n",
-			id, res.DefaultBranch, git.ShortSHA(res.MainBefore), git.ShortSHA(res.MainAfter),
-			res.Branch, res.DefaultBranch)
-		return
-	}
-	moePrintf(w, "workspace %s: %s %s -> %s; rebased %s %s -> %s\n",
-		id, res.DefaultBranch, git.ShortSHA(res.MainBefore), git.ShortSHA(res.MainAfter),
-		res.Branch, git.ShortSHA(res.BranchBefore), git.ShortSHA(res.BranchAfter))
-}
-
-// buildWorkspaceRebaseResolveKickoff is the agent-facing user prompt
-// for the workspace rebase chain-back. Conflict-state only: refuseDirty
-// fires earlier so the resolver never sees the "rebase refused to
-// start" case session-close has to handle. Names the workspace branch
-// explicitly so the agent doesn't get confused with the bureaucracy
-// session worktree case the same resolver also serves.
-func buildWorkspaceRebaseResolveKickoff(e *workspace.RebaseFailureError) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "`moe workspace rebase` tried to rebase %s onto the project's default branch and hit conflicts. The rebase has been aborted, so the working tree is clean and the branch is back at its pre-rebase tip — you are starting from the conflict state, not mid-rebase.\n\n", e.Branch)
-	if len(e.Conflicts) > 0 {
-		b.WriteString("Files git flagged as conflicting on the abandoned rebase:\n")
-		for _, p := range e.Conflicts {
-			fmt.Fprintf(&b, "  - %s\n", p)
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("Re-run the rebase yourself (`git rebase main`), resolve the conflicts, and commit (or `git rebase --continue`) as you go. Then exit — the outer workspace-rebase verb will retry.\n\n")
-	if e.GitOutput != "" {
-		b.WriteString("Raw git output that triggered this:\n\n")
-		b.WriteString(e.GitOutput)
-		if !strings.HasSuffix(e.GitOutput, "\n") {
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
 }

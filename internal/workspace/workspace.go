@@ -460,6 +460,67 @@ func checkoutNewFrom(workspacePath, branch, base string) error {
 	return nil
 }
 
+// ResetToDefault parks the workspace on the project's default branch
+// after a merge has landed for the holding run. The CLI's release path
+// calls it on the workspace branch of the push-merge flow so the next
+// claim doesn't anchor itself to a stale view:
+//
+//   - fetch origin <defaultBranch> with --prune (refreshes
+//     origin/<defaultBranch> and drops the dead remote-tracking ref
+//     for the merged run branch left behind by DeleteRemoteBranch).
+//   - check out <defaultBranch>.
+//   - fast-forward local <defaultBranch> to origin/<defaultBranch>.
+//   - delete the local run branch (force; the ff above already advanced
+//     default past it, but -D names the intent: "this branch is gone,
+//     we know it's gone").
+//
+// Refuses on a dirty working tree. Merge has already landed at this
+// point, so dirty here is a real bug — fail loud and let the operator
+// recover by hand rather than silently leaving the next run with the
+// same stale-default problem.
+//
+// Idempotent. If already on <defaultBranch>, with <defaultBranch>
+// already at origin/<defaultBranch>, and the run branch already gone,
+// every step is a no-op. Calling twice is safe.
+//
+// runBranch is the local branch to delete; if it doesn't exist (e.g.,
+// already cleaned on a prior partial run) the delete step is skipped.
+// Empty runBranch skips the delete entirely — useful for paths that
+// just want the park-on-default behaviour without naming a branch to
+// drop.
+func ResetToDefault(workspacePath, defaultBranch, runBranch string) error {
+	if defaultBranch == "" {
+		return fmt.Errorf("workspace: ResetToDefault: default branch is required")
+	}
+	if _, err := os.Stat(workspacePath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("workspace: ResetToDefault: stat %s: %w", workspacePath, err)
+	}
+	if err := refuseDirty(workspacePath); err != nil {
+		return err
+	}
+	if out, err := git.Combined(workspacePath, "fetch", "--prune", "origin", defaultBranch); err != nil {
+		return fmt.Errorf("workspace: ResetToDefault: fetch --prune origin %s in %s: %w (%s)",
+			defaultBranch, workspacePath, err, strings.TrimSpace(out))
+	}
+	if err := git.Run(workspacePath, "checkout", defaultBranch); err != nil {
+		return fmt.Errorf("workspace: ResetToDefault: checkout %s in %s: %w",
+			defaultBranch, workspacePath, err)
+	}
+	originRef := "refs/remotes/origin/" + defaultBranch
+	if out, err := git.Combined(workspacePath, "merge", "--ff-only", originRef); err != nil {
+		return fmt.Errorf("workspace: ResetToDefault: ff-merge %s in %s: %w (%s)",
+			originRef, workspacePath, err, strings.TrimSpace(out))
+	}
+	if runBranch != "" && runBranch != defaultBranch && branchExists(workspacePath, runBranch) {
+		if err := git.Run(workspacePath, "branch", "-D", runBranch); err != nil {
+			return fmt.Errorf("workspace: ResetToDefault: delete branch %s: %w", runBranch, err)
+		}
+	}
+	return nil
+}
+
 func writeClaim(workspacePath string, c Claim) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
