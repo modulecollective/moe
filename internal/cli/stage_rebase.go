@@ -5,19 +5,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
-	"github.com/modulecollective/moe/internal/agent"
-	_ "github.com/modulecollective/moe/internal/agent/claude"
 	"github.com/modulecollective/moe/internal/session"
 )
-
-// rebaseAutoResolveTimeout caps the chain-back agent's wall-time.
-// 5min matches wiki finalize's budget — the failure mode this targets
-// (submodule pointer bump on main while a session was open) is sub-30-
-// seconds work; longer timeouts only help genuinely ambiguous conflicts
-// the agent probably shouldn't be resolving autonomously anyway.
-const rebaseAutoResolveTimeout = 5 * time.Minute
 
 // closeWithAutoResolve wraps a close closure: on *RebaseFailureError,
 // release the lock (already done — closeSess holds it inside its
@@ -40,68 +30,11 @@ func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, st
 	moePrintln(stderr, "  launching an agent to resolve the rebase; single-shot — if it can't, the message above is what you'll see again")
 
 	prompt := buildSessionRebaseResolveKickoff(rebaseFail)
-	if agentErr := launchSessionRebaseResolve(rebaseFail.WorktreePath, prompt, stdout, stderr); agentErr != nil {
+	if agentErr := launchRebaseResolve(rebaseFail.WorktreePath, prompt, stdout, stderr); agentErr != nil {
 		moePrintf(stderr, "  auto-resolve agent: %v\n", agentErr)
 	}
 	return closeSess(okToPush)
 }
-
-// launchSessionRebaseResolve fires the one-shot agent inside the
-// session worktree. Overridable in tests so closeWithAutoResolve can
-// be exercised end-to-end without spinning a real claude subprocess.
-var launchSessionRebaseResolve = func(worktreePath, userPrompt string, stdout, stderr io.Writer) error {
-	// The chain-back rebase resolver is single-binary by construction
-	// (it's a session-close fallback, not a stage turn), so it pins
-	// claude rather than reading from any per-run agent setting.
-	a, err := agent.Get("claude")
-	if err != nil {
-		return err
-	}
-	_, err = a.ExecuteOneShot(agent.OneShotRequest{
-		Root:       worktreePath,
-		Prompt:     sessionRebaseResolveSystemPrompt,
-		UserPrompt: userPrompt,
-		ClonePath:  worktreePath,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		Timeout:    rebaseAutoResolveTimeout,
-	})
-	return err
-}
-
-// sessionRebaseResolveSystemPrompt is the system-prompt addendum for
-// the chain-back agent. Tight scope: it's not editing the canvas, just
-// landing the session branch on main. The "must not" list mirrors the
-// design's enumeration — no pushing, no force, no touching other
-// branches, no hook bypass, no nuking the worktree from above.
-const sessionRebaseResolveSystemPrompt = `You are resolving a failed rebase of a stage-session branch onto main.
-
-Scope:
-- You are inside the session worktree. cwd is the worktree root.
-- Your single job is to get the session branch rebased onto main with a clean
-  working tree, then exit. The outer "moe session close" will retry the rebase
-  + ff-merge after you exit; if your work is correct, the retry is a no-op.
-
-Do:
-- Read git status first to see what state the worktree is in.
-- Run "git rebase main" yourself and resolve conflicts as they come up.
-- Preserve the session's intent (the work on the branch) over main's edits
-  when conflicts involve the branch's actual content; let main win for
-  submodule-pointer bumps and other bureaucracy-side drift.
-- Commit (or "git rebase --continue") as you go.
-
-Do NOT:
-- Push, force-push, or touch the remote.
-- Use --no-verify, --no-gpg-sign, or any hook-bypass flag.
-- Switch branches, delete branches, or check out anything other than the
-  current session branch.
-- Run "git reset --hard" outside the worktree, or rm -rf the worktree.
-- Edit the canvas content as part of conflict resolution — the canvas is
-  the work; conflicts there are real and should be resolved keeping the
-  session's intent intact, not erased.
-
-When the worktree is clean and "git rebase main" reports nothing to do,
-you're done. Exit.`
 
 // buildSessionRebaseResolveKickoff is the agent-facing user prompt
 // describing the specific failure. Two shapes keyed off Dirty: dirty

@@ -24,13 +24,13 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 	}
 
 	var capturedWorktree, capturedPrompt string
-	prev := launchSessionRebaseResolve
-	launchSessionRebaseResolve = func(worktreePath, userPrompt string, _, _ io.Writer) error {
+	prev := launchRebaseResolve
+	launchRebaseResolve = func(worktreePath, userPrompt string, _, _ io.Writer) error {
 		capturedWorktree = worktreePath
 		capturedPrompt = userPrompt
 		return nil
 	}
-	t.Cleanup(func() { launchSessionRebaseResolve = prev })
+	t.Cleanup(func() { launchRebaseResolve = prev })
 
 	calls := 0
 	var lastOkToPush bool
@@ -79,11 +79,11 @@ func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
 		GitOutput:    "stuck",
 	}
 
-	prev := launchSessionRebaseResolve
-	launchSessionRebaseResolve = func(_, _ string, _, _ io.Writer) error {
+	prev := launchRebaseResolve
+	launchRebaseResolve = func(_, _ string, _, _ io.Writer) error {
 		return nil
 	}
-	t.Cleanup(func() { launchSessionRebaseResolve = prev })
+	t.Cleanup(func() { launchRebaseResolve = prev })
 
 	calls := 0
 	closeSess := func(okToPush bool) error {
@@ -108,12 +108,12 @@ func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
 // that isn't a *RebaseFailureError (commit failure, worktree-remove
 // failure, etc.) passes through without firing the agent or retrying.
 func TestCloseWithAutoResolvePassesNonRebaseErrorsUnchanged(t *testing.T) {
-	prev := launchSessionRebaseResolve
-	launchSessionRebaseResolve = func(_, _ string, _, _ io.Writer) error {
+	prev := launchRebaseResolve
+	launchRebaseResolve = func(_, _ string, _, _ io.Writer) error {
 		t.Fatal("agent must not fire for non-rebase errors")
 		return nil
 	}
-	t.Cleanup(func() { launchSessionRebaseResolve = prev })
+	t.Cleanup(func() { launchRebaseResolve = prev })
 
 	wantErr := errors.New("some other close failure")
 	calls := 0
