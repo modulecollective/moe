@@ -1,15 +1,19 @@
 package serve
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 func TestDashRouteRendersBuckets(t *testing.T) {
@@ -144,6 +148,78 @@ func TestStaticAssetServed(t *testing.T) {
 	}
 }
 
+func TestNewRunFormEmptyRoot(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "no projects registered") {
+		t.Errorf("empty-root form should suggest `moe project add`, got:\n%s", body)
+	}
+	if strings.Contains(body, "<form") {
+		t.Errorf("empty-root form should hide the form entirely")
+	}
+}
+
+func TestNewRunFormWithProjects(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	seedProject(t, root, "beta")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<form`, `name="project"`, `name="slug"`, `name="agent"`,
+		`>alpha<`, `>beta<`,
+		`>claude<`, `>codex<`,
+		`(default)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("form missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestNewRunPostNotImplementedYet(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/new", nil))
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("want 501 until per-run slice lands, got %d", rr.Code)
+	}
+}
+
+func TestNewRunMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/run/new", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Allow"); !strings.Contains(got, "GET") || !strings.Contains(got, "POST") {
+		t.Errorf("Allow header should list GET and POST, got %q", got)
+	}
+}
+
 func newTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
 	if opts.Logger == nil {
@@ -154,4 +230,28 @@ func newTestServer(t *testing.T, opts Options) *Server {
 		t.Fatalf("New: %v", err)
 	}
 	return s
+}
+
+// seedProject lays down projects/<id>/project.json with a placeholder
+// remote so project.List picks it up — same shape as the project
+// package's own test fixture, just inlined here.
+func seedProject(t *testing.T, root, id string) {
+	t.Helper()
+	dir := filepath.Join(root, "projects", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := project.Metadata{
+		ID:            id,
+		Remote:        "git@example.test:" + id + ".git",
+		DefaultBranch: "main",
+		Submodule:     "modules/" + id,
+	}
+	b, err := json.MarshalIndent(md, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

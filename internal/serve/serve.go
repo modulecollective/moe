@@ -158,6 +158,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/", s.handleDash)
+	s.router.HandleFunc("/run/new", s.handleNewRun)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.
@@ -168,6 +169,21 @@ func (s *Server) registerRoutes() {
 		panic("serve: sub static FS: " + err.Error())
 	}
 	s.router.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+}
+
+// handleNewRun dispatches GET (form render) vs POST (spawn child) on
+// the single /run/new path. The POST handler lands in the per-run /
+// PTY slice; for now POSTs return 405 with a hint.
+func (s *Server) handleNewRun(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleNewRunForm(w, r)
+	case http.MethodPost:
+		http.Error(w, "spawn not wired yet — per-run / PTY slice lands next", http.StatusNotImplemented)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleDash renders the home page. Pulls dash data through the

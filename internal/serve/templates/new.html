@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>new run — moe</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <h1><a href="/">moe</a> · new run</h1>
+  </header>
+
+  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
+
+  {{if not .Projects}}
+  <p class="empty">no projects registered. Run <code>moe project add &lt;repo-url&gt;</code> on the serve host first.</p>
+  {{else}}
+  <form method="post" action="/run/new" class="new-run">
+    <label>
+      project
+      <select name="project" required>
+        {{range .Projects}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </label>
+
+    <label>
+      slug
+      <input type="text" name="slug" required autofocus
+             pattern="[a-z0-9][a-z0-9-]*"
+             placeholder="kebab-case-slug">
+    </label>
+
+    {{if .Workspaces}}
+    <label>
+      workspace <span class="hint">(optional; sdlc/hooks only)</span>
+      <select name="workspace">
+        <option value="">(none)</option>
+        {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}">{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+
+    <label>
+      agent <span class="hint">(optional; resolves to default if blank)</span>
+      <select name="agent">
+        {{range .Agents}}<option value="{{.}}">{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
+      </select>
+    </label>
+
+    <button type="submit">open run</button>
+  </form>
+  {{end}}
+</main>
+</body>
+</html>
