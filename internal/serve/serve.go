@@ -66,13 +66,14 @@ type Options struct {
 	GatherDash func(showAll bool) (rows []dash.Row, projectCount, activeProjects int, err error)
 }
 
-// Server owns the HTTP listener and (in later slices) the registry of
-// live PTY children.
+// Server owns the HTTP listener and the registry of live PTY
+// children.
 type Server struct {
-	opts   Options
-	addr   string
-	tmpl   *template.Template
-	router *http.ServeMux
+	opts     Options
+	addr     string
+	tmpl     *template.Template
+	router   *http.ServeMux
+	children *children
 }
 
 //go:embed templates/*.html static/*
@@ -102,10 +103,11 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		opts:   opts,
-		addr:   addr,
-		tmpl:   tmpl,
-		router: http.NewServeMux(),
+		opts:     opts,
+		addr:     addr,
+		tmpl:     tmpl,
+		router:   http.NewServeMux(),
+		children: newChildren(),
 	}
 	s.registerRoutes()
 	return s, nil
@@ -150,6 +152,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if err := srv.Shutdown(shutCtx); err != nil {
 			s.logf("shutdown: %v", err)
 		}
+		// Tear down PTY children alongside HTTP graceful shutdown.
+		// The kernel SIGHUPs them via controlling-terminal teardown
+		// when their master fd closes.
+		s.children.shutdown(shutCtx)
 		return <-errCh
 	case err := <-errCh:
 		return err
@@ -159,6 +165,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/", s.handleDash)
 	s.router.HandleFunc("/run/new", s.handleNewRun)
+	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
+	// and slug fall out of the URL without manual splitting.
+	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.
@@ -171,15 +180,14 @@ func (s *Server) registerRoutes() {
 	s.router.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 }
 
-// handleNewRun dispatches GET (form render) vs POST (spawn child) on
-// the single /run/new path. The POST handler lands in the per-run /
-// PTY slice; for now POSTs return 405 with a hint.
+// handleNewRun dispatches GET (form render) vs POST (spawn child)
+// on the single /run/new path.
 func (s *Server) handleNewRun(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		s.handleNewRunForm(w, r)
 	case http.MethodPost:
-		http.Error(w, "spawn not wired yet — per-run / PTY slice lands next", http.StatusNotImplemented)
+		s.handleNewRunSubmit(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

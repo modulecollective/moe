@@ -193,18 +193,6 @@ func TestNewRunFormWithProjects(t *testing.T) {
 	}
 }
 
-func TestNewRunPostNotImplementedYet(t *testing.T) {
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: t.TempDir(),
-	})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/new", nil))
-	if rr.Code != http.StatusNotImplemented {
-		t.Fatalf("want 501 until per-run slice lands, got %d", rr.Code)
-	}
-}
-
 func TestNewRunMethodNotAllowed(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
