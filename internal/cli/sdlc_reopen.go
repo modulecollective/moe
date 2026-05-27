@@ -175,6 +175,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		Trailers:    trailers.Block{ReopenOf: priorSlug},
 		Workspace:   wsName,
 		Agent:       agentName,
+		ReopenOf:    priorSlug,
 	}
 
 	var md *run.Metadata

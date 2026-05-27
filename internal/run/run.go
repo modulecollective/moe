@@ -82,7 +82,15 @@ type Metadata struct {
 	// Per-stage overrides (`--agent codex` on a single stage) read
 	// past this value but do not write back — the run-level default
 	// is sticky.
-	Agent     string               `json:"agent,omitempty"`
+	Agent string `json:"agent,omitempty"`
+	// ReopenOf, when non-empty, names the prior run slug this run was
+	// reopened from. Mirrors the MoE-Reopen-Of trailer on the open
+	// commit, but lives in run.json so the stage prompt assembler can
+	// surface prior-run lineage without walking git per stage turn.
+	// Set at open time by `moe sdlc reopen` (via Options.ReopenOf);
+	// empty on every other path. omitempty keeps pre-existing run.json
+	// bodies unchanged.
+	ReopenOf  string               `json:"reopen_of,omitempty"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -155,6 +163,15 @@ type Options struct {
 	// hard default. Empty leaves Metadata.Agent unset; the same
 	// precedence then runs unchanged.
 	Agent string
+
+	// ReopenOf, when non-empty, names the prior run slug this run was
+	// reopened from. Persisted to Metadata.ReopenOf so the stage
+	// prompt assembler can name prior-run artifacts without walking
+	// git per stage turn. Set by `moe sdlc reopen` alongside the
+	// Trailers.ReopenOf trailer; the trailer remains the canonical
+	// signal for dash / journal index, the metadata field is the
+	// cheap read path. Empty on every other path.
+	ReopenOf string
 
 	// AllowDirty bypasses the working-tree-clean precondition. The
 	// guardrail is there so a stray edit doesn't ride along on the
@@ -282,6 +299,7 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		Agent:     opts.Agent,
 		Created:   now().Local().Format("2006-01-02"),
 		Workspace: opts.Workspace,
+		ReopenOf:  opts.ReopenOf,
 		Documents: map[string]*Document{},
 	}
 

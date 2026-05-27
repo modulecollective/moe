@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,6 +77,15 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 	// guidance still reaches the agent.
 	if guidance := projectAgentsGuidance(clonePath); guidance != "" {
 		sections = append(sections, guidance)
+	}
+
+	// Prior-runs lineage: when md is a reopen, name the prior run(s)
+	// and the artifacts on disk so the agent reads what was tried
+	// previously before substantive work. Lands after project guidance
+	// (project rules first, then run-specific lineage) and is empty
+	// for non-reopen runs, so the common case pays zero prompt cost.
+	if priors := priorRunsSection(root, md); priors != "" {
+		sections = append(sections, priors)
 	}
 
 	if wikiCfg != nil {
@@ -362,4 +372,81 @@ func projectAgentsGuidance(clonePath string) string {
 	b.WriteString("project-specific rules (build conventions, internal seams,\n")
 	b.WriteString("etc.) that override general defaults.\n")
 	return b.String()
+}
+
+// priorRunsDepthCap bounds the reopen chain walk. Realistic chains
+// are 1–2 deep; the cap is a defensive ceiling so a pathological
+// chain (or a loop, though Metadata.ReopenOf is set once at open and
+// never edited) can't blow the prompt.
+const priorRunsDepthCap = 8
+
+// priorRunsSection emits a "## Prior runs" block when md is a reopen,
+// naming each prior run in the chain (most-recent first) and listing
+// the existing document content.md paths plus followups.md so the
+// agent reads what was tried previously before substantive work.
+//
+// Chain walk: load md's prior via Metadata.ReopenOf, then its prior,
+// repeating until a run with empty ReopenOf, a load error (treated
+// as a chain terminator — don't take down the prompt over a missing
+// or unreadable prior), or the depth cap.
+//
+// Returns "" when md.ReopenOf is empty, so non-reopen runs pay zero
+// prompt cost.
+func priorRunsSection(root string, md *run.Metadata) string {
+	if root == "" || md == nil || md.ReopenOf == "" || md.Project == "" {
+		return ""
+	}
+	type priorEntry struct {
+		slug   string
+		status string
+		paths  []string
+	}
+	var priors []priorEntry
+	slug := md.ReopenOf
+	for depth := 0; depth < priorRunsDepthCap && slug != ""; depth++ {
+		pmd, err := run.Load(root, md.Project, slug)
+		if err != nil {
+			break
+		}
+		priors = append(priors, priorEntry{
+			slug:   slug,
+			status: pmd.Status,
+			paths:  priorRunArtifactPaths(root, md.Project, slug),
+		})
+		slug = pmd.ReopenOf
+	}
+	if len(priors) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Prior runs\n\n")
+	b.WriteString("This run is a reopen. Read the prior runs' artifacts before\n")
+	b.WriteString("substantive work — they record what was tried previously and\n")
+	b.WriteString("why this run exists at all. Listed most-recent first:\n")
+	for _, p := range priors {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "`%s` (status: %s):\n", p.slug, p.status)
+		for _, path := range p.paths {
+			fmt.Fprintf(&b, "  %s\n", path)
+		}
+	}
+	return b.String()
+}
+
+// priorRunArtifactPaths returns absolute paths to a prior run's
+// document content.md files (one per documents/<doc>/content.md that
+// exists on disk) and followups.md if present. Sorted so prompt
+// output is deterministic across runs. Returns nil when nothing on
+// disk matches — the caller still emits the slug line so the agent
+// knows the prior existed.
+func priorRunArtifactPaths(root, projectID, slug string) []string {
+	runDir := filepath.Join(root, run.Dir(projectID, slug))
+	matches, _ := filepath.Glob(filepath.Join(runDir, "documents", "*", "content.md"))
+	sort.Strings(matches)
+	paths := matches
+	followups := filepath.Join(root, run.FollowupsPath(projectID, slug))
+	if _, err := os.Stat(followups); err == nil {
+		paths = append(paths, followups)
+	}
+	return paths
 }

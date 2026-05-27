@@ -118,6 +118,74 @@ func TestNewSlugNotInOtherProject(t *testing.T) {
 	}
 }
 
+// TestNewPersistsReopenOf pins that Options.ReopenOf round-trips
+// through run.json. The stage prompt assembler reads Metadata.ReopenOf
+// to surface prior-run lineage without walking git per turn — if the
+// field is lost on write, the section silently disappears for every
+// reopen and the agent loses the cue.
+func TestNewPersistsReopenOf(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	if _, err := New(root, "tele", Options{
+		Workflow: "sdlc",
+		ID:       "prior-slug",
+	}); err != nil {
+		t.Fatalf("seed prior: %v", err)
+	}
+
+	md, err := New(root, "tele", Options{
+		Workflow: "sdlc",
+		ID:       "new-slug",
+		ReopenOf: "prior-slug",
+	})
+	if err != nil {
+		t.Fatalf("New reopen: %v", err)
+	}
+	if md.ReopenOf != "prior-slug" {
+		t.Fatalf("returned metadata ReopenOf = %q, want %q", md.ReopenOf, "prior-slug")
+	}
+
+	// And the value is durable on disk — the stage prompt re-loads
+	// run.json on every turn, so the field must round-trip the JSON
+	// boundary, not just live on the in-memory struct.
+	loaded, err := Load(root, "tele", "new-slug")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.ReopenOf != "prior-slug" {
+		t.Errorf("loaded ReopenOf = %q, want %q", loaded.ReopenOf, "prior-slug")
+	}
+
+	// Read the raw run.json so the json tag is pinned too — a typo
+	// in the struct tag would still let the value round-trip through
+	// the same encoder/decoder pair, but break any external reader.
+	raw, err := os.ReadFile(filepath.Join(root, Dir("tele", "new-slug"), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"reopen_of": "prior-slug"`) {
+		t.Errorf("run.json missing reopen_of field:\n%s", raw)
+	}
+
+	// And the field is omitempty: a non-reopen run's run.json must
+	// not carry an empty "reopen_of" key.
+	fresh, err := New(root, "tele", Options{Workflow: "sdlc", ID: "no-reopen"})
+	if err != nil {
+		t.Fatalf("fresh New: %v", err)
+	}
+	if fresh.ReopenOf != "" {
+		t.Errorf("non-reopen ReopenOf = %q, want empty", fresh.ReopenOf)
+	}
+	rawFresh, err := os.ReadFile(filepath.Join(root, Dir("tele", "no-reopen"), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawFresh), "reopen_of") {
+		t.Errorf("non-reopen run.json should omit reopen_of:\n%s", rawFresh)
+	}
+}
+
 // deleteRunDir removes a run dir and commits the removal, so the
 // working tree is clean again while the original `Open run` commit
 // still sits in history — the state a manual `rm -rf` + commit leaves

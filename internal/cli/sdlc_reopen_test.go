@@ -130,6 +130,16 @@ func TestSDLCReopenSeedsDesignAndCarriesTrailer(t *testing.T) {
 	if !strings.Contains(string(prior), `"status": "closed"`) {
 		t.Fatalf("source run.json status mutated under reopen:\n%s", prior)
 	}
+
+	// New run.json carries the reopen_of field so the stage prompt
+	// assembler can name the prior without walking git per turn.
+	newRun, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", dated, "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(newRun), `"reopen_of": "fix-it"`) {
+		t.Fatalf("new run.json missing reopen_of pointer to prior:\n%s", newRun)
+	}
 }
 
 // TestSDLCReopenSeedsKickoffWhenSourceEmpty: operator opens a run,

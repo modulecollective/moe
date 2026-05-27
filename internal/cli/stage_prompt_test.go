@@ -367,3 +367,174 @@ func TestProjectAgentsGuidance(t *testing.T) {
 		t.Errorf("AGENTS.md path mentioned when file absent: %q", got)
 	}
 }
+
+// writePriorRun materialises a fake prior run dir on disk: writes
+// run.json with the given metadata, plus a content.md per docID
+// listed in docs, plus followups.md when withFollowups is true. Test
+// helper for priorRunsSection — the section reads run.json (status,
+// chain pointer) and globs documents/*/content.md, so the fakes need
+// to match those shapes.
+func writePriorRun(t *testing.T, root, projectID, slug, status, reopenOf string, docs []string, withFollowups bool) {
+	t.Helper()
+	md := &run.Metadata{
+		ID:        slug,
+		Project:   projectID,
+		Status:    status,
+		Workflow:  "sdlc",
+		ReopenOf:  reopenOf,
+		Documents: map[string]*run.Document{},
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatalf("save prior run %s: %v", slug, err)
+	}
+	for _, doc := range docs {
+		path := filepath.Join(root, run.ContentPath(projectID, slug, doc))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# "+doc+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if withFollowups {
+		path := filepath.Join(root, run.FollowupsPath(projectID, slug))
+		if err := os.WriteFile(path, []byte("- something\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestPriorRunsSectionSingleDeep: a reopen with one prior names the
+// prior's slug, its status, and the absolute paths to each existing
+// documents/<doc>/content.md plus followups.md. This is the common
+// case — most reopens are one level deep.
+func TestPriorRunsSectionSingleDeep(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writePriorRun(t, root, "tele", "fix-it", run.StatusClosed, "",
+		[]string{"design", "code"}, true)
+	md := &run.Metadata{
+		ID:       "fix-it-2026-05-27",
+		Project:  "tele",
+		Workflow: "sdlc",
+		ReopenOf: "fix-it",
+	}
+	got := priorRunsSection(root, md)
+	wantSubs := []string{
+		"## Prior runs",
+		"This run is a reopen.",
+		"Listed most-recent first",
+		"`fix-it` (status: closed):",
+		filepath.Join(root, run.ContentPath("tele", "fix-it", "design")),
+		filepath.Join(root, run.ContentPath("tele", "fix-it", "code")),
+		filepath.Join(root, run.FollowupsPath("tele", "fix-it")),
+	}
+	for _, want := range wantSubs {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// TestPriorRunsSectionTwoDeep: a chain of A → A-2 → A-3 (newest is
+// the active run, A-2 is its prior, A is the grandprior) lists both
+// priors with A-2 first. Order matters: the agent is told to read
+// most-recent first so it sees the immediately-preceding attempt
+// before deeper history.
+func TestPriorRunsSectionTwoDeep(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writePriorRun(t, root, "tele", "fix-it", run.StatusMerged, "",
+		[]string{"design"}, false)
+	writePriorRun(t, root, "tele", "fix-it-2", run.StatusClosed, "fix-it",
+		[]string{"design", "code"}, false)
+	md := &run.Metadata{
+		ID:       "fix-it-3",
+		Project:  "tele",
+		Workflow: "sdlc",
+		ReopenOf: "fix-it-2",
+	}
+	got := priorRunsSection(root, md)
+	for _, want := range []string{
+		"`fix-it-2` (status: closed):",
+		"`fix-it` (status: merged):",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	idx2 := strings.Index(got, "`fix-it-2`")
+	idx1 := strings.Index(got, "`fix-it` ")
+	if !(idx2 >= 0 && idx1 > idx2) {
+		t.Errorf("expected fix-it-2 before fix-it (most-recent first); fix-it-2=%d fix-it=%d in:\n%s",
+			idx2, idx1, got)
+	}
+}
+
+// TestPriorRunsSectionAbsentForNonReopen: a fresh run with no
+// ReopenOf produces no section, so non-reopen runs pay zero prompt
+// cost. Pinned because the slot is conditional in buildSystemPrompt
+// and the negative case is the common case.
+func TestPriorRunsSectionAbsentForNonReopen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fresh", Project: "tele", Workflow: "sdlc"}
+	if got := priorRunsSection(root, md); got != "" {
+		t.Errorf("expected empty section for non-reopen, got:\n%s", got)
+	}
+}
+
+// TestPriorRunsSectionStopsOnBrokenChain: if a prior's run.json
+// can't be loaded (missing dir, corrupt json, etc.) the walk stops
+// rather than failing the whole prompt. The walk so far still
+// renders; downstream priors are silently dropped. Failing-soft
+// matches every other prompt section's behaviour.
+func TestPriorRunsSectionStopsOnBrokenChain(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writePriorRun(t, root, "tele", "fix-it", run.StatusClosed, "missing-grandprior",
+		[]string{"design"}, false)
+	md := &run.Metadata{
+		ID:       "fix-it-2",
+		Project:  "tele",
+		Workflow: "sdlc",
+		ReopenOf: "fix-it",
+	}
+	got := priorRunsSection(root, md)
+	if !strings.Contains(got, "`fix-it` (status: closed):") {
+		t.Errorf("loaded prior must still render:\n%s", got)
+	}
+	if strings.Contains(got, "missing-grandprior") {
+		t.Errorf("broken chain link must not appear:\n%s", got)
+	}
+}
+
+// TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance pins
+// the slot order: lineage lands after project AGENTS.md guidance so
+// the agent reads project ground rules first, then run-specific
+// history. Sequence is checked by substring index, not exact string
+// match, so the test stays robust to prose edits.
+func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
+	root := newTestBureaucracy(t)
+	writePriorRun(t, root, "tele", "fix-it", run.StatusClosed, "",
+		[]string{"design"}, false)
+	md := &run.Metadata{
+		ID:       "fix-it-2",
+		Project:  "tele",
+		Workflow: "sdlc",
+		ReopenOf: "fix-it",
+	}
+	clone := t.TempDir()
+	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildSystemPrompt(root, md, "code", clone, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projIdx := strings.Index(got, "## Project guidance")
+	priorIdx := strings.Index(got, "## Prior runs")
+	if projIdx < 0 || priorIdx < 0 {
+		t.Fatalf("missing sections; project=%d prior=%d in:\n%s", projIdx, priorIdx, got)
+	}
+	if !(projIdx < priorIdx) {
+		t.Errorf("project guidance must precede prior runs; project=%d prior=%d",
+			projIdx, priorIdx)
+	}
+}
