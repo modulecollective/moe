@@ -33,6 +33,15 @@ type Block struct {
 	Idea          string
 	IdeaMovedFrom string
 	ReopenOf      string
+	// ChainedTo and ChainedToRemoved each repeat once per edge, one
+	// trailer line per slice entry, value
+	// "<parent-project>/<parent-slug> <child-project>/<child-slug>".
+	// A `chain edit` save commit stamps one ChainedTo per new edge
+	// plus one ChainedToRemoved per replaced edge; a `chain clear`
+	// stamps one ChainedToRemoved per currently-live edge. Empty
+	// slices elide.
+	ChainedTo        []string
+	ChainedToRemoved []string
 }
 
 // String renders the block. Empty fields are skipped; field
@@ -52,6 +61,12 @@ func (b Block) String() string {
 	write(&sb, "MoE-Idea", b.Idea)
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
+	for _, v := range b.ChainedTo {
+		write(&sb, "MoE-Chained-To", v)
+	}
+	for _, v := range b.ChainedToRemoved {
+		write(&sb, "MoE-Chained-To-Removed", v)
+	}
 	return sb.String()
 }
 

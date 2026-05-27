@@ -544,3 +544,111 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 		t.Errorf("ReopenedFrom[loose] should be absent for a run without the trailer")
 	}
 }
+
+// TestJournalIndexChainedChildLiveEdge: a chain edit commit lands
+// MoE-Chained-To trailers without a MoE-Run scope (one edit touches
+// several parents — no single canonical run). The index must pick
+// them up regardless. The widening of BuildJournalIndex's grep is
+// load-bearing for this — without it the commit is invisible.
+func TestJournalIndexChainedChildLiveEdge(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commitWith("chain: edit (2 added, 0 removed)",
+		"MoE-Chained-To: a/parent1 a/child1\nMoE-Chained-To: a/parent2 b/child2\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.ChainedChild["a/parent1"], "a/child1"; got != want {
+		t.Errorf("ChainedChild[a/parent1] = %q, want %q", got, want)
+	}
+	if got, want := idx.ChainedChild["a/parent2"], "b/child2"; got != want {
+		t.Errorf("ChainedChild[a/parent2] = %q, want %q (cross-project edge)", got, want)
+	}
+	if _, ok := idx.ChainedChild["a/unknown"]; ok {
+		t.Errorf("ChainedChild[a/unknown] should be absent for a parent with no trailer")
+	}
+}
+
+// TestJournalIndexChainedChildNewerCommitWins: when a parent has
+// trailers across multiple commits, the most recent one decides the
+// live state. Mirrors PromotedTo's "first encountered (HEAD-side)
+// wins" semantics.
+func TestJournalIndexChainedChildNewerCommitWins(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commitWith("chain: edit (older)",
+		"MoE-Chained-To: a/parent a/old-child\n")
+	commitWith("chain: edit (newer)",
+		"MoE-Chained-To-Removed: a/parent a/old-child\nMoE-Chained-To: a/parent a/new-child\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.ChainedChild["a/parent"], "a/new-child"; got != want {
+		t.Errorf("ChainedChild[a/parent] = %q, want %q (newer commit wins, replace pair: added beats removed within commit)", got, want)
+	}
+}
+
+// TestJournalIndexChainedChildClearPinsEmpty: a `chain clear` commit
+// stamps Removed for a previously-live edge. The index must remember
+// the clear (entry present, value empty) so an older Chained-To
+// commit can't re-assert the edge during the walk.
+func TestJournalIndexChainedChildClearPinsEmpty(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commitWith("chain: edit (older)",
+		"MoE-Chained-To: a/parent a/child\n")
+	commitWith("chain: clear",
+		"MoE-Chained-To-Removed: a/parent a/child\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	got, ok := idx.ChainedChild["a/parent"]
+	if !ok {
+		t.Fatalf("ChainedChild[a/parent]: expected entry pinning the clear, got absent")
+	}
+	if got != "" {
+		t.Errorf("ChainedChild[a/parent] = %q, want \"\" (cleared)", got)
+	}
+}
+
+// TestJournalIndexChainedChildIgnoresMalformed: a trailer that doesn't
+// parse as two whitespace-separated <project>/<slug> tokens must be
+// dropped silently rather than fail the whole index build. Other
+// trailer parsers here take the same posture.
+func TestJournalIndexChainedChildIgnoresMalformed(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commitWith("chain: edit (malformed)",
+		"MoE-Chained-To: not-qualified-token\n"+
+			"MoE-Chained-To: a/ok b/ok\n"+
+			"MoE-Chained-To: bare-slug-only\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.ChainedChild["a/ok"], "b/ok"; got != want {
+		t.Errorf("well-formed edge missing: ChainedChild[a/ok] = %q, want %q", got, want)
+	}
+	if len(idx.ChainedChild) != 1 {
+		t.Errorf("ChainedChild should contain only the well-formed edge: got %v", idx.ChainedChild)
+	}
+}

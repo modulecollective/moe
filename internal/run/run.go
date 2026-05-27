@@ -681,6 +681,23 @@ type JournalIndex struct {
 	// recognise prior runs that have *not* been reopened yet — those
 	// are the candidates the closed bucket marks.
 	ReopenedFrom map[string]string
+	// ChainedChild maps "<project>/<slug>" of a parent run to
+	// "<project>/<slug>" of its currently-live chained child, or
+	// to "" if the most recent chain-related commit cleared the
+	// parent's edge. Absent keys mean the parent has never had a
+	// chain trailer. Three-valued by design so a newer chain-clear
+	// commit blocks an older chain-edit from re-asserting an edge —
+	// the entry pins the verdict either way.
+	//
+	// Read-side rule for "is this parent currently chained?":
+	// `v, ok := ChainedChild[parent]; ok && v != ""`. Built from
+	// MoE-Chained-To / MoE-Chained-To-Removed trailers, walked HEAD-
+	// first; first commit touching a parent decides its live state.
+	// Within one commit, MoE-Chained-To beats MoE-Chained-To-Removed
+	// for the same parent (a `chain edit` save naturally pairs a
+	// remove of the prior edge with the add of the new one, and the
+	// add is the survivor).
+	ChainedChild map[string]string
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -704,9 +721,15 @@ type WorkTurnKey struct {
 // MoE-Run-tagged commit dash cares about is reachable from HEAD.
 // Mirrors the scope LastActivityMap walked.
 func BuildJournalIndex(root string) (*JournalIndex, error) {
+	// Two --grep patterns are OR'd by default. The widening pulls in
+	// chain-edit / chain-clear commits, which carry no MoE-Run trailer
+	// (one edit touches several parents — no single canonical run to
+	// scope it to) and would otherwise be invisible to the existing
+	// MoE-Run-only filter.
 	out, err := git.Output(root,
 		"log",
 		"--grep", "^MoE-Run: ",
+		"--grep", "^MoE-Chained-To",
 		"--format=%ct%x00%B%x1e",
 	)
 	if err != nil {
@@ -718,6 +741,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		PRURL:        make(map[string]string),
 		WorkTurnTime: make(map[WorkTurnKey]time.Time),
 		ReopenedFrom: make(map[string]string),
+		ChainedChild: make(map[string]string),
 	}
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
@@ -739,6 +763,14 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		}
 		slug := ""
 		var promotedTo, prURL, projectID, docID, reopenOf string
+		// Per-commit chain verdicts. addByParent wins over
+		// removeByParent for the same parent within one commit (an edit
+		// save pairs a remove of the prior edge with an add of the new
+		// one; the new edge is the live state). First add wins on
+		// duplicate Chained-To lines for the same parent — linear-chain
+		// invariant says there should only be one, but pick a
+		// deterministic survivor regardless.
+		var addByParent, removeByParent map[string]string
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
@@ -777,6 +809,49 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 				}
 				continue
 			}
+			// MoE-Chained-To-Removed must be matched before
+			// MoE-Chained-To — the latter is a prefix of the former.
+			if v, ok := strings.CutPrefix(line, "MoE-Chained-To-Removed:"); ok {
+				parent, _, ok := splitChainPair(v)
+				if !ok {
+					continue
+				}
+				if removeByParent == nil {
+					removeByParent = make(map[string]string)
+				}
+				if _, dup := removeByParent[parent]; !dup {
+					removeByParent[parent] = ""
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Chained-To:"); ok {
+				parent, child, ok := splitChainPair(v)
+				if !ok {
+					continue
+				}
+				if addByParent == nil {
+					addByParent = make(map[string]string)
+				}
+				if _, dup := addByParent[parent]; !dup {
+					addByParent[parent] = child
+				}
+				continue
+			}
+		}
+		// Apply per-commit chain verdicts before the slug gate — chain
+		// commits carry no MoE-Run trailer (one edit touches several
+		// parents) and would otherwise be discarded.
+		for parent, child := range addByParent {
+			if _, decided := idx.ChainedChild[parent]; decided {
+				continue
+			}
+			idx.ChainedChild[parent] = child
+		}
+		for parent := range removeByParent {
+			if _, decided := idx.ChainedChild[parent]; decided {
+				continue
+			}
+			idx.ChainedChild[parent] = ""
 		}
 		if slug == "" {
 			continue
@@ -810,6 +885,24 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		}
 	}
 	return idx, nil
+}
+
+// splitChainPair splits a MoE-Chained-To / -Removed trailer value into
+// its parent and child halves. The wire format is two whitespace-
+// separated "<project>/<slug>" tokens (project leg required since
+// slugs are per-project unique, not bureaucracy-unique). Returns
+// ok=false on malformed input — caller should ignore the line rather
+// than fail the whole index build, the same posture other trailer
+// parsing here takes.
+func splitChainPair(v string) (parent, child string, ok bool) {
+	f := strings.Fields(v)
+	if len(f) != 2 {
+		return "", "", false
+	}
+	if !strings.Contains(f[0], "/") || !strings.Contains(f[1], "/") {
+		return "", "", false
+	}
+	return f[0], f[1], true
 }
 
 // LastFileActivity returns the committer time of the most recent commit

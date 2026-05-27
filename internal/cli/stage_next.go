@@ -794,6 +794,13 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 				return res, ship
 			}
 			res.shipped = true
+			// Chain ride: after the parent's terminal stage ships, if a
+			// live chain edge points at an unresolved child, cascade
+			// into it in the same mode. Recursive by construction —
+			// the child's cascadeFromGate reaches its own push (sdlc)
+			// or auto-close (non-sdlc) and re-fires this hook on its
+			// own outgoing edge.
+			maybeRideChain(md, driven, stdout, stderr)
 			continue
 		}
 		code := dispatcher(stage, md.Project, md.ID, !driven, true, stdout, stderr)
@@ -810,6 +817,12 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 	// non-interactive (followups.md harvests as-is); a hands-off cascade
 	// should never block on an editor.
 	if yolo && !res.shipped {
+		// Chain ride fires before the synthetic auto-close — per
+		// design, the ride sits between "all real stages committed"
+		// and the terminal action. For sdlc the analogous slot is
+		// "after push success" in the loop above; this branch is the
+		// non-sdlc analogue.
+		maybeRideChain(md, driven, stdout, stderr)
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
 			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
@@ -821,6 +834,89 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 		}
 	}
 	return res, 0
+}
+
+// maybeRideChain dispatches the parent's chained child at the end of a
+// `!!` / `!!!` cascade, if a live unresolved edge exists. The child
+// opens at its first pending stage (Workflow.Next) and inherits the
+// parent's driven/headless mode. Recursive by construction — the
+// child's cascadeFromGate reaches its own terminal stage and re-fires
+// this hook on its own outgoing edge, so `!!!` rides the whole chain
+// in one shot.
+//
+// Best-effort: every failure mode (missing index, malformed child key,
+// terminal child, child missing from disk) is silently a no-op except
+// where it's worth a stderr line (a child cascade exits non-zero, or
+// the index can't be built). The parent's cascade outcome is the
+// authoritative one — a chain ride that goes sideways must not
+// retroactively mark the parent's ship as failed.
+//
+// findRoot is re-derived here so the helper's signature stays a
+// drop-in at any cascade seam; the cost is one extra git rev-parse
+// per terminal stage in a chain, which is rounding error next to the
+// stage dispatch itself.
+func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Writer) {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return
+	}
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		moePrintf(stderr, "chain ride: build index: %v\n", err)
+		return
+	}
+	parentKey := parentMD.Project + "/" + parentMD.ID
+	childKey := idx.ChainedChild[parentKey]
+	if childKey == "" {
+		return
+	}
+	childProj, childID, err := splitProjectRun(childKey)
+	if err != nil {
+		moePrintf(stderr, "chain ride: malformed child key %q: %v\n", childKey, err)
+		return
+	}
+	childMD, err := run.Load(root, childProj, childID)
+	if err != nil {
+		// Trailer references a child that doesn't exist on disk
+		// (race with delete, or a typo from a hand-edited file).
+		// Quiet skip — surfacing it on every ride would spam.
+		return
+	}
+	switch childMD.Status {
+	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
+		// Decision 1: terminal children skipped at the chain prompt.
+		// StatusPushed too — there's no stage left for the cascade
+		// to drive, only a human-owed merge click.
+		return
+	}
+	wf, err := LookupWorkflow(childMD.Workflow)
+	if err != nil {
+		moePrintf(stderr, "chain ride: %v\n", err)
+		return
+	}
+	nextStage, kind, err := wf.Next(root, childMD)
+	if err != nil {
+		moePrintf(stderr, "chain ride: next stage: %v\n", err)
+		return
+	}
+	if kind != NextKindStage || nextStage == "" {
+		// Nothing pending — done-but-not-closed runs surface a
+		// `· close?` hint in the dash already; chain ride does not
+		// auto-close someone else's parked run.
+		return
+	}
+	mode := "headless"
+	if driven {
+		mode = "driven"
+	}
+	moePrintf(stdout, "chain: riding into %s at %s (%s)\n", childKey, nextStage, mode)
+	childRes, childCode := cascadeFromGate(nextStage, "", false, driven, childMD, stdout, stderr)
+	if summary := renderCascadeSummary(childRes); summary != "" {
+		moePrintln(stdout, summary)
+	}
+	if childCode != 0 {
+		moePrintf(stderr, "chain ride into %s exited %d\n", childKey, childCode)
+	}
 }
 
 // renderCascadeSummary formats the single-line summary printed after

@@ -60,6 +60,40 @@ func TestBlockTrailingNewline(t *testing.T) {
 	}
 }
 
+func TestBlockChainedTrailersRepeatInOrder(t *testing.T) {
+	// `chain edit` saves a single commit that batches one MoE-Chained-To
+	// per new edge and one MoE-Chained-To-Removed per replaced edge.
+	// The slice fields preserve emit order so a reviewer reading the
+	// commit body sees adds then removes in the order the editor
+	// produced them.
+	b := Block{
+		Run: "r",
+		ChainedTo: []string{
+			"projA/parent1 projB/child1",
+			"projA/parent2 projA/child2",
+		},
+		ChainedToRemoved: []string{
+			"projA/parent1 projA/old1",
+		},
+	}
+	want := "MoE-Run: r\n" +
+		"MoE-Chained-To: projA/parent1 projB/child1\n" +
+		"MoE-Chained-To: projA/parent2 projA/child2\n" +
+		"MoE-Chained-To-Removed: projA/parent1 projA/old1\n"
+	if got := b.String(); got != want {
+		t.Fatalf("chained trailers:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestBlockChainedTrailersElideWhenEmpty(t *testing.T) {
+	// Nil and empty slices both elide — same contract as empty
+	// strings on other fields.
+	b := Block{Run: "r", ChainedTo: nil, ChainedToRemoved: []string{}}
+	if got := b.String(); got != "MoE-Run: r\n" {
+		t.Fatalf("empty chained trailers should elide: got %q", got)
+	}
+}
+
 func TestBlockOrderIndependentOfFieldAssignment(t *testing.T) {
 	// Renders should not depend on which fields the caller populated
 	// first — the struct field order is what determines wire order.

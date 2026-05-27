@@ -209,10 +209,37 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 		// same shape as the `· reopen?` hint on closed sdlc runs.
 		// Twin is the canonical case (`done → close` is the only path);
 		// sdlc-without-push and kb hit the same shape.
-		return BucketActiveRuns, prefix + "done · close?", "done", ""
+		return BucketActiveRuns, prefix + "done · close?" + chainHint(idx, md, byRunKey), "done", ""
 	}
 	runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
-	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
+	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage) + chainHint(idx, md, byRunKey), dec.Stage, runningDoc
+}
+
+// chainHint renders the trailing " · chained → <slug>" action hint
+// for an in-progress run whose live chain edge points at an
+// unresolved child. Cross-project children render as
+// "<project>/<slug>"; same-project children render bare. Returns ""
+// when there's no edge, the child slug is malformed, the child is
+// missing from disk, or the child is in a terminal state (Decision 1
+// — terminal children are filtered at read time).
+func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run.Metadata) string {
+	parentKey := md.Project + "/" + md.ID
+	childKey := idx.ChainedChild[parentKey]
+	if childKey == "" {
+		return ""
+	}
+	child, ok := byRunKey[childKey]
+	if !ok {
+		return ""
+	}
+	switch child.Status {
+	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
+		return ""
+	}
+	if child.Project == md.Project {
+		return " · chained → " + child.ID
+	}
+	return " · chained → " + childKey
 }
 
 // winningRunningDoc picks the open-session doc that "wins" the row's
