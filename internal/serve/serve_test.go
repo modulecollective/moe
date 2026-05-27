@@ -341,7 +341,7 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 	// no chain-prompt section. The template's {{if}} gates keep
 	// these out when the matching VM fields are zero.
 	for _, banned := range []string{
-		"end agent", "<h2>agent</h2>", "<h2>activity</h2>", "<h2>chain prompt</h2>",
+		"End Agent", "<h2>agent</h2>", "<h2>activity</h2>", "<h2>chain prompt</h2>",
 	} {
 		if strings.Contains(body, banned) {
 			t.Errorf("read-only page must not contain %q\n%s", banned, body)

@@ -253,7 +253,7 @@ func TestRunPageRendersEndAgentButtonWhileLive(t *testing.T) {
 	if !strings.Contains(body, "/run/p/r/end-agent") {
 		t.Errorf("expected end-agent form action, got:\n%s", body)
 	}
-	if !strings.Contains(body, ">end agent<") {
+	if !strings.Contains(body, ">End Agent<") {
 		t.Errorf("expected end-agent button label, got:\n%s", body)
 	}
 }

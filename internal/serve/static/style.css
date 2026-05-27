@@ -106,7 +106,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
 }
 .page-footer p { margin: 0.3rem 0; }
 
-#theme-toggle {
+.header-action, #theme-toggle {
   background: transparent;
   border: 1px solid var(--hairline);
   color: var(--muted);
@@ -114,8 +114,14 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   padding: 0.3rem 0.6rem;
   border-radius: 4px;
   cursor: pointer;
+  white-space: nowrap;
 }
-#theme-toggle:hover { color: var(--fg); border-color: var(--muted); }
+.header-action { border-bottom: 1px solid var(--hairline); }
+.header-action:hover, .header-action:focus,
+#theme-toggle:hover, #theme-toggle:focus {
+  color: var(--fg);
+  border-color: var(--muted);
+}
 
 /* Section headers */
 section { margin-top: 1.5rem; }

@@ -24,7 +24,8 @@
       <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
     </div>
-    <button id="theme-toggle" type="button">theme</button>
+    <a class="header-action" href="/run/new">+ New Run</a>
+    <button id="theme-toggle" type="button">Theme</button>
   </header>
 
   <section class="dash-section">
@@ -82,7 +83,6 @@
   </section>
 
   <footer class="page-footer">
-    <p><a href="/run/new">+ new run</a></p>
     <p>{{.ProjectCount}} project{{if ne .ProjectCount 1}}s{{end}} registered · {{.ActiveProjects}} with active runs</p>
     {{if not .ShowAll}}<p><a href="?all=1">show all</a></p>{{end}}
   </footer>
