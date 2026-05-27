@@ -78,9 +78,10 @@ type Options struct {
 	ResolveCanvas func(project, run, stage string) (path string, err error)
 
 	// RunStages returns the workflow ladder order for an on-disk run.
-	// Used by the per-run page to render canvas links in ladder
-	// order rather than alphabetical. Absent falls back to
-	// alphabetical (the existing canvasLinksFor behaviour).
+	// canvasLinks walks this ladder and asks ResolveCanvas for each
+	// stage in order — so this drives both ordering *and* which
+	// stages get a link at all. Absent means no canvas links on the
+	// per-run page.
 	RunStages func(project, run string) (stages []string, err error)
 
 	// NotifyURL is the webhook URL we POST a small JSON payload to

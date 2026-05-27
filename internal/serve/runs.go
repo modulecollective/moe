@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -347,72 +346,50 @@ func buttonClass(key string) string {
 	}
 }
 
-// canvasLinks enumerates the run's stage canvas files (under
-// projects/<p>/runs/<r>/documents/*/content.md) with their mtimes.
-// Only stages whose content.md actually exists are surfaced.
+// canvasLinks enumerates the run's stage canvas files (rendered in
+// workflow ladder order) with their mtimes. Only stages whose
+// content.md actually exists are surfaced.
 //
-// Ordering: when Options.RunStages is wired, the result follows the
-// workflow's ladder order so `design → code → test → push` reads
-// left-to-right; otherwise the result is alphabetical. Any disk
-// stages not in the ladder are appended alphabetically — a stale
-// stage directory shouldn't disappear from the page just because
-// the workflow has moved on.
+// Resolution routes through Options.ResolveCanvas — the same callback
+// the canvas route and `moe sdlc cat` use — so an in-progress run
+// whose canonical-root documents/ is empty still surfaces links to
+// the live session's worktree copy. Before this, canvasLinks did its
+// own `ReadDir` on the canonical docs dir; for in-progress runs that
+// directory is empty (the agent edits live under .moe/worktrees/…),
+// so no links were emitted and the canvas was effectively invisible
+// on the run page.
+//
+// A nil ResolveCanvas or RunStages yields no links. `moe serve` wires
+// both in cli/serve.go; tests that want canvas links must too. Note
+// that the session-vs-canonical decision baked into ResolveCanvas
+// depends on session.List finding worktrees under <Root>/.moe — i.e.
+// serve must run from the bureaucracy root, not from inside a session
+// worktree, or the live-edit branch silently falls back to canonical.
 func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink {
-	docsDir := filepath.Join(s.opts.Root, "projects", projectID, "runs", slug, "documents")
-	entries, err := os.ReadDir(docsDir)
+	if s.opts.ResolveCanvas == nil || s.opts.RunStages == nil {
+		return nil
+	}
+	ladder, err := s.opts.RunStages(projectID, slug)
 	if err != nil {
 		return nil
 	}
-	onDisk := map[string]time.Time{}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		st, err := os.Stat(filepath.Join(docsDir, e.Name(), "content.md"))
+	out := make([]canvasLink, 0, len(ladder))
+	for _, stage := range ladder {
+		path, err := s.opts.ResolveCanvas(projectID, slug, stage)
 		if err != nil {
 			continue
 		}
-		onDisk[e.Name()] = st.ModTime()
-	}
-
-	stageOrder := s.stageOrder(projectID, slug, onDisk)
-	out := make([]canvasLink, 0, len(stageOrder))
-	for _, stage := range stageOrder {
+		st, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
 		out = append(out, canvasLink{
 			Stage:   stage,
 			URL:     "/run/" + projectID + "/" + slug + "/canvas/" + stage,
-			ModTime: dash.HumanAgo(now, onDisk[stage]),
+			ModTime: dash.HumanAgo(now, st.ModTime()),
 		})
 	}
 	return out
-}
-
-// stageOrder returns the order in which canvas links should render.
-// Ladder order first (filtered to stages that exist on disk), then
-// any unknown stages alphabetically.
-func (s *Server) stageOrder(projectID, slug string, onDisk map[string]time.Time) []string {
-	var ladder []string
-	if s.opts.RunStages != nil {
-		if l, err := s.opts.RunStages(projectID, slug); err == nil {
-			ladder = l
-		}
-	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(onDisk))
-	for _, stage := range ladder {
-		if _, ok := onDisk[stage]; ok {
-			out = append(out, stage)
-			seen[stage] = true
-		}
-	}
-	var extras []string
-	for stage := range onDisk {
-		if !seen[stage] {
-			extras = append(extras, stage)
-		}
-	}
-	sort.Strings(extras)
-	return append(out, extras...)
 }
 
 // CSI: ESC [ <params> <intermediates> <final>. Params are

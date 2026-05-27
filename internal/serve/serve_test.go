@@ -316,6 +316,10 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: root,
+		ResolveCanvas: func(p, r, stage string) (string, error) {
+			return filepath.Join(root, "projects", p, "runs", r,
+				"documents", stage, "content.md"), nil
+		},
 		RunStages: func(_, _ string) ([]string, error) {
 			return []string{"design", "code", "test", "push"}, nil
 		},
@@ -356,6 +360,78 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 	if iDesign < 0 || iCode < 0 || iDesign > iCode {
 		t.Errorf("canvas links not in ladder order; design=%d code=%d\n%s",
 			iDesign, iCode, body)
+	}
+}
+
+// TestRunPageInProgressRunSurfacesWorktreeCanvas: the bug fix.
+// For an in-progress run, projects/<p>/runs/<r>/ holds only run.json
+// — the documents/ tree lives under .moe/worktrees/<id>/… and is
+// not yet committed to the canonical root. canvasLinks must route
+// through ResolveCanvas (which returns the worktree path) instead
+// of doing its own ReadDir on the canonical docs dir; otherwise the
+// per-run page emits no links and the operator can't reach the
+// canvas they're actively editing.
+func TestRunPageInProgressRunSurfacesWorktreeCanvas(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+
+	// Canonical root deliberately has no documents/ — emulates the
+	// in-progress state where edits only exist in the session
+	// worktree.
+	docsDir := filepath.Join(root, "projects", "alpha", "runs", "fix-it", "documents")
+	if _, err := os.Stat(docsDir); !os.IsNotExist(err) {
+		t.Fatalf("test fixture: canonical documents/ should not exist (err=%v)", err)
+	}
+
+	// Stand-in for the worktree: a tmp dir with one stage's canvas.
+	worktree := t.TempDir()
+	wtCanvas := filepath.Join(worktree, "documents", "design", "content.md")
+	if err := os.MkdirAll(filepath.Dir(wtCanvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wtCanvas, []byte("# live edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		ResolveCanvas: func(_, _, stage string) (string, error) {
+			// Mirrors the production resolver: route the design
+			// stage to the worktree, leave others pointing at the
+			// (missing) canonical path so Stat fails and they're
+			// skipped.
+			if stage == "design" {
+				return wtCanvas, nil
+			}
+			return filepath.Join(root, "projects", "alpha", "runs", "fix-it",
+				"documents", stage, "content.md"), nil
+		},
+		RunStages: func(_, _ string) ([]string, error) {
+			return []string{"design", "code", "test", "push"}, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `href="/run/alpha/fix-it/canvas/design"`) {
+		t.Errorf("in-progress run page must link to the worktree canvas, body:\n%s", body)
+	}
+	// The other ladder stages have no canvas yet (worktree or canonical) —
+	// they should not get links. Asserting absence keeps the test honest
+	// about the "stat-driven" gating.
+	for _, banned := range []string{
+		`href="/run/alpha/fix-it/canvas/code"`,
+		`href="/run/alpha/fix-it/canvas/test"`,
+		`href="/run/alpha/fix-it/canvas/push"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("page emitted link for a stage with no canvas yet: %q", banned)
+		}
 	}
 }
 
