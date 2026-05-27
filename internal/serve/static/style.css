@@ -110,7 +110,9 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   background: transparent;
   border: 1px solid var(--hairline);
   color: var(--muted);
-  font: 0.8rem/1 inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  font-family: inherit;
   padding: 0.3rem 0.6rem;
   border-radius: 4px;
   cursor: pointer;
