@@ -157,6 +157,34 @@ func TestFilteredEnvEmptyExtra(t *testing.T) {
 	}
 }
 
+// TestPickCwdPrefersSessionCwd is the resume-invariant pin: claude
+// buckets transcripts by EncodeCwd(cwd), so cwd has to be the same
+// per-document path on every turn. SessionCwd is that stable path;
+// Root is only the fallback for run-less callers (rebase_resolve)
+// that have no session to resume. A regression that flipped the
+// precedence (Root wins when SessionCwd is set) would route code
+// stages back through the per-turn worktree UUID and silently break
+// `--resume` again.
+func TestPickCwdPrefersSessionCwd(t *testing.T) {
+	cases := []struct {
+		name       string
+		sessionCwd string
+		root       string
+		want       string
+	}{
+		{name: "sessionCwd set", sessionCwd: "/sess/cwd", root: "/root", want: "/sess/cwd"},
+		{name: "empty sessionCwd falls back to root", sessionCwd: "", root: "/root", want: "/root"},
+		{name: "both empty stays empty", sessionCwd: "", root: "", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickCwd(tc.sessionCwd, tc.root); got != tc.want {
+				t.Fatalf("pickCwd(%q, %q) = %q, want %q", tc.sessionCwd, tc.root, got, tc.want)
+			}
+		})
+	}
+}
+
 // assertArgsEqual reports the entire mismatch when args differ — a
 // single index error in a 15-element slice is easier to debug as the
 // pair of slices than as a single failing field.

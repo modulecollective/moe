@@ -39,7 +39,7 @@ func TestMoeBureaucracySkillEmbedded(t *testing.T) {
 func TestMaterializeMoeBureaucracySkillBothBackends(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	if err := materializeMoeBureaucracySkill(root, md); err != nil {
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
 
@@ -73,6 +73,60 @@ func TestMaterializeMoeBureaucracySkillBothBackends(t *testing.T) {
 	}
 }
 
+// TestMaterializeMoeBureaucracySkillWritesUnderSessionCwd pins the
+// claude-side fallback: post-stable-cwd-fix, claude actually runs cwd
+// = sessionCwd, so its progressive-disclosure walk starts from there.
+// The materialiser must drop a second copy of the rendered skill under
+// sessionCwd/.claude/skills/ so claude finds it. Codex's tree stays
+// only under workRoot because codex still runs cwd = workRoot.
+func TestMaterializeMoeBureaucracySkillWritesUnderSessionCwd(t *testing.T) {
+	workRoot := t.TempDir()
+	sessionCwd := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+
+	if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	// claude copy under sessionCwd is the load-bearing one for resume.
+	sessClaude := filepath.Join(sessionCwd, ".claude", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(sessClaude); err != nil {
+		t.Errorf("expected sessionCwd-side claude skill at %s: %v", sessClaude, err)
+	}
+	// workRoot side still gets both backends — codex anchors there.
+	for _, dir := range []string{".claude", ".codex"} {
+		path := filepath.Join(workRoot, dir, "skills", "moe-bureaucracy", "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected workRoot-side %s skill at %s: %v", dir, path, err)
+		}
+	}
+	// Codex must NOT be planted under sessionCwd — codex's cwd stays
+	// at workRoot and the sessionCwd-side dir is operator scratch under
+	// .moe/sessions/. A stray .codex/ tree there would be noise.
+	stray := filepath.Join(sessionCwd, ".codex", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(stray); err == nil {
+		t.Errorf("codex skill should not appear under sessionCwd: %s", stray)
+	}
+}
+
+// TestMaterializeMoeBureaucracySkillEmptySessionCwdSkipsExtraWrite
+// pins the run-less / pre-fix-fallback branch: when sessionCwd is "",
+// the materialiser must not blow up trying to mkdir an empty path and
+// must produce the same on-disk shape as before (workRoot only).
+func TestMaterializeMoeBureaucracySkillEmptySessionCwdSkipsExtraWrite(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	for _, dir := range []string{".claude", ".codex"} {
+		path := filepath.Join(root, dir, "skills", "moe-bureaucracy", "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected %s skill at %s: %v", dir, path, err)
+		}
+	}
+}
+
 // TestMaterializeMoeBureaucracySkillIsIdempotent pins the cheap
 // rewrite-each-turn behaviour. The materialiser runs on every
 // BuildSpec call (including session resume); a second call must
@@ -81,14 +135,14 @@ func TestMaterializeMoeBureaucracySkillIsIdempotent(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
-	if err := materializeMoeBureaucracySkill(root, md); err != nil {
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize (first): %v", err)
 	}
 	first, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := materializeMoeBureaucracySkill(root, md); err != nil {
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize (second): %v", err)
 	}
 	second, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
@@ -131,7 +185,7 @@ func TestMaterializeMoeContextSkillBothBackends(t *testing.T) {
 	root := t.TempDir()
 	clone := "/tmp/clone-fixture/moe-tele"
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	if err := materializeMoeContextSkill(root, md, clone); err != nil {
+	if err := materializeMoeContextSkill(root, "", md, clone); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
 
@@ -171,7 +225,7 @@ func TestMaterializeMoeContextSkillBothBackends(t *testing.T) {
 func TestMaterializeMoeContextSkillDocumentOnly(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "design-only", Project: "tele", Workflow: "sdlc"}
-	if err := materializeMoeContextSkill(root, md, ""); err != nil {
+	if err := materializeMoeContextSkill(root, "", md, ""); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))
@@ -196,14 +250,14 @@ func TestMaterializeMoeContextSkillIsIdempotent(t *testing.T) {
 	clone := "/tmp/clone-fixture/moe-tele"
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
-	if err := materializeMoeContextSkill(root, md, clone); err != nil {
+	if err := materializeMoeContextSkill(root, "", md, clone); err != nil {
 		t.Fatalf("materialize (first): %v", err)
 	}
 	first, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := materializeMoeContextSkill(root, md, clone); err != nil {
+	if err := materializeMoeContextSkill(root, "", md, clone); err != nil {
 		t.Fatalf("materialize (second): %v", err)
 	}
 	second, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))

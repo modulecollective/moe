@@ -115,11 +115,12 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	// cwd-inversion shape: codex always runs cwd = r.Root (the
 	// bureaucracy session worktree). Code-bearing stages reach the
 	// project clone via --add-dir; document-only stages have no clone
-	// and write the canvas directly under root. Unlike claude, codex
-	// doesn't encode cwd in its session id, so there's no
-	// per-document-cwd stability to preserve — and any other shape
-	// (e.g. cwd under a sibling git worktree) trips apply_patch's
-	// worktree-boundary check.
+	// and write the canvas directly under root. Claude diverges and
+	// runs cwd = r.SessionCwd because it encodes cwd into its on-disk
+	// session bucket and needs a stable cwd for `--resume`; codex
+	// keeps cwd=root because apply_patch enforces a project-scope
+	// check and rollouts are date-sharded so resume doesn't depend
+	// on cwd.
 	cmd.Dir = r.Root
 	cmd.Env = filteredEnv(r.ExtraEnv)
 	cmd.Stdin = r.Stdin

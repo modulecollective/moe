@@ -1000,7 +1000,7 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 func TestMoeBureaucracySkillCarriesAllThreeTraceChannels(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	if err := materializeMoeBureaucracySkill(root, md); err != nil {
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
 

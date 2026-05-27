@@ -148,11 +148,16 @@ type Request struct {
 	// project's submodule, or "" for document-only runs. When set,
 	// the agent runs with this as its working directory.
 	ClonePath string
-	// SessionCwd is the document-only fallback cwd: a stable per-document
-	// path whose only purpose is to keep claude's encoded-cwd project dir
-	// constant across turns so `--resume <sid>` finds its JSONL. Empty
-	// for code stages (ClonePath already gives them a stable cwd). Codex
-	// ignores this field — its rollout files aren't cwd-indexed.
+	// SessionCwd is the stable per-document cwd for claude turns: a path
+	// under <root>/.moe/sessions/<p>/<r>/<d> that's identical across
+	// turns, so claude's encoded-cwd project dir under
+	// ~/.claude/projects/ doesn't churn and `--resume <sid>` finds the
+	// JSONL it wrote on turn 1. Used by every claude stage now —
+	// code-bearing stages reach the sandbox clone via --add-dir rather
+	// than via cwd. Empty for run-less callers (rebase_resolve) which
+	// have no session to resume; the executor falls back to Root.
+	// Codex ignores this field — its rollout files are date-sharded,
+	// not cwd-indexed.
 	SessionCwd string
 	// InitialPrompt, if non-empty, is auto-sent as the first user message
 	// of the turn so the operator doesn't have to type anything to kick
@@ -190,10 +195,15 @@ type OneShotRequest struct {
 	Prompt string
 	// UserPrompt is the single user turn for the headless run.
 	UserPrompt string
-	// ClonePath, when non-empty, is cwd for the agent subprocess —
-	// the per-run sandbox clone for code stages. Empty for
-	// document-only stages (cwd falls back to Root).
+	// ClonePath, when non-empty, is the per-run sandbox clone for
+	// code-bearing stages. Reached via --add-dir; not used as cwd. Empty
+	// for document-only stages.
 	ClonePath string
+	// SessionCwd is the stable per-document cwd for claude headless
+	// turns — same shape and rationale as Request.SessionCwd. Empty for
+	// run-less callers (rebase_resolve); the executor falls back to
+	// Root. Codex ignores this field.
+	SessionCwd string
 	// Model, if non-empty, names the model to use. Empty defers to
 	// the agent's configured default. Bounded curation tasks (push
 	// synthesis) may pass a model override; full stage turns leave it

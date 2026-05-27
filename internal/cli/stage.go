@@ -265,15 +265,24 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if err != nil {
 				return wikiTurnSpec{}, err
 			}
-			// Materialise the moe-bureaucracy skill into the session
-			// worktree's .claude/skills/ and .codex/skills/ trees so
-			// both backends discover it via progressive disclosure.
-			// The skill carries the twin/lore/followups trace-recording
-			// guidance that used to inline ~90 lines into operationalCore
-			// on every turn. Refresh on every BuildSpec is cheap; the
-			// paths are session-stable but rewriting is faster than
-			// reasoning about staleness across resumes.
-			if err := materializeMoeBureaucracySkill(workRoot, md); err != nil {
+			// Resolve sessionCwd early so the skill materialisers can
+			// write under it: claude's cwd-walkup skill discovery starts
+			// at sessionCwd post-fix, so a workRoot-only materialisation
+			// wouldn't be found. See sessionDocCwd's doc for the
+			// stable-cwd rationale.
+			sessionCwd := sessionDocCwd(root, md.Project, md.ID, docID)
+			if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
+				return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
+			}
+			// Materialise the moe-bureaucracy skill into both the
+			// session worktree's .claude/skills/ and the sessionCwd
+			// .claude/skills/ so claude finds it whichever way its
+			// discovery walks (we keep both for now — see
+			// skill_materialize.go). Codex still writes only under
+			// workRoot/.codex/skills/. Refresh on every BuildSpec is
+			// cheap; the paths are session-stable but rewriting is
+			// faster than reasoning about staleness across resumes.
+			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
 				return wikiTurnSpec{}, err
 			}
 			if mutated {
@@ -354,31 +363,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// name both roots concretely (or render the document-only
 			// branch when there's no clone). Same lifecycle: worktree-
 			// only, refreshed every BuildSpec, never staged.
-			if err := materializeMoeContextSkill(workRoot, md, clonePath); err != nil {
+			if err := materializeMoeContextSkill(workRoot, sessionCwd, md, clonePath); err != nil {
 				return wikiTurnSpec{}, err
-			}
-
-			// Document-only stages need a cwd that's stable across
-			// turns so claude's encoded-cwd project dir doesn't churn
-			// and `--resume <sid>` can find the JSONL it wrote on
-			// turn 1. The session worktree is per-turn (UUID), so
-			// using workRoot would re-break it. Code stages have
-			// ClonePath, which is already stable.
-			sessionCwd := ""
-			if clonePath == "" {
-				sessionCwd = sessionDocCwd(root, md.Project, md.ID, docID)
-				if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
-					return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
-				}
 			}
 
 			// mutated means EnsureDocument just minted the session
 			// UUID this turn — fresh session, nothing to validate.
 			// Otherwise stat the exact path claude will read for
-			// `--resume <sid>` from the cwd it'll run in (clonePath
-			// for code stages, sessionCwd for document-only — the
-			// same precedence the executor uses for cmd.Dir) and
-			// decide between two outcomes:
+			// `--resume <sid>` from the cwd it'll run in (sessionCwd,
+			// the same value the executor's cmd.Dir uses) and decide
+			// between two outcomes:
 			//   - JSONL at the canonical path → resume normally.
 			//   - JSONL absent (cross-machine fresh checkout, wiped
 			//     cache, dirty exit before claude wrote turn 1, or
@@ -391,16 +385,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// operator gets a clear stderr line, not a stuck run.
 			newSession := mutated
 			if !newSession {
-				resumeCwd := clonePath
-				if resumeCwd == "" {
-					resumeCwd = sessionCwd
-				}
-				if resumeCwd != "" {
+				if sessionCwd != "" {
 					a, agentErr := agent.Get(agentName)
 					if agentErr != nil {
 						return wikiTurnSpec{}, agentErr
 					}
-					switch found, err := a.TranscriptExists(doc.Session, resumeCwd); {
+					switch found, err := a.TranscriptExists(doc.Session, sessionCwd); {
 					case err != nil:
 						return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", err)
 					case found:
@@ -413,7 +403,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						// mirror). Codex returns RestoreMissing as a no-op
 						// — its own glob already settled the question.
 						mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
-						outcome, err := a.RestoreTranscript(doc.Session, resumeCwd, mirrorPath)
+						outcome, err := a.RestoreTranscript(doc.Session, sessionCwd, mirrorPath)
 						if err != nil {
 							return wikiTurnSpec{}, fmt.Errorf("session: restore transcript: %w", err)
 						}
@@ -603,10 +593,11 @@ type wikiTurnSpec struct {
 	// ClonePath is the sandbox clone working directory. Empty for
 	// document-only / lint sessions.
 	ClonePath string
-	// SessionCwd is the document-only fallback cwd — a stable
-	// per-document path under <root>/.moe/sessions/. Empty for code
-	// stages (ClonePath wins) and for run-less / lint sessions, which
-	// can keep using the worktree root since they don't `--resume`.
+	// SessionCwd is the stable per-document cwd for claude turns — a
+	// path under <root>/.moe/sessions/<p>/<r>/<d>. Code-bearing stages
+	// reach the sandbox clone via --add-dir, not via cwd. Empty for
+	// run-less / lint sessions, which don't `--resume` and can keep
+	// using the worktree root.
 	SessionCwd string
 	// SessionUUID is the Claude Code session id. Stage sessions reuse
 	// the per-document UUID stored in run.json; lint sessions mint a
@@ -815,6 +806,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			Prompt:     prompt,
 			UserPrompt: spec.InitialPrompt,
 			ClonePath:  spec.ClonePath,
+			SessionCwd: spec.SessionCwd,
 			Model:      spec.Model,
 			Stdout:     stdout,
 			Stderr:     stderr,
@@ -858,12 +850,11 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// spec.SessionUUID` guard keeps it a no-op there.
 	//
 	// Persisting the returned id lets the next turn's `--resume`
-	// point at the right transcript. The interactive pre-flight
-	// re-mints with a warning when the cwd-encoded path doesn't
-	// resolve (e.g. headless one-shot ran with workRoot but the
-	// follow-up interactive turn uses SessionCwd), so a mismatch
-	// degrades gracefully rather than wedging the resume. Run-less
-	// callers (lint) carry no document to mutate.
+	// point at the right transcript. Both headless and interactive
+	// claude turns now share the same SessionCwd, so a headless →
+	// interactive transition resolves to the same encoded-cwd
+	// bucket and `--resume` works without recovery on turn 2.
+	// Run-less callers (lint) carry no document to mutate.
 	if spec.Metadata != nil && returnedSid != "" && returnedSid != spec.SessionUUID {
 		if doc, ok := spec.Metadata.Documents[spec.DocID]; ok {
 			doc.Session = returnedSid
@@ -1081,14 +1072,17 @@ func writePromptSnapshot(workRoot, agent string, md *run.Metadata, docID, prompt
 	return nil
 }
 
-// sessionDocCwd is the cwd document-only stages hand to claude — a
+// sessionDocCwd is the cwd every claude stage hands to claude — a
 // stable per-document path under <root>/.moe/sessions/<project>/<run>/<doc>/.
 // Stable across turns because the inputs are stable; that's the whole
 // point: claude encodes cwd into its on-disk project dir, so a churning
 // cwd (e.g. the per-turn worktree path) leaves `--resume <sid>` looking
-// in a fresh dir on every turn and reporting the session missing. The
-// dir itself stays empty — `--add-dir` is what actually scopes the
-// session to the worktree.
+// in a fresh dir on every turn and reporting the session missing. Code
+// stages don't get a different cwd — they reach the sandbox clone and
+// the bureaucracy worktree via `--add-dir`. The dir itself stays empty
+// of source — `.claude/skills/` is the one tree materialized inside it
+// so claude's cwd-walkup skill discovery finds the moe-bureaucracy /
+// moe-context skills.
 func sessionDocCwd(root, projectID, runID, docID string) string {
 	return filepath.Join(root, ".moe", "sessions", projectID, runID, docID)
 }

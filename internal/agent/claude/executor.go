@@ -25,6 +25,18 @@ func init() {
 // dispatch hook the registry hands back.
 type Agent struct{}
 
+// pickCwd picks the cwd claude runs under. sessionCwd is the
+// per-document stable path stage.go owns; claude buckets transcripts
+// by EncodeCwd(cwd), so resume needs cwd to be the same value on every
+// turn. Root is the fallback for run-less callers (rebase_resolve)
+// that have no session to resume.
+func pickCwd(sessionCwd, root string) string {
+	if sessionCwd != "" {
+		return sessionCwd
+	}
+	return root
+}
+
 // scrubbedKeys names the env vars stripped from every claude
 // subprocess's inherited environment. Both override Anthropic's OAuth
 // path silently: ANTHROPIC_API_KEY is documented to take precedence
@@ -180,19 +192,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 
 	args := executeArgs(r)
 	cmd := exec.Command(bin, args...)
-	// cwd-inversion shape: code-bearing stages (r.ClonePath set) run
-	// cwd = r.Root (the bureaucracy session worktree) and reach the
-	// project clone via --add-dir. Document-only stages run cwd =
-	// r.SessionCwd so claude's encoded-cwd project dir stays stable
-	// across turns (--resume <sid> finds its JSONL).
-	switch {
-	case r.ClonePath != "":
-		cmd.Dir = r.Root
-	case r.SessionCwd != "":
-		cmd.Dir = r.SessionCwd
-	default:
-		cmd.Dir = r.Root
-	}
+	cmd.Dir = pickCwd(r.SessionCwd, r.Root)
 	cmd.Env = filteredEnv(r.ExtraEnv)
 	cmd.Stdin = r.Stdin
 	cmd.Stdout = r.Stdout
@@ -264,10 +264,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
-	// cwd-inversion shape: r.Root is the canonical cwd (bureaucracy
-	// session worktree for code stages, bureaucracy root for
-	// document-only). The project clone is reached via --add-dir.
-	cmd.Dir = r.Root
+	cmd.Dir = pickCwd(r.SessionCwd, r.Root)
 	cmd.Env = filteredEnv(r.ExtraEnv)
 	// No stdin: -p mode reads only flags + positional prompt. Wiring
 	// stdin would let claude block on a tty that nobody's typing into.

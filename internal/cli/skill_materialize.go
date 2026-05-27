@@ -12,26 +12,32 @@ import (
 )
 
 // skillMaterializeDirs lists the per-backend skill discovery roots both
-// claude and codex walk for. Discovery rules differ — codex stops at
-// the nearest .git anchor and claude walks unanchored further up — but
-// both look in `.<backend>/skills/<skill-name>/SKILL.md`. The session
-// worktree is a git worktree, which gives codex its anchor; claude
-// reaches the same file via its more permissive walk.
+// claude and codex walk for under workRoot. Discovery rules differ —
+// codex stops at the nearest .git anchor and claude walks unanchored
+// further up — but both look in `.<backend>/skills/<skill-name>/SKILL.md`.
+// The session worktree is a git worktree, which gives codex its anchor;
+// claude reaches the same file via its more permissive walk when its
+// cwd is under workRoot. Post-stable-cwd-fix, claude actually runs from
+// sessionCwd, so the materialiser also writes `.claude/skills/` under
+// sessionCwd — see writeSkill.
 var skillMaterializeDirs = []string{".claude", ".codex"}
 
 // materializeMoeBureaucracySkill writes the moe-bureaucracy SKILL.md
 // into the session worktree's .claude/skills/ and .codex/skills/ trees
-// with the run-specific twin/lore/followups paths pre-substituted.
+// (codex discovery walks up from cwd=workRoot to the worktree's .git
+// anchor) and additionally under sessionCwd/.claude/skills/ (claude's
+// cwd-walkup starts from sessionCwd post-fix). The two claude targets
+// are belt-and-suspenders for now — the workRoot side stays so add-dir
+// walkup keeps working without a discovery audit.
 //
 // Materialized fresh on every BuildSpec call; the paths are
 // session-stable for the run but cheap to rewrite, and a refresh costs
 // less than reasoning about staleness across resumes. Lives inside the
-// session worktree so teardown is free: session.Close removes the
-// worktree, taking the materialized skill with it. Never staged or
-// committed — commitTurn only stages explicit pathspecs (docDir,
-// runJSON, followups, feedback), and the worktree-root .claude/.codex
-// dirs aren't on that list.
-func materializeMoeBureaucracySkill(workRoot string, md *run.Metadata) error {
+// session worktree (workRoot) or under .moe/sessions/ (sessionCwd) so
+// teardown is free: session.Close removes the worktree, taking those
+// materialized skills with it; the sessionCwd dir is operator-local
+// scratch under .moe/. Never staged or committed.
+func materializeMoeBureaucracySkill(workRoot, sessionCwd string, md *run.Metadata) error {
 	tmpl, err := template.New("moe-bureaucracy-skill").Parse(moe.MoeBureaucracySkill())
 	if err != nil {
 		return fmt.Errorf("skill: parse moe-bureaucracy template: %w", err)
@@ -49,33 +55,24 @@ func materializeMoeBureaucracySkill(workRoot string, md *run.Metadata) error {
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("skill: render moe-bureaucracy template: %w", err)
 	}
-	body := buf.Bytes()
-	for _, dir := range skillMaterializeDirs {
-		skillDir := filepath.Join(workRoot, dir, "skills", "moe-bureaucracy")
-		if err := os.MkdirAll(skillDir, 0o755); err != nil {
-			return fmt.Errorf("skill: mkdir %s: %w", skillDir, err)
-		}
-		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), body, 0o644); err != nil {
-			return fmt.Errorf("skill: write %s/SKILL.md: %w", skillDir, err)
-		}
-	}
-	return nil
+	return writeSkill(workRoot, sessionCwd, "moe-bureaucracy", buf.Bytes())
 }
 
 // materializeMoeContextSkill writes the moe-context SKILL.md into the
-// session worktree's .claude/skills/ and .codex/skills/ trees with the
-// run's project, run id, bureaucracy root, and (if present) sandbox
-// clone path pre-substituted. Sibling to materializeMoeBureaucracySkill:
-// the bureaucracy skill teaches the agent how to *write* traces back
-// into the bureaucracy; this one teaches the agent how to *read* prior
-// runs, the journal, and past stage transcripts as context.
+// session worktree's .claude/skills/ and .codex/skills/ trees, plus the
+// sessionCwd .claude/skills/ tree, with the run's project, run id,
+// bureaucracy root, and (if present) sandbox clone path pre-substituted.
+// Sibling to materializeMoeBureaucracySkill: the bureaucracy skill
+// teaches the agent how to *write* traces back into the bureaucracy;
+// this one teaches the agent how to *read* prior runs, the journal,
+// and past stage transcripts as context.
 //
 // clonePath is empty for document-only stages; the skill template uses
 // HasClone to decide whether to render the project-source-clone bullet.
 //
 // Materialized fresh on every BuildSpec call — same lifecycle as
 // materializeMoeBureaucracySkill. Never staged or committed.
-func materializeMoeContextSkill(workRoot string, md *run.Metadata, clonePath string) error {
+func materializeMoeContextSkill(workRoot, sessionCwd string, md *run.Metadata, clonePath string) error {
 	tmpl, err := template.New("moe-context-skill").Parse(moe.MoeContextSkill())
 	if err != nil {
 		return fmt.Errorf("skill: parse moe-context template: %w", err)
@@ -97,9 +94,26 @@ func materializeMoeContextSkill(workRoot string, md *run.Metadata, clonePath str
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("skill: render moe-context template: %w", err)
 	}
-	body := buf.Bytes()
+	return writeSkill(workRoot, sessionCwd, "moe-context", buf.Bytes())
+}
+
+// writeSkill plants the rendered SKILL.md body under each backend's
+// discovery roots. workRoot covers both backends (codex's anchor-walk,
+// claude's add-dir-side fallback); sessionCwd, when non-empty, gets
+// the claude tree alone so claude's cwd-walkup from sessionCwd finds
+// the skill. Codex never sees sessionCwd — its cwd stays at workRoot.
+func writeSkill(workRoot, sessionCwd, skillName string, body []byte) error {
 	for _, dir := range skillMaterializeDirs {
-		skillDir := filepath.Join(workRoot, dir, "skills", "moe-context")
+		skillDir := filepath.Join(workRoot, dir, "skills", skillName)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			return fmt.Errorf("skill: mkdir %s: %w", skillDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), body, 0o644); err != nil {
+			return fmt.Errorf("skill: write %s/SKILL.md: %w", skillDir, err)
+		}
+	}
+	if sessionCwd != "" {
+		skillDir := filepath.Join(sessionCwd, ".claude", "skills", skillName)
 		if err := os.MkdirAll(skillDir, 0o755); err != nil {
 			return fmt.Errorf("skill: mkdir %s: %w", skillDir, err)
 		}
