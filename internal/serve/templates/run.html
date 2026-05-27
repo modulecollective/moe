@@ -23,9 +23,7 @@
     <button id="theme-toggle" type="button">theme</button>
   </header>
 
-  <div id="poll-target">
-    {{template "run_fragment.html" .}}
-  </div>
+  {{template "run_fragment.html" .}}
 </main>
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {
@@ -35,26 +33,6 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
   document.documentElement.dataset.theme = next;
   localStorage.setItem('moe-theme', next);
 });
-(function () {
-  var target = document.getElementById('poll-target');
-  if (!target) return;
-  var timer = setInterval(function () {
-    fetch(location.pathname + '/fragment', {cache: 'no-store'})
-      .then(function (r) {
-        if (r.status === 404) { clearInterval(timer); return null; }
-        return r.text();
-      })
-      .then(function (html) {
-        if (html === null || html === undefined) return;
-        target.innerHTML = html;
-        if (target.firstElementChild &&
-            target.firstElementChild.dataset.stop === '1') {
-          clearInterval(timer);
-        }
-      })
-      .catch(function () { /* transient; try again on next tick */ });
-  }, 2000);
-})();
 </script>
 </body>
 </html>

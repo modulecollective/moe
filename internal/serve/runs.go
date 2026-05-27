@@ -134,7 +134,6 @@ type runVM struct {
 	CanvasLinks     []canvasLink
 	Buttons         []promptButton // chain-prompt buttons when one is active
 	EndAgentEnabled bool           // render the "end agent" button (true while live)
-	PollStop        bool           // tell the client-side poller to stop (exited + grace elapsed)
 }
 
 // promptButton is one renderable button for the per-run page. Key
@@ -177,8 +176,7 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
 // not currently parented by this serve. The result has no Tail /
 // Buttons / EndAgentEnabled — the template's {{if}} gates collapse
-// those sections. The /fragment poller will 404 on its first tick
-// and stop, so the page is effectively static.
+// those sections, so the page renders as a static snapshot.
 func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
@@ -193,29 +191,11 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	}, nil
 }
 
-// handleRunFragment renders just the swapping subtree of the run
-// page. The setInterval poller on run.html hits this endpoint every
-// 2s and swaps its innerHTML into <div id="poll-target">. Returns
-// 404 if the run isn't parented (the poller stops on 404).
-func (s *Server) handleRunFragment(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	id := projectID + "/" + slug
-
-	c, ok := s.children.get(id)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	vm := s.buildRunVM(c, projectID, slug, id)
-	s.render(w, r, "run_fragment.html", vm)
-}
-
 // handleEndAgent writes two \x04 (EOT) bytes ~100ms apart to the
 // child's PTY. Soft EOFs: claude / codex see EOF on stdin, flush,
 // and exit cleanly. Always sends two — claude needs them, codex
-// no-ops the second. The chain prompt that follows surfaces on the
-// next poller tick via the broadened chainPromptRegex.
+// no-ops the second. The 303 redirect lands back on the run page,
+// which re-renders with the chain prompt the agent emitted on exit.
 func (s *Server) handleEndAgent(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -242,16 +222,10 @@ func (s *Server) handleEndAgent(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// pollStopGrace is how long after a child exits the client-side
-// poller keeps fetching. Long enough for the operator to read the
-// final tail; short enough not to keep an abandoned tab polling
-// forever.
-const pollStopGrace = 30 * time.Second
-
-// buildRunVM is shared between the full-page and fragment renderers
-// so they're guaranteed to agree on what's visible.
+// buildRunVM assembles the per-run page from the live child's state
+// and the on-disk canvas listing.
 func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
-	tail, prompt, exited, exitErr, exitedAt := c.snapshot()
+	tail, prompt, exited, exitErr, _ := c.snapshot()
 	now := time.Now()
 	vm := runVM{
 		ID:              id,
@@ -274,9 +248,6 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	if prompt.Active {
 		vm.Buttons = buttonsFor(prompt.Options)
-	}
-	if exited && now.Sub(exitedAt) > pollStopGrace {
-		vm.PollStop = true
 	}
 	return vm
 }

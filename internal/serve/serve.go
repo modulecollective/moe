@@ -197,7 +197,6 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
-	s.router.HandleFunc("GET /run/{project}/{slug}/fragment", s.handleRunFragment)
 	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
 	s.router.HandleFunc("POST /run/{project}/{slug}/end-agent", s.handleEndAgent)
 

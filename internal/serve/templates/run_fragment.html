@@ -1,4 +1,4 @@
-<div class="run-fragment"{{if .PollStop}} data-stop="1"{{end}}>
+<div class="run-fragment">
   <p class="meta">{{if .Started}}started {{.Started}} · {{end}}<span class="status {{if .Live}}live{{else if .Parented}}exited{{end}}">{{.Status}}</span></p>
 
   {{if .CanvasLinks}}
