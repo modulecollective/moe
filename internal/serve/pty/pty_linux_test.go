@@ -34,10 +34,6 @@ func TestStartEchoesThroughMaster(t *testing.T) {
 	if err := p.Cmd().Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	// After the child exits, master will EIO on next read so the
-	// goroutine unblocks. Close defensively in case the kernel
-	// hasn't propagated the teardown yet.
-	_ = p.Close()
 
 	select {
 	case res := <-out:
