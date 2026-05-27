@@ -192,6 +192,43 @@ func TestRemoveAfterEnsure(t *testing.T) {
 	}
 }
 
+// TestRemoveSurfacesPermissionHint exercises the warning-text change:
+// when the underlying `os.RemoveAll` hits EACCES (real-world cause: a
+// container running as root wrote files the host can't unlink), the
+// wrapped error must point at `moe gc clones` so the operator finds
+// the recovery verb without trawling docs. Reproduced cheaply by
+// revoking write on the parent dir — that's what fails the unlink in
+// the original incident.
+func TestRemoveSurfacesPermissionHint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses unix permission checks")
+	}
+	root := t.TempDir()
+	clone := Path(root, "thing", "req-a")
+	if err := os.MkdirAll(clone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clone, "stuck"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(clone, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(clone, 0o755) })
+
+	err := Remove(root, "thing", "req-a")
+	if err == nil {
+		t.Fatal("expected permission error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "moe gc clones") {
+		t.Fatalf("error missing `moe gc clones` hint: %v", err)
+	}
+	if !strings.Contains(msg, "container-written") {
+		t.Fatalf("error missing container-written explanation: %v", err)
+	}
+}
+
 // TestRemoveWithDirtyClone confirms Remove tears down a clone with
 // uncommitted edits without complaint — by the time Remove runs the
 // run is terminal, so any uncommitted state is intentionally being

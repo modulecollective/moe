@@ -164,9 +164,23 @@ func CheckoutBranch(clonePath, branch string) error {
 // `os.RemoveAll`. The clone's `objects/info/alternates` is a one-way
 // reference; nuking the clone has no effect on the canonical
 // submodule's object store.
+//
+// A permission denial inside the clone typically means a container
+// running as root wrote files there (rootless docker maps container-
+// root → host `nobody:nogroup`, which the moe process can't unlink).
+// We surface that likely cause and point at `moe gc clones`, the verb
+// that knows how to fall back to a container-driven rm. The wrapped
+// error keeps the path / syscall detail intact for anyone matching on
+// it with errors.Is.
 func Remove(root, projectID, runID string) error {
 	dst := Path(root, projectID, runID)
 	if err := os.RemoveAll(dst); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf(
+				"sandbox: remove %s: %w (likely a container-written file; "+
+					"the project's dev-env-teardown.d should remove it, "+
+					"or run `moe gc clones`)", dst, err)
+		}
 		return fmt.Errorf("sandbox: remove %s: %w", dst, err)
 	}
 	return nil
