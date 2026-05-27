@@ -163,4 +163,3 @@ func TestDockerRmRecipeFormat(t *testing.T) {
 		t.Fatalf("recipe: got %q want %q", got, want)
 	}
 }
-

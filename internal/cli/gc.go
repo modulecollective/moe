@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
@@ -201,7 +202,7 @@ func removeOrphanClone(path string) error {
 	cmd := exec.Command("docker", "run", "--rm", "-v", abs+":/x", "alpine", "rm", "-rf", "/x")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("permission denied; docker fallback failed: %v: %s. try: %s",
-			err, string(out), dockerRmRecipe(abs))
+			err, strings.TrimSpace(string(out)), dockerRmRecipe(abs))
 	}
 	// The bind-mount target itself isn't removed by container-side rm
 	// — the host-side dir survives even when empty. RemoveAll once
