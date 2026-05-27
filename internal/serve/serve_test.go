@@ -149,6 +149,23 @@ func TestStaticAssetServed(t *testing.T) {
 	}
 }
 
+func TestFaviconServed(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/static/favicon.svg", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rr.Code)
+	}
+	// Pin the content-type so a build host with a missing mime registration
+	// fails loudly instead of silently serving application/octet-stream.
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "image/svg+xml") {
+		t.Errorf("want image/svg+xml content-type, got %q", ct)
+	}
+}
+
 func TestNewRunFormEmptyRoot(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
