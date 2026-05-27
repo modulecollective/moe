@@ -61,13 +61,15 @@ a:hover, a:focus { border-bottom-style: solid; }
 
 /* Header & footer */
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
   margin-bottom: 1.5rem;
 }
-.banner { flex: 1; min-width: 0; }
+.banner { min-width: 0; }
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
 .banner-bar {
   display: block;
   font-weight: 600;

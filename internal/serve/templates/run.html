@@ -21,8 +21,10 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub">{{.Project}}/{{.Slug}}</div>
     </div>
-    <a class="header-action" href="/run/new">new run</a>
-    <button id="theme-toggle" type="button">theme</button>
+    <div class="header-actions">
+      <a class="header-action" href="/run/new">new run</a>
+      <button id="theme-toggle" type="button">theme</button>
+    </div>
   </header>
 
   {{template "run_fragment.html" .}}
