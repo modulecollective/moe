@@ -14,6 +14,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 func TestDashRouteRendersBuckets(t *testing.T) {
@@ -453,6 +454,129 @@ func TestRunPageMissingRun404(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "no such run") {
 		t.Errorf("body should say 'no such run', got:\n%s", rr.Body.String())
+	}
+}
+
+// TestPromoteFormRendersForInProgressIdea: when the loaded run is an
+// in-progress idea, the per-run page renders the promote-to-sdlc
+// form with workspace + agent dropdowns and a POST action at the
+// /promote subpath. The agent dropdown shows both backends and the
+// "(default)" option.
+func TestPromoteFormRendersForInProgressIdea(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<h2>promote to sdlc</h2>`,
+		`action="/run/alpha/my-idea/promote"`,
+		`name="agent"`,
+		`>claude<`, `>codex<`, `(default)`,
+		`type="submit"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+}
+
+// TestPromoteFormHiddenForNonIdea: a non-idea run on disk gets no
+// promote form. The {{if .PromoteEnabled}} gate keeps the section
+// out of the rendered HTML.
+func TestPromoteFormHiddenForNonIdea(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, banned := range []string{
+		"promote to sdlc",
+		`action="/run/alpha/fix-it/promote"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("non-idea page must not render promote form (found %q)\n%s", banned, body)
+		}
+	}
+}
+
+// TestPromoteFormHiddenForPromotedIdea: once an idea has been
+// promoted, its status is no longer in_progress and the form goes
+// away — re-promoting a hand-off idea would be a foot-gun (the
+// destination run already exists).
+func TestPromoteFormHiddenForPromotedIdea(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	md := &run.Metadata{
+		ID:        "old-idea",
+		Project:   "alpha",
+		Status:    run.StatusPromoted,
+		Workflow:  "idea",
+		Created:   "2026-04-01",
+		Documents: map[string]*run.Document{},
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/old-idea", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "promote to sdlc") {
+		t.Errorf("promoted idea must not render promote form:\n%s", rr.Body.String())
+	}
+}
+
+// TestPromoteRefusesNonIdeaRun: POSTing to the promote URL of a
+// non-idea run is the operator (or a stale form) calling the wrong
+// surface. 409 with a clear body, no spawn.
+func TestPromoteRefusesNonIdeaRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/promote", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := s.children.get("alpha/fix-it:promoting"); ok {
+		t.Error("no placeholder child should have been spawned for non-idea run")
+	}
+}
+
+// TestPromoteRefusesMissingRun: a slug that doesn't exist on disk
+// returns 404 from the load step.
+func TestPromoteRefusesMissingRun(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/ghost/ghost/promote", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

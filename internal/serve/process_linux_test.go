@@ -307,6 +307,118 @@ func TestEndAgentRefusesIfAlreadyExited(t *testing.T) {
 	}
 }
 
+// TestPromoteSpawnRenamesAfterOpenedRunLine drives the placeholder
+// → real-slug rename path: spawn a child under `<p>/<s>:promoting`,
+// have it print the `opened run …` line moe sdlc new emits, then
+// assert the registry has rebucketed it under the new slug. Uses
+// `/bin/sh -c` to drive deterministic stdout without invoking moe
+// itself.
+func TestPromoteSpawnRenamesAfterOpenedRunLine(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+
+	s := newTestServer(t, Options{
+		Addr:   "127.0.0.1:0",
+		Root:   root,
+		MoeBin: "/bin/sh",
+	})
+	// Sneak the script in via MoeBin + args by re-spawning manually:
+	// handlePromote builds args from the form, so to keep the test
+	// focused on the watcher, drive children.spawn directly with the
+	// echo command and the `:promoting` id.
+	args := []string{"-c", "echo 'opened run alpha/my-idea-2026-05-27'; sleep 2"}
+	if _, err := s.children.spawn("alpha/my-idea:promoting", "/bin/sh", args, root, io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	// Poll for the rename — bounded by the child's own write speed.
+	// /bin/sh + echo lands well within 1s.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := s.children.get("alpha/my-idea-2026-05-27"); ok {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, ok := s.children.get("alpha/my-idea-2026-05-27"); !ok {
+		t.Fatal("expected child to be renamed to alpha/my-idea-2026-05-27")
+	}
+	if _, ok := s.children.get("alpha/my-idea:promoting"); ok {
+		t.Error("placeholder id should have been removed from registry")
+	}
+
+	// Cleanup: the sleep child is still alive; close its PTY.
+	if c, ok := s.children.get("alpha/my-idea-2026-05-27"); ok {
+		_ = c.pty.Close()
+	}
+}
+
+// TestPromotePOSTSpawnsPlaceholderChild drives the full HTTP path:
+// POST /promote on an in-progress idea spawns a child under the
+// `:promoting` id and redirects back to the idea page. Doesn't
+// assert the rename (that's the watcher test); just that the
+// placeholder lands in the registry.
+func TestPromotePOSTSpawnsPlaceholderChild(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+
+	s := newTestServer(t, Options{
+		Addr:   "127.0.0.1:0",
+		Root:   root,
+		MoeBin: "/bin/sh",
+	})
+
+	form := url.Values{}
+	form.Set("agent", "claude")
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/my-idea" {
+		t.Errorf("Location = %q, want /run/alpha/my-idea", got)
+	}
+	c, ok := s.children.get("alpha/my-idea:promoting")
+	if !ok {
+		t.Fatal("placeholder child not in registry")
+	}
+	defer c.pty.Close()
+	// The fake child is `/bin/sh` with no args — it reads its
+	// controlling-tty stdin and would block on us forever. /bin/sh
+	// reads stdin until EOF; closing the PTY in defer is enough.
+}
+
+// TestPromotePOSTRejectsBadWorkspace: validation re-renders the
+// idea page with an ErrorBanner. The spawn must not have happened.
+func TestPromotePOSTRejectsBadWorkspace(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	form := url.Values{}
+	form.Set("workspace", "Not A Workspace!")
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "workspace:") {
+		t.Errorf("body should surface validation error, got:\n%s", rr.Body.String())
+	}
+	if _, ok := s.children.get("alpha/my-idea:promoting"); ok {
+		t.Error("invalid form must not spawn a placeholder child")
+	}
+}
+
 // withShortShutdownGrace shrinks the phase budgets for the duration
 // of a test so we don't spend 20+ seconds per shutdown case. Not
 // safe under t.Parallel.
