@@ -16,7 +16,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "serve",
-		Summary: "run the phone-reachable web UI on the Tailnet",
+		Summary: "run the moe web UI",
 		Run:     runServe,
 	})
 }
@@ -24,14 +24,15 @@ func init() {
 func runServe(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	addr := fs.String("addr", "", "listen address override (host or host:port); default is the Tailscale IPv4")
+	addr := fs.String("addr", "", "listen address override (host or host:port); default auto-detects a local Tailscale IPv4 if available")
 	port := fs.Int("port", serve.DefaultPort, "listen port (ignored when --addr already includes one)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Runs an HTTP server bound to the Tailscale interface so phones on")
-		moePrintln(stderr, "the tailnet can launch and advance MoE runs. Ctrl-C to stop; live")
-		moePrintln(stderr, "runs spawned by serve die with it (PTY teardown).")
+		moePrintln(stderr, "Runs the moe web UI as an HTTP server. The default bind address")
+		moePrintln(stderr, "auto-detects a local Tailscale IPv4 if one is available; use --addr")
+		moePrintln(stderr, "to listen somewhere else (for example, 127.0.0.1:8080 for local-only).")
+		moePrintln(stderr, "Ctrl-C to stop; live runs spawned by serve die with it (PTY teardown).")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

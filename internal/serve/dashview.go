@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"math/rand"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
@@ -34,13 +35,20 @@ type dashVM struct {
 	ProjectCount   int
 	ActiveProjects int
 	ShowAll        bool
+	// FactoryArt is the same peripheral-vision rail the CLI dash draws
+	// under its banner — backlog feed, station glyphs for active runs,
+	// completed-output dots. One-line empty state, three lines populated.
+	FactoryArt []string
 }
 
 func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, showAll bool) dashVM {
+	state := dash.FactoryStateFromRows(rows)
+	r := rand.New(rand.NewSource(now.UnixNano()))
 	vm := dashVM{
 		ProjectCount:   projectCount,
 		ActiveProjects: activeProjects,
 		ShowAll:        showAll,
+		FactoryArt:     dash.BuildFactoryArt(state, dash.ArtWidth, r),
 	}
 	for _, r := range rows {
 		row := dashRowVM{

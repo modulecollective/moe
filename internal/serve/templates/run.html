@@ -16,8 +16,9 @@
 <body>
 <main>
   <header class="page-header">
-    <div>
-      <h1><a href="/">moe</a> · {{.Project}}/{{.Slug}}</h1>
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub">{{.Project}}/{{.Slug}}</div>
       <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
     </div>
     <button id="theme-toggle" type="button">theme</button>
