@@ -15,7 +15,10 @@ judgment; MoE removes the coordination tax around opening work, handing context
 forward, checking progress, and filing the lessons that should shape the next
 run.
 
-![MoE dashboard - open runs and backlog](docs/dash.png)
+![MoE CLI dashboard - open runs and backlog in CLI](docs/dash-cli.png)
+
+![MoE web dashboard - open runs and backlog with local web server](docs/dash-web.png)
+
 
 ## What MoE Is
 
