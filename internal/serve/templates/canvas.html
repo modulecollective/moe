@@ -21,8 +21,6 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> → {{.Stage}}</div>
     </div>
-    <a class="header-action" href="/run/new">new run</a>
-    <button id="theme-toggle" type="button">theme</button>
   </header>
 
   {{if .Missing}}
@@ -31,6 +29,10 @@
   <p class="meta">{{.ModTime}}</p>
   <pre class="canvas-body">{{.Body}}</pre>
   {{end}}
+
+  <footer class="page-footer">
+    <p><button id="theme-toggle" type="button">theme</button></p>
+  </footer>
 </main>
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {
