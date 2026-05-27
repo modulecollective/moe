@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -515,22 +516,9 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runIdeaReopen flips a promoted idea back to in_progress when its
-// destination sdlc run was abandoned (closed without push), so it
-// reappears in `moe idea list` and the dash's backlog bucket instead
-// of stranding the operator with no way back.
-//
-// Precondition is strict: the idea must be status=promoted *and* the
-// destination run named by its MoE-Promoted-To trailer must be
-// status=closed. A destination that is in-progress, pushed, or merged
-// is refused with a named message — silently allowing those would let
-// two live forks of the same intent coexist, or undo a ship. The
-// destination slug comes from the journal index (PromotedTo), the same
-// source dash reads.
-//
-// One commit, one field flip. `MoE-Promoted-To` on the original
-// promote commit stays in history — it documents what *did* happen,
-// not current state.
+// runIdeaReopen flips a closed idea back to in_progress. For promoted
+// ideas, runopen.ReopenIdea preserves the destination-closed guard so
+// reopening cannot create two live owners of the same intent.
 func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea reopen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -563,83 +551,12 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	md, err := loadIdeaRun(root, projectID, slug)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if md.Status != run.StatusPromoted {
-		moePrintf(stderr, "idea %s/%s is %s, not promoted — reopen only flips a promoted idea\n", projectID, slug, md.Status)
-		return 1
-	}
-
-	// Resolve the destination run via the same MoE-Promoted-To trailer
-	// dash keys off. A missing entry means the idea is promoted but
-	// nothing in the journal recorded the destination — refuse rather
-	// than guess, the operator has a state mismatch worth seeing.
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		moePrintf(stderr, "idea reopen: %v\n", err)
-		return 1
-	}
-	destValue := idx.PromotedTo[slug]
-	if destValue == "" {
-		moePrintf(stderr, "idea %s/%s is promoted but has no MoE-Promoted-To trailer on record; cannot resolve destination\n", projectID, slug)
-		return 1
-	}
-	destProject, destSlug, ok := splitPromotedTo(destValue)
-	if !ok {
-		moePrintf(stderr, "idea %s/%s: malformed MoE-Promoted-To trailer %q\n", projectID, slug, destValue)
-		return 1
-	}
-	dest, err := run.Load(root, destProject, destSlug)
-	if err != nil {
+	if err := runopen.ReopenIdea(root, projectID, slug); err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "idea %s/%s points at %s/%s but that run is gone; cannot verify destination status\n", projectID, slug, destProject, destSlug)
-			return 1
+			moePrintf(stderr, "idea %s/%s does not exist; run `moe idea list %s` to see open ideas\n", projectID, slug, projectID)
+		} else {
+			moePrintf(stderr, "idea: reopen: %v\n", err)
 		}
-		moePrintf(stderr, "idea reopen: %v\n", err)
-		return 1
-	}
-	switch dest.Status {
-	case run.StatusClosed:
-		// Proceed — destination was abandoned.
-	case run.StatusInProgress:
-		moePrintf(stderr, "idea %s/%s: destination %s/%s is in_progress; just keep working on it\n", projectID, slug, destProject, destSlug)
-		return 1
-	case run.StatusPushed:
-		moePrintf(stderr, "idea %s/%s: destination %s/%s is pushed; resolve via GitHub + `moe sync` before reopening\n", projectID, slug, destProject, destSlug)
-		return 1
-	case run.StatusMerged:
-		moePrintf(stderr, "idea %s/%s already shipped via %s/%s; run `moe idea new` for a fresh capture instead\n", projectID, slug, destProject, destSlug)
-		return 1
-	case run.StatusPromoted:
-		moePrintf(stderr, "idea %s/%s: destination %s/%s is itself promoted; resolve that chain before reopening\n", projectID, slug, destProject, destSlug)
-		return 1
-	default:
-		moePrintf(stderr, "idea %s/%s: destination %s/%s has unexpected status %q\n", projectID, slug, destProject, destSlug, dest.Status)
-		return 1
-	}
-
-	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	msg := fmt.Sprintf("Reopen idea %s/%s\n\n", projectID, slug) +
-		trailers.Block{
-			Run:      slug,
-			Project:  projectID,
-			Workflow: ideaWorkflow,
-		}.String()
-	err = withRepoLock(root, repolock.Options{
-		Purpose: "idea-reopen",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		md.Status = run.StatusInProgress
-		if err := run.Save(root, md); err != nil {
-			return err
-		}
-		return run.StageAndCommit(root, msg, runJSONRel)
-	})
-	if err != nil {
-		moePrintf(stderr, "idea: reopen: %v\n", err)
 		return 1
 	}
 	moePrintf(stdout, "reopened idea %s/%s\n", projectID, slug)

@@ -15,8 +15,9 @@
 //     Knowing the slug synchronously is what lets serve drop the
 //     `:promoting` placeholder + `opened run …` regex it used before.
 //
-// Both Open and Promote take the repolock around their mutations so
-// concurrent invocations don't clobber each other's git index.
+// Open, Promote, CloseIdea, and ReopenIdea take the repolock
+// around their mutations so concurrent invocations do not clobber
+// each other.s git index.
 package runopen
 
 import (
@@ -24,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -37,13 +39,17 @@ import (
 // everything).
 const ideaDocID = "idea"
 
-// ErrNotIdea is returned by EditIdea when the slug names a run that
-// isn't an in-progress idea — either a different workflow, or an
-// idea that has already been promoted/closed. Defence in depth: the
-// serve handler should have gated on the same check via
-// isPromotableIdea, this is the floor that catches a replayed POST
-// landing on a now-promoted idea.
-var ErrNotIdea = errors.New("runopen: not an editable idea (workflow!=idea or status!=in_progress)")
+// ErrNotIdea is returned when the slug names a run that
+// is not an in-progress idea — either a different workflow, or an
+// idea that has already been promoted/closed. Defence in depth: serve
+// handlers gate on the same check before rendering actions, and this
+// catches replayed POSTs landing on a now-terminal idea.
+var ErrNotIdea = errors.New("runopen: not an in-progress idea (workflow!=idea or status!=in_progress)")
+
+// ErrNotReopenableIdea is returned by ReopenIdea when the slug is not
+// an idea that can be flipped back to in_progress. The wrapped error
+// text names the specific status or destination-state problem.
+var ErrNotReopenableIdea = errors.New("runopen: not a reopenable idea")
 
 // PromoteOptions configures Promote. The destination run's workflow,
 // workspace, and agent are caller-provided; the first-stage doc id is
@@ -188,6 +194,123 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 		}
 		return run.StageAndCommit(root, msg, runJSONRel)
 	})
+}
+
+// CloseIdea flips an in-progress idea run to closed and commits only
+// its run.json with the standard idea close trailer block.
+func CloseIdea(root, projectID, slug string) error {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IdeaWorkflow || md.Status != run.StatusInProgress {
+		return ErrNotIdea
+	}
+
+	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
+	msg := fmt.Sprintf("Close idea %s/%s\n\n", projectID, slug) +
+		trailers.Block{
+			Run:      slug,
+			Project:  projectID,
+			Workflow: dash.IdeaWorkflow,
+		}.String()
+	return withRepoLock(root, repolock.Options{
+		Purpose: "idea-close",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		md.Status = run.StatusClosed
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
+// ReopenIdea flips a closed idea back to in_progress. For promoted
+// ideas, it preserves the old CLI policy: the promoted destination must
+// resolve through MoE-Promoted-To and be closed, otherwise reopening
+// would create two live owners of the same intent or resurrect shipped
+// work.
+func ReopenIdea(root, projectID, slug string) error {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IdeaWorkflow {
+		return fmt.Errorf("%w: run %s/%s is a %s run, not an idea", ErrNotReopenableIdea, projectID, slug, md.Workflow)
+	}
+	switch md.Status {
+	case run.StatusClosed:
+		// Plain closed idea: direct reopen.
+	case run.StatusPromoted:
+		if err := verifyPromotedDestinationClosed(root, projectID, slug); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
+	}
+
+	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
+	msg := fmt.Sprintf("Reopen idea %s/%s\n\n", projectID, slug) +
+		trailers.Block{
+			Run:      slug,
+			Project:  projectID,
+			Workflow: dash.IdeaWorkflow,
+		}.String()
+	return withRepoLock(root, repolock.Options{
+		Purpose: "idea-reopen",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		md.Status = run.StatusInProgress
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
+func verifyPromotedDestinationClosed(root, projectID, slug string) error {
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		return fmt.Errorf("idea reopen: %w", err)
+	}
+	destValue := idx.PromotedTo[slug]
+	if destValue == "" {
+		return fmt.Errorf("%w: idea %s/%s is promoted but has no MoE-Promoted-To trailer on record; cannot resolve destination", ErrNotReopenableIdea, projectID, slug)
+	}
+	destProject, destSlug, ok := splitPromotedTo(destValue)
+	if !ok {
+		return fmt.Errorf("%w: idea %s/%s has malformed MoE-Promoted-To trailer %q", ErrNotReopenableIdea, projectID, slug, destValue)
+	}
+	dest, err := run.Load(root, destProject, destSlug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			return fmt.Errorf("%w: idea %s/%s points at %s/%s but that run is gone; cannot verify destination status", ErrNotReopenableIdea, projectID, slug, destProject, destSlug)
+		}
+		return fmt.Errorf("idea reopen: %w", err)
+	}
+	switch dest.Status {
+	case run.StatusClosed:
+		return nil
+	case run.StatusInProgress:
+		return fmt.Errorf("%w: idea %s/%s destination %s/%s is in_progress; just keep working on it", ErrNotReopenableIdea, projectID, slug, destProject, destSlug)
+	case run.StatusPushed:
+		return fmt.Errorf("%w: idea %s/%s destination %s/%s is pushed; resolve via GitHub + `moe sync` before reopening", ErrNotReopenableIdea, projectID, slug, destProject, destSlug)
+	case run.StatusMerged:
+		return fmt.Errorf("%w: idea %s/%s already shipped via %s/%s; run `moe idea new` for a fresh capture instead", ErrNotReopenableIdea, projectID, slug, destProject, destSlug)
+	case run.StatusPromoted:
+		return fmt.Errorf("%w: idea %s/%s destination %s/%s is itself promoted; resolve that chain before reopening", ErrNotReopenableIdea, projectID, slug, destProject, destSlug)
+	default:
+		return fmt.Errorf("%w: idea %s/%s destination %s/%s has unexpected status %q", ErrNotReopenableIdea, projectID, slug, destProject, destSlug, dest.Status)
+	}
+}
+
+func splitPromotedTo(v string) (projectID, slug string, ok bool) {
+	projectID, slug, ok = strings.Cut(v, "/")
+	if !ok || projectID == "" || slug == "" || strings.Contains(slug, "/") {
+		return "", "", false
+	}
+	return projectID, slug, true
 }
 
 // EditIdea overwrites the idea's canvas with body and commits the

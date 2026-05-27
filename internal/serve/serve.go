@@ -215,6 +215,8 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
 	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleIdeaEditForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
+	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleIdeaClose)
+	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.

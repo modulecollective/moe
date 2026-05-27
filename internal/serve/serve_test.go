@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -1007,4 +1008,152 @@ func seedProject(t *testing.T, root, id string) {
 	if err := os.WriteFile(filepath.Join(dir, "project.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestIdeaPageRendersCloseAndReopenActions(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`href="/run/alpha/my-idea/edit"`,
+		`href="/run/alpha/my-idea/promote"`,
+		`<form method="post" action="/run/alpha/my-idea/close"`,
+		`>close idea</button>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "confirm(") || strings.Contains(body, "data-confirm") {
+		t.Errorf("close action should not carry browser confirmation\n%s", body)
+	}
+
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusClosed
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body = rr.Body.String()
+	for _, want := range []string{
+		`<form method="post" action="/run/alpha/my-idea/reopen"`,
+		`>reopen idea</button>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	for _, banned := range []string{
+		`href="/run/alpha/my-idea/edit"`,
+		`href="/run/alpha/my-idea/promote"`,
+		`action="/run/alpha/my-idea/close"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("closed idea page must not render %q\n%s", banned, body)
+		}
+	}
+}
+
+func TestIdeaCloseRouteClosesAndRedirects(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/my-idea" {
+		t.Fatalf("Location=%q", got)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusClosed {
+		t.Fatalf("status=%q, want closed", md.Status)
+	}
+}
+
+func TestIdeaReopenRouteReopensAndRedirects(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusClosed
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "seed closed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/reopen", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/my-idea" {
+		t.Fatalf("Location=%q", got)
+	}
+	md, err = run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("status=%q, want in_progress", md.Status)
+	}
+}
+
+func TestIdeaCloseAndReopenRoutesReturnConflictForStalePosts(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusPromoted
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "seed promoted idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	for _, path := range []string{
+		"/run/alpha/my-idea/close",
+		"/run/alpha/my-idea/reopen",
+	} {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader("")))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("%s: want 409, got %d body=%s", path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func newGitServeRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed")
+	return root
 }

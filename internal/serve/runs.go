@@ -168,19 +168,17 @@ type runVM struct {
 	Live        bool
 	CanvasLinks []canvasLink
 	// Actions is the peer-affordances block on the per-run page. For
-	// an in-progress idea this is two entries (edit, promote); the
-	// list is empty for any other run, so the template's range loop
-	// renders nothing. Order is render order.
+	// an in-progress idea this is edit, promote, and close; for a
+	// closed idea this is reopen; other runs render no actions.
 	Actions []runAction
 }
 
-// runAction is one peer affordance on the per-run page. Label is the
-// link text, Href is where it navigates. Two entries appear today
-// (edit, promote on in-progress ideas); future affordances (close,
-// rehome) become a VM-build change, not a template change.
+// runAction is one peer affordance on the per-run page. Empty Method
+// renders as a link; POST renders as a small form button.
 type runAction struct {
-	Label string
-	Href  string
+	Label  string
+	Href   string
+	Method string
 }
 
 type canvasLink struct {
@@ -211,6 +209,46 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "run.html", vm)
 }
 
+func (s *Server) handleIdeaClose(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	if err := runopen.CloseIdea(s.opts.Root, projectID, slug); err != nil {
+		switch {
+		case errors.Is(err, run.ErrRunNotFound):
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+		case errors.Is(err, runopen.ErrNotIdea):
+			http.Error(w, "run "+id+" is not a closable idea", http.StatusConflict)
+		default:
+			s.logf("close idea %s: %v", id, err)
+			http.Error(w, "close idea: "+err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug); err != nil {
+		switch {
+		case errors.Is(err, run.ErrRunNotFound):
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+		case errors.Is(err, runopen.ErrNotReopenableIdea):
+			http.Error(w, "reopen idea: "+err.Error(), http.StatusConflict)
+		default:
+			s.logf("reopen idea %s: %v", id, err)
+			http.Error(w, "reopen idea: "+err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
 // not currently parented by this serve. For in-progress idea runs,
 // the page surfaces edit/promote affordances; for sdlc runs, just the
@@ -234,17 +272,26 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 }
 
 // ideaActions returns the peer-affordances list for the per-run page.
-// In-progress idea runs get edit + promote links; everything else
-// gets nil. Order is render order (edit first — refining a captured
-// idea is the more frequent next step than promoting it).
+// In-progress idea runs get edit, promote, and close; closed idea runs
+// get reopen; everything else gets nil.
 func ideaActions(projectID, slug string, md *run.Metadata) []runAction {
-	if !isPromotableIdea(md) {
+	if md.Workflow != dash.IdeaWorkflow {
 		return nil
 	}
 	base := "/run/" + projectID + "/" + slug
-	return []runAction{
-		{Label: "edit idea", Href: base + "/edit"},
-		{Label: "promote to sdlc", Href: base + "/promote"},
+	switch md.Status {
+	case run.StatusInProgress:
+		return []runAction{
+			{Label: "edit idea", Href: base + "/edit"},
+			{Label: "promote to sdlc", Href: base + "/promote"},
+			{Label: "close idea", Href: base + "/close", Method: "POST"},
+		}
+	case run.StatusClosed:
+		return []runAction{
+			{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+		}
+	default:
+		return nil
 	}
 }
 

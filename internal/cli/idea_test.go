@@ -1444,14 +1444,14 @@ func TestIdeaReopenRefusesInProgressIdea(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero on in_progress idea, got 0; stdout=%q", out.String())
 	}
-	if !strings.Contains(errb.String(), "not promoted") {
-		t.Fatalf("expected not-promoted error, got: %q", errb.String())
+	if !strings.Contains(errb.String(), "not closed or promoted") {
+		t.Fatalf("expected not-reopenable error, got: %q", errb.String())
 	}
 }
 
-// TestIdeaReopenRefusesClosedIdea: a closed idea never had a
-// destination — reopen is for promoted, not for "captured and dropped."
-func TestIdeaReopenRefusesClosedIdea(t *testing.T) {
+// TestIdeaReopenAcceptsClosedIdea: a plain closed idea can be moved
+// back to in_progress without a promoted destination.
+func TestIdeaReopenAcceptsClosedIdea(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -1467,11 +1467,18 @@ func TestIdeaReopenRefusesClosedIdea(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "reopen", "tele/dropped"}, &out, &errb)
-	if code == 0 {
-		t.Fatalf("expected non-zero on closed idea, got 0; stdout=%q", out.String())
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "not promoted") {
-		t.Fatalf("expected not-promoted error, got: %q", errb.String())
+	if !strings.Contains(out.String(), "reopened idea tele/dropped") {
+		t.Fatalf("missing reopen confirmation: %q", out.String())
+	}
+	md, err := run.Load(root, "tele", "dropped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("status=%q, want in_progress", md.Status)
 	}
 }
 

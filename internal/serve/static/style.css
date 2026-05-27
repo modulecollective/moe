@@ -199,10 +199,14 @@ section.actions {
   gap: 0.5rem;
   margin-top: 1rem;
 }
+.action-form { margin: 0; }
 .action {
+  appearance: none;
+  background: transparent;
   border: 1px solid var(--hairline);
   border-radius: 4px;
   padding: 0.4rem 0.7rem;
+  font: inherit;
   font-size: 0.9rem;
   color: var(--fg);
   text-decoration: none;

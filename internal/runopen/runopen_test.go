@@ -169,3 +169,172 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestCloseIdeaBumpsStatusAndCommits(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+
+	if err := CloseIdea(root, "alpha", "my-idea"); err != nil {
+		t.Fatalf("CloseIdea: %v", err)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusClosed {
+		t.Fatalf("status=%q, want %q", md.Status, run.StatusClosed)
+	}
+	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
+	for _, want := range []string{
+		"Close idea alpha/my-idea",
+		"MoE-Run: my-idea",
+		"MoE-Project: alpha",
+		"MoE-Workflow: idea",
+	} {
+		if !contains(msg, want) {
+			t.Errorf("commit message missing %q\n%s", want, msg)
+		}
+	}
+}
+
+func TestCloseIdeaRefusesNonIdeaAndTerminalIdea(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		workflow string
+		status   string
+	}{
+		{name: "non-idea", workflow: "sdlc", status: run.StatusInProgress},
+		{name: "closed", workflow: dash.IdeaWorkflow, status: run.StatusClosed},
+		{name: "promoted", workflow: dash.IdeaWorkflow, status: run.StatusPromoted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+			setRunFields(t, root, "alpha", "my-idea", tc.workflow, tc.status)
+			if err := CloseIdea(root, "alpha", "my-idea"); !errors.Is(err, ErrNotIdea) {
+				t.Fatalf("want ErrNotIdea, got %v", err)
+			}
+		})
+	}
+}
+
+func TestReopenIdeaReopensClosedIdea(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	setRunFields(t, root, "alpha", "my-idea", dash.IdeaWorkflow, run.StatusClosed)
+	gittest.Commit(t, root, "close fixture")
+
+	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
+		t.Fatalf("ReopenIdea: %v", err)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("status=%q, want %q", md.Status, run.StatusInProgress)
+	}
+	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
+	for _, want := range []string{
+		"Reopen idea alpha/my-idea",
+		"MoE-Run: my-idea",
+		"MoE-Project: alpha",
+		"MoE-Workflow: idea",
+	} {
+		if !contains(msg, want) {
+			t.Errorf("commit message missing %q\n%s", want, msg)
+		}
+	}
+}
+
+func TestReopenIdeaPreservesPromotedDestinationClosedPath(t *testing.T) {
+	root := promotedIdeaFixture(t, run.StatusClosed, "alpha/my-idea-dest")
+
+	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
+		t.Fatalf("ReopenIdea: %v", err)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("status=%q, want %q", md.Status, run.StatusInProgress)
+	}
+}
+
+func TestReopenIdeaRefusesInvalidStates(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		workflow  string
+		status    string
+		dest      string
+		destState string
+	}{
+		{name: "non-idea", workflow: "sdlc", status: run.StatusClosed},
+		{name: "in-progress", workflow: dash.IdeaWorkflow, status: run.StatusInProgress},
+		{name: "pushed-destination", workflow: dash.IdeaWorkflow, status: run.StatusPromoted, dest: "alpha/my-idea-dest", destState: run.StatusPushed},
+		{name: "merged-destination", workflow: dash.IdeaWorkflow, status: run.StatusPromoted, dest: "alpha/my-idea-dest", destState: run.StatusMerged},
+		{name: "malformed-destination", workflow: dash.IdeaWorkflow, status: run.StatusPromoted, dest: "not/a/pair", destState: run.StatusClosed},
+		{name: "missing-destination", workflow: dash.IdeaWorkflow, status: run.StatusPromoted, dest: "alpha/missing", destState: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+			setRunFields(t, root, "alpha", "my-idea", tc.workflow, tc.status)
+			if tc.dest != "" {
+				if tc.destState != "" && tc.dest == "alpha/my-idea-dest" {
+					seedRunMetadata(t, root, "alpha", "my-idea-dest", "sdlc", tc.destState)
+				}
+				gittest.Commit(t, root, "promote fixture\n\nMoE-Run: my-idea\nMoE-Project: alpha\nMoE-Workflow: idea\nMoE-Promoted-To: "+tc.dest)
+			}
+			if err := ReopenIdea(root, "alpha", "my-idea"); !errors.Is(err, ErrNotReopenableIdea) {
+				t.Fatalf("want ErrNotReopenableIdea, got %v", err)
+			}
+		})
+	}
+}
+
+func promotedIdeaFixture(t *testing.T, destStatus, promotedTo string) string {
+	t.Helper()
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	setRunFields(t, root, "alpha", "my-idea", dash.IdeaWorkflow, run.StatusPromoted)
+	seedRunMetadata(t, root, "alpha", "my-idea-dest", "sdlc", destStatus)
+	gittest.Commit(t, root, "Promote idea alpha/my-idea\n\nMoE-Run: my-idea\nMoE-Project: alpha\nMoE-Workflow: idea\nMoE-Promoted-To: "+promotedTo)
+	return root
+}
+
+func setRunFields(t *testing.T, root, projectID, slug, workflow, status string) {
+	t.Helper()
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Workflow = workflow
+	md.Status = status
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedRunMetadata(t *testing.T, root, projectID, slug, workflow, status string) {
+	t.Helper()
+	md := &run.Metadata{
+		ID:        slug,
+		Project:   projectID,
+		Status:    status,
+		Workflow:  workflow,
+		Created:   "2026-04-01",
+		Documents: map[string]*run.Document{},
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIdeaTransitionsReturnRunNotFoundForMissingRuns(t *testing.T) {
+	root := t.TempDir()
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed")
+	if err := CloseIdea(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
+		t.Fatalf("CloseIdea: want ErrRunNotFound, got %v", err)
+	}
+	if err := ReopenIdea(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
+		t.Fatalf("ReopenIdea: want ErrRunNotFound, got %v", err)
+	}
+}
