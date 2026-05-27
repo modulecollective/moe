@@ -54,6 +54,7 @@ func TestDashRouteRendersBuckets(t *testing.T) {
 func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	seedRun(t, root, "alpha", "my-idea", "idea")
 	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", "# design\n")
 	now := time.Now().UTC()
 	s := newTestServer(t, Options{
@@ -76,6 +77,8 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 		"/idea/new",
 		"/run/alpha/fix-it",
 		"/run/alpha/fix-it/canvas/design",
+		"/run/alpha/my-idea/promote",
+		"/run/alpha/my-idea/edit",
 	} {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
@@ -625,12 +628,11 @@ func TestRunPageMissingRun404(t *testing.T) {
 	}
 }
 
-// TestPromoteFormRendersForInProgressIdea: when the loaded run is an
-// in-progress idea, the per-run page renders the promote-to-sdlc
-// form with workspace + agent dropdowns and a POST action at the
-// /promote subpath. The agent dropdown shows both backends and the
-// "(default)" option.
-func TestPromoteFormRendersForInProgressIdea(t *testing.T) {
+// TestIdeaPageRendersActionsForInProgressIdea: when the loaded run is
+// an in-progress idea, the per-run page renders edit + promote peer
+// affordances (links to /edit and /promote). The actual forms live on
+// those sub-pages — not inline on the idea page.
+func TestIdeaPageRendersActionsForInProgressIdea(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
 
@@ -646,7 +648,43 @@ func TestPromoteFormRendersForInProgressIdea(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
+		`<section class="actions">`,
+		`href="/run/alpha/my-idea/edit"`,
+		`href="/run/alpha/my-idea/promote"`,
+		`>edit idea<`,
+		`>promote to sdlc<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	// The page must not embed the form chrome any more; that lives on
+	// the dedicated /promote page.
+	for _, banned := range []string{
 		`<h2>promote to sdlc</h2>`,
+		`name="agent"`,
+		`name="workspace"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("idea page must not inline promote form (found %q)\n%s", banned, body)
+		}
+	}
+}
+
+// TestPromotePageRendersForm: the dedicated /promote page renders the
+// workspace + agent dropdowns and a POST action back to the same path.
+func TestPromotePageRendersForm(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea/promote", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
 		`action="/run/alpha/my-idea/promote"`,
 		`name="agent"`,
 		`>claude<`, `>codex<`, `(default)`,
@@ -658,10 +696,24 @@ func TestPromoteFormRendersForInProgressIdea(t *testing.T) {
 	}
 }
 
-// TestPromoteFormHiddenForNonIdea: a non-idea run on disk gets no
-// promote form. The {{if .PromoteEnabled}} gate keeps the section
-// out of the rendered HTML.
-func TestPromoteFormHiddenForNonIdea(t *testing.T) {
+// TestPromotePageRefusesNonIdea: GET on a non-idea run is 409, no
+// rendered form. Same gate POST applies, so a stale bookmark fails the
+// same way at either method.
+func TestPromotePageRefusesNonIdea(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/promote", nil))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestIdeaPageHiddenActionsForNonIdea: a non-idea run on disk renders
+// no Actions block and no /promote or /edit links.
+func TestIdeaPageHiddenActionsForNonIdea(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 
@@ -674,20 +726,21 @@ func TestPromoteFormHiddenForNonIdea(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, banned := range []string{
-		"promote to sdlc",
-		`action="/run/alpha/fix-it/promote"`,
+		`href="/run/alpha/fix-it/promote"`,
+		`href="/run/alpha/fix-it/edit"`,
+		`<section class="actions">`,
 	} {
 		if strings.Contains(body, banned) {
-			t.Errorf("non-idea page must not render promote form (found %q)\n%s", banned, body)
+			t.Errorf("non-idea page must not render actions (found %q)\n%s", banned, body)
 		}
 	}
 }
 
-// TestPromoteFormHiddenForPromotedIdea: once an idea has been
-// promoted, its status is no longer in_progress and the form goes
-// away — re-promoting a hand-off idea would be a foot-gun (the
-// destination run already exists).
-func TestPromoteFormHiddenForPromotedIdea(t *testing.T) {
+// TestIdeaPageHiddenActionsForPromotedIdea: once an idea has been
+// promoted, its status is no longer in_progress and the actions block
+// goes away — re-promoting or editing a hand-off idea would be a foot-
+// gun (the destination run already owns the canvas).
+func TestIdeaPageHiddenActionsForPromotedIdea(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
 	md := &run.Metadata{
@@ -708,8 +761,121 @@ func TestPromoteFormHiddenForPromotedIdea(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if strings.Contains(rr.Body.String(), "promote to sdlc") {
-		t.Errorf("promoted idea must not render promote form:\n%s", rr.Body.String())
+	body := rr.Body.String()
+	for _, banned := range []string{
+		`href="/run/alpha/old-idea/edit"`,
+		`href="/run/alpha/old-idea/promote"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("promoted idea must not render actions (found %q)\n%s", banned, body)
+		}
+	}
+}
+
+// TestRunPageRendersDashRowMeta: when GatherRunRow returns a row, the
+// per-run page renders RowNote and RowWhen instead of the older
+// "started X · in_progress" line. The note carries whatever the dash
+// would have shown ("sdlc:design @workspace" etc.) verbatim.
+func TestRunPageRendersDashRowMeta(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			if p != "alpha" || slug != "fix-it" {
+				return dash.Row{}, false, nil
+			}
+			return dash.Row{
+				Project: "alpha",
+				Run:     "fix-it",
+				Note:    "sdlc:design @workspace-name",
+				When:    now.Add(-3 * time.Minute),
+				Bucket:  dash.BucketActiveRuns,
+			}, true, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		"sdlc:design @workspace-name",
+		"3m ago",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	// Fallback "started …" line must not render when a row is on hand.
+	if strings.Contains(body, "started ") {
+		t.Errorf("page rendered fallback meta despite row being available:\n%s", body)
+	}
+}
+
+// TestRunPageFallbackMetaWhenNoRow: when GatherRunRow is unset (or
+// returns ok=false), the per-run page falls back to the older
+// "started Xm ago · status" line so it still renders something useful.
+func TestRunPageFallbackMetaWhenNoRow(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "in_progress") {
+		t.Errorf("fallback meta should carry run.Status, got:\n%s", body)
+	}
+}
+
+// TestIdeaEditPageRendersBody: GET /run/{p}/{s}/edit seeds the textarea
+// with the on-disk canvas body.
+func TestIdeaEditPageRendersBody(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	writeCanvas(t, root, "alpha", "my-idea", "idea", "# my idea\n\nbody text\n")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea/edit", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<textarea`,
+		`action="/run/alpha/my-idea/edit"`,
+		"body text",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+}
+
+// TestIdeaEditPageRefusesNonIdea: GET on a non-idea returns 409, same
+// shape as the promote page's gate.
+func TestIdeaEditPageRefusesNonIdea(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/edit", nil))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

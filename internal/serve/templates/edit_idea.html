@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>edit {{.Project}}/{{.Slug}} — moe</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<script>
+(function () {
+  var t = localStorage.getItem('moe-theme') ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> · edit idea</div>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </header>
+
+  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
+
+  <form method="post" action="/run/{{.Project}}/{{.Slug}}/edit" class="new-run">
+    <label>
+      body <span class="hint">(markdown)</span>
+      <textarea name="body" rows="16" class="idea-body" autofocus>{{.Body}}</textarea>
+    </label>
+
+    <button type="submit">save</button>
+  </form>
+</main>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('moe-theme', next);
+});
+</script>
+</body>
+</html>

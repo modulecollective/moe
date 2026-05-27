@@ -79,6 +79,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			return wf.Stages(), nil
 		},
+		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
+			return GatherRunRow(root, project, runID, time.Now().UTC())
+		},
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

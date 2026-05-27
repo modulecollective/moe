@@ -2,8 +2,10 @@ package serve
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -147,22 +149,38 @@ func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, msg str
 // remote-controlled end-agent affordance — so the same shape covers
 // both the live-parented and read-only render paths.
 type runVM struct {
-	ID          string
-	Project     string
-	Slug        string
-	Started     string // human "Xm ago"; empty on the read-only path
-	Status      string // "live" | "exited: …" | "exited cleanly" | run.Status
+	ID      string
+	Project string
+	Slug    string
+	// RowNote / RowWhen are the dash-row Note and (humanised) When for
+	// this run, computed the same way the dash computes them. Empty
+	// strings when the row gathered as "no row" (e.g. dormant outside
+	// All=true, or no GatherRunRow callback wired) — template falls
+	// back to the Started / Status line in that case.
+	RowNote string
+	RowWhen string
+	// Started / Status are the fallback meta line shown when the
+	// dash-row lookup didn't return a row. Started is empty on the
+	// read-only path; Status is "live" / "exited: …" / "exited
+	// cleanly" / run.Status.
+	Started     string
+	Status      string
 	Live        bool
 	CanvasLinks []canvasLink
-	// PromoteEnabled signals the page to render the promote-to-sdlc
-	// form. Set when the loaded run is an in-progress idea.
-	// Workspaces / Agents back the form's dropdowns.
-	PromoteEnabled bool
-	Workspaces     []workspaceOption
-	Agents         []string
-	// ErrorBanner is the form-error path for /promote re-renders.
-	// Empty on the happy GET path.
-	ErrorBanner string
+	// Actions is the peer-affordances block on the per-run page. For
+	// an in-progress idea this is two entries (edit, promote); the
+	// list is empty for any other run, so the template's range loop
+	// renders nothing. Order is render order.
+	Actions []runAction
+}
+
+// runAction is one peer affordance on the per-run page. Label is the
+// link text, Href is where it navigates. Two entries appear today
+// (edit, promote on in-progress ideas); future affordances (close,
+// rehome) become a VM-build change, not a template change.
+type runAction struct {
+	Label string
+	Href  string
 }
 
 type canvasLink struct {
@@ -195,34 +213,59 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
 // not currently parented by this serve. For in-progress idea runs,
-// the promote form fields are populated so the operator can launch
-// the sdlc run inline.
+// the page surfaces edit/promote affordances; for sdlc runs, just the
+// dash-row meta and canvas links.
 func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
 		return runVM{}, err
 	}
+	now := time.Now()
 	vm := runVM{
 		ID:          id,
 		Project:     projectID,
 		Slug:        slug,
 		Status:      md.Status,
-		CanvasLinks: s.canvasLinks(projectID, slug, time.Now()),
+		CanvasLinks: s.canvasLinks(projectID, slug, now),
+		Actions:     ideaActions(projectID, slug, md),
 	}
-	if isPromotableIdea(md) {
-		wsOpts, agents, err := s.gatherIdeaPromoteVM(projectID)
-		if err != nil {
-			// Don't fail the whole page over a workspace-listing
-			// hiccup; just don't render the form. The operator
-			// still has the SSH fallback.
-			s.logf("promote form gather: %v", err)
-		} else {
-			vm.PromoteEnabled = true
-			vm.Workspaces = wsOpts
-			vm.Agents = agents
-		}
-	}
+	s.fillRunRow(&vm, projectID, slug, now)
 	return vm, nil
+}
+
+// ideaActions returns the peer-affordances list for the per-run page.
+// In-progress idea runs get edit + promote links; everything else
+// gets nil. Order is render order (edit first — refining a captured
+// idea is the more frequent next step than promoting it).
+func ideaActions(projectID, slug string, md *run.Metadata) []runAction {
+	if !isPromotableIdea(md) {
+		return nil
+	}
+	base := "/run/" + projectID + "/" + slug
+	return []runAction{
+		{Label: "edit idea", Href: base + "/edit"},
+		{Label: "promote to sdlc", Href: base + "/promote"},
+	}
+}
+
+// fillRunRow populates RowNote / RowWhen from the dash-row lookup.
+// Errors are swallowed (logged) so a row-gather hiccup never breaks
+// the per-run page; the template falls back to the Started / Status
+// meta line when the row note is empty.
+func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
+	if s.opts.GatherRunRow == nil {
+		return
+	}
+	row, ok, err := s.opts.GatherRunRow(projectID, slug)
+	if err != nil {
+		s.logf("run row gather %s/%s: %v", projectID, slug, err)
+		return
+	}
+	if !ok {
+		return
+	}
+	vm.RowNote = row.Note
+	vm.RowWhen = dash.HumanAgo(now, row.When)
 }
 
 // isPromotableIdea reports whether the loaded run is an in-progress
@@ -252,6 +295,10 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 		vm.Status = "exited cleanly"
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
+	s.fillRunRow(&vm, projectID, slug, now)
+	// No Actions: a live-parented run is by definition not an idea
+	// (idea runs don't host a PTY), and idea is the only workflow
+	// that surfaces affordances today.
 	return vm
 }
 
@@ -301,14 +348,25 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 	return out
 }
 
-// gatherIdeaPromoteVM returns just the dropdown content the per-idea
-// promote form needs: every named workspace this host knows about
-// (cross-project, mirroring /run/new) and the agent option set.
+// promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).
+// Workspaces is every named workspace this host knows about (cross-
+// project, mirroring /run/new); Agents includes "" for "use default".
+// ErrorBanner is populated on POST validation failure so the re-render
+// keeps the operator's correction surface in one place.
+type promoteVM struct {
+	Project     string
+	Slug        string
+	Workspaces  []workspaceOption
+	Agents      []string
+	ErrorBanner string
+}
+
+// gatherPromoteVM returns the dropdown content the promote page needs.
 // Pulled from disk per request, same as gatherNewRunVM.
-func (s *Server) gatherIdeaPromoteVM(_ string) ([]workspaceOption, []string, error) {
+func (s *Server) gatherPromoteVM(projectID, slug string) (promoteVM, error) {
 	infos, err := workspace.List(s.opts.Root, "")
 	if err != nil {
-		return nil, nil, err
+		return promoteVM{}, err
 	}
 	wsOpts := make([]workspaceOption, 0, len(infos))
 	for _, info := range infos {
@@ -318,7 +376,47 @@ func (s *Server) gatherIdeaPromoteVM(_ string) ([]workspaceOption, []string, err
 			Label:   info.Project + "/" + info.Name,
 		})
 	}
-	return wsOpts, agentOptions, nil
+	return promoteVM{
+		Project:    projectID,
+		Slug:       slug,
+		Workspaces: wsOpts,
+		Agents:     agentOptions,
+	}, nil
+}
+
+// handlePromoteForm renders the per-idea promote page (GET). 404 when
+// the slug doesn't exist, 409 when the run is not a promotable idea —
+// same gates POST applies, so a stale bookmark fails the same way at
+// either method.
+func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("promote form: load %s: %v", id, err)
+		http.Error(w, "promote form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isPromotableIdea(md) {
+		http.Error(w,
+			"run "+id+" is not a promotable idea (workflow="+md.Workflow+", status="+md.Status+")",
+			http.StatusConflict)
+		return
+	}
+
+	vm, err := s.gatherPromoteVM(projectID, slug)
+	if err != nil {
+		s.logf("promote form gather: %v", err)
+		http.Error(w, "promote form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "promote.html", vm)
 }
 
 // handlePromote opens the destination sdlc run in-process by calling
@@ -326,8 +424,8 @@ func (s *Server) gatherIdeaPromoteVM(_ string) ([]workspaceOption, []string, err
 // PTY-backed agent session and redirects to the new run's page.
 // Opening synchronously means the destination's slug is known before
 // the spawn — no placeholder id, no stdout regex, no rename race.
-// Validation failures re-render the idea page with an inline error
-// banner — same shape as the new-run form's renderFormError.
+// Validation failures re-render the promote page with an inline error
+// banner.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -358,7 +456,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	}
 	if wsName != "" {
 		if err := workspace.ValidateName(wsName); err != nil {
-			s.renderPromoteError(w, r, projectID, slug, id, "workspace: "+err.Error())
+			s.renderPromoteError(w, r, projectID, slug, "workspace: "+err.Error())
 			return
 		}
 	}
@@ -371,7 +469,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		Agent:      agentName,
 	})
 	if err != nil {
-		s.renderPromoteError(w, r, projectID, slug, id, "promote: "+err.Error())
+		s.renderPromoteError(w, r, projectID, slug, "promote: "+err.Error())
 		return
 	}
 	if promoted.MarkErr != nil {
@@ -385,21 +483,21 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	destID := promoted.Run.Project + "/" + promoted.Run.ID
 	args := []string{"sdlc", promotedFirstStage, destID}
 	if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		s.renderPromoteError(w, r, projectID, slug, id, "spawn: "+err.Error())
+		s.renderPromoteError(w, r, projectID, slug, "spawn: "+err.Error())
 		return
 	}
 	http.Redirect(w, r, "/run/"+promoted.Run.Project+"/"+promoted.Run.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, id, msg string) {
-	vm, err := s.buildReadOnlyRunVM(projectID, slug, id)
+func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, msg string) {
+	vm, err := s.gatherPromoteVM(projectID, slug)
 	if err != nil {
-		http.Error(w, msg+" (and run-page gather failed: "+err.Error()+")", http.StatusInternalServerError)
+		http.Error(w, msg+" (and promote form gather failed: "+err.Error()+")", http.StatusInternalServerError)
 		return
 	}
 	vm.ErrorBanner = msg
 	w.WriteHeader(http.StatusUnprocessableEntity)
-	s.render(w, r, "run.html", vm)
+	s.render(w, r, "promote.html", vm)
 }
 
 func (s *Server) gatherNewRunVM() (newRunVM, error) {
@@ -525,4 +623,98 @@ func (s *Server) gatherNewIdeaVM() (newIdeaVM, error) {
 		return newIdeaVM{}, err
 	}
 	return newIdeaVM{Projects: projectIDs}, nil
+}
+
+// editIdeaVM backs the per-idea edit page (GET /run/{p}/{s}/edit).
+// Body is the current canvas content (seeded into the textarea); a
+// missing file falls back to empty and the operator can save into it.
+// ErrorBanner is populated on POST validation failure.
+type editIdeaVM struct {
+	Project     string
+	Slug        string
+	Body        string
+	ErrorBanner string
+}
+
+// handleIdeaEditForm renders the textarea seeded with the idea's
+// canvas. 404 / 409 mirror handlePromoteForm's gates.
+func (s *Server) handleIdeaEditForm(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("edit form: load %s: %v", id, err)
+		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isPromotableIdea(md) {
+		http.Error(w,
+			"run "+id+" is not an editable idea (workflow="+md.Workflow+", status="+md.Status+")",
+			http.StatusConflict)
+		return
+	}
+
+	body, err := os.ReadFile(filepath.Join(s.opts.Root, run.ContentPath(projectID, slug, "idea")))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		s.logf("edit form: read canvas %s/%s: %v", projectID, slug, err)
+		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "edit_idea.html", editIdeaVM{
+		Project: projectID,
+		Slug:    slug,
+		Body:    string(body),
+	})
+}
+
+// handleIdeaEditSubmit writes the textarea body to the idea's canvas
+// and commits with the trailers that runIdeaEdit produces. CRLF is
+// normalised to LF (mirrors handleNewIdeaSubmit). Defends against a
+// replayed POST landing on a now-promoted idea by re-checking
+// isPromotableIdea inside runopen.EditIdea.
+func (s *Server) handleIdeaEditSubmit(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
+
+	err := runopen.EditIdea(s.opts.Root, projectID, slug, body)
+	switch {
+	case errors.Is(err, run.ErrRunNotFound):
+		http.Error(w, "no such run: "+id, http.StatusNotFound)
+		return
+	case errors.Is(err, runopen.ErrNotIdea):
+		http.Error(w,
+			"run "+id+" is not an editable idea",
+			http.StatusConflict)
+		return
+	case errors.Is(err, run.ErrNothingToCommit):
+		// No-op edit — body matched on-disk content. Treat as success;
+		// the operator wanted to land their text and it's there.
+	case err != nil:
+		s.renderIdeaEditError(w, r, projectID, slug, body, "edit: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+func (s *Server) renderIdeaEditError(w http.ResponseWriter, r *http.Request, projectID, slug, body, msg string) {
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	s.render(w, r, "edit_idea.html", editIdeaVM{
+		Project:     projectID,
+		Slug:        slug,
+		Body:        body,
+		ErrorBanner: msg,
+	})
 }

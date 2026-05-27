@@ -37,6 +37,14 @@ import (
 // everything).
 const ideaDocID = "idea"
 
+// ErrNotIdea is returned by EditIdea when the slug names a run that
+// isn't an in-progress idea — either a different workflow, or an
+// idea that has already been promoted/closed. Defence in depth: the
+// serve handler should have gated on the same check via
+// isPromotableIdea, this is the floor that catches a replayed POST
+// landing on a now-promoted idea.
+var ErrNotIdea = errors.New("runopen: not an editable idea (workflow!=idea or status!=in_progress)")
+
 // PromoteOptions configures Promote. The destination run's workflow,
 // workspace, and agent are caller-provided; the first-stage doc id is
 // where the source idea's canvas lands as a seed.
@@ -179,6 +187,54 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 			return err
 		}
 		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
+// EditIdea overwrites the idea's canvas with body and commits the
+// change under the standard idea-edit trailer block. Body is taken
+// verbatim — CRLF normalisation is the caller's responsibility.
+//
+// Returns run.ErrNothingToCommit when body matches the on-disk content
+// (caller can treat this as success). Returns run.ErrRunNotFound when
+// no such run exists. Returns ErrNotIdea when the run is not an
+// in-progress idea (defence in depth — promoted ideas are owned by the
+// destination's design stage and must not be rewritten through this
+// path).
+//
+// The CLI's `moe idea edit` does not migrate to EditIdea: its editor /
+// chat flow writes the file in place via $EDITOR or runIdeaChat and a
+// body-in API doesn't fit cleanly. The trailer block is the same shape
+// (work: update idea, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
+func EditIdea(root, projectID, slug, body string) error {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IdeaWorkflow || md.Status != run.StatusInProgress {
+		return ErrNotIdea
+	}
+
+	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
+	docDir := run.DocDir(projectID, slug, ideaDocID)
+	if err := os.MkdirAll(filepath.Join(root, docDir), 0o755); err != nil {
+		return fmt.Errorf("runopen: mkdir doc dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, canvasRel), []byte(body), 0o644); err != nil {
+		return fmt.Errorf("runopen: write canvas: %w", err)
+	}
+
+	msg := fmt.Sprintf("work: update %s\n\n", ideaDocID) +
+		trailers.Block{
+			Run:      slug,
+			Project:  projectID,
+			Workflow: dash.IdeaWorkflow,
+			Document: ideaDocID,
+		}.String()
+	return withRepoLock(root, repolock.Options{
+		Purpose: "idea-edit",
+		Run:     projectID + "/" + slug,
+	}, func() error {
+		return run.StageAndCommit(root, msg, docDir)
 	})
 }
 

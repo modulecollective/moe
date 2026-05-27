@@ -84,6 +84,18 @@ type Options struct {
 	// per-run page.
 	RunStages func(project, run string) (stages []string, err error)
 
+	// GatherRunRow returns the dash.Row for one run — the same shape
+	// the dash renders. The per-run page uses it to surface the
+	// dash-row note (workflow:stage, workspace marker, open-session
+	// marker, "· close?" hint, etc.) and the When timestamp that
+	// matches what the operator just saw on the dash. ok=false means
+	// the row was filtered out (or no such run); the per-run page
+	// falls back to its older started/status line in that case.
+	//
+	// Absent means the per-run page renders the fallback meta line on
+	// every hit — no row data is fatal, just less informative.
+	GatherRunRow func(project, run string) (row dash.Row, ok bool, err error)
+
 	// NotifyURL is the webhook URL we POST a small JSON payload to
 	// when a serve-parented run exits. Empty disables notifications.
 	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
@@ -199,7 +211,10 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
+	s.router.HandleFunc("GET /run/{project}/{slug}/promote", s.handlePromoteForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
+	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleIdeaEditForm)
+	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.

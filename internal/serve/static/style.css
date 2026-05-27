@@ -192,6 +192,29 @@ section h2 .count {
 
 .empty { color: var(--muted); font-style: italic; margin: 0.5rem 0 0; }
 
+/* Per-run page action list (edit, promote, …) */
+section.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.action {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+.action:hover, .action:focus {
+  border-color: var(--muted);
+  color: var(--fg);
+}
+
+.meta .note { color: var(--fg); margin-right: 0.5rem; }
+.meta .when { color: var(--muted); margin-right: 0.5rem; }
+
 /* Forms */
 form.new-run { display: grid; gap: 1rem; margin-top: 1rem; max-width: 28rem; }
 form.new-run label {

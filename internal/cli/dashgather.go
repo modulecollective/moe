@@ -107,3 +107,33 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		ActiveProjects: len(activeProjects),
 	}, nil
 }
+
+// GatherRunRow returns the dash.Row for a single run, computed the same
+// way GatherDashSnapshot computes rows for the dash. ok is false when
+// the run is filtered out (e.g. classified into BucketNone) or doesn't
+// exist on disk.
+//
+// All=true is wired unconditionally: opening a detail page is a
+// deliberate operator action, so dormancy-as-filter would be confusing.
+// The caller (serve's per-run page) wants the same Note / When the
+// dash just rendered — including for dormant runs.
+//
+// Implementation reuses GatherDashSnapshot with a ProjectFilter so the
+// classify logic stays in one place. One extra single-project scan per
+// detail-page hit, which is cheap on a single-operator localhost
+// server.
+func GatherRunRow(root string, projectID, slug string, now time.Time) (dash.Row, bool, error) {
+	snap, err := GatherDashSnapshot(root, now, DashFilter{
+		All:           true,
+		ProjectFilter: projectID,
+	})
+	if err != nil {
+		return dash.Row{}, false, err
+	}
+	for _, r := range snap.Rows {
+		if r.Run == slug {
+			return r, true, nil
+		}
+	}
+	return dash.Row{}, false, nil
+}

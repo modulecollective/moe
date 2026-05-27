@@ -1,31 +1,18 @@
 <div class="run-fragment">
-  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
-
+  {{if .RowNote}}
+  <p class="meta">
+    <span class="note">{{.RowNote}}</span>
+    <span class="when">{{.RowWhen}}</span>
+    {{if .Live}}<span class="badge live">live</span>{{end}}
+  </p>
+  {{else}}
   <p class="meta">{{if .Started}}started {{.Started}} · {{end}}<span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+  {{end}}
 
-  {{if .PromoteEnabled}}
-  <section class="promote">
-    <h2>promote to sdlc</h2>
-    <form method="post" action="/run/{{.Project}}/{{.Slug}}/promote" class="new-run">
-      {{if .Workspaces}}
-      <label>
-        workspace <span class="hint">(optional)</span>
-        <select name="workspace">
-          <option value="">(none)</option>
-          {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}">{{.Label}}</option>{{end}}
-        </select>
-      </label>
-      {{end}}
-
-      <label>
-        agent <span class="hint">(optional; resolves to default if blank)</span>
-        <select name="agent">
-          {{range .Agents}}<option value="{{.}}">{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
-        </select>
-      </label>
-
-      <button type="submit">promote</button>
-    </form>
+  {{if .Actions}}
+  <section class="actions">
+    {{range .Actions}}<a class="action" href="{{.Href}}">{{.Label}}</a>
+    {{end}}
   </section>
   {{end}}
 
