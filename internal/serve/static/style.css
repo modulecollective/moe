@@ -61,9 +61,16 @@ a:hover, a:focus { border-bottom-style: solid; }
 
 /* Header & footer */
 .page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
-.banner { min-width: 0; }
+.banner {
+  min-width: 0;
+  flex: 1;
+}
 .banner-bar {
   display: block;
   font-weight: 600;
@@ -102,7 +109,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
 }
 .page-footer p { margin: 0.3rem 0; }
 
-.section-action, #theme-toggle {
+.section-action, .theme-toggle {
   background: transparent;
   border: 1px solid var(--hairline);
   color: var(--muted);
@@ -115,8 +122,16 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   white-space: nowrap;
 }
 .section-action { border-bottom: 1px solid var(--hairline); }
+.theme-toggle {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
 .section-action:hover, .section-action:focus,
-#theme-toggle:hover, #theme-toggle:focus {
+.theme-toggle:hover, .theme-toggle:focus {
   color: var(--fg);
   border-color: var(--muted);
 }

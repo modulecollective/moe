@@ -21,6 +21,7 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub">new run</div>
     </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
   </header>
 
   {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
@@ -64,10 +65,6 @@
     <button type="submit">open run</button>
   </form>
   {{end}}
-
-  <footer class="page-footer">
-    <p><button id="theme-toggle" type="button">theme</button></p>
-  </footer>
 </main>
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {

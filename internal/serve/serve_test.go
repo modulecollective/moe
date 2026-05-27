@@ -51,6 +51,60 @@ func TestDashRouteRendersBuckets(t *testing.T) {
 	}
 }
 
+func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", "# design\n")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherDash: func(showAll bool) ([]dash.Row, int, int, error) {
+			return []dash.Row{{Project: "alpha", Run: "fix-it", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
+		},
+		ResolveCanvas: func(_, _, _ string) (string, error) {
+			return canvasPath, nil
+		},
+		RunStages: func(_, _ string) ([]string, error) {
+			return []string{"design", "code", "test", "push"}, nil
+		},
+	})
+
+	for _, path := range []string{
+		"/",
+		"/run/new",
+		"/idea/new",
+		"/run/alpha/fix-it",
+		"/run/alpha/fix-it/canvas/design",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			assertThemeToggleInHeader(t, rr.Body.String())
+		})
+	}
+}
+
+func assertThemeToggleInHeader(t *testing.T, body string) {
+	t.Helper()
+	button := `<button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>`
+	if got := strings.Count(body, button); got != 1 {
+		t.Fatalf("want one icon theme toggle, got %d\n%s", got, body)
+	}
+	headerEnd := strings.Index(body, "</header>")
+	buttonIdx := strings.Index(body, button)
+	if headerEnd < 0 || buttonIdx < 0 || buttonIdx > headerEnd {
+		t.Fatalf("theme toggle must render inside page header\n%s", body)
+	}
+	footerIdx := strings.Index(body, `<footer class="page-footer">`)
+	if footerIdx >= 0 && strings.Index(body[footerIdx:], `id="theme-toggle"`) >= 0 {
+		t.Fatalf("theme toggle must not render in footer\n%s", body)
+	}
+}
+
 func TestDashRouteWithoutGatherReturns500(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",

@@ -24,6 +24,7 @@
       <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
     </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
   </header>
 
   <section class="dash-section">
@@ -91,7 +92,6 @@
   <footer class="page-footer">
     <p>{{.ProjectCount}} project{{if ne .ProjectCount 1}}s{{end}} registered · {{.ActiveProjects}} with active runs</p>
     {{if not .ShowAll}}<p><a href="?all=1">show all</a></p>{{end}}
-    <p><button id="theme-toggle" type="button">theme</button></p>
   </footer>
 </main>
 <script>
