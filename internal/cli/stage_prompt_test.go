@@ -153,6 +153,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 	for _, want := range []string{
 		"## Out-of-scope work",
 		"`moe-bureaucracy`",
+		"`moe-context`",
 		wantPath,
 	} {
 		if !strings.Contains(got, want) {
@@ -231,6 +232,32 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	for _, deny := range []string{"./.moe-run/", ".moe-run/documents", ".moe-run/followups", ".moe-run/feedback"} {
 		if strings.Contains(codeStage, deny) {
 			t.Errorf("code-stage prompt still names shuttle path %q:\n%s", deny, codeStage)
+		}
+	}
+}
+
+// TestOperationalCoreNamesMoeContextSkill pins the always-on read cue:
+// every stage's operationalCore points the agent at the moe-context
+// skill for prior-run canvases / transcripts / journal slicing. Sibling
+// to the per-trace-channel cues that point at moe-bureaucracy from
+// twin / lore / followups sections — those name the *write* skill, this
+// names the *read* skill in the always-on framing.
+func TestOperationalCoreNamesMoeContextSkill(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	for _, stage := range []string{"design", "code"} {
+		clone := ""
+		if stage == "code" {
+			clone = "/sandbox/clones/tele/fix-it"
+		}
+		got := operationalCore(root, md, stage, clone)
+		for _, want := range []string{
+			"`moe-context`",
+			"prior run",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("stage %q: operationalCore missing %q in:\n%s", stage, want, got)
+			}
 		}
 	}
 }

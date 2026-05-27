@@ -268,6 +268,9 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 	b.WriteString("If you spot work worth doing but out of scope for this canvas,\n")
 	b.WriteString("leave it via the `moe-bureaucracy` skill at:\n")
 	fmt.Fprintf(&b, "  %s\n", path)
+	b.WriteString("To check what prior runs have already filed for this project (so\n")
+	b.WriteString("you don't duplicate a followup or re-decide a settled question),\n")
+	b.WriteString("use `moe-context`.\n")
 	return b.String()
 }
 
@@ -304,6 +307,11 @@ Treat the conversation as exploratory, and the file as the compressed
 artifact. When the operator asks for edits, write them directly to that
 file (create it if it doesn't exist). Keep the file tidy — it becomes
 upstream context for downstream agents once the operator moves on.
+
+Prior runs of this project (their canvases, their stage transcripts,
+the journal sliced by run / doc / workflow) are reachable via the
+`+"`moe-context`"+` skill. Reach for it before asking the operator a
+question whose answer might already be in a prior run.
 `, docID, md.ID, md.Project, content)
 
 	if clonePath != "" {

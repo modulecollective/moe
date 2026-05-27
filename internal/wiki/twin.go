@@ -96,7 +96,9 @@ records intent; code is implementation. When they conflict, the
 twin wins until a decided edit updates it (` + "`moe twin claim`" + `).
 
 If you notice something that should edit one of these docs, leave
-a note via the ` + "`moe-bureaucracy`" + ` skill.
+a note via the ` + "`moe-bureaucracy`" + ` skill. To read what prior
+runs have observed about the twin (and how to slice the journal for
+twin-touching work), use the sibling ` + "`moe-context`" + ` skill.
 `)
 	return b.String()
 }

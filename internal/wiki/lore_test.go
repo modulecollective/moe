@@ -37,6 +37,7 @@ func TestLoreReferenceSectionRendersEntries(t *testing.T) {
 		"Interactive codex blocks .git/",
 		"codex under a submodule",
 		"`moe-bureaucracy`",
+		"`moe-context`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lore reference missing %q in:\n%s", want, got)
