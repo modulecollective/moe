@@ -8,10 +8,13 @@
 // `tmux send-keys`. Runs started outside `moe serve` are read-only in
 // the UI (they show on the dash but expose no buttons).
 //
-// Auth is network reach. The listener binds to the local node's
-// Tailscale IPv4 address, not 0.0.0.0, so only Tailnet peers can
-// connect at all. There is no token, no login form. See design
-// document for the trade-off.
+// Auth is network reach. The listener binds to 127.0.0.1 by default,
+// so nothing off-box can reach it directly. Exposing it to the tailnet
+// is the job of whatever sits in front — on the cloud-box that's a
+// `tailscale serve` proxy at tailnet:443 → 127.0.0.1:4242, which is
+// the thing that enforces "tailnet peers only." There is no token, no
+// login form. Override with --addr to bind elsewhere (for example,
+// --addr <tailnet-ip> on a kernel-mode tailscale host).
 package serve
 
 import (
@@ -36,8 +39,7 @@ const DefaultPort = 4242
 // Options configures a Server.
 type Options struct {
 	// Addr overrides the listener address. Accepts "host" or
-	// "host:port". Empty means "resolve the Tailscale IPv4 at startup
-	// and use Port".
+	// "host:port". Empty means 127.0.0.1 with Port.
 	Addr string
 
 	// Port is the listener port. Ignored when Addr already includes
@@ -97,10 +99,7 @@ func New(opts Options) (*Server, error) {
 		opts.Port = DefaultPort
 	}
 
-	addr, err := resolveAddr(opts.Addr, opts.Port)
-	if err != nil {
-		return nil, err
-	}
+	addr := resolveAddr(opts.Addr, opts.Port)
 
 	tmpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
@@ -258,18 +257,14 @@ func (s *Server) logf(format string, a ...any) {
 }
 
 // resolveAddr returns "ip:port". When override is empty the listener
-// IP comes from the Tailscale CLI (so the bind itself is the auth).
-// When override includes a port, that port wins.
-func resolveAddr(override string, port int) (string, error) {
-	if override != "" {
-		if _, _, err := net.SplitHostPort(override); err == nil {
-			return override, nil
-		}
-		return net.JoinHostPort(override, strconv.Itoa(port)), nil
+// binds to loopback; the proxy in front is what enforces reach. When
+// override includes a port, that port wins.
+func resolveAddr(override string, port int) string {
+	if override == "" {
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	}
-	ip, err := tailscaleIP4()
-	if err != nil {
-		return "", fmt.Errorf("serve: resolve tailscale ip: %w (use --addr to override)", err)
+	if _, _, err := net.SplitHostPort(override); err == nil {
+		return override
 	}
-	return net.JoinHostPort(ip, strconv.Itoa(port)), nil
+	return net.JoinHostPort(override, strconv.Itoa(port))
 }

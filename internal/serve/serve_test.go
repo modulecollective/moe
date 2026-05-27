@@ -113,21 +113,22 @@ func TestDashRouteNotFoundForUnknownPath(t *testing.T) {
 	}
 }
 
-func TestResolveAddrOverrideWithoutPort(t *testing.T) {
-	got, err := resolveAddr("127.0.0.1", 4242)
-	if err != nil {
-		t.Fatal(err)
+func TestResolveAddrEmptyOverrideDefaultsToLoopback(t *testing.T) {
+	got := resolveAddr("", 4242)
+	if got != "127.0.0.1:4242" {
+		t.Errorf("got %s, want 127.0.0.1:4242", got)
 	}
+}
+
+func TestResolveAddrOverrideWithoutPort(t *testing.T) {
+	got := resolveAddr("127.0.0.1", 4242)
 	if got != "127.0.0.1:4242" {
 		t.Errorf("got %s, want 127.0.0.1:4242", got)
 	}
 }
 
 func TestResolveAddrOverrideWithPort(t *testing.T) {
-	got, err := resolveAddr("127.0.0.1:9999", 4242)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := resolveAddr("127.0.0.1:9999", 4242)
 	if got != "127.0.0.1:9999" {
 		t.Errorf("got %s, want 127.0.0.1:9999", got)
 	}
