@@ -7,6 +7,8 @@
 package claude
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -114,4 +116,161 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 		return false, fmt.Errorf("claude: close thread file: %w", err)
 	}
 	return true, nil
+}
+
+// RestoreFromCache stages a transcript copy from src into the canonical
+// path `--resume sessionID` will read from cwd, rewriting each line's
+// top-level "cwd" field to absCwd so claude's resume doesn't trip on the
+// mismatch. Source file is left in place (the design's "copy, don't move"
+// decision so `moe claude-cache gc` can reap the orphan separately).
+// Returns the source directory's basename so the caller can surface
+// "recovered from <bucket>" on stderr.
+//
+// Only top-level cwd is rewritten — tool-call paths nested inside message
+// content are not touched. Doc-only stages (the only callers that hit this
+// path; code stages already have a stable cwd) rarely embed absolute paths
+// in past tool output, and stale absolute references in past assistant text
+// don't block resume.
+func RestoreFromCache(src, absCwd, sessionID string) (string, error) {
+	dest := CanonicalTranscriptPath(absCwd, sessionID)
+	if dest == "" {
+		return "", fmt.Errorf("claude: no config dir for canonical path")
+	}
+	if src == dest {
+		return filepath.Base(filepath.Dir(src)), nil
+	}
+	if err := copyTranscriptWithCwdRewrite(src, dest, absCwd); err != nil {
+		return "", err
+	}
+	return filepath.Base(filepath.Dir(src)), nil
+}
+
+// RestoreFromMirror is the cross-machine / cache-wipe fallback: copy the
+// bureaucracy-side mirror at mirrorPath into the canonical cache slot for
+// (absCwd, sessionID), rewriting top-level cwd lines on the way. Returns
+// (true, nil) on success, (false, nil) when mirrorPath doesn't exist —
+// the legitimate "nothing to fall back to" state.
+func RestoreFromMirror(mirrorPath, absCwd, sessionID string) (bool, error) {
+	if mirrorPath == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(mirrorPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("claude: stat mirror: %w", err)
+	}
+	dest := CanonicalTranscriptPath(absCwd, sessionID)
+	if dest == "" {
+		return false, fmt.Errorf("claude: no config dir for canonical path")
+	}
+	if err := copyTranscriptWithCwdRewrite(mirrorPath, dest, absCwd); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// copyTranscriptWithCwdRewrite streams src to dest line-by-line, rewriting
+// each JSON record's top-level "cwd" field to absCwd. Non-JSON lines (rare;
+// claude's writer always emits well-formed lines but defensive matters here)
+// and lines without a top-level cwd pass through verbatim. The output writer
+// uses bufio.Writer plus a final Flush so a half-written file never lands
+// at dest — same partial-write tolerance the existing CopyTranscript path
+// has via os.Create's truncate semantics.
+func copyTranscriptWithCwdRewrite(src, dest, absCwd string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("claude: open transcript src: %w", err)
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("claude: mkdir canonical dir: %w", err)
+	}
+	out, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("claude: create canonical file: %w", err)
+	}
+	w := bufio.NewWriter(out)
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		rewritten := rewriteTopLevelCwd(line, absCwd)
+		if _, err := w.Write(rewritten); err != nil {
+			out.Close()
+			return fmt.Errorf("claude: write canonical: %w", err)
+		}
+		if err := w.WriteByte('\n'); err != nil {
+			out.Close()
+			return fmt.Errorf("claude: write canonical: %w", err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		out.Close()
+		return fmt.Errorf("claude: scan transcript: %w", err)
+	}
+	if err := w.Flush(); err != nil {
+		out.Close()
+		return fmt.Errorf("claude: flush canonical: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("claude: close canonical: %w", err)
+	}
+	return nil
+}
+
+// rewriteTopLevelCwd parses line as JSON, replaces a top-level "cwd"
+// string value with absCwd, and returns the re-serialized bytes. Lines
+// that don't parse as a JSON object, or that lack a top-level "cwd",
+// pass through unchanged so the rewrite is structure-preserving.
+//
+// Uses encoding/json's map[string]any decode rather than a string-replace
+// because cwd values may share prefixes with other paths in the same line
+// (tool-call output references); a substring sweep would over-rewrite.
+func rewriteTopLevelCwd(line []byte, absCwd string) []byte {
+	trimmed := bytesTrimLeftWhitespace(line)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return line
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(line, &obj); err != nil {
+		return line
+	}
+	raw, ok := obj["cwd"]
+	if !ok {
+		return line
+	}
+	// Only rewrite when cwd was a string; preserve odd shapes verbatim.
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return line
+	}
+	if s == absCwd {
+		return line
+	}
+	enc, err := json.Marshal(absCwd)
+	if err != nil {
+		return line
+	}
+	obj["cwd"] = enc
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return line
+	}
+	return out
+}
+
+// bytesTrimLeftWhitespace trims leading ASCII whitespace from b without
+// allocating. Kept local so the rewrite path doesn't pull in bytes for
+// one helper.
+func bytesTrimLeftWhitespace(b []byte) []byte {
+	for i, c := range b {
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			continue
+		default:
+			return b[i:]
+		}
+	}
+	return nil
 }

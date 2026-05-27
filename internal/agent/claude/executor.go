@@ -352,5 +352,46 @@ func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
 	}
 }
 
+// RestoreTranscript runs after a TranscriptExists miss. Two fallbacks
+// in order: glob every <CLAUDE_CONFIG_DIR>/projects/*/<sessionID>.jsonl
+// for a stray copy under an old encoded-cwd bucket (typical when the
+// session was opened before the stable-cwd switch landed and its JSONL
+// lives under a worktree-UUID dir); if that misses, fall back to the
+// bureaucracy-side mirror at mirrorPath. Both branches copy with a
+// top-level `cwd` rewrite so claude --resume can read the file from
+// the new canonical path without complaining about mismatched cwd.
+// Source files are left in place; `moe claude-cache gc` reaps the
+// orphaned cache dirs.
+func (Agent) RestoreTranscript(sessionID, cwd, mirrorPath string) (agent.RestoreOutcome, error) {
+	// Cache glob first — the original is the most fidelity-preserving
+	// recovery and avoids the mirror's once-per-turn snapshot lag.
+	src, err := TranscriptPath(sessionID)
+	if err != nil {
+		return agent.RestoreOutcome{}, err
+	}
+	if src != "" {
+		// Skip rewrite when the cached copy is already the canonical
+		// path (defensive — TranscriptExists should have caught it,
+		// but a race between probe and restore could land here).
+		if canonical := CanonicalTranscriptPath(cwd, sessionID); canonical != "" && src == canonical {
+			return agent.RestoreOutcome{Result: agent.RestoreNotNeeded}, nil
+		}
+		oldDir, err := RestoreFromCache(src, cwd, sessionID)
+		if err != nil {
+			return agent.RestoreOutcome{}, err
+		}
+		return agent.RestoreOutcome{Result: agent.RestoreFromCache, Source: oldDir}, nil
+	}
+	// No cache hit — try the bureaucracy-side mirror.
+	restored, err := RestoreFromMirror(mirrorPath, cwd, sessionID)
+	if err != nil {
+		return agent.RestoreOutcome{}, err
+	}
+	if restored {
+		return agent.RestoreOutcome{Result: agent.RestoreFromMirror, Source: mirrorPath}, nil
+	}
+	return agent.RestoreOutcome{Result: agent.RestoreMissing}, nil
+}
+
 // Compile-time check that Agent satisfies the interface.
 var _ agent.Agent = Agent{}

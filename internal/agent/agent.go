@@ -64,6 +64,58 @@ type Agent interface {
 	// files live under ~/.codex/sessions/<date>/, keyed only by
 	// session id).
 	TranscriptExists(sessionID, cwd string) (bool, error)
+	// RestoreTranscript is the recovery hook stage.go calls after a
+	// TranscriptExists miss but before re-minting the session id. The
+	// agent looks for the transcript anywhere it might still live
+	// (other encoded-cwd buckets, the bureaucracy-side mirror) and
+	// stages it where `--resume sessionID` will find it from cwd.
+	// Returns a RestoreOutcome describing which path was taken so
+	// stage.go can emit the operator-facing stderr line. The mirrorPath
+	// is the bureaucracy-relative thread-<agent>.jsonl the agent should
+	// fall back to when no agent-cached copy survives; empty disables
+	// the mirror branch (run-less sessions).
+	//
+	// Codex's rollout layout is date-sharded, not cwd-keyed, so
+	// TranscriptExists is authoritative; codex returns RestoreMissing
+	// here as a no-op. Claude's impl does the real work.
+	RestoreTranscript(sessionID, cwd, mirrorPath string) (RestoreOutcome, error)
+}
+
+// RestoreResult names which recovery branch RestoreTranscript took.
+// Stage.go uses it to pick the appropriate operator-facing stderr line
+// and to decide whether to re-mint the session id.
+type RestoreResult int
+
+const (
+	// RestoreNotNeeded means the transcript is already at the canonical
+	// path TranscriptExists would have found — defensive return when
+	// the caller skipped the pre-flight. No log line; resume normally.
+	RestoreNotNeeded RestoreResult = iota
+	// RestoreFromCache means the agent found the transcript in a
+	// non-canonical bucket under its on-disk cache (claude's case: a
+	// pre-Option-B encoded-cwd dir from an old worktree path) and
+	// copied it into place. The original is left for `moe claude-cache
+	// gc` to reap. Source carries the old bucket's dirname.
+	RestoreFromCache
+	// RestoreFromMirror means the agent restored the transcript from
+	// the bureaucracy-side mirror (thread-<agent>.jsonl) — the
+	// cross-machine / cache-wipe path. Source carries the mirror file
+	// path (already operator-friendly).
+	RestoreFromMirror
+	// RestoreMissing means no transcript exists anywhere the agent
+	// knows to look. Stage.go re-mints the session id and proceeds as
+	// a true fresh start.
+	RestoreMissing
+)
+
+// RestoreOutcome is the result of a RestoreTranscript call. Result
+// names the branch; Source is the operator-readable identifier for
+// the path that was used (old encoded-dir for cache restores, mirror
+// path for mirror restores, empty otherwise). Stage.go reads both to
+// compose the stderr line.
+type RestoreOutcome struct {
+	Result RestoreResult
+	Source string
 }
 
 // Request is the inputs for one interactive turn on one document.

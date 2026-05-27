@@ -273,6 +273,17 @@ func (Agent) TranscriptExists(sessionID, _ string) (bool, error) {
 	return path != "", nil
 }
 
+// RestoreTranscript is a no-op for codex: TranscriptExists already
+// globs every date shard for the rollout file, so a miss there means
+// the rollout truly isn't on disk and there's nowhere else for codex
+// to look. The mirror-restore path that claude needs doesn't apply —
+// codex won't accept a hand-staged rollout without a matching session
+// id of its own choosing. Stage.go treats RestoreMissing the same as
+// the pre-Option-A re-mint behaviour.
+func (Agent) RestoreTranscript(_, _, _ string) (agent.RestoreOutcome, error) {
+	return agent.RestoreOutcome{Result: agent.RestoreMissing}, nil
+}
+
 // CopyTranscript is the package-level form used both by Agent's
 // CopyTranscript method and by stage.go's per-agent thread mirror.
 func CopyTranscript(sessionID, dest string) (bool, error) {

@@ -406,19 +406,45 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					case found:
 						// Transcript present — normal --resume path.
 					default:
-						moePrintf(stderr, "session %s not found; starting fresh (prior chat history not recoverable)\n", doc.Session)
-						sid, err := run.NewSessionID()
+						// TranscriptExists miss. Before re-minting, ask the
+						// agent to look anywhere else the transcript might
+						// still live (claude: a stale encoded-cwd bucket
+						// from a pre-stable-cwd run, or the bureaucracy
+						// mirror). Codex returns RestoreMissing as a no-op
+						// — its own glob already settled the question.
+						mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
+						outcome, err := a.RestoreTranscript(doc.Session, resumeCwd, mirrorPath)
 						if err != nil {
-							return wikiTurnSpec{}, err
+							return wikiTurnSpec{}, fmt.Errorf("session: restore transcript: %w", err)
 						}
-						doc.Session = sid
-						if err := run.Save(workRoot, md); err != nil {
-							return wikiTurnSpec{}, err
+						switch outcome.Result {
+						case agent.RestoreFromCache:
+							moePrintf(stderr, "session %s recovered from cache (%s)\n", doc.Session, outcome.Source)
+						case agent.RestoreFromMirror:
+							src := outcome.Source
+							if rel, relErr := filepath.Rel(workRoot, src); relErr == nil && !strings.HasPrefix(rel, "..") {
+								src = rel
+							}
+							moePrintf(stderr, "session %s restored from %s\n", doc.Session, src)
+						case agent.RestoreNotNeeded:
+							// Race between probe and restore — the
+							// canonical path showed up after the miss. No
+							// stderr line; resume normally.
+						case agent.RestoreMissing:
+							sid, err := run.NewSessionID()
+							if err != nil {
+								return wikiTurnSpec{}, err
+							}
+							moePrintf(stderr, "session %s not found anywhere; starting fresh as %s (prior chat history not recoverable)\n", doc.Session, sid)
+							doc.Session = sid
+							if err := run.Save(workRoot, md); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							if err := commitSessionStart(workRoot, md, docID); err != nil {
+								return wikiTurnSpec{}, err
+							}
+							newSession = true
 						}
-						if err := commitSessionStart(workRoot, md, docID); err != nil {
-							return wikiTurnSpec{}, err
-						}
-						newSession = true
 					}
 				}
 			}
