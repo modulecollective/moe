@@ -27,7 +27,7 @@ and resumption**, not real-time updates.
 MoE is a small CLI wrapped around a durable operating journal:
 
 - **`moe/`** (this repo) — the Go CLI. Stdlib only, shells out to
-  `git` and `claude`.
+  `git` and the selected agent backend (`claude` or `codex`).
 - **`bureaucracy/`** — the operator's personal journal: projects,
   runs, documents, backlog, digital twins, and the markdown fragments
   that steer agents. Discovered via a `bureaucracy.conf` marker file
@@ -46,8 +46,9 @@ close those loops.
 
 ## Install
 
-Requires Go 1.26+ and [Claude Code](https://claude.com/claude-code) on
-your `PATH`.
+Requires Go 1.26+ and the agent backend you plan to use on your `PATH`
+([Claude Code](https://claude.com/claude-code) for `claude`, or Codex
+for `codex`).
 
 ```sh
 go install github.com/modulecollective/moe/cmd/moe@latest
@@ -127,8 +128,8 @@ The current workflows are:
 | `hooks`    | `code`                                                     | project-specific automation hooks        |
 | `meta-moe` | `report`                                                   | inspect the bureaucracy itself           |
 
-Each stage is a subcommand that opens a Claude Code session on that
-stage's document. Each workflow is its own top-level verb — `moe sdlc`,
+Each stage is a subcommand that opens an agent session on that stage's
+document. Each workflow is its own top-level verb — `moe sdlc`,
 `moe kb`, `moe twin`. For example:
 
 ```sh
@@ -139,10 +140,12 @@ moe sdlc test tele/add-batch-support        # agent verifies and records what pa
 moe sdlc push tele/add-batch-support        # fast-forward to the target repo; --pr opens one instead
 ```
 
-`moe dash` shows your open runs and backlog. `moe idea` captures
-loose ideas without starting a run. Followups discovered during work
-can flow back into the backlog, and twin/kb passes keep project memory
-fresh without turning documentation into a separate manual job.
+`moe dash` shows your open runs and backlog in the terminal. `moe
+serve` runs the small local HTTP UI, bound to `127.0.0.1:4242` by
+default. `moe idea` captures loose ideas without starting a run.
+Followups discovered during work can flow back into the backlog, and
+twin/kb passes keep project memory fresh without turning documentation
+into a separate manual job.
 
 ## How it works
 
@@ -181,6 +184,8 @@ and the dashboard is the re-entry point when you walk away.
 
 - `moe dash` — pick what to resume; lists open runs, the idea
   backlog, and any stale sessions that need cleanup.
+- `moe serve` — run the web UI as a local HTTP server; it shows the
+  same dashboard shape and can parent live runs it starts.
 - `moe <wf> new <project>/<slug>` — open a run in any workflow that
   takes operator-typed slugs (`sdlc` / `kb` / `idea` / `hooks` /
   `meta-moe`; the `twin` workflow opens via `moe twin reflect`
@@ -201,7 +206,9 @@ and the dashboard is the re-entry point when you walk away.
   a terminal prior run's design canvas, for when you decide a closed
   problem actually wasn't.
 - `moe <wf> cat` / `moe <wf> log` — dump a stage canvas, or render
-  the recorded agent transcript, so you can audit a past turn.
+  the recorded agent transcript for that workflow. `log --agent
+  claude|codex` is only needed when both backend transcript files
+  exist for the same stage.
 
 ### Project memory and follow-ups
 
@@ -245,17 +252,20 @@ dev server's warm state shouldn't die at every branch switch.
 - `moe workspace new <project>/<name>` — eagerly create a long-lived
   working tree before any run attaches, e.g. to warm a dev server
   whose startup is slow.
-- `moe workspace list [<project>]` / `moe workspace shell` — inspect
-  named workspaces (optionally filtered to one project) or drop into
-  one. List prints a single `WORKSPACE` column in `<project>/<name>`
-  form so each row pastes straight into the other workspace verbs.
+- `moe workspace list [<project>]` / `moe workspace shell <project>/<name>` —
+  inspect named workspaces (optionally filtered to one project) or
+  drop directly into one. `shell` lazily creates the workspace on
+  first use; it does not switch branches or take a run claim. List
+  prints a single `WORKSPACE` column in `<project>/<name>` form so
+  each row pastes straight into the other workspace verbs.
 - `moe workspace refresh <project>/<name>` — re-run the project's
   `dev-env.d/*` scripts in place when the cached env breaks.
 - `moe workspace remove` / `release` — tear down a workspace, or
   clear a stuck claim left behind by a crash.
 - `moe sdlc shell <project>/<run>` — drop into a shell rooted at the
   run's working tree (the sandbox clone, or the named workspace it
-  attached to).
+  attached to). This is for an existing run, not for direct named
+  workspace access.
 
 ### Backends and tool scoping
 
@@ -306,6 +316,9 @@ recovering from a crash shouldn't lose work.
   branch without landing its commits.
 - `moe session resolve <session>` — retry the rebase+ff-merge that a
   close failed on.
+- `moe gc clones` — remove orphan per-run sandbox clones under
+  `.moe/clones/` after their runs have reached terminal status or
+  their `run.json` is gone.
 - `moe where` — print the resolved bureaucracy path; handy in
   scripts and from inside a sandbox clone where `$PWD` isn't
   obviously inside the bureaucracy.
