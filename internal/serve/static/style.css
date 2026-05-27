@@ -149,6 +149,14 @@ section h2 .count {
   .row .note { flex-basis: auto; flex-grow: 1; }
 }
 
+@media (min-width: 64rem) {
+  main {
+    max-width: 64rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
 .badge, .status {
   font-size: 0.75rem;
   letter-spacing: 0.05em;
