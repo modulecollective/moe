@@ -249,11 +249,3 @@ form.new-run button:hover { filter: brightness(1.05); }
 }
 .canvases li:last-child { border-bottom: none; }
 .canvases li .slug { color: var(--fg); }
-.canvases li .transcript {
-  flex-basis: 100%;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.canvases li .transcript code {
-  word-break: break-all;
-}

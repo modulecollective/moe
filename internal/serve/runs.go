@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -167,10 +166,9 @@ type runVM struct {
 }
 
 type canvasLink struct {
-	Stage         string
-	URL           string // /run/<p>/<r>/canvas/<stage>
-	ModTime       string // human "Xm ago"
-	TranscriptURL string // /static/transcripts/... when a snagged jsonl exists; empty otherwise
+	Stage   string
+	URL     string // /run/<p>/<r>/canvas/<stage>
+	ModTime string // human "Xm ago"
 }
 
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
@@ -276,12 +274,6 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 // depends on session.List finding worktrees under <Root>/.moe — i.e.
 // serve must run from the bureaucracy root, not from inside a session
 // worktree, or the live-edit branch silently falls back to canonical.
-//
-// Each link also picks up a TranscriptURL pointing at the most-recent
-// snagged claude-code session JSONL under the canonical
-// `documents/<stage>/transcripts/` dir (left to point at the on-disk
-// path the operator can pull via SSH; serve doesn't host the JSONL
-// itself).
 func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink {
 	if s.opts.ResolveCanvas == nil || s.opts.RunStages == nil {
 		return nil
@@ -300,45 +292,13 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 		if err != nil {
 			continue
 		}
-		link := canvasLink{
+		out = append(out, canvasLink{
 			Stage:   stage,
 			URL:     "/run/" + projectID + "/" + slug + "/canvas/" + stage,
 			ModTime: dash.HumanAgo(now, st.ModTime()),
-		}
-		if hasSnaggedTranscript(s.opts.Root, projectID, slug, stage) {
-			link.TranscriptURL = transcriptOnDiskPath(s.opts.Root, projectID, slug, stage)
-		}
-		out = append(out, link)
+		})
 	}
 	return out
-}
-
-// hasSnaggedTranscript reports whether at least one *.jsonl lives
-// under the canonical `documents/<stage>/transcripts/` dir for this
-// run. Used to decide whether the per-run page renders a transcript
-// affordance next to the stage's canvas link.
-func hasSnaggedTranscript(root, projectID, slug, stage string) bool {
-	dir := filepath.Join(root, "projects", projectID, "runs", slug,
-		"documents", stage, "transcripts")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			return true
-		}
-	}
-	return false
-}
-
-// transcriptOnDiskPath returns the canonical on-disk transcripts
-// dir for (project, run, stage). The per-run page surfaces this as
-// a path string, not a download URL: serve doesn't host the JSONL
-// itself, and the operator has shell access to pull it.
-func transcriptOnDiskPath(root, projectID, slug, stage string) string {
-	return filepath.Join(root, "projects", projectID, "runs", slug,
-		"documents", stage, "transcripts")
 }
 
 // gatherIdeaPromoteVM returns just the dropdown content the per-idea

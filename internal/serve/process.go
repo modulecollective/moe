@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +67,11 @@ func newChildren() *children {
 // spawn starts a moe run as a PTY child and records it under id.
 // The caller has already validated id and constructed args. Returns
 // an error if a live child already holds id.
+//
+// root is the bureaucracy root, used as cmd.Dir. The agent inside
+// the spawned moe handles its own per-document transcript mirror
+// (see internal/agent/claude/executor.go's CopyTranscript call) —
+// serve doesn't snag JSONL on its own.
 func (cs *children) spawn(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
 	cs.mu.Lock()
 	if existing, dup := cs.all[id]; dup {
@@ -111,7 +114,7 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	cs.all[id] = c
 	cs.mu.Unlock()
 
-	go c.read(root, logger, notify)
+	go c.read(logger, notify)
 	return c, nil
 }
 
@@ -237,14 +240,9 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 // read drains the master PTY until EIO, then reaps the child and
 // closes done. Calls notify (if non-nil) once the exit status is
 // known. Output is dropped on the floor — the per-run page is a
-// monitor surface, not a remote terminal; the agent's own session
-// transcript (claude code's JSONL) is what gets snagged on exit.
-//
-// root is the bureaucracy root, used by snagTranscripts to find
-// both source (~/.claude/projects/<encoded worktree>/) and
-// destination (projects/<p>/runs/<s>/documents/design/
-// transcripts/). Empty root skips snagging.
-func (c *child) read(root string, logger io.Writer, notify func(string, error)) {
+// monitor surface, not a remote terminal; the agent inside moe
+// handles its own per-document transcript mirror at session close.
+func (c *child) read(logger io.Writer, notify func(string, error)) {
 	buf := make([]byte, 4096)
 	for {
 		_, err := c.pty.File().Read(buf)
@@ -254,9 +252,6 @@ func (c *child) read(root string, logger io.Writer, notify func(string, error)) 
 	}
 	c.exitErr = c.cmd.Wait()
 	c.exitedAt = time.Now()
-	if root != "" {
-		c.snagTranscripts(root, logger)
-	}
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
@@ -289,129 +284,4 @@ func (c *child) snapshot() (exited bool, exitErr error, exitedAt time.Time) {
 	default:
 	}
 	return
-}
-
-// claudeProjectsDir returns ~/.claude/projects/<encoded-cwd> per
-// claude code's per-session project-directory encoding: replace `/`
-// with `-`, replace `.` with `-`, ensure a leading `-`. Returns the
-// empty string if $HOME isn't resolvable.
-//
-//	/home/dev/work/bureaucracy
-//	  → ~/.claude/projects/-home-dev-work-bureaucracy
-//	/home/dev/work/bureaucracy/.moe/worktrees/<uuid>
-//	  → ~/.claude/projects/-home-dev-work-bureaucracy--moe-worktrees-<uuid>
-func claudeProjectsDir(cwd string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	enc := strings.ReplaceAll(cwd, "/", "-")
-	enc = strings.ReplaceAll(enc, ".", "-")
-	if !strings.HasPrefix(enc, "-") {
-		enc = "-" + enc
-	}
-	return filepath.Join(home, ".claude", "projects", enc)
-}
-
-// snagTranscripts copies any claude-code per-session JSONL written
-// during this child's lifetime into the run's
-// `documents/design/transcripts/` tree, so the transcript survives
-// worktree cleanup and is reachable when the operator resumes from
-// another machine.
-//
-// Source: every `~/.claude/projects/<encoded>/*.jsonl` whose
-// directory name has the encoded `<root>/.moe/worktrees/` prefix
-// (the encoding for the per-session worktrees moe opens under this
-// bureaucracy) and whose mtime is ≥ c.started. Copy, not move —
-// the original is harmless and any concurrent reader sees no
-// surprise.
-//
-// Destination: `<root>/projects/<p>/runs/<s>/documents/design/
-// transcripts/<session-uuid>.jsonl` (the JSONL filename is
-// preserved so the file stays drop-in compatible with anything that
-// reads claude code's session format).
-//
-// Skips silently when reading `~/.claude/projects/` fails (no claude
-// code on this host, or no sessions yet — both fine).
-func (c *child) snagTranscripts(root string, logger io.Writer) {
-	project, slug, ok := strings.Cut(c.id, "/")
-	if !ok {
-		return
-	}
-	started := c.started
-
-	projectsRoot := claudeProjectsDir(filepath.Join(root, ".moe", "worktrees"))
-	if projectsRoot == "" {
-		return
-	}
-	// projectsRoot is .../projects/<encoded-worktrees-dir>; we want
-	// the *parent* (.../projects) to list, and the basename as the
-	// per-worktree prefix (encoded basename + `-` for the separator
-	// before the UUID).
-	parent := filepath.Dir(projectsRoot)
-	prefix := filepath.Base(projectsRoot) + "-"
-
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		return
-	}
-	destDir := filepath.Join(root, "projects", project, "runs", slug,
-		"documents", "design", "transcripts")
-
-	var copied int
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
-			continue
-		}
-		srcDir := filepath.Join(parent, entry.Name())
-		files, err := os.ReadDir(srcDir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
-			}
-			info, err := f.Info()
-			if err != nil || info.ModTime().Before(started) {
-				continue
-			}
-			if err := copyFile(filepath.Join(srcDir, f.Name()),
-				filepath.Join(destDir, f.Name())); err != nil {
-				if logger != nil {
-					fmt.Fprintf(logger, "serve: snag %s/%s: %v\n",
-						entry.Name(), f.Name(), err)
-				}
-				continue
-			}
-			copied++
-		}
-	}
-	if copied > 0 && logger != nil {
-		fmt.Fprintf(logger, "serve: snagged %d transcript(s) for %s\n", copied, c.id)
-	}
-}
-
-// copyFile copies src to dst, creating dst's parent dir as needed.
-// Overwrites dst if it already exists (a re-run of the same session
-// snags the same file; last-write-wins is fine because the source
-// is append-only).
-func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
 }
