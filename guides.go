@@ -21,6 +21,9 @@ var workflowsFS embed.FS
 //go:embed skills/moe-bureaucracy/SKILL.md
 var moeBureaucracySkill string
 
+//go:embed skills/moe-context/SKILL.md
+var moeContextSkill string
+
 // Soul returns the embedded soul.md content. Never empty in a correctly
 // built binary; an empty return means the embed directive is broken.
 func Soul() string {
@@ -48,6 +51,18 @@ func Stage(workflow, docID string) string {
 // and .codex/skills/ trees. Never empty in a correctly built binary.
 func MoeBureaucracySkill() string {
 	return moeBureaucracySkill
+}
+
+// MoeContextSkill returns the embedded SKILL.md template for the
+// moe-context skill — the sibling to MoeBureaucracySkill that teaches
+// the agent how to *read* the bureaucracy as context (prior runs,
+// journal trailers, past stage transcripts). The body carries
+// `{{.Project}}`, `{{.Run}}`, `{{.BureaucracyRoot}}`, `{{.ClonePath}}`,
+// and `{{.HasClone}}` placeholders that the session materialization
+// step substitutes per run before writing into .claude/skills/ and
+// .codex/skills/. Never empty in a correctly built binary.
+func MoeContextSkill() string {
+	return moeContextSkill
 }
 
 // OneShot returns the embedded workflows/<workflow>/oneshot.md fragment

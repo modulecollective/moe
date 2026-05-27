@@ -348,6 +348,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 			}
 
+			// Materialise the moe-context skill once clonePath is final
+			// — sibling to the bureaucracy materialiser above, but this
+			// one needs the clone path threaded so the rendered body can
+			// name both roots concretely (or render the document-only
+			// branch when there's no clone). Same lifecycle: worktree-
+			// only, refreshed every BuildSpec, never staged.
+			if err := materializeMoeContextSkill(workRoot, md, clonePath); err != nil {
+				return wikiTurnSpec{}, err
+			}
+
 			// Document-only stages need a cwd that's stable across
 			// turns so claude's encoded-cwd project dir doesn't churn
 			// and `--resume <sid>` can find the JSONL it wrote on
