@@ -246,12 +246,16 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	}
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
 	// Mark which active rows are currently parented by serve so the
-	// dash can render a "live" badge — the per-run page keys its
-	// interactive surface off the same check.
+	// dash can render a "live" badge. Registry presence isn't enough:
+	// natural exit leaves *child in cs.all (only the respawn path
+	// deletes), so c.snapshot() gates on the exited flag the same way
+	// buildRunVM does for the per-run page.
 	for i := range vm.Active {
 		id := vm.Active[i].Project + "/" + vm.Active[i].Run
-		if _, ok := s.children.get(id); ok {
-			vm.Active[i].Live = true
+		if c, ok := s.children.get(id); ok {
+			if exited, _, _ := c.snapshot(); !exited {
+				vm.Active[i].Live = true
+			}
 		}
 	}
 	s.render(w, r, "dash.html", vm)

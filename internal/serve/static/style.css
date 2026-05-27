@@ -86,7 +86,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   font-size: inherit;
   line-height: 1.1;
   white-space: pre;
-  overflow-x: auto;
+  overflow: hidden;
 }
 .banner-sub {
   margin-top: 0.2rem;
@@ -202,15 +202,21 @@ form.new-run input:focus, form.new-run select:focus {
 }
 form.new-run button {
   justify-self: start;
-  font: 1rem inherit;
-  background: var(--accent);
-  color: var(--bg);
-  border: none;
-  padding: 0.6rem 1.2rem;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  font-family: inherit;
+  padding: 0.3rem 0.6rem;
   border-radius: 4px;
   cursor: pointer;
+  white-space: nowrap;
 }
-form.new-run button:hover { filter: brightness(1.05); }
+form.new-run button:hover, form.new-run button:focus {
+  color: var(--fg);
+  border-color: var(--muted);
+}
 
 .error {
   background: color-mix(in srgb, var(--warn) 12%, transparent);

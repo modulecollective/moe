@@ -102,6 +102,57 @@ func TestDashShowAllStripsCap(t *testing.T) {
 	}
 }
 
+// TestDashLiveBadgeReflectsExitState: an active-bucket row whose
+// child is still in the registry but has exited (done closed) must
+// not render the "live" badge — registry presence alone overstates
+// the state, since natural exit leaves the *child behind.
+func TestDashLiveBadgeReflectsExitState(t *testing.T) {
+	now := time.Now().UTC()
+	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+		return []dash.Row{
+			{Project: "p", Run: "running", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
+			{Project: "p", Run: "exited", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
+		}, 1, 1, nil
+	}
+	s := newTestServer(t, Options{
+		Addr:       "127.0.0.1:0",
+		Root:       t.TempDir(),
+		GatherDash: gather,
+	})
+
+	running := &child{id: "p/running", started: now, done: make(chan struct{})}
+	exited := &child{id: "p/exited", started: now, done: make(chan struct{})}
+	close(exited.done)
+	s.children.all["p/running"] = running
+	s.children.all["p/exited"] = exited
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+
+	// One live badge — for p/running, anchored at p/exited's row breaks.
+	// Anchor on the row hrefs to read presence per-row.
+	runningIdx := strings.Index(body, `/run/p/running`)
+	exitedIdx := strings.Index(body, `/run/p/exited`)
+	if runningIdx < 0 || exitedIdx < 0 {
+		t.Fatalf("both row anchors must render; body=%s", body)
+	}
+	// Find the next "live" badge anchored after each row label.
+	if got := strings.Count(body, `class="badge live"`); got != 1 {
+		t.Fatalf("want exactly one live badge, got %d\n%s", got, body)
+	}
+	// The single live badge must belong to the running row (i.e. appear
+	// after the running anchor and before the exited anchor, since
+	// active rows render in order).
+	badgeIdx := strings.Index(body, `class="badge live"`)
+	if !(runningIdx < badgeIdx && badgeIdx < exitedIdx) {
+		t.Errorf("live badge not anchored to running row: running=%d badge=%d exited=%d", runningIdx, badgeIdx, exitedIdx)
+	}
+}
+
 func TestDashRouteNotFoundForUnknownPath(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
