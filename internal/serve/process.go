@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -13,17 +14,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/serve/pty"
 )
-
-// chainPromptRegex matches the moe chain-prompt line and captures the
-// option set between the square brackets. Two phrasings to match,
-// both ending in `run now? [...]`:
-//
-//	next: <hint> — run now? [Y/n/x/b/!]   (stage_next.go:359, :529)
-//	<stage> sealed — close run now? [Y/n/x] (stage_next.go:444)
-//
-// We capture just the bracket contents so the button renderer can
-// enumerate the keys without re-parsing the legend that follows.
-var chainPromptRegex = regexp.MustCompile(`run now\? \[([A-Za-z!/]+)\]`)
 
 // openedRunRegex matches the `opened run <project>/<slug>` stdout
 // line `moe sdlc new` prints once the open commit lands
@@ -38,27 +28,25 @@ var openedRunRegex = regexp.MustCompile(`opened run ([a-z0-9._-]+)/([a-z0-9-]+)`
 // real run.
 const promotingSuffix = ":promoting"
 
-// promptWindow is the byte-window at the tail of the ring buffer
-// where a matching prompt is treated as "active". A prompt detected
-// deeper in history is stale — moe printed the prompt earlier, the
-// operator answered, and progress output has since pushed the
-// prompt out of the window.
-const promptWindow = 1024
-
 // tailBytes is the per-child ring-buffer cap on PTY stdout retained
-// for the activity log. Big enough for the chain-prompt context and
-// a few claude turns; small enough not to grow without bound.
-const tailBytes = 64 * 1024
+// for the `opened run …` rename watcher. The line lands within the
+// first few KiB of moe's startup output, so the buffer just needs to
+// be big enough to survive normal terminal noise (banner, prompts)
+// before the watcher matches.
+const tailBytes = 8 * 1024
 
-// endAgentEotGap is the pause between the two \x04 (EOT) bytes used to
-// politely signal "end the agent". Claude's input loop needs at least
-// two EOTs to exit and seems to ignore a back-to-back pair; 100ms is
-// enough for the first to be consumed as a discrete event. Codex
-// exits on the first and treats the second as a no-op.
-const endAgentEotGap = 100 * time.Millisecond
+// shutdownIntrGap is the pause between the two \x03 (Ctrl-C) bytes
+// written to each child's PTY during shutdown. Two Ctrl-Cs is the
+// same byte path a human at the terminal would take: in raw mode
+// claude treats them as two interrupts and exits cleanly; in cooked
+// mode (moe at a chain prompt) the kernel converts each to SIGINT
+// on the foreground process group, which `readLineWithSignal` turns
+// into a clean exit. 100ms is enough for the first byte to be
+// consumed as a discrete event before the second arrives.
+const shutdownIntrGap = 100 * time.Millisecond
 
 // shutdownSoftGrace is how long the four-phase shutdown waits after
-// the soft EOFs for a child to exit naturally. Moe at the chain
+// the two Ctrl-Cs for a child to exit naturally. Moe at the chain
 // prompt is the common end-state once the agent exits — this is the
 // budget for the agent to flush, moe to run session.Close +
 // sync.AutoPush, and moe to print the chain prompt.
@@ -69,17 +57,9 @@ const endAgentEotGap = 100 * time.Millisecond
 var shutdownSoftGrace = 10 * time.Second
 
 // shutdownHangupGrace is the second wait after hanging up the PTY
-// for stragglers that didn't exit on EOT. Total shutdown budget is
-// roughly endAgentEotGap + shutdownSoftGrace + shutdownHangupGrace.
+// for stragglers that didn't exit on Ctrl-C. Total shutdown budget
+// is roughly shutdownIntrGap + shutdownSoftGrace + shutdownHangupGrace.
 var shutdownHangupGrace = 10 * time.Second
-
-// Prompt is the chain-prompt state currently detected at the tail
-// of the child's PTY output. Active is true when a prompt line sits
-// in the last `promptWindow` bytes of the ring buffer.
-type Prompt struct {
-	Options string // single characters from the bracket set, e.g. "Ynxb!"
-	Active  bool
-}
 
 // child is one PTY-backed moe run the server is parenting.
 type child struct {
@@ -159,7 +139,7 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	cs.all[id] = c
 	cs.mu.Unlock()
 
-	go c.read(cs, logger, notify)
+	go c.read(cs, root, logger, notify)
 	return c, nil
 }
 
@@ -207,12 +187,17 @@ func (cs *children) get(id string) (*child, bool) {
 // moe-the-parent of the agent) gets a real chance to commit, push,
 // and exit cleanly before the kernel reaps anything:
 //
-//  1. Send \x04\x04 to every live child (writeRaw — soft EOFs to
-//     the agent process, EOF on moe's stdinSharedReader).
+//  1. Write \x03\x03 (two Ctrl-Cs, ~100ms apart) to every live
+//     child's PTY master. The tty mode does the routing: raw mode
+//     (claude active) sees two interrupts and exits; cooked mode
+//     (moe at a chain prompt) converts each to SIGINT on the fg
+//     pgrp and `readLineWithSignal` returns interrupted → moe
+//     exits 0. In the transition gap the byte sits in the tty input
+//     buffer until something reads it.
 //  2. Wait up to shutdownSoftGrace for natural exit. The common
 //     end-state: agent flushes and exits → moe runs session.Close
-//     + AutoPush → moe prints the chain prompt → moe's
-//     readLineWithSignal sees EOF and returns → moe exits.
+//     + AutoPush → moe prints the chain prompt → the second \x03
+//     (now in cooked mode) interrupts the prompt → moe exits.
 //  3. For stragglers, pty.Close() → kernel SIGHUP via the
 //     controlling terminal. Same blunt instrument as the old
 //     behavior, just gated on the agent having declined to leave
@@ -241,19 +226,19 @@ func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	if len(live) == 0 {
 		return
 	}
-	shutLogf(logger, "shutdown: sending EOF to %d children", len(live))
+	shutLogf(logger, "shutdown: sending Ctrl-C to %d children", len(live))
 
-	// Phase 1: two soft EOFs to every live child.
+	// Phase 1: two Ctrl-Cs to every live child.
 	for _, c := range live {
-		_ = c.writeRaw([]byte{0x04})
+		_ = c.writeRaw([]byte{0x03})
 	}
 	select {
-	case <-time.After(endAgentEotGap):
+	case <-time.After(shutdownIntrGap):
 	case <-ctx.Done():
 		return
 	}
 	for _, c := range live {
-		_ = c.writeRaw([]byte{0x04})
+		_ = c.writeRaw([]byte{0x03})
 	}
 
 	// Phase 2: wait for natural exit.
@@ -315,7 +300,12 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 // once the exit status is known. cs is held so the promote-rename
 // watcher can mutate the registry when the `opened run …` line
 // shows up; nil is permitted for tests that drive a child directly.
-func (c *child) read(cs *children, logger io.Writer, notify func(string, error)) {
+//
+// root is the bureaucracy root, used by the on-exit transcript
+// snag to find both source (~/.claude/projects/<encoded
+// worktree>/) and destination (projects/<p>/runs/<s>/documents/
+// design/transcripts/). Empty root skips snagging.
+func (c *child) read(cs *children, root string, logger io.Writer, notify func(string, error)) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := c.pty.File().Read(buf)
@@ -331,6 +321,9 @@ func (c *child) read(cs *children, logger io.Writer, notify func(string, error))
 	}
 	c.exitErr = c.cmd.Wait()
 	c.exitedAt = time.Now()
+	if root != "" {
+		c.snagTranscripts(root, logger)
+	}
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
@@ -385,20 +378,9 @@ func (c *child) maybeRename(cs *children, logger io.Writer) {
 	}
 }
 
-// writeKeys writes the given string (typically one or two bytes —
-// "Y", "!", "!!") followed by a newline so moe's line-buffered
-// readLine consumes it. Returns the underlying Write error.
-func (c *child) writeKeys(s string) error {
-	if len(s) == 0 {
-		return fmt.Errorf("serve: empty key")
-	}
-	_, err := c.pty.File().Write([]byte(s + "\n"))
-	return err
-}
-
 // writeRaw writes b verbatim to the child's PTY — no newline, no
-// other framing. Used for control characters (Ctrl-D / EOT) that
-// would be corrupted by writeKeys' line-buffered append.
+// other framing. Used for control characters (Ctrl-C / 0x03) sent
+// during shutdown.
 func (c *child) writeRaw(b []byte) error {
 	if len(b) == 0 {
 		return nil
@@ -407,15 +389,13 @@ func (c *child) writeRaw(b []byte) error {
 	return err
 }
 
-// snapshot returns a copy of the current tail, the active chain-prompt
-// (if any), and the child's exit state. Safe to call from request
-// handlers; doesn't block the reader. exitedAt is the zero value
-// until exited == true.
-func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr error, exitedAt time.Time) {
+// snapshot returns a copy of the current tail and the child's exit
+// state. Safe to call from request handlers; doesn't block the
+// reader. exitedAt is the zero value until exited == true.
+func (c *child) snapshot() (tail []byte, exited bool, exitErr error, exitedAt time.Time) {
 	c.mu.Lock()
 	tail = append([]byte(nil), c.tail...)
 	c.mu.Unlock()
-	prompt = detectPrompt(tail)
 	select {
 	case <-c.done:
 		exited = true
@@ -426,33 +406,135 @@ func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr err
 	return
 }
 
-// detectPrompt scans the tail for a chain-prompt match. Returns
-// Active=false unless the match sits in the last promptWindow bytes
-// of tail — a deeper match is stale (the operator already answered
-// and moe has since printed past it).
-func detectPrompt(tail []byte) Prompt {
-	if len(tail) == 0 {
-		return Prompt{}
+// claudeProjectsDir returns ~/.claude/projects/<encoded-cwd> per
+// claude code's per-session project-directory encoding: replace `/`
+// with `-`, replace `.` with `-`, ensure a leading `-`. Returns the
+// empty string if $HOME isn't resolvable.
+//
+//	/home/dev/work/bureaucracy
+//	  → ~/.claude/projects/-home-dev-work-bureaucracy
+//	/home/dev/work/bureaucracy/.moe/worktrees/<uuid>
+//	  → ~/.claude/projects/-home-dev-work-bureaucracy--moe-worktrees-<uuid>
+func claudeProjectsDir(cwd string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
 	}
-	matches := chainPromptRegex.FindAllSubmatchIndex(tail, -1)
-	if len(matches) == 0 {
-		return Prompt{}
+	enc := strings.ReplaceAll(cwd, "/", "-")
+	enc = strings.ReplaceAll(enc, ".", "-")
+	if !strings.HasPrefix(enc, "-") {
+		enc = "-" + enc
 	}
-	// FindAll returns matches in order; take the last (most recent).
-	last := matches[len(matches)-1]
-	matchEnd := last[1]
-	if len(tail)-matchEnd > promptWindow {
-		// Prompt printed too far back to still be live.
-		return Prompt{}
+	return filepath.Join(home, ".claude", "projects", enc)
+}
+
+// snagTranscripts copies any claude-code per-session JSONL written
+// during this child's lifetime into the run's
+// `documents/design/transcripts/` tree, so the transcript survives
+// worktree cleanup and is reachable when the operator resumes from
+// another machine.
+//
+// Source: every `~/.claude/projects/<encoded>/*.jsonl` whose
+// directory name has the encoded `<root>/.moe/worktrees/` prefix
+// (the encoding for the per-session worktrees moe opens under this
+// bureaucracy) and whose mtime is ≥ child.started. Copy, not move —
+// the original is harmless and any concurrent reader sees no
+// surprise.
+//
+// Destination: `<root>/projects/<p>/runs/<s>/documents/design/
+// transcripts/<session-uuid>.jsonl` (the JSONL filename is
+// preserved so the file stays drop-in compatible with anything that
+// reads claude code's session format).
+//
+// Skips silently when the id still carries the `:promoting`
+// placeholder (no destination run dir exists) or when reading
+// `~/.claude/projects/` fails (no claude code on this host, or no
+// sessions yet — both fine).
+func (c *child) snagTranscripts(root string, logger io.Writer) {
+	c.mu.Lock()
+	id := c.id
+	started := c.started
+	c.mu.Unlock()
+	if strings.HasSuffix(id, promotingSuffix) {
+		return
 	}
-	// Group 1 holds the bracket contents, e.g. "Y/n/x/b/!". Strip
-	// slashes; what remains is the option-key alphabet.
-	raw := string(tail[last[2]:last[3]])
-	var keys []byte
-	for i := 0; i < len(raw); i++ {
-		if raw[i] != '/' {
-			keys = append(keys, raw[i])
+	project, slug, ok := strings.Cut(id, "/")
+	if !ok {
+		return
+	}
+
+	projectsRoot := claudeProjectsDir(filepath.Join(root, ".moe", "worktrees"))
+	if projectsRoot == "" {
+		return
+	}
+	// projectsRoot is .../projects/<encoded-worktrees-dir>; we want
+	// the *parent* (.../projects) to list, and the basename as the
+	// per-worktree prefix (encoded basename + `-` for the separator
+	// before the UUID).
+	parent := filepath.Dir(projectsRoot)
+	prefix := filepath.Base(projectsRoot) + "-"
+
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	destDir := filepath.Join(root, "projects", project, "runs", slug,
+		"documents", "design", "transcripts")
+
+	var copied int
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		srcDir := filepath.Join(parent, entry.Name())
+		files, err := os.ReadDir(srcDir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil || info.ModTime().Before(started) {
+				continue
+			}
+			if err := copyFile(filepath.Join(srcDir, f.Name()),
+				filepath.Join(destDir, f.Name())); err != nil {
+				if logger != nil {
+					fmt.Fprintf(logger, "serve: snag %s/%s: %v\n",
+						entry.Name(), f.Name(), err)
+				}
+				continue
+			}
+			copied++
 		}
 	}
-	return Prompt{Options: string(keys), Active: true}
+	if copied > 0 && logger != nil {
+		fmt.Fprintf(logger, "serve: snagged %d transcript(s) for %s\n", copied, id)
+	}
+}
+
+// copyFile copies src to dst, creating dst's parent dir as needed.
+// Overwrites dst if it already exists (a re-run of the same session
+// snags the same file; last-write-wins is fine because the source
+// is append-only).
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

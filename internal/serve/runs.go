@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -126,22 +127,21 @@ func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, msg str
 	s.render(w, r, "new.html", vm)
 }
 
-// runVM backs the per-run page (GET /run/{project}/{slug}).
+// runVM backs the per-run page (GET /run/{project}/{slug}). It is a
+// static panel — no PTY tail, no chain-prompt buttons, no
+// remote-controlled end-agent affordance — so the same shape covers
+// both the live-parented and read-only render paths.
 type runVM struct {
-	ID              string
-	Project         string
-	Slug            string
-	Started         string // human "Xm ago"
-	Status          string // "live" | "exited (err)" | "exited (ok)"
-	Live            bool
-	Parented        bool   // serve has a live PTY child for this run (governs the activity section)
-	Tail            string // PTY stdout, stripped to plain text
-	CanvasLinks     []canvasLink
-	Buttons         []promptButton // chain-prompt buttons when one is active
-	EndAgentEnabled bool           // render the "end agent" button (true while live)
-	// PromoteEnabled signals the read-only page to render the
-	// promote-to-sdlc form. Set when the loaded run is an
-	// in-progress idea. Workspaces / Agents back the form's dropdowns.
+	ID          string
+	Project     string
+	Slug        string
+	Started     string // human "Xm ago"; empty on the read-only path
+	Status      string // "live" | "exited: …" | "exited cleanly" | run.Status
+	Live        bool
+	CanvasLinks []canvasLink
+	// PromoteEnabled signals the page to render the promote-to-sdlc
+	// form. Set when the loaded run is an in-progress idea.
+	// Workspaces / Agents back the form's dropdowns.
 	PromoteEnabled bool
 	Workspaces     []workspaceOption
 	Agents         []string
@@ -150,19 +150,11 @@ type runVM struct {
 	ErrorBanner string
 }
 
-// promptButton is one renderable button for the per-run page. Key
-// is what gets POSTed to /key; Label is what the operator sees;
-// Class lets the CSS color-code by intent (benign / accent / warn).
-type promptButton struct {
-	Key   string // "Y", "n", "!", "!!", ...
-	Label string // typically same as Key but readable
-	Class string // "benign" | "accent" | "warn"
-}
-
 type canvasLink struct {
-	Stage   string
-	URL     string // /run/<p>/<r>/canvas/<stage>
-	ModTime string // human "Xm ago"
+	Stage         string
+	URL           string // /run/<p>/<r>/canvas/<stage>
+	ModTime       string // human "Xm ago"
+	TranscriptURL string // /static/transcripts/... when a snagged jsonl exists; empty otherwise
 }
 
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
@@ -188,11 +180,9 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
-// not currently parented by this serve. The result has no Tail /
-// Buttons / EndAgentEnabled — the template's {{if}} gates collapse
-// those sections, so the page renders as a static snapshot. For
-// in-progress idea runs, the promote form fields are populated so
-// the operator can launch the sdlc run inline.
+// not currently parented by this serve. For in-progress idea runs,
+// the promote form fields are populated so the operator can launch
+// the sdlc run inline.
 func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
@@ -227,51 +217,17 @@ func isPromotableIdea(md *run.Metadata) bool {
 	return md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress
 }
 
-// handleEndAgent writes two \x04 (EOT) bytes ~100ms apart to the
-// child's PTY. Soft EOFs: claude / codex see EOF on stdin, flush,
-// and exit cleanly. Always sends two — claude needs them, codex
-// no-ops the second. The 303 redirect lands back on the run page,
-// which re-renders with the chain prompt the agent emitted on exit.
-func (s *Server) handleEndAgent(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	id := projectID + "/" + slug
-
-	c, ok := s.children.get(id)
-	if !ok {
-		http.Error(w, "run "+id+" not live in this serve", http.StatusNotFound)
-		return
-	}
-	if _, _, exited, _, _ := c.snapshot(); exited {
-		http.Error(w, "run already exited", http.StatusConflict)
-		return
-	}
-	if err := c.writeRaw([]byte{0x04}); err != nil {
-		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	time.Sleep(endAgentEotGap)
-	if err := c.writeRaw([]byte{0x04}); err != nil {
-		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
-}
-
 // buildRunVM assembles the per-run page from the live child's state
 // and the on-disk canvas listing.
 func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
-	tail, prompt, exited, exitErr, _ := c.snapshot()
+	_, exited, exitErr, _ := c.snapshot()
 	now := time.Now()
 	vm := runVM{
-		ID:              id,
-		Project:         projectID,
-		Slug:            slug,
-		Started:         dash.HumanAgo(now, c.started),
-		Tail:            sanitizePTYTail(string(tail)),
-		Live:            !exited,
-		Parented:        true,
-		EndAgentEnabled: !exited,
+		ID:      id,
+		Project: projectID,
+		Slug:    slug,
+		Started: dash.HumanAgo(now, c.started),
+		Live:    !exited,
 	}
 	switch {
 	case !exited:
@@ -282,105 +238,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 		vm.Status = "exited cleanly"
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
-	if prompt.Active {
-		vm.Buttons = buttonsFor(prompt.Options)
-	}
 	return vm
-}
-
-// handleRunKey writes one chain-prompt answer (single byte or "!!")
-// to the child's PTY stdin, then 303-redirects back to the run page.
-// Validates that the requested key is in the currently-active prompt
-// option set so a stale POST can't push an unsolicited byte into the
-// child.
-func (s *Server) handleRunKey(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	id := projectID + "/" + slug
-
-	c, ok := s.children.get(id)
-	if !ok {
-		http.Error(w, "run "+id+" not live in this serve", http.StatusNotFound)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	key := strings.TrimSpace(r.FormValue("key"))
-	if key == "" {
-		http.Error(w, "missing key", http.StatusBadRequest)
-		return
-	}
-
-	_, prompt, exited, _, _ := c.snapshot()
-	if exited {
-		http.Error(w, "run already exited", http.StatusConflict)
-		return
-	}
-	if !prompt.Active {
-		http.Error(w, "no active chain prompt; refresh", http.StatusConflict)
-		return
-	}
-	if !keyAllowed(key, prompt.Options) {
-		http.Error(w, "key "+key+" not in current option set "+prompt.Options, http.StatusBadRequest)
-		return
-	}
-
-	if err := c.writeKeys(key); err != nil {
-		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
-}
-
-// keyAllowed checks that key is admissible given the live prompt's
-// option set. Single-char keys must appear verbatim in options; the
-// "!!" multi-char cascade is permitted whenever "!" is in options,
-// since they ride the same dispatcher.
-func keyAllowed(key, options string) bool {
-	if key == "!!" {
-		return strings.Contains(options, "!")
-	}
-	if len(key) != 1 {
-		return false
-	}
-	return strings.IndexByte(options, key[0]) >= 0
-}
-
-// buttonsFor maps an option string to renderable buttons. Keeps the
-// always-visible cascade extra (!!) right after the single ! so the
-// row reads left-to-right as "more aggressive". Class assignments
-// follow the design's color rule: Y/!/N benign, !! accent, x warn.
-func buttonsFor(options string) []promptButton {
-	out := make([]promptButton, 0, len(options)+1)
-	for i := 0; i < len(options); i++ {
-		k := string(options[i])
-		out = append(out, promptButton{
-			Key:   k,
-			Label: k,
-			Class: buttonClass(k),
-		})
-		if k == "!" {
-			out = append(out, promptButton{
-				Key:   "!!",
-				Label: "!!",
-				Class: "accent",
-			})
-		}
-	}
-	return out
-}
-
-func buttonClass(key string) string {
-	switch key {
-	case "x":
-		return "warn"
-	case "!":
-		return "benign"
-	default:
-		return "benign"
-	}
 }
 
 // canvasLinks enumerates the run's stage canvas files (rendered in
@@ -402,6 +260,12 @@ func buttonClass(key string) string {
 // depends on session.List finding worktrees under <Root>/.moe — i.e.
 // serve must run from the bureaucracy root, not from inside a session
 // worktree, or the live-edit branch silently falls back to canonical.
+//
+// Each link also picks up a TranscriptURL pointing at the most-recent
+// snagged claude-code session JSONL under the canonical
+// `documents/<stage>/transcripts/` dir (left to point at the on-disk
+// path the operator can pull via SSH; serve doesn't host the JSONL
+// itself).
 func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink {
 	if s.opts.ResolveCanvas == nil || s.opts.RunStages == nil {
 		return nil
@@ -420,77 +284,45 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 		if err != nil {
 			continue
 		}
-		out = append(out, canvasLink{
+		link := canvasLink{
 			Stage:   stage,
 			URL:     "/run/" + projectID + "/" + slug + "/canvas/" + stage,
 			ModTime: dash.HumanAgo(now, st.ModTime()),
-		})
+		}
+		if hasSnaggedTranscript(s.opts.Root, projectID, slug, stage) {
+			link.TranscriptURL = transcriptOnDiskPath(s.opts.Root, projectID, slug, stage)
+		}
+		out = append(out, link)
 	}
 	return out
 }
 
-// CSI: ESC [ <params> <intermediates> <final>. Params are
-// 0x30-0x3f (digits, ; : < = > ?), intermediates are 0x20-0x2f
-// (space ! " # $ % & ' ( ) * + , - . /), finals are 0x40-0x7e.
-// Covers SGR (m), cursor moves (A-H), erase (J/K), private modes
-// (?25l/h), and anything else following the ECMA-48 CSI grammar.
-var ansiCSI = regexp.MustCompile(`\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]`)
-
-// OSC: ESC ] <text> (BEL | ESC \). Matches both terminators so
-// title-set sequences emitted by either flavor of terminal are
-// stripped.
-var ansiOSC = regexp.MustCompile(`\x1b\][^\x07\x1b]*(\x07|\x1b\\)`)
-
-// Simple ESC: ESC <intermediates>? <final>. Charset switches,
-// cursor save/restore, DEC line-drawing ops. Applied *after* CSI
-// and OSC so we don't accidentally consume their `[` / `]`
-// introducers.
-var ansiSimpleEsc = regexp.MustCompile(`\x1b[\x20-\x2f]*[\x30-\x7e]`)
-
-// sanitizePTYTail turns the captured PTY ring buffer into something
-// readable inside a <pre>. This is not a terminal emulator — any
-// agent that drives the screen with cursor-up-and-rewrite multi-line
-// regions will still leak orphan fragments. The goal is to flatten
-// the single-line-spinner / clear-line / carriage-return overwrite
-// patterns claude and codex actually produce, so the activity log
-// stops showing "174m*oz / * / Ii" empty-line junk.
-//
-// Order matters:
-//
-//  1. CSI and OSC (they share an introducer with the simple-ESC pass).
-//  2. The simple-ESC pass — what remains is non-CSI / non-OSC ESC.
-//  3. BEL and BS stripped wholesale.
-//  4. \r semantics applied per line: split on \n, and for each line
-//     keep only the substring after the *last* \r. Collapses
-//     spinner-overwrite trails like "Loading...\rDone." → "Done."
-//  5. Runs of blank lines collapsed to at most one. The redraws
-//     agents do leave behind a lot of vertical whitespace.
-func sanitizePTYTail(s string) string {
-	s = ansiCSI.ReplaceAllString(s, "")
-	s = ansiOSC.ReplaceAllString(s, "")
-	s = ansiSimpleEsc.ReplaceAllString(s, "")
-	s = strings.ReplaceAll(s, "\x07", "")
-	s = strings.ReplaceAll(s, "\x08", "")
-
-	lines := strings.Split(s, "\n")
-	var b strings.Builder
-	b.Grow(len(s))
-	blank := false
-	for i, line := range lines {
-		if idx := strings.LastIndexByte(line, '\r'); idx >= 0 {
-			line = line[idx+1:]
-		}
-		isBlank := strings.TrimSpace(line) == ""
-		if isBlank && blank {
-			continue
-		}
-		blank = isBlank
-		b.WriteString(line)
-		if i < len(lines)-1 {
-			b.WriteByte('\n')
+// hasSnaggedTranscript reports whether at least one *.jsonl lives
+// under the canonical `documents/<stage>/transcripts/` dir for this
+// run. Used to decide whether the per-run page renders a transcript
+// affordance next to the stage's canvas link.
+func hasSnaggedTranscript(root, projectID, slug, stage string) bool {
+	dir := filepath.Join(root, "projects", projectID, "runs", slug,
+		"documents", stage, "transcripts")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			return true
 		}
 	}
-	return b.String()
+	return false
+}
+
+// transcriptOnDiskPath returns the canonical on-disk transcripts
+// dir for (project, run, stage). The per-run page surfaces this as
+// a path string, not a download URL: serve doesn't host the JSONL
+// itself, and the operator has shell access to pull it.
+func transcriptOnDiskPath(root, projectID, slug, stage string) string {
+	return filepath.Join(root, "projects", projectID, "runs", slug,
+		"documents", stage, "transcripts")
 }
 
 // gatherIdeaPromoteVM returns just the dropdown content the per-idea

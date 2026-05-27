@@ -4,14 +4,37 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// TestMain doubles as a tiny self-exec helper for the shutdown
+// phase-3 test. When MOE_TEST_IGNORE_SIGNALS=1 is set in the env
+// the binary installs SIG_IGN for INT and TERM, prints READY to
+// stderr so the test can sync on signal-handler-installed, then
+// waits for SIGHUP and exits — i.e. survives the two Ctrl-Cs of
+// phase 1/2 but dies cleanly when phase 3's pty.Close lands.
+// Everything else routes through the normal test entry point.
+func TestMain(m *testing.M) {
+	if os.Getenv("MOE_TEST_IGNORE_SIGNALS") == "1" {
+		signal.Ignore(syscall.SIGINT, syscall.SIGTERM)
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		fmt.Fprint(os.Stderr, "READY")
+		<-hup
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestSpawnFillsTailAndReapsChild(t *testing.T) {
 	cs := newChildren()
@@ -30,7 +53,7 @@ func TestSpawnFillsTailAndReapsChild(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("child never exited")
 	}
-	tail, _, exited, exitErr, _ := c.snapshot()
+	tail, exited, exitErr, _ := c.snapshot()
 	if !exited {
 		t.Fatal("expected child to report exited")
 	}
@@ -116,7 +139,7 @@ func TestPOSTNewRunRejectsBadSlug(t *testing.T) {
 	}
 }
 
-func TestRunPageRendersAndCanvasLinks(t *testing.T) {
+func TestRunPageRendersForLiveChild(t *testing.T) {
 	root := t.TempDir()
 	cs := newChildren()
 	if _, err := cs.spawn("p/r", "/bin/echo", []string{"-n", "marker"}, root, io.Discard); err != nil {
@@ -136,90 +159,21 @@ func TestRunPageRendersAndCanvasLinks(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"p/r", "marker", "exited"} {
+	for _, want := range []string{"p/r", "exited"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-}
-
-func TestRunPageRendersButtonsForActivePrompt(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	// Spawn a sleeper so the child stays live; manually inject a
-	// prompt-shaped line into the tail so detectPrompt picks it up.
-	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	defer c.pty.Close()
-	c.appendTail([]byte("next: moe sdlc design p/r — run now? [Y/n/x/b/!]\n"))
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/p/r", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`name="key" value="Y"`,
-		`name="key" value="!"`,
-		`name="key" value="!!"`,
-		`name="key" value="x"`,
+	// The collapsed per-run page renders no PTY tail, no chain
+	// prompt, no end-agent button. Asserting absence keeps the
+	// trim honest.
+	for _, banned := range []string{
+		"marker", "End Agent", "chain prompt", "activity",
+		"/key", "/end-agent",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("button missing: %q\n%s", want, body)
+		if strings.Contains(body, banned) {
+			t.Errorf("collapsed page must not contain %q\n%s", banned, body)
 		}
-	}
-}
-
-func TestPostKeyRefusesUnknownKey(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	defer c.pty.Close()
-	c.appendTail([]byte("next: moe sdlc design p/r — run now? [Y/n/!]\n"))
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	form := url.Values{}
-	form.Set("key", "x") // not in [Y/n/!]
-	req := httptest.NewRequest("POST", "/run/p/r/key", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 for off-set key, got %d", rr.Code)
-	}
-}
-
-func TestPostKeyRefusesIfNoActivePrompt(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	defer c.pty.Close()
-	// no prompt in tail
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	form := url.Values{}
-	form.Set("key", "Y")
-	req := httptest.NewRequest("POST", "/run/p/r/key", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d", rr.Code)
 	}
 }
 
@@ -229,81 +183,6 @@ func TestRunPage404ForUnknownRun(t *testing.T) {
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/nope/nope", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", rr.Code)
-	}
-}
-
-func TestRunPageRendersEndAgentButtonWhileLive(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"2"}, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	defer c.pty.Close()
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/p/r", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rr.Code)
-	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "/run/p/r/end-agent") {
-		t.Errorf("expected end-agent form action, got:\n%s", body)
-	}
-	if !strings.Contains(body, ">End Agent<") {
-		t.Errorf("expected end-agent button label, got:\n%s", body)
-	}
-}
-
-// TestEndAgentPostExitsCat verifies the soft-EOF endpoint: two \x04
-// bytes 100ms apart land in /bin/cat's stdin via the PTY's line
-// discipline, which terminates it with EOF.
-func TestEndAgentPostExitsCat(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/cat", nil, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	req := httptest.NewRequest("POST", "/run/p/r/end-agent", nil)
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	select {
-	case <-c.done:
-	case <-time.After(3 * time.Second):
-		_ = c.pty.Close()
-		t.Fatal("cat never exited after end-agent POST")
-	}
-}
-
-func TestEndAgentRefusesIfAlreadyExited(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/echo", nil, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	<-c.done
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	s.children = cs
-
-	req := httptest.NewRequest("POST", "/run/p/r/end-agent", nil)
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -433,9 +312,51 @@ func withShortShutdownGrace(t *testing.T, soft, hangup time.Duration) {
 	})
 }
 
-// TestShutdownPhaseTwoExitsCat exercises the soft-EOF + natural-exit
-// branch of children.shutdown: /bin/cat sees EOT on its terminal
-// stdin and exits cleanly within the grace window.
+// TestShutdownPhase1WritesTwoCtrlCs is the byte-level guard for the
+// "two Ctrl-Cs, not two EOTs" decision: put the slave tty in raw
+// mode (-isig disables SIGINT generation, -icanon disables line
+// buffering, -echo silences the line-discipline echo) so cat just
+// passes its stdin through to stdout verbatim, then assert the
+// master read back exactly \x03\x03. Waits for a READY marker so
+// stty has settled before shutdown writes the bytes.
+func TestShutdownPhase1WritesTwoCtrlCs(t *testing.T) {
+	withShortShutdownGrace(t, 500*time.Millisecond, 2*time.Second)
+	cs := newChildren()
+	script := "stty -echo -icanon -isig; printf READY; cat"
+	if _, err := cs.spawn("p/r", "/bin/sh", []string{"-c", script}, t.TempDir(), io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := cs.get("p/r")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		tail, _, _, _ := c.snapshot()
+		if strings.Contains(string(tail), "READY") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		cs.shutdown(context.Background(), io.Discard)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(shutdownSoftGrace + shutdownHangupGrace + 3*time.Second):
+		_ = c.pty.Close()
+		t.Fatal("shutdown didn't return within total budget")
+	}
+	tail, _, _, _ := c.snapshot()
+	if !strings.Contains(string(tail), "\x03\x03") {
+		t.Errorf("expected raw \\x03\\x03 in cat output, got: %q", string(tail))
+	}
+}
+
+// TestShutdownPhaseTwoExitsCat exercises the Ctrl-C + natural-exit
+// branch of children.shutdown: /bin/cat in PTY cooked mode receives
+// SIGINT from the \x03 byte and dies within the grace window.
 func TestShutdownPhaseTwoExitsCat(t *testing.T) {
 	withShortShutdownGrace(t, 2*time.Second, 500*time.Millisecond)
 	cs := newChildren()
@@ -466,20 +387,53 @@ func TestShutdownPhaseTwoExitsCat(t *testing.T) {
 	}
 }
 
-// TestShutdownPhaseThreeHangsUpSleep exercises the hang-up branch:
-// /bin/sleep ignores EOT, so shutdown moves on to pty.Close after
-// the soft grace window and the child dies via SIGHUP/SIGTERM.
-func TestShutdownPhaseThreeHangsUpSleep(t *testing.T) {
+// TestShutdownPhaseThreeHangsUpStubbornChild exercises the hang-up
+// branch: a child that ignores SIGINT/SIGTERM survives the two
+// Ctrl-Cs, so shutdown moves on to pty.Close after the soft grace
+// window and the child dies via SIGHUP from the controlling-terminal
+// disconnect. The "stubborn child" is the test binary re-exec'd with
+// MOE_TEST_IGNORE_SIGNALS=1 (see TestMain), which installs SIG_IGN
+// for INT and TERM and blocks until SIGHUP.
+func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	withShortShutdownGrace(t, 500*time.Millisecond, 2*time.Second)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	// Inherited by the child via spawn's os.Environ() snapshot.
+	t.Setenv("MOE_TEST_IGNORE_SIGNALS", "1")
 	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/sleep", []string{"30"}, t.TempDir(), io.Discard); err != nil {
+	if _, err := cs.spawn("p/r", self, []string{"-test.run=^$"}, t.TempDir(), io.Discard); err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
 	c, _ := cs.get("p/r")
 
+	// Wait for the helper's READY marker so signal.Ignore is in
+	// place before shutdown writes \x03. Without this sync, the
+	// race between exec-start and signal-handler-install can let
+	// the default SIGINT handler kill the child mid-startup.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		tail, _, _, _ := c.snapshot()
+		if strings.Contains(string(tail), "READY") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(),
 		shutdownSoftGrace+shutdownHangupGrace+2*time.Second)
 	defer cancel()
+
+	// SIGKILL the helper after the test regardless of whether
+	// SIGHUP managed to take it out — the helper is contrived and
+	// production-side a real moe child wouldn't ignore SIGHUP, so
+	// the test just verifies the *shape* of the phase walk.
+	t.Cleanup(func() {
+		if c.cmd != nil && c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
+	})
 
 	logger := &strings.Builder{}
 	done := make(chan struct{})
@@ -493,12 +447,15 @@ func TestShutdownPhaseThreeHangsUpSleep(t *testing.T) {
 		_ = c.pty.Close()
 		t.Fatal("shutdown didn't return within total budget")
 	}
+	// The phase-3 advance is the assertion: shutdown survived the
+	// two Ctrl-Cs, exhausted the soft grace, and reached the
+	// hang-up branch.
 	if !strings.Contains(logger.String(), "hanging up PTY") {
 		t.Errorf("expected 'hanging up PTY' log line, got:\n%s", logger.String())
 	}
-	select {
-	case <-c.done:
-	default:
-		t.Error("sleep child should be reaped after hangup")
+	// And it walked all the way to phase 4 — anything still alive
+	// is left for the kernel to reap on os.Exit, as designed.
+	if !strings.Contains(logger.String(), "leaving for kernel reap") {
+		t.Errorf("expected 'leaving for kernel reap' log line, got:\n%s", logger.String())
 	}
 }

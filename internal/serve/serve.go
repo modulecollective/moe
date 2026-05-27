@@ -178,7 +178,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		// Children get their own budget — the four-phase wind-down
 		// in children.shutdown can run up to shutdownSoftGrace +
-		// shutdownHangupGrace + endAgentEotGap. Add a small buffer
+		// shutdownHangupGrace + shutdownIntrGap. Add a small buffer
 		// so the inner phases see the deadline as theirs, not the
 		// context's.
 		childCtx, childCancel := context.WithTimeout(context.Background(),
@@ -198,8 +198,6 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
-	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
-	s.router.HandleFunc("POST /run/{project}/{slug}/end-agent", s.handleEndAgent)
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
 
 	// Static assets are embedded under static/; strip the URL prefix
