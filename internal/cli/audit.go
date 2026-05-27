@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-// The review workflow is the bureaucracy's "checkup" verb. A run reads
+// The audit workflow is the bureaucracy's "checkup" verb. A run reads
 // one project — its code, canvases, and digital twin — and produces
 // structured feedback in the channels every other run uses: a canvas
 // report, followups for the next sdlc run, twin observations for the
@@ -26,60 +26,60 @@ import (
 // tracked-change guard re-used to enforce the read-only character —
 // the report stage's job is to write notes, not edit project code.
 
-// reviewWorkflow is the workflow name written to run.json.
-const reviewWorkflow = "review"
+// auditWorkflow is the workflow name written to run.json.
+const auditWorkflow = "audit"
 
-// reviewPlanDoc is the document id for the plan stage. Canvas lives
+// auditPlanDoc is the document id for the plan stage. Canvas lives
 // at projects/<p>/runs/<r>/documents/plan/content.md.
-const reviewPlanDoc = "plan"
+const auditPlanDoc = "plan"
 
-// reviewReportDoc is the document id for the report stage. Canvas
+// auditReportDoc is the document id for the report stage. Canvas
 // lives at projects/<p>/runs/<r>/documents/report/content.md.
-const reviewReportDoc = "report"
+const auditReportDoc = "report"
 
 func init() {
-	g := NewCommandGroup(reviewWorkflow, "review workflow: new, plan, report")
-	g.Register(newRunCommand(reviewWorkflow))
+	g := NewCommandGroup(auditWorkflow, "audit workflow: new, plan, report")
+	g.Register(newRunCommand(auditWorkflow))
 	g.Register(&Command{
-		Name:    reviewPlanDoc,
+		Name:    auditPlanDoc,
 		Summary: "open a Claude Code session on the run's plan canvas — pick what this review pass should cover",
-		Run:     runReviewPlan,
+		Run:     runAuditPlan,
 	})
 	g.Register(&Command{
-		Name:    reviewReportDoc,
+		Name:    auditReportDoc,
 		Summary: "open a Claude Code session on the run's report canvas — do the actual review and file feedback",
-		Run:     runReviewReport,
+		Run:     runAuditReport,
 	})
-	// Review has no workspace and no moe/<run> branch, so the shared
+	// Audit has no workspace and no moe/<run> branch, so the shared
 	// close skeleton has nothing workflow-specific to clean up — pass
 	// nil and ride the standard harvest / state-guard / status-flip
 	// path. The followups / lore / twin-feedback channels populated by
 	// the report stage all harvest through the same shared paths sdlc
 	// and kb runs use.
-	g.Register(closeCommand(reviewWorkflow, "Close review run %s/%s", nil))
+	g.Register(closeCommand(auditWorkflow, "Close audit run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "cat",
-		Summary: "dump a stage canvas to stdout (review cat <project>/<run> <stage>)",
-		Run:     runCat(reviewWorkflow, ""),
+		Summary: "dump a stage canvas to stdout (audit cat <project>/<run> <stage>)",
+		Run:     runCat(auditWorkflow, ""),
 	})
 	g.Register(&Command{
 		Name:    "log",
-		Summary: "render a stage's agent transcript (review log <project>/<run> <stage>)",
-		Run:     runLog(reviewWorkflow, ""),
+		Summary: "render a stage's agent transcript (audit log <project>/<run> <stage>)",
+		Run:     runLog(auditWorkflow, ""),
 	})
 	RegisterGroup(g)
 
-	w := NewWorkflow(reviewWorkflow)
-	w.RegisterStage(reviewPlanDoc)
-	w.RegisterStage(reviewReportDoc, reviewPlanDoc)
+	w := NewWorkflow(auditWorkflow)
+	w.RegisterStage(auditPlanDoc)
+	w.RegisterStage(auditReportDoc, auditPlanDoc)
 	RegisterWorkflow(w)
 }
 
-func runReviewPlan(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("review plan", flag.ContinueOnError)
+func runAuditPlan(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("audit plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe review plan <project>/<run>")
+		moePrintln(stderr, "usage: moe audit plan <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the plan canvas.")
 		moePrintln(stderr, "The agent asks the operator what this review pass should cover")
@@ -96,27 +96,27 @@ func runReviewPlan(args []string, stdout, stderr io.Writer) int {
 	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
-		moePrintf(stderr, "review plan: %v\n", err)
+		moePrintf(stderr, "audit plan: %v\n", err)
 		return 2
 	}
-	return openReviewPlan(projectID, runID, false, false, stdout, stderr)
+	return openAuditPlan(projectID, runID, false, false, stdout, stderr)
 }
 
-// openReviewPlan is the Go-level seam behind `moe review plan`. The
+// openAuditPlan is the Go-level seam behind `moe audit plan`. The
 // chain prompt's cascade driver (`!` / `!<stage>` / `!!`) reaches it
-// through openReviewStage. NeedsSandbox is true so the agent can
+// through openAuditStage. NeedsSandbox is true so the agent can
 // verify a path the operator names in passing exists; the
 // design-stage's tracked-change guard is re-used to enforce the
 // read-only character of the stage.
-func openReviewPlan(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	if headless {
-		return runStageSession(projectID, runID, reviewPlanDoc,
+		return runStageSession(projectID, runID, auditPlanDoc,
 			stageSessionOpts{
 				NeedsSandbox:           true,
 				EnforceSandboxBoundary: true,
 				Headless:               true,
 				SkipNextStage:          suppressNextStage,
-				CanvasSkeleton:         reviewPlanCanvasSkeleton,
+				CanvasSkeleton:         auditPlanCanvasSkeleton,
 			}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this review plan session. " +
@@ -124,21 +124,21 @@ func openReviewPlan(projectID, runID string, headless, suppressNextStage bool, s
 		"what's actually on it. In one sentence, acknowledge where the plan stands " +
 		"(fresh vs. resumed). Then ask the one question: what should this review " +
 		"cover? Wait for their reply, then write the answer to the Scope section."
-	return runStageSession(projectID, runID, reviewPlanDoc,
+	return runStageSession(projectID, runID, auditPlanDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,
 			SkipNextStage:          suppressNextStage,
-			CanvasSkeleton:         reviewPlanCanvasSkeleton,
+			CanvasSkeleton:         auditPlanCanvasSkeleton,
 		}, stdout, stderr)
 }
 
-func runReviewReport(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("review report", flag.ContinueOnError)
+func runAuditReport(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("audit report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe review report <project>/<run>")
+		moePrintln(stderr, "usage: moe audit report <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the report canvas.")
 		moePrintln(stderr, "The agent reads the project — code, canvases, digital twin — under")
@@ -155,27 +155,27 @@ func runReviewReport(args []string, stdout, stderr io.Writer) int {
 	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
-		moePrintf(stderr, "review report: %v\n", err)
+		moePrintf(stderr, "audit report: %v\n", err)
 		return 2
 	}
-	return openReviewReport(projectID, runID, false, false, stdout, stderr)
+	return openAuditReport(projectID, runID, false, false, stdout, stderr)
 }
 
-// openReviewReport is the Go-level seam behind `moe review report`.
-// Same shape as openReviewPlan one stage downstream. The report stage
+// openAuditReport is the Go-level seam behind `moe audit report`.
+// Same shape as openAuditPlan one stage downstream. The report stage
 // has no requirePriorCanvas check: the plan stage is optional by design
 // (an empty `## Scope` falls through to "everything" at read-time),
 // so the report stage opens against whatever the plan left — even a
 // fresh run that skipped plan entirely.
-func openReviewReport(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openAuditReport(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 	if headless {
-		return runStageSession(projectID, runID, reviewReportDoc,
+		return runStageSession(projectID, runID, auditReportDoc,
 			stageSessionOpts{
 				NeedsSandbox:           true,
 				EnforceSandboxBoundary: true,
 				Headless:               true,
 				SkipNextStage:          suppressNextStage,
-				CanvasSkeleton:         reviewReportCanvasSkeleton,
+				CanvasSkeleton:         auditReportCanvasSkeleton,
 			}, stdout, stderr)
 	}
 	const kickoff = "The operator just opened this review report session. " +
@@ -186,22 +186,22 @@ func openReviewReport(projectID, runID string, headless, suppressNextStage bool,
 		"acknowledge the scope you read off the plan and ask the operator " +
 		"whether to begin the review or refine the scope first. Then wait for " +
 		"their reply."
-	return runStageSession(projectID, runID, reviewReportDoc,
+	return runStageSession(projectID, runID, auditReportDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,
 			SkipNextStage:          suppressNextStage,
-			CanvasSkeleton:         reviewReportCanvasSkeleton,
+			CanvasSkeleton:         auditReportCanvasSkeleton,
 		}, stdout, stderr)
 }
 
-// reviewPlanCanvasSkeleton is the fixed structural shape the plan
+// auditPlanCanvasSkeleton is the fixed structural shape the plan
 // canvas opens with. The agent fills the sections in place; an
 // untouched skeleton on commit refuses through the standard canvas-
 // unchanged-from-kickoff gate. Same shape as testCanvasSkeleton in
 // sdlc.go.
-const reviewPlanCanvasSkeleton = `# Plan
+const auditPlanCanvasSkeleton = `# Plan
 
 ## Scope
 
@@ -216,11 +216,11 @@ const reviewPlanCanvasSkeleton = `# Plan
 (optional — things this pass deliberately ignores. Empty is fine.)
 `
 
-// reviewReportCanvasSkeleton is the fixed structural shape the report
+// auditReportCanvasSkeleton is the fixed structural shape the report
 // canvas opens with. The `## Counts` self-tally is the budget surface
-// in `moe review cat` — fixed section so the operator sees the numbers
-// at a glance. See workflows/review/report.md for the framing.
-const reviewReportCanvasSkeleton = `# Review
+// in `moe audit cat` — fixed section so the operator sees the numbers
+// at a glance. See workflows/audit/report.md for the framing.
+const auditReportCanvasSkeleton = `# Audit
 
 ## Summary
 

@@ -1,6 +1,6 @@
 # Stage: report
 
-You are at the report stage of a review workflow. The job is the
+You are at the report stage of an audit workflow. The job is the
 actual review: read the project — code, canvases, digital twin — and
 produce structured feedback through the bureaucracy's existing
 channels (followups, twin feedback, lore) plus a report canvas that
@@ -89,7 +89,7 @@ and the format. Use them.
 The canvas you edit is `documents/report/content.md`. The shape:
 
 ```
-# Review
+# Audit
 
 ## Summary
 (2–3 sentences: what was reviewed and the bottom line)
@@ -110,7 +110,7 @@ twin: N
 
 The `## Counts` self-tally is mechanical — count what you filed in
 each channel and write the numbers. It surfaces the budget pressure
-as an artifact the operator sees in `moe review cat`.
+as an artifact the operator sees in `moe audit cat`.
 
 The canvas is the *ranked summary*. The substantive content is in
 the followups / twin / lore entries themselves. Each concern's
@@ -148,7 +148,7 @@ review passes. Read the previous pass's canvas as context — what
 was already surfaced, what got actioned upstream, what still stands.
 Don't repeat a concern that's still on a prior `followups.md` as
 unchecked; either reference it ("still standing from
-`review-2025-12-01`") or skip it.
+`audit-2025-12-01`") or skip it.
 
 ## When you're done
 
