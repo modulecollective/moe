@@ -15,7 +15,13 @@ judgment; MoE removes the coordination tax around opening work, handing context
 forward, checking progress, and filing the lessons that should shape the next
 run.
 
+Everything works from the CLI:
+
 ![MoE CLI dashboard - open runs and backlog in CLI](docs/dash-cli.png)
+
+And there's also a small web server available which is useful for quick checks
+from a phone (via something like Tailscale) or for use locally to browse runs
+and read canvas files.
 
 ![MoE web dashboard - open runs and backlog with local web server](docs/dash-web.png)
 
