@@ -285,6 +285,84 @@ func TestButtonsForOrdering(t *testing.T) {
 	}
 }
 
+// TestRunPageReadOnlyForNonParented: a run that exists on disk but
+// isn't currently parented by this serve must render the per-run
+// page (no 404) with canvas links pointing at the canvas route.
+// This is the "view canvases from a phone for an SSH-launched run"
+// path the design names.
+func TestRunPageReadOnlyForNonParented(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	writeCanvas(t, root, "alpha", "fix-it", "design", "# design body\n")
+	writeCanvas(t, root, "alpha", "fix-it", "code", "# code body\n")
+
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		RunStages: func(_, _ string) ([]string, error) {
+			return []string{"design", "code", "test", "push"}, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`href="/run/alpha/fix-it/canvas/design"`,
+		`href="/run/alpha/fix-it/canvas/code"`,
+		"alpha/fix-it",
+		"in_progress",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	// Read-only shape: no end-agent button, no activity log heading,
+	// no chain-prompt section. The template's {{if}} gates keep
+	// these out when the matching VM fields are zero.
+	for _, banned := range []string{
+		"end agent", "<h2>agent</h2>", "<h2>activity</h2>", "<h2>chain prompt</h2>",
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("read-only page must not contain %q\n%s", banned, body)
+		}
+	}
+	// Ladder ordering: design appears before code in the rendered
+	// list (the test-stage canvas isn't on disk so its absence is
+	// fine). A strict before-check would over-constrain; positional
+	// check on just the two we wrote is enough.
+	iDesign := strings.Index(body, `canvas/design`)
+	iCode := strings.Index(body, `canvas/code`)
+	if iDesign < 0 || iCode < 0 || iDesign > iCode {
+		t.Errorf("canvas links not in ladder order; design=%d code=%d\n%s",
+			iDesign, iCode, body)
+	}
+}
+
+// TestRunPageMissingRun404: a slug that doesn't exist on disk and
+// isn't parented returns 404, not a render with an empty header.
+func TestRunPageMissingRun404(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/ghost/run/", nil))
+	// ServeMux pattern routing strips trailing slash redirects;
+	// the substantive check is the no-slash form.
+	rr = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/ghost/run", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "no such run") {
+		t.Errorf("body should say 'no such run', got:\n%s", rr.Body.String())
+	}
+}
+
 func TestMakeNotifierPostsJSON(t *testing.T) {
 	gotBody := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

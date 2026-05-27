@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
@@ -127,6 +129,7 @@ type runVM struct {
 	Started         string // human "Xm ago"
 	Status          string // "live" | "exited (err)" | "exited (ok)"
 	Live            bool
+	Parented        bool   // serve has a live PTY child for this run (governs the activity section)
 	Tail            string // PTY stdout, stripped to plain text
 	CanvasLinks     []canvasLink
 	Buttons         []promptButton // chain-prompt buttons when one is active
@@ -145,6 +148,7 @@ type promptButton struct {
 
 type canvasLink struct {
 	Stage   string
+	URL     string // /run/<p>/<r>/canvas/<stage>
 	ModTime string // human "Xm ago"
 }
 
@@ -153,13 +157,40 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	c, ok := s.children.get(id)
-	if !ok {
-		http.Error(w, "run "+id+" is not parented by this serve process", http.StatusNotFound)
+	if c, ok := s.children.get(id); ok {
+		s.render(w, r, "run.html", s.buildRunVM(c, projectID, slug, id))
 		return
 	}
-	vm := s.buildRunVM(c, projectID, slug, id)
+	vm, err := s.buildReadOnlyRunVM(projectID, slug, id)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("run page: %v", err)
+		http.Error(w, "run page: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.render(w, r, "run.html", vm)
+}
+
+// buildReadOnlyRunVM constructs a runVM from on-disk state for a run
+// not currently parented by this serve. The result has no Tail /
+// Buttons / EndAgentEnabled — the template's {{if}} gates collapse
+// those sections. The /fragment poller will 404 on its first tick
+// and stop, so the page is effectively static.
+func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		return runVM{}, err
+	}
+	return runVM{
+		ID:          id,
+		Project:     projectID,
+		Slug:        slug,
+		Status:      md.Status,
+		CanvasLinks: s.canvasLinks(projectID, slug, time.Now()),
+	}, nil
 }
 
 // handleRunFragment renders just the swapping subtree of the run
@@ -229,6 +260,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 		Started:         dash.HumanAgo(now, c.started),
 		Tail:            sanitizePTYTail(string(tail)),
 		Live:            !exited,
+		Parented:        true,
 		EndAgentEnabled: !exited,
 	}
 	switch {
@@ -239,7 +271,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	default:
 		vm.Status = "exited cleanly"
 	}
-	vm.CanvasLinks = canvasLinksFor(s.opts.Root, projectID, slug, now)
+	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	if prompt.Active {
 		vm.Buttons = buttonsFor(prompt.Options)
 	}
@@ -374,33 +406,72 @@ func buttonClass(key string) string {
 	}
 }
 
-// canvasLinksFor enumerates the run's stage canvas files (under
+// canvasLinks enumerates the run's stage canvas files (under
 // projects/<p>/runs/<r>/documents/*/content.md) with their mtimes.
-// Used by the run page so the operator can see at a glance which
-// stages have content and how fresh it is.
-func canvasLinksFor(root, projectID, slug string, now time.Time) []canvasLink {
-	docsDir := filepath.Join(root, "projects", projectID, "runs", slug, "documents")
+// Only stages whose content.md actually exists are surfaced.
+//
+// Ordering: when Options.RunStages is wired, the result follows the
+// workflow's ladder order so `design → code → test → push` reads
+// left-to-right; otherwise the result is alphabetical. Any disk
+// stages not in the ladder are appended alphabetically — a stale
+// stage directory shouldn't disappear from the page just because
+// the workflow has moved on.
+func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink {
+	docsDir := filepath.Join(s.opts.Root, "projects", projectID, "runs", slug, "documents")
 	entries, err := os.ReadDir(docsDir)
 	if err != nil {
 		return nil
 	}
-	var out []canvasLink
+	onDisk := map[string]time.Time{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		canvas := filepath.Join(docsDir, e.Name(), "content.md")
-		st, err := os.Stat(canvas)
+		st, err := os.Stat(filepath.Join(docsDir, e.Name(), "content.md"))
 		if err != nil {
 			continue
 		}
+		onDisk[e.Name()] = st.ModTime()
+	}
+
+	stageOrder := s.stageOrder(projectID, slug, onDisk)
+	out := make([]canvasLink, 0, len(stageOrder))
+	for _, stage := range stageOrder {
 		out = append(out, canvasLink{
-			Stage:   e.Name(),
-			ModTime: dash.HumanAgo(now, st.ModTime()),
+			Stage:   stage,
+			URL:     "/run/" + projectID + "/" + slug + "/canvas/" + stage,
+			ModTime: dash.HumanAgo(now, onDisk[stage]),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Stage < out[j].Stage })
 	return out
+}
+
+// stageOrder returns the order in which canvas links should render.
+// Ladder order first (filtered to stages that exist on disk), then
+// any unknown stages alphabetically.
+func (s *Server) stageOrder(projectID, slug string, onDisk map[string]time.Time) []string {
+	var ladder []string
+	if s.opts.RunStages != nil {
+		if l, err := s.opts.RunStages(projectID, slug); err == nil {
+			ladder = l
+		}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(onDisk))
+	for _, stage := range ladder {
+		if _, ok := onDisk[stage]; ok {
+			out = append(out, stage)
+			seen[stage] = true
+		}
+	}
+	var extras []string
+	for stage := range onDisk {
+		if !seen[stage] {
+			extras = append(extras, stage)
+		}
+	}
+	sort.Strings(extras)
+	return append(out, extras...)
 }
 
 // CSI: ESC [ <params> <intermediates> <final>. Params are

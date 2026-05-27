@@ -68,6 +68,17 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			return resolveCanvasPath(root, md.Workflow, project, runID, stage)
 		},
+		RunStages: func(project, runID string) ([]string, error) {
+			md, err := run.Load(root, project, runID)
+			if err != nil {
+				return nil, err
+			}
+			wf, err := LookupWorkflow(md.Workflow)
+			if err != nil {
+				return nil, err
+			}
+			return wf.Stages(), nil
+		},
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

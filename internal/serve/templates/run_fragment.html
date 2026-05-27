@@ -1,12 +1,12 @@
 <div class="run-fragment"{{if .PollStop}} data-stop="1"{{end}}>
-  <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+  <p class="meta">{{if .Started}}started {{.Started}} · {{end}}<span class="status {{if .Live}}live{{else if .Parented}}exited{{end}}">{{.Status}}</span></p>
 
   {{if .CanvasLinks}}
   <section class="canvases">
     <h2>canvases</h2>
     <ul>
       {{range .CanvasLinks}}
-      <li><span class="slug">{{.Stage}}</span> · {{.ModTime}}</li>
+      <li><a class="slug" href="{{.URL}}">{{.Stage}}</a> · {{.ModTime}}</li>
       {{end}}
     </ul>
   </section>
@@ -38,8 +38,10 @@
   </section>
   {{end}}
 
+  {{if .Parented}}
   <section class="activity">
     <h2>activity</h2>
     <pre class="log">{{.Tail}}</pre>
   </section>
+  {{end}}
 </div>

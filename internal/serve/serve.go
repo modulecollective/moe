@@ -77,6 +77,12 @@ type Options struct {
 	// 404.
 	ResolveCanvas func(project, run, stage string) (path string, err error)
 
+	// RunStages returns the workflow ladder order for an on-disk run.
+	// Used by the per-run page to render canvas links in ladder
+	// order rather than alphabetical. Absent falls back to
+	// alphabetical (the existing canvasLinksFor behaviour).
+	RunStages func(project, run string) (stages []string, err error)
+
 	// NotifyURL is the webhook URL we POST a small JSON payload to
 	// when a serve-parented run exits. Empty disables notifications.
 	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
