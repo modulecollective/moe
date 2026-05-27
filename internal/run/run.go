@@ -517,20 +517,6 @@ var ErrNothingToCommit = errors.New("run: nothing to commit")
 // followups harvester uses this for auto-disambiguation across a batch.
 var ErrSlugTaken = errors.New("run: slug already used")
 
-// CommitAllowEmpty stages pathspecs (if any) and commits with msg, passing
-// --allow-empty so the commit lands even when nothing is staged. Used for
-// stage sign-offs: the trailer in the commit message is itself the payload,
-// so an empty tree is a legitimate commit.
-func CommitAllowEmpty(root, msg string, pathspecs ...string) error {
-	if len(pathspecs) > 0 {
-		addArgs := append([]string{"add", "--"}, pathspecs...)
-		if err := git.Run(root, addArgs...); err != nil {
-			return err
-		}
-	}
-	return git.Run(root, "commit", "--allow-empty", "-m", msg)
-}
-
 func hasStagedChanges(root string) bool {
 	// `diff --cached --quiet` exits 0 if nothing is staged, 1 if there
 	// are staged changes — Probe returns true on exit 0, so a Probe of
