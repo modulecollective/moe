@@ -228,6 +228,36 @@ func (s *Server) handleRunKey(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
+// handleResume spawns `moe sdlc resume <project>/<slug>` as a PTY
+// child so a run started outside serve (e.g. in the operator's
+// laptop tmux) becomes button-controllable from the phone. The
+// route is workflow-agnostic at this layer — moe surfaces a clear
+// error in the activity log if the run isn't sdlc-shaped.
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	projectID := strings.TrimSpace(r.FormValue("project"))
+	slug := strings.TrimSpace(r.FormValue("slug"))
+	if !projectIDPattern.MatchString(projectID) {
+		http.Error(w, "project: invalid id", http.StatusBadRequest)
+		return
+	}
+	if !slugPattern.MatchString(slug) {
+		http.Error(w, "slug: invalid", http.StatusBadRequest)
+		return
+	}
+
+	id := projectID + "/" + slug
+	args := []string{"sdlc", "resume", id}
+	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		http.Error(w, "spawn: "+err.Error(), http.StatusConflict)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
 // keyAllowed checks that key is admissible given the live prompt's
 // option set. Single-char keys must appear verbatim in options; the
 // "!!" multi-char cascade is permitted whenever "!" is in options,

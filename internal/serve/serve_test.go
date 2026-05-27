@@ -272,6 +272,30 @@ func TestButtonsForOrdering(t *testing.T) {
 	}
 }
 
+func TestMakeNotifierPostsJSON(t *testing.T) {
+	gotBody := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody <- b
+	}))
+	defer srv.Close()
+
+	notify := makeNotifier(srv.URL, io.Discard)
+	notify("alpha/foo", nil)
+
+	select {
+	case body := <-gotBody:
+		if !strings.Contains(string(body), `"id":"alpha/foo"`) {
+			t.Errorf("payload missing id: %s", string(body))
+		}
+		if !strings.Contains(string(body), `"ok":true`) {
+			t.Errorf("payload missing ok=true: %s", string(body))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("notifier never POSTed")
+	}
+}
+
 func newTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
 	if opts.Logger == nil {

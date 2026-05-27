@@ -47,10 +47,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	srv, err := serve.New(serve.Options{
-		Addr:   *addr,
-		Port:   *port,
-		Root:   root,
-		Logger: stderr,
+		Addr:      *addr,
+		Port:      *port,
+		Root:      root,
+		Logger:    stderr,
+		NotifyURL: os.Getenv("MOE_SERVE_NOTIFY_URL"),
 		GatherDash: func(showAll bool) ([]dash.Row, int, int, error) {
 			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{All: showAll})
 			if err != nil {

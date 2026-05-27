@@ -64,6 +64,11 @@ type Options struct {
 	//
 	// Required by the dash route; absent means GET / returns 500.
 	GatherDash func(showAll bool) (rows []dash.Row, projectCount, activeProjects int, err error)
+
+	// NotifyURL is the webhook URL we POST a small JSON payload to
+	// when a serve-parented run exits. Empty disables notifications.
+	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
+	NotifyURL string
 }
 
 // Server owns the HTTP listener and the registry of live PTY
@@ -108,6 +113,9 @@ func New(opts Options) (*Server, error) {
 		tmpl:     tmpl,
 		router:   http.NewServeMux(),
 		children: newChildren(),
+	}
+	if opts.NotifyURL != "" {
+		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
 	}
 	s.registerRoutes()
 	return s, nil
@@ -169,6 +177,7 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
+	s.router.HandleFunc("POST /run/resume", s.handleResume)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.
@@ -215,6 +224,17 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
+	// Mark which active rows are currently parented by serve so the
+	// template can pick between "open" (live) and "take it over"
+	// (resumable) affordances.
+	for i := range vm.Active {
+		id := vm.Active[i].Project + "/" + vm.Active[i].Run
+		if _, ok := s.children.get(id); ok {
+			vm.Active[i].Live = true
+		} else {
+			vm.Active[i].Resumable = true
+		}
+	}
 	s.render(w, r, "dash.html", vm)
 }
 

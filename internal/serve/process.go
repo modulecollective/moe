@@ -61,6 +61,10 @@ type child struct {
 type children struct {
 	mu  sync.RWMutex
 	all map[string]*child
+	// notify fires once per child on natural exit (not on server
+	// shutdown). Empty by default; Server.New wires it when
+	// Options.NotifyURL is set.
+	notify func(id string, exitErr error)
 }
 
 func newChildren() *children {
@@ -105,10 +109,11 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 		started: time.Now(),
 		done:    make(chan struct{}),
 	}
+	notify := cs.notify
 	cs.all[id] = c
 	cs.mu.Unlock()
 
-	go c.read(logger)
+	go c.read(logger, notify)
 	return c, nil
 }
 
@@ -141,8 +146,9 @@ func (cs *children) shutdown(ctx context.Context) {
 }
 
 // read copies master PTY output into the ring buffer until EIO,
-// then reaps the child and closes done.
-func (c *child) read(logger io.Writer) {
+// then reaps the child and closes done. Calls notify (if non-nil)
+// once the exit status is known.
+func (c *child) read(logger io.Writer, notify func(string, error)) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := c.pty.File().Read(buf)
@@ -157,6 +163,9 @@ func (c *child) read(logger io.Writer) {
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
+	}
+	if notify != nil {
+		notify(c.id, c.exitErr)
 	}
 }
 
