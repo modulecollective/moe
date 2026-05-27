@@ -404,7 +404,7 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 			if code == 0 {
 				t.Fatalf("runStageSession unexpectedly succeeded; stderr=%q", stderr.String())
 			}
-			want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  [" + tc.wantAgent + "] sdlc · design  ·  tele fix-it\n"
+			want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  [" + tc.wantAgent + "] sdlc · design  ·  tele/fix-it\n"
 			if got := stdout.String(); !strings.HasPrefix(got, want) {
 				t.Fatalf("stdout prefix = %q, want %q (stderr=%q)", got, want, stderr.String())
 			}

@@ -14,7 +14,7 @@ func TestStageEntryGolden(t *testing.T) {
 	var buf bytes.Buffer
 	StageEntry(&buf, "claude", "sdlc", "design", "moe", "nice-banners")
 	got := buf.String()
-	want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  [claude] sdlc · design  ·  moe nice-banners\n"
+	want := "▓▒░ MINISTRY OF EVERYTHING ░▒▓  [claude] sdlc · design  ·  moe/nice-banners\n"
 	if got != want {
 		t.Fatalf("StageEntry =\n%q\nwant\n%q", got, want)
 	}
@@ -26,12 +26,12 @@ func TestStageEntryGolden(t *testing.T) {
 func TestStageExitCompleteAndNoOp(t *testing.T) {
 	var buf bytes.Buffer
 	StageExit(&buf, "sdlc", "design", "moe", "nice-banners", true)
-	if got, want := buf.String(), "░▒▓ design complete  ·  moe nice-banners ▓▒░\n"; got != want {
+	if got, want := buf.String(), "░▒▓ design complete  ·  moe/nice-banners ▓▒░\n"; got != want {
 		t.Fatalf("StageExit(committed=true) =\n%q\nwant\n%q", got, want)
 	}
 	buf.Reset()
 	StageExit(&buf, "sdlc", "design", "moe", "nice-banners", false)
-	if got, want := buf.String(), "░▒▓ design no-op  ·  moe nice-banners ▓▒░\n"; got != want {
+	if got, want := buf.String(), "░▒▓ design no-op  ·  moe/nice-banners ▓▒░\n"; got != want {
 		t.Fatalf("StageExit(committed=false) =\n%q\nwant\n%q", got, want)
 	}
 }

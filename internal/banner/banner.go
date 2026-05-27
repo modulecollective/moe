@@ -35,7 +35,7 @@ const (
 // workflow · stage, project + run. Fired once at the start of every
 // stage session — the one place every stage-using verb funnels through.
 func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
-	cliout.Printf(w, "%s  [%s] %s · %s  ·  %s %s\n", bar, agent, workflow, stage, project, run)
+	cliout.Printf(w, "%s  [%s] %s · %s  ·  %s/%s\n", bar, agent, workflow, stage, project, run)
 }
 
 // StageExit prints the stage-bottom footer. Flipped gradient blocks
@@ -49,7 +49,7 @@ func StageExit(w io.Writer, workflow, stage, project, runID string, committed bo
 	if !committed {
 		status = "no-op"
 	}
-	cliout.Printf(w, "%s %s %s  ·  %s %s %s\n", barOpen, stage, status, project, runID, barClose)
+	cliout.Printf(w, "%s %s %s  ·  %s/%s %s\n", barOpen, stage, status, project, runID, barClose)
 }
 
 // Dash prints the dash-render mark, with the render timestamp appended
