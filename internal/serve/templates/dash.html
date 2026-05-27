@@ -64,13 +64,15 @@
   </section>
 
   <section class="dash-section">
-    <h2>completed
-      <span class="count">
-      {{if and (not .ShowAll) (gt .CompletedTotal (len .Completed))}}
-        ({{len .Completed}} of {{.CompletedTotal}})
-      {{else}}
-        ({{.CompletedTotal}})
-      {{end}}
+    <h2>
+      <span>completed
+        <span class="count">
+        {{if and (not .ShowAll) (gt .CompletedTotal (len .Completed))}}
+          ({{len .Completed}} of {{.CompletedTotal}})
+        {{else}}
+          ({{.CompletedTotal}})
+        {{end}}
+        </span>
       </span>
     </h2>
     {{if .Completed}}
