@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Project}}/{{.Slug}} {{.Stage}} — moe</title>
+<script>
+(function () {
+  var t = localStorage.getItem('moe-theme') ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> → {{.Stage}}</div>
+    </div>
+    <button id="theme-toggle" type="button">theme</button>
+  </header>
+
+  {{if .Missing}}
+  <p class="meta">no canvas yet at <code>{{.Path}}</code></p>
+  {{else}}
+  <p class="meta">{{.ModTime}}</p>
+  <pre class="canvas-body">{{.Body}}</pre>
+  {{end}}
+</main>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('moe-theme', next);
+});
+</script>
+</body>
+</html>

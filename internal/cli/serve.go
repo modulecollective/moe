@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -59,6 +60,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return nil, 0, 0, err
 			}
 			return snap.Rows, snap.ProjectCount, snap.ActiveProjects, nil
+		},
+		ResolveCanvas: func(project, runID, stage string) (string, error) {
+			md, err := run.Load(root, project, runID)
+			if err != nil {
+				return "", err
+			}
+			return resolveCanvasPath(root, md.Workflow, project, runID, stage)
 		},
 	})
 	if err != nil {

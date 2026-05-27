@@ -67,6 +67,16 @@ type Options struct {
 	// Required by the dash route; absent means GET / returns 500.
 	GatherDash func(showAll bool) (rows []dash.Row, projectCount, activeProjects int, err error)
 
+	// ResolveCanvas returns the absolute filesystem path serve should
+	// open for (project, run, stage). The cli wrapper closes over the
+	// bureaucracy root and looks up the run's workflow internally so
+	// serve stays workflow-registry-free. Required by the canvas
+	// route; absent means GET .../canvas/... returns 500. Errors
+	// satisfying errors.Is(err, fs.ErrNotExist) signal a missing
+	// canvas file (handler renders empty-state); other errors map to
+	// 404.
+	ResolveCanvas func(project, run, stage string) (path string, err error)
+
 	// NotifyURL is the webhook URL we POST a small JSON payload to
 	// when a serve-parented run exits. Empty disables notifications.
 	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
@@ -180,6 +190,7 @@ func (s *Server) registerRoutes() {
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
+	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
 	s.router.HandleFunc("GET /run/{project}/{slug}/fragment", s.handleRunFragment)
 	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
 	s.router.HandleFunc("POST /run/{project}/{slug}/end-agent", s.handleEndAgent)
