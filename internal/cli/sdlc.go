@@ -102,7 +102,7 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "sdlc design: %v\n", err)
 		return 2
 	}
-	return openSdlcDesign(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openSdlcDesign(projectID, runID, false, serveAgentSuppress(), *agentOverride, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
@@ -128,7 +128,7 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "sdlc code: %v\n", err)
 		return 2
 	}
-	return openSdlcCode(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openSdlcCode(projectID, runID, false, serveAgentSuppress(), *agentOverride, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
@@ -155,7 +155,21 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "sdlc test: %v\n", err)
 		return 2
 	}
-	return openSdlcTest(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openSdlcTest(projectID, runID, false, serveAgentSuppress(), *agentOverride, stdout, stderr)
+}
+
+// serveAgentSuppress reports whether the current process was spawned
+// by `moe serve` to host a single agent session. The serve↔CLI
+// handshake is invisible to shell-side operators: setting
+// MOE_SERVE_AGENT=1 in the spawn env tells the stage opener to set
+// SkipNextStage=true so moe exits cleanly after the agent returns,
+// instead of falling through to the post-turn `next: …` chain
+// prompt (which has no input source under serve).
+//
+// Read once per stage entry; same shape MOE_SERVE_NOTIFY_URL takes
+// (env-var handshake, not a documented operator flag).
+func serveAgentSuppress() bool {
+	return os.Getenv("MOE_SERVE_AGENT") == "1"
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
