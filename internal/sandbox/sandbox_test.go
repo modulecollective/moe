@@ -195,7 +195,7 @@ func TestRemoveAfterEnsure(t *testing.T) {
 // TestRemoveSurfacesPermissionHint exercises the warning-text change:
 // when the underlying `os.RemoveAll` hits EACCES (real-world cause: a
 // container running as root wrote files the host can't unlink), the
-// wrapped error must point at `moe gc clones` so the operator finds
+// wrapped error must point at `moe clone gc` so the operator finds
 // the recovery verb without trawling docs. Reproduced cheaply by
 // revoking write on the parent dir — that's what fails the unlink in
 // the original incident.
@@ -221,8 +221,8 @@ func TestRemoveSurfacesPermissionHint(t *testing.T) {
 		t.Fatal("expected permission error, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "moe gc clones") {
-		t.Fatalf("error missing `moe gc clones` hint: %v", err)
+	if !strings.Contains(msg, "moe clone gc") {
+		t.Fatalf("error missing `moe clone gc` hint: %v", err)
 	}
 	if !strings.Contains(msg, "container-written") {
 		t.Fatalf("error missing container-written explanation: %v", err)

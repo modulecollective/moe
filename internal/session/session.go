@@ -167,7 +167,8 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	if branchExists(root, branch) {
 		return nil, fmt.Errorf(
 			"session: branch %s exists without a registered worktree — abandoned close?\n"+
-				"  run `moe session abandon %s` to drop it, or rebase and merge manually",
+				"  run `moe session abandon %s` to drop it, or rebase and merge manually\n"+
+				"  or run `moe session gc` to sweep every orphan in one pass",
 			branch, branch)
 	}
 

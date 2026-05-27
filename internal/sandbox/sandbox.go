@@ -168,7 +168,7 @@ func CheckoutBranch(clonePath, branch string) error {
 // A permission denial inside the clone typically means a container
 // running as root wrote files there (rootless docker maps container-
 // root → host `nobody:nogroup`, which the moe process can't unlink).
-// We surface that likely cause and point at `moe gc clones`, the verb
+// We surface that likely cause and point at `moe clone gc`, the verb
 // that knows how to fall back to a container-driven rm. The wrapped
 // error keeps the path / syscall detail intact for anyone matching on
 // it with errors.Is.
@@ -179,7 +179,7 @@ func Remove(root, projectID, runID string) error {
 			return fmt.Errorf(
 				"sandbox: remove %s: %w (likely a container-written file; "+
 					"the project's dev-env-teardown.d should remove it, "+
-					"or run `moe gc clones`)", dst, err)
+					"or run `moe clone gc`)", dst, err)
 		}
 		return fmt.Errorf("sandbox: remove %s: %w", dst, err)
 	}

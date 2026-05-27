@@ -83,10 +83,10 @@ func TestFindOrphanClonesNoClonesDir(t *testing.T) {
 	}
 }
 
-// TestGCClonesRemovesOrphans is the end-to-end happy-path: the verb
+// TestCloneGCRemovesOrphans is the end-to-end happy-path: the verb
 // removes terminal-status clones, leaves in-progress and pushed ones
 // alone, prints one line per removal, and exits 0.
-func TestGCClonesRemovesOrphans(t *testing.T) {
+func TestCloneGCRemovesOrphans(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -107,7 +107,7 @@ func TestGCClonesRemovesOrphans(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"gc", "clones"}, &out, &errb)
+	code := Run([]string{"clone", "gc"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -134,22 +134,88 @@ func TestGCClonesRemovesOrphans(t *testing.T) {
 	}
 }
 
-// TestGCClonesNoOrphans confirms the "nothing to do" path prints a
+// TestCloneGCNoOrphans confirms the "nothing to do" path prints a
 // status line and exits 0 — sync runs this in a loop, so a clean
 // bureaucracy must not surface as a failure.
-func TestGCClonesNoOrphans(t *testing.T) {
+func TestCloneGCNoOrphans(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"gc", "clones"}, &out, &errb)
+	code := Run([]string{"clone", "gc"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "no orphan clones") {
 		t.Fatalf("expected 'no orphan clones', got %q", out.String())
+	}
+}
+
+// TestCloneListSortedWithStatus exercises the visibility verb: every
+// clone dir under .moe/clones/ shows up, in (project, run) order, paired
+// with the run-registry status — or `(missing)` for a phantom clone
+// whose run.json was never seeded.
+func TestCloneListSortedWithStatus(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	trailerstest.SeedRun(t, root, "alpha", "in-flight", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "alpha", "merged-one", "sdlc", run.StatusMerged)
+	trailerstest.SeedRun(t, root, "beta", "closed-one", "sdlc", run.StatusClosed)
+
+	for _, c := range [][2]string{
+		{"alpha", "in-flight"},
+		{"alpha", "merged-one"},
+		{"alpha", "phantom"},
+		{"beta", "closed-one"},
+	} {
+		if err := os.MkdirAll(sandbox.Path(root, c[0], c[1]), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"clone", "list"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines, got %d:\n%s", len(lines), got)
+	}
+	wantPrefix := []string{
+		"alpha/in-flight\t" + run.StatusInProgress + "\t",
+		"alpha/merged-one\t" + run.StatusMerged + "\t",
+		"alpha/phantom\t(missing)\t",
+		"beta/closed-one\t" + run.StatusClosed + "\t",
+	}
+	for i, want := range wantPrefix {
+		if !strings.HasPrefix(lines[i], want) {
+			t.Errorf("line %d: got %q, want prefix %q", i, lines[i], want)
+		}
+	}
+}
+
+// TestCloneListNoClones: an empty bureaucracy must surface "no clones"
+// rather than a stat error or an empty body.
+func TestCloneListNoClones(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"clone", "list"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "no clones") {
+		t.Fatalf("expected 'no clones', got %q", out.String())
 	}
 }
 

@@ -316,7 +316,14 @@ recovering from a crash shouldn't lose work.
   branch without landing its commits.
 - `moe session resolve <session>` — retry the rebase+ff-merge that a
   close failed on.
-- `moe gc clones` — remove orphan per-run sandbox clones under
+- `moe session gc` — sweep stray stage-session worktrees and branches
+  in one pass (terminal-status runs, missing `run.json`, missing
+  project dir, branch without a worktree, worktree dir without a
+  branch).
+- `moe clone list` — print one line per directory under `.moe/clones/`
+  with its owning run's status, or `(missing)` when `run.json` is
+  gone.
+- `moe clone gc` — remove orphan per-run sandbox clones under
   `.moe/clones/` after their runs have reached terminal status or
   their `run.json` is gone.
 - `moe where` — print the resolved bureaucracy path; handy in
