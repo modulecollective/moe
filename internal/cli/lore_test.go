@@ -278,6 +278,49 @@ func TestSDLCCloseHarvestsLore(t *testing.T) {
 	}
 }
 
+func TestSDLCCloseHarvestsFollowupsAndLoreTogether(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it",
+		"- [ ] `idea-next` — Idea next\n")
+	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `fact-next` — Fact next",
+		"",
+		"  applies-when: now",
+		"",
+		"  Lore body.",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "idea-next", "run.json")); err != nil {
+		t.Fatalf("expected harvested idea: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, "fact-next.md")); err != nil {
+		t.Fatalf("expected harvested lore: %v", err)
+	}
+	if got := readFollowups(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `idea-next` — Idea next") {
+		t.Fatalf("followups.md was not marked harvested:\n%s", got)
+	}
+	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `fact-next` — Fact next") {
+		t.Fatalf("feedback/lore.md was not marked harvested:\n%s", got)
+	}
+
+	headPaths := gitLog(t, root, "-1", "--name-only", "--format=")
+	for _, want := range []string{"followups.md", "feedback/lore.md", "lore/fact-next.md"} {
+		if !strings.Contains(headPaths, want) {
+			t.Fatalf("close commit missing %s:\n%s", want, headPaths)
+		}
+	}
+}
+
 // TestSDLCCloseAutoDisambiguatesLoreCollision pins the -2, -3 collision
 // policy: an entry whose slug already exists in lore/ lands as
 // <slug>-2, and the resolved slug appears in the rewritten checklist.

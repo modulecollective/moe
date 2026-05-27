@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -63,59 +62,20 @@ type parsedLore struct {
 // parseFollowups: a malformed `- [ ]` line, a duplicate slug, or an
 // empty title aborts the harvest with a 1-based line number.
 func parseLore(body []byte) (lines []string, todo []parsedLore, err error) {
-	lines = strings.Split(string(body), "\n")
-	seen := map[string]int{}
-
-	// openIdx >= 0 means we're inside an open item collecting body
-	// lines into bodyLines. A `[x]` item resets openIdx to -1 so its
-	// own body lines (if any) are consumed without attaching to the
-	// prior open item — same shape parseFollowups uses.
-	openIdx := -1
-	var bodyLines []string
-
-	finalize := func() {
-		if openIdx >= 0 {
-			rawBody := trimAndDedentBody(bodyLines)
-			appliesWhen, prose := splitAppliesWhen(rawBody)
-			todo[openIdx].appliesWhen = appliesWhen
-			todo[openIdx].body = prose
-			openIdx = -1
-		}
-		bodyLines = nil
+	lines, entries, err := parseChecklist(body, "lore entry", "lore")
+	if err != nil {
+		return nil, nil, err
 	}
-
-	for i, line := range lines {
-		if followupCheckboxRE.MatchString(line) {
-			finalize()
-			if followupDoneRE.MatchString(line) {
-				continue
-			}
-			m := followupOpenRE.FindStringSubmatch(line)
-			if m == nil {
-				return nil, nil, fmt.Errorf("line %d: malformed lore entry %q (expected: - [ ] `slug` — Title)", i+1, line)
-			}
-			slug := m[2]
-			title := strings.TrimSpace(m[3])
-			if title == "" {
-				return nil, nil, fmt.Errorf("line %d: lore entry title is empty", i+1)
-			}
-			if prev, dup := seen[slug]; dup {
-				return nil, nil, fmt.Errorf("line %d: lore slug %q duplicates line %d", i+1, slug, prev+1)
-			}
-			seen[slug] = i
-			todo = append(todo, parsedLore{lineIdx: i, slug: slug, title: title})
-			openIdx = len(todo) - 1
-			continue
-		}
-		if line == "" || isIndentedBody(line) {
-			if openIdx >= 0 {
-				bodyLines = append(bodyLines, line)
-			}
-			continue
-		}
-		finalize()
+	for _, e := range entries {
+		appliesWhen, prose := splitAppliesWhen(e.body)
+		todo = append(todo, parsedLore{
+			lineIdx:     e.lineIdx,
+			slug:        e.slug,
+			title:       e.title,
+			appliesWhen: appliesWhen,
+			body:        prose,
+		})
 	}
-	finalize()
 	return lines, todo, nil
 }
 
@@ -244,67 +204,27 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 // because the progress commit took the dirty file with it.
 func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
 	relPath := run.FeedbackPath(projectID, runID, "lore")
-	absPath := filepath.Join(root, relPath)
-
-	if !skipEdit && hasUncheckedEntry(absPath) {
-		if err := injectEditorPopHeader(absPath, loreHeader); err != nil {
-			return err
-		}
-		if err := launchEditorOrFail(absPath); err != nil {
-			return err
-		}
-	}
-
-	body, err := os.ReadFile(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", relPath, err)
-	}
-
-	lines, todo, err := parseLore(body)
-	if err != nil {
-		return fmt.Errorf("%s: %w", relPath, err)
-	}
-	if len(todo) == 0 {
-		return nil
-	}
-
-	for hi, p := range todo {
-		resolved, werr := promoteLoreEntry(root, projectID, runID, p)
-		if werr != nil {
-			if hi > 0 {
-				if perr := commitLoreProgress(root, projectID, runID, workflow, relPath, lines); perr != nil {
-					return fmt.Errorf("promote lore %s (then progress commit failed: %v): %w", p.slug, perr, werr)
-				}
+	spec := scratchHarvestSpec[parsedLore]{
+		relPath:         relPath,
+		header:          loreHeader,
+		progressSubject: fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
+		progressPaths:   []string{wiki.LoreDirRel},
+		markLine:        markHarvested,
+		writeErrPrefix:  "promote lore",
+		parse: func(body []byte) ([]string, []scratchItem[parsedLore], error) {
+			lines, todo, err := parseLore(body)
+			if err != nil {
+				return nil, nil, err
 			}
-			return fmt.Errorf("promote lore %s (after harvesting %d): %w", p.slug, hi, werr)
-		}
-		lines[p.lineIdx] = markHarvested(lines[p.lineIdx], p.slug, resolved)
+			items := make([]scratchItem[parsedLore], 0, len(todo))
+			for _, p := range todo {
+				items = append(items, scratchItem[parsedLore]{lineIdx: p.lineIdx, slug: p.slug, entry: p})
+			}
+			return lines, items, nil
+		},
+		write: func(p parsedLore) (string, error) {
+			return promoteLoreEntry(root, projectID, runID, p)
+		},
 	}
-
-	if err := os.WriteFile(absPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", relPath, err)
-	}
-	return nil
-}
-
-// commitLoreProgress lands the partially-harvested feedback file plus
-// any lore/*.md files already written as a standalone bookkeeping
-// commit, mirroring commitHarvestProgress for followups. Subject
-// names the abort: the run is still in_progress, so a `Close ... `
-// shape would mislead.
-func commitLoreProgress(root, projectID, runID, workflow, relPath string, lines []string) error {
-	if err := os.WriteFile(filepath.Join(root, relPath), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-		return fmt.Errorf("write progress %s: %w", relPath, err)
-	}
-	subject := fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID)
-	msg := subject + "\n\n" +
-		trailers.Block{
-			Run:      runID,
-			Project:  projectID,
-			Workflow: workflow,
-		}.String()
-	return run.StageAndCommit(root, msg, relPath, wiki.LoreDirRel)
+	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)
 }

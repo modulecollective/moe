@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -95,57 +94,18 @@ type parsedFollowup struct {
 // (so they don't attach to a prior open item) but discarded — the
 // idea has already been created on a past run.
 func parseFollowups(body []byte) (lines []string, todo []parsedFollowup, err error) {
-	lines = strings.Split(string(body), "\n")
-	seen := map[string]int{}
-
-	// openIdx >= 0 means we're inside an open item collecting body
-	// lines into bodyLines. A `[x]` item resets openIdx to -1 so its
-	// own body lines (if any) are silently consumed without attaching
-	// to the prior open item.
-	openIdx := -1
-	var bodyLines []string
-
-	finalize := func() {
-		if openIdx >= 0 {
-			todo[openIdx].body = trimAndDedentBody(bodyLines)
-			openIdx = -1
-		}
-		bodyLines = nil
+	lines, entries, err := parseChecklist(body, "follow-up", "follow-up")
+	if err != nil {
+		return nil, nil, err
 	}
-
-	for i, line := range lines {
-		if followupCheckboxRE.MatchString(line) {
-			finalize()
-			if followupDoneRE.MatchString(line) {
-				continue
-			}
-			m := followupOpenRE.FindStringSubmatch(line)
-			if m == nil {
-				return nil, nil, fmt.Errorf("line %d: malformed follow-up %q (expected: - [ ] `slug` — Title)", i+1, line)
-			}
-			slug := m[2]
-			title := strings.TrimSpace(m[3])
-			if title == "" {
-				return nil, nil, fmt.Errorf("line %d: follow-up title is empty", i+1)
-			}
-			if prev, dup := seen[slug]; dup {
-				return nil, nil, fmt.Errorf("line %d: follow-up slug %q duplicates line %d", i+1, slug, prev+1)
-			}
-			seen[slug] = i
-			todo = append(todo, parsedFollowup{lineIdx: i, slug: slug, title: title})
-			openIdx = len(todo) - 1
-			continue
-		}
-		if line == "" || isIndentedBody(line) {
-			if openIdx >= 0 {
-				bodyLines = append(bodyLines, line)
-			}
-			continue
-		}
-		// Non-blank, non-indented, non-checkbox line: closes the item.
-		finalize()
+	for _, e := range entries {
+		todo = append(todo, parsedFollowup{
+			lineIdx: e.lineIdx,
+			slug:    e.slug,
+			title:   e.title,
+			body:    e.body,
+		})
 	}
-	finalize()
 	return lines, todo, nil
 }
 
@@ -217,64 +177,41 @@ func markHarvested(line, baseSlug, resolvedSlug string) string {
 // progress commit took the dirty file with it.
 func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) error {
 	relPath := run.FollowupsPath(projectID, runID)
-	absPath := filepath.Join(root, relPath)
-
-	if !skipEdit && hasUncheckedEntry(absPath) {
-		if err := injectEditorPopHeader(absPath, followupsHeader); err != nil {
-			return err
-		}
-		if err := launchEditorOrFail(absPath); err != nil {
-			return err
-		}
-	}
-
-	body, err := os.ReadFile(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", relPath, err)
-	}
-
-	lines, todo, err := parseFollowups(body)
-	if err != nil {
-		return fmt.Errorf("%s: %w", relPath, err)
-	}
-	if len(todo) == 0 {
-		return nil
-	}
-
 	openTrailers := trailers.Block{FromRun: projectID + "/" + runID}
 
-	for hi, fu := range todo {
-		// followups.md preserves the prose title — render it as the H1
-		// so the harvested idea reads as the operator wrote it, even
-		// though the slug is what the namespace keys off.
-		canvasBody := fmt.Sprintf("# %s\n", fu.title)
-		if fu.body != "" {
-			canvasBody = fmt.Sprintf("# %s\n\n%s\n", fu.title, fu.body)
-		}
-		md, ierr := createIdea(root, projectID, fu.slug, canvasBody, openTrailers)
-		if ierr != nil {
-			// If we already harvested some entries, persist their
-			// `- [x]` rewrites as a standalone bookkeeping commit so
-			// the retry-after-fix skips them. With zero progress the
-			// followups.md is unchanged on disk and there is nothing
-			// to record beyond the failure itself.
-			if hi > 0 {
-				if perr := commitHarvestProgress(root, projectID, runID, workflow, relPath, lines); perr != nil {
-					return fmt.Errorf("create idea %s (then progress commit failed: %v): %w", fu.slug, perr, ierr)
-				}
+	spec := scratchHarvestSpec[parsedFollowup]{
+		relPath:         relPath,
+		header:          followupsHeader,
+		progressSubject: fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID),
+		markLine:        markHarvested,
+		writeErrPrefix:  "create idea",
+		parse: func(body []byte) ([]string, []scratchItem[parsedFollowup], error) {
+			lines, todo, err := parseFollowups(body)
+			if err != nil {
+				return nil, nil, err
 			}
-			return fmt.Errorf("create idea %s (after harvesting %d): %w", fu.slug, hi, ierr)
-		}
-		lines[fu.lineIdx] = markHarvested(lines[fu.lineIdx], fu.slug, md.ID)
+			items := make([]scratchItem[parsedFollowup], 0, len(todo))
+			for _, fu := range todo {
+				items = append(items, scratchItem[parsedFollowup]{lineIdx: fu.lineIdx, slug: fu.slug, entry: fu})
+			}
+			return lines, items, nil
+		},
+		write: func(fu parsedFollowup) (string, error) {
+			// followups.md preserves the prose title — render it as the H1
+			// so the harvested idea reads as the operator wrote it, even
+			// though the slug is what the namespace keys off.
+			canvasBody := fmt.Sprintf("# %s\n", fu.title)
+			if fu.body != "" {
+				canvasBody = fmt.Sprintf("# %s\n\n%s\n", fu.title, fu.body)
+			}
+			md, err := createIdea(root, projectID, fu.slug, canvasBody, openTrailers)
+			if err != nil {
+				return "", err
+			}
+			return md.ID, nil
+		},
 	}
-
-	if err := os.WriteFile(absPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", relPath, err)
-	}
-	return nil
+	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)
 }
 
 // hasUncheckedEntry reports whether absPath contains any line whose
@@ -357,25 +294,6 @@ func launchEditorOrFail(path string) error {
 		return fmt.Errorf("editor exited: %w", err)
 	}
 	return nil
-}
-
-// commitHarvestProgress lands lines (the partially-harvested file) as
-// a standalone bookkeeping commit, so the working tree is clean again
-// for the operator's retry. Subject and trailers mirror the close
-// commit but call out the abort: the run is still in_progress, so the
-// `Close ... ` shape would be misleading.
-func commitHarvestProgress(root, projectID, runID, workflow, relPath string, lines []string) error {
-	if err := os.WriteFile(filepath.Join(root, relPath), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-		return fmt.Errorf("write progress %s: %w", relPath, err)
-	}
-	subject := fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID)
-	msg := subject + "\n\n" +
-		trailers.Block{
-			Run:      runID,
-			Project:  projectID,
-			Workflow: workflow,
-		}.String()
-	return run.StageAndCommit(root, msg, relPath)
 }
 
 // dirtyOutsidePaths returns true if the working tree has uncommitted
