@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -1187,6 +1188,264 @@ func TestIdeaMoveUsageErrors(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "move", "tele/slug"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected exit=2 on missing args, got %d; stderr=%q", code, errb.String())
+	}
+}
+
+// reopenFixture seeds the happy-path precondition for `moe idea reopen`:
+// open an idea, promote it into an sdlc run (which date-suffixes the
+// destination slug because the idea occupies the bare slug), and
+// optionally drive the destination into a non-default status by
+// rewriting its run.json. Returns the bureaucracy root and the
+// resolved destination slug.
+func reopenFixture(t *testing.T, projectID, ideaSlug, destStatus string) (root, destSlug string) {
+	t.Helper()
+	root = newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, projectID)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := Run([]string{"idea", "new", projectID + "/" + ideaSlug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if code := runNew("sdlc", []string{"--from-idea=" + projectID + "/" + ideaSlug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup promote failed")
+	}
+	// Promote date-suffixes the destination because the idea itself
+	// occupies the bare slug.
+	destSlug = ideaSlug + "-" + todayDateSuffix()
+
+	switch destStatus {
+	case run.StatusClosed:
+		// `sdlc close` on the destination is the natural way to
+		// produce the precondition the reopen verb is built for.
+		if code := Run([]string{"sdlc", "close", "--no-edit", projectID + "/" + destSlug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+			t.Fatalf("setup close destination failed")
+		}
+	case run.StatusInProgress:
+		// Default — destination opens in_progress.
+	case "":
+		// Caller wants whatever runNew left behind (in_progress).
+	default:
+		// Stamp the status directly. Avoids replicating push / merge
+		// machinery for what is only a status-field assertion.
+		md, err := run.Load(root, projectID, destSlug)
+		if err != nil {
+			t.Fatalf("load destination: %v", err)
+		}
+		md.Status = destStatus
+		if err := run.Save(root, md); err != nil {
+			t.Fatalf("save destination: %v", err)
+		}
+		runJSONRel := filepath.Join("projects", projectID, "runs", destSlug, "run.json")
+		gittest.Run(t, root, "add", runJSONRel)
+		gittest.Run(t, root, "commit", "-m", "stamp destination status="+destStatus)
+	}
+	return root, destSlug
+}
+
+// TestIdeaReopenFlipsPromotedToInProgress: happy path. A promoted idea
+// whose destination sdlc run is closed flips back to in_progress, the
+// reopen commit carries canonical trailers, and `moe idea list` shows
+// it again.
+func TestIdeaReopenFlipsPromotedToInProgress(t *testing.T) {
+	root, _ := reopenFixture(t, "tele", "abandoned-feature", run.StatusClosed)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/abandoned-feature"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "reopened idea tele/abandoned-feature") {
+		t.Fatalf("missing reopen confirmation: %q", out.String())
+	}
+
+	mdBody, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "abandoned-feature", "run.json"))
+	if err != nil {
+		t.Fatalf("run.json missing after reopen: %v", err)
+	}
+	if !strings.Contains(string(mdBody), `"status": "in_progress"`) {
+		t.Fatalf("run.json status not in_progress:\n%s", mdBody)
+	}
+
+	head := gitLog(t, root, "-1", "--format=%s%n%b")
+	if !strings.Contains(head, "Reopen idea tele/abandoned-feature") {
+		t.Fatalf("commit subject wrong:\n%s", head)
+	}
+	for _, want := range []string{
+		"MoE-Run: abandoned-feature",
+		"MoE-Project: tele",
+		"MoE-Workflow: idea",
+	} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("commit missing trailer %q:\n%s", want, head)
+		}
+	}
+
+	// Round-trip: the idea is back on `moe idea list`.
+	var listOut, listErr bytes.Buffer
+	if code := Run([]string{"idea", "list", "tele"}, &listOut, &listErr); code != 0 {
+		t.Fatalf("idea list exit=%d stderr=%q", code, listErr.String())
+	}
+	if !strings.Contains(listOut.String(), "abandoned-feature") {
+		t.Fatalf("reopened idea not in `idea list` output:\n%s", listOut.String())
+	}
+}
+
+// TestIdeaReopenRefusesNonIdeaRun: a slug that names an sdlc run is
+// not a reopen target — same workflow guard idea edit / move rely on.
+func TestIdeaReopenRefusesNonIdeaRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := runNew("sdlc", []string{"tele/real-run"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup sdlc run failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/real-run"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on non-idea run, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not an idea") {
+		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaReopenRefusesInProgressIdea: an idea that was never promoted
+// is not a reopen target — the "abandoned destination" precondition
+// can't apply.
+func TestIdeaReopenRefusesInProgressIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele/still-open"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/still-open"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on in_progress idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not promoted") {
+		t.Fatalf("expected not-promoted error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaReopenRefusesClosedIdea: a closed idea never had a
+// destination — reopen is for promoted, not for "captured and dropped."
+func TestIdeaReopenRefusesClosedIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if code := Run([]string{"idea", "new", "tele/dropped"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup capture failed")
+	}
+	if code := Run([]string{"idea", "close", "tele/dropped"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("setup close failed")
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/dropped"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on closed idea, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not promoted") {
+		t.Fatalf("expected not-promoted error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaReopenRefusesDestinationInProgress: destination still being
+// worked — point the operator at the live slug rather than letting two
+// forks coexist.
+func TestIdeaReopenRefusesDestinationInProgress(t *testing.T) {
+	root, destSlug := reopenFixture(t, "tele", "still-cooking", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/still-cooking"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on live destination, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "in_progress") || !strings.Contains(errb.String(), "just keep working") {
+		t.Fatalf("expected just-keep-working error naming the destination, got: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), destSlug) {
+		t.Fatalf("expected error to name destination slug %q, got: %q", destSlug, errb.String())
+	}
+
+	// Source idea must not have flipped.
+	mdBody, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "still-cooking", "run.json"))
+	if err != nil {
+		t.Fatalf("run.json missing: %v", err)
+	}
+	if !strings.Contains(string(mdBody), `"status": "promoted"`) {
+		t.Fatalf("idea status changed on refusal:\n%s", mdBody)
+	}
+}
+
+// TestIdeaReopenRefusesDestinationMerged: destination already shipped
+// — reopening would resurrect intent that's been fulfilled.
+func TestIdeaReopenRefusesDestinationMerged(t *testing.T) {
+	_, destSlug := reopenFixture(t, "tele", "already-shipped", run.StatusMerged)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/already-shipped"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on merged destination, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "already shipped") {
+		t.Fatalf("expected already-shipped error, got: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), destSlug) {
+		t.Fatalf("expected error to name destination slug %q, got: %q", destSlug, errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe idea new") {
+		t.Fatalf("expected error to point at `moe idea new`, got: %q", errb.String())
+	}
+}
+
+// TestIdeaReopenRefusesDirtyWorkingTree: a stray edit would ride along
+// on the reopen commit. Trip the clean-tree gate before any state
+// change.
+func TestIdeaReopenRefusesDirtyWorkingTree(t *testing.T) {
+	root, _ := reopenFixture(t, "tele", "needs-clean-tree", run.StatusClosed)
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen", "tele/needs-clean-tree"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on dirty tree, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "uncommitted changes") {
+		t.Fatalf("expected dirty-tree error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaReopenUsageErrors: wrong arity exits 2.
+func TestIdeaReopenUsageErrors(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "reopen"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected exit=2 on missing args, got %d; stderr=%q", code, errb.String())
 	}
