@@ -92,7 +92,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   margin-top: 0.2rem;
   color: var(--muted);
 }
-.page-header .meta {
+.meta {
   margin: 0.25rem 0 0;
   color: var(--muted);
   font-size: 0.92rem;
@@ -203,6 +203,15 @@ form.new-run button:hover { filter: brightness(1.05); }
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
   margin: 0 0 1rem;
+}
+
+/* End-agent button — the affordance to wind a stage down from the
+   web UI. Always visible while the child is live, separate row from
+   the chain-prompt buttons (which are gated on prompt.Active). */
+.end-agent .hint {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 /* Chain-prompt buttons + inline action buttons */

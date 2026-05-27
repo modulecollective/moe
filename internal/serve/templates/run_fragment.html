@@ -1,0 +1,45 @@
+<div class="run-fragment"{{if .PollStop}} data-stop="1"{{end}}>
+  <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+
+  {{if .CanvasLinks}}
+  <section class="canvases">
+    <h2>canvases</h2>
+    <ul>
+      {{range .CanvasLinks}}
+      <li><span class="slug">{{.Stage}}</span> · {{.ModTime}}</li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if .EndAgentEnabled}}
+  <section class="end-agent">
+    <h2>agent</h2>
+    <div class="buttons">
+      <form method="post" action="/run/{{.Project}}/{{.Slug}}/end-agent" class="inline-action">
+        <button type="submit" class="key warn">end agent</button>
+      </form>
+    </div>
+    <p class="hint">two soft Ctrl-D presses — the agent flushes and exits.</p>
+  </section>
+  {{end}}
+
+  {{if .Buttons}}
+  <section class="prompt">
+    <h2>chain prompt</h2>
+    <div class="buttons">
+      {{range .Buttons}}
+      <form method="post" action="/run/{{$.Project}}/{{$.Slug}}/key" class="key-form">
+        <input type="hidden" name="key" value="{{.Key}}">
+        <button type="submit" class="key {{.Class}}">{{.Label}}</button>
+      </form>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+
+  <section class="activity">
+    <h2>activity</h2>
+    <pre class="log">{{.Tail}}</pre>
+  </section>
+</div>

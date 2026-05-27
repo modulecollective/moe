@@ -14,14 +14,15 @@ import (
 )
 
 // chainPromptRegex matches the moe chain-prompt line and captures the
-// option set between the square brackets. Format printed at
-// internal/cli/stage_next.go:359 is:
+// option set between the square brackets. Two phrasings to match,
+// both ending in `run now? [...]`:
 //
-//	next: <hint> — run now? [Y/n/x/b/!]
+//	next: <hint> — run now? [Y/n/x/b/!]   (stage_next.go:359, :529)
+//	<stage> sealed — close run now? [Y/n/x] (stage_next.go:444)
 //
 // We capture just the bracket contents so the button renderer can
 // enumerate the keys without re-parsing the legend that follows.
-var chainPromptRegex = regexp.MustCompile(`— run now\? \[([A-Za-z!/]+)\]`)
+var chainPromptRegex = regexp.MustCompile(`run now\? \[([A-Za-z!/]+)\]`)
 
 // promptWindow is the byte-window at the tail of the ring buffer
 // where a matching prompt is treated as "active". A prompt detected
@@ -34,6 +35,29 @@ const promptWindow = 1024
 // for the activity log. Big enough for the chain-prompt context and
 // a few claude turns; small enough not to grow without bound.
 const tailBytes = 64 * 1024
+
+// endAgentEotGap is the pause between the two \x04 (EOT) bytes used to
+// politely signal "end the agent". Claude's input loop needs at least
+// two EOTs to exit and seems to ignore a back-to-back pair; 100ms is
+// enough for the first to be consumed as a discrete event. Codex
+// exits on the first and treats the second as a no-op.
+const endAgentEotGap = 100 * time.Millisecond
+
+// shutdownSoftGrace is how long the four-phase shutdown waits after
+// the soft EOFs for a child to exit naturally. Moe at the chain
+// prompt is the common end-state once the agent exits — this is the
+// budget for the agent to flush, moe to run session.Close +
+// sync.AutoPush, and moe to print the chain prompt.
+//
+// Variable rather than const so tests can shorten the wait; not
+// part of the package's surface and not safe to mutate concurrently
+// with a running ListenAndServe.
+var shutdownSoftGrace = 10 * time.Second
+
+// shutdownHangupGrace is the second wait after hanging up the PTY
+// for stragglers that didn't exit on EOT. Total shutdown budget is
+// roughly endAgentEotGap + shutdownSoftGrace + shutdownHangupGrace.
+var shutdownHangupGrace = 10 * time.Second
 
 // Prompt is the chain-prompt state currently detected at the tail
 // of the child's PTY output. Active is true when a prompt line sits
@@ -53,8 +77,9 @@ type child struct {
 	mu   sync.Mutex
 	tail []byte // ring-buffer of recent PTY stdout, capped at tailBytes
 
-	done    chan struct{}
-	exitErr error
+	done     chan struct{}
+	exitErr  error
+	exitedAt time.Time // set before close(done); only read after <-done
 }
 
 // children is the live PTY-child registry, keyed by id.
@@ -124,25 +149,111 @@ func (cs *children) get(id string) (*child, bool) {
 	return c, ok
 }
 
-// shutdown closes every child's PTY (kernel SIGHUPs the chain) and
-// waits for the readers to drain. Called from Server.ListenAndServe
-// on context cancellation.
-func (cs *children) shutdown(ctx context.Context) {
+// shutdown winds children down in four phases so the agent (and
+// moe-the-parent of the agent) gets a real chance to commit, push,
+// and exit cleanly before the kernel reaps anything:
+//
+//  1. Send \x04\x04 to every live child (writeRaw — soft EOFs to
+//     the agent process, EOF on moe's stdinSharedReader).
+//  2. Wait up to shutdownSoftGrace for natural exit. The common
+//     end-state: agent flushes and exits → moe runs session.Close
+//     + AutoPush → moe prints the chain prompt → moe's
+//     readLineWithSignal sees EOF and returns → moe exits.
+//  3. For stragglers, pty.Close() → kernel SIGHUP via the
+//     controlling terminal. Same blunt instrument as the old
+//     behavior, just gated on the agent having declined to leave
+//     politely.
+//  4. Wait up to shutdownHangupGrace for the hung-up stragglers to
+//     drain. Anything still alive after that is left for the
+//     kernel to reap on os.Exit; logged so the operator knows.
+//
+// logger is the serve logger (the per-server io.Writer); nil means
+// quiet shutdown. ctx caps the whole operation — useful if the
+// operator hits Ctrl-C twice (the second SIGINT collapses through
+// the Go runtime's default handler).
+func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	cs.mu.Lock()
 	live := make([]*child, 0, len(cs.all))
 	for _, c := range cs.all {
-		_ = c.pty.Close()
-		live = append(live, c)
+		select {
+		case <-c.done:
+			// Already exited; nothing to do.
+		default:
+			live = append(live, c)
+		}
 	}
 	cs.mu.Unlock()
 
+	if len(live) == 0 {
+		return
+	}
+	shutLogf(logger, "shutdown: sending EOF to %d children", len(live))
+
+	// Phase 1: two soft EOFs to every live child.
 	for _, c := range live {
+		_ = c.writeRaw([]byte{0x04})
+	}
+	select {
+	case <-time.After(endAgentEotGap):
+	case <-ctx.Done():
+		return
+	}
+	for _, c := range live {
+		_ = c.writeRaw([]byte{0x04})
+	}
+
+	// Phase 2: wait for natural exit.
+	stillLive := waitForExit(live, shutdownSoftGrace, ctx)
+	if len(stillLive) == 0 {
+		shutLogf(logger, "shutdown: %d/%d children exited cleanly", len(live), len(live))
+		return
+	}
+	shutLogf(logger, "shutdown: %d/%d still live after grace, hanging up PTY", len(stillLive), len(live))
+
+	// Phase 3: hang up the master fd for stragglers.
+	for _, c := range stillLive {
+		_ = c.pty.Close()
+	}
+
+	// Phase 4: bounded wait for the hung-up stragglers.
+	final := waitForExit(stillLive, shutdownHangupGrace, ctx)
+	if len(final) > 0 {
+		shutLogf(logger, "shutdown: %d still live after hangup, leaving for kernel reap", len(final))
+	}
+}
+
+// waitForExit waits up to grace (or ctx cancellation) for every
+// child in cs to close c.done. Returns the children that didn't
+// exit in time.
+func waitForExit(cs []*child, grace time.Duration, ctx context.Context) []*child {
+	deadline := time.Now().Add(grace)
+	var stillLive []*child
+	for _, c := range cs {
+		remaining := time.Until(deadline)
+		if remaining < 0 {
+			remaining = 0
+		}
+		timer := time.NewTimer(remaining)
 		select {
 		case <-c.done:
+			timer.Stop()
+		case <-timer.C:
+			stillLive = append(stillLive, c)
 		case <-ctx.Done():
-			return
+			timer.Stop()
+			// Treat remaining children as still-live; caller
+			// decides what to do.
+			stillLive = append(stillLive, c)
 		}
 	}
+	return stillLive
+}
+
+func shutLogf(logger io.Writer, format string, a ...any) {
+	if logger == nil {
+		return
+	}
+	fmt.Fprintf(logger, format+"\n", a...)
 }
 
 // read copies master PTY output into the ring buffer until EIO,
@@ -160,6 +271,7 @@ func (c *child) read(logger io.Writer, notify func(string, error)) {
 		}
 	}
 	c.exitErr = c.cmd.Wait()
+	c.exitedAt = time.Now()
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
@@ -189,10 +301,22 @@ func (c *child) writeKeys(s string) error {
 	return err
 }
 
+// writeRaw writes b verbatim to the child's PTY — no newline, no
+// other framing. Used for control characters (Ctrl-D / EOT) that
+// would be corrupted by writeKeys' line-buffered append.
+func (c *child) writeRaw(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+	_, err := c.pty.File().Write(b)
+	return err
+}
+
 // snapshot returns a copy of the current tail, the active chain-prompt
 // (if any), and the child's exit state. Safe to call from request
-// handlers; doesn't block the reader.
-func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr error) {
+// handlers; doesn't block the reader. exitedAt is the zero value
+// until exited == true.
+func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr error, exitedAt time.Time) {
 	c.mu.Lock()
 	tail = append([]byte(nil), c.tail...)
 	c.mu.Unlock()
@@ -201,6 +325,7 @@ func (c *child) snapshot() (tail []byte, prompt Prompt, exited bool, exitErr err
 	case <-c.done:
 		exited = true
 		exitErr = c.exitErr
+		exitedAt = c.exitedAt
 	default:
 	}
 	return

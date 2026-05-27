@@ -121,15 +121,17 @@ func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, msg str
 
 // runVM backs the per-run page (GET /run/{project}/{slug}).
 type runVM struct {
-	ID          string
-	Project     string
-	Slug        string
-	Started     string // human "Xm ago"
-	Status      string // "live" | "exited (err)" | "exited (ok)"
-	Live        bool
-	Tail        string // PTY stdout, stripped to plain text
-	CanvasLinks []canvasLink
-	Buttons     []promptButton // chain-prompt buttons when one is active
+	ID              string
+	Project         string
+	Slug            string
+	Started         string // human "Xm ago"
+	Status          string // "live" | "exited (err)" | "exited (ok)"
+	Live            bool
+	Tail            string // PTY stdout, stripped to plain text
+	CanvasLinks     []canvasLink
+	Buttons         []promptButton // chain-prompt buttons when one is active
+	EndAgentEnabled bool           // render the "end agent" button (true while live)
+	PollStop        bool           // tell the client-side poller to stop (exited + grace elapsed)
 }
 
 // promptButton is one renderable button for the per-run page. Key
@@ -156,16 +158,78 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "run "+id+" is not parented by this serve process", http.StatusNotFound)
 		return
 	}
+	vm := s.buildRunVM(c, projectID, slug, id)
+	s.render(w, r, "run.html", vm)
+}
 
-	tail, prompt, exited, exitErr := c.snapshot()
+// handleRunFragment renders just the swapping subtree of the run
+// page. The setInterval poller on run.html hits this endpoint every
+// 2s and swaps its innerHTML into <div id="poll-target">. Returns
+// 404 if the run isn't parented (the poller stops on 404).
+func (s *Server) handleRunFragment(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	c, ok := s.children.get(id)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	vm := s.buildRunVM(c, projectID, slug, id)
+	s.render(w, r, "run_fragment.html", vm)
+}
+
+// handleEndAgent writes two \x04 (EOT) bytes ~100ms apart to the
+// child's PTY. Soft EOFs: claude / codex see EOF on stdin, flush,
+// and exit cleanly. Always sends two — claude needs them, codex
+// no-ops the second. The chain prompt that follows surfaces on the
+// next poller tick via the broadened chainPromptRegex.
+func (s *Server) handleEndAgent(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	c, ok := s.children.get(id)
+	if !ok {
+		http.Error(w, "run "+id+" not live in this serve", http.StatusNotFound)
+		return
+	}
+	if _, _, exited, _, _ := c.snapshot(); exited {
+		http.Error(w, "run already exited", http.StatusConflict)
+		return
+	}
+	if err := c.writeRaw([]byte{0x04}); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	time.Sleep(endAgentEotGap)
+	if err := c.writeRaw([]byte{0x04}); err != nil {
+		http.Error(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+// pollStopGrace is how long after a child exits the client-side
+// poller keeps fetching. Long enough for the operator to read the
+// final tail; short enough not to keep an abandoned tab polling
+// forever.
+const pollStopGrace = 30 * time.Second
+
+// buildRunVM is shared between the full-page and fragment renderers
+// so they're guaranteed to agree on what's visible.
+func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
+	tail, prompt, exited, exitErr, exitedAt := c.snapshot()
 	now := time.Now()
 	vm := runVM{
-		ID:      id,
-		Project: projectID,
-		Slug:    slug,
-		Started: dash.HumanAgo(now, c.started),
-		Tail:    stripANSI(string(tail)),
-		Live:    !exited,
+		ID:              id,
+		Project:         projectID,
+		Slug:            slug,
+		Started:         dash.HumanAgo(now, c.started),
+		Tail:            sanitizePTYTail(string(tail)),
+		Live:            !exited,
+		EndAgentEnabled: !exited,
 	}
 	switch {
 	case !exited:
@@ -179,7 +243,10 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	if prompt.Active {
 		vm.Buttons = buttonsFor(prompt.Options)
 	}
-	s.render(w, r, "run.html", vm)
+	if exited && now.Sub(exitedAt) > pollStopGrace {
+		vm.PollStop = true
+	}
+	return vm
 }
 
 // handleRunKey writes one chain-prompt answer (single byte or "!!")
@@ -207,7 +274,7 @@ func (s *Server) handleRunKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, prompt, exited, _ := c.snapshot()
+	_, prompt, exited, _, _ := c.snapshot()
 	if exited {
 		http.Error(w, "run already exited", http.StatusConflict)
 		return
@@ -336,17 +403,68 @@ func canvasLinksFor(root, projectID, slug string, now time.Time) []canvasLink {
 	return out
 }
 
-// ansiCSI strips most ANSI escape sequences from PTY output so the
-// activity log reads as plain text in a <pre>. Full terminal-state
-// emulation is out of scope; this just drops the noise that makes
-// the log unreadable.
-var ansiCSI = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-var ansiOSC = regexp.MustCompile(`\x1b\][^\x07]*\x07`)
+// CSI: ESC [ <params> <intermediates> <final>. Params are
+// 0x30-0x3f (digits, ; : < = > ?), intermediates are 0x20-0x2f
+// (space ! " # $ % & ' ( ) * + , - . /), finals are 0x40-0x7e.
+// Covers SGR (m), cursor moves (A-H), erase (J/K), private modes
+// (?25l/h), and anything else following the ECMA-48 CSI grammar.
+var ansiCSI = regexp.MustCompile(`\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]`)
 
-func stripANSI(s string) string {
-	s = ansiOSC.ReplaceAllString(s, "")
+// OSC: ESC ] <text> (BEL | ESC \). Matches both terminators so
+// title-set sequences emitted by either flavor of terminal are
+// stripped.
+var ansiOSC = regexp.MustCompile(`\x1b\][^\x07\x1b]*(\x07|\x1b\\)`)
+
+// Simple ESC: ESC <intermediates>? <final>. Charset switches,
+// cursor save/restore, DEC line-drawing ops. Applied *after* CSI
+// and OSC so we don't accidentally consume their `[` / `]`
+// introducers.
+var ansiSimpleEsc = regexp.MustCompile(`\x1b[\x20-\x2f]*[\x30-\x7e]`)
+
+// sanitizePTYTail turns the captured PTY ring buffer into something
+// readable inside a <pre>. This is not a terminal emulator — any
+// agent that drives the screen with cursor-up-and-rewrite multi-line
+// regions will still leak orphan fragments. The goal is to flatten
+// the single-line-spinner / clear-line / carriage-return overwrite
+// patterns claude and codex actually produce, so the activity log
+// stops showing "174m*oz / * / Ii" empty-line junk.
+//
+// Order matters:
+//
+//  1. CSI and OSC (they share an introducer with the simple-ESC pass).
+//  2. The simple-ESC pass — what remains is non-CSI / non-OSC ESC.
+//  3. BEL and BS stripped wholesale.
+//  4. \r semantics applied per line: split on \n, and for each line
+//     keep only the substring after the *last* \r. Collapses
+//     spinner-overwrite trails like "Loading...\rDone." → "Done."
+//  5. Runs of blank lines collapsed to at most one. The redraws
+//     agents do leave behind a lot of vertical whitespace.
+func sanitizePTYTail(s string) string {
 	s = ansiCSI.ReplaceAllString(s, "")
-	return s
+	s = ansiOSC.ReplaceAllString(s, "")
+	s = ansiSimpleEsc.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "\x07", "")
+	s = strings.ReplaceAll(s, "\x08", "")
+
+	lines := strings.Split(s, "\n")
+	var b strings.Builder
+	b.Grow(len(s))
+	blank := false
+	for i, line := range lines {
+		if idx := strings.LastIndexByte(line, '\r'); idx >= 0 {
+			line = line[idx+1:]
+		}
+		isBlank := strings.TrimSpace(line) == ""
+		if isBlank && blank {
+			continue
+		}
+		blank = isBlank
+		b.WriteString(line)
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 func (s *Server) gatherNewRunVM() (newRunVM, error) {

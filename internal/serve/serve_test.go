@@ -220,6 +220,18 @@ func TestDetectPromptHappyPath(t *testing.T) {
 	}
 }
 
+func TestDetectPromptClosePrompt(t *testing.T) {
+	// The close-prompt phrasing printed at stage_next.go:444.
+	tail := []byte("design sealed — close run now? [Y/n/x]\n  Y = close · n = decline · x = close (alias)\n")
+	got := detectPrompt(tail)
+	if !got.Active {
+		t.Fatalf("expected active prompt, got %+v", got)
+	}
+	if got.Options != "Ynx" {
+		t.Errorf("Options = %q, want Ynx", got.Options)
+	}
+}
+
 func TestDetectPromptStaleMatch(t *testing.T) {
 	prompt := "next: moe sdlc design alpha/foo — run now? [Y/n/!]\n"
 	// Pad with > promptWindow bytes of post-prompt progress so the

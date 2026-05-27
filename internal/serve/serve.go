@@ -154,15 +154,20 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutCtx); err != nil {
+		httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer httpCancel()
+		if err := srv.Shutdown(httpCtx); err != nil {
 			s.logf("shutdown: %v", err)
 		}
-		// Tear down PTY children alongside HTTP graceful shutdown.
-		// The kernel SIGHUPs them via controlling-terminal teardown
-		// when their master fd closes.
-		s.children.shutdown(shutCtx)
+		// Children get their own budget — the four-phase wind-down
+		// in children.shutdown can run up to shutdownSoftGrace +
+		// shutdownHangupGrace + endAgentEotGap. Add a small buffer
+		// so the inner phases see the deadline as theirs, not the
+		// context's.
+		childCtx, childCancel := context.WithTimeout(context.Background(),
+			shutdownSoftGrace+shutdownHangupGrace+2*time.Second)
+		defer childCancel()
+		s.children.shutdown(childCtx, s.opts.Logger)
 		return <-errCh
 	case err := <-errCh:
 		return err
@@ -175,7 +180,9 @@ func (s *Server) registerRoutes() {
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
+	s.router.HandleFunc("GET /run/{project}/{slug}/fragment", s.handleRunFragment)
 	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
+	s.router.HandleFunc("POST /run/{project}/{slug}/end-agent", s.handleEndAgent)
 	s.router.HandleFunc("POST /run/resume", s.handleResume)
 
 	// Static assets are embedded under static/; strip the URL prefix

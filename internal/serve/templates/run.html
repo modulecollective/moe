@@ -19,40 +19,13 @@
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub">{{.Project}}/{{.Slug}}</div>
-      <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
     </div>
     <button id="theme-toggle" type="button">theme</button>
   </header>
 
-  {{if .CanvasLinks}}
-  <section class="canvases">
-    <h2>canvases</h2>
-    <ul>
-      {{range .CanvasLinks}}
-      <li><span class="slug">{{.Stage}}</span> · {{.ModTime}}</li>
-      {{end}}
-    </ul>
-  </section>
-  {{end}}
-
-  {{if .Buttons}}
-  <section class="prompt">
-    <h2>chain prompt</h2>
-    <div class="buttons">
-      {{range .Buttons}}
-      <form method="post" action="/run/{{$.Project}}/{{$.Slug}}/key" class="key-form">
-        <input type="hidden" name="key" value="{{.Key}}">
-        <button type="submit" class="key {{.Class}}">{{.Label}}</button>
-      </form>
-      {{end}}
-    </div>
-  </section>
-  {{end}}
-
-  <section class="activity">
-    <h2>activity</h2>
-    <pre class="log">{{.Tail}}</pre>
-  </section>
+  <div id="poll-target">
+    {{template "run_fragment.html" .}}
+  </div>
 </main>
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {
@@ -62,6 +35,26 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
   document.documentElement.dataset.theme = next;
   localStorage.setItem('moe-theme', next);
 });
+(function () {
+  var target = document.getElementById('poll-target');
+  if (!target) return;
+  var timer = setInterval(function () {
+    fetch(location.pathname + '/fragment', {cache: 'no-store'})
+      .then(function (r) {
+        if (r.status === 404) { clearInterval(timer); return null; }
+        return r.text();
+      })
+      .then(function (html) {
+        if (html === null || html === undefined) return;
+        target.innerHTML = html;
+        if (target.firstElementChild &&
+            target.firstElementChild.dataset.stop === '1') {
+          clearInterval(timer);
+        }
+      })
+      .catch(function () { /* transient; try again on next tick */ });
+  }, 2000);
+})();
 </script>
 </body>
 </html>
