@@ -111,36 +111,6 @@ func TestSnagSkipsStaleTranscript(t *testing.T) {
 	}
 }
 
-// TestSnagSkipsPromotingPlaceholder: a child still under its
-// `<p>/<s>:promoting` placeholder has no destination run dir to
-// snag into. The snag must skip cleanly rather than mkdir-p a
-// `<slug>:promoting`-named tree.
-func TestSnagSkipsPromotingPlaceholder(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	root := t.TempDir()
-
-	worktreeCwd := filepath.Join(root, ".moe", "worktrees", "uuid")
-	srcDir := claudeProjectsDir(worktreeCwd)
-	if err := os.MkdirAll(srcDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "x.jsonl"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	c := &child{
-		id:      "alpha/my-idea:promoting",
-		started: time.Now().Add(-time.Minute),
-	}
-	c.snagTranscripts(root, io.Discard)
-
-	bad := filepath.Join(root, "projects", "alpha", "runs", "my-idea:promoting")
-	if _, err := os.Stat(bad); err == nil {
-		t.Error("snag must not create a :promoting-named run dir")
-	}
-}
-
 // TestSnagIgnoresUnrelatedProjectDirs: ~/.claude/projects/ on a real
 // host carries dirs from every cwd claude was ever invoked under.
 // Only entries matching this bureaucracy's worktree-encoded prefix

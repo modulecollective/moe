@@ -4,6 +4,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,34 +12,45 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // TestMain doubles as a tiny self-exec helper for the shutdown
 // phase-3 test. When MOE_TEST_IGNORE_SIGNALS=1 is set in the env
-// the binary installs SIG_IGN for INT and TERM, prints READY to
-// stderr so the test can sync on signal-handler-installed, then
-// waits for SIGHUP and exits — i.e. survives the two Ctrl-Cs of
-// phase 1/2 but dies cleanly when phase 3's pty.Close lands.
-// Everything else routes through the normal test entry point.
+// the binary installs SIG_IGN for INT and TERM, touches the file
+// named by MOE_TEST_READY_FILE so the test can sync on
+// signal-handler-installed, then waits for SIGHUP and exits — i.e.
+// survives the two Ctrl-Cs of phase 1/2 but dies cleanly when phase
+// 3's pty.Close lands. Everything else routes through the normal
+// test entry point.
 func TestMain(m *testing.M) {
 	if os.Getenv("MOE_TEST_IGNORE_SIGNALS") == "1" {
 		signal.Ignore(syscall.SIGINT, syscall.SIGTERM)
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
-		fmt.Fprint(os.Stderr, "READY")
+		if ready := os.Getenv("MOE_TEST_READY_FILE"); ready != "" {
+			_ = os.WriteFile(ready, nil, 0o644)
+		}
 		<-hup
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
 
-func TestSpawnFillsTailAndReapsChild(t *testing.T) {
+// TestSpawnAndReap is the minimum-viable spawn check: a child
+// records under the requested id, its read loop drains the master
+// PTY to EIO, and `done` closes after `cmd.Wait` returns. With the
+// rename / tail apparatus gone, that's all spawn is on the hook for.
+func TestSpawnAndReap(t *testing.T) {
 	cs := newChildren()
-	_, err := cs.spawn("p/r", "/bin/echo", []string{"-n", "tail-marker"}, t.TempDir(), io.Discard)
+	_, err := cs.spawn("p/r", "/bin/echo", []string{"-n", "hi"}, t.TempDir(), io.Discard)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -47,21 +59,17 @@ func TestSpawnFillsTailAndReapsChild(t *testing.T) {
 		t.Fatal("expected child in registry")
 	}
 
-	// Wait for the child to exit, then snapshot.
 	select {
 	case <-c.done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("child never exited")
 	}
-	tail, exited, exitErr, _ := c.snapshot()
+	exited, exitErr, _ := c.snapshot()
 	if !exited {
 		t.Fatal("expected child to report exited")
 	}
 	if exitErr != nil {
 		t.Errorf("exit err: %v", exitErr)
-	}
-	if !strings.Contains(string(tail), "tail-marker") {
-		t.Errorf("tail missing marker: %q", string(tail))
 	}
 }
 
@@ -81,10 +89,13 @@ func TestSpawnRefusesDuplicateLiveID(t *testing.T) {
 	}
 }
 
-func TestPOSTNewRunSpawnsAndRedirects(t *testing.T) {
-	root := t.TempDir()
-	seedProject(t, root, "alpha")
-
+// TestPOSTNewRunOpensAndSpawnsAgent drives the form path end-to-end:
+// the handler opens the run in-process via runopen.Open (committing
+// to git), then spawns the agent verb under the known slug. The
+// fixture seeds a git-backed bureaucracy with the target project so
+// run.New finds projects/alpha/project.json.
+func TestPOSTNewRunOpensAndSpawnsAgent(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
 	s := newTestServer(t, Options{
 		Addr:   "127.0.0.1:0",
 		Root:   root,
@@ -93,7 +104,7 @@ func TestPOSTNewRunSpawnsAndRedirects(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("project", "alpha")
-	form.Set("slug", "first-idea")
+	form.Set("slug", "first-thing")
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -102,15 +113,21 @@ func TestPOSTNewRunSpawnsAndRedirects(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Location"); got != "/run/alpha/first-idea" {
-		t.Errorf("Location = %q, want /run/alpha/first-idea", got)
+	if got := rr.Header().Get("Location"); got != "/run/alpha/first-thing" {
+		t.Errorf("Location = %q, want /run/alpha/first-thing", got)
 	}
 
-	c, ok := s.children.get("alpha/first-idea")
-	if !ok {
-		t.Fatal("child not recorded in registry")
+	// The run is committed: run.Load must find it without the live
+	// child being around.
+	if _, err := run.Load(root, "alpha", "first-thing"); err != nil {
+		t.Fatalf("run.Load after POST: %v", err)
 	}
-	// /bin/echo with no args exits immediately.
+
+	c, ok := s.children.get("alpha/first-thing")
+	if !ok {
+		t.Fatal("child not recorded in registry under the real slug")
+	}
+	// `/bin/echo` with the spawn-args exits immediately.
 	select {
 	case <-c.done:
 	case <-time.After(3 * time.Second):
@@ -119,8 +136,7 @@ func TestPOSTNewRunSpawnsAndRedirects(t *testing.T) {
 }
 
 func TestPOSTNewRunRejectsBadSlug(t *testing.T) {
-	root := t.TempDir()
-	seedProject(t, root, "alpha")
+	root := seedBureaucracy(t, "alpha")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	form := url.Values{}
@@ -139,7 +155,7 @@ func TestPOSTNewRunRejectsBadSlug(t *testing.T) {
 	}
 }
 
-func TestRunPageRendersForLiveChild(t *testing.T) {
+func TestRunPageRendersForExitedChild(t *testing.T) {
 	root := t.TempDir()
 	cs := newChildren()
 	if _, err := cs.spawn("p/r", "/bin/echo", []string{"-n", "marker"}, root, io.Discard); err != nil {
@@ -186,66 +202,19 @@ func TestRunPage404ForUnknownRun(t *testing.T) {
 	}
 }
 
-// TestPromoteSpawnRenamesAfterOpenedRunLine drives the placeholder
-// → real-slug rename path: spawn a child under `<p>/<s>:promoting`,
-// have it print the `opened run …` line moe sdlc new emits, then
-// assert the registry has rebucketed it under the new slug. Uses
-// `/bin/sh -c` to drive deterministic stdout without invoking moe
-// itself.
-func TestPromoteSpawnRenamesAfterOpenedRunLine(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
+// TestPromotePOSTOpensRunAndSpawnsAgent drives the POST path: an
+// in-progress idea is promoted in-process via runopen.Promote, the
+// destination run lands on disk under a date-suffixed slug (the idea
+// itself occupied the base), and the spawn registers under the
+// destination's real slug — no placeholder, no rename watcher.
+func TestPromotePOSTOpensRunAndSpawnsAgent(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	seedIdeaRun(t, root, "alpha", "my-idea")
 
 	s := newTestServer(t, Options{
 		Addr:   "127.0.0.1:0",
 		Root:   root,
-		MoeBin: "/bin/sh",
-	})
-	// Sneak the script in via MoeBin + args by re-spawning manually:
-	// handlePromote builds args from the form, so to keep the test
-	// focused on the watcher, drive children.spawn directly with the
-	// echo command and the `:promoting` id.
-	args := []string{"-c", "echo 'opened run alpha/my-idea-2026-05-27'; sleep 2"}
-	if _, err := s.children.spawn("alpha/my-idea:promoting", "/bin/sh", args, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-
-	// Poll for the rename — bounded by the child's own write speed.
-	// /bin/sh + echo lands well within 1s.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := s.children.get("alpha/my-idea-2026-05-27"); ok {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if _, ok := s.children.get("alpha/my-idea-2026-05-27"); !ok {
-		t.Fatal("expected child to be renamed to alpha/my-idea-2026-05-27")
-	}
-	if _, ok := s.children.get("alpha/my-idea:promoting"); ok {
-		t.Error("placeholder id should have been removed from registry")
-	}
-
-	// Cleanup: the sleep child is still alive; close its PTY.
-	if c, ok := s.children.get("alpha/my-idea-2026-05-27"); ok {
-		_ = c.pty.Close()
-	}
-}
-
-// TestPromotePOSTSpawnsPlaceholderChild drives the full HTTP path:
-// POST /promote on an in-progress idea spawns a child under the
-// `:promoting` id and redirects back to the idea page. Doesn't
-// assert the rename (that's the watcher test); just that the
-// placeholder lands in the registry.
-func TestPromotePOSTSpawnsPlaceholderChild(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
-
-	s := newTestServer(t, Options{
-		Addr:   "127.0.0.1:0",
-		Root:   root,
-		MoeBin: "/bin/sh",
+		MoeBin: "/bin/echo",
 	})
 
 	form := url.Values{}
@@ -259,24 +228,41 @@ func TestPromotePOSTSpawnsPlaceholderChild(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Location"); got != "/run/alpha/my-idea" {
-		t.Errorf("Location = %q, want /run/alpha/my-idea", got)
+
+	// Promote derives the destination slug from the idea's name with
+	// a date suffix on collision; the idea reserves the base.
+	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
+	wantLoc := "/run/alpha/" + dated
+	if got := rr.Header().Get("Location"); got != wantLoc {
+		t.Errorf("Location = %q, want %q", got, wantLoc)
 	}
-	c, ok := s.children.get("alpha/my-idea:promoting")
-	if !ok {
-		t.Fatal("placeholder child not in registry")
+
+	// Destination run is on disk; source idea bumped to promoted.
+	if _, err := run.Load(root, "alpha", dated); err != nil {
+		t.Fatalf("destination run.Load: %v", err)
 	}
-	defer c.pty.Close()
-	// The fake child is `/bin/sh` with no args — it reads its
-	// controlling-tty stdin and would block on us forever. /bin/sh
-	// reads stdin until EOF; closing the PTY in defer is enough.
+	srcMD, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatalf("source idea run.Load: %v", err)
+	}
+	if srcMD.Status != run.StatusPromoted {
+		t.Errorf("source idea status = %q, want promoted", srcMD.Status)
+	}
+
+	// Spawn is registered under the real slug.
+	if _, ok := s.children.get("alpha/" + dated); !ok {
+		t.Fatal("expected child registered under destination slug")
+	}
+	if _, ok := s.children.get("alpha/my-idea:promoting"); ok {
+		t.Error("placeholder id should not appear in the registry")
+	}
 }
 
 // TestPromotePOSTRejectsBadWorkspace: validation re-renders the
-// idea page with an ErrorBanner. The spawn must not have happened.
+// idea page with an ErrorBanner. No spawn, no destination run.
 func TestPromotePOSTRejectsBadWorkspace(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
+	root := seedBureaucracy(t, "alpha")
+	seedIdeaRun(t, root, "alpha", "my-idea")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	form := url.Values{}
@@ -293,8 +279,8 @@ func TestPromotePOSTRejectsBadWorkspace(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "workspace:") {
 		t.Errorf("body should surface validation error, got:\n%s", rr.Body.String())
 	}
-	if _, ok := s.children.get("alpha/my-idea:promoting"); ok {
-		t.Error("invalid form must not spawn a placeholder child")
+	if len(s.children.all) != 0 {
+		t.Errorf("invalid form must not spawn any child; registry has %d", len(s.children.all))
 	}
 }
 
@@ -310,48 +296,6 @@ func withShortShutdownGrace(t *testing.T, soft, hangup time.Duration) {
 		shutdownSoftGrace = origSoft
 		shutdownHangupGrace = origHangup
 	})
-}
-
-// TestShutdownPhase1WritesTwoCtrlCs is the byte-level guard for the
-// "two Ctrl-Cs, not two EOTs" decision: put the slave tty in raw
-// mode (-isig disables SIGINT generation, -icanon disables line
-// buffering, -echo silences the line-discipline echo) so cat just
-// passes its stdin through to stdout verbatim, then assert the
-// master read back exactly \x03\x03. Waits for a READY marker so
-// stty has settled before shutdown writes the bytes.
-func TestShutdownPhase1WritesTwoCtrlCs(t *testing.T) {
-	withShortShutdownGrace(t, 500*time.Millisecond, 2*time.Second)
-	cs := newChildren()
-	script := "stty -echo -icanon -isig; printf READY; cat"
-	if _, err := cs.spawn("p/r", "/bin/sh", []string{"-c", script}, t.TempDir(), io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		tail, _, _, _ := c.snapshot()
-		if strings.Contains(string(tail), "READY") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		cs.shutdown(context.Background(), io.Discard)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(shutdownSoftGrace + shutdownHangupGrace + 3*time.Second):
-		_ = c.pty.Close()
-		t.Fatal("shutdown didn't return within total budget")
-	}
-	tail, _, _, _ := c.snapshot()
-	if !strings.Contains(string(tail), "\x03\x03") {
-		t.Errorf("expected raw \\x03\\x03 in cat output, got: %q", string(tail))
-	}
 }
 
 // TestShutdownPhaseTwoExitsCat exercises the Ctrl-C + natural-exit
@@ -400,22 +344,24 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	// Inherited by the child via spawn's os.Environ() snapshot.
+
+	// File-based ready sync: the helper touches readyFile once
+	// signal.Ignore is in place. Without this sync, the race between
+	// exec-start and signal-handler-install can let the default
+	// SIGINT handler kill the child mid-startup.
+	readyFile := filepath.Join(t.TempDir(), "ready")
 	t.Setenv("MOE_TEST_IGNORE_SIGNALS", "1")
+	t.Setenv("MOE_TEST_READY_FILE", readyFile)
+
 	cs := newChildren()
 	if _, err := cs.spawn("p/r", self, []string{"-test.run=^$"}, t.TempDir(), io.Discard); err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
 	c, _ := cs.get("p/r")
 
-	// Wait for the helper's READY marker so signal.Ignore is in
-	// place before shutdown writes \x03. Without this sync, the
-	// race between exec-start and signal-handler-install can let
-	// the default SIGINT handler kill the child mid-startup.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		tail, _, _, _ := c.snapshot()
-		if strings.Contains(string(tail), "READY") {
+		if _, err := os.Stat(readyFile); err == nil {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -458,4 +404,59 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	if !strings.Contains(logger.String(), "leaving for kernel reap") {
 		t.Errorf("expected 'leaving for kernel reap' log line, got:\n%s", logger.String())
 	}
+}
+
+// seedBureaucracy lays down a git-initialized root with a bureaucracy
+// marker and one project, then commits the seed so subsequent
+// run.New calls find a clean working tree. Returns the root.
+func seedBureaucracy(t *testing.T, projectID string) string {
+	t.Helper()
+	root := t.TempDir()
+	gittest.InitAt(t, root)
+	if err := os.WriteFile(filepath.Join(root, "bureaucracy.conf"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdir := filepath.Join(root, "projects", projectID)
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pj := map[string]string{
+		"id":             projectID,
+		"remote":         "git@example.test:" + projectID + ".git",
+		"default_branch": "main",
+		"submodule":      "modules/" + projectID,
+	}
+	body, _ := json.MarshalIndent(pj, "", "  ")
+	if err := os.WriteFile(filepath.Join(pdir, "project.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "seed")
+	return root
+}
+
+// seedIdeaRun lays down an in-progress idea run at <root>/projects/
+// <p>/runs/<slug>/ with a one-line canvas, then commits. Sufficient
+// fixture for runopen.Promote to load + seed + bump status.
+func seedIdeaRun(t *testing.T, root, projectID, slug string) {
+	t.Helper()
+	md := &run.Metadata{
+		ID:        slug,
+		Project:   projectID,
+		Status:    run.StatusInProgress,
+		Workflow:  "idea",
+		Created:   time.Now().Local().Format("2006-01-02"),
+		Documents: map[string]*run.Document{},
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatalf("run.Save idea: %v", err)
+	}
+	canvasDir := filepath.Join(root, "projects", projectID, "runs", slug, "documents", "idea")
+	if err := os.MkdirAll(canvasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("# idea: %s\n\nseed body\n", slug)
+	if err := os.WriteFile(filepath.Join(canvasDir, "content.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "seed idea "+slug)
 }

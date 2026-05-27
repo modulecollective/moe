@@ -484,8 +484,8 @@ func TestPromoteRefusesNonIdeaRun(t *testing.T) {
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if _, ok := s.children.get("alpha/fix-it:promoting"); ok {
-		t.Error("no placeholder child should have been spawned for non-idea run")
+	if len(s.children.all) != 0 {
+		t.Errorf("no child should have been spawned for non-idea run; registry has %d", len(s.children.all))
 	}
 }
 

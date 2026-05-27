@@ -13,14 +13,22 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
-// promotedWorkflow names the workflow a Promote action opens the
-// idea into. Hardcoded to sdlc per design: the seed request says
-// "sdlc run", and `--from-idea` is workflow-agnostic at the CLI
-// but the dominant case here is sdlc.
+// promotedWorkflow names the workflow both the new-run form and the
+// promote-from-idea form open into. Hardcoded to sdlc: the operator-
+// facing surface only fronts sdlc runs (the other workflows have
+// their own entry points elsewhere), and serve only knows how to
+// host one kind of agent session.
 const promotedWorkflow = "sdlc"
+
+// promotedFirstStage is the destination workflow's first-stage doc
+// id (where a promote seeds the source idea's canvas) and the verb
+// serve spawns to host the agent session. Sdlc's first stage is
+// design; if a second workflow ever fronts here, this would split.
+const promotedFirstStage = "design"
 
 // slugPattern is the kebab-case shape `moe sdlc new` accepts. Mirrors
 // the validation moe does itself so a bad slug fails at the form
@@ -68,10 +76,15 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "new.html", vm)
 }
 
-// handleNewRunSubmit validates the form, builds the `moe sdlc new`
-// argv, spawns the child as a PTY-backed run, and redirects to the
-// per-run page. Validation failures re-render the form with an
-// ErrorBanner so the operator can correct without retyping.
+// handleNewRunSubmit validates the form, opens the run in-process,
+// then spawns `moe sdlc design <p>/<slug>` as a PTY-backed agent
+// session and redirects to the per-run page. Opening synchronously
+// means an open failure surfaces in the HTTP response (instead of
+// the prior spawn-succeeded-but-open-failed half-state), and the
+// child has no slug-discovery to do on its way to the agent.
+//
+// Validation failures re-render the form with an ErrorBanner so the
+// operator can correct without retyping.
 func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
@@ -96,24 +109,27 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Agent validity is checked by `moe sdlc new`; we trust the
-	// hardcoded dropdown set here.
+	// Agent validity is checked by runopen.Open via run.New; we trust
+	// the hardcoded dropdown set here.
 
-	args := []string{"sdlc", "new"}
-	if wsName != "" {
-		args = append(args, "--workspace", wsName)
+	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
+		ID:        slug,
+		Workflow:  promotedWorkflow,
+		Workspace: wsName,
+		Agent:     agentName,
+	})
+	if err != nil {
+		s.renderFormError(w, r, "open: "+err.Error())
+		return
 	}
-	if agentName != "" {
-		args = append(args, "--agent", agentName)
-	}
-	args = append(args, projectID+"/"+slug)
 
-	id := projectID + "/" + slug
+	id := md.Project + "/" + md.ID
+	args := []string{"sdlc", promotedFirstStage, id}
 	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		s.renderFormError(w, r, "spawn: "+err.Error())
 		return
 	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
 
 func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, msg string) {
@@ -220,7 +236,7 @@ func isPromotableIdea(md *run.Metadata) bool {
 // buildRunVM assembles the per-run page from the live child's state
 // and the on-disk canvas listing.
 func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
-	_, exited, exitErr, _ := c.snapshot()
+	exited, exitErr, _ := c.snapshot()
 	now := time.Now()
 	vm := runVM{
 		ID:      id,
@@ -345,10 +361,11 @@ func (s *Server) gatherIdeaPromoteVM(_ string) ([]workspaceOption, []string, err
 	return wsOpts, agentOptions, nil
 }
 
-// handlePromote spawns `moe sdlc new --from-idea <p>/<s>` as a PTY
-// child and redirects back to the idea page. The child opens under
-// a `<p>/<s>:promoting` placeholder id; the read-loop watcher
-// renames it to `<p>/<newslug>` on the first `opened run …` line.
+// handlePromote opens the destination sdlc run in-process by calling
+// runopen.Promote, then spawns `moe sdlc design <p>/<newslug>` as a
+// PTY-backed agent session and redirects to the new run's page.
+// Opening synchronously means the destination's slug is known before
+// the spawn — no placeholder id, no stdout regex, no rename race.
 // Validation failures re-render the idea page with an inline error
 // banner — same shape as the new-run form's renderFormError.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
@@ -387,21 +404,31 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	}
 	// Agent membership rides the hardcoded dropdown set.
 
-	args := []string{"sdlc", "new"}
-	if wsName != "" {
-		args = append(args, "--workspace", wsName)
+	promoted, err := runopen.Promote(s.opts.Root, projectID, slug, runopen.PromoteOptions{
+		Workflow:   promotedWorkflow,
+		FirstStage: promotedFirstStage,
+		Workspace:  wsName,
+		Agent:      agentName,
+	})
+	if err != nil {
+		s.renderPromoteError(w, r, projectID, slug, id, "promote: "+err.Error())
+		return
 	}
-	if agentName != "" {
-		args = append(args, "--agent", agentName)
+	if promoted.MarkErr != nil {
+		// The destination run is already open; surface the bookkeeping
+		// failure in the log so the operator can re-mark the idea by
+		// hand if needed. The destination's MoE-Idea trailer still
+		// records the source.
+		s.logf("promote: mark idea %s/%s promoted: %v", projectID, slug, promoted.MarkErr)
 	}
-	args = append(args, "--from-idea", id)
 
-	placeholder := id + promotingSuffix
-	if _, err := s.children.spawn(placeholder, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+	destID := promoted.Run.Project + "/" + promoted.Run.ID
+	args := []string{"sdlc", promotedFirstStage, destID}
+	if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		s.renderPromoteError(w, r, projectID, slug, id, "spawn: "+err.Error())
 		return
 	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+	http.Redirect(w, r, "/run/"+promoted.Run.Project+"/"+promoted.Run.ID, http.StatusSeeOther)
 }
 
 func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, id, msg string) {
