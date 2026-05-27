@@ -137,6 +137,27 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Pre-flight the slug before the editor pop. run.New checks again
+	// inside the lock and is the authority on collisions; this gate
+	// just refuses the obvious case before the operator types into a
+	// tempfile we'd otherwise have to throw away (the original
+	// late-bail bug). Match run.New's wording so the operator sees the
+	// same error regardless of which gate caught it.
+	if taken, err := run.SlugTaken(root, projectID, slug); err != nil {
+		moePrintf(stderr, "idea new: %v\n", err)
+		return 1
+	} else if taken {
+		suggestion, serr := run.NextFreeID(root, projectID, slug)
+		if serr != nil {
+			moePrintf(stderr, "idea new: %v\n", serr)
+			return 1
+		}
+		moePrintf(stderr,
+			"idea new: slug %q in project %s is already used (existing run or prior history); try %q or pick a different name\n",
+			slug, projectID, suggestion)
+		return 1
+	}
+
 	// Write the stub to a tempfile outside the bureaucracy tree so the
 	// editor/chat flow doesn't dirty it. We pass the edited body into
 	// run.New as seed content — run.New writes the canvas at its
@@ -146,7 +167,20 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea: tempdir: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmpDir)
+	// Default-clean: cleanup happens unless a post-editor failure
+	// flips keepTmp. The editor/chat session is a multi-minute window
+	// (Claude --chat can run far longer), so anything that fails after
+	// the operator may have written content keeps the tempfile and
+	// names its absolute path on stderr — the pre-flight above closes
+	// the common collision case, this is the safety net for whatever
+	// races slip through (concurrent harvest, late-arriving error
+	// from run.New).
+	keepTmp := false
+	defer func() {
+		if !keepTmp {
+			os.RemoveAll(tmpDir)
+		}
+	}()
 	tmpPath := filepath.Join(tmpDir, "content.md")
 	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("# %s\n", slug)), 0o644); err != nil {
 		moePrintf(stderr, "idea: write stub: %v\n", err)
@@ -155,17 +189,23 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 
 	if *chat {
 		if code := runIdeaChat(root, tmpPath, "capture", stdout, stderr); code != 0 {
+			keepTmp = true
+			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
 			return code
 		}
 	} else {
 		if code := launchEditor(tmpPath, stdout, stderr); code != 0 {
+			keepTmp = true
+			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
 			return code
 		}
 	}
 
 	body, err := os.ReadFile(tmpPath)
 	if err != nil {
+		keepTmp = true
 		moePrintf(stderr, "idea: read edited canvas: %v\n", err)
+		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
 		return 1
 	}
 
@@ -187,7 +227,9 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return nil
 	})
 	if err != nil {
+		keepTmp = true
 		moePrintf(stderr, "idea: %v\n", err)
+		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
 		return 1
 	}
 	moePrintf(stdout, "captured idea %s/%s\n", md.Project, md.ID)

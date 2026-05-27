@@ -186,6 +186,111 @@ func TestIdeaNewSlugCollisionFailsLoud(t *testing.T) {
 	}
 }
 
+// Pre-flight refuses a taken slug *before* the editor pop — the
+// original late-bail bug was that the editor ran first and the
+// operator's typed body was wiped by the deferred RemoveAll when
+// run.New finally returned ErrSlugTaken. The fake editor here
+// appends a line to a counter file every time it runs; after the
+// second `idea new` (which collides), the counter must still be
+// one — proving the gate fires before the editor.
+func TestIdeaNewSlugPreflightFiresBeforeEditor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	editorDir := t.TempDir()
+	marker := filepath.Join(editorDir, "ran")
+	script := filepath.Join(editorDir, "fake-editor.sh")
+	body := "#!/bin/sh\nprintf 'ran\\n' >> " + marker + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+
+	if code := Run([]string{"idea", "new", "tele/preflight-foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("first new failed: code=%d", code)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "new", "tele/preflight-foo"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on slug collision, got 0; stderr=%q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "already used") {
+		t.Fatalf("expected collision error, got: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), `"preflight-foo-2"`) {
+		t.Fatalf("expected suggested free slug, got: %q", errb.String())
+	}
+
+	// Marker should record exactly one editor invocation — the
+	// successful first call. The second (colliding) call must
+	// short-circuit before the editor pop.
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if n := strings.Count(string(got), "ran"); n != 1 {
+		t.Fatalf("editor ran %d times, want 1 (second call should have pre-flighted before editor pop):\n%s", n, got)
+	}
+}
+
+// Tempfile preservation: a late failure from run.New (here forced by
+// making the project dir unwritable so run.New's MkdirAll fails after
+// the editor has already run) must leave the tempfile on disk and
+// name its path on stderr — the operator's typing is the recoverable
+// asset, not the run dir.
+func TestIdeaNewPreservesTempfileOnLateFailure(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	// Make projects/tele read+exec only so run.New's MkdirAll of
+	// projects/tele/runs/<slug> fails. The pre-flight uses stat
+	// (read), which still works; the failure lands at the late path
+	// the preservation gate is meant to catch.
+	projDir := filepath.Join(root, "projects", "tele")
+	if err := os.Chmod(projDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(projDir, 0o755) })
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"idea", "new", "tele/late-bail"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on forced run.New failure, got 0; stderr=%q", errb.String())
+	}
+
+	const needle = "preserved at "
+	idx := strings.Index(errb.String(), needle)
+	if idx < 0 {
+		t.Fatalf("expected stderr to name the preserved tempfile, got: %q", errb.String())
+	}
+	rest := errb.String()[idx+len(needle):]
+	// The path is the rest of the line up to the next newline.
+	nl := strings.IndexByte(rest, '\n')
+	if nl < 0 {
+		t.Fatalf("malformed preservation notice (no newline): %q", rest)
+	}
+	preservedPath := strings.TrimSpace(rest[:nl])
+	if preservedPath == "" {
+		t.Fatalf("empty preserved path on stderr: %q", errb.String())
+	}
+	info, err := os.Stat(preservedPath)
+	if err != nil {
+		t.Fatalf("preserved tempfile missing at %s: %v", preservedPath, err)
+	}
+	if info.IsDir() {
+		t.Fatalf("preserved path is a dir, expected the canvas file: %s", preservedPath)
+	}
+}
+
 // Non-canonical slug (uppercase, spaces, underscores) is rejected at
 // the verb boundary so silent slugify can't paper over operator typos.
 func TestIdeaNewRejectsNonCanonicalSlug(t *testing.T) {

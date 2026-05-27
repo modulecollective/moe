@@ -37,13 +37,13 @@ type metaMoeScanResult struct {
 var metaMoeAutoSuffixDate = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}(-\d+)?$`)
 
 // metaMoeAutoSuffixNum matches the trailing -N pattern
-// nextFreeID emits on a title-derived collision. N is >= 2 in
+// run.NextFreeID emits on a title-derived collision. N is >= 2 in
 // practice; we accept any positive int and trust the slug grammar
 // (idPattern in run/run.go) to keep noise out.
 var metaMoeAutoSuffixNum = regexp.MustCompile(`-\d+$`)
 
 // metaMoeBaseSlug strips the deterministic auto-suffixes
-// nextFreeID and nextFreeDatedID emit and returns the underlying
+// run.NextFreeID and nextFreeDatedID emit and returns the underlying
 // base slug. A slug with no recognized suffix returns unchanged. The
 // dated form is checked before the numeric form so
 // "foo-2026-01-02-3" reduces to "foo" in one pass rather than

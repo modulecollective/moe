@@ -262,13 +262,13 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		return nil, fmt.Errorf("run: one of Options.ID or Options.IDBase is required")
 	}
 
-	taken, err := slugTaken(root, projectID, id)
+	taken, err := SlugTaken(root, projectID, id)
 	if err != nil {
 		return nil, err
 	}
 	if taken {
 		if !dateSuffix {
-			suggestion, serr := nextFreeID(root, projectID, id)
+			suggestion, serr := NextFreeID(root, projectID, id)
 			if serr != nil {
 				return nil, serr
 			}
@@ -859,7 +859,7 @@ func LastFileActivity(root, relPath string) (time.Time, error) {
 // the assertion will drift in CI runners whose zone flips the date.
 func nextFreeDatedID(root, projectID, base string, now time.Time) (string, error) {
 	dated := base + "-" + now.Local().Format("2006-01-02")
-	taken, err := slugTaken(root, projectID, dated)
+	taken, err := SlugTaken(root, projectID, dated)
 	if err != nil {
 		return "", err
 	}
@@ -868,7 +868,7 @@ func nextFreeDatedID(root, projectID, base string, now time.Time) (string, error
 	}
 	for n := 2; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", dated, n)
-		taken, err := slugTaken(root, projectID, candidate)
+		taken, err := SlugTaken(root, projectID, candidate)
 		if err != nil {
 			return "", err
 		}
@@ -878,12 +878,15 @@ func nextFreeDatedID(root, projectID, base string, now time.Time) (string, error
 	}
 }
 
-// nextFreeID walks base, base-2, base-3, … until it finds a slug that
-// isn't taken — see slugTaken for what "taken" means. The base itself
+// NextFreeID walks base, base-2, base-3, … until it finds a slug that
+// isn't taken — see SlugTaken for what "taken" means. The base itself
 // is never returned; the caller has already checked it. A trailing -N
 // is stripped before counting so a collision on fix-timeout-2 continues
 // to -3 rather than producing fix-timeout-2-2.
-func nextFreeID(root, projectID, base string) (string, error) {
+//
+// Exported alongside SlugTaken so pre-flighting verbs can suggest the
+// same disambiguated slug New itself would suggest on collision.
+func NextFreeID(root, projectID, base string) (string, error) {
 	base = strings.TrimRight(base, "-")
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		tail := base[i+1:]
@@ -893,7 +896,7 @@ func nextFreeID(root, projectID, base string) (string, error) {
 	}
 	for n := 2; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", base, n)
-		taken, err := slugTaken(root, projectID, candidate)
+		taken, err := SlugTaken(root, projectID, candidate)
 		if err != nil {
 			return "", err
 		}
@@ -903,13 +906,18 @@ func nextFreeID(root, projectID, base string) (string, error) {
 	}
 }
 
-// slugTaken reports whether (projectID, slug) is usable for a new run.
+// SlugTaken reports whether (projectID, slug) is usable for a new run.
 // "Taken" means either the run dir already exists on disk OR main
 // carries a commit with `MoE-Project: <p>` and `MoE-Run: <slug>`
 // trailers. The history check is load-bearing: runs/<slug> is a flat
 // namespace, so reusing a deleted run's slug reintroduces its old work
 // turns into a fresh run's stage-satisfaction check.
-func slugTaken(root, projectID, slug string) (bool, error) {
+//
+// Exported so verbs that pop an editor before run.New (idea new's
+// --chat / $EDITOR session is a multi-minute window) can pre-flight
+// the slug and refuse before any operator effort goes into the
+// tempfile.
+func SlugTaken(root, projectID, slug string) (bool, error) {
 	if _, err := os.Stat(filepath.Join(root, Dir(projectID, slug))); err == nil {
 		return true, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
