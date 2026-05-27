@@ -363,6 +363,46 @@ func TestRunPageMissingRun404(t *testing.T) {
 	}
 }
 
+// TestDashRowsRenderAnchors: every row — active (live + resumable),
+// backlog, completed — wraps its slug in an <a> pointing at the
+// per-run page, so the operator can read any run's canvases without
+// the row needing a separate "view" affordance.
+func TestDashRowsRenderAnchors(t *testing.T) {
+	now := time.Now().UTC()
+	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+		return []dash.Row{
+			{Project: "p", Run: "live-run", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
+			{Project: "p", Run: "done", Note: "sdlc:merged", Bucket: dash.BucketCompletedRuns, When: now.Add(-24 * time.Hour)},
+			{Project: "p", Run: "later", Note: "idea:capture", Bucket: dash.BucketBacklog, When: now.Add(-1 * time.Hour)},
+		}, 1, 1, nil
+	}
+	s := newTestServer(t, Options{
+		Addr:       "127.0.0.1:0",
+		Root:       t.TempDir(),
+		GatherDash: gather,
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<a class="slug" href="/run/p/live-run">`,
+		`<a class="slug" href="/run/p/done">`,
+		`<a class="slug" href="/run/p/later">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	// The active row is resumable (not parented by this serve),
+	// so the take-over form must still ride alongside the anchor.
+	if !strings.Contains(body, `action="/run/resume"`) {
+		t.Errorf("resumable row missing take-over form:\n%s", body)
+	}
+}
+
 func TestMakeNotifierPostsJSON(t *testing.T) {
 	gotBody := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

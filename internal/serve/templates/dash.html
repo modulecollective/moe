@@ -32,11 +32,7 @@
     <ul class="rows">
       {{range .Active}}
       <li class="row">
-        {{if .Live}}
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
-        {{else}}
-        <span class="slug">{{.Project}}/{{.Run}}</span>
-        {{end}}
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
         {{if .Live}}<span class="badge live">live</span>{{end}}
@@ -59,7 +55,7 @@
     <ul class="rows">
       {{range .Backlog}}
       <li class="row">
-        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
       </li>
@@ -82,7 +78,7 @@
     <ul class="rows">
       {{range .Completed}}
       <li class="row">
-        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
       </li>
