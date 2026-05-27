@@ -4,13 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.ID}} — moe</title>
+<script>
+(function () {
+  var t = localStorage.getItem('moe-theme') ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <main>
   <header class="page-header">
-    <h1><a href="/">moe</a> · {{.Project}}/{{.Slug}}</h1>
-    <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+    <div>
+      <h1><a href="/">moe</a> · {{.Project}}/{{.Slug}}</h1>
+      <p class="meta">started {{.Started}} · <span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+    </div>
+    <button id="theme-toggle" type="button">theme</button>
   </header>
 
   {{if .CanvasLinks}}
@@ -43,5 +53,14 @@
     <pre class="log">{{.Tail}}</pre>
   </section>
 </main>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('moe-theme', next);
+});
+</script>
 </body>
 </html>
