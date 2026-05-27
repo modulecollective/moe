@@ -396,11 +396,6 @@ func TestDashRowsRenderAnchors(t *testing.T) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-	// The active row is resumable (not parented by this serve),
-	// so the take-over form must still ride alongside the anchor.
-	if !strings.Contains(body, `action="/run/resume"`) {
-		t.Errorf("resumable row missing take-over form:\n%s", body)
-	}
 }
 
 func TestMakeNotifierPostsJSON(t *testing.T) {

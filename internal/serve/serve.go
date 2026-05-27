@@ -200,7 +200,6 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /run/{project}/{slug}/fragment", s.handleRunFragment)
 	s.router.HandleFunc("POST /run/{project}/{slug}/key", s.handleRunKey)
 	s.router.HandleFunc("POST /run/{project}/{slug}/end-agent", s.handleEndAgent)
-	s.router.HandleFunc("POST /run/resume", s.handleResume)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.
@@ -248,14 +247,12 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	}
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
 	// Mark which active rows are currently parented by serve so the
-	// template can pick between "open" (live) and "take it over"
-	// (resumable) affordances.
+	// dash can render a "live" badge — the per-run page keys its
+	// interactive surface off the same check.
 	for i := range vm.Active {
 		id := vm.Active[i].Project + "/" + vm.Active[i].Run
 		if _, ok := s.children.get(id); ok {
 			vm.Active[i].Live = true
-		} else {
-			vm.Active[i].Resumable = true
 		}
 	}
 	s.render(w, r, "dash.html", vm)

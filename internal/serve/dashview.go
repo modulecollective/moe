@@ -19,9 +19,6 @@ type dashRowVM struct {
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
 	Live bool
-	// Resumable is true when the row would benefit from a "take it
-	// over" button (active row, not live in serve).
-	Resumable bool
 }
 
 // dashVM is the data the dash template renders against. Same three

@@ -36,13 +36,6 @@
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
         {{if .Live}}<span class="badge live">live</span>{{end}}
-        {{if .Resumable}}
-        <form method="post" action="/run/resume" class="inline-action">
-          <input type="hidden" name="project" value="{{.Project}}">
-          <input type="hidden" name="slug" value="{{.Run}}">
-          <button type="submit" class="key benign">take over</button>
-        </form>
-        {{end}}
       </li>
       {{end}}
     </ul>
