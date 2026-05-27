@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,19 @@ import (
 // We capture just the bracket contents so the button renderer can
 // enumerate the keys without re-parsing the legend that follows.
 var chainPromptRegex = regexp.MustCompile(`run now\? \[([A-Za-z!/]+)\]`)
+
+// openedRunRegex matches the `opened run <project>/<slug>` stdout
+// line `moe sdlc new` prints once the open commit lands
+// (internal/cli/new.go:226). The promote flow spawns the child
+// under a `:promoting` placeholder id and renames the registry
+// entry on first match.
+var openedRunRegex = regexp.MustCompile(`opened run ([a-z0-9._-]+)/([a-z0-9-]+)`)
+
+// promotingSuffix tags a child's registry id while we wait for the
+// `opened run …` line to land and tell us the real slug. The colon
+// is illegal in slugs, so a placeholder id can't collide with a
+// real run.
+const promotingSuffix = ":promoting"
 
 // promptWindow is the byte-window at the tail of the ring buffer
 // where a matching prompt is treated as "active". A prompt detected
@@ -69,13 +83,19 @@ type Prompt struct {
 
 // child is one PTY-backed moe run the server is parenting.
 type child struct {
-	id      string // "<project>/<slug>"
 	cmd     *exec.Cmd
 	pty     *pty.Pty
 	started time.Time
 
-	mu   sync.Mutex
-	tail []byte // ring-buffer of recent PTY stdout, capped at tailBytes
+	mu sync.Mutex
+	// id is "<project>/<slug>", possibly with the `:promoting`
+	// placeholder suffix while a promote spawn waits for its
+	// `opened run …` line. Mutated by children.rename under
+	// cs.mu + c.mu so the watcher and the snapshot path see a
+	// consistent value.
+	id            string
+	tail          []byte // ring-buffer of recent PTY stdout, capped at tailBytes
+	renamePending bool   // true while a promote spawn is still under :promoting
 
 	done     chan struct{}
 	exitErr  error
@@ -128,18 +148,52 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	}
 
 	c := &child{
-		id:      id,
-		cmd:     cmd,
-		pty:     p,
-		started: time.Now(),
-		done:    make(chan struct{}),
+		id:            id,
+		cmd:           cmd,
+		pty:           p,
+		started:       time.Now(),
+		done:          make(chan struct{}),
+		renamePending: strings.HasSuffix(id, promotingSuffix),
 	}
 	notify := cs.notify
 	cs.all[id] = c
 	cs.mu.Unlock()
 
-	go c.read(logger, notify)
+	go c.read(cs, logger, notify)
 	return c, nil
+}
+
+// rename swaps c's registry key from old to new under cs.mu. Refuses
+// if new is already live (a second promote of the same idea, or a
+// rename racing against an unrelated spawn — both cases should land
+// loudly). The child's own id field is updated so log lines and
+// notifier payloads carry the post-rename value.
+//
+// Used by the promote flow: a child spawned under `<p>/<s>:promoting`
+// gets its slug from the `opened run …` line `moe sdlc new` prints
+// after the open commit lands.
+func (cs *children) rename(old, new string) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	c, ok := cs.all[old]
+	if !ok {
+		return fmt.Errorf("serve: rename %s: not in registry", old)
+	}
+	if existing, dup := cs.all[new]; dup {
+		select {
+		case <-existing.done:
+			delete(cs.all, new)
+		default:
+			return fmt.Errorf("serve: rename %s -> %s: target already live", old, new)
+		}
+	}
+	delete(cs.all, old)
+	cs.all[new] = c
+	c.mu.Lock()
+	c.id = new
+	c.renamePending = false
+	c.mu.Unlock()
+	return nil
 }
 
 func (cs *children) get(id string) (*child, bool) {
@@ -258,13 +312,18 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 
 // read copies master PTY output into the ring buffer until EIO,
 // then reaps the child and closes done. Calls notify (if non-nil)
-// once the exit status is known.
-func (c *child) read(logger io.Writer, notify func(string, error)) {
+// once the exit status is known. cs is held so the promote-rename
+// watcher can mutate the registry when the `opened run …` line
+// shows up; nil is permitted for tests that drive a child directly.
+func (c *child) read(cs *children, logger io.Writer, notify func(string, error)) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := c.pty.File().Read(buf)
 		if n > 0 {
 			c.appendTail(buf[:n])
+			if cs != nil {
+				c.maybeRename(cs, logger)
+			}
 		}
 		if err != nil {
 			break
@@ -287,6 +346,42 @@ func (c *child) appendTail(data []byte) {
 	c.tail = append(c.tail, data...)
 	if len(c.tail) > tailBytes {
 		c.tail = c.tail[len(c.tail)-tailBytes:]
+	}
+}
+
+// maybeRename greps the tail for the `opened run …` line and, on
+// first match, atomically renames the child's registry id from its
+// `:promoting` placeholder to `<project>/<slug>`. No-op once the
+// rename has happened (renamePending stays false thereafter), and
+// no-op for any child not spawned under a `:promoting` id.
+func (c *child) maybeRename(cs *children, logger io.Writer) {
+	c.mu.Lock()
+	if !c.renamePending {
+		c.mu.Unlock()
+		return
+	}
+	tail := c.tail
+	oldID := c.id
+	c.mu.Unlock()
+	m := openedRunRegex.FindSubmatch(tail)
+	if m == nil {
+		return
+	}
+	newID := string(m[1]) + "/" + string(m[2])
+	if err := cs.rename(oldID, newID); err != nil {
+		if logger != nil {
+			fmt.Fprintf(logger, "serve: rename %s -> %s: %v\n", oldID, newID, err)
+		}
+		// Clear the pending flag so we don't churn on every read —
+		// the placeholder id stays in the registry, the operator
+		// sees the failure via the child's own error tail.
+		c.mu.Lock()
+		c.renamePending = false
+		c.mu.Unlock()
+		return
+	}
+	if logger != nil {
+		fmt.Fprintf(logger, "serve: promoted child %s -> %s\n", oldID, newID)
 	}
 }
 
