@@ -15,6 +15,12 @@ import (
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
+// promotedWorkflow names the workflow a Promote action opens the
+// idea into. Hardcoded to sdlc per design: the seed request says
+// "sdlc run", and `--from-idea` is workflow-agnostic at the CLI
+// but the dominant case here is sdlc.
+const promotedWorkflow = "sdlc"
+
 // slugPattern is the kebab-case shape `moe sdlc new` accepts. Mirrors
 // the validation moe does itself so a bad slug fails at the form
 // rather than after the child has spawned. Lowercase letters, digits,
@@ -133,6 +139,15 @@ type runVM struct {
 	CanvasLinks     []canvasLink
 	Buttons         []promptButton // chain-prompt buttons when one is active
 	EndAgentEnabled bool           // render the "end agent" button (true while live)
+	// PromoteEnabled signals the read-only page to render the
+	// promote-to-sdlc form. Set when the loaded run is an
+	// in-progress idea. Workspaces / Agents back the form's dropdowns.
+	PromoteEnabled bool
+	Workspaces     []workspaceOption
+	Agents         []string
+	// ErrorBanner is the form-error path for /promote re-renders.
+	// Empty on the happy GET path.
+	ErrorBanner string
 }
 
 // promptButton is one renderable button for the per-run page. Key
@@ -175,19 +190,41 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
 // not currently parented by this serve. The result has no Tail /
 // Buttons / EndAgentEnabled — the template's {{if}} gates collapse
-// those sections, so the page renders as a static snapshot.
+// those sections, so the page renders as a static snapshot. For
+// in-progress idea runs, the promote form fields are populated so
+// the operator can launch the sdlc run inline.
 func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
 		return runVM{}, err
 	}
-	return runVM{
+	vm := runVM{
 		ID:          id,
 		Project:     projectID,
 		Slug:        slug,
 		Status:      md.Status,
 		CanvasLinks: s.canvasLinks(projectID, slug, time.Now()),
-	}, nil
+	}
+	if isPromotableIdea(md) {
+		wsOpts, agents, err := s.gatherIdeaPromoteVM(projectID)
+		if err != nil {
+			// Don't fail the whole page over a workspace-listing
+			// hiccup; just don't render the form. The operator
+			// still has the SSH fallback.
+			s.logf("promote form gather: %v", err)
+		} else {
+			vm.PromoteEnabled = true
+			vm.Workspaces = wsOpts
+			vm.Agents = agents
+		}
+	}
+	return vm, nil
+}
+
+// isPromotableIdea reports whether the loaded run is an in-progress
+// idea — the gate for offering the promote-to-sdlc affordance.
+func isPromotableIdea(md *run.Metadata) bool {
+	return md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress
 }
 
 // handleEndAgent writes two \x04 (EOT) bytes ~100ms apart to the
@@ -454,6 +491,96 @@ func sanitizePTYTail(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// gatherIdeaPromoteVM returns just the dropdown content the per-idea
+// promote form needs: every named workspace this host knows about
+// (cross-project, mirroring /run/new) and the agent option set.
+// Pulled from disk per request, same as gatherNewRunVM.
+func (s *Server) gatherIdeaPromoteVM(_ string) ([]workspaceOption, []string, error) {
+	infos, err := workspace.List(s.opts.Root, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	wsOpts := make([]workspaceOption, 0, len(infos))
+	for _, info := range infos {
+		wsOpts = append(wsOpts, workspaceOption{
+			Project: info.Project,
+			Name:    info.Name,
+			Label:   info.Project + "/" + info.Name,
+		})
+	}
+	return wsOpts, agentOptions, nil
+}
+
+// handlePromote spawns `moe sdlc new --from-idea <p>/<s>` as a PTY
+// child and redirects back to the idea page. The child opens under
+// a `<p>/<s>:promoting` placeholder id; the read-loop watcher
+// renames it to `<p>/<newslug>` on the first `opened run …` line.
+// Validation failures re-render the idea page with an inline error
+// banner — same shape as the new-run form's renderFormError.
+func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	wsName := strings.TrimSpace(r.FormValue("workspace"))
+	agentName := strings.TrimSpace(r.FormValue("agent"))
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("promote: load %s: %v", id, err)
+		http.Error(w, "promote: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isPromotableIdea(md) {
+		http.Error(w,
+			"run "+id+" is not a promotable idea (workflow="+md.Workflow+", status="+md.Status+")",
+			http.StatusConflict)
+		return
+	}
+	if wsName != "" {
+		if err := workspace.ValidateName(wsName); err != nil {
+			s.renderPromoteError(w, r, projectID, slug, id, "workspace: "+err.Error())
+			return
+		}
+	}
+	// Agent membership rides the hardcoded dropdown set.
+
+	args := []string{"sdlc", "new"}
+	if wsName != "" {
+		args = append(args, "--workspace", wsName)
+	}
+	if agentName != "" {
+		args = append(args, "--agent", agentName)
+	}
+	args = append(args, "--from-idea", id)
+
+	placeholder := id + promotingSuffix
+	if _, err := s.children.spawn(placeholder, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		s.renderPromoteError(w, r, projectID, slug, id, "spawn: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, id, msg string) {
+	vm, err := s.buildReadOnlyRunVM(projectID, slug, id)
+	if err != nil {
+		http.Error(w, msg+" (and run-page gather failed: "+err.Error()+")", http.StatusInternalServerError)
+		return
+	}
+	vm.ErrorBanner = msg
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	s.render(w, r, "run.html", vm)
 }
 
 func (s *Server) gatherNewRunVM() (newRunVM, error) {
