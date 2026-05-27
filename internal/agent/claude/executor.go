@@ -206,7 +206,17 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	if cmd.Stderr == nil {
 		cmd.Stderr = os.Stderr
 	}
-	runErr := cmd.Run()
+	// Route through agent.StartCommand so an operator Ctrl-C while
+	// claude is running becomes a non-nil runErr (ErrInterrupted) rather
+	// than a clean-looking exit; non-zero claude exits keep their
+	// *exec.ExitError shape.
+	var runErr error
+	ac, startErr := agent.StartCommand(cmd)
+	if startErr != nil {
+		runErr = startErr
+	} else {
+		runErr = ac.Wait()
+	}
 
 	// Transcript copy is best-effort: a missing file is legal (operator
 	// aborted before claude wrote anything, or ran on another machine),
@@ -278,7 +288,13 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("claude: -p stdout pipe: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	// agent.StartCommand wraps cmd.Start so an operator Ctrl-C during
+	// the headless turn surfaces as a non-nil waitErr (ErrInterrupted)
+	// instead of a clean exit. The context's timeout-kill still wins on
+	// deadline because that returns a non-nil process error, which
+	// StartCommand preserves verbatim.
+	ac, err := agent.StartCommand(cmd)
+	if err != nil {
 		return "", fmt.Errorf("claude: -p start: %w", err)
 	}
 	sidCh := make(chan string, 1)
@@ -287,7 +303,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer close(done)
 		pipeOneShotProgress(pipe, stdout, r.Root, sidCh)
 	}()
-	waitErr := cmd.Wait()
+	waitErr := ac.Wait()
 	<-done
 	close(sidCh)
 	var sid string

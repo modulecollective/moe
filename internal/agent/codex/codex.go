@@ -136,7 +136,17 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	}
 
 	turnStart := time.Now()
-	runErr := cmd.Run()
+	// Route through agent.StartCommand so an operator Ctrl-C while
+	// codex is running becomes a non-nil runErr (ErrInterrupted) rather
+	// than a clean-looking exit; non-zero codex exits keep their
+	// *exec.ExitError shape.
+	var runErr error
+	ac, startErr := agent.StartCommand(cmd)
+	if startErr != nil {
+		runErr = startErr
+	} else {
+		runErr = ac.Wait()
+	}
 
 	// First-turn id discovery: glob rollout files created since
 	// turnStart, take the newest, parse its <uuid> suffix. On miss
@@ -201,7 +211,13 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("codex: exec stdout pipe: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	// agent.StartCommand wraps cmd.Start so an operator Ctrl-C during
+	// the headless turn surfaces as a non-nil waitErr (ErrInterrupted)
+	// instead of a clean exit. Context timeout-kills still win on
+	// deadline because that returns a non-nil process error, which
+	// StartCommand preserves verbatim.
+	ac, err := agent.StartCommand(cmd)
+	if err != nil {
 		return "", fmt.Errorf("codex: exec start: %w", err)
 	}
 	sidCh := make(chan string, 1)
@@ -210,7 +226,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer close(done)
 		pipeExecProgress(pipe, stdout, r.Root, sidCh)
 	}()
-	waitErr := cmd.Wait()
+	waitErr := ac.Wait()
 	<-done
 	close(sidCh)
 	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
