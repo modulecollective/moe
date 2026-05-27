@@ -194,6 +194,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/", s.handleDash)
 	s.router.HandleFunc("/run/new", s.handleNewRun)
+	s.router.HandleFunc("/idea/new", s.handleNewIdea)
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
@@ -219,6 +220,21 @@ func (s *Server) handleNewRun(w http.ResponseWriter, r *http.Request) {
 		s.handleNewRunForm(w, r)
 	case http.MethodPost:
 		s.handleNewRunSubmit(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleNewIdea dispatches GET (form render) vs POST (open idea run)
+// on the single /idea/new path. No PTY spawn — idea runs are a single
+// canvas with no live agent.
+func (s *Server) handleNewIdea(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleNewIdeaForm(w, r)
+	case http.MethodPost:
+		s.handleNewIdeaSubmit(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

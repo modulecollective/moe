@@ -24,14 +24,13 @@
       <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
     </div>
-    <div class="header-actions">
-      <a class="header-action" href="/run/new">new run</a>
-      <button id="theme-toggle" type="button">theme</button>
-    </div>
   </header>
 
   <section class="dash-section">
-    <h2>active <span class="count">({{len .Active}})</span></h2>
+    <h2>
+      <span>active <span class="count">({{len .Active}})</span></span>
+      <a class="section-action" href="/run/new">new run</a>
+    </h2>
     {{if .Active}}
     <ul class="rows">
       {{range .Active}}
@@ -47,7 +46,10 @@
   </section>
 
   <section class="dash-section">
-    <h2>backlog <span class="count">({{len .Backlog}})</span></h2>
+    <h2>
+      <span>backlog <span class="count">({{len .Backlog}})</span></span>
+      <a class="section-action" href="/idea/new">new idea</a>
+    </h2>
     {{if .Backlog}}
     <ul class="rows">
       {{range .Backlog}}
@@ -87,6 +89,7 @@
   <footer class="page-footer">
     <p>{{.ProjectCount}} project{{if ne .ProjectCount 1}}s{{end}} registered · {{.ActiveProjects}} with active runs</p>
     {{if not .ShowAll}}<p><a href="?all=1">show all</a></p>{{end}}
+    <p><button id="theme-toggle" type="button">theme</button></p>
   </footer>
 </main>
 <script>

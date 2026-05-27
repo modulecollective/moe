@@ -278,6 +278,145 @@ func TestNewRunMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestNewRunSlugHasMobileAttrs: the slug input carries the mobile-
+// keyboard attributes that disable initial-caps / autocorrect. Without
+// these, a phone keyboard fights the kebab-case pattern regex.
+func TestNewRunSlugHasMobileAttrs(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
+	body := rr.Body.String()
+	for _, want := range []string{
+		`autocapitalize="none"`,
+		`autocorrect="off"`,
+		`spellcheck="false"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("slug input missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestNewIdeaFormEmptyRoot(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/idea/new", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "no projects registered") {
+		t.Errorf("empty-root form should suggest `moe project add`, got:\n%s", body)
+	}
+	if strings.Contains(body, "<form") {
+		t.Errorf("empty-root form should hide the form entirely")
+	}
+}
+
+func TestNewIdeaFormWithProjects(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	seedProject(t, root, "beta")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/idea/new", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<form`, `action="/idea/new"`,
+		`name="project"`, `name="slug"`, `name="body"`,
+		`>alpha<`, `>beta<`,
+		`<textarea`,
+		// Mobile keyboard attrs on slug — the whole point of the
+		// secondary "phone fights the kebab-case pattern" fix.
+		`autocapitalize="none"`,
+		`autocorrect="off"`,
+		`spellcheck="false"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("form missing %q\n%s", want, body)
+		}
+	}
+	// No workspace/agent dropdowns — idea runs have neither.
+	for _, banned := range []string{
+		`name="workspace"`, `name="agent"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("idea form must not have %q\n%s", banned, body)
+		}
+	}
+}
+
+func TestNewIdeaMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/idea/new", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Allow"); !strings.Contains(got, "GET") || !strings.Contains(got, "POST") {
+		t.Errorf("Allow header should list GET and POST, got %q", got)
+	}
+}
+
+// TestNewIdeaSubmitInvalidSlug: POST with a slug that doesn't match
+// the kebab-case pattern re-renders the form with the inline banner
+// at 422, no run gets opened on disk. Mirrors the validation shape of
+// handleNewRunSubmit.
+func TestNewIdeaSubmitInvalidSlug(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	form := "project=alpha&slug=Bad_Slug&body=hello"
+	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "slug:") {
+		t.Errorf("body should carry an inline 'slug:' banner, got:\n%s", body)
+	}
+	// No run should have been opened.
+	if _, err := os.Stat(filepath.Join(root, "projects", "alpha", "runs")); !os.IsNotExist(err) {
+		t.Errorf("validation failure must not create runs dir (stat err=%v)", err)
+	}
+}
+
+// TestNewIdeaSubmitInvalidProject: same shape as the slug test, for
+// the project field. Closes the form-redirect loop on validation.
+func TestNewIdeaSubmitInvalidProject(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	form := "project=&slug=valid-slug&body=hello"
+	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "project:") {
+		t.Errorf("body should carry an inline 'project:' banner, got:\n%s", rr.Body.String())
+	}
+}
+
 // TestRunPageReadOnlyForNonParented: a run that exists on disk but
 // isn't currently parented by this serve must render the per-run
 // page (no 404) with canvas links pointing at the canvas route.

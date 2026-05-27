@@ -403,18 +403,10 @@ func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, proj
 }
 
 func (s *Server) gatherNewRunVM() (newRunVM, error) {
-	mds, warns, err := project.List(s.opts.Root)
+	projectIDs, err := s.listProjectIDs()
 	if err != nil {
 		return newRunVM{}, err
 	}
-	for _, w := range warns {
-		s.logf("project list: skipping %s: %v", w.ID, w.Err)
-	}
-	projectIDs := make([]string, 0, len(mds))
-	for _, md := range mds {
-		projectIDs = append(projectIDs, md.ID)
-	}
-	sort.Strings(projectIDs)
 
 	infos, err := workspace.List(s.opts.Root, "")
 	if err != nil {
@@ -434,4 +426,103 @@ func (s *Server) gatherNewRunVM() (newRunVM, error) {
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
 	}, nil
+}
+
+// listProjectIDs returns the sorted set of registered project IDs.
+// Shared by the new-run and new-idea forms; the idea form needs
+// nothing else from gatherNewRunVM, so this stays a small helper
+// rather than dragging a workspace listing through the idea path.
+func (s *Server) listProjectIDs() ([]string, error) {
+	mds, warns, err := project.List(s.opts.Root)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range warns {
+		s.logf("project list: skipping %s: %v", w.ID, w.Err)
+	}
+	projectIDs := make([]string, 0, len(mds))
+	for _, md := range mds {
+		projectIDs = append(projectIDs, md.ID)
+	}
+	sort.Strings(projectIDs)
+	return projectIDs, nil
+}
+
+// newIdeaVM backs the new-idea form. Projects are gathered from disk
+// at request time; there are no workspace / agent dropdowns because
+// idea runs don't host a PTY session and have no workspace binding.
+type newIdeaVM struct {
+	Projects    []string
+	ErrorBanner string
+}
+
+func (s *Server) handleNewIdeaForm(w http.ResponseWriter, r *http.Request) {
+	vm, err := s.gatherNewIdeaVM()
+	if err != nil {
+		s.logf("new-idea form gather: %v", err)
+		http.Error(w, "new-idea form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "new_idea.html", vm)
+}
+
+// handleNewIdeaSubmit validates the form and opens an idea run
+// in-process via runopen.Open. No PTY spawn — idea runs are a
+// single-stage doc with no live agent — so the handler redirects
+// straight to the per-run page once the open commit lands.
+//
+// Body is taken verbatim with CRLF normalised to LF (browsers send
+// \r\n in textarea bodies; canvases live on disk as LF). An empty
+// body falls back to "# {slug}\n", matching the CLI stub
+// (internal/cli/idea.go:185).
+func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	projectID := strings.TrimSpace(r.FormValue("project"))
+	slug := strings.TrimSpace(r.FormValue("slug"))
+	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
+
+	if !projectIDPattern.MatchString(projectID) {
+		s.renderIdeaFormError(w, r, "project: invalid id")
+		return
+	}
+	if !slugPattern.MatchString(slug) {
+		s.renderIdeaFormError(w, r, "slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
+		return
+	}
+	if body == "" {
+		body = "# " + slug + "\n"
+	}
+
+	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
+		ID:       slug,
+		Workflow: dash.IdeaWorkflow,
+		SeedDocs: map[string]string{"idea": body},
+	})
+	if err != nil {
+		s.renderIdeaFormError(w, r, "open: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
+}
+
+func (s *Server) renderIdeaFormError(w http.ResponseWriter, r *http.Request, msg string) {
+	vm, err := s.gatherNewIdeaVM()
+	if err != nil {
+		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
+		return
+	}
+	vm.ErrorBanner = msg
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	s.render(w, r, "new_idea.html", vm)
+}
+
+func (s *Server) gatherNewIdeaVM() (newIdeaVM, error) {
+	projectIDs, err := s.listProjectIDs()
+	if err != nil {
+		return newIdeaVM{}, err
+	}
+	return newIdeaVM{Projects: projectIDs}, nil
 }

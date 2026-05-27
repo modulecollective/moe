@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.ID}} — moe</title>
+<title>new idea — moe</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <script>
 (function () {
@@ -19,11 +19,39 @@
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub">{{.Project}}/{{.Slug}}</div>
+      <div class="banner-sub">new idea</div>
     </div>
   </header>
 
-  {{template "run_fragment.html" .}}
+  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
+
+  {{if not .Projects}}
+  <p class="empty">no projects registered. Run <code>moe project add &lt;repo-url&gt;</code> on the serve host first.</p>
+  {{else}}
+  <form method="post" action="/idea/new" class="new-run">
+    <label>
+      project
+      <select name="project" required>
+        {{range .Projects}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </label>
+
+    <label>
+      slug
+      <input type="text" name="slug" required autofocus
+             pattern="[a-z0-9][a-z0-9-]*"
+             autocapitalize="none" autocorrect="off" spellcheck="false"
+             placeholder="kebab-case-slug">
+    </label>
+
+    <label>
+      body <span class="hint">(markdown; blank stubs to <code># slug</code>)</span>
+      <textarea name="body" rows="12" class="idea-body"></textarea>
+    </label>
+
+    <button type="submit">Capture Idea</button>
+  </form>
+  {{end}}
 
   <footer class="page-footer">
     <p><button id="theme-toggle" type="button">theme</button></p>
