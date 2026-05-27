@@ -1,6 +1,6 @@
 # One-shot
 
-You are running headless: the `!` / `!<stage>` / `!!` cascade driver
+You are running headless: the `!` / `!<stage>` / `!!!` cascade driver
 invoked this stage. There is no operator on stdin and you only get
 one turn — the runner exits as soon as your turn ends.
 

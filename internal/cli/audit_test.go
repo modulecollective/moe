@@ -126,13 +126,13 @@ func TestBuildSystemPromptInjectsAuditReportFragment(t *testing.T) {
 	}
 }
 
-// TestAuditHeadlessDispatcherRegistered confirms the cascade driver
-// can reach audit stages headlessly via the workflow-agnostic
-// dispatcher registry. Without this wiring, `!` / `!<stage>` / `!!`
-// at an audit run's chain prompt would print "workflow has no headless
+// TestAuditCascadeDispatcherRegistered confirms the cascade driver
+// can reach audit stages via the workflow-agnostic dispatcher
+// registry. Without this wiring, `!` / `!<stage>` / `!!` / `!!!` at
+// an audit run's chain prompt would print "workflow has no cascade
 // dispatcher" and refuse to walk.
-func TestAuditHeadlessDispatcherRegistered(t *testing.T) {
-	if d := lookupHeadlessDispatcher(auditWorkflow); d == nil {
-		t.Fatal("audit workflow has no headless dispatcher registered")
+func TestAuditCascadeDispatcherRegistered(t *testing.T) {
+	if d := lookupCascadeDispatcher(auditWorkflow); d == nil {
+		t.Fatal("audit workflow has no cascade dispatcher registered")
 	}
 }

@@ -202,9 +202,10 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// Fresh run — no stage has just finished, so promptNextStage falls
 	// back to Next() and offers the workflow's first incomplete stage.
 	// Headless cascade is no longer a `new` flag: the operator picks
-	// `!<stage>` or `!!` at the chain prompt after seeing the seeded
-	// canvas. Scripted automation that wants fire-and-forget can pipe
-	// the answer in (`echo '!!' | moe sdlc new ...`).
+	// `!<stage>`, `!!` (driven), or `!!!` (headless) at the chain prompt
+	// after seeing the seeded canvas. Scripted automation that wants
+	// fire-and-forget can pipe the answer in (`echo '!!!' | moe sdlc new
+	// ...`).
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

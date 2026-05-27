@@ -86,7 +86,7 @@ esac
 // Headless design (via openSdlcDesign) lands the canvas without an
 // interactive turn. The run title flows through as the user prompt
 // (not the interactive kickoff string), so the agent gets the same
-// context the cascade driver (`!` / `!<stage>` / `!!`) produces.
+// context the cascade driver (`!` / `!<stage>` / `!!` / `!!!`) produces.
 func TestRunDesignOneShot(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)

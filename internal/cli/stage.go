@@ -74,7 +74,7 @@ type stageSessionOpts struct {
 	// appended to the system prompt, and transcript mirroring is
 	// skipped (the canvas + per-turn commit are the durable
 	// artifacts). Set by the chain prompt's cascade driver
-	// (`!` / `!<stage>` / `!!`).
+	// (`!` / `!<stage>` / `!!` / `!!!`).
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by the cascade driver, which composes

@@ -36,7 +36,7 @@ The sections matter; the prose under them does not need to be long.
   cover?" — write the answer to the canvas in the operator's voice,
   and hand back. Don't pre-emptively go fishing for themes the
   operator didn't name.
-- **Headless default (`!!` from `moe audit new` or any cascade).**
+- **Headless default (`!!!` from `moe audit new` or any cascade).**
   No operator is on the other end. Write `Scope: everything` (and
   leave Themes / Out of scope empty) and exit. The report stage will
   read that and behave accordingly. Do not stall waiting for a reply

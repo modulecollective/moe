@@ -68,7 +68,7 @@ type RebaseFailureError struct {
 // or `moe session abandon` explicitly. The previous behaviour
 // (silent Abandon on zero-commit sessions, fast-forward on stub-
 // equals-main) is the cascade footgun this error is here to close:
-// a chain prompt firing after a no-op close lets `!!` carry the
+// a chain prompt firing after a no-op close lets `!!` / `!!!` carry the
 // next stage forward against an unchanged canvas.
 type CanvasUnchangedError struct {
 	Project      string
@@ -223,7 +223,7 @@ func Close(s *Session) error {
 	//   2. Commits exist but none touched the canvas: the kickoff
 	//      stub committed at `Open run` is still the blob at branch
 	//      tip and at main. Close used to fast-forward on this; a
-	//      downstream `!!` cascade would then dispatch the next
+	//      downstream `!!` / `!!!` cascade would then dispatch the next
 	//      stage against the stub.
 	//
 	// We compare blob OIDs at <branch>:<canvas> to <main>:<canvas>.

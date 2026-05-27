@@ -22,7 +22,7 @@ import (
 // glossary → finalize) walk the closed-schema twin, then dispatches
 // the first stage interactively. The chain prompt drives the
 // remainder of the ladder; the cascade vocabulary (`!<stage>` /
-// `!!`) is available at every stage gate.
+// `!!` / `!!!`) is available at every stage gate.
 //
 // Per-stage commits don't bump the checkpoint; finalize does. That
 // keeps `EventsSinceCheckpoint` stable across the pass — every stage
@@ -147,8 +147,8 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	// Hand off to the chain prompt's fresh-run path. justFinished="" so
 	// promptNextStage falls back to Workflow.Next, which returns the
 	// first parked stage (vision). The chain prompt offers `Y` to run
-	// it; `!!` to cascade through the ladder; `o` for headless dispatch
-	// of just the next stage.
+	// it; `!!` / `!!!` to cascade through the ladder (driven / headless);
+	// `!` for headless dispatch of just the next stage.
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

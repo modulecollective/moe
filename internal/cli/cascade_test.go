@@ -108,14 +108,15 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 }
 
 // openSdlcStageInvocation records one openSdlcStage dispatch — the
-// stage name, the (project, run) tuple, and the next-stage
-// suppression flag. Tests assert on these directly instead of an
-// args slice; the rename run carved away the
-// `--one-shot` prefix that used to be the assertion target.
+// stage name, the (project, run) tuple, the headless flag (false under
+// driven `!!`), and the next-stage suppression flag. Tests assert on
+// these directly instead of an args slice; the rename run carved away
+// the `--one-shot` prefix that used to be the assertion target.
 type openSdlcStageInvocation struct {
 	stage             string
 	projectID         string
 	runID             string
+	headless          bool
 	suppressNextStage bool
 }
 
@@ -127,8 +128,8 @@ func stubOpenSdlcStage(t *testing.T, perStageExit map[string]int) *[]openSdlcSta
 	t.Helper()
 	var captured []openSdlcStageInvocation
 	prev := openSdlcStage
-	openSdlcStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID, suppressNextStage})
+	openSdlcStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openSdlcStage = prev })
@@ -158,7 +159,7 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "push", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "push", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -194,19 +195,20 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateYoloShipsAtPush pins the !! shape: cascade
-// walks every remaining stage and ships at push. code/test go
-// through openSdlcStage (headless), push goes through pushFromCascade
-// (the typed entry that wraps runPushTyped — merge path, no flags).
-// There is no separate cascade synthesis step: `!!` defaults to
-// fast-forward merge and runPushTyped writes the merge-path push note.
+// TestCascadeFromGateYoloShipsAtPush pins the !!! shape: cascade
+// walks every remaining stage headless and ships at push. code/test
+// go through openSdlcStage (headless=true), push goes through
+// pushFromCascade (the typed entry that wraps runPushTyped — merge
+// path, no flags). There is no separate cascade synthesis step:
+// `!!!` defaults to fast-forward merge and runPushTyped writes the
+// merge-path push note.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	openCaptured := stubOpenSdlcStage(t, nil)
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -235,6 +237,9 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		if !inv.suppressNextStage {
 			t.Fatalf("cascade openSdlcStage args = %+v, want suppressNextStage=true", inv)
 		}
+		if !inv.headless {
+			t.Fatalf("!!! cascade openSdlcStage args = %+v, want headless=true", inv)
+		}
 	}
 	// push ship is a pushFromCascade call with the bare (project, run)
 	// args — merge path, no --pr flag.
@@ -244,26 +249,67 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/fix-it"; got != want {
 		t.Fatalf("push ship args = %q, want %q (merge path, no flags)", got, want)
 	}
+	// Summary line tags the headless mode per stage.
+	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
+		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
+	}
+}
+
+// TestCascadeFromGateDrivenShipsAtPush pins the `!!` (driven) shape:
+// each stage opens interactively (headless=false) but the cascade
+// otherwise walks the same ladder and ships at push. Mirrors the
+// `!!!` shape one variant over — the only ambient difference is the
+// `headless` flag threaded into each opener and the `(driven)` tag in
+// the per-stage cascade announcement.
+func TestCascadeFromGateDrivenShipsAtPush(t *testing.T) {
+	openCaptured := stubOpenSdlcStage(t, nil)
+	pushCaptured := stubPushFromCascade(t, 0, nil)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("driven cascade must ship at push: %+v", res)
+	}
+	for _, inv := range *openCaptured {
+		if inv.headless {
+			t.Fatalf("driven cascade openSdlcStage args = %+v, want headless=false", inv)
+		}
+		if !inv.suppressNextStage {
+			t.Fatalf("driven cascade openSdlcStage args = %+v, want suppressNextStage=true", inv)
+		}
+	}
+	if len(*pushCaptured) != 1 {
+		t.Fatalf("push ship dispatched %d times, want 1: %v", len(*pushCaptured), *pushCaptured)
+	}
+	if got := stdout.String(); !strings.Contains(got, "cascade: code (driven)") {
+		t.Fatalf("expected per-stage `(driven)` mode tag in stdout, got: %q", got)
+	}
 }
 
 // openTwinStageInvocation mirrors openSdlcStageInvocation for the
-// twin headless dispatcher: stage name, (project, run), suppression.
+// twin cascade dispatcher: stage name, (project, run), headless flag,
+// suppression.
 type openTwinStageInvocation struct {
 	stage             string
 	projectID         string
 	runID             string
+	headless          bool
 	suppressNextStage bool
 }
 
 // stubOpenTwinStage swaps openTwinStage for a recorder so cascade tests
-// can drive twin yolo runs without invoking real stage sessions.
+// can drive twin cascades without invoking real stage sessions.
 // perStageExit pins a non-zero exit for a named stage when needed.
 func stubOpenTwinStage(t *testing.T, perStageExit map[string]int) *[]openTwinStageInvocation {
 	t.Helper()
 	var captured []openTwinStageInvocation
 	prev := openTwinStage
-	openTwinStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, suppressNextStage})
+	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openTwinStage = prev })
@@ -314,7 +360,7 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -372,7 +418,7 @@ func TestCascadeFromGateTwinBangStageDoesNotClose(t *testing.T) {
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "finalize", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("vision", "finalize", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -393,7 +439,7 @@ func TestCascadeFromGateTwinYoloStopsOnStageFailure(t *testing.T) {
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -413,7 +459,7 @@ func TestCascadeFromGateStopsOnFailure(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "push", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "push", false, false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -434,7 +480,7 @@ func TestCascadeFromGateNoOpBehindStart(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	// startStage=code, destination=design — design is behind code.
-	res, code := cascadeFromGate("code", "design", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "design", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("no-op cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -455,7 +501,7 @@ func TestCascadeFromGateNoOpDestinationEqualsStart(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "code", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "code", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("destination=start cascade exit=%d, want 0", code)
 	}
@@ -476,7 +522,7 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", true, md, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", true, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -506,7 +552,7 @@ func TestCascadeFromGateOneStepAtTerminalStage(t *testing.T) {
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("finalize", "", true, md, &stdout, &stderr)
+	res, code := cascadeFromGate("finalize", "", true, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -653,6 +699,89 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	}
 }
 
+// TestPromptStageNextStageBangBangDispatchesDriven: typing `!!` at
+// the design→code gate parses as the driven variant — every
+// openSdlcStage dispatch in the resulting cascade sees headless=false,
+// and the per-stage announcement carries the `(driven)` mode tag.
+// Pins the swap: pre-swap, `!!` meant headless yolo; post-swap it
+// means driven.
+func TestPromptStageNextStageBangBangDispatchesDriven(t *testing.T) {
+	captured := stubOpenSdlcStage(t, nil)
+	stubPushFromCascade(t, 0, nil)
+	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "!!\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
+	}
+	if len(*captured) == 0 {
+		t.Fatalf("!! must dispatch at least one stage; got no openSdlcStage calls")
+	}
+	for _, inv := range *captured {
+		if inv.headless {
+			t.Fatalf("!! cascade openSdlcStage args = %+v, want headless=false (driven)", inv)
+		}
+	}
+	if got := stdout.String(); !strings.Contains(got, "(driven)") {
+		t.Fatalf("expected `(driven)` cascade mode tag in stdout, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageBangBangBangDispatchesHeadless: typing
+// `!!!` at the same gate parses as the headless yolo variant —
+// openSdlcStage sees headless=true and the announcement reads
+// `(headless)`. The sibling to TestPromptStageNextStageBangBangDispatchesDriven
+// pinning the other half of the swap.
+func TestPromptStageNextStageBangBangBangDispatchesHeadless(t *testing.T) {
+	captured := stubOpenSdlcStage(t, nil)
+	stubPushFromCascade(t, 0, nil)
+	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "!!!\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
+	}
+	if len(*captured) == 0 {
+		t.Fatalf("!!! must dispatch at least one stage; got no openSdlcStage calls")
+	}
+	for _, inv := range *captured {
+		if !inv.headless {
+			t.Fatalf("!!! cascade openSdlcStage args = %+v, want headless=true", inv)
+		}
+	}
+	if got := stdout.String(); !strings.Contains(got, "(headless)") {
+		t.Fatalf("expected `(headless)` cascade mode tag in stdout, got: %q", got)
+	}
+}
+
 // TestPromptStageNextStageRejectsUnknownStage: typing `!nonsense`
 // prints a list of valid stages and declines.
 func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
@@ -717,8 +846,11 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	if !strings.Contains(stdout.String(), "!<stage> = cascade to gate") {
 		t.Fatalf("expected cascade legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!! = cascade and ship") {
-		t.Fatalf("expected !! legend in stdout, got: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "!! = driven cascade") {
+		t.Fatalf("expected !! driven legend in stdout, got: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "!!! = headless cascade") {
+		t.Fatalf("expected !!! headless legend in stdout, got: %q", stdout.String())
 	}
 	// The cascade-extras line is reserved for the genuinely multi-char
 	// forms now; bare `!` lives in the main legend instead. Guards
@@ -845,7 +977,7 @@ func TestPromptPushNextStageBangStageIsNoOp(t *testing.T) {
 }
 
 // TestPromptPushNextStageShowsBangBangLegend: the push prompt
-// legend mentions `!!` for sdlc workflows.
+// legend mentions `!!` / `!!!` for sdlc workflows.
 func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	next := &Command{Name: "push", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -867,8 +999,8 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d", code)
 	}
-	if !strings.Contains(stdout.String(), "!! = ship now") {
-		t.Fatalf("expected !! legend at push gate, got: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "!! / !!! = ship now") {
+		t.Fatalf("expected !! / !!! legend at push gate, got: %q", stdout.String())
 	}
 }
 
@@ -914,7 +1046,7 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("code", "", false, md, &stdout, &stderr)
+			res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("cascade exit=%d, want 0 (recovery exited cleanly); stderr=%q", code, stderr.String())
 			}
@@ -960,14 +1092,15 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 
 // openKbStageInvocation, openMetaMoeStageInvocation, and
 // openHooksStageInvocation mirror openSdlcStageInvocation /
-// openTwinStageInvocation for the kb / meta-moe / hooks headless
-// dispatchers. Same three fields — the cascade exercises identical
-// shapes across workflows, so a tighter type-share would lose more
-// in test readability than it'd save in lines.
+// openTwinStageInvocation for the kb / meta-moe / hooks cascade
+// dispatchers. Same fields — the cascade exercises identical shapes
+// across workflows, so a tighter type-share would lose more in test
+// readability than it'd save in lines.
 type openKbStageInvocation struct {
 	stage             string
 	projectID         string
 	runID             string
+	headless          bool
 	suppressNextStage bool
 }
 
@@ -975,6 +1108,7 @@ type openMetaMoeStageInvocation struct {
 	stage             string
 	projectID         string
 	runID             string
+	headless          bool
 	suppressNextStage bool
 }
 
@@ -982,6 +1116,7 @@ type openHooksStageInvocation struct {
 	stage             string
 	projectID         string
 	runID             string
+	headless          bool
 	suppressNextStage bool
 }
 
@@ -992,8 +1127,8 @@ func stubOpenKbStage(t *testing.T, perStageExit map[string]int) *[]openKbStageIn
 	t.Helper()
 	var captured []openKbStageInvocation
 	prev := openKbStage
-	openKbStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openKbStageInvocation{stage, projectID, runID, suppressNextStage})
+	openKbStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openKbStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openKbStage = prev })
@@ -1004,8 +1139,8 @@ func stubOpenMetaMoeStage(t *testing.T, perStageExit map[string]int) *[]openMeta
 	t.Helper()
 	var captured []openMetaMoeStageInvocation
 	prev := openMetaMoeStage
-	openMetaMoeStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, suppressNextStage})
+	openMetaMoeStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openMetaMoeStage = prev })
@@ -1016,8 +1151,8 @@ func stubOpenHooksStage(t *testing.T, perStageExit map[string]int) *[]openHooksS
 	t.Helper()
 	var captured []openHooksStageInvocation
 	prev := openHooksStage
-	openHooksStage = func(stage, projectID, runID string, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openHooksStageInvocation{stage, projectID, runID, suppressNextStage})
+	openHooksStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+		captured = append(captured, openHooksStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openHooksStage = prev })
@@ -1036,7 +1171,7 @@ func TestCascadeFromGateKbYoloAutoCloses(t *testing.T) {
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("research", "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("research", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -1091,7 +1226,7 @@ func TestCascadeFromGateMetaMoeYoloAutoCloses(t *testing.T) {
 	md := &run.Metadata{ID: "meta-moe-2026-05-17", Project: "moe", Workflow: metaMoeWorkflow, Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate(metaMoeReportDoc, "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate(metaMoeReportDoc, "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -1133,7 +1268,7 @@ func TestCascadeFromGateHooksYoloAutoCloses(t *testing.T) {
 	md := &run.Metadata{ID: "hooks-2026-05-17", Project: "moe", Workflow: hooksWorkflow, Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate(hooksCodeDoc, "", false, md, &stdout, &stderr)
+	res, code := cascadeFromGate(hooksCodeDoc, "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}

@@ -144,7 +144,7 @@ func init() {
 	// Per-stage entry points (six doc stages plus finalize). Each opens
 	// an interactive Claude Code session against the named stage's
 	// canvas; the dispatcher behind them (openTwinStage) routes the
-	// chain prompt's cascade driver (`!` / `!<stage>` / `!!`). Stage
+	// chain prompt's cascade driver (`!` / `!<stage>` / `!!` / `!!!`). Stage
 	// order here matches twinStageOrder so a reordering shows up in
 	// one place.
 	g.Register(&Command{

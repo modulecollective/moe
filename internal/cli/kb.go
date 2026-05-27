@@ -124,7 +124,7 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 
 // openKbResearch is the Go-level seam behind `moe kb research`. The
 // typed `Command.Run` parses args and hands to this helper; the chain
-// prompt's cascade driver (`!` / `!<stage>` / `!!`) reaches it directly
+// prompt's cascade driver (`!` / `!<stage>` / `!!` / `!!!`) reaches it directly
 // via openKbStage. headless=true selects the bounded one-turn variant
 // (`claude -p` plus the workflow's oneshot.md fragment), the same path
 // the equivalent twin / sdlc seams take.

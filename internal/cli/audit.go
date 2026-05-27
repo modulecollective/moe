@@ -103,7 +103,7 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 }
 
 // openAuditPlan is the Go-level seam behind `moe audit plan`. The
-// chain prompt's cascade driver (`!` / `!<stage>` / `!!`) reaches it
+// chain prompt's cascade driver (`!` / `!<stage>` / `!!` / `!!!`) reaches it
 // through openAuditStage. NeedsSandbox is true so the agent can
 // verify a path the operator names in passing exists; the
 // design-stage's tracked-change guard is re-used to enforce the

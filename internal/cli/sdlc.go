@@ -288,7 +288,7 @@ func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool
 }
 
 // openSdlcStage routes the chain prompt's cascade driver
-// (`!` / `!<stage>` / `!!`) and the cascade's pre-push iteration to
+// (`!` / `!<stage>` / `!!` / `!!!`) and the cascade's pre-push iteration to
 // the right per-stage helper, headless, carrying suppressNextStage
 // through to stageSessionOpts.SkipNextStage. Knowing the stage names
 // statically (sdlc has three headlessable stages — push is not one
@@ -310,27 +310,28 @@ func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool
 // checker. Closing the loop with a direct func declaration tipped
 // it into an init-cycle error; the var has no initializer
 // expression for the checker to follow.
-var openSdlcStage func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
+var openSdlcStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
 
 func init() {
-	openSdlcStage = func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openSdlcStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 		// Chain / cascade entry: no per-call --agent override. The run's
 		// persisted agent (from run.json) takes over inside
-		// runStageSession.
+		// runStageSession. headless flips between `!!!` (yolo) and
+		// `!!` (driven); the bare-`!` / `!<stage>` callers pass true.
 		switch stage {
 		case "design":
-			return openSdlcDesign(projectID, runID, true, suppressNextStage, "", stdout, stderr)
+			return openSdlcDesign(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		case "code":
-			return openSdlcCode(projectID, runID, true, suppressNextStage, "", stdout, stderr)
+			return openSdlcCode(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		case "test":
-			return openSdlcTest(projectID, runID, true, suppressNextStage, "", stdout, stderr)
+			return openSdlcTest(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "sdlc: openSdlcStage: unknown stage %q\n", stage)
 			return 1
 		}
 	}
-	registerHeadlessDispatcher("sdlc", func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openSdlcStage(stage, projectID, runID, suppressNextStage, stdout, stderr)
+	registerCascadeDispatcher("sdlc", func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+		return openSdlcStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
 	})
 }
 
@@ -365,9 +366,9 @@ const testCanvasSkeleton = `# Test
 // Always interactive: invokes the next pending stage interactively;
 // the stage's existing chain prompt (`[Y/n…]` / `[N/m/p…]`) walks
 // the rest. Headless cascade is no longer a `resume` flag — the
-// operator types `!<stage>` or `!!` at the chain prompt once they've
-// seen the canvas, the same vocabulary every other headless decision
-// uses.
+// operator types `!<stage>`, `!!` (driven), or `!!!` (headless) at
+// the chain prompt once they've seen the canvas, the same vocabulary
+// every other cascade decision uses.
 //
 // Refuses missing or terminal runs at the boundary so a resume call
 // against a dead run fails fast instead of spawning a session.
@@ -380,8 +381,8 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "Picks up the run at its first pending stage and opens it")
 		moePrintln(stderr, "interactively. The stage's post-turn chain prompt drives the rest:")
 		moePrintln(stderr, "`!` runs the next stage headless, `!<stage>` cascades to a named gate,")
-		moePrintln(stderr, "`!!` cascades and ships. Refuses runs that are missing or already")
-		moePrintln(stderr, "terminal.")
+		moePrintln(stderr, "`!!` is a driven cascade to ship, `!!!` is the headless variant. Refuses")
+		moePrintln(stderr, "runs that are missing or already terminal.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -521,7 +522,7 @@ func requireCodeCanvas(projectID, runID string) error {
 //  2. The canvas at HEAD is byte-identical to the kickoff commit's
 //     blob — the prior stage was opened but the agent never wrote
 //     to the canvas (or someone reverted it back to the seed). This
-//     is the cascade footgun the design twin records: a `!!` after
+//     is the cascade footgun the design twin records: a `!!` / `!!!` after
 //     a no-op session would otherwise dispatch the next stage
 //     against an unchanged stub.
 //

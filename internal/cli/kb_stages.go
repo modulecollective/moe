@@ -3,7 +3,7 @@ package cli
 import "io"
 
 // openKbStage is the Go-level seam behind the chain prompt's cascade
-// driver (`!` / `!<stage>` / `!!`) for kb runs. Same shape as
+// driver (`!` / `!<stage>` / `!!` / `!!!`) for kb runs. Same shape as
 // openSdlcStage / openTwinStage one workflow over: switch on the stage
 // name, hand to the right helper, run headless, carry suppressNextStage
 // through to stageSessionOpts.SkipNextStage. A `default` branch surfaces
@@ -13,24 +13,24 @@ import "io"
 // Declared as a var and assigned in init() so the static reference
 // chain doesn't trip Go's init-order cycle checker — same shape
 // openSdlcStage / openTwinStage use, same reason.
-var openKbStage func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int
+var openKbStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
 
 func init() {
-	openKbStage = func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openKbStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 		switch stage {
 		case "research":
-			return openKbResearch(projectID, runID, true, suppressNextStage, stdout, stderr)
+			return openKbResearch(projectID, runID, headless, suppressNextStage, stdout, stderr)
 		case "summarize":
-			return openKbSummarize(projectID, runID, true, suppressNextStage, stdout, stderr)
+			return openKbSummarize(projectID, runID, headless, suppressNextStage, stdout, stderr)
 		default:
 			moePrintf(stderr, "kb: openKbStage: unknown stage %q\n", stage)
 			return 1
 		}
 	}
 	// Register the dispatcher so the generic chain-prompt / cascade
-	// machinery can drive kb stages headless via workflow name — no
+	// machinery can drive kb stages via workflow name — no
 	// workflow-specific switch in stage_next.go.
-	registerHeadlessDispatcher("kb", func(stage, projectID, runID string, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openKbStage(stage, projectID, runID, suppressNextStage, stdout, stderr)
+	registerCascadeDispatcher("kb", func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+		return openKbStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
 	})
 }

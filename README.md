@@ -84,9 +84,11 @@ moe sdlc design tele/add-batch-support
 ```
 
 At the end of each stage MoE prints a chain prompt. The keystrokes `!`
-(run the next stage headless), `!<stage>` (cascade up to a stage), and
-`!!` (cascade all the way to ship) hand the rest of the chain to the
-agent without re-typing the verb.
+(run the next stage headless), `!<stage>` (cascade up to a stage), `!!`
+(driven cascade — one interactive REPL per stage, all the way to ship),
+and `!!!` (headless cascade — fully unattended, all the way to ship)
+hand the rest of the chain to the agent without re-typing the verb. The
+mnemonic: more bangs, less of you in the loop.
 
 `moe help` is the source of truth for the command surface.
 
@@ -195,8 +197,10 @@ and the dashboard is the re-entry point when you walk away.
   pins the backend for this run only.
 - `moe sdlc design|code|test|push` — drive the sdlc stages one at a
   time. The chain prompt at exit offers `!` (run the next stage
-  headless), `!<stage>` (cascade up to a gate), and `!!` (cascade all
-  the way to ship). `moe sdlc push` fast-forwards the target repo's
+  headless), `!<stage>` (cascade up to a gate), `!!` (driven cascade
+  to ship — one interactive REPL per stage), and `!!!` (headless
+  cascade to ship — fully unattended). `moe sdlc push` fast-forwards
+  the target repo's
   default branch to the run's branch; `--pr` opens a pull request
   instead.
 - `moe sdlc resume <project>/<run>` — pick up a parked run at
