@@ -6,12 +6,12 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-func TestChainHintSameProjectBareSlug(t *testing.T) {
+func TestChainHintSameProjectQualified(t *testing.T) {
 	parent := &run.Metadata{ID: "fix-bug", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
 	child := &run.Metadata{ID: "next-fix", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
 	idx := &run.JournalIndex{ChainedChild: map[string]string{"p/fix-bug": "p/next-fix"}}
 	byKey := map[string]*run.Metadata{"p/fix-bug": parent, "p/next-fix": child}
-	if got, want := chainHint(idx, parent, byKey), " · chained → next-fix"; got != want {
+	if got, want := chainHint(idx, parent, byKey), " · chained → p/next-fix"; got != want {
 		t.Errorf("same-project hint = %q, want %q", got, want)
 	}
 }

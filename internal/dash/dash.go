@@ -215,13 +215,12 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage) + chainHint(idx, md, byRunKey), dec.Stage, runningDoc
 }
 
-// chainHint renders the trailing " · chained → <slug>" action hint
-// for an in-progress run whose live chain edge points at an
-// unresolved child. Cross-project children render as
-// "<project>/<slug>"; same-project children render bare. Returns ""
-// when there's no edge, the child slug is malformed, the child is
-// missing from disk, or the child is in a terminal state (Decision 1
-// — terminal children are filtered at read time).
+// chainHint renders the trailing " · chained → <project>/<slug>"
+// action hint for an in-progress run whose live chain edge points at
+// an unresolved child. Returns "" when there's no edge, the child slug
+// is malformed, the child is missing from disk, or the child is in a
+// terminal state (Decision 1 — terminal children are filtered at read
+// time).
 func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run.Metadata) string {
 	parentKey := md.Project + "/" + md.ID
 	childKey := idx.ChainedChild[parentKey]
@@ -235,9 +234,6 @@ func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run
 	switch child.Status {
 	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
 		return ""
-	}
-	if child.Project == md.Project {
-		return " · chained → " + child.ID
 	}
 	return " · chained → " + childKey
 }
