@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -281,6 +282,72 @@ func TestPromotePOSTRejectsBadWorkspace(t *testing.T) {
 	}
 	if len(s.children.all) != 0 {
 		t.Errorf("invalid form must not spawn any child; registry has %d", len(s.children.all))
+	}
+}
+
+// TestAdvancePOSTSpawnsNextStage: a parked in-progress sdlc run whose
+// next stage is code spawns `moe sdlc code <id>` (no cascade flag) and
+// redirects. The spawn args carry the server-re-derived stage, not
+// anything the button supplied.
+func TestAdvancePOSTSpawnsNextStage(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/fix-it" {
+		t.Errorf("Location=%q, want /run/alpha/fix-it", got)
+	}
+	c, ok := s.children.get("alpha/fix-it")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done // echo exits immediately; read args after Wait returned
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "sdlc code alpha/fix-it" {
+		t.Errorf("spawn args = %q, want %q", got, "sdlc code alpha/fix-it")
+	}
+}
+
+// TestShipPOSTSpawnsNextStageWithFlag: the ship chip spawns the next
+// stage under --ship — the headless cascade through push. The trailing
+// flag is the only difference from /advance.
+func TestShipPOSTSpawnsNextStageWithFlag(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/ship", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	c, ok := s.children.get("alpha/fix-it")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "sdlc code alpha/fix-it --ship" {
+		t.Errorf("spawn args = %q, want %q", got, "sdlc code alpha/fix-it --ship")
 	}
 }
 

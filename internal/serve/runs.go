@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,6 +160,11 @@ type runVM struct {
 	// back to the Started / Status line in that case.
 	RowNote string
 	RowWhen string
+	// NextStage is the run's bare next-stage name (row.Stage), or "" when
+	// there's no next stage / no row. The advance + ship chips key off
+	// it: they render only for an in-progress sdlc run whose next stage
+	// is design/code/test (see advanceActions).
+	NextStage string
 	// Started / Status are the fallback meta line shown when the
 	// dash-row lookup didn't return a row. Started is empty on the
 	// read-only path; Status is "live" / "exited: …" / "exited
@@ -179,6 +185,11 @@ type runAction struct {
 	Label  string
 	Href   string
 	Method string
+	// Class is an extra CSS class on the rendered button (POST actions
+	// only); "" renders the plain "action" chip. The ship chip sets
+	// "ship" so a one-click PR open/merge is styled apart from the safe
+	// single-step advance chip and can't be mistaken for it.
+	Class string
 }
 
 type canvasLink struct {
@@ -310,6 +321,121 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
+// handleAdvance spawns the run's next sdlc stage as a single headless
+// turn (no cascade flag): one stage runs under SkipNextStage and the
+// child exits at the chain prompt it never reaches. The "→ <stage>"
+// chip on the per-run page posts here.
+func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
+	s.spawnNextStage(w, r, false)
+}
+
+// handleShip spawns the run's next sdlc stage under --ship: the
+// headless yolo cascade that drives every remaining stage all the way
+// through push. The "ship it" chip posts here. Bigger lever than
+// advance — one click can open/merge a PR — but still operator-
+// triggered, and guarded downstream by the test-stage anti-theater gate
+// and the pre-push hooks.
+func (s *Server) handleShip(w http.ResponseWriter, r *http.Request) {
+	s.spawnNextStage(w, r, true)
+}
+
+// spawnNextStage is the shared body behind /advance and /ship. It
+// re-derives the next stage server-side (never trusting a possibly-
+// stale page) and applies the same guard set the close route uses,
+// then spawns `moe sdlc <stage> <id>` — appending --ship when ship is
+// true. The server-side re-derivation plus spawn's own dup-guard mean a
+// double-click or a stale button can't double-spawn or skip a stage.
+//
+// A direct spawn deliberately bypasses the design-stage cascade's
+// tracked-change refusal (EnforceSandboxBoundary): the explicit click
+// is the consent that guard asks for at the chain prompt.
+func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, ship bool) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+	verb := "advance"
+	if ship {
+		verb = "ship"
+	}
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("%s %s: load: %v", verb, id, err)
+		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if md.Workflow != promotedWorkflow {
+		http.Error(w, "run "+id+" is not an sdlc run (workflow="+md.Workflow+")", http.StatusConflict)
+		return
+	}
+	if md.Status != run.StatusInProgress {
+		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
+		return
+	}
+	// A live agent mid-turn owns the sandbox clone; spawning the next
+	// stage now would race it. Mirror closeSDLCRun's live-child refusal.
+	if c, ok := s.children.get(id); ok {
+		if exited, _, _ := c.snapshot(); !exited {
+			http.Error(w,
+				"run "+id+" has a live agent mid-turn — wait for it to finish, then "+verb,
+				http.StatusConflict)
+			return
+		}
+	}
+	// Re-derive the next stage rather than trusting the button. row.Stage
+	// is the bare next-stage name with all satisfaction logic baked in.
+	stage, err := s.nextStage(projectID, slug)
+	if err != nil {
+		s.logf("%s %s: next stage: %v", verb, id, err)
+		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	switch stage {
+	case "design", "code", "test":
+		// advanceable
+	default:
+		// "" (no next stage) or "push" — push stays terminal/CLI-only.
+		http.Error(w,
+			"run "+id+" has no advanceable next stage (next="+strconv.Quote(stage)+")",
+			http.StatusConflict)
+		return
+	}
+
+	args := []string{"sdlc", stage, id}
+	if ship {
+		args = append(args, "--ship")
+	}
+	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		s.logf("%s %s: spawn: %v", verb, id, err)
+		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+// nextStage re-derives a run's bare next-stage name through the
+// GatherRunRow callback (the same lookup fillRunRow uses for the
+// dash-row meta). Returns "" when no callback is wired or the row
+// gathered as not-found / filtered — callers treat "" as "no
+// advanceable stage" and refuse.
+func (s *Server) nextStage(projectID, slug string) (string, error) {
+	if s.opts.GatherRunRow == nil {
+		return "", nil
+	}
+	row, ok, err := s.opts.GatherRunRow(projectID, slug)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	return row.Stage, nil
+}
+
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
 // not currently parented by this serve. For in-progress idea runs,
 // the page surfaces edit/promote affordances; for sdlc runs, just the
@@ -326,9 +452,13 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		Slug:        slug,
 		Status:      md.Status,
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
-		Actions:     runActions(projectID, slug, md),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
+	// No live child on the read-only path (this serve isn't parenting the
+	// run), so advance/ship gate on live=false. fillRunRow ran first so
+	// vm.NextStage is populated.
+	vm.Actions = append(advanceActions(projectID, slug, vm.NextStage, md, false),
+		runActions(projectID, slug, md)...)
 	return vm, nil
 }
 
@@ -363,6 +493,34 @@ func runActions(projectID, slug string, md *run.Metadata) []runAction {
 	return nil
 }
 
+// advanceActions returns the stage-advancement chips — "→ <stage>"
+// (single headless step) and "ship it" (--ship cascade through push) —
+// prepended ahead of the base actions on an in-progress sdlc run's
+// page. nextStage is the bare next-stage name re-derived from the dash
+// row; live is true when an agent is mid-turn.
+//
+// Returns nil unless the run is an in-progress sdlc run, no agent is
+// live (advancing past a stage whose agent is still running would race
+// it for the sandbox clone), and the next stage is design/code/test. A
+// "" or "push" next stage yields no chips: push stays terminal/CLI-only
+// — the bang vocabulary collapses there — so a run parked right before
+// push shows neither chip.
+func advanceActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
+	if md.Workflow != promotedWorkflow || md.Status != run.StatusInProgress || live {
+		return nil
+	}
+	switch nextStage {
+	case "design", "code", "test":
+	default:
+		return nil
+	}
+	base := "/run/" + projectID + "/" + slug
+	return []runAction{
+		{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
+		{Label: "ship it", Href: base + "/ship", Method: "POST", Class: "ship"},
+	}
+}
+
 // fillRunRow populates RowNote / RowWhen from the dash-row lookup.
 // Errors are swallowed (logged) so a row-gather hiccup never breaks
 // the per-run page; the template falls back to the Started / Status
@@ -381,6 +539,7 @@ func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 	}
 	vm.RowNote = row.Note
 	vm.RowWhen = dash.HumanAgo(now, row.When)
+	vm.NextStage = row.Stage
 }
 
 // isPromotableIdea reports whether the loaded run is an in-progress
@@ -418,7 +577,10 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
-		vm.Actions = runActions(projectID, slug, md)
+		// !exited == an agent mid-turn; advanceActions drops the chips in
+		// that case. fillRunRow above populated vm.NextStage.
+		vm.Actions = append(advanceActions(projectID, slug, vm.NextStage, md, !exited),
+			runActions(projectID, slug, md)...)
 	}
 	return vm
 }

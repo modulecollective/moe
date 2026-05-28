@@ -230,6 +230,11 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
+	// Stage advancement for in-progress sdlc runs: /advance spawns the
+	// next stage as a single headless step; /ship spawns it under --ship
+	// (the headless cascade through push).
+	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
+	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.

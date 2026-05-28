@@ -988,6 +988,222 @@ func TestCloseRouteSDLCWithoutCallbackIs500(t *testing.T) {
 	}
 }
 
+// TestRunPageRendersAdvanceAndShipChips: an in-progress sdlc run parked
+// at an advanceable stage (next=code) surfaces the "→ code" advance
+// chip (POST /advance) and the distinctly-styled "ship it" chip (POST
+// /ship), prepended ahead of the existing close-run chip.
+func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:code", Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`action="/run/alpha/fix-it/advance"`,
+		`>→ code</button>`,
+		`action="/run/alpha/fix-it/ship"`,
+		`class="action ship"`,
+		`>ship it</button>`,
+		`action="/run/alpha/fix-it/close"`, // base close chip still present
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+	// Advance chip renders ahead of the close chip.
+	iAdv, iClose := strings.Index(body, "/fix-it/advance"), strings.Index(body, "/fix-it/close")
+	if iAdv < 0 || iClose < 0 || iAdv > iClose {
+		t.Errorf("advance chip should render before close chip: adv=%d close=%d", iAdv, iClose)
+	}
+}
+
+// TestRunPageHidesAdvanceChipsBeforePush: a run parked right before push
+// (next=push) shows neither advance nor ship — push stays terminal/
+// CLI-only, where the bang vocabulary collapses. The close chip stays.
+func TestRunPageHidesAdvanceChipsBeforePush(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:push", Stage: "push",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, banned := range []string{
+		`/run/alpha/fix-it/advance`,
+		`/run/alpha/fix-it/ship`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("push-parked run must not render %q\n%s", banned, body)
+		}
+	}
+	if !strings.Contains(body, `/run/alpha/fix-it/close`) {
+		t.Errorf("push-parked run should still show the close chip\n%s", body)
+	}
+}
+
+// TestRunPageHidesAdvanceChipsForLiveChild: while an agent is mid-turn
+// (a live child in the registry), the advance/ship chips drop even with
+// an advanceable next stage — you can't advance past a stage whose agent
+// is still running.
+func TestRunPageHidesAdvanceChipsForLiveChild(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
+	s.children.all["alpha/fix-it"] = live
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, banned := range []string{
+		`/run/alpha/fix-it/advance`,
+		`/run/alpha/fix-it/ship`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("live-child page must not render %q\n%s", banned, body)
+		}
+	}
+}
+
+// TestAdvanceRefusesNonSDLC: POST /advance on an idea run is the wrong
+// surface — 409, no spawn.
+func TestAdvanceRefusesNonSDLC(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("non-sdlc advance must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestAdvanceRefusesTerminalRun: a merged sdlc run is past advancing —
+// 409 (not in progress), no spawn.
+func TestAdvanceRefusesTerminalRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "shipped", "sdlc")
+	md, err := run.Load(root, "alpha", "shipped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusMerged
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/shipped/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAdvanceRefusesPushStage: a run whose re-derived next stage is push
+// gets 409 — push stays terminal/CLI-only even via the route, and the
+// server re-derives the stage rather than trusting the caller.
+func TestAdvanceRefusesPushStage(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "push",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("push-stage advance must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestAdvanceRefusesLiveChild: a live agent mid-turn blocks advance with
+// 409 — the same guard the close route applies — and never spawns.
+func TestAdvanceRefusesLiveChild(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
+	s.children.all["alpha/fix-it"] = live
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(s.children.all) != 1 {
+		t.Errorf("live-child advance must not spawn a second child; registry has %d", len(s.children.all))
+	}
+}
+
+// TestAdvanceRefusesMissingRun: an unknown slug 404s at the load step.
+func TestAdvanceRefusesMissingRun(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+	req := httptest.NewRequest("POST", "/run/ghost/ghost/advance", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 // TestIdeaPageHiddenActionsForPromotedIdea: once an idea has been
 // promoted, its status is no longer in_progress and the actions block
 // goes away — re-promoting or editing a hand-off idea would be a foot-
