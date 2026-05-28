@@ -368,6 +368,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 			}
 
+			// Chat grooms the operator's real backlog in-session — point
+			// the agent's MOE_HOME at the canonical bureaucracy so
+			// `moe idea new` / `edit` commit to live main (visible across
+			// windows at once) and the real bureaucracy lands in the
+			// agent's writable --add-dir set. One assignment, both
+			// effects; see chatGroomingHome. No-op for non-chat stages.
+			devEnv = chatGroomingHome(md.Workflow, devEnv, root)
+
 			// Materialise the moe-context skill once clonePath is final
 			// — sibling to the bureaucracy materialiser above, but this
 			// one needs the clone path threaded so the rendered body can

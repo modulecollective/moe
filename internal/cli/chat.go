@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -218,6 +219,33 @@ func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "chat: %s/%s has unexpected status %q; cannot resume\n", projectID, runID, md.Status)
 		return 1
 	}
+}
+
+// chatGroomingHome points the chat agent's MOE_HOME at the canonical
+// bureaucracy root so backlog grooming (`moe idea new` / `edit`) lands
+// on the operator's live backlog: committed to real `main`, visible to
+// any other window at once, and writable — devEnvWritableDirs keys the
+// agent's --add-dir set off MOE_HOME, so this one assignment both aims
+// grooming at the real bureaucracy and adds it to the writable scope.
+//
+// Setting it last also overrides any project dev-env hook that
+// redirected MOE_HOME to a scratch bureaucracy — the moe-on-moe
+// silent-scratch trap, where an in-session capture used to succeed into
+// a throwaway world and vanish on teardown. root is the canonical root
+// moe already resolved; the scratch redirect only ever lived in the
+// agent subprocess's env, never in moe's own.
+//
+// Mutates and returns devEnv (creating it when nil); non-chat workflows
+// get devEnv back untouched.
+func chatGroomingHome(workflow string, devEnv map[string]string, root string) map[string]string {
+	if workflow != chatWorkflow {
+		return devEnv
+	}
+	if devEnv == nil {
+		devEnv = map[string]string{}
+	}
+	devEnv[bureaucracy.EnvHome] = root
+	return devEnv
 }
 
 // chatCanvasOnOpen seeds (turn one) or appends to (every resume) the

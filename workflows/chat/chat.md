@@ -55,11 +55,14 @@ itself is the artifact.
 
 You're interactive, so the operator sees every command before it runs.
 Grooming verbs from `moe-howto` (`moe idea new`, …) and read-only verbs
-(`moe dash`, `moe idea list`, `git log`) are fair game. If a command
-that mutates the bureaucracy fails — a lock held by another moe process,
-a sandbox write refusal — don't fight it: print the exact command and
-let the operator run it from their own shell. Surfacing the command is
-always an acceptable outcome.
+(`moe dash`, `moe idea list`, `git log`) are fair game. Grooming lands
+on the operator's live backlog — `moe idea new` commits to the real
+bureaucracy on this box, visible in any other window at once. If a
+command that mutates the bureaucracy fails — a lock held by another moe
+process, or a dirty main checkout (`moe idea new` refuses uncommitted
+changes) — don't fight it: print the exact command and let the operator
+run it from their own shell. Surfacing the command is always an
+acceptable outcome.
 
 ## Leaving traces
 

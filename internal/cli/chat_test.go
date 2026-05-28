@@ -172,6 +172,73 @@ func TestChatCanvasOnOpenSeedsAndAppends(t *testing.T) {
 	}
 }
 
+// TestChatGroomingHomeOverridesScratch is the core of the chat-sandbox
+// fix. For the chat workflow, chatGroomingHome must repoint MOE_HOME at
+// the canonical bureaucracy root even when a project dev-env hook has
+// already redirected it to a scratch path (the moe-on-moe silent-scratch
+// trap). The repointed root must then ride two channels: the agent's env
+// (so in-session `moe idea new` resolves the live backlog) and the
+// writable --add-dir set via devEnvWritableDirs (so the write isn't
+// refused).
+func TestChatGroomingHomeOverridesScratch(t *testing.T) {
+	root := t.TempDir()
+	devEnv := map[string]string{"MOE_HOME": "/tmp/scratch-bureaucracy"}
+
+	got := chatGroomingHome(chatWorkflow, devEnv, root)
+
+	if got["MOE_HOME"] != root {
+		t.Fatalf("MOE_HOME=%q want %q (scratch must be overridden)", got["MOE_HOME"], root)
+	}
+	// ExtraEnv side: the agent subprocess must see MOE_HOME=root, since
+	// ExtraEnv is appended last and last wins over the hook's scratch.
+	if !containsStr(mapToEnv(got), "MOE_HOME="+root) {
+		t.Fatalf("mapToEnv(devEnv)=%v missing MOE_HOME=%q", mapToEnv(got), root)
+	}
+	// AddDirs side: devEnvWritableDirs keys off MOE_HOME, so the real
+	// bureaucracy must land in the writable scope.
+	if dirs := devEnvWritableDirs(got); !containsStr(dirs, root) {
+		t.Fatalf("writable dirs %v missing root %q", dirs, root)
+	}
+}
+
+// TestChatGroomingHomeNilMap covers a chat run on a project with no
+// dev-env hooks: devEnvSetupEnv can hand back an empty/absent map, and
+// the helper must still mint MOE_HOME=root so every project's chat —
+// not just moe-on-moe — grooms the real bureaucracy.
+func TestChatGroomingHomeNilMap(t *testing.T) {
+	root := t.TempDir()
+	got := chatGroomingHome(chatWorkflow, nil, root)
+	if got == nil {
+		t.Fatal("nil devEnv should be initialised for chat")
+	}
+	if got["MOE_HOME"] != root {
+		t.Fatalf("MOE_HOME=%q want %q", got["MOE_HOME"], root)
+	}
+}
+
+// TestChatGroomingHomeNonChatUntouched pins the no-op for every other
+// workflow. sdlc code/test must keep the project's own MOE_HOME (scratch
+// for moe-on-moe) — that redirect is exactly what protects the real
+// bureaucracy from the WIP `moe` binary during code/test.
+func TestChatGroomingHomeNonChatUntouched(t *testing.T) {
+	root := t.TempDir()
+	const scratch = "/tmp/scratch-bureaucracy"
+	devEnv := map[string]string{"MOE_HOME": scratch}
+	got := chatGroomingHome("sdlc", devEnv, root)
+	if got["MOE_HOME"] != scratch {
+		t.Fatalf("non-chat MOE_HOME=%q want %q (must not be repointed)", got["MOE_HOME"], scratch)
+	}
+}
+
+func containsStr(haystack []string, want string) bool {
+	for _, s := range haystack {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func readChatCanvas(t *testing.T, root string, md *run.Metadata) string {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, chatDoc)))

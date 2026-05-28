@@ -13,10 +13,14 @@ the verb set for that, and nothing more.
 
 You're interactive, so the operator sees every command before it runs.
 Propose the command, run it when they're on board, and report what it
-did. If a mutating command fails — another moe process holds the lock,
-or a sandbox write is refused — print the exact command and let the
-operator run it from their own shell. Surfacing the command is always an
-acceptable outcome.
+did. Grooming lands on the operator's **live** backlog: `moe idea new`
+commits to the real bureaucracy on this box, so a capture shows up in
+any other window's `moe dash` at once (and you see that window's commits
+in turn). If a mutating command fails — another moe process holds the
+lock, or the main checkout has uncommitted changes (`moe idea new`
+refuses a dirty tree) — print the exact command and let the operator run
+it from their own shell. Surfacing the command is always an acceptable
+outcome.
 
 ## Capture a new idea
 
