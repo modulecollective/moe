@@ -82,6 +82,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
 			return GatherRunRow(root, project, runID, time.Now().UTC())
 		},
+		// serve can't host $EDITOR inside an HTTP POST, so close runs
+		// with --no-edit semantics (skipEdit=true): harvest the
+		// followups/lore files as they sit on disk. Mirrors `moe sdlc
+		// close`'s subject + workspace-release cleanup so the in-process
+		// path and the CLI verb stay one pipeline.
+		CloseRun: func(project, runID string) error {
+			return closeRunInProcess(root, "sdlc", sdlcCloseSubject,
+				releaseWorkspaceCleanup, project, runID, true, io.Discard, io.Discard)
+		},
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

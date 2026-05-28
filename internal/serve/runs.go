@@ -209,11 +209,37 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "run.html", vm)
 }
 
-func (s *Server) handleIdeaClose(w http.ResponseWriter, r *http.Request) {
+// handleClose closes a run from the per-run page. It loads the run's
+// metadata and dispatches by workflow: idea runs flip closed in-process
+// via runopen.CloseIdea (no harvest, no sandbox); everything else (the
+// sdlc runs serve fronts) routes through the CloseRun callback, which
+// runs the full cli close pipeline with --no-edit semantics. One route,
+// one guard set, regardless of run kind — a stale or replayed POST hits
+// the same refusals.
+func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("close %s: load: %v", id, err)
+		http.Error(w, "close: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if md.Workflow == dash.IdeaWorkflow {
+		s.closeIdeaRun(w, r, projectID, slug, id)
+		return
+	}
+	s.closeSDLCRun(w, r, projectID, slug, id)
+}
+
+func (s *Server) closeIdeaRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
 	if err := runopen.CloseIdea(s.opts.Root, projectID, slug); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
@@ -226,6 +252,41 @@ func (s *Server) handleIdeaClose(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+// closeSDLCRun closes an in-progress sdlc run through the CloseRun
+// callback. serve owns the PTY children it spawned, so the one guard it
+// applies itself is the live-child refusal: closing while the agent is
+// mid-turn would yank the sandbox clone out from under it. Every other
+// guard (pushed, terminal, canvas-empty) lives in the cli close core and
+// surfaces through the callback's error.
+func (s *Server) closeSDLCRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
+	if s.opts.CloseRun == nil {
+		http.Error(w, "close not configured (Options.CloseRun is nil)", http.StatusInternalServerError)
+		return
+	}
+	if c, ok := s.children.get(id); ok {
+		if exited, _, _ := c.snapshot(); !exited {
+			http.Error(w,
+				"run "+id+" has a live agent mid-turn — wait for it to finish, then close",
+				http.StatusConflict)
+			return
+		}
+	}
+	if err := s.opts.CloseRun(projectID, slug); err != nil {
+		var notClosable *runopen.NotClosableError
+		if errors.As(err, &notClosable) {
+			http.Error(w, "close: "+err.Error(), http.StatusConflict)
+			return
+		}
+		s.logf("close run %s: %v", id, err)
+		http.Error(w, "close: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// The run is gone; drop any lingering exited-child entry so the dash
+	// and run page stop marking it parented.
+	s.children.remove(id)
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
@@ -265,34 +326,41 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		Slug:        slug,
 		Status:      md.Status,
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
-		Actions:     ideaActions(projectID, slug, md),
+		Actions:     runActions(projectID, slug, md),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	return vm, nil
 }
 
-// ideaActions returns the peer-affordances list for the per-run page.
+// runActions returns the peer-affordances list for the per-run page.
 // In-progress idea runs get edit, promote, and close; closed idea runs
-// get reopen; everything else gets nil.
-func ideaActions(projectID, slug string, md *run.Metadata) []runAction {
-	if md.Workflow != dash.IdeaWorkflow {
-		return nil
-	}
+// get reopen; in-progress sdlc runs get a close-run chip; every other
+// run kind/status gets nil. The chip routes through the same /close POST
+// the route dispatches by workflow.
+func runActions(projectID, slug string, md *run.Metadata) []runAction {
 	base := "/run/" + projectID + "/" + slug
-	switch md.Status {
-	case run.StatusInProgress:
-		return []runAction{
-			{Label: "edit idea", Href: base + "/edit"},
-			{Label: "promote to sdlc", Href: base + "/promote"},
-			{Label: "close idea", Href: base + "/close", Method: "POST"},
+	switch md.Workflow {
+	case dash.IdeaWorkflow:
+		switch md.Status {
+		case run.StatusInProgress:
+			return []runAction{
+				{Label: "edit idea", Href: base + "/edit"},
+				{Label: "promote to sdlc", Href: base + "/promote"},
+				{Label: "close idea", Href: base + "/close", Method: "POST"},
+			}
+		case run.StatusClosed:
+			return []runAction{
+				{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+			}
 		}
-	case run.StatusClosed:
-		return []runAction{
-			{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+	case promotedWorkflow:
+		if md.Status == run.StatusInProgress {
+			return []runAction{
+				{Label: "close run", Href: base + "/close", Method: "POST"},
+			}
 		}
-	default:
-		return nil
 	}
+	return nil
 }
 
 // fillRunRow populates RowNote / RowWhen from the dash-row lookup.
@@ -343,9 +411,15 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	s.fillRunRow(&vm, projectID, slug, now)
-	// No Actions: a live-parented run is by definition not an idea
-	// (idea runs don't host a PTY), and idea is the only workflow
-	// that surfaces affordances today.
+	// A live-parented run is an sdlc run (serve only spawns sdlc), which
+	// now carries a close-run chip once it's exited and idle next to its
+	// sandbox — so gate the chip on the on-disk metadata rather than
+	// assuming "live ⇒ no actions". A load failure just drops the chip.
+	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
+		s.logf("run page %s: load for actions: %v", id, err)
+	} else {
+		vm.Actions = runActions(projectID, slug, md)
+	}
 	return vm
 }
 

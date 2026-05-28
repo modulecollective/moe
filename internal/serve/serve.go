@@ -100,6 +100,19 @@ type Options struct {
 	// when a serve-parented run exits. Empty disables notifications.
 	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
 	NotifyURL string
+
+	// CloseRun closes an in-progress non-idea (sdlc) run in-process:
+	// the full cli close pipeline — workspace release, follow-up/lore
+	// harvest, status flip, trailered commit — run with --no-edit
+	// semantics. cli/serve.go wires this to the cli close core so the
+	// serve package stays free of the workflow registry and the
+	// cli-resident teardown helpers.
+	//
+	// Returns *runopen.NotClosableError when the run's state forbids a
+	// close (pushed, already terminal, wrong workflow); the close route
+	// maps that to 409 and anything else to 500. Absent means the close
+	// route returns 500 for sdlc runs (idea closes don't need it).
+	CloseRun func(project, run string) error
 }
 
 // Server owns the HTTP listener and the registry of live PTY
@@ -215,7 +228,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
 	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleIdeaEditForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
-	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleIdeaClose)
+	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
 
 	// Static assets are embedded under static/; strip the URL prefix

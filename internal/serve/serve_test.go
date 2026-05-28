@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 )
 
 func TestDashRouteRendersBuckets(t *testing.T) {
@@ -712,9 +714,11 @@ func TestPromotePageRefusesNonIdea(t *testing.T) {
 	}
 }
 
-// TestIdeaPageHiddenActionsForNonIdea: a non-idea run on disk renders
-// no Actions block and no /promote or /edit links.
-func TestIdeaPageHiddenActionsForNonIdea(t *testing.T) {
+// TestSDLCPageRendersCloseChipNotIdeaAffordances: an in-progress sdlc
+// run surfaces the close-run chip (POST /close) but none of the
+// idea-only affordances (edit/promote) — those must not leak across
+// workflows.
+func TestSDLCPageRendersCloseChipNotIdeaAffordances(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 
@@ -726,14 +730,221 @@ func TestIdeaPageHiddenActionsForNonIdea(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
+	for _, want := range []string{
+		`<section class="actions">`,
+		`<form method="post" action="/run/alpha/fix-it/close"`,
+		`>close run</button>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sdlc page missing %q\n%s", want, body)
+		}
+	}
 	for _, banned := range []string{
 		`href="/run/alpha/fix-it/promote"`,
 		`href="/run/alpha/fix-it/edit"`,
-		`<section class="actions">`,
 	} {
 		if strings.Contains(body, banned) {
-			t.Errorf("non-idea page must not render actions (found %q)\n%s", banned, body)
+			t.Errorf("sdlc page must not render idea affordance %q\n%s", banned, body)
 		}
+	}
+}
+
+// TestSDLCPageHidesCloseChipForTerminalRun: a merged (or otherwise
+// terminal) sdlc run is past closing, so the chip drops — the action
+// builder gates on in_progress.
+func TestSDLCPageHidesCloseChipForTerminalRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "shipped", "sdlc")
+	md, err := run.Load(root, "alpha", "shipped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusMerged
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/shipped", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, banned := range []string{
+		`<section class="actions">`,
+		`action="/run/alpha/shipped/close"`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("terminal sdlc page must not render the close chip (found %q)\n%s", banned, body)
+		}
+	}
+}
+
+// TestLiveParentedSDLCRunShowsCloseChip: even on the live-parented
+// render path (an exited child still in the registry), the per-run page
+// gates the close-run chip on the on-disk metadata rather than assuming
+// "parented ⇒ no actions".
+func TestLiveParentedSDLCRunShowsCloseChip(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	exited := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})}
+	close(exited.done)
+	s.children.all["alpha/fix-it"] = exited
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `>close run</button>`) {
+		t.Errorf("live-parented sdlc page should show the close-run chip:\n%s", rr.Body.String())
+	}
+}
+
+// TestCloseRouteClosesSDLCRunAndRedirects: an in-progress sdlc run
+// closes through the CloseRun callback and redirects, dropping the
+// lingering exited-child registry entry so the dash badge clears.
+func TestCloseRouteClosesSDLCRunAndRedirects(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+
+	var gotProject, gotRun string
+	called := 0
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		CloseRun: func(project, runID string) error {
+			called++
+			gotProject, gotRun = project, runID
+			return nil
+		},
+	})
+	// An exited child sitting idle in the registry — the common
+	// grooming state. Close must drop it on success.
+	exited := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})}
+	close(exited.done)
+	s.children.all["alpha/fix-it"] = exited
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/fix-it" {
+		t.Fatalf("Location=%q", got)
+	}
+	if called != 1 || gotProject != "alpha" || gotRun != "fix-it" {
+		t.Fatalf("CloseRun called=%d project=%q run=%q", called, gotProject, gotRun)
+	}
+	if _, ok := s.children.get("alpha/fix-it"); ok {
+		t.Errorf("exited child entry should be dropped after a successful close")
+	}
+}
+
+// TestCloseRouteRefusesPushedSDLCRun: a *runopen.NotClosableError from
+// the callback (pushed / terminal / wrong workflow) maps to 409 and
+// surfaces the steering message in the body.
+func TestCloseRouteRefusesPushedSDLCRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		CloseRun: func(project, runID string) error {
+			return &runopen.NotClosableError{Reason: "sdlc alpha/fix-it is pushed — close the PR on GitHub and run `moe sync` to reconcile"}
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "moe sync") {
+		t.Errorf("409 body should carry the steering message, got: %s", rr.Body.String())
+	}
+}
+
+// TestCloseRouteRefusesLiveChild: a live PTY child means the agent is
+// mid-turn; close refuses with 409 and never reaches the callback, and
+// the registry entry survives.
+func TestCloseRouteRefusesLiveChild(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	called := false
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		CloseRun: func(project, runID string) error {
+			called = true
+			return nil
+		},
+	})
+	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
+	s.children.all["alpha/fix-it"] = live
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Errorf("CloseRun must not run while a live child exists")
+	}
+	if _, ok := s.children.get("alpha/fix-it"); !ok {
+		t.Errorf("live child entry must survive a refused close")
+	}
+}
+
+// TestCloseRouteCanvasEmptyMapsTo500: the canvas-empty gate (and any
+// other non-state failure) comes back as a plain error from the
+// callback, which the route maps to 500 — distinct from the 409 state
+// refusals.
+func TestCloseRouteCanvasEmptyMapsTo500(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		CloseRun: func(project, runID string) error {
+			return errors.New("sdlc alpha/fix-it: canvas projects/alpha/runs/fix-it/documents/code/content.md is empty")
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "is empty") {
+		t.Errorf("500 body should carry the canvas-empty message, got: %s", rr.Body.String())
+	}
+}
+
+// TestCloseRouteSDLCWithoutCallbackIs500: an sdlc close on a server with
+// no CloseRun wired can't proceed — 500 rather than a silent no-op
+// redirect.
+func TestCloseRouteSDLCWithoutCallbackIs500(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
