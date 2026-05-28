@@ -7,16 +7,34 @@ to where each term is anchored.
 
 ## Inclusion bar
 
-A term earns an entry when **either**:
+A term earns an entry when an operator talking about MoE at the
+product level would reach for it — the vocabulary a PM, a PR
+writer, or a new operator would need to discuss what the project
+is and how it works. Concretely: the term appears load-bearing in
+2+ twin docs and names a *concept* operators use, not an
+implementation seam.
 
-- it appears load-bearing in **2+ twin docs**, **or**
-- it names a **code seam** the twin discusses — a package,
-  command, struct, or commit trailer.
+CLI verbs (`moe serve`, `moe dash`, `moe sync`) qualify because
+they're operator-facing.
 
-A term that appears in one doc stays in that doc. Generic nouns
-("the agent", "the operator") do not earn entries. Acronyms
-follow the same rule: project-specific short forms belong;
-general programming acronyms do not.
+The test: can you explain why MoE is the way it is without the
+term? If no, it belongs.
+
+### What doesn't earn an entry
+
+- `internal/*` packages — they belong in `architecture.md` prose
+  where each seam is situated.
+- Struct names, struct field names, typed errors — code shape,
+  not product vocabulary.
+- Hook names, exported method names, callback shapes — same
+  reason; the home doc is `architecture.md` or `patterns.md`,
+  not the glossary.
+- Generic nouns ("the agent", "the operator") — too general,
+  unless your project means something specific by them (and even
+  then, the 2+ docs bar still applies).
+- General programming acronyms — not project-specific.
+
+A term that appears in one doc stays in that doc.
 
 ## What to do
 
@@ -26,11 +44,14 @@ general programming acronyms do not.
   patterns, operations, roadmap — every term those stages used
   load-bearingly is a glossary candidate. The prior canvases
   in this run are the freshest source.
-- **Promote new terms.** A term that hit the bar in 2+ docs gets
-  a new entry: `### Term`, 1–3 sentences, pointer back to the
-  home doc by **section heading** (never line number).
+- **Promote new terms.** A term that hit the bar (2+ docs,
+  product-level concept) gets a new entry: `### Term`, 1–3
+  sentences, pointer back to the home doc by **section heading**
+  (never line number).
 - **Retire stale entries.** A term whose home no longer mentions
-  it, or that no longer appears in 2+ docs, comes out.
+  it, or that no longer appears in 2+ docs, or that turns out to
+  be an implementation seam rather than a product concept, comes
+  out.
 - **Normalize synonyms.** When prose has drifted apart (the same
   thing called two names in different docs), pick the glossary
   form and update the home docs to match. Cite the changes on
@@ -45,6 +66,10 @@ be slow-moving — a quiet pass is the common case.
   compresses + points.
 - **Don't reach for line numbers.** Line numbers rot; section
   headings survive.
+- **Don't smuggle in implementation vocabulary.** If the term
+  names a package, struct, error, or callback, the home is
+  `architecture.md` prose, not the glossary — even when the
+  term appears across multiple docs.
 - **Don't smuggle in generic vocabulary.** "Agent" is generic
   unless your project means something specific by it (and even
   then, the inclusion bar still applies).
@@ -70,7 +95,7 @@ be slow-moving — a quiet pass is the common case.
 ## How to work with the operator
 
 - **Show the sightings.** When you promote, name the 2+ docs the
-  term appears in (or the code seam it names).
+  term appears in.
 - **Walk normalizations carefully.** Renaming a term across home
   docs is a structural edit — surface what you're changing
   before applying.
