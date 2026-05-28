@@ -218,6 +218,17 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	}
 }
 
+// With acquires the repo-wide lock, runs fn, and releases. fn's error
+// (or an acquire error) is returned.
+func With(root string, opts Options, fn func() error) error {
+	l, err := Acquire(root, opts)
+	if err != nil {
+		return err
+	}
+	defer l.Release()
+	return fn()
+}
+
 // Release removes the lock file and stops the heartbeat goroutine (if
 // any). Safe on a nil receiver and idempotent — calling twice is a
 // no-op after the first success.

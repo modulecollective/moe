@@ -42,7 +42,7 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 		i := i
 		go func() {
 			defer wg.Done()
-			err := withRepoLock(root, repolock.Options{
+			err := repolock.With(root, repolock.Options{
 				Purpose:    "run-new",
 				Budget:     30 * 1_000_000_000, // 30s in ns
 				BackoffCap: 10_000_000,         // 10ms

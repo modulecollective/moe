@@ -76,7 +76,7 @@ func Open(root, projectID string, opts run.Options) (*run.Metadata, error) {
 		runRef = projectID + "/" + opts.ID
 	}
 	var md *run.Metadata
-	err := withRepoLock(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     runRef,
 	}, func() error {
@@ -179,7 +179,7 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 			Workflow:   dash.IdeaWorkflow,
 			PromotedTo: dest.Project + "/" + dest.ID,
 		}.String()
-	return withRepoLock(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "idea-promote",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
@@ -208,7 +208,7 @@ func CloseIdea(root, projectID, slug string) error {
 			Project:  projectID,
 			Workflow: dash.IdeaWorkflow,
 		}.String()
-	return withRepoLock(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "idea-close",
 		Run:     projectID + "/" + slug,
 	}, func() error {
@@ -251,7 +251,7 @@ func ReopenIdea(root, projectID, slug string) error {
 			Project:  projectID,
 			Workflow: dash.IdeaWorkflow,
 		}.String()
-	return withRepoLock(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "idea-reopen",
 		Run:     projectID + "/" + slug,
 	}, func() error {
@@ -347,22 +347,10 @@ func EditIdea(root, projectID, slug, body string) error {
 			Workflow: dash.IdeaWorkflow,
 			Document: dash.IdeaDocID,
 		}.String()
-	return withRepoLock(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
 	}, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
-}
-
-// withRepoLock acquires the bureaucracy-wide lock at <root>/.moe/lock,
-// runs fn, releases. Mirrors internal/cli/repolock.go's wrapper;
-// duplicated here so runopen has no cli dependency.
-func withRepoLock(root string, opts repolock.Options, fn func() error) error {
-	l, err := repolock.Acquire(root, opts)
-	if err != nil {
-		return err
-	}
-	defer l.Release()
-	return fn()
 }

@@ -208,7 +208,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		SeedDocs: map[string]string{dash.IdeaDocID: string(body)},
 	}
 	var md *run.Metadata
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-new",
 		Run:     projectID + "/" + slug,
 	}, func() error {
@@ -341,7 +341,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 			Workflow: dash.IdeaWorkflow,
 			Document: dash.IdeaDocID,
 		}.String()
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
 	}, func() error {
@@ -478,7 +478,7 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 			IdeaMovedFrom: fromProject + "/" + slug,
 		}.String()
 
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-move",
 		Run:     toProject + "/" + slug,
 	}, func() error {

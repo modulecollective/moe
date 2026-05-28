@@ -968,7 +968,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
 	var sess *session.Session
-	err := withRepoLock(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose:   in.LockPurpose + "-open",
 		Run:       in.Project + "/" + in.RunSlug,
 		Heartbeat: true,
@@ -987,7 +987,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 		return nil, nil, err
 	}
 	closeSess := func(okToPush bool) error {
-		return withRepoLock(root, repolock.Options{
+		return repolock.With(root, repolock.Options{
 			Purpose:   in.LockPurpose + "-close",
 			Run:       in.Project + "/" + in.RunSlug,
 			Heartbeat: true,

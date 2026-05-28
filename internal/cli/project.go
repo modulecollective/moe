@@ -56,7 +56,7 @@ func runProjectAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var md *project.Metadata
-	err = withRepoLock(root, repolock.Options{Purpose: "project-add"}, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "project-add"}, func() error {
 		m, err := project.Register(root, url, project.Options{})
 		if err != nil {
 			return err
@@ -149,7 +149,7 @@ func runProjectRemove(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "       remove each with `moe workspace remove %s <name>` first\n", id)
 		return 1
 	}
-	err = withRepoLock(root, repolock.Options{Purpose: "project-remove"}, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "project-remove"}, func() error {
 		return project.Unregister(root, id)
 	})
 	if err != nil {

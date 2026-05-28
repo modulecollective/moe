@@ -137,7 +137,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		Agent:    *agentOverride,
 	}
 	var md *run.Metadata
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     projectID,
 	}, func() error {

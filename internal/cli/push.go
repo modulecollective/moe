@@ -392,7 +392,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 				Document: "push",
 				PR:       url,
 			}.String()
-		err := withRepoLock(root, repolock.Options{
+		err := repolock.With(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
 		}, func() error {
@@ -427,7 +427,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// editor pops on followups.md before harvest just like close.
 	priorStatus := md.Status
 	var paths []string
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
@@ -475,7 +475,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			Document: "push",
 			Merged:   tipSHA,
 		}.String()
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {

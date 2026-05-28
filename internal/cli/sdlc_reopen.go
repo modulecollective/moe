@@ -179,7 +179,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var md *run.Metadata
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     projectID,
 	}, func() error {

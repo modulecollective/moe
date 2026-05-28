@@ -45,7 +45,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	// reconcile pushed runs → push). Hold the repo lock for the whole
 	// sequence so two syncs don't clobber each other mid-flight.
 	// Heartbeat is on because sync can sit on the network for a while.
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose:   "sync",
 		Budget:    repolock.CronBudget,
 		Heartbeat: true,

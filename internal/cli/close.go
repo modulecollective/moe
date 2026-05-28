@@ -184,7 +184,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 			Project:  projectID,
 			Workflow: workflow,
 		}.String()
-	err = withRepoLock(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 	}, func() error {

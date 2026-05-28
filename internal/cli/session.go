@@ -84,7 +84,7 @@ func runSessionAbandon(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	err = withRepoLock(root, repolock.Options{Purpose: "session-abandon"}, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "session-abandon"}, func() error {
 		s, err := session.FindByBranch(root, branch)
 		if err != nil {
 			return err
@@ -114,7 +114,7 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	err = withRepoLock(root, repolock.Options{Purpose: "session-resolve"}, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "session-resolve"}, func() error {
 		s, err := session.FindByBranch(root, branch)
 		if err != nil {
 			return err
@@ -172,7 +172,7 @@ func runSessionGC(args []string, stdout, stderr io.Writer) int {
 
 	var reaped []string
 	var reapErrs []string
-	err = withRepoLock(root, repolock.Options{Purpose: "session-gc"}, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "session-gc"}, func() error {
 		regs, err := findOrphanSessions(root)
 		if err != nil {
 			return err
