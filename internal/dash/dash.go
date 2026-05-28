@@ -37,6 +37,18 @@ const (
 	IdeaDocID    = "idea"
 )
 
+// ChatWorkflow and ChatDocID are the chat workflow's cross-cutting
+// contract, the same shape as the idea pair: the workflow name written
+// to run.json and the doc id for the single chat stage. dash needs the
+// workflow name to recognise chat runs in classify (chat is never
+// "done" — see there), and the doc id as the bare stage name for the
+// factory-art glyph and the open-session marker. The cli chat consts
+// alias these so the string lives in exactly one place.
+const (
+	ChatWorkflow = "chat"
+	ChatDocID    = "chat"
+)
+
 // DormantCutoff is the staleness threshold for the ACTIVE section.
 // A run with no MoE-Run-scoped commit in this window is considered
 // dormant and hidden unless the caller passes All=true.
@@ -298,13 +310,20 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 		return BucketCompletedRuns, prefix + "merged", "", ""
 	case run.StatusClosed:
 		note := prefix + "closed"
+		switch {
 		// sdlc-only: reopen is an sdlc verb, so marking non-sdlc closed
 		// runs would advertise an action the operator can't take.
 		// Closed runs whose MoE-Reopen-Of chain is unextended are the
 		// candidates the operator might still want to carry forward —
 		// reduxes that previously needed a fresh `*-redux` slug.
-		if md.Workflow == "sdlc" && !hasBeenReopened(idx, md.ID) {
+		case md.Workflow == "sdlc" && !hasBeenReopened(idx, md.ID):
 			note += " · reopen?"
+		// chat close is a soft archive: re-entering a closed chat
+		// reopens-and-continues the same thread (see classify's
+		// in-progress chat note and openChat). Always advertise it —
+		// chat has no reopen-chain to exhaust, so no hasBeenReopened gate.
+		case md.Workflow == ChatWorkflow:
+			note += " · resume?"
 		}
 		return BucketCompletedRuns, note, "", ""
 	case run.StatusPromoted:
@@ -312,6 +331,20 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 	}
 	if md.Status != run.StatusInProgress {
 		return BucketNone, "", "", ""
+	}
+	// chat is a perpetually-resumable thinking thread with only two
+	// honest states — open (resumable) and closed (archived,
+	// re-enterable) — so it is never "done". Whether the operator has
+	// chatted yet (next stage "chat") or walked the single stage (the
+	// dec.Done case below), an in-progress chat is one thing: open,
+	// resumable. Special-cased before the dec.Done branch so it never
+	// renders the `done · close?` nag that's load-bearing for
+	// multi-stage workflows (sdlc/twin/kb). No next-stage decision is
+	// needed; the live open-session marker is preserved like any active
+	// row.
+	if md.Workflow == ChatWorkflow {
+		runningDoc := winningRunningDoc(openSessionDocs, ChatDocID)
+		return BucketActiveRuns, prefix + "open · resume?" + openSessionMarker(runningDoc, ChatDocID), ChatDocID, runningDoc
 	}
 	dec, ok := nextByRun[md.ID]
 	if !ok {

@@ -2,13 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestChatRegistered partners with TestAuditRegistered / TestMetaMoeRegistered:
@@ -176,4 +179,111 @@ func readChatCanvas(t *testing.T, root string, md *run.Metadata) string {
 		t.Fatalf("read chat canvas: %v", err)
 	}
 	return string(body)
+}
+
+// stubStageSession swaps runStageSession for a no-op that records
+// whether it ran and which doc it was handed, restoring the original on
+// cleanup. Lets the reopen tests assert the flip happened before the
+// session opened without spinning a real session worktree.
+func stubStageSession(t *testing.T, opened *bool) {
+	t.Helper()
+	prev := runStageSession
+	runStageSession = func(_, _, docID string, _ stageSessionOpts, _, _ io.Writer) int {
+		*opened = true
+		if docID != chatDoc {
+			t.Fatalf("docID=%q want %q", docID, chatDoc)
+		}
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+}
+
+// TestOpenChatReopensClosedRun is the auto-reopen path: re-entering a
+// closed chat flips it back to in_progress, announces the revival, and
+// falls through to open the session — close is a soft archive, not a
+// one-way door, and there is no separate reopen verb.
+func TestOpenChatReopensClosedRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusClosed)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var opened bool
+	stubStageSession(t, &opened)
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !opened {
+		t.Fatal("session was not opened after reopen")
+	}
+	if !strings.Contains(out.String(), "reopened moe/ponder") {
+		t.Fatalf("missing reopen notice: %q", out.String())
+	}
+	md, err := run.Load(root, "moe", "ponder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("status=%q want %q", md.Status, run.StatusInProgress)
+	}
+	// The shared runopen.Reopen lands a chat-flavoured commit so the
+	// revival stays greppable per workflow.
+	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
+	for _, want := range []string{"Reopen chat moe/ponder", "MoE-Run: ponder", "MoE-Project: moe", "MoE-Workflow: chat"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit message missing %q\n%s", want, msg)
+		}
+	}
+}
+
+// TestOpenChatInProgressResumesWithoutReopen: an already-open run is a
+// plain resume — no flip, no reopen notice.
+func TestOpenChatInProgressResumesWithoutReopen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var opened bool
+	stubStageSession(t, &opened)
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !opened {
+		t.Fatal("session was not opened")
+	}
+	if strings.Contains(out.String(), "reopened") {
+		t.Fatalf("in-progress resume should not print a reopen notice: %q", out.String())
+	}
+}
+
+// TestOpenChatRefusesUnexpectedStatus: chat never pushes, so a non-
+// closed terminal status shouldn't occur — if it does, refuse loud
+// rather than guessing, and do not open the session.
+func TestOpenChatRefusesUnexpectedStatus(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusPushed)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var opened bool
+	stubStageSession(t, &opened)
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 1 {
+		t.Fatalf("exit=%d want 1; stderr=%q", code, errb.String())
+	}
+	if opened {
+		t.Fatal("session must not open on an unexpected status")
+	}
+	if !strings.Contains(errb.String(), "unexpected status") {
+		t.Fatalf("missing refusal message: %q", errb.String())
+	}
 }

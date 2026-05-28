@@ -214,3 +214,86 @@ func TestChainHintChildMissingFromDisk(t *testing.T) {
 		t.Errorf("ghost child: hint = %q, want empty", got)
 	}
 }
+
+// rowsByKey runs BuildRows and returns the rows keyed by
+// "<project>/<run>" so a test can assert one run's bucket and note
+// without depending on section order.
+func rowsByKey(t *testing.T, runs []*run.Metadata, next map[string]NextDecision, sessionDocs map[string][]string) map[string]Row {
+	t.Helper()
+	rows, err := BuildRows(Inputs{
+		Now:              time.Now().UTC(),
+		Runs:             runs,
+		Index:            &run.JournalIndex{},
+		NextByRun:        next,
+		SessionDocsByRun: sessionDocs,
+	})
+	if err != nil {
+		t.Fatalf("BuildRows: %v", err)
+	}
+	m := make(map[string]Row, len(rows))
+	for _, r := range rows {
+		m[r.Project+"/"+r.Run] = r
+	}
+	return m
+}
+
+// TestChatInProgressRendersOpenResumeNeverDone is the core of the
+// "chat is never done" change: whether the operator has never chatted
+// (next stage "chat") or has walked the single stage (Done), an
+// in-progress chat renders one resumable ACTIVE row — never the
+// `done · close?` nag that fires for multi-stage workflows.
+func TestChatInProgressRendersOpenResumeNeverDone(t *testing.T) {
+	md := &run.Metadata{ID: "ponder", Project: "moe", Workflow: ChatWorkflow, Status: run.StatusInProgress}
+	for name, dec := range map[string]NextDecision{
+		"never-chatted": {Stage: ChatDocID},
+		"chatted-done":  {Done: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, ok := rowsByKey(t, []*run.Metadata{md}, map[string]NextDecision{"ponder": dec}, nil)["moe/ponder"]
+			if !ok {
+				t.Fatal("chat run missing from rows")
+			}
+			if r.Bucket != BucketActiveRuns {
+				t.Fatalf("bucket=%v want ACTIVE", r.Bucket)
+			}
+			if r.Note != "chat:open · resume?" {
+				t.Fatalf("note=%q want %q", r.Note, "chat:open · resume?")
+			}
+			if strings.Contains(r.Note, "done") {
+				t.Fatalf("chat note must never say done: %q", r.Note)
+			}
+			if r.Stage != ChatDocID {
+				t.Fatalf("stage=%q want %q (factory-art glyph)", r.Stage, ChatDocID)
+			}
+		})
+	}
+}
+
+// TestChatInProgressPreservesRunningMarker: a chat row with an open
+// session keeps the live `[running]` marker, same as any active row.
+func TestChatInProgressPreservesRunningMarker(t *testing.T) {
+	md := &run.Metadata{ID: "ponder", Project: "moe", Workflow: ChatWorkflow, Status: run.StatusInProgress}
+	r := rowsByKey(t, []*run.Metadata{md},
+		map[string]NextDecision{"ponder": {Stage: ChatDocID}},
+		map[string][]string{"ponder": {ChatDocID}})["moe/ponder"]
+	if r.Note != "chat:open · resume? [running]" {
+		t.Fatalf("note=%q want %q", r.Note, "chat:open · resume? [running]")
+	}
+	if r.RunningDoc != ChatDocID {
+		t.Fatalf("runningDoc=%q want %q", r.RunningDoc, ChatDocID)
+	}
+}
+
+// TestChatClosedRendersResumeInCompleted: a closed chat stays in
+// COMPLETED (close is a soft archive) but advertises `· resume?` —
+// re-entry is cheap. No hasBeenReopened gate; chat has no reopen chain.
+func TestChatClosedRendersResumeInCompleted(t *testing.T) {
+	md := &run.Metadata{ID: "ponder", Project: "moe", Workflow: ChatWorkflow, Status: run.StatusClosed}
+	r := rowsByKey(t, []*run.Metadata{md}, nil, nil)["moe/ponder"]
+	if r.Bucket != BucketCompletedRuns {
+		t.Fatalf("bucket=%v want COMPLETED", r.Bucket)
+	}
+	if r.Note != "chat:closed · resume?" {
+		t.Fatalf("note=%q want %q", r.Note, "chat:closed · resume?")
+	}
+}

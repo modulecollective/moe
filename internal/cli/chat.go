@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 )
 
 // The chat workflow is the bureaucracy's "just think about a project"
@@ -42,14 +44,16 @@ import (
 // cascade if any tracked file in the clone changed — the hard gate
 // against source edits leaking out of a "just thinking" session.
 
-// chatWorkflow is the workflow name written to run.json.
-const chatWorkflow = "chat"
+// chatWorkflow is the workflow name written to run.json. Aliased from
+// dash so the string lives in one place — dash also needs it to
+// recognise chat runs on the home screen (see dash.ChatWorkflow).
+const chatWorkflow = dash.ChatWorkflow
 
 // chatDoc is the document id for the single chat stage. Canvas lives at
 // projects/<p>/runs/<r>/documents/chat/content.md. The stage verb and
 // the workflow share the name, so the resume invocation reads
-// `moe chat chat <project>/<run>`.
-const chatDoc = "chat"
+// `moe chat chat <project>/<run>`. Aliased from dash.ChatDocID.
+const chatDoc = dash.ChatDocID
 
 // chatCanvasHeader is the fixed preamble moe writes the first time a
 // chat canvas is opened. The session markers append below the
@@ -147,7 +151,15 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 // oneshot.md fragment. The cascade dispatcher is still registered (see
 // chat_stages.go) for surface uniformity, but it routes here and always
 // opens an interactive REPL.
+//
+// A closed run is reopened-and-continued in one step before the session
+// opens (reopenClosedChat): close is a soft archive for chat, and
+// re-entering is the reopen — there is no separate `moe chat reopen`
+// verb.
 func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) int {
+	if code := reopenClosedChat(projectID, runID, stdout, stderr); code != 0 {
+		return code
+	}
 	const kickoff = "The operator just opened a chat session about this project — you are " +
 		"their thinking partner here, not an implementer. Read the chat canvas first " +
 		"(it's a moe-written session log; you don't edit it), then orient yourself with " +
@@ -166,6 +178,46 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 				return chatCanvasOnOpen(workRoot, md, resolveAgentName(agentOverride, md.Agent))
 			},
 		}, stdout, stderr)
+}
+
+// reopenClosedChat flips a closed chat run back to in_progress before
+// the session opens, so re-entering a closed thread reopens-and-continues
+// in one step — close is a soft archive, not a one-way door. The flip is
+// scoped to the chat verb's own entry (here) rather than runStageSession,
+// which must not silently revive other workflows on stage re-entry.
+//
+// chat never pushes, so closed is the only terminal status reachable: an
+// in-progress run falls straight through to a plain resume, a closed run
+// is flipped (via the shared runopen.Reopen) and announced, and any other
+// status refuses loud rather than guessing. A non-zero return is a hard
+// failure (root/load/flip error or unexpected status); 0 means "carry on
+// and open the session". The transcript lives in the bureaucracy and
+// survives close, and NeedsSandbox re-mints the read-only clone if
+// `moe clone gc` reaped it, so the conversation continues either way.
+func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "chat: %v\n", err)
+		return 1
+	}
+	switch md.Status {
+	case run.StatusInProgress:
+		return 0
+	case run.StatusClosed:
+		if err := runopen.Reopen(root, md); err != nil {
+			moePrintf(stderr, "chat: reopen %s/%s: %v\n", projectID, runID, err)
+			return 1
+		}
+		moePrintf(stdout, "reopened %s/%s\n", projectID, runID)
+		return 0
+	default:
+		moePrintf(stderr, "chat: %s/%s has unexpected status %q; cannot resume\n", projectID, runID, md.Status)
+		return 1
+	}
 }
 
 // chatCanvasOnOpen seeds (turn one) or appends to (every resume) the
