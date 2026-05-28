@@ -304,6 +304,36 @@ echo "WS=${MOE_WORKSPACE:-NONE}"
 	}
 }
 
+// TestDevEnvSetupEnvExportsMoeBureaucracy: the bureaucracy root flows
+// through as MOE_BUREAUCRACY so setup scripts can read project metadata
+// (project.json, hooks/, etc.) without walking up from MOE_SANDBOX.
+// Pre-push hooks already see this var; this test pins the dev-env side.
+func TestDevEnvSetupEnvExportsMoeBureaucracy(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+echo "BUR=${MOE_BUREAUCRACY:-MISSING}"
+`
+	if err := os.WriteFile(filepath.Join(hookDir, "10-bur.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workTree := t.TempDir()
+	md := &run.Metadata{ID: "x", Project: projID, Workflow: "sdlc"}
+
+	env, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["BUR"] != root {
+		t.Fatalf("BUR = %q; expected MOE_BUREAUCRACY=%q to flow through", env["BUR"], root)
+	}
+}
+
 // TestDevEnvSetupEnvLaterScriptSeesEarlierVars: scripts run in lex
 // order and later ones see earlier ones' exports — projects can
 // layer state across scripts.

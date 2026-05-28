@@ -211,7 +211,7 @@ func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.W
 		// myapp_dev_foo") on stderr — KEY=VALUE goes via stdout — so
 		// indenting groups them visually under the script that wrote
 		// them. IndentStderr passes through on non-TTY destinations.
-		out, runErr := runDevEnvSetupScript(filepath.Join(dir, script), workTree, md, env, banner.IndentStderr(stderr))
+		out, runErr := runDevEnvSetupScript(filepath.Join(dir, script), root, workTree, md, env, banner.IndentStderr(stderr))
 		banner.HookDone(stdout, script, time.Since(start))
 		if runErr != nil {
 			return nil, runErr
@@ -231,10 +231,10 @@ func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.W
 // captured stdout. Earlier scripts' vars are exported into later
 // scripts' env so a multi-script chain can layer state — e.g.,
 // 10-port.sh emits PORT, 20-db.sh reads PORT.
-func runDevEnvSetupScript(path, workTree string, md *run.Metadata, accumulated map[string]string, stderr io.Writer) (string, error) {
+func runDevEnvSetupScript(path, root, workTree string, md *run.Metadata, accumulated map[string]string, stderr io.Writer) (string, error) {
 	cmd := exec.Command(path)
 	cmd.Dir = workTree
-	cmd.Env = append(devEnvBaseEnv(workTree, md), mapToEnv(accumulated)...)
+	cmd.Env = append(devEnvBaseEnv(root, workTree, md), mapToEnv(accumulated)...)
 	var stdoutBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = stderr
@@ -272,7 +272,7 @@ func runDevEnvScripts(root, eventDirRel, workTree string, md *run.Metadata, cach
 		// own layout.
 		cmd := exec.Command(filepath.Join(dir, script))
 		cmd.Dir = workTree
-		cmd.Env = append(devEnvBaseEnv(workTree, md), mapToEnv(cached)...)
+		cmd.Env = append(devEnvBaseEnv(root, workTree, md), mapToEnv(cached)...)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		runErr := cmd.Run()
@@ -318,16 +318,18 @@ func listExecutables(dir string) ([]string, error) {
 
 // devEnvBaseEnv is the minimum env every dev-env script (setup or
 // teardown) sees: the operator's environment plus the MOE_* vars
-// keyed off the run. MOE_WORKSPACE is set if and only if the run uses
-// a named workspace — scripts branch on its presence to do different
-// setup for sandbox vs workspace runs.
-func devEnvBaseEnv(workTree string, md *run.Metadata) []string {
+// keyed off the run. MOE_BUREAUCRACY is the calling bureaucracy root
+// (always set, same shape pre-push uses); MOE_WORKSPACE is set if and
+// only if the run uses a named workspace — scripts branch on its
+// presence to do different setup for sandbox vs workspace runs.
+func devEnvBaseEnv(root, workTree string, md *run.Metadata) []string {
 	base := append([]string(nil), os.Environ()...)
 	base = append(base,
 		"MOE_PROJECT="+md.Project,
 		"MOE_RUN="+md.ID,
 		"MOE_WORKFLOW="+md.Workflow,
 		"MOE_SANDBOX="+workTree,
+		"MOE_BUREAUCRACY="+root,
 	)
 	if md.Workspace != "" {
 		base = append(base, "MOE_WORKSPACE="+md.Workspace)

@@ -55,10 +55,10 @@ The existing dev-env.d/* scripts set the bar; new scripts match it:
   else goes to stderr. `dev-env-teardown.d/*` and `pre-push.d/*` are
   stream-through (stdout/stderr both reach the operator's terminal).
 - Read the `MOE_*` env vars exported by the harness (`MOE_PROJECT`,
-  `MOE_RUN`, `MOE_SANDBOX`, optionally `MOE_WORKSPACE`,
-  `MOE_TARGET_BRANCH`) — they're the contract for "which run is this,
-  where is its tree, what branch is it about to push against." Don't
-  reach outside that contract.
+  `MOE_RUN`, `MOE_BUREAUCRACY`, `MOE_SANDBOX`, optionally
+  `MOE_WORKSPACE`, `MOE_TARGET_BRANCH`) — they're the contract for
+  "which run is this, where is its tree, what branch is it about to
+  push against." Don't reach outside that contract.
 - `dev-env.d/*` must not mutate tracked files in the project repo
   (`$MOE_SANDBOX`). Setup work belongs in external locations the
   script owns — emit a path on stdout (e.g. `MOE_DEV_TMPDIR=...`) and
