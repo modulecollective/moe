@@ -166,10 +166,12 @@ interactive Codex sessions can fail when Git needs to write
 | --- | --- | --- |
 | `sdlc` | `design` -> `code` -> `test` -> `push` | designed code changes with a ship gate |
 | `audit` | `plan` -> `report` | fresh-eyes review that files feedback but does not push code |
+| `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
 | `kb` | `research` -> `summarize` | project knowledge articles |
 | `idea` | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `roadmap` -> `glossary` -> `finalize` | recorded project intent |
 | `hooks` | `code` | project-specific hook scripts |
+| `chores` | `code` | edit project chore definitions: what maintenance is due, and the run each one opens |
 | `meta-moe` | `report` | feedback about MoE itself |
 
 ### SDLC
@@ -226,6 +228,26 @@ project, prior canvases, and digital twin, then writes ranked findings and files
 followups, twin observations, or lore through the normal feedback channels. It
 has no push stage.
 
+### Chat
+
+`moe chat` is a thinking-partner workflow, not a coding or shipping one:
+
+```sh
+moe chat new [--workspace <name>] [--agent <name>] <project>/<slug>
+moe chat chat [--agent <name>] <project>/<run>
+moe chat close [--no-edit] <project>/<run>
+```
+
+`new` opens the run, `chat` opens or resumes the session, and `close` archives
+it. The agent reads project source through a per-run sandbox clone but never
+edits it and never drives coding: if the conversation lands on "this needs
+building", it captures an idea and you start the SDLC ladder yourself. The run
+stays open across sittings, so re-running `chat` continues the same thread. The
+canvas is a moe-written session log; the conversation transcript is the record,
+read back with `moe chat log`. Grooming the idea backlog (`moe idea
+new|edit|close|reopen`) is the one state change a chat session makes on your
+behalf.
+
 ### Ideas
 
 `moe idea` is the cheap backlog surface:
@@ -258,6 +280,18 @@ decided out-of-band twin edit without opening a laddered run.
 for project hook scripts. `moe hook fire <project> <event>` is the fast loop:
 it creates a transient sandbox, runs one event's scripts once, prints the
 sandbox path, and exits.
+
+Chores mirror that same split. `moe chores new|code|close` is the journaled
+loop for editing chore definitions; its edits land under
+`projects/<project>/chores/*`, not in target-project source. `moe chore
+list|check|open` is the supervision/fast loop: `list` shows due chores, `check`
+dry-runs a definition's validation and due-state, and `open` opens the chore's
+configured workflow run seeded with its prompt (refusing if the chore isn't
+due, already has an open run, or is cooling down). A chore definition carries a
+`trigger` (path glob, or `*` for any merged project change), a `workflow`
+(defaults to `sdlc`), an optional `cooldown` and `cadence`, and a `prompt.md`
+seed. Due chores surface in `moe dash` under a CHORES bucket; nothing fires on
+its own, so you open a due chore when you choose to.
 
 `moe meta-moe new` and `moe meta-moe report` inspect a project's MoE history
 and produce maintainer-facing feedback about the harness itself.
@@ -325,8 +359,10 @@ The catalog below is a map, not a replacement for `moe help`.
 ### Re-Entry And Supervision
 
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
-  dashboard.
+  dashboard, including a CHORES bucket for due project chores.
 - `moe serve [--addr <host[:port]>] [--port <n>]` runs the local web UI.
+- `moe chore list|check|open` lists due project chores, dry-runs a chore
+  definition, or opens the run a due chore configures.
 - `moe where` prints the resolved bureaucracy path.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
 - `moe <workflow> log <project>/<run> [<stage>]` renders a past stage
@@ -352,11 +388,14 @@ The catalog below is a map, not a replacement for `moe help`.
 - `moe sdlc new|design|code|test|push|reopen|cat|log` drives designed
   code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
+- `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
 - `moe twin reflect|vision|architecture|patterns|operations|roadmap|glossary|finalize|claim|close|cat|log`
   maintains recorded intent.
 - `moe hooks new|code|close|cat|log` edits project hook scripts through a
+  journaled run.
+- `moe chores new|code|close|cat|log` edits project chore definitions through a
   journaled run.
 - `moe meta-moe new|report|close|cat|log` records MoE-maintenance feedback.
 
@@ -410,11 +449,19 @@ editing the markdown it reads over adding Go code.
 ## Skills
 
 Claude Code and Codex both support skills: named markdown files the backend can
-load when their description matches the situation. MoE ships `moe-bureaucracy`,
-which teaches agents how to leave followups, twin observations, and lore
-without exceeding the current stage's scope. MoE materializes the skill into
-the session's backend-specific skill directory with paths already filled in for
-the current run.
+load when their description matches the situation. MoE ships three:
+
+- `moe-bureaucracy` teaches agents how to leave traces for downstream runs:
+  followups, twin observations, and lore, without exceeding the current stage's
+  scope.
+- `moe-context` teaches agents how to read the bureaucracy as context: prior
+  runs' canvases, journal trailers for slicing by run/doc/workflow, past
+  transcripts, the twin, and lore.
+- `moe-howto` teaches agents how to capture and groom the idea backlog from a
+  chat session, the verb set chat uses on your behalf.
+
+MoE materializes the relevant skills into the session's backend-specific skill
+directory with paths already filled in for the current run.
 
 ## Status
 
