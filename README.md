@@ -1,4 +1,4 @@
-# Ministry of Everything
+# ▓▒░ MINISTRY OF EVERYTHING ░▒▓
 
 Ministry of Everything (MoE) is a CLI-first harness for one operator directing
 AI agents through durable markdown work.
@@ -95,10 +95,10 @@ conversation, then let the rest run:
 ```sh
 moe idea new my-project/add-batch-support              # jot it when it occurs to you
 moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
-moe sdlc design my-project/add-batch-support           # one design conversation
 ```
 
-When the design stage ends, MoE prints the chain prompt. Type `!!!` there to
+Promoting the idea will offer to jump into the design stage right away. When
+the design stage ends, MoE prints the chain prompt. Type `!!!` there to
 run `code`, `test`, and `push` headlessly. The five-command block above is the
 same path spelled out by hand.
 
