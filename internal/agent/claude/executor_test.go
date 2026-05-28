@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -31,17 +32,17 @@ func TestExecuteArgsIncludesAddDirsBeforeSettings(t *testing.T) {
 		AddDirs:       []string{"/tmp/moe-home", "/tmp/moe-devtmp"},
 		Prompt:        "system",
 		InitialPrompt: "go",
-	})
+	}, "/tmp/prompt.md")
 	// First flag is --session-id (NewSession=true), then --add-dir Root,
-	// then each AddDirs pair, then --settings, --append-system-prompt,
-	// and the positional prompt last.
+	// then each AddDirs pair, then --settings,
+	// --append-system-prompt-file <path>, and the positional prompt last.
 	want := []string{
 		"--session-id", "sid-1",
 		"--add-dir", "/bureaucracy",
 		"--add-dir", "/tmp/moe-home",
 		"--add-dir", "/tmp/moe-devtmp",
 		"--settings", `{"sandbox":{"enabled":true}}`,
-		"--append-system-prompt", "system",
+		"--append-system-prompt-file", "/tmp/prompt.md",
 		"go",
 	}
 	assertArgsEqual(t, args, want)
@@ -58,13 +59,13 @@ func TestExecuteArgsAddsClonePathForCodeStages(t *testing.T) {
 		Root:       "/bureaucracy",
 		ClonePath:  "/bureaucracy/.moe/clones/widget/req-1",
 		Prompt:     "system",
-	})
+	}, "/tmp/prompt.md")
 	want := []string{
 		"--session-id", "sid-1",
 		"--add-dir", "/bureaucracy",
 		"--add-dir", "/bureaucracy/.moe/clones/widget/req-1",
 		"--settings", `{"sandbox":{"enabled":true}}`,
-		"--append-system-prompt", "system",
+		"--append-system-prompt-file", "/tmp/prompt.md",
 	}
 	assertArgsEqual(t, args, want)
 }
@@ -77,12 +78,12 @@ func TestExecuteArgsResumeWhenNotNewSession(t *testing.T) {
 		NewSession: false,
 		Root:       "/bureaucracy",
 		Prompt:     "system",
-	})
+	}, "/tmp/prompt.md")
 	want := []string{
 		"--resume", "sid-2",
 		"--add-dir", "/bureaucracy",
 		"--settings", `{"sandbox":{"enabled":true}}`,
-		"--append-system-prompt", "system",
+		"--append-system-prompt-file", "/tmp/prompt.md",
 	}
 	assertArgsEqual(t, args, want)
 }
@@ -98,7 +99,7 @@ func TestExecuteOneShotArgsIncludesAddDirsBeforeSettings(t *testing.T) {
 		AddDirs:    []string{"/tmp/moe-home"},
 		Prompt:     "system",
 		UserPrompt: "user",
-	})
+	}, "/tmp/prompt.md")
 	want := []string{
 		"-p",
 		"--permission-mode", "bypassPermissions",
@@ -108,10 +109,72 @@ func TestExecuteOneShotArgsIncludesAddDirsBeforeSettings(t *testing.T) {
 		"--add-dir", "/bureaucracy",
 		"--add-dir", "/tmp/moe-home",
 		"--settings", `{"sandbox":{"enabled":true}}`,
-		"--append-system-prompt", "system",
+		"--append-system-prompt-file", "/tmp/prompt.md",
 		"user",
 	}
 	assertArgsEqual(t, args, want)
+}
+
+// TestExecuteArgsNeverInlinesPrompt is the E2BIG regression guard: the
+// assembled prompt rides as `--append-system-prompt-file <path>`, never
+// as an argv string. A multi-hundred-KB prompt (the twin-reflect case
+// that overran MAX_ARG_STRLEN) must not appear anywhere in argv, and the
+// inline `--append-system-prompt` flag must be gone. Covers both arg
+// builders.
+func TestExecuteArgsNeverInlinesPrompt(t *testing.T) {
+	huge := strings.Repeat("x", 200*1024)
+	check := func(name string, args []string) {
+		for i, a := range args {
+			if a == "--append-system-prompt" {
+				t.Errorf("%s: inline --append-system-prompt flag must be gone (args[%d])", name, i)
+			}
+			if a == huge {
+				t.Errorf("%s: prompt body leaked onto argv at args[%d]", name, i)
+			}
+		}
+		if !containsPair(args, "--append-system-prompt-file", "/tmp/prompt.md") {
+			t.Errorf("%s: missing --append-system-prompt-file /tmp/prompt.md pair: %v", name, args)
+		}
+	}
+	check("interactive", executeArgs(agent.Request{
+		SessionID: "sid", NewSession: true, Root: "/b", Prompt: huge,
+	}, "/tmp/prompt.md"))
+	check("one-shot", executeOneShotArgs(agent.OneShotRequest{
+		Root: "/b", Prompt: huge, UserPrompt: "user",
+	}, "/tmp/prompt.md"))
+}
+
+// TestWritePromptFileRoundTrips verifies the materialized prompt file
+// holds the prompt verbatim and that the cleanup func removes it.
+func TestWritePromptFileRoundTrips(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	prompt := "# system prompt\n\nwith newlines and \"quotes\" and a \x00 null"
+	path, cleanup, err := writePromptFile(prompt)
+	if err != nil {
+		t.Fatalf("writePromptFile: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != prompt {
+		t.Fatalf("prompt not preserved: got %q want %q", got, prompt)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cleanup should remove the file; stat err=%v", err)
+	}
+}
+
+// containsPair reports whether args contains the consecutive [key,
+// value] pair in order.
+func containsPair(args []string, key, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // TestFilteredEnvDropsAPIKeys verifies the OAuth-precedence vars are

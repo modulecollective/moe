@@ -45,10 +45,11 @@ func seedSdlcOneShotProject(t *testing.T, root, projectID string) {
 }
 
 // fakeOneShotClaude installs a `claude` stub that, on every -p
-// invocation, parses --append-system-prompt to find the canvas path
-// (the line under "Your canvas for this document is the single
-// file:") and appends a tagged line to it. Appending — not overwriting
-// — lets the from-idea test verify the seed survives the agent turn.
+// invocation, reads the prompt from the --append-system-prompt-file
+// path to find the canvas path (the line under "Your canvas for this
+// document is the single file:") and appends a tagged line to it.
+// Appending — not overwriting — lets the from-idea test verify the
+// seed survives the agent turn.
 //
 // failOn lets a test inject a deterministic failure for a specific
 // docID's stage call: if the canvas path matches `*/<failOn>/content.md`,
@@ -57,12 +58,13 @@ func seedSdlcOneShotProject(t *testing.T, root, projectID string) {
 func fakeOneShotClaude(t *testing.T, failOn string, failExit int, marker string) {
 	t.Helper()
 	script := `#!/bin/sh
-prompt=
+promptfile=
 next=0
 for a in "$@"; do
-  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
-  case "$a" in --append-system-prompt) next=1 ;; esac
+  if [ "$next" = "1" ]; then promptfile=$a; next=0; fi
+  case "$a" in --append-system-prompt-file) next=1 ;; esac
 done
+prompt=$(cat "$promptfile" 2>/dev/null)
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
 ` + failOnSnippet(failOn, failExit) + `
 if [ -n "$canvas" ]; then printf '` + marker + `\n' >> "$canvas"; fi
@@ -100,14 +102,15 @@ func TestRunDesignOneShot(t *testing.T) {
 	argvFile := filepath.Join(t.TempDir(), "argv.txt")
 	t.Setenv("MOE_TEST_ARGV_DUMP", argvFile)
 	fakeClaudeOnPath(t, `#!/bin/sh
-prompt=
+promptfile=
 next=0
 for a in "$@"; do
   printf '%s\n' "$a" >> "$MOE_TEST_ARGV_DUMP"
-  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
-  case "$a" in --append-system-prompt) next=1 ;; esac
+  if [ "$next" = "1" ]; then promptfile=$a; next=0; fi
+  case "$a" in --append-system-prompt-file) next=1 ;; esac
 done
 printf -- '--END-ARGV--\n' >> "$MOE_TEST_ARGV_DUMP"
+prompt=$(cat "$promptfile" 2>/dev/null)
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
 if [ -n "$canvas" ]; then printf 'design via per-stage one-shot\n' >> "$canvas"; fi
 exit 0

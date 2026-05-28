@@ -303,12 +303,13 @@ func TestSDLCDesignSandboxBoundaryRefusesCommit(t *testing.T) {
 	// prompt — same pattern the existing fake-claude scripts use for
 	// the canvas path.
 	fakeClaudeOnPath(t, `#!/bin/sh
-prompt=
+promptfile=
 next=0
 for a in "$@"; do
-  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
-  case "$a" in --append-system-prompt) next=1 ;; esac
+  if [ "$next" = "1" ]; then promptfile=$a; next=0; fi
+  case "$a" in --append-system-prompt-file) next=1 ;; esac
 done
+prompt=$(cat "$promptfile" 2>/dev/null)
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
 sandbox=$(printf '%s' "$prompt" | awk '/exposed as an additional writable/ {getline; getline; gsub(/^ +| +$/, ""); print; exit}')
 if [ -n "$canvas" ]; then printf 'design canvas content\n' >> "$canvas"; fi

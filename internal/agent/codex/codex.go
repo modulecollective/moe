@@ -28,11 +28,19 @@
 //     interactive Codex has the same approval posture while keeping the
 //     same sandbox boundary.
 //
-// System prompt injection uses `-c developer_instructions="""<prompt>"""`.
-// The triple-quoted TOML multi-line form sidesteps the
-// "prose-accidentally-parses-as-TOML" risk the design names: the parser
-// always takes the string path. Escape `"""` (if present) and any
-// backslashes so the TOML reader returns the prompt verbatim.
+// System prompt injection writes the prompt to a per-run profile file
+// `$CODEX_HOME/<name>.config.toml` holding `developer_instructions =
+// """<prompt>"""` and selects it with `--profile <name>`, which layers
+// that file onto the operator's base config (so auth and the
+// workspace-git permissions profile the `-c default_permissions` flag
+// references both still resolve). It used to ride inline as `-c
+// developer_instructions="""…"""`, but the assembled prompt can exceed
+// the kernel's per-argv-string ceiling (MAX_ARG_STRLEN = 128 KiB) and
+// fail the launch with E2BIG. The triple-quoted TOML multi-line form
+// sidesteps the "prose-accidentally-parses-as-TOML" risk the design
+// names: the parser always takes the string path. Escape `"""` (if
+// present) and any backslashes so the TOML reader returns the prompt
+// verbatim.
 package codex
 
 import (
@@ -109,7 +117,13 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	cmdArgs := executeArgs(r)
+	profileName, cleanup, err := writeProfile(r.Prompt)
+	if err != nil {
+		return r.SessionID, fmt.Errorf("codex: write profile: %w", err)
+	}
+	defer cleanup()
+
+	cmdArgs := executeArgs(r, profileName)
 
 	cmd := exec.Command(bin, cmdArgs...)
 	// cwd-inversion shape: codex always runs cwd = r.Root (the
@@ -184,7 +198,13 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		return "", fmt.Errorf("codex: CLI not found on PATH: %w", err)
 	}
 
-	cmdArgs := executeOneShotArgs(r)
+	profileName, cleanup, err := writeProfile(r.Prompt)
+	if err != nil {
+		return "", fmt.Errorf("codex: write profile: %w", err)
+	}
+	defer cleanup()
+
+	cmdArgs := executeOneShotArgs(r, profileName)
 
 	ctx := context.Background()
 	if r.Timeout > 0 {
@@ -320,18 +340,68 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 	return true, nil
 }
 
-// sessionsDir returns the effective codex sessions root —
-// $CODEX_HOME/sessions when set, else ~/.codex/sessions. Empty when
-// neither is available.
-func sessionsDir() string {
+// codexHome returns the codex config dir — $CODEX_HOME when set, else
+// ~/.codex. Empty when neither is resolvable (no env var and no home
+// dir). Both the profile-file path and the sessions root derive from
+// it.
+func codexHome() string {
 	if d := os.Getenv("CODEX_HOME"); d != "" {
-		return filepath.Join(d, "sessions")
+		return d
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".codex", "sessions")
+	return filepath.Join(home, ".codex")
+}
+
+// sessionsDir returns the effective codex sessions root —
+// <codexHome>/sessions, or "" when codexHome can't be resolved.
+func sessionsDir() string {
+	h := codexHome()
+	if h == "" {
+		return ""
+	}
+	return filepath.Join(h, "sessions")
+}
+
+// writeProfile materializes the assembled system prompt as a per-run
+// codex profile file under $CODEX_HOME so it can ride as `--profile
+// <name>` rather than as the `-c developer_instructions=…` argv string
+// (which overran MAX_ARG_STRLEN = 128 KiB once the twin-reflect history
+// summary grew, failing the launch with E2BIG). `--profile <name>`
+// layers `$CODEX_HOME/<name>.config.toml` onto the operator's base
+// config, so auth and the workspace-git permissions profile keep
+// resolving. The file basename is `moe-prompt-<rand>.config.toml`;
+// the profile name handed back is that basename minus `.config.toml`.
+// The random suffix keeps concurrent turns from colliding. Returns the
+// profile name and a cleanup func the caller defers to remove the file
+// when the turn ends.
+func writeProfile(prompt string) (string, func(), error) {
+	noop := func() {}
+	home := codexHome()
+	if home == "" {
+		return "", noop, fmt.Errorf("cannot resolve CODEX_HOME (no $CODEX_HOME, no home dir)")
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return "", noop, fmt.Errorf("mkdir codex home: %w", err)
+	}
+	f, err := os.CreateTemp(home, "moe-prompt-*.config.toml")
+	if err != nil {
+		return "", noop, fmt.Errorf("create profile: %w", err)
+	}
+	content := "developer_instructions = " + tomlMultilineBasic(prompt) + "\n"
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", noop, fmt.Errorf("write %s: %w", f.Name(), err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", noop, fmt.Errorf("close %s: %w", f.Name(), err)
+	}
+	name := strings.TrimSuffix(filepath.Base(f.Name()), ".config.toml")
+	return name, func() { os.Remove(f.Name()) }, nil
 }
 
 // rolloutPath returns the rollout file path whose filename suffix
@@ -358,8 +428,8 @@ func rolloutPath(sessionID string) (string, error) {
 // `codex …` for a new session, `codex resume <sid> …` for a returning
 // one. Kept separate from Execute so the argument shape (and its
 // dependence on AddDirs) is unit-testable without shelling out.
-func executeArgs(r agent.Request) []string {
-	args := commonArgs(r.ClonePath, r.Prompt)
+func executeArgs(r agent.Request, profileName string) []string {
+	args := commonArgs(r.ClonePath, profileName)
 	// Stage-provided AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) widen
 	// the writable scope alongside the clone path commonArgs passes.
 	// Loop shape mirrors executeOneShotArgs's so the two call sites
@@ -387,8 +457,8 @@ func executeArgs(r agent.Request) []string {
 // executeOneShotArgs builds the full codex argv for the non-interactive
 // streaming path (`codex exec --json …`). Same testability rationale
 // as executeArgs.
-func executeOneShotArgs(r agent.OneShotRequest) []string {
-	args := commonArgs(r.ClonePath, r.Prompt)
+func executeOneShotArgs(r agent.OneShotRequest, profileName string) []string {
+	args := commonArgs(r.ClonePath, profileName)
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
@@ -406,8 +476,14 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 }
 
 // commonArgs builds the codex flag set shared across exec / interactive
-// / resume: developer-instructions injection, sandbox mode, and the
-// per-stage clone add-dir.
+// / resume: the developer-instructions profile selection, sandbox mode,
+// and the per-stage clone add-dir.
+//
+// profileName names the per-run profile file writeProfile materialized
+// (`$CODEX_HOME/<profileName>.config.toml`, holding
+// developer_instructions); `--profile` layers it onto the operator's
+// base config. The prompt rides in that file rather than on argv so an
+// oversized prompt can't overrun MAX_ARG_STRLEN at launch.
 //
 // cwd-inversion shape: every stage runs cwd = bureaucracy worktree,
 // which `--sandbox workspace-write` makes writable automatically — no
@@ -418,10 +494,8 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 // and is handled separately (system prompt or symlink) where needed.
 // Document-only stages have an empty clonePath; cwd alone gives them
 // the canvas's writable surface.
-func commonArgs(clonePath, systemPrompt string) []string {
-	args := []string{
-		"-c", "developer_instructions=" + tomlMultilineBasic(systemPrompt),
-	}
+func commonArgs(clonePath, profileName string) []string {
+	args := []string{"--profile", profileName}
 	// Sandbox: workspace-write keeps writes scoped to cwd + the
 	// explicit add-dir set. read-only would block the canvas write
 	// every stage needs.

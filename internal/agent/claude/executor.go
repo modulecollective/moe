@@ -87,16 +87,47 @@ func filteredEnv(extra []string) []string {
 // paths work without per-payload widening.
 const sandboxSettingsJSON = `{"sandbox":{"enabled":true}}`
 
+// writePromptFile materializes the assembled system prompt to a
+// per-turn temp file so it can ride as `--append-system-prompt-file
+// <path>` instead of as the `--append-system-prompt <prompt>` argv
+// string. The whole twin-reflect prompt can exceed the kernel's
+// per-argv-string ceiling (MAX_ARG_STRLEN = 128 KiB, independent of the
+// far larger total ARG_MAX); passing it inline made execve fail with
+// E2BIG ("argument list too long") before claude ever started. The file
+// is read by the claude orchestrator at startup while it assembles the
+// system prompt — that read is not a sandboxed tool call, so a temp
+// path outside the `--add-dir` set is fine. Returns the path and a
+// cleanup func the caller defers to remove the file when the turn ends.
+func writePromptFile(prompt string) (string, func(), error) {
+	noop := func() {}
+	f, err := os.CreateTemp("", "moe-claude-prompt-*.md")
+	if err != nil {
+		return "", noop, fmt.Errorf("create temp: %w", err)
+	}
+	if _, err := f.WriteString(prompt); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", noop, fmt.Errorf("write %s: %w", f.Name(), err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", noop, fmt.Errorf("close %s: %w", f.Name(), err)
+	}
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
 // executeArgs builds the interactive `claude` flag set. Kept separate
 // from Execute so the argument shape can be exercised in tests without
-// shelling out to the binary.
+// shelling out to the binary. promptPath is the per-turn temp file
+// holding r.Prompt (see writePromptFile for why the prompt no longer
+// rides on argv).
 //
 // Ordering rule: `--add-dir` is variadic (<directories...>), so any
 // `--add-dir <path>` pair must sit before `--settings` /
-// `--append-system-prompt` and the optional positional prompt;
+// `--append-system-prompt-file` and the optional positional prompt;
 // otherwise claude eats the next flag's value as another directory
 // and the session launches with nothing to send.
-func executeArgs(r agent.Request) []string {
+func executeArgs(r agent.Request, promptPath string) []string {
 	// Claude Code uses --session-id to create and --resume to continue.
 	// NewSession was set upstream by EnsureDocument exactly when the
 	// UUID was minted this turn.
@@ -121,7 +152,7 @@ func executeArgs(r agent.Request) []string {
 	}
 	args = append(args,
 		"--settings", sandboxSettingsJSON,
-		"--append-system-prompt", r.Prompt,
+		"--append-system-prompt-file", promptPath,
 	)
 	// A positional prompt launches claude interactively but auto-sends
 	// it as the first user message, so the operator lands in a session
@@ -134,7 +165,8 @@ func executeArgs(r agent.Request) []string {
 
 // executeOneShotArgs builds the `claude -p` flag set. Same ordering
 // rule as executeArgs: --add-dir pairs sit before --settings /
-// --append-system-prompt / positional prompt.
+// --append-system-prompt-file / positional prompt. promptPath is the
+// per-turn temp file holding r.Prompt (see writePromptFile).
 //
 // --output-format stream-json (with mandatory --verbose) makes claude
 // emit one JSON event per tool call / message instead of buffering a
@@ -150,7 +182,7 @@ func executeArgs(r agent.Request) []string {
 // land. Bypass mode skips the per-call prompt; safety still comes
 // from --settings enabling the built-in sandbox plus --add-dir
 // scoping filesystem reach to the worktree/clone.
-func executeOneShotArgs(r agent.OneShotRequest) []string {
+func executeOneShotArgs(r agent.OneShotRequest, promptPath string) []string {
 	args := []string{"-p"}
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
@@ -170,7 +202,7 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 	}
 	args = append(args,
 		"--settings", sandboxSettingsJSON,
-		"--append-system-prompt", r.Prompt,
+		"--append-system-prompt-file", promptPath,
 		r.UserPrompt,
 	)
 	return args
@@ -190,7 +222,13 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 
-	args := executeArgs(r)
+	promptPath, cleanup, err := writePromptFile(r.Prompt)
+	if err != nil {
+		return r.SessionID, fmt.Errorf("claude: write prompt file: %w", err)
+	}
+	defer cleanup()
+
+	args := executeArgs(r, promptPath)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = pickCwd(r.SessionCwd, r.Root)
 	cmd.Env = filteredEnv(r.ExtraEnv)
@@ -256,7 +294,12 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
-	args := executeOneShotArgs(r)
+	promptPath, cleanup, err := writePromptFile(r.Prompt)
+	if err != nil {
+		return "", fmt.Errorf("claude: write prompt file: %w", err)
+	}
+	defer cleanup()
+	args := executeOneShotArgs(r, promptPath)
 	ctx := context.Background()
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc
