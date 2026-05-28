@@ -89,6 +89,12 @@ At the end of a stage, MoE prints a chain prompt. The shortcuts are:
   sessions and then shipping or auto-closing.
 - `!!!` runs every remaining stage headlessly and then ships or auto-closes.
 
+When several SDLC runs are already designed and ready for code/test, use
+`moe chain edit` to order the active runs in `$EDITOR`. After a `!!` or `!!!`
+cascade finishes one run, MoE can ride into the next live chained run at its
+first pending stage. Use `!!` when you still want an interactive session at
+each stage, or `!!!` when the queued work is routine enough to run headlessly.
+
 `moe dash` is the terminal home screen for re-entry. `moe serve` starts a local
 web UI, bound to `127.0.0.1:4242` by default, that shows the dashboard, run
 detail pages and canvas links, can open and parent live SDLC runs, and can edit,
@@ -177,6 +183,14 @@ headless to a named gate; `--drive` (= `!!`) is a driven cascade through
 push; `--ship` (= `!!!`) is its headless counterpart. They are mutually
 exclusive and cannot combine with `--agent` (cascade walks multiple stages
 on the run's persisted agent).
+
+Chains are the batch version of that same forward motion for active SDLC runs.
+`moe chain edit` opens every active SDLC run across projects; reorder the lines
+to make a sequence, delete lines you want left unchained, and save. `moe dash`
+shows a `chained -> <project>/<run>` hint for active parents with a live child.
+When a `!!` or `!!!` cascade reaches the end of a chained parent, MoE starts
+the child at its first pending stage: a fresh child starts at `design`, while a
+partly completed child resumes where it is parked.
 
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask
@@ -314,6 +328,9 @@ The catalog below is a map, not a replacement for `moe help`.
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
+- `moe chain edit` opens an editor over active SDLC runs; reorder lines to
+  record a run chain in the bureaucracy journal.
+- `moe chain clear [--yes]` drops every currently live run-chain edge.
 - `moe <workflow> close [--no-edit] <project>/<run>` closes workflows that do
   not ship through `sdlc push`.
 
