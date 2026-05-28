@@ -89,6 +89,19 @@ At the end of a stage, MoE prints a chain prompt. The shortcuts are:
   sessions and then shipping or auto-closing.
 - `!!!` runs every remaining stage headlessly and then ships or auto-closes.
 
+In practice the everyday path is lighter: jot an idea, shape the design in one
+conversation, then let the rest run:
+
+```sh
+moe idea new my-project/add-batch-support              # jot it when it occurs to you
+moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
+moe sdlc design my-project/add-batch-support           # one design conversation
+```
+
+When the design stage ends, MoE prints the chain prompt. Type `!!!` there to
+run `code`, `test`, and `push` headlessly. The five-command block above is the
+same path spelled out by hand.
+
 When several SDLC runs are already designed and ready for code/test, use
 `moe chain edit` to order the active runs in `$EDITOR`. After a `!!` or `!!!`
 cascade finishes one run, MoE can ride into the next live chained run at its
