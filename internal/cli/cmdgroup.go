@@ -43,9 +43,9 @@ func (g *CommandGroup) Register(c *Command) {
 }
 
 // Lookup returns the registered subcommand named sub, or nil if no
-// such name was registered. Used by callers (chain prompt, resume)
-// that need to invoke a stage by name without going through the
-// argv dispatcher.
+// such name was registered. Used by callers (chain prompt, cascade
+// dispatch) that need to invoke a stage by name without going
+// through the argv dispatcher.
 func (g *CommandGroup) Lookup(sub string) *Command {
 	return g.commands[sub]
 }
@@ -112,7 +112,7 @@ func RegisterGroup(g *CommandGroup) {
 
 // LookupGroup returns the registered group named name. An unknown or
 // empty name returns an error listing the known groups so a typo at a
-// dispatch site (chain prompt, resume) surfaces loudly.
+// dispatch site (chain prompt, cascade dispatch) surfaces loudly.
 func LookupGroup(name string) (*CommandGroup, error) {
 	g, ok := groups[name]
 	if !ok {

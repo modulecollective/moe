@@ -159,17 +159,24 @@ interactive Codex sessions can fail when Git needs to write
 
 ```sh
 moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
-moe sdlc design [--agent <name>] <project>/<run>
-moe sdlc code [--agent <name>] <project>/<run>
-moe sdlc test [--agent <name>] <project>/<run>
+moe sdlc design [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
+moe sdlc code   [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
+moe sdlc test   [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 ```
 
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
-seeds the design canvas from the idea body. `moe sdlc resume <project>/<run>`
-opens the next pending stage for an existing run. `moe sdlc reopen
-<project>/<slug>` starts a new run seeded with a terminal prior run's design
-canvas, useful when a closed or merged topic still has more work behind it.
+seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
+starts a new run seeded with a terminal prior run's design canvas, useful
+when a closed or merged topic still has more work behind it.
+
+The cascade mode flags on `design`/`code`/`test` mirror the post-stage chain
+prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
+headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
+headless to a named gate; `--drive` (= `!!`) is a driven cascade through
+push; `--ship` (= `!!!`) is its headless counterpart. They are mutually
+exclusive and cannot combine with `--agent` (cascade walks multiple stages
+on the run's persisted agent).
 
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask
@@ -312,7 +319,7 @@ The catalog below is a map, not a replacement for `moe help`.
 
 ### Workflows
 
-- `moe sdlc new|design|code|test|push|resume|reopen|cat|log` drives designed
+- `moe sdlc new|design|code|test|push|reopen|cat|log` drives designed
   code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.

@@ -29,7 +29,8 @@ import (
 // answer for "want to advance?". Empty justFinished falls back to
 // Next() — the right answer for fresh runs (where the workflow's
 // first stage is the next thing to run) and for entry points that
-// don't know which stage just landed (resume hitting the merge gate).
+// don't know which stage just landed (e.g. `moe sdlc reopen` landing
+// on the design gate of the freshly seeded run).
 //
 // justFinished also drives the "back" targets offered at the prompt:
 // a non-empty justFinished resolves to the list of stages up to and
