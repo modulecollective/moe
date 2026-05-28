@@ -275,10 +275,12 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	// launch Claude (the test process has no terminal/agent).
 	var captured *push.RebaseConflictError
 	var capturedRun *run.Metadata
+	var capturedHeadless bool
 	prev := openCodeSessionForRebaseConflict
-	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *push.RebaseConflictError, _, _ io.Writer) (int, error) {
+	openCodeSessionForRebaseConflict = func(md *run.Metadata, c *push.RebaseConflictError, headless bool, _, _ io.Writer) (int, error) {
 		capturedRun = md
 		captured = c
+		capturedHeadless = headless
 		return 1, &PushDeferredError{Recovery: "rebase-conflict", Project: md.Project, Run: md.ID}
 	}
 	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
@@ -292,6 +294,9 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 	if capturedRun == nil || capturedRun.ID != f.runID {
 		t.Fatalf("chain-back run.Metadata: want id=%s, got %#v", f.runID, capturedRun)
+	}
+	if capturedHeadless {
+		t.Fatalf("standalone push recovery should be interactive, got headless=true")
 	}
 	if captured.Branch != f.branch || captured.DefaultBranch != "main" {
 		t.Fatalf("chain-back conflict context: branch=%q default=%q", captured.Branch, captured.DefaultBranch)
@@ -377,7 +382,10 @@ func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
 		// Stub the recovery helper to return (0, *PushDeferredError) —
 		// the "agent resolved and exited cleanly" case.
 		prev := openCodeSessionForRebaseConflict
-		openCodeSessionForRebaseConflict = func(md *run.Metadata, _ *push.RebaseConflictError, _, _ io.Writer) (int, error) {
+		openCodeSessionForRebaseConflict = func(md *run.Metadata, _ *push.RebaseConflictError, headless bool, _, _ io.Writer) (int, error) {
+			if headless {
+				t.Fatalf("runPushTyped without options should open interactive recovery")
+			}
 			return 0, &PushDeferredError{
 				Recovery: "rebase-conflict",
 				Project:  md.Project,
@@ -461,6 +469,49 @@ exit 7
 				cliCode, stdoutBuf, stderrBuf)
 		}
 	})
+}
+
+func TestRunPushHeadlessRecoveryOptionReachesRebaseChainBack(t *testing.T) {
+	f := newPushFixture(t)
+
+	work := t.TempDir()
+	gittest.Run(t, "", "clone", "-b", "main", f.origin, work)
+	writeFile(t, filepath.Join(work, "feature.txt"), "from-default\n")
+	gittest.Run(t, work, "add", "feature.txt")
+	gittest.Run(t, work, "commit", "-m", "default-side feature")
+	gittest.Run(t, work, "push", "origin", "main")
+
+	var capturedHeadless *bool
+	prev := openCodeSessionForRebaseConflict
+	openCodeSessionForRebaseConflict = func(md *run.Metadata, _ *push.RebaseConflictError, headless bool, _, _ io.Writer) (int, error) {
+		capturedHeadless = &headless
+		return 0, &PushDeferredError{
+			Recovery: "rebase-conflict",
+			Project:  md.Project,
+			Run:      md.ID,
+		}
+	}
+	t.Cleanup(func() { openCodeSessionForRebaseConflict = prev })
+
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+	var stdout, stderr bytes.Buffer
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+		HeadlessRecovery: true,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runPushTypedWithOptions exit: want 0, got %d; stderr=%s", code, stderr.String())
+	}
+	var deferred *PushDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("runPushTypedWithOptions error: want *PushDeferredError, got %T (%v)", err, err)
+	}
+	if capturedHeadless == nil {
+		t.Fatal("expected rebase recovery helper to be invoked")
+	}
+	if !*capturedHeadless {
+		t.Fatalf("rebase recovery headless flag = false, want true")
+	}
 }
 
 // TestPushNoRebaseNeededFastPath: when origin/main hasn't moved past
@@ -1953,7 +2004,7 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 					Branch:        "moe/fix-it",
 					DefaultBranch: "main",
 					Conflicts:     []string{"feature.txt"},
-				}, io.Discard, io.Discard)
+				}, false, io.Discard, io.Discard)
 			},
 			stubReturns:  0,
 			wantRecovery: "rebase-conflict",

@@ -655,10 +655,10 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 // var to stub the cascade's push step without touching the standalone
 // `moe sdlc push` path (which still goes through pushCmd.Run →
 // runPushTyped → discard-error).
-var pushFromCascade func(workflow string, args []string, stdout, stderr io.Writer) (int, error)
+var pushFromCascade func(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, error)
 
 func init() {
-	pushFromCascade = runPushTyped
+	pushFromCascade = runPushTypedWithOptions
 }
 
 // cascadeStepResult records one dispatched stage's outcome. deferred
@@ -775,7 +775,9 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 			// channel, a recovery session that exits 0 would look
 			// identical to a real ship and the cascade summary would
 			// claim "shipped" when nothing was pushed.
-			ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, stdout, stderr)
+			ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
+				HeadlessRecovery: !driven,
+			}, stdout, stderr)
 			var deferred *PushDeferredError
 			if errors.As(err, &deferred) {
 				res.ran = append(res.ran, cascadeStepResult{

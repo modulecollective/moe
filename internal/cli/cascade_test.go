@@ -76,9 +76,10 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 // *PushDeferredError the stub was configured to surface, exit is the
 // int the stub returned. Tests assert directly on these fields.
 type pushFromCascadeInvocation struct {
-	args   []string
-	defer_ *PushDeferredError
-	exit   int
+	args    []string
+	options pushRunOptions
+	defer_  *PushDeferredError
+	exit    int
 }
 
 // stubPushFromCascade swaps pushFromCascade — the cascade's typed
@@ -92,11 +93,12 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 	t.Helper()
 	var captured []pushFromCascadeInvocation
 	prev := pushFromCascade
-	pushFromCascade = func(_ string, args []string, _, _ io.Writer) (int, error) {
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
 		inv := pushFromCascadeInvocation{
-			args:   append([]string(nil), args...),
-			defer_: deferred,
-			exit:   exit,
+			args:    append([]string(nil), args...),
+			options: opts,
+			defer_:  deferred,
+			exit:    exit,
 		}
 		captured = append(captured, inv)
 		if deferred != nil {
@@ -250,6 +252,9 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/fix-it"; got != want {
 		t.Fatalf("push ship args = %q, want %q (merge path, no flags)", got, want)
 	}
+	if !(*pushCaptured)[0].options.HeadlessRecovery {
+		t.Fatalf("!!! push recovery option HeadlessRecovery = false, want true")
+	}
 	// Summary line tags the headless mode per stage.
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
@@ -285,6 +290,9 @@ func TestCascadeFromGateDrivenShipsAtPush(t *testing.T) {
 	}
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push ship dispatched %d times, want 1: %v", len(*pushCaptured), *pushCaptured)
+	}
+	if (*pushCaptured)[0].options.HeadlessRecovery {
+		t.Fatalf("!! push recovery option HeadlessRecovery = true, want false")
 	}
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (driven)") {
 		t.Fatalf("expected per-stage `(driven)` mode tag in stdout, got: %q", got)
@@ -1077,6 +1085,9 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 			// pushFromCascade was invoked exactly once (no retry).
 			if len(*pushCaptured) != 1 {
 				t.Fatalf("push dispatched %d times, want 1: %+v", len(*pushCaptured), *pushCaptured)
+			}
+			if !(*pushCaptured)[0].options.HeadlessRecovery {
+				t.Fatalf("deferred !!! push recovery option HeadlessRecovery = false, want true")
 			}
 			// No openSdlcStage call happened after the deferred push
 			// (push is the last stage in the sdlc ladder; this guards
