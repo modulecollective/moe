@@ -39,7 +39,7 @@ func TestRestoreTranscriptFromCacheGlobAndRewriteCwd(t *testing.T) {
 		t.Fatalf("Source = %q, want %q", outcome.Source, oldBucket)
 	}
 
-	canonical := CanonicalTranscriptPath(newCwd, sid)
+	canonical := canonicalTranscriptPath(newCwd, sid)
 	got, err := os.ReadFile(canonical)
 	if err != nil {
 		t.Fatalf("read canonical: %v", err)
@@ -94,7 +94,7 @@ func TestRestoreTranscriptFromMirrorWhenCacheMisses(t *testing.T) {
 		t.Fatalf("Source = %q, want %q", outcome.Source, mirrorPath)
 	}
 
-	got, err := os.ReadFile(CanonicalTranscriptPath(newCwd, sid))
+	got, err := os.ReadFile(canonicalTranscriptPath(newCwd, sid))
 	if err != nil {
 		t.Fatalf("read canonical: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestRestoreTranscriptMissingEverywhere(t *testing.T) {
 	if outcome.Result != agent.RestoreMissing {
 		t.Fatalf("Result = %v, want RestoreMissing", outcome.Result)
 	}
-	if _, err := os.Stat(CanonicalTranscriptPath("/some/cwd", sid)); !os.IsNotExist(err) {
+	if _, err := os.Stat(canonicalTranscriptPath("/some/cwd", sid)); !os.IsNotExist(err) {
 		t.Errorf("canonical path should not exist on RestoreMissing; stat err=%v", err)
 	}
 

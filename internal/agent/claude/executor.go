@@ -335,7 +335,7 @@ func (Agent) CopyTranscript(sessionID, dest string) (bool, error) {
 // True with nil err means "safe to --resume"; false with nil err is
 // the re-mint-and-warn branch the stage pre-flight uses.
 func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
-	canonical := CanonicalTranscriptPath(cwd, sessionID)
+	canonical := canonicalTranscriptPath(cwd, sessionID)
 	if canonical == "" {
 		return false, nil
 	}
@@ -362,7 +362,7 @@ func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
 func (Agent) RestoreTranscript(sessionID, cwd, mirrorPath string) (agent.RestoreOutcome, error) {
 	// Cache glob first — the original is the most fidelity-preserving
 	// recovery and avoids the mirror's once-per-turn snapshot lag.
-	src, err := TranscriptPath(sessionID)
+	src, err := transcriptPath(sessionID)
 	if err != nil {
 		return agent.RestoreOutcome{}, err
 	}
@@ -370,7 +370,7 @@ func (Agent) RestoreTranscript(sessionID, cwd, mirrorPath string) (agent.Restore
 		// Skip rewrite when the cached copy is already the canonical
 		// path (defensive — TranscriptExists should have caught it,
 		// but a race between probe and restore could land here).
-		if canonical := CanonicalTranscriptPath(cwd, sessionID); canonical != "" && src == canonical {
+		if canonical := canonicalTranscriptPath(cwd, sessionID); canonical != "" && src == canonical {
 			return agent.RestoreOutcome{Result: agent.RestoreNotNeeded}, nil
 		}
 		oldDir, err := RestoreFromCache(src, cwd, sessionID)

@@ -110,15 +110,15 @@ func TestEncodeCwdReplacesSeparatorsAndDots(t *testing.T) {
 			"-Users-x-projects-y--moe-sessions-p-r-d"},
 	}
 	for _, c := range cases {
-		if got := EncodeCwd(c.in); got != c.want {
-			t.Errorf("EncodeCwd(%q) = %q, want %q", c.in, got, c.want)
+		if got := encodeCwd(c.in); got != c.want {
+			t.Errorf("encodeCwd(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
 func TestCanonicalTranscriptPathMatchesClaudeLayout(t *testing.T) {
 	// Pin the canonical layout against a hard-coded expectation rather
-	// than asserting CanonicalTranscriptPath agrees with TranscriptPath's
+	// than asserting canonicalTranscriptPath agrees with transcriptPath's
 	// glob (which is circular — both helpers would drift together). The
 	// `/.moe/` segment must encode as `--moe-`.
 	cfg := t.TempDir()
@@ -126,11 +126,11 @@ func TestCanonicalTranscriptPathMatchesClaudeLayout(t *testing.T) {
 	cwd := "/Users/x/projects/y/.moe/sessions/p/r/d"
 	sid := "f0e1d2c3-b4a5-6789-0123-456789abcdef"
 
-	got := CanonicalTranscriptPath(cwd, sid)
+	got := canonicalTranscriptPath(cwd, sid)
 	want := filepath.Join(cfg, "projects",
 		"-Users-x-projects-y--moe-sessions-p-r-d", sid+".jsonl")
 	if got != want {
-		t.Fatalf("CanonicalTranscriptPath = %q, want %q", got, want)
+		t.Fatalf("canonicalTranscriptPath = %q, want %q", got, want)
 	}
 }
 
@@ -139,8 +139,8 @@ func TestCanonicalTranscriptPathEmptyConfig(t *testing.T) {
 	// returns "". Canonical path follows.
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("HOME", "")
-	if got := CanonicalTranscriptPath("/cwd", "sid"); got != "" {
-		t.Fatalf("CanonicalTranscriptPath with empty ConfigDir = %q, want \"\"", got)
+	if got := canonicalTranscriptPath("/cwd", "sid"); got != "" {
+		t.Fatalf("canonicalTranscriptPath with empty ConfigDir = %q, want \"\"", got)
 	}
 }
 

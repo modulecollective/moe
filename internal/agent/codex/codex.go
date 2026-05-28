@@ -320,10 +320,10 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 	return true, nil
 }
 
-// SessionsDir returns the effective codex sessions root —
+// sessionsDir returns the effective codex sessions root —
 // $CODEX_HOME/sessions when set, else ~/.codex/sessions. Empty when
 // neither is available.
-func SessionsDir() string {
+func sessionsDir() string {
 	if d := os.Getenv("CODEX_HOME"); d != "" {
 		return filepath.Join(d, "sessions")
 	}
@@ -339,7 +339,7 @@ func SessionsDir() string {
 // exists. The glob is intentionally broad — codex shards rollouts by
 // `YYYY/MM/DD` under sessions/; the session id alone disambiguates.
 func rolloutPath(sessionID string) (string, error) {
-	root := SessionsDir()
+	root := sessionsDir()
 	if root == "" {
 		return "", nil
 	}
@@ -462,7 +462,7 @@ func tomlMultilineBasic(s string) string {
 // keeps its prior id and lets the next turn's pre-flight catch the
 // missing transcript.
 func discoverSessionID(since time.Time) string {
-	root := SessionsDir()
+	root := sessionsDir()
 	if root == "" {
 		return ""
 	}

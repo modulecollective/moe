@@ -32,7 +32,7 @@ func ConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-// EncodeCwd returns the directory name Claude Code uses to bucket
+// encodeCwd returns the directory name Claude Code uses to bucket
 // per-session JSONLs under <ConfigDir>/projects. Claude encodes absCwd
 // by replacing both path separators (`/`) and `.` with `-`; an absolute
 // POSIX path's leading `/` becomes a leading `-`, and a `/.moe/` segment
@@ -40,32 +40,32 @@ func ConfigDir() string {
 // been stable across recent versions; if it ever drifts, callers
 // `Stat`ing the returned path will see ErrNotExist and can fall back
 // to a glob lookup.
-func EncodeCwd(absCwd string) string {
+func encodeCwd(absCwd string) string {
 	s := strings.ReplaceAll(absCwd, string(os.PathSeparator), "-")
 	return strings.ReplaceAll(s, ".", "-")
 }
 
-// CanonicalTranscriptPath is the path Claude Code reads when you pass
-// `--resume sessionID` from cwd: <ConfigDir>/projects/<EncodeCwd(cwd)>/<sessionID>.jsonl.
+// canonicalTranscriptPath is the path Claude Code reads when you pass
+// `--resume sessionID` from cwd: <ConfigDir>/projects/<encodeCwd(cwd)>/<sessionID>.jsonl.
 // Returned regardless of whether the file exists; callers stat it
 // themselves to drive the migrate-or-re-mint decision. Returns "" when
 // ConfigDir is unavailable (no $HOME and no $CLAUDE_CONFIG_DIR), which
 // callers should treat the same as "transcript not found here."
-func CanonicalTranscriptPath(cwd, sessionID string) string {
+func canonicalTranscriptPath(cwd, sessionID string) string {
 	root := ConfigDir()
 	if root == "" {
 		return ""
 	}
-	return filepath.Join(root, "projects", EncodeCwd(cwd), sessionID+".jsonl")
+	return filepath.Join(root, "projects", encodeCwd(cwd), sessionID+".jsonl")
 }
 
-// TranscriptPath returns the filesystem path of Claude Code's session log
+// transcriptPath returns the filesystem path of Claude Code's session log
 // for sessionID, or "" if no log has been written yet. The lookup globs
 // <config>/projects/*/<sessionID>.jsonl rather than reconstructing the
 // encoded-cwd path: sessionID is a UUID so collisions across project
 // dirs are impossible, and the glob keeps the per-turn save into
 // thread-<agent>.jsonl resilient to any drift in claude's cwd-encoding scheme.
-func TranscriptPath(sessionID string) (string, error) {
+func transcriptPath(sessionID string) (string, error) {
 	root := ConfigDir()
 	if root == "" {
 		return "", nil
@@ -86,7 +86,7 @@ func TranscriptPath(sessionID string) (string, error) {
 // before claude wrote anything, or ran on a different machine) that callers
 // should treat as a no-op rather than an error.
 func CopyTranscript(sessionID, dest string) (bool, error) {
-	src, err := TranscriptPath(sessionID)
+	src, err := transcriptPath(sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -132,7 +132,7 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 // in past tool output, and stale absolute references in past assistant text
 // don't block resume.
 func RestoreFromCache(src, absCwd, sessionID string) (string, error) {
-	dest := CanonicalTranscriptPath(absCwd, sessionID)
+	dest := canonicalTranscriptPath(absCwd, sessionID)
 	if dest == "" {
 		return "", fmt.Errorf("claude: no config dir for canonical path")
 	}
@@ -160,7 +160,7 @@ func RestoreFromMirror(mirrorPath, absCwd, sessionID string) (bool, error) {
 		}
 		return false, fmt.Errorf("claude: stat mirror: %w", err)
 	}
-	dest := CanonicalTranscriptPath(absCwd, sessionID)
+	dest := canonicalTranscriptPath(absCwd, sessionID)
 	if dest == "" {
 		return false, fmt.Errorf("claude: no config dir for canonical path")
 	}

@@ -100,11 +100,11 @@ type Options struct {
 
 // Lock is an acquired lock on <root>/.moe/lock. Release it exactly once.
 type Lock struct {
-	path   string
-	record Record
-	opts   Options
+	path string
+	rec  Record
+	opts Options
 
-	mu       sync.Mutex // guards record during heartbeat rewrites
+	mu       sync.Mutex // guards rec during heartbeat rewrites
 	stopHB   chan struct{}
 	doneHB   chan struct{}
 	released bool
@@ -246,12 +246,12 @@ func (l *Lock) Release() error {
 	return err
 }
 
-// Record returns a copy of the on-disk record for this lock. Useful
+// record returns a copy of the on-disk record for this lock. Useful
 // for tests and logging.
-func (l *Lock) Record() Record {
+func (l *Lock) record() Record {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.record
+	return l.rec
 }
 
 func applyDefaults(opts Options) Options {
@@ -304,7 +304,7 @@ func tryCreate(path string, rec Record, opts Options) (*Lock, error) {
 		}
 		return nil, err
 	}
-	l := &Lock{path: path, record: rec, opts: opts}
+	l := &Lock{path: path, rec: rec, opts: opts}
 	if opts.Heartbeat {
 		l.startHeartbeat()
 	}
@@ -345,13 +345,13 @@ func (l *Lock) beat() bool {
 		return false
 	}
 	l.mu.Lock()
-	if existing.Owner != l.record.Owner || !existing.AcquiredAt.Equal(l.record.AcquiredAt) {
+	if existing.Owner != l.rec.Owner || !existing.AcquiredAt.Equal(l.rec.AcquiredAt) {
 		l.mu.Unlock()
 		fmt.Fprintf(l.opts.Logger, "repolock: heartbeat lost (owner changed at %s)\n", l.path)
 		return false
 	}
-	l.record.HeartbeatAt = l.opts.Now().UTC()
-	rec := l.record
+	l.rec.HeartbeatAt = l.opts.Now().UTC()
+	rec := l.rec
 	l.mu.Unlock()
 
 	body, marshalErr := marshalRecord(rec)

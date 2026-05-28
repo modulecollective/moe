@@ -325,7 +325,7 @@ func BumpProjectPointers(root string, stdout, stderr io.Writer) error {
 	// Scope the commit to just the gitlink paths so any unrelated
 	// changes the operator already had staged don't get swept into a
 	// "sync: bump project pointers" commit by accident.
-	commitArgs := append([]string{"commit", "-m", PointerBumpCommitMessage(bumps), "--"}, paths...)
+	commitArgs := append([]string{"commit", "-m", pointerBumpCommitMessage(bumps), "--"}, paths...)
 	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
 	}
@@ -371,7 +371,7 @@ func BumpOne(root, projectID string, stdout, stderr io.Writer) error {
 	if out, err := git.Combined(root, "add", bump.Path); err != nil {
 		return fmt.Errorf("moe sync: git add %s: %w (%s)", bump.Path, err, out)
 	}
-	commitArgs := []string{"commit", "-m", PointerBumpCommitMessage([]Bump{*bump}), "--", bump.Path}
+	commitArgs := []string{"commit", "-m", pointerBumpCommitMessage([]Bump{*bump}), "--", bump.Path}
 	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
 	}
@@ -379,14 +379,14 @@ func BumpOne(root, projectID string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// PointerBumpCommitMessage formats a bump set as a sync commit body.
+// pointerBumpCommitMessage formats a bump set as a sync commit body.
 // Format:
 //
 //	sync: bump project pointers
 //
 //	moe: 4562047..d077102
 //	…
-func PointerBumpCommitMessage(bumps []Bump) string {
+func pointerBumpCommitMessage(bumps []Bump) string {
 	sort.Slice(bumps, func(i, j int) bool { return bumps[i].Path < bumps[j].Path })
 	var sb strings.Builder
 	sb.WriteString("sync: bump project pointers\n\n")

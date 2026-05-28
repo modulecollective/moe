@@ -125,8 +125,8 @@ func TestStaleTakeover(t *testing.T) {
 		t.Fatalf("Acquire over stale: %v", err)
 	}
 	defer l.Release()
-	if l.Record().Purpose != "takeover" {
-		t.Errorf("Purpose = %q, want %q", l.Record().Purpose, "takeover")
+	if l.record().Purpose != "takeover" {
+		t.Errorf("Purpose = %q, want %q", l.record().Purpose, "takeover")
 	}
 }
 
@@ -245,12 +245,12 @@ func TestHeartbeatRewritesHeartbeatAt(t *testing.T) {
 	}
 	defer l.Release()
 
-	initial := l.Record().HeartbeatAt
+	initial := l.record().HeartbeatAt
 	// Force an immediate heartbeat rather than waiting a full tick.
 	if ok := l.beat(); !ok {
 		t.Fatal("beat returned false")
 	}
-	updated := l.Record().HeartbeatAt
+	updated := l.record().HeartbeatAt
 	if !updated.After(initial) {
 		t.Errorf("heartbeat did not advance: initial=%s updated=%s", initial, updated)
 	}
@@ -324,8 +324,8 @@ func TestCorruptRecordTakeover(t *testing.T) {
 		t.Fatalf("Acquire over corrupt: %v", err)
 	}
 	defer l.Release()
-	if l.Record().Purpose != "takeover-corrupt" {
-		t.Errorf("Purpose = %q, want %q", l.Record().Purpose, "takeover-corrupt")
+	if l.record().Purpose != "takeover-corrupt" {
+		t.Errorf("Purpose = %q, want %q", l.record().Purpose, "takeover-corrupt")
 	}
 }
 
@@ -505,10 +505,10 @@ func TestAcquireWithFailingHostnameUsesInstanceID(t *testing.T) {
 		t.Fatalf("readInstanceID: %v", err)
 	}
 	wantPrefix := id + "/"
-	if !strings.HasPrefix(l.Record().Owner, wantPrefix) {
-		t.Errorf("Owner = %q, want prefix %q", l.Record().Owner, wantPrefix)
+	if !strings.HasPrefix(l.record().Owner, wantPrefix) {
+		t.Errorf("Owner = %q, want prefix %q", l.record().Owner, wantPrefix)
 	}
-	if strings.HasPrefix(l.Record().Owner, "unknown/") {
+	if strings.HasPrefix(l.record().Owner, "unknown/") {
 		t.Error("Owner still uses literal 'unknown' fallback")
 	}
 }
