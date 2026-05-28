@@ -123,17 +123,17 @@ func TestLoreReferenceSectionSkipsHiddenAndDraftFiles(t *testing.T) {
 // nudge, not a gate.
 func TestLoreReferenceSectionOverCapWarning(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < LoreSoftCap+3; i++ {
+	for i := 0; i < loreSoftCap+3; i++ {
 		writeFile(t,
 			filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
 			fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))
 	}
 	got := LoreReferenceSectionAt(root)
-	if !strings.Contains(got, fmt.Sprintf("%d lore entries (soft cap %d)", LoreSoftCap+3, LoreSoftCap)) {
+	if !strings.Contains(got, fmt.Sprintf("%d lore entries (soft cap %d)", loreSoftCap+3, loreSoftCap)) {
 		t.Errorf("expected over-cap warning, got:\n%s", got)
 	}
 	// All entries still rendered.
-	for i := 0; i < LoreSoftCap+3; i++ {
+	for i := 0; i < loreSoftCap+3; i++ {
 		want := fmt.Sprintf("Entry %d", i)
 		if !strings.Contains(got, want) {
 			t.Errorf("entry %q missing from over-cap render", want)
@@ -141,11 +141,11 @@ func TestLoreReferenceSectionOverCapWarning(t *testing.T) {
 	}
 }
 
-// At-cap (exactly LoreSoftCap entries) does NOT carry the warning —
+// At-cap (exactly loreSoftCap entries) does NOT carry the warning —
 // only `> cap` does.
 func TestLoreReferenceSectionAtCapNoWarning(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < LoreSoftCap; i++ {
+	for i := 0; i < loreSoftCap; i++ {
 		writeFile(t,
 			filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
 			fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))

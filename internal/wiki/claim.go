@@ -155,7 +155,7 @@ func managedDocRelToBureaucracy(cfg Config, filename string) string {
 
 // ClaimPromptSection is the wiki-specific block for a twin claim
 // session. Sibling of IngestPromptSection / LintPromptSection /
-// ReflectPromptSection: same preamble, different framing — record
+// reflect: same preamble, different framing — record
 // what the operator changed and why, without editing managed docs.
 //
 // Closed-schema only.

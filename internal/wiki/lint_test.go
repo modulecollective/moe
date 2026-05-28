@@ -270,8 +270,8 @@ func equalStrings(got, want []string) bool {
 func TestLintPromptSectionMentionsStashFile(t *testing.T) {
 	cfg := Config{Name: "kb", ContentDir: "/x/y", Mode: Open}
 	got := LintPromptSection(cfg)
-	if !strings.Contains(got, OpsStashPath(cfg.ContentDir)) {
-		t.Errorf("lint prompt should print %q:\n%s", OpsStashPath(cfg.ContentDir), got)
+	if !strings.Contains(got, opsStashPath(cfg.ContentDir)) {
+		t.Errorf("lint prompt should print %q:\n%s", opsStashPath(cfg.ContentDir), got)
 	}
 }
 

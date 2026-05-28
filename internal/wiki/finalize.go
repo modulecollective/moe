@@ -111,7 +111,7 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 	}
 	now := fctx.Now.UTC()
 
-	if err := AssertModeInvariants(cfg); err != nil {
+	if err := assertModeInvariantsPreFinalize(cfg); err != nil {
 		return FinalizeResult{}, err
 	}
 
@@ -292,7 +292,7 @@ func excludeManaged(changes []Change, contentDir string) []Change {
 	managed := map[string]bool{
 		"log.md":          true,
 		"checkpoint.json": true,
-		OpsStashName:      true,
+		opsStashName:      true,
 	}
 	out := changes[:0]
 	for _, c := range changes {
@@ -312,8 +312,8 @@ func excludeManaged(changes []Change, contentDir string) []Change {
 // renders content edits only; a session with tags but no content
 // edits doesn't reach this function (FinalizeIngest short-circuits on
 // an empty change set).
-func appendLogEntry(contentDir string, now time.Time, fctx FinalizeContext, changes []Change, ops []WikiOp) error {
-	path := LogPath(contentDir)
+func appendLogEntry(contentDir string, now time.Time, fctx FinalizeContext, changes []Change, ops []wikiOp) error {
+	path := logPath(contentDir)
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("wiki: read %s: %w", path, err)

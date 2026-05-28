@@ -212,12 +212,12 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	}
 }
 
-// ReflectPromptSection now carries roadmap conventions and the
+// reflectPromptSection now carries roadmap conventions and the
 // hygiene-walk framing that used to live in PlanPromptSection /
 // LintPromptSection. Pin those so a future trim doesn't silently
 // drop them.
 func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
-	got, err := ReflectPromptSection(Config{
+	got, err := reflectPromptSection(Config{
 		Mode:        Closed,
 		Name:        "twin",
 		ContentDir:  "/x/projects/p/digital-twin",
@@ -498,7 +498,7 @@ func TestReadHistorySummaryMissingIsEmpty(t *testing.T) {
 func TestReadHistorySummaryReadsContent(t *testing.T) {
 	root := t.TempDir()
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, HistorySummaryPath(twinDir), "# History\n\nThe twin was seeded in 2026-Q1.\n")
+	writeFile(t, historySummaryPath(twinDir), "# History\n\nThe twin was seeded in 2026-Q1.\n")
 	cfg := Config{Mode: Closed, ContentDir: twinDir, Project: "p"}
 	got, err := ReadHistorySummary(cfg)
 	if err != nil {

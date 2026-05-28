@@ -24,49 +24,49 @@ type Checkpoint struct {
 	ProjectRepoSHA *string `json:"project_repo_sha"`
 }
 
-// TopicsSubdir is the basename of the directory under ContentDir that
+// topicsSubdir is the basename of the directory under ContentDir that
 // holds topic docs. index.md, log.md, checkpoint.json and .wiki-ops
 // stay at the top of ContentDir; per-topic *.md files live inside
-// TopicsSubdir so the corpus catalog (index.md) sits clean above the
+// topicsSubdir so the corpus catalog (index.md) sits clean above the
 // topic-doc dump.
-const TopicsSubdir = "topics"
+const topicsSubdir = "topics"
 
-// CheckpointPath returns the absolute path to checkpoint.json given a
+// checkpointPath returns the absolute path to checkpoint.json given a
 // ContentDir.
-func CheckpointPath(contentDir string) string {
+func checkpointPath(contentDir string) string {
 	return filepath.Join(contentDir, "checkpoint.json")
 }
 
-// TopicsDir returns the absolute path to the topics subdirectory given
+// topicsDir returns the absolute path to the topics subdirectory given
 // a ContentDir.
-func TopicsDir(contentDir string) string {
-	return filepath.Join(contentDir, TopicsSubdir)
+func topicsDir(contentDir string) string {
+	return filepath.Join(contentDir, topicsSubdir)
 }
 
-// LogPath returns the absolute path to log.md given a ContentDir.
-func LogPath(contentDir string) string {
+// logPath returns the absolute path to log.md given a ContentDir.
+func logPath(contentDir string) string {
 	return filepath.Join(contentDir, "log.md")
 }
 
-// IndexPath returns the absolute path to index.md given a ContentDir.
-func IndexPath(contentDir string) string {
+// indexPath returns the absolute path to index.md given a ContentDir.
+func indexPath(contentDir string) string {
 	return filepath.Join(contentDir, "index.md")
 }
 
-// HistorySummaryName is the basename of the rolling-summary doc the
+// historySummaryName is the basename of the rolling-summary doc the
 // agent maintains during reflect. Exempted from the closed-schema
 // invariants alongside log.md — engine-aware but agent-written, so it's
 // neither a managed doc with a ReflectPrompt nor a stray .md the
 // schema-drift check should reject.
-const HistorySummaryName = "history-summary.md"
+const historySummaryName = "history-summary.md"
 
-// HistorySummaryPath returns the absolute path to history-summary.md
+// historySummaryPath returns the absolute path to history-summary.md
 // given a ContentDir. The summary is reflect's rolling compressed memory
 // of project history before the current checkpoint SHA — maintained by
 // the agent at the end of each reflect pass, alongside the verbatim
 // "events since last reflect" block.
-func HistorySummaryPath(contentDir string) string {
-	return filepath.Join(contentDir, HistorySummaryName)
+func historySummaryPath(contentDir string) string {
+	return filepath.Join(contentDir, historySummaryName)
 }
 
 // WriteCheckpoint marshals cp as canonical pretty-printed JSON and
@@ -82,7 +82,7 @@ func WriteCheckpoint(contentDir string, cp Checkpoint) error {
 		return fmt.Errorf("wiki: marshal checkpoint: %w", err)
 	}
 	body = append(body, '\n')
-	path := CheckpointPath(contentDir)
+	path := checkpointPath(contentDir)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		return fmt.Errorf("wiki: write %s: %w", path, err)
 	}
@@ -94,7 +94,7 @@ func WriteCheckpoint(contentDir string, cp Checkpoint) error {
 // has no checkpoint yet, and that's the normal first-ingest path. Any
 // other I/O or parse error is returned as-is.
 func ReadCheckpoint(contentDir string) (Checkpoint, bool, error) {
-	path := CheckpointPath(contentDir)
+	path := checkpointPath(contentDir)
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -15,7 +15,7 @@ import (
 // IngestPromptSection: same preamble (schema-config body, wiki
 // header, on-disk shape), different framing — a health pass instead
 // of an ingest. The closed-schema hygiene pass folded into
-// `moe twin reflect` (see ReflectPromptSection); this surface is
+// `moe twin reflect`; this surface is
 // now open-schema only and panics on Closed so a misregistration is
 // loud rather than silent.
 func LintPromptSection(cfg Config) string {
@@ -58,7 +58,7 @@ in the same shape ingest uses:
     [wiki-op] rename <old>.md → <new>.md
     [wiki-op] retire <doc>.md
 
-Stash file: ` + OpsStashPath(cfg.ContentDir) + `
+Stash file: ` + opsStashPath(cfg.ContentDir) + `
 
 Do not edit log.md or checkpoint.json — the engine writes those at
 session close, the same as during ingest.
@@ -157,7 +157,7 @@ func Scan(cfg Config) (Findings, error) {
 func scanOpen(cfg Config) (Findings, error) {
 	var f Findings
 
-	topicsDir := TopicsDir(cfg.ContentDir)
+	topicsDir := topicsDir(cfg.ContentDir)
 	entries, err := os.ReadDir(topicsDir)
 	if err != nil && !os.IsNotExist(err) {
 		return f, fmt.Errorf("wiki: read %s: %w", topicsDir, err)
@@ -176,12 +176,12 @@ func scanOpen(cfg Config) (Findings, error) {
 		if !strings.HasSuffix(name, ".md") {
 			continue
 		}
-		rel := path.Join(TopicsSubdir, name)
+		rel := path.Join(topicsSubdir, name)
 		topics[rel] = true
 		topicList = append(topicList, rel)
 	}
 
-	indexBody, indexExists, err := readMaybe(IndexPath(cfg.ContentDir))
+	indexBody, indexExists, err := readMaybe(indexPath(cfg.ContentDir))
 	if err != nil {
 		return f, err
 	}

@@ -27,7 +27,7 @@ import (
 // value is 500. Same pattern as git.go's writeRetryCap.
 var firstReflectCommitCap = 500
 
-// ReflectPromptSection is the wiki-specific block appended to the
+// reflectPromptSection is the wiki-specific block appended to the
 // system prompt for a closed-schema reflect session. Sibling of
 // IngestPromptSection / ClaimPromptSection: same preamble, different
 // framing — walk each managed doc against recent events and propose
@@ -37,7 +37,7 @@ var firstReflectCommitCap = 500
 // Closed-schema only. Open-schema reflect (whether kb wants one) is
 // undecided; the seam exists, the implementation doesn't, so this
 // errors loudly on Open rather than silently inheriting kb framing.
-func ReflectPromptSection(cfg Config) (string, error) {
+func reflectPromptSection(cfg Config) (string, error) {
 	if cfg.Mode != Closed {
 		return "", fmt.Errorf("wiki: reflect is closed-schema only (got %s)", cfg.Mode)
 	}
@@ -339,7 +339,7 @@ func ReadHistorySummary(cfg Config) (string, error) {
 	if cfg.Mode != Closed {
 		return "", fmt.Errorf("wiki: history summary is closed-schema only (got %s)", cfg.Mode)
 	}
-	body, err := os.ReadFile(HistorySummaryPath(cfg.ContentDir))
+	body, err := os.ReadFile(historySummaryPath(cfg.ContentDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil

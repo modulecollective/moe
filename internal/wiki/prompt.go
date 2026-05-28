@@ -50,7 +50,7 @@ engine's stash file before the per-turn commit, in this exact shape:
     [wiki-op] rename <old>.md → <new>.md
     [wiki-op] retire <doc>.md
 
-Stash file: ` + OpsStashPath(cfg.ContentDir) + `
+Stash file: ` + opsStashPath(cfg.ContentDir) + `
 
 The engine harvests these tags into log.md and truncates the stash at
 session close. The stash never appears in diffs — it's engine-managed

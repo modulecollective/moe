@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// AssertModeInvariants is the guardrail the engine runs pre-finalize.
+// assertModeInvariantsPreFinalize is the guardrail the engine runs pre-finalize.
 // For open-schema wikis it's a no-op — the agent is permitted to evolve
 // the doc set freely. For closed-schema wikis (the twin) it refuses a
 // finalize that would add or remove docs the operator hasn't authorized:
@@ -18,18 +18,18 @@ import (
 // passes opts.Bootstrap=true on the first turn for a fresh closed-schema
 // wiki (when the engine just wrote the stubs). On bootstrap turns the
 // present-docs check skips — the stubs are about to land in the same
-// commit and AssertModeInvariants is called pre-finalize, so the docs
+// commit and assertModeInvariantsPreFinalize is called pre-finalize, so the docs
 // are always on disk by then anyway, but the flag exists so callers can
 // skip the check explicitly when they know they just stubbed.
-func AssertModeInvariants(cfg Config) error {
+func assertModeInvariantsPreFinalize(cfg Config) error {
 	return assertModeInvariants(cfg, false)
 }
 
-// AssertModeInvariantsBootstrap is AssertModeInvariants with the
+// assertModeInvariantsBootstrap is assertModeInvariantsPreFinalize with the
 // present-docs requirement relaxed: missing managed docs are tolerated
 // because the engine is about to create them in this turn. Used by
 // runWikiSession on the first turn for a fresh closed-schema wiki.
-func AssertModeInvariantsBootstrap(cfg Config) error {
+func assertModeInvariantsBootstrap(cfg Config) error {
 	return assertModeInvariants(cfg, true)
 }
 
@@ -82,8 +82,8 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() {
-			if name == TopicsSubdir {
-				return fmt.Errorf("wiki: closed-schema must not contain a %s/ subdir", TopicsSubdir)
+			if name == topicsSubdir {
+				return fmt.Errorf("wiki: closed-schema must not contain a %s/ subdir", topicsSubdir)
 			}
 			continue
 		}
@@ -99,7 +99,7 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 		// instructs the agent to maintain it, so it sits alongside
 		// log.md as a known-and-allowed top-level doc that isn't part
 		// of ManagedDocs.
-		if name == "log.md" || name == HistorySummaryName {
+		if name == "log.md" || name == historySummaryName {
 			continue
 		}
 		return fmt.Errorf("wiki: closed-schema has unexpected top-level doc %s", name)

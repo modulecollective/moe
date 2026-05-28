@@ -52,13 +52,13 @@ func TestScanClosedSchema(t *testing.T) {
 }
 
 func TestReflectPromptSectionRefusesOpen(t *testing.T) {
-	if _, err := ReflectPromptSection(Config{Mode: Open}); err == nil {
-		t.Fatal("ReflectPromptSection should refuse open-schema")
+	if _, err := reflectPromptSection(Config{Mode: Open}); err == nil {
+		t.Fatal("reflectPromptSection should refuse open-schema")
 	}
 }
 
 func TestReflectPromptSectionRendersClosed(t *testing.T) {
-	got, err := ReflectPromptSection(Config{
+	got, err := reflectPromptSection(Config{
 		Mode:       Closed,
 		Name:       "twin",
 		ContentDir: "/x/projects/p/digital-twin",
@@ -87,7 +87,7 @@ func TestReflectPromptSectionRendersClosed(t *testing.T) {
 // 2+-doc rule and the code-seam carve-out so the agent applies the
 // rule from the prompt verbatim.
 func TestReflectPromptSectionRendersGlossaryConvention(t *testing.T) {
-	got, err := ReflectPromptSection(Config{
+	got, err := reflectPromptSection(Config{
 		Mode:       Closed,
 		Name:       "twin",
 		ContentDir: "/x/projects/p/digital-twin",

@@ -69,13 +69,13 @@ func TestIngestPromptSectionClosedSchema(t *testing.T) {
 }
 
 func TestAssertModeInvariantsOpenIsNoOp(t *testing.T) {
-	if err := AssertModeInvariants(Config{Mode: Open}); err != nil {
+	if err := assertModeInvariantsPreFinalize(Config{Mode: Open}); err != nil {
 		t.Fatalf("open-schema invariants: unexpected error %v", err)
 	}
 }
 
 func TestAssertModeInvariantsClosedRequiresManagedDocs(t *testing.T) {
-	err := AssertModeInvariants(Config{Mode: Closed})
+	err := assertModeInvariantsPreFinalize(Config{Mode: Closed})
 	if err == nil || !strings.Contains(err.Error(), "ManagedDocs") {
 		t.Fatalf("closed-schema with no ManagedDocs should refuse with a managed-docs message, got %v", err)
 	}
@@ -93,7 +93,7 @@ func TestAssertModeInvariantsClosedRefusesMissingDoc(t *testing.T) {
 			{Filename: "architecture.md", Title: "Architecture"},
 		},
 	}
-	err := AssertModeInvariants(cfg)
+	err := assertModeInvariantsPreFinalize(cfg)
 	if err == nil || !strings.Contains(err.Error(), "architecture.md") {
 		t.Fatalf("expected missing-doc error naming architecture.md, got %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAssertModeInvariantsClosedBootstrapTolerantOfMissing(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	if err := AssertModeInvariantsBootstrap(cfg); err != nil {
+	if err := assertModeInvariantsBootstrap(cfg); err != nil {
 		t.Fatalf("bootstrap should tolerate missing docs, got %v", err)
 	}
 }
@@ -124,7 +124,7 @@ func TestAssertModeInvariantsClosedRefusesUnexpectedDoc(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	err := AssertModeInvariants(cfg)
+	err := assertModeInvariantsPreFinalize(cfg)
 	if err == nil || !strings.Contains(err.Error(), "stray.md") {
 		t.Fatalf("expected unexpected-doc error naming stray.md, got %v", err)
 	}
@@ -133,7 +133,7 @@ func TestAssertModeInvariantsClosedRefusesUnexpectedDoc(t *testing.T) {
 func TestAssertModeInvariantsClosedRefusesTopicsDir(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
-	if err := os.MkdirAll(filepath.Join(dir, TopicsSubdir), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, topicsSubdir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{
@@ -143,8 +143,8 @@ func TestAssertModeInvariantsClosedRefusesTopicsDir(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	err := AssertModeInvariants(cfg)
-	if err == nil || !strings.Contains(err.Error(), TopicsSubdir) {
+	err := assertModeInvariantsPreFinalize(cfg)
+	if err == nil || !strings.Contains(err.Error(), topicsSubdir) {
 		t.Fatalf("expected topics-dir refusal, got %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestAssertModeInvariantsClosedAllowsHistorySummary(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")
 	writeFile(t, filepath.Join(dir, "architecture.md"), "# Architecture\n")
-	writeFile(t, filepath.Join(dir, HistorySummaryName), "# History\n\nthings happened\n")
+	writeFile(t, filepath.Join(dir, historySummaryName), "# History\n\nthings happened\n")
 	cfg := Config{
 		Mode:       Closed,
 		ContentDir: dir,
@@ -167,7 +167,7 @@ func TestAssertModeInvariantsClosedAllowsHistorySummary(t *testing.T) {
 			{Filename: "architecture.md", Title: "Architecture"},
 		},
 	}
-	if err := AssertModeInvariants(cfg); err != nil {
+	if err := assertModeInvariantsPreFinalize(cfg); err != nil {
 		t.Fatalf("invariants should accept history-summary.md, got %v", err)
 	}
 }
@@ -341,10 +341,10 @@ func TestFinalizeIngestNoChangesIsNoOp(t *testing.T) {
 	if res.LogEntryWritten || res.CheckpointWritten {
 		t.Fatalf("expected no writes for empty change set, got %+v", res)
 	}
-	if _, err := os.Stat(LogPath(wikiDir)); err == nil {
+	if _, err := os.Stat(logPath(wikiDir)); err == nil {
 		t.Fatal("log.md should not exist after no-op finalize")
 	}
-	if _, err := os.Stat(CheckpointPath(wikiDir)); err == nil {
+	if _, err := os.Stat(checkpointPath(wikiDir)); err == nil {
 		t.Fatal("checkpoint.json should not exist after no-op finalize")
 	}
 }
@@ -391,7 +391,7 @@ func TestFinalizeIngestWritesLogAndCheckpoint(t *testing.T) {
 	// the per-status bullets. Check shape, not exact bytes — the
 	// changelog format is allowed to evolve as long as the heading and
 	// run-id remain greppable.
-	logBody, err := os.ReadFile(LogPath(wikiDir))
+	logBody, err := os.ReadFile(logPath(wikiDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,22 +535,22 @@ func TestParseOpsRecognisesAllPrimitives(t *testing.T) {
 	if len(ops) != 4 {
 		t.Fatalf("expected 4 ops, got %d: %+v", len(ops), ops)
 	}
-	if ops[0].Kind != OpSplit ||
+	if ops[0].Kind != opSplit ||
 		len(ops[0].Sources) != 1 || ops[0].Sources[0] != "networking.md" ||
 		len(ops[0].Targets) != 2 ||
 		ops[0].Targets[0] != "dns-basics.md" || ops[0].Targets[1] != "tcp-handshake.md" {
 		t.Errorf("split op malformed: %+v", ops[0])
 	}
-	if ops[1].Kind != OpMerge ||
+	if ops[1].Kind != opMerge ||
 		len(ops[1].Sources) != 1 || ops[1].Sources[0] != "dns-caching.md" ||
 		len(ops[1].Targets) != 1 || ops[1].Targets[0] != "dns-basics.md" {
 		t.Errorf("merge op malformed: %+v", ops[1])
 	}
-	if ops[2].Kind != OpRename ||
+	if ops[2].Kind != opRename ||
 		ops[2].Sources[0] != "old-stuff.md" || ops[2].Targets[0] != "archived-projects.md" {
 		t.Errorf("rename op malformed: %+v", ops[2])
 	}
-	if ops[3].Kind != OpRetire ||
+	if ops[3].Kind != opRetire ||
 		ops[3].Sources[0] != "scratch-notes.md" || len(ops[3].Targets) != 0 {
 		t.Errorf("retire op malformed: %+v", ops[3])
 	}
@@ -559,7 +559,7 @@ func TestParseOpsRecognisesAllPrimitives(t *testing.T) {
 func TestParseOpsAcceptsAsciiArrow(t *testing.T) {
 	// Operators on keyboards without → should not be locked out.
 	ops := parseOps("[wiki-op] rename old.md -> new.md\n")
-	if len(ops) != 1 || ops[0].Kind != OpRename ||
+	if len(ops) != 1 || ops[0].Kind != opRename ||
 		ops[0].Sources[0] != "old.md" || ops[0].Targets[0] != "new.md" {
 		t.Fatalf("ascii arrow rename not parsed: %+v", ops)
 	}
@@ -575,7 +575,7 @@ func TestParseOpsSkipsMalformedAndCommentary(t *testing.T) {
 plain text without a tag prefix
 `
 	ops := parseOps(body)
-	if len(ops) != 1 || ops[0].Kind != OpRetire || ops[0].Sources[0] != "kept.md" {
+	if len(ops) != 1 || ops[0].Kind != opRetire || ops[0].Sources[0] != "kept.md" {
 		t.Fatalf("expected only the well-formed retire to survive, got %+v", ops)
 	}
 }
@@ -588,7 +588,7 @@ func TestEnsureOpsStashCreatesAndTruncates(t *testing.T) {
 	if err := EnsureOpsStash(wikiDir); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
-	stash := OpsStashPath(wikiDir)
+	stash := opsStashPath(wikiDir)
 	body, err := os.ReadFile(stash)
 	if err != nil {
 		t.Fatalf("read after first seed: %v", err)
@@ -653,7 +653,7 @@ func TestFinalizeIngestRendersOperationsGroup(t *testing.T) {
 		}
 	}
 
-	logBody, err := os.ReadFile(LogPath(wikiDir))
+	logBody, err := os.ReadFile(logPath(wikiDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +678,7 @@ func TestFinalizeIngestRendersOperationsGroup(t *testing.T) {
 	// Stash file must be truncated to zero bytes by finalize so the
 	// next session starts fresh; the truncation rides into the
 	// per-turn commit alongside log.md.
-	stashBody, err := os.ReadFile(OpsStashPath(wikiDir))
+	stashBody, err := os.ReadFile(opsStashPath(wikiDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -720,7 +720,7 @@ func TestFinalizeIngestStashOnlyIsNoOp(t *testing.T) {
 // managed doc and writes history-summary.md must finalize cleanly —
 // log.md and checkpoint.json get written, history-summary.md rides
 // into the change set as a real ingest output. Before the
-// invariants-exemption fix, finalize aborted at AssertModeInvariants
+// invariants-exemption fix, finalize aborted at the invariant check
 // with "unexpected top-level doc history-summary.md", silently
 // dropping the checkpoint write and producing the dash's "never
 // reflected" misreport.
@@ -729,7 +729,7 @@ func TestFinalizeIngestClosedSchemaWithHistorySummary(t *testing.T) {
 	wikiDir := filepath.Join(root, "twin")
 	writeFile(t, filepath.Join(wikiDir, "vision.md"), "# Vision\n\nbody\n")
 	writeFile(t, filepath.Join(wikiDir, "architecture.md"), "# Architecture\n")
-	writeFile(t, filepath.Join(wikiDir, HistorySummaryName),
+	writeFile(t, filepath.Join(wikiDir, historySummaryName),
 		"# History\n\nThe twin was reseeded in 2026-Q2.\n")
 
 	cfg := Config{
@@ -758,23 +758,23 @@ func TestFinalizeIngestClosedSchemaWithHistorySummary(t *testing.T) {
 	// the change set so the changelog reflects that the agent edited it.
 	var sawSummary bool
 	for _, c := range res.Changes {
-		if c.Path == HistorySummaryName {
+		if c.Path == historySummaryName {
 			sawSummary = true
 		}
 	}
 	if !sawSummary {
-		t.Errorf("expected %s in change set, got %+v", HistorySummaryName, res.Changes)
+		t.Errorf("expected %s in change set, got %+v", historySummaryName, res.Changes)
 	}
 
-	if _, err := os.Stat(CheckpointPath(wikiDir)); err != nil {
+	if _, err := os.Stat(checkpointPath(wikiDir)); err != nil {
 		t.Errorf("checkpoint.json not on disk: %v", err)
 	}
-	logBody, err := os.ReadFile(LogPath(wikiDir))
+	logBody, err := os.ReadFile(logPath(wikiDir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logBody), HistorySummaryName) {
-		t.Errorf("log.md missing %s line:\n%s", HistorySummaryName, logBody)
+	if !strings.Contains(string(logBody), historySummaryName) {
+		t.Errorf("log.md missing %s line:\n%s", historySummaryName, logBody)
 	}
 }
 
@@ -806,7 +806,7 @@ func TestFinalizeIngestPicksUpDeletes(t *testing.T) {
 	if len(res.Changes) != 2 {
 		t.Fatalf("expected 2 changes (add + remove), got %+v", res.Changes)
 	}
-	logBody, err := os.ReadFile(LogPath(wikiDir))
+	logBody, err := os.ReadFile(logPath(wikiDir))
 	if err != nil {
 		t.Fatal(err)
 	}

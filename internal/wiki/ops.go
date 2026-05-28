@@ -7,63 +7,63 @@ import (
 	"strings"
 )
 
-// OpsStashName is the dotfile under ContentDir the agent appends
+// opsStashName is the dotfile under ContentDir the agent appends
 // `[wiki-op]` tags to as it applies schema-evolution primitives. The
 // engine seeds it at session open and reads + truncates it at finalize.
 // excludeManaged keeps it out of the diff that drives log.md so the
 // scratchpad never appears in changelog entries.
-const OpsStashName = ".wiki-ops"
+const opsStashName = ".wiki-ops"
 
-// OpsStashPath returns the absolute path to the `.wiki-ops` stash file
+// opsStashPath returns the absolute path to the `.wiki-ops` stash file
 // given a ContentDir.
-func OpsStashPath(contentDir string) string {
-	return filepath.Join(contentDir, OpsStashName)
+func opsStashPath(contentDir string) string {
+	return filepath.Join(contentDir, opsStashName)
 }
 
-// WikiOpKind enumerates the schema-evolution primitives the agent may
+// wikiOpKind enumerates the schema-evolution primitives the agent may
 // apply during an open-schema ingest. The closed-schema (twin) config
 // will refuse all of these — the engine exposes the same vocabulary so
 // both modes can talk about the same operations.
-type WikiOpKind int
+type wikiOpKind int
 
 const (
-	// OpSplit — one topic doc fanned out into multiple new docs.
-	OpSplit WikiOpKind = iota
-	// OpMerge — content from one (or more) docs absorbed into another.
-	OpMerge
-	// OpRename — title/framing shifted; the underlying doc is the
+	// opSplit — one topic doc fanned out into multiple new docs.
+	opSplit wikiOpKind = iota
+	// opMerge — content from one (or more) docs absorbed into another.
+	opMerge
+	// opRename — title/framing shifted; the underlying doc is the
 	// same content under a new filename.
-	OpRename
-	// OpRetire — doc removed because nothing references it any more
+	opRename
+	// opRetire — doc removed because nothing references it any more
 	// and its content is either fully absorbed elsewhere or no longer
 	// load-bearing.
-	OpRetire
+	opRetire
 )
 
 // String returns the lowercase label used in `[wiki-op]` tags and
 // rendered log entries.
-func (k WikiOpKind) String() string {
+func (k wikiOpKind) String() string {
 	switch k {
-	case OpSplit:
+	case opSplit:
 		return "split"
-	case OpMerge:
+	case opMerge:
 		return "merge"
-	case OpRename:
+	case opRename:
 		return "rename"
-	case OpRetire:
+	case opRetire:
 		return "retire"
 	default:
 		return "unknown"
 	}
 }
 
-// WikiOp is one parsed entry from `.wiki-ops`. Sources / Targets are
+// wikiOp is one parsed entry from `.wiki-ops`. Sources / Targets are
 // the filenames the agent named on either side of the operation;
 // retire has a single source and no targets, rename has one of each,
 // split has one source and N targets, merge has N sources and one
 // target.
-type WikiOp struct {
-	Kind    WikiOpKind
+type wikiOp struct {
+	Kind    wikiOpKind
 	Sources []string
 	Targets []string
 }
@@ -80,7 +80,7 @@ func EnsureOpsStash(contentDir string) error {
 	if err := os.MkdirAll(contentDir, 0o755); err != nil {
 		return fmt.Errorf("wiki: mkdir %s: %w", contentDir, err)
 	}
-	path := OpsStashPath(contentDir)
+	path := opsStashPath(contentDir)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("wiki: seed %s: %w", path, err)
@@ -93,8 +93,8 @@ func EnsureOpsStash(contentDir string) error {
 // an error — it produces an empty op list and the log entry degrades
 // to today's shape. The truncation rides along in the per-turn commit
 // commitTurn assembles after FinalizeIngest.
-func readAndTruncateOpsStash(contentDir string) []WikiOp {
-	path := OpsStashPath(contentDir)
+func readAndTruncateOpsStash(contentDir string) []wikiOp {
+	path := opsStashPath(contentDir)
 	body, err := os.ReadFile(path)
 	if err != nil {
 		// Missing or unreadable — degrade silently. The diff still
@@ -113,8 +113,8 @@ func readAndTruncateOpsStash(contentDir string) []WikiOp {
 // tags whose body doesn't match a known primitive shape, are silently
 // skipped — the agent's commentary or a malformed line shouldn't blow
 // up the parse.
-func parseOps(body string) []WikiOp {
-	var ops []WikiOp
+func parseOps(body string) []wikiOp {
+	var ops []wikiOp
 	for _, raw := range strings.Split(body, "\n") {
 		line := strings.TrimSpace(raw)
 		rest, ok := strings.CutPrefix(line, "[wiki-op]")
@@ -143,22 +143,22 @@ func parseOps(body string) []WikiOp {
 }
 
 // parseOpBody dispatches on the primitive name and parses the rest of
-// the line into a WikiOp. Returns false for unknown primitives or
+// the line into a wikiOp. Returns false for unknown primitives or
 // malformed bodies.
-func parseOpBody(kind, body string) (WikiOp, bool) {
+func parseOpBody(kind, body string) (wikiOp, bool) {
 	switch kind {
 	case "split":
 		// "<src> → <dst1>, <dst2>, ..."
 		left, right, ok := splitArrow(body)
 		if !ok {
-			return WikiOp{}, false
+			return wikiOp{}, false
 		}
 		src := strings.TrimSpace(left)
 		targets := splitCommaList(right)
 		if src == "" || len(targets) == 0 {
-			return WikiOp{}, false
+			return wikiOp{}, false
 		}
-		return WikiOp{Kind: OpSplit, Sources: []string{src}, Targets: targets}, true
+		return wikiOp{Kind: opSplit, Sources: []string{src}, Targets: targets}, true
 	case "merge":
 		// "<src> into <dst>" — also accept "<srcs...> → <dst>" so the
 		// rendered log entry style ("a → b") parses if the agent ever
@@ -167,38 +167,38 @@ func parseOpBody(kind, body string) (WikiOp, bool) {
 			sources := splitCommaList(left)
 			tgt := strings.TrimSpace(right)
 			if len(sources) == 0 || tgt == "" {
-				return WikiOp{}, false
+				return wikiOp{}, false
 			}
-			return WikiOp{Kind: OpMerge, Sources: sources, Targets: []string{tgt}}, true
+			return wikiOp{Kind: opMerge, Sources: sources, Targets: []string{tgt}}, true
 		}
 		if left, right, ok := splitArrow(body); ok {
 			sources := splitCommaList(left)
 			tgt := strings.TrimSpace(right)
 			if len(sources) == 0 || tgt == "" {
-				return WikiOp{}, false
+				return wikiOp{}, false
 			}
-			return WikiOp{Kind: OpMerge, Sources: sources, Targets: []string{tgt}}, true
+			return wikiOp{Kind: opMerge, Sources: sources, Targets: []string{tgt}}, true
 		}
-		return WikiOp{}, false
+		return wikiOp{}, false
 	case "rename":
 		left, right, ok := splitArrow(body)
 		if !ok {
-			return WikiOp{}, false
+			return wikiOp{}, false
 		}
 		src := strings.TrimSpace(left)
 		tgt := strings.TrimSpace(right)
 		if src == "" || tgt == "" {
-			return WikiOp{}, false
+			return wikiOp{}, false
 		}
-		return WikiOp{Kind: OpRename, Sources: []string{src}, Targets: []string{tgt}}, true
+		return wikiOp{Kind: opRename, Sources: []string{src}, Targets: []string{tgt}}, true
 	case "retire":
 		src := strings.TrimSpace(body)
 		if src == "" {
-			return WikiOp{}, false
+			return wikiOp{}, false
 		}
-		return WikiOp{Kind: OpRetire, Sources: []string{src}}, true
+		return wikiOp{Kind: opRetire, Sources: []string{src}}, true
 	default:
-		return WikiOp{}, false
+		return wikiOp{}, false
 	}
 }
 
@@ -240,24 +240,24 @@ func splitCommaList(s string) []string {
 	return out
 }
 
-// formatOpLine renders a single WikiOp as it appears in log.md under
+// formatOpLine renders a single wikiOp as it appears in log.md under
 // the operations group. The arrow form is canonical regardless of how
 // the agent originally phrased the tag, so log entries read uniformly.
-func formatOpLine(op WikiOp) string {
+func formatOpLine(op wikiOp) string {
 	switch op.Kind {
-	case OpSplit:
+	case opSplit:
 		return fmt.Sprintf("split: %s → %s",
 			strings.Join(op.Sources, ", "),
 			strings.Join(op.Targets, ", "))
-	case OpMerge:
+	case opMerge:
 		return fmt.Sprintf("merge: %s → %s",
 			strings.Join(op.Sources, ", "),
 			strings.Join(op.Targets, ", "))
-	case OpRename:
+	case opRename:
 		return fmt.Sprintf("rename: %s → %s",
 			strings.Join(op.Sources, ", "),
 			strings.Join(op.Targets, ", "))
-	case OpRetire:
+	case opRetire:
 		return fmt.Sprintf("retire: %s", strings.Join(op.Sources, ", "))
 	default:
 		return ""

@@ -19,7 +19,7 @@ package wiki
 // Mode picks between the two schema-evolution dispositions. Open lets
 // the agent split / merge / rename / retire topic docs as warranted.
 // Closed (twin) refuses doc-set changes that aren't explicitly
-// authorized — AssertModeInvariants is where that gets enforced.
+// authorized; the finalize invariant check enforces that boundary.
 type Mode int
 
 const (
@@ -66,7 +66,7 @@ type Config struct {
 	// root. Used to capture bureaucracy_sha at finalize time.
 	BureaucracyPath string
 	// Mode selects open- vs. closed-schema rules for the ingest
-	// prompt and AssertModeInvariants.
+	// prompt and finalize invariant checks.
 	Mode Mode
 	// IngestPrompt is the schema-config body that gets pasted into
 	// the system prompt above the engine's mode rules. Carries the
