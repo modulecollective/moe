@@ -24,6 +24,9 @@ var moeBureaucracySkill string
 //go:embed skills/moe-context/SKILL.md
 var moeContextSkill string
 
+//go:embed skills/moe-howto/SKILL.md
+var moeHowtoSkill string
+
 // Soul returns the embedded soul.md content. Never empty in a correctly
 // built binary; an empty return means the embed directive is broken.
 func Soul() string {
@@ -63,6 +66,15 @@ func MoeBureaucracySkill() string {
 // .codex/skills/. Never empty in a correctly built binary.
 func MoeContextSkill() string {
 	return moeContextSkill
+}
+
+// MoeHowtoSkill returns the embedded SKILL.md for the moe-howto skill —
+// the chat workflow's idea-capture / backlog-grooming guidance. Unlike
+// its two siblings it carries no template placeholders (its body is
+// project-agnostic command guidance), so the materialiser writes it
+// verbatim. Never empty in a correctly built binary.
+func MoeHowtoSkill() string {
+	return moeHowtoSkill
 }
 
 // OneShot returns the embedded workflows/<workflow>/oneshot.md fragment

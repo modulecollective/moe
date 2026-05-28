@@ -1,0 +1,85 @@
+---
+name: moe-howto
+description: How to capture and groom the backlog from a MoE chat session — open, edit, close, and reopen idea runs, and read the dash/list surfaces that inform grooming. Use when the operator asks you to open an idea, track something, or tidy the idea backlog. Does not cover starting or driving coding work.
+---
+
+# Capturing and grooming the backlog
+
+You are in a Ministry of Everything (MoE) chat session — a thinking
+partner, not a builder. One concrete thing you do on the operator's
+behalf is tend the **idea backlog**: capture new ideas, refine existing
+ones, and close or reopen them as the operator decides. This skill is
+the verb set for that, and nothing more.
+
+You're interactive, so the operator sees every command before it runs.
+Propose the command, run it when they're on board, and report what it
+did. If a mutating command fails — another moe process holds the lock,
+or a sandbox write is refused — print the exact command and let the
+operator run it from their own shell. Surfacing the command is always an
+acceptable outcome.
+
+## Capture a new idea
+
+```
+moe idea new <project>/<slug>
+```
+
+Opens a new idea run. The slug is lowercase kebab (`[a-z0-9-]+`). An
+idea is a single free-form canvas — the operator's capture of "a thing
+worth doing", not a design. Keep what you write tight: the problem, why
+it matters, and any constraints the conversation surfaced. Don't design
+the solution; that's the sdlc design stage's job if the idea ever gets
+promoted.
+
+`moe idea new` opens `$EDITOR` by default. In a chat session there's no
+editor to drop into, so pass `--chat` to draft the idea body in a short
+agent session instead:
+
+```
+moe idea new --chat <project>/<slug>
+```
+
+## Refine an existing idea
+
+```
+moe idea edit <project>/<slug>          # opens $EDITOR
+moe idea edit --chat <project>/<slug>   # drafts in an agent session
+```
+
+Use this to sharpen a captured idea the conversation revisited — tighten
+the problem statement, add a constraint, record a decision. Same rule:
+refine the *what*, leave the *how* to design.
+
+## Close / reopen
+
+```
+moe idea close <project>/<slug>     # the idea is handled or no longer wanted
+moe idea reopen <project>/<slug>    # flip a closed idea back to in_progress
+```
+
+Close an idea the operator has decided against or that's been folded
+elsewhere. Reopen recovers a closed idea (or one whose promoted
+destination has since closed) — it refuses if reopening would create two
+live owners of the same intent, so trust the refusal when it fires.
+
+## Read the backlog before grooming
+
+Look before you capture, so you don't open a duplicate or re-decide a
+settled question:
+
+- `moe dash` — the board: every run and idea with status at a glance.
+- `moe idea list` — the idea backlog specifically.
+- `moe idea cat <project>/<slug>` — dump one idea's canvas.
+- `moe idea log <project>/<slug>` — render an idea's capture transcript.
+
+Pair this with the `moe-context` skill when you want the deeper history
+(prior run canvases, the journal sliced by run/doc/workflow).
+
+## What this skill is not
+
+This is the **grooming** verb set — capture and tidy intent. It is
+deliberately silent on starting or driving coding work: `moe sdlc new`,
+the `design` / `code` / `test` ladder, and `push` are not here, because
+the chat agent is not the one who starts building. When an idea is ripe
+to build, the move is to leave it well-captured and let the operator
+open the coding ladder themselves.

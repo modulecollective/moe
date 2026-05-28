@@ -134,6 +134,17 @@ type stageSessionOpts struct {
 	// $MOE_AGENT, else "claude". Stage callers populate this from the
 	// run.json field when present, or from a --agent flag override.
 	Agent string
+	// CanvasOnOpen, when non-nil, runs on every session open (fresh and
+	// resume) after the rest of BuildSpec has succeeded. It receives the
+	// session worktree root and the run metadata and may read or write
+	// the canvas. chat is the only caller: its canvas is a moe-owned
+	// session log the agent never writes, so chat appends a per-session
+	// marker here to make the canvas differ from main every turn — which
+	// is what satisfies session.Close's canvas-unchanged guard without an
+	// opt-out flag (the canvas genuinely moved). Distinct from
+	// CanvasSkeleton, which seeds once on first open only; CanvasOnOpen
+	// fires every open, which is what the per-resume marker needs.
+	CanvasOnOpen func(workRoot string, md *run.Metadata) error
 }
 
 // stageAgentName resolves the agent backend for a stage turn. It is
@@ -367,6 +378,18 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				return wikiTurnSpec{}, err
 			}
 
+			// moe-howto is the chat workflow's idea-capture / backlog-
+			// grooming skill — chat-only by intent (sdlc / twin / kb
+			// agents aren't here to groom the backlog, so per "tool
+			// scoping by document" they don't get it). One workflow needs
+			// it today, so a single gate beats a registry; revisit if a
+			// second workflow-specific skill shows up.
+			if md.Workflow == chatWorkflow {
+				if err := materializeMoeHowtoSkill(workRoot, sessionCwd); err != nil {
+					return wikiTurnSpec{}, err
+				}
+			}
+
 			// mutated means EnsureDocument just minted the session
 			// UUID this turn — fresh session, nothing to validate.
 			// Otherwise stat the exact path claude will read for
@@ -436,6 +459,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 							newSession = true
 						}
 					}
+				}
+			}
+
+			// CanvasOnOpen runs last in BuildSpec — after every step that
+			// can fail — so a bootstrap error never leaves an uncommitted
+			// canvas write behind. chat uses it to append its per-session
+			// marker; see the field doc on stageSessionOpts.
+			if opts.CanvasOnOpen != nil {
+				if err := opts.CanvasOnOpen(workRoot, md); err != nil {
+					return wikiTurnSpec{}, err
 				}
 			}
 

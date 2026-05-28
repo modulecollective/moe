@@ -40,6 +40,7 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"audit report", []string{"audit", "report", "--agent=gpt", "moe/x"}},
 		{"hooks code", []string{"hooks", "code", "--agent=gpt", "moe/x"}},
 		{"meta-moe report", []string{"meta-moe", "report", "--agent=gpt", "moe/x"}},
+		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
 		{"twin claim", []string{"twin", "claim", "--agent=gpt", "moe"}},
