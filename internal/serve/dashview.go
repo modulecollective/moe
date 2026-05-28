@@ -19,6 +19,9 @@ type dashRowVM struct {
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
 	Live bool
+	// Member is true for an active row that follows its chain parent in
+	// the grouped order — the template indents it and draws a connector.
+	Member bool
 }
 
 // dashVM is the data the dash template renders against. Same three
@@ -53,6 +56,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			Run:     r.Run,
 			Note:    r.Note,
 			When:    dash.HumanAgo(now, r.When),
+			Member:  r.Member,
 		}
 		switch r.Bucket {
 		case dash.BucketActiveRuns:

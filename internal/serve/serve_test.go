@@ -162,6 +162,46 @@ func TestDashShowAllStripsCap(t *testing.T) {
 	}
 }
 
+func TestNewDashVMCarriesChainMember(t *testing.T) {
+	now := time.Now().UTC()
+	rows := []dash.Row{
+		{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
+		{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
+		{Project: "p", Run: "solo", Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
+	}
+	vm := newDashVM(now, rows, 1, 1, false)
+	if len(vm.Active) != 3 {
+		t.Fatalf("active len = %d, want 3", len(vm.Active))
+	}
+	for i, want := range []struct {
+		run    string
+		member bool
+	}{{"head", false}, {"child", true}, {"solo", false}} {
+		if vm.Active[i].Run != want.run || vm.Active[i].Member != want.member {
+			t.Errorf("row %d = {run:%s member:%v}, want {run:%s member:%v}", i, vm.Active[i].Run, vm.Active[i].Member, want.run, want.member)
+		}
+	}
+}
+
+func TestDashRendersChainedClass(t *testing.T) {
+	now := time.Now().UTC()
+	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+		return []dash.Row{
+			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
+			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
+		}, 1, 1, nil
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := strings.Count(rr.Body.String(), `class="row chained"`); got != 1 {
+		t.Errorf("want one chained row, got %d\n%s", got, rr.Body.String())
+	}
+}
+
 // TestDashLiveBadgeReflectsExitState: an active-bucket row whose
 // child is still in the registry but has exited (done closed) must
 // not render the "live" badge — registry presence alone overstates

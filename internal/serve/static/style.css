@@ -165,6 +165,8 @@ section h2 .count {
   border-bottom: 1px solid var(--hairline);
 }
 .row:last-child { border-bottom: none; }
+.row.chained { padding-left: 1.5rem; }
+.row.chained::before { content: "↳"; color: var(--muted); flex-shrink: 0; }
 .row .slug { font-size: 0.95rem; color: var(--fg); flex-shrink: 0; }
 .row .when { color: var(--muted); font-size: 0.85rem; }
 .row .note { color: var(--muted); font-size: 0.9rem; flex-basis: 100%; }

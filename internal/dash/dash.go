@@ -72,6 +72,10 @@ type Row struct {
 	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
+	// Member is true for an active row that follows its chain parent in
+	// the grouped ACTIVE order — the renderer draws a connector for it.
+	// Heads and singletons (and every backlog/completed row) are false.
+	Member bool
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -147,7 +151,115 @@ func BuildRows(in Inputs) ([]Row, error) {
 		}
 		return rows[i].When.After(rows[j].When)
 	})
+	groupActiveChains(rows, in.Index, byRunKey)
 	return rows, nil
+}
+
+// groupActiveChains reorders the ACTIVE bucket so each chain renders as
+// a contiguous, head-first block, marks the following members so the
+// renderer can draw a connector, and reattaches the textual
+// "· chained → X" hint only for edges adjacency doesn't already show
+// (a fan-in's second parent, or a child that fell out of the active
+// set). BACKLOG and COMPLETED rows keep their recency order.
+//
+// rows must already be bucket-then-recency sorted, so the ACTIVE bucket
+// is the leading run of BucketActiveRuns rows.
+func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.Metadata) {
+	n := 0
+	for n < len(rows) && rows[n].Bucket == BucketActiveRuns {
+		n++
+	}
+	if n == 0 {
+		return
+	}
+	active := rows[:n]
+	keyOf := func(r Row) string { return r.Project + "/" + r.Run }
+
+	inActive := make(map[string]bool, n)
+	for _, r := range active {
+		inActive[keyOf(r)] = true
+	}
+
+	// Live edges with both endpoints active. childOf is ≤1 per parent
+	// (ChainedChild is a map); parentOf records the active incoming edge
+	// — its value is unused, so fan-in's last-writer-wins is harmless.
+	childOf := make(map[string]string)
+	parentOf := make(map[string]string)
+	for parent, child := range idx.ChainedChild {
+		if inActive[parent] && inActive[child] && chainChildLive(child, byKey) {
+			childOf[parent] = child
+			parentOf[child] = parent
+		}
+	}
+
+	shownEdge := make(map[string]bool) // parents whose child is drawn adjacently
+	if len(childOf) > 0 {
+		rowByKey := make(map[string]Row, n)
+		for _, r := range active {
+			rowByKey[keyOf(r)] = r
+		}
+		type unit struct {
+			keys []string
+			rep  time.Time // representative time = most-recent member
+		}
+		consumed := make(map[string]bool, n)
+		var units []unit
+		for _, r := range active { // recency order
+			k := keyOf(r)
+			if consumed[k] {
+				continue
+			}
+			if _, hasParent := parentOf[k]; hasParent {
+				continue // a member; emitted within its head's unit
+			}
+			if _, hasChild := childOf[k]; !hasChild {
+				consumed[k] = true
+				units = append(units, unit{keys: []string{k}, rep: r.When})
+				continue
+			}
+			// Head: walk childOf transitively, cycle-guarded by consumed.
+			var u unit
+			for cur := k; cur != "" && !consumed[cur]; cur = childOf[cur] {
+				consumed[cur] = true
+				u.keys = append(u.keys, cur)
+				if w := rowByKey[cur].When; w.After(u.rep) {
+					u.rep = w
+				}
+			}
+			units = append(units, u)
+		}
+		// Safety net for a parentless cycle (no head): keep any unplaced
+		// row in its recency slot rather than dropping it.
+		for _, r := range active {
+			if k := keyOf(r); !consumed[k] {
+				consumed[k] = true
+				units = append(units, unit{keys: []string{k}, rep: r.When})
+			}
+		}
+		sort.SliceStable(units, func(i, j int) bool {
+			return units[i].rep.After(units[j].rep)
+		})
+		i := 0
+		for _, u := range units {
+			for pos, k := range u.keys {
+				row := rowByKey[k]
+				row.Member = len(u.keys) >= 2 && pos > 0
+				active[i] = row
+				i++
+				if c, ok := childOf[k]; ok && pos+1 < len(u.keys) && u.keys[pos+1] == c {
+					shownEdge[k] = true
+				}
+			}
+		}
+	}
+
+	// Reattach the textual hint for every active parent whose edge
+	// adjacency doesn't already show.
+	for i := range active {
+		if k := keyOf(active[i]); !shownEdge[k] {
+			active[i].Note += chainHint(idx, byKey[k], byKey)
+		}
+	}
 }
 
 // classify decides which section a run lands in, what note to render,
@@ -216,10 +328,10 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 		// same shape as the `· reopen?` hint on closed sdlc runs.
 		// Twin is the canonical case (`done → close` is the only path);
 		// sdlc-without-push and kb hit the same shape.
-		return BucketActiveRuns, prefix + "done · close?" + chainHint(idx, md, byRunKey), "done", ""
+		return BucketActiveRuns, prefix + "done · close?", "done", ""
 	}
 	runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
-	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage) + chainHint(idx, md, byRunKey), dec.Stage, runningDoc
+	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
 }
 
 // chainHint renders the trailing " · chained → <project>/<slug>"
@@ -229,20 +341,30 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 // terminal state (Decision 1 — terminal children are filtered at read
 // time).
 func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run.Metadata) string {
-	parentKey := md.Project + "/" + md.ID
-	childKey := idx.ChainedChild[parentKey]
-	if childKey == "" {
-		return ""
-	}
-	child, ok := byRunKey[childKey]
-	if !ok {
-		return ""
-	}
-	switch child.Status {
-	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
+	childKey := idx.ChainedChild[md.Project+"/"+md.ID]
+	if !chainChildLive(childKey, byRunKey) {
 		return ""
 	}
 	return " · chained → " + childKey
+}
+
+// chainChildLive reports whether childKey names a run that's on disk and
+// not terminal — the read-side of Decision 1 (terminal children are
+// filtered, so a chain edge to one wouldn't fire on the ride). Empty or
+// missing-from-byRunKey counts as not live.
+func chainChildLive(childKey string, byRunKey map[string]*run.Metadata) bool {
+	if childKey == "" {
+		return false
+	}
+	child, ok := byRunKey[childKey]
+	if !ok {
+		return false
+	}
+	switch child.Status {
+	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
+		return false
+	}
+	return true
 }
 
 // winningRunningDoc picks the open-session doc that "wins" the row's
@@ -414,7 +536,11 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
-			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+			slug := r.Project + "/" + r.Run
+			if r.Member {
+				slug = "↳ " + slug
+			}
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}
