@@ -67,75 +67,6 @@ func TestTomlMultilineBasicEscapesDangerousSequences(t *testing.T) {
 	}
 }
 
-// TestExecuteArgsNeverInlinesPrompt is the E2BIG regression guard: the
-// prompt rides via `--profile <name>` (a file under $CODEX_HOME), never
-// as a `-c developer_instructions=…` argv string. The inline injection
-// must be gone and the profile flag present on both arg builders.
-func TestExecuteArgsNeverInlinesPrompt(t *testing.T) {
-	check := func(name string, args []string) {
-		for i, a := range args {
-			if strings.HasPrefix(a, "developer_instructions=") {
-				t.Errorf("%s: inline developer_instructions leaked onto argv at args[%d]", name, i)
-			}
-		}
-		if !containsPair(args, "--profile", "moe-prompt-123") {
-			t.Errorf("%s: missing --profile moe-prompt-123 pair: %v", name, args)
-		}
-	}
-	check("interactive", executeArgs(agent.Request{
-		Root: "/b", NewSession: true, Prompt: "system",
-	}, "moe-prompt-123"))
-	check("one-shot", executeOneShotArgs(agent.OneShotRequest{
-		Root: "/b", Prompt: "system", UserPrompt: "user",
-	}, "moe-prompt-123"))
-}
-
-// TestWriteProfileLayersDeveloperInstructions verifies writeProfile
-// drops a `$CODEX_HOME/<name>.config.toml` holding the prompt as
-// `developer_instructions`, returns the matching profile name, and that
-// the cleanup func removes the file.
-func TestWriteProfileLayersDeveloperInstructions(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	prompt := "# system\n\nprose with \"\"\" inside and a \\ backslash"
-
-	name, cleanup, err := writeProfile(prompt)
-	if err != nil {
-		t.Fatalf("writeProfile: %v", err)
-	}
-	if !strings.HasPrefix(name, "moe-prompt-") {
-		t.Errorf("profile name %q should have the moe-prompt- prefix", name)
-	}
-	path := filepath.Join(home, name+".config.toml")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read profile file %s: %v", path, err)
-	}
-	want := "developer_instructions = " + tomlMultilineBasic(prompt) + "\n"
-	if string(body) != want {
-		t.Fatalf("profile body:\n got %q\nwant %q", body, want)
-	}
-	cleanup()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("cleanup should remove %s; stat err=%v", path, err)
-	}
-}
-
-// TestCodexHomePrefersEnv pins the resolution writeProfile and
-// sessionsDir share: $CODEX_HOME wins; absent it, ~/.codex under the
-// home dir.
-func TestCodexHomePrefersEnv(t *testing.T) {
-	t.Setenv("CODEX_HOME", "/custom/codex")
-	if got := codexHome(); got != "/custom/codex" {
-		t.Errorf("codexHome with $CODEX_HOME set = %q, want /custom/codex", got)
-	}
-	t.Setenv("CODEX_HOME", "")
-	t.Setenv("HOME", "/home/someone")
-	if got := codexHome(); got != filepath.Join("/home/someone", ".codex") {
-		t.Errorf("codexHome fallback = %q, want /home/someone/.codex", got)
-	}
-}
-
 // TestCopyTranscriptRespectsCodexHome plants a fake rollout under a
 // temp $CODEX_HOME and verifies CopyTranscript locates it via the
 // glob and copies it byte-for-byte to the destination.
@@ -225,10 +156,9 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		AddDirs:       []string{"/tmp/moe-home", "/tmp/moe-devtmp"},
 		Prompt:        "system",
 		InitialPrompt: "go",
-	}, "moe-prompt-123")
+	})
 	got := strings.Join(args, " ")
 	for _, want := range []string{
-		"--profile moe-prompt-123",
 		"--add-dir /bureaucracy/clone",
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
@@ -272,7 +202,7 @@ func TestExecuteArgsResumePrependsSid(t *testing.T) {
 		SessionID:     "sid-1",
 		Prompt:        "system",
 		InitialPrompt: "follow-up",
-	}, "moe-prompt-123")
+	})
 	if len(args) < 2 || args[0] != "resume" || args[1] != "sid-1" {
 		t.Fatalf("expected leading `resume sid-1`, got %v", args)
 	}
@@ -290,7 +220,7 @@ func TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt(t *testing.T) {
 		AddDirs:    []string{"/tmp/moe-home"},
 		Prompt:     "system",
 		UserPrompt: "user",
-	}, "moe-prompt-123")
+	})
 	if args[0] != "exec" || args[1] != "--json" || args[2] != "--skip-git-repo-check" {
 		t.Fatalf("expected `exec --json --skip-git-repo-check` prefix, got %v", args[:3])
 	}
@@ -318,7 +248,7 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 		Root:       "/bureaucracy",
 		Prompt:     "system",
 		UserPrompt: "user",
-	}, "moe-prompt-123")
+	})
 	if !containsPair(args, "-c", "approval_policy=never") {
 		t.Errorf("args missing `-c approval_policy=never` pair: %v", args)
 	}
@@ -343,7 +273,7 @@ func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 		ClonePath:  "/bureaucracy/clone",
 		NewSession: true,
 		Prompt:     "system",
-	}, "moe-prompt-123")
+	})
 	got := strings.Join(args, " ")
 	if strings.Contains(got, "approval_policy=never") {
 		t.Errorf("interactive path should not pin approval_policy=never: %s", got)
