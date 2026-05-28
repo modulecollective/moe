@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -83,46 +84,70 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	if err != nil {
 		return 1
 	}
-	if err := requireProject(root, projectID); err != nil {
+
+	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	moePrintf(stdout, "closed %s %s/%s\n", workflow, projectID, runID)
+	if nudge := twinReflectNudge(root, projectID, runID, workflow); nudge != "" {
+		moePrintf(stdout, "%s", nudge)
+	}
+	return 0
+}
+
+// closeRunInProcess runs the shared close pipeline — state guards,
+// workflow cleanup, follow-up/lore harvest, status flip, trailered
+// commit — for an already-resolved run, returning an error instead of
+// printing. Both the CLI wrapper (runClose) and `moe serve` (via the
+// CloseRun option, wired in cli/serve.go) drive it; the CLI wrapper owns
+// flag/arg parse, sdlc slug resolution, and the success/nudge print,
+// while serve maps the error to an HTTP status.
+//
+// State-rooted refusals (wrong workflow, pushed, already-terminal) come
+// back as *runopen.NotClosableError so serve can answer 409; the
+// canvas-empty gate and any IO/commit failure come back as plain errors
+// (serve answers 500). skipEdit threads to enterTerminal's harvest
+// pre-flight: serve always passes true since it can't host $EDITOR.
+//
+// stdout/stderr are handed to the workflow cleanup hook; the only hook
+// today (sdlc's releaseWorkspaceCleanup) logs to the process streams
+// directly, so serve passes io.Discard without losing anything.
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stdout, stderr io.Writer) error {
+	if err := requireProject(root, projectID); err != nil {
+		return err
+	}
+
 	// Idea closes have no follow-ups dance — the run *is* the capture.
 	// For everything else, the operator's local edits to the harvest
 	// scratch files (followups.md, feedback/lore.md) are expected —
 	// that's where stage-time captures land — so the clean-tree gate
 	// ignores changes on those paths. Anything else dirty stays a
 	// refusal.
-	harvest := workflow != dash.IdeaWorkflow
-	followupsRel := run.FollowupsPath(projectID, runID)
-	loreRel := run.FeedbackPath(projectID, runID, "lore")
-	if harvest {
+	if workflow != dash.IdeaWorkflow {
+		followupsRel := run.FollowupsPath(projectID, runID)
+		loreRel := run.FeedbackPath(projectID, runID, "lore")
 		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel)
 		if derr != nil {
-			moePrintf(stderr, "%v\n", derr)
-			return 1
+			return derr
 		}
 		if dirty {
-			moePrintf(stderr, "working tree has uncommitted changes; commit or stash first\n")
-			return 1
+			return errors.New("working tree has uncommitted changes; commit or stash first")
 		}
 	} else if err := requireCleanTree(root); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+		return err
 	}
 
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s %s/%s does not exist\n", workflow, projectID, runID)
-			return 1
+			return fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
 		}
-		moePrintf(stderr, "%s: %v\n", workflow, err)
-		return 1
+		return fmt.Errorf("%s: %w", workflow, err)
 	}
 	if md.Workflow != workflow {
-		moePrintf(stderr, "run %s/%s is a %s run, not %s\n", projectID, runID, md.Workflow, workflow)
-		return 1
+		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+			"run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)}
 	}
 
 	switch md.Status {
@@ -132,16 +157,15 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		// Refusing here keeps PR-state reconciliation on a single path
 		// (GitHub → sync); letting local close race the remote state
 		// risks divergence on partial failure.
-		moePrintf(stderr,
-			"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile\n",
-			workflow, projectID, runID)
-		return 1
+		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+			"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile",
+			workflow, projectID, runID)}
 	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		moePrintf(stderr, "%s %s/%s already %s\n", workflow, projectID, runID, md.Status)
-		return 1
+		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+			"%s %s/%s already %s", workflow, projectID, runID, md.Status)}
 	default:
-		moePrintf(stderr, "%s %s/%s has unexpected status %q\n", workflow, projectID, runID, md.Status)
-		return 1
+		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+			"%s %s/%s has unexpected status %q", workflow, projectID, runID, md.Status)}
 	}
 
 	// Mirror commitTurn's per-turn predicate at the close seal: every
@@ -167,13 +191,12 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 			canvasRel := run.ContentPath(md.Project, md.ID, docID)
 			info, err := os.Stat(filepath.Join(root, canvasRel))
 			if err != nil || info.Size() == 0 {
-				moePrintf(stderr,
+				return fmt.Errorf(
 					"%s %s/%s: canvas %s is empty\n"+
 						"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+
-						"  or restore the file from git history\n",
+						"  or restore the file from git history",
 					workflow, projectID, runID, canvasRel,
 					workflow, docID, projectID, runID)
-				return 1
 			}
 		}
 	}
@@ -184,7 +207,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 			Project:  projectID,
 			Workflow: workflow,
 		}.String()
-	err = repolock.With(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 	}, func() error {
@@ -193,21 +216,12 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 				return err
 			}
 		}
-		paths, err := enterTerminal(root, md, run.StatusClosed, *noEdit)
+		paths, err := enterTerminal(root, md, run.StatusClosed, skipEdit)
 		if err != nil {
 			return err
 		}
 		return run.StageAndCommit(root, msg, paths...)
 	})
-	if err != nil {
-		moePrintf(stderr, "%s: close: %v\n", workflow, err)
-		return 1
-	}
-	moePrintf(stdout, "closed %s %s/%s\n", workflow, projectID, runID)
-	if nudge := twinReflectNudge(root, projectID, runID, workflow); nudge != "" {
-		moePrintf(stdout, "%s", nudge)
-	}
-	return 0
 }
 
 // twinReflectNudge returns a one-line suggestion to reflect the twin

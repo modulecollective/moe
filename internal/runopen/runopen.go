@@ -45,6 +45,23 @@ var ErrNotIdea = errors.New("runopen: not an in-progress idea (workflow!=idea or
 // text names the specific status or destination-state problem.
 var ErrNotReopenableIdea = errors.New("runopen: not a reopenable idea")
 
+// NotClosableError reports a close refused because of the run's current
+// state — a non-idea run that is pushed, already terminal, or of a
+// different workflow — rather than an internal failure (the
+// canvas-empty gate, a dirty tree, a commit error). The sdlc-side peer
+// of ErrNotIdea.
+//
+// The close pipeline itself stays in the cli package (it leans on
+// cli-resident workspace teardown and harvest helpers), but serve must
+// classify its result without importing cli. So the type lives here, in
+// the package cli and serve already share: cli's close core returns it
+// through serve's CloseRun callback, and serve maps it to HTTP 409 while
+// internal failures fall through to 500. Reason is the operator-facing
+// message (carried verbatim into the HTTP body and CLI stderr).
+type NotClosableError struct{ Reason string }
+
+func (e *NotClosableError) Error() string { return e.Reason }
+
 // PromoteOptions configures Promote. The destination run's workflow,
 // workspace, and agent are caller-provided; the first-stage doc id is
 // where the source idea's canvas lands as a seed.

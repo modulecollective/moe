@@ -20,6 +20,12 @@ import (
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
 
+// sdlcCloseSubject is the commit-subject template for closing an sdlc
+// run (a fmt.Sprintf string taking projectID, runID). Shared by the
+// `moe sdlc close` verb and `moe serve`'s in-process CloseRun callback
+// so the two close paths land identically-shaped commits.
+const sdlcCloseSubject = "Close sdlc run %s/%s"
+
 func init() {
 	g := NewCommandGroup("sdlc", "sdlc workflow: new, design, code, test, push")
 	g.Register(newRunCommand("sdlc"))
@@ -44,7 +50,7 @@ func init() {
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
 		Run:     runShell,
 	})
-	g.Register(closeCommand("sdlc", "Close sdlc run %s/%s", releaseWorkspaceCleanup))
+	g.Register(closeCommand("sdlc", sdlcCloseSubject, releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (sdlc cat <project>/<run> <stage>)",
