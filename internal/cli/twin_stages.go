@@ -202,7 +202,7 @@ const finalizeCanvasSkeleton = `# Finalize
 
 ## History-summary delta
 
-(agent fills: the paragraph(s) appended to history-summary.md this pass — a prose compression of the events block, slow-growing, signal-preserving)
+(agent fills: the rolled-up history-summary.md for this pass. Don't just append — fold this pass's events in at full detail as the newest horizon, compress the prior few horizons into progressively terser lines, and reduce the oldest to a line or drop them once what survives still carries their signal. The doc is a decaying-resolution timeline, not an append-only log: newest sharp, older blurred, oldest gone — so it stays bounded instead of growing every reflect. Preserve signal a future reflect needs; shed detail it won't.)
 `
 
 // requireTwinRun is the per-stage entry guard: load run.json, refuse

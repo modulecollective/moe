@@ -21,13 +21,18 @@ during verification.
   should have handled? Inline fixes go in. Escalations become
   notes on the canvas + entries in `feedback/twin.md` for the
   next reflect.
-- **Fold events into `history-summary.md`.** The events block
-  in your kickoff is the verbatim tail since the last reflect.
-  Compress it into a fresh paragraph appended to
-  `digital-twin/<project>/history-summary.md`. Keep it slow-
-  growing prose: the twin's compressed memory of everything
-  before the next checkpoint. Don't drop signal future reflects
-  will need.
+- **Roll up `history-summary.md` — don't just append.** The
+  events block in your kickoff is the verbatim tail since the
+  last reflect. Fold it into
+  `digital-twin/<project>/history-summary.md` as the newest,
+  most-detailed horizon — *and in the same pass* compress the
+  older horizons already there: recent passes stay legible,
+  older ones collapse toward a line, the oldest fold away once
+  what survives still carries their signal. The summary is a
+  decaying-resolution timeline, not an append-only log — newest
+  sharp, older blurred, oldest gone — so it stays bounded
+  instead of growing every reflect. Don't drop signal a future
+  reflect will need; do shed detail it won't.
 - **Walk the prior stage canvases.** Anything they flagged "for
   operator" or "needs follow-up" that didn't get acted on — fold
   the residue into either an inline fix here, a feedback-twin
@@ -43,8 +48,10 @@ during verification.
   contract: fix what you can fix in place. Escalation here means
   a feedback-twin note for the *next* reflect, not a re-walk of
   this pass's upstream stages.
-- **Don't write a new history summary from scratch.** Append; the
-  existing summary is load-bearing context.
+- **Don't append blindly.** The existing summary is load-bearing
+  context, but it isn't immutable: rewrite it each pass so older
+  horizons lose detail as new ones arrive. Appending without
+  rolling up is what let the doc grow without bound.
 - **Don't trim the events list.** The events block is what got
   walked; the history-summary delta reflects all of it (even
   the quiet entries).
@@ -65,9 +72,9 @@ the feedback-twin note (or follow-up) where the residue
 lives. Empty if everything cleared.)
 
 ## History-summary delta
-(the paragraph(s) appended to history-summary.md this pass — a
-prose compression of the events block, slow-growing, signal-
-preserving)
+(the rolled-up history-summary.md: this pass's events folded in
+at full detail, prior horizons compressed, oldest folded away —
+a decaying-resolution timeline, not an append-only log)
 ```
 
 The first three sections are load-bearing. The stage refuses
@@ -97,8 +104,9 @@ gate refuses both an empty canvas and a non-empty hygiene scan.
 
 1. The hygiene scan is clean (or the residue is named on the
    canvas with feedback-twin notes filed).
-2. `history-summary.md` has a fresh paragraph appended that
-   compresses this pass's events.
+2. `history-summary.md` is rolled up: this pass's events folded
+   in at full detail and older horizons compressed so the doc
+   stays bounded.
 3. The canvas's `What I fixed` and `What I left` together name
    every finding from the kickoff.
 4. The post-flight scan passes; the engine seals the pass.
