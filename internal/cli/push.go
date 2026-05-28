@@ -417,6 +417,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
 		return 1
 	}
+	touched := touchedChoresForBranch(root, md.Project, clonePath, pj.DefaultBranch, branch)
 
 	// Harvest follow-ups and flip run.json to merged before the
 	// ff-push: harvest (and any per-idea slug failures) must be
@@ -469,11 +470,12 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 
 	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
-			Run:      md.ID,
-			Project:  md.Project,
-			Workflow: md.Workflow,
-			Document: "push",
-			Merged:   tipSHA,
+			Run:          md.ID,
+			Project:      md.Project,
+			Workflow:     md.Workflow,
+			Document:     "push",
+			Merged:       tipSHA,
+			ChoreTouched: touched,
 		}.String()
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-merge",

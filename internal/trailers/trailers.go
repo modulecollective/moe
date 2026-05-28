@@ -33,6 +33,11 @@ type Block struct {
 	Idea          string
 	IdeaMovedFrom string
 	ReopenOf      string
+	Chore         string
+	// ChoreTouched repeats once per chore whose trigger matched the
+	// target-repo change landed by this terminal transition. Values are
+	// "<project>/<chore>".
+	ChoreTouched []string
 	// ChainedTo and ChainedToRemoved each repeat once per edge, one
 	// trailer line per slice entry, value
 	// "<parent-project>/<parent-slug> <child-project>/<child-slug>".
@@ -61,6 +66,10 @@ func (b Block) String() string {
 	write(&sb, "MoE-Idea", b.Idea)
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
+	write(&sb, "MoE-Chore", b.Chore)
+	for _, v := range b.ChoreTouched {
+		write(&sb, "MoE-Chore-Touched", v)
+	}
 	for _, v := range b.ChainedTo {
 		write(&sb, "MoE-Chained-To", v)
 	}

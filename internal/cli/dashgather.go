@@ -3,6 +3,7 @@ package cli
 import (
 	"time"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
@@ -74,6 +75,28 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		}
 		nextByRun[md.ID] = dec
 	}
+	var choreInputs []dash.ChoreInput
+	if filter.WorkflowFilter == "" {
+		defs, err := chore.LoadAll(root)
+		if err != nil {
+			return DashSnapshot{}, err
+		}
+		for _, s := range chore.EvaluateAll(defs, mds, idx, now) {
+			if !s.Due {
+				continue
+			}
+			when := s.LastCompleted
+			if touched := s.Definition.EditedAt; touched.After(when) {
+				when = touched
+			}
+			choreInputs = append(choreInputs, dash.ChoreInput{
+				Project: s.Definition.Project,
+				Name:    s.Definition.Name,
+				Reason:  s.ReasonString(),
+				When:    when,
+			})
+		}
+	}
 
 	rows, err := dash.BuildRows(dash.Inputs{
 		Now:              now,
@@ -84,6 +107,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		Index:            idx,
 		SessionDocsByRun: sessionDocsByRun,
 		NextByRun:        nextByRun,
+		Chores:           choreInputs,
 	})
 	if err != nil {
 		return DashSnapshot{}, err

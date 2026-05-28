@@ -8,14 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // closeCleanup runs workflow-specific tear-down after state guards pass
@@ -90,9 +88,6 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 	moePrintf(stdout, "closed %s %s/%s\n", workflow, projectID, runID)
-	if nudge := twinReflectNudge(root, projectID, runID, workflow); nudge != "" {
-		moePrintf(stdout, "%s", nudge)
-	}
 	return 0
 }
 
@@ -222,55 +217,6 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		}
 		return run.StageAndCommit(root, msg, paths...)
 	})
-}
-
-// twinReflectNudge returns a one-line suggestion to reflect the twin
-// when the project's twin checkpoint is older than the run that just
-// closed. Empty when the project has no twin, the twin was reflected
-// after the run's last activity, or the workflow is one whose close
-// shouldn't carry the nudge (idea, twin itself).
-//
-// The nudge is advisory — it doesn't gate close, doesn't auto-run
-// reflect, and doesn't fail when the freshness check itself errors.
-// Intent: lower-friction reminder so durable-layer drift surfaces
-// while the just-finished run is still fresh in the operator's head.
-func twinReflectNudge(root, projectID, runID, workflow string) string {
-	switch workflow {
-	case dash.IdeaWorkflow, "twin":
-		return ""
-	}
-	cfg, err := twinWikiBuilder(root, projectID)
-	if err != nil || cfg == nil {
-		return ""
-	}
-	if _, statErr := os.Stat(cfg.ContentDir); statErr != nil {
-		return ""
-	}
-	cp, ok, err := wiki.ReadCheckpoint(cfg.ContentDir)
-	if err != nil {
-		return ""
-	}
-	if !ok || cp.LastIngestAt == "" {
-		return fmt.Sprintf(
-			"twin never reflected — consider `moe twin reflect %s` when you have a moment\n",
-			projectID,
-		)
-	}
-	last, err := time.Parse(time.RFC3339, cp.LastIngestAt)
-	if err != nil {
-		return ""
-	}
-	when, err := run.LastActivity(root, runID)
-	if err != nil || when.IsZero() {
-		return ""
-	}
-	if last.After(when) {
-		return ""
-	}
-	return fmt.Sprintf(
-		"twin not reflected since %s — consider `moe twin reflect %s` when you have a moment\n",
-		last.Format("2006-01-02"), projectID,
-	)
 }
 
 // releaseWorkspaceCleanup releases the run's hold on its workspace.

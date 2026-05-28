@@ -698,6 +698,12 @@ type JournalIndex struct {
 	// remove of the prior edge with the add of the new one, and the
 	// add is the survivor).
 	ChainedChild map[string]string
+	// ChoreByRun maps "<project>/<slug>" to "<project>/<chore>" for
+	// runs opened by `moe chore open`.
+	ChoreByRun map[string]string
+	// ChoreTouched maps "<project>/<chore>" to the most recent
+	// reachable commit time carrying MoE-Chore-Touched for that chore.
+	ChoreTouched map[string]time.Time
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -729,6 +735,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 	out, err := git.Output(root,
 		"log",
 		"--grep", "^MoE-Run: ",
+		"--grep", "^MoE-Chore",
 		"--grep", "^MoE-Chained-To",
 		"--format=%ct%x00%B%x1e",
 	)
@@ -742,6 +749,8 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		WorkTurnTime: make(map[WorkTurnKey]time.Time),
 		ReopenedFrom: make(map[string]string),
 		ChainedChild: make(map[string]string),
+		ChoreByRun:   make(map[string]string),
+		ChoreTouched: make(map[string]time.Time),
 	}
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
@@ -762,7 +771,8 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			subject = body[:nl]
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf string
+		var promotedTo, prURL, projectID, docID, reopenOf, chore string
+		var choreTouched []string
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
 		// save pairs a remove of the prior edge with an add of the new
@@ -806,6 +816,18 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			if v, ok := strings.CutPrefix(line, "MoE-Reopen-Of:"); ok {
 				if reopenOf == "" {
 					reopenOf = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Chore-Touched:"); ok {
+				if touched := strings.TrimSpace(v); touched != "" {
+					choreTouched = append(choreTouched, touched)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Chore:"); ok {
+				if chore == "" {
+					chore = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -853,6 +875,11 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			}
 			idx.ChainedChild[parent] = ""
 		}
+		for _, touched := range choreTouched {
+			if _, ok := idx.ChoreTouched[touched]; !ok {
+				idx.ChoreTouched[touched] = time.Unix(epoch, 0).UTC()
+			}
+		}
 		if slug == "" {
 			continue
 		}
@@ -872,6 +899,12 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		if reopenOf != "" {
 			if _, ok := idx.ReopenedFrom[slug]; !ok {
 				idx.ReopenedFrom[slug] = reopenOf
+			}
+		}
+		if chore != "" && projectID != "" {
+			k := projectID + "/" + slug
+			if _, ok := idx.ChoreByRun[k]; !ok {
+				idx.ChoreByRun[k] = chore
 			}
 		}
 		// Work-turn keying is project-scoped, and the subject pin

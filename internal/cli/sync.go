@@ -179,7 +179,10 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
 			return nil
 		}
-		ok, err := finalizePushedRun(root, md, run.StatusMerged, trailers.Block{Merged: mergeSHA}, stderr)
+		ok, err := finalizePushedRun(root, md, run.StatusMerged, trailers.Block{
+			Merged:       mergeSHA,
+			ChoreTouched: touchedChoresForCommit(root, md.Project, mergeSHA),
+		}, stderr)
 		if err != nil {
 			return err
 		}

@@ -94,6 +94,23 @@ func TestBlockChainedTrailersElideWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBlockChoreTrailers(t *testing.T) {
+	got := (Block{
+		Run:          "readme-refresh",
+		Project:      "moe",
+		Chore:        "moe/readme-refresh",
+		ChoreTouched: []string{"moe/twin-reflect", "moe/readme-refresh"},
+	}).String()
+	want := "MoE-Run: readme-refresh\n" +
+		"MoE-Project: moe\n" +
+		"MoE-Chore: moe/readme-refresh\n" +
+		"MoE-Chore-Touched: moe/twin-reflect\n" +
+		"MoE-Chore-Touched: moe/readme-refresh\n"
+	if got != want {
+		t.Fatalf("trailers:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestBlockOrderIndependentOfFieldAssignment(t *testing.T) {
 	// Renders should not depend on which fields the caller populated
 	// first — the struct field order is what determines wire order.

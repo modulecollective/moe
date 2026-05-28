@@ -29,6 +29,7 @@ type dashRowVM struct {
 // unless showAll is set so the template doesn't need slice math.
 type dashVM struct {
 	Active         []dashRowVM
+	Chores         []dashRowVM
 	Backlog        []dashRowVM
 	Completed      []dashRowVM
 	CompletedTotal int // pre-cap count; lets the header show "N of M"
@@ -61,6 +62,8 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		switch r.Bucket {
 		case dash.BucketActiveRuns:
 			vm.Active = append(vm.Active, row)
+		case dash.BucketChores:
+			vm.Chores = append(vm.Chores, row)
 		case dash.BucketBacklog:
 			vm.Backlog = append(vm.Backlog, row)
 		case dash.BucketCompletedRuns:

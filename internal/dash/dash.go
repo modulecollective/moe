@@ -68,6 +68,7 @@ type Bucket int
 
 const (
 	BucketActiveRuns    Bucket = iota // in-progress runs with a next stage
+	BucketChores                      // due project chores, before they become runs
 	BucketBacklog                     // captured ideas, not yet promoted to a run
 	BucketCompletedRuns               // pushed or terminal runs, shown as "done"
 	BucketNone                        // filtered out entirely (dormant without --all)
@@ -99,6 +100,13 @@ type NextDecision struct {
 	Done  bool
 }
 
+type ChoreInput struct {
+	Project string
+	Name    string
+	Reason  string
+	When    time.Time
+}
+
 // Inputs is everything BuildRows needs. The caller computes most of
 // these once (run.Scan, run.BuildJournalIndex, the session list, the
 // workflow-resolution loop) and threads the same values into Render
@@ -112,6 +120,7 @@ type Inputs struct {
 	Index            *run.JournalIndex
 	SessionDocsByRun map[string][]string
 	NextByRun        map[string]NextDecision // populated only for in-progress, non-idea runs.
+	Chores           []ChoreInput
 }
 
 // BuildRows maps scanned metadata to dashboard rows. Per-run journal
@@ -164,6 +173,29 @@ func BuildRows(in Inputs) ([]Row, error) {
 		return rows[i].When.After(rows[j].When)
 	})
 	groupActiveChains(rows, in.Index, byRunKey)
+	var choreRows []Row
+	for _, c := range in.Chores {
+		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
+			continue
+		}
+		choreRows = append(choreRows, Row{
+			Project: c.Project,
+			Run:     c.Name,
+			Note:    c.Reason,
+			When:    c.When,
+			Bucket:  BucketChores,
+		})
+	}
+	sort.SliceStable(choreRows, func(i, j int) bool {
+		return choreRows[i].When.After(choreRows[j].When)
+	})
+	if len(choreRows) > 0 {
+		insert := 0
+		for insert < len(rows) && rows[insert].Bucket == BucketActiveRuns {
+			insert++
+		}
+		rows = append(rows[:insert], append(choreRows, rows[insert:]...)...)
+	}
 	return rows, nil
 }
 
@@ -522,6 +554,8 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 				Stage:      r.Stage,
 				RunningDoc: r.RunningDoc,
 			})
+		case BucketChores:
+			// Chores are pre-run work and don't drive a station glyph.
 		case BucketBacklog:
 			state.BacklogCount++
 		case BucketCompletedRuns:
@@ -551,11 +585,13 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 	}
 	fmt.Fprintln(w)
 
-	var active, backlog, completed []Row
+	var active, chores, backlog, completed []Row
 	for _, r := range rows {
 		switch r.Bucket {
 		case BucketActiveRuns:
 			active = append(active, r)
+		case BucketChores:
+			chores = append(chores, r)
 		case BucketBacklog:
 			backlog = append(backlog, r)
 		case BucketCompletedRuns:
@@ -574,6 +610,18 @@ func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount in
 				slug = "↳ " + slug
 			}
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
+
+	cliout.Printf(w, "CHORES (%d)\n", len(chores))
+	if len(chores) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range chores {
+			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}
