@@ -135,9 +135,13 @@ func buildRail(state FactoryState) (string, []int) {
 		if visible > InputCap {
 			visible = InputCap
 		}
-		s := strings.Repeat(inputGlyph, visible)
+		glyphs := make([]string, visible)
+		for i := range glyphs {
+			glyphs[i] = inputGlyph
+		}
+		s := strings.Join(glyphs, " ")
 		if state.BacklogCount > InputCap {
-			s += fmt.Sprintf("+%d", state.BacklogCount-InputCap)
+			s += fmt.Sprintf(" +%d", state.BacklogCount-InputCap)
 		}
 		s += " " + feedArrow
 		segs = append(segs, segment{text: s, stationIdx: -1})
@@ -171,7 +175,7 @@ func buildRail(state FactoryState) (string, []int) {
 		}
 		s := strings.Join(glyphs, " ")
 		if state.CompletedCount > OutputCap {
-			s += fmt.Sprintf("+%d", state.CompletedCount-OutputCap)
+			s += fmt.Sprintf(" +%d", state.CompletedCount-OutputCap)
 		}
 		segs = append(segs, segment{text: s, stationIdx: -1})
 	}

@@ -929,8 +929,8 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 		t.Fatalf("zones not in order in rail:\n%q", rail)
 	}
 	// The feed arrow follows the input zone when backlog is non-empty.
-	if !strings.Contains(rail, "▦▦ ▶") {
-		t.Fatalf("expected '▦▦ ▶' feed arrow after input glyphs, got rail:\n%q", rail)
+	if !strings.Contains(rail, "▦ ▦ ▶") {
+		t.Fatalf("expected '▦ ▦ ▶' feed arrow after spaced input glyphs, got rail:\n%q", rail)
 	}
 }
 
@@ -952,7 +952,7 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
 	rail := lines[2]
-	for _, want := range []string{"+3", "+2", "+7"} {
+	for _, want := range []string{"▦ ▦ ▦ ▦ +3", "+2", "▣ ▣ ▣ ▣ ▣ +7"} {
 		if !strings.Contains(rail, want) {
 			t.Fatalf("expected overflow tag %q in rail:\n%q", want, rail)
 		}
