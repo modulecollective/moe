@@ -9,6 +9,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -32,8 +33,9 @@ func lintCommand(workflow string, builder func(root, projectID string) (*wiki.Co
 func runLintSession(workflow string, builder func(root, projectID string) (*wiki.Config, error), args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s lint <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s lint [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code lint session on the project's wiki.")
 		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json.")
@@ -42,12 +44,18 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 		moePrintln(stderr, "and applies fixes inline. The wiki diff is the artifact, recorded in")
 		moePrintln(stderr, "log.md under a synthetic lint-YYYY-MM-DD-HHMMSS run id.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID := fs.Arg(0)
 
@@ -114,6 +122,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 				InitialPrompt:    lintKickoff(findings),
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: "Wiki lint pass",
+				Agent:            *agentOverride,
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					return buildLintSystemPrompt(worktreeWiki)
 				},

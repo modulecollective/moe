@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
@@ -159,6 +160,12 @@ func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {

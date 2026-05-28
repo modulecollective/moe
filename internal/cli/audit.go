@@ -3,6 +3,8 @@ package cli
 import (
 	"flag"
 	"io"
+
+	"github.com/modulecollective/moe/internal/agent"
 )
 
 // The audit workflow is the bureaucracy's "checkup" verb. A run reads
@@ -78,8 +80,9 @@ func init() {
 func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe audit plan <project>/<run>")
+		moePrintln(stderr, "usage: moe audit plan [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the plan canvas.")
 		moePrintln(stderr, "The agent asks the operator what this review pass should cover")
@@ -94,12 +97,18 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "audit plan: %v\n", err)
 		return 2
 	}
-	return openAuditPlan(projectID, runID, false, false, stdout, stderr)
+	return openAuditPlan(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openAuditPlan is the Go-level seam behind `moe audit plan`. The
@@ -108,7 +117,7 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 // verify a path the operator names in passing exists; the
 // design-stage's tracked-change guard is re-used to enforce the
 // read-only character of the stage.
-func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if headless {
 		return runStageSession(projectID, runID, auditPlanDoc,
 			stageSessionOpts{
@@ -116,6 +125,7 @@ func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, st
 				EnforceSandboxBoundary: true,
 				Headless:               true,
 				SkipNextStage:          suppressNextStage,
+				Agent:                  agentOverride,
 				CanvasSkeleton:         auditPlanCanvasSkeleton,
 			}, stdout, stderr)
 	}
@@ -130,6 +140,7 @@ func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, st
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,
 			SkipNextStage:          suppressNextStage,
+			Agent:                  agentOverride,
 			CanvasSkeleton:         auditPlanCanvasSkeleton,
 		}, stdout, stderr)
 }
@@ -137,8 +148,9 @@ func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, st
 func runAuditReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe audit report <project>/<run>")
+		moePrintln(stderr, "usage: moe audit report [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the report canvas.")
 		moePrintln(stderr, "The agent reads the project — code, canvases, digital twin — under")
@@ -153,12 +165,18 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "audit report: %v\n", err)
 		return 2
 	}
-	return openAuditReport(projectID, runID, false, false, stdout, stderr)
+	return openAuditReport(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openAuditReport is the Go-level seam behind `moe audit report`.
@@ -167,7 +185,7 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 // (an empty `## Scope` falls through to "everything" at read-time),
 // so the report stage opens against whatever the plan left — even a
 // fresh run that skipped plan entirely.
-func openAuditReport(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openAuditReport(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if headless {
 		return runStageSession(projectID, runID, auditReportDoc,
 			stageSessionOpts{
@@ -175,6 +193,7 @@ func openAuditReport(projectID, runID string, headless, suppressNextStage bool, 
 				EnforceSandboxBoundary: true,
 				Headless:               true,
 				SkipNextStage:          suppressNextStage,
+				Agent:                  agentOverride,
 				CanvasSkeleton:         auditReportCanvasSkeleton,
 			}, stdout, stderr)
 	}
@@ -192,6 +211,7 @@ func openAuditReport(projectID, runID string, headless, suppressNextStage bool, 
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,
 			SkipNextStage:          suppressNextStage,
+			Agent:                  agentOverride,
 			CanvasSkeleton:         auditReportCanvasSkeleton,
 		}, stdout, stderr)
 }

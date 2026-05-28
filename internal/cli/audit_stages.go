@@ -18,11 +18,14 @@ var openAuditStage func(stage, projectID, runID string, headless, suppressNextSt
 
 func init() {
 	openAuditStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+		// Cascade entry: no per-call --agent override. The run's
+		// persisted agent (from run.json) takes over inside
+		// runStageSession, matching openSdlcStage one workflow over.
 		switch stage {
 		case auditPlanDoc:
-			return openAuditPlan(projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return openAuditPlan(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		case auditReportDoc:
-			return openAuditReport(projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return openAuditReport(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "audit: openAuditStage: unknown stage %q\n", stage)
 			return 1

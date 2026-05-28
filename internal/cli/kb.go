@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -101,8 +102,9 @@ func kbLintWikiBuilder(root, projectID string) (*wiki.Config, error) {
 func runResearch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb research", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb research <project>/<run>")
+		moePrintln(stderr, "usage: moe kb research [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the research bibliography.")
 		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
@@ -114,12 +116,18 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "kb research: %v\n", err)
 		return 2
 	}
-	return openKbResearch(projectID, runID, false, false, stdout, stderr)
+	return openKbResearch(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openKbResearch is the Go-level seam behind `moe kb research`. The
@@ -128,7 +136,7 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 // via openKbStage. headless=true selects the bounded one-turn variant
 // (`claude -p` plus the workflow's oneshot.md fragment), the same path
 // the equivalent twin / sdlc seams take.
-func openKbResearch(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openKbResearch(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	const kickoff = "The operator just opened this research session. " +
 		"Read the canvas file before replying, so your acknowledgement reflects " +
 		"what's actually on it. In one or two sentences, acknowledge where the " +
@@ -139,14 +147,16 @@ func openKbResearch(projectID, runID string, headless, suppressNextStage bool, s
 			InitialPrompt: kickoff,
 			Headless:      headless,
 			SkipNextStage: suppressNextStage,
+			Agent:         agentOverride,
 		}, stdout, stderr)
 }
 
 func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kb summarize", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb summarize <project>/<run>")
+		moePrintln(stderr, "usage: moe kb summarize [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
 		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")
@@ -160,18 +170,24 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "kb summarize: %v\n", err)
 		return 2
 	}
-	return openKbSummarize(projectID, runID, false, false, stdout, stderr)
+	return openKbSummarize(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openKbSummarize is the Go-level seam behind `moe kb summarize`. Same
 // contract as openKbResearch one stage downstream — adds the wiki
 // engine wiring kbWikiBuilder produces.
-func openKbSummarize(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openKbSummarize(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	const kickoff = "The operator just opened this kb ingest session. " +
 		"Read the run's research bibliography and the project's wiki under " +
 		"projects/<project>/knowledge/ before replying. In one or two sentences, " +
@@ -183,6 +199,7 @@ func openKbSummarize(projectID, runID string, headless, suppressNextStage bool, 
 			InitialPrompt: kickoff,
 			Headless:      headless,
 			SkipNextStage: suppressNextStage,
+			Agent:         agentOverride,
 			WikiBuilder:   kbWikiBuilder,
 		}, stdout, stderr)
 }

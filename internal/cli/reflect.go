@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -49,8 +50,9 @@ func reflectCommand(workflow string, builder func(root, projectID string) (*wiki
 func runReflectSession(workflow string, builder func(root, projectID string) (*wiki.Config, error), args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" reflect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT, then claude")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s reflect <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
 		moePrintln(stderr, "dispatches the first stage of the seven-stage ladder. Each managed doc")
@@ -59,12 +61,18 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintln(stderr, "history-summary fold, checkpoint bump. The engine refuses to seal with")
 		moePrintln(stderr, "leftover findings; per-stage commits don't bump the checkpoint.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID := fs.Arg(0)
 
@@ -126,6 +134,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	opts := run.Options{
 		IDBase:   "reflect",
 		Workflow: "twin",
+		Agent:    *agentOverride,
 	}
 	var md *run.Metadata
 	err = withRepoLock(root, repolock.Options{

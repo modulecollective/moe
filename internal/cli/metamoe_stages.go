@@ -18,9 +18,12 @@ var openMetaMoeStage func(stage, projectID, runID string, headless, suppressNext
 
 func init() {
 	openMetaMoeStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+		// Cascade entry: no per-call --agent override. The run's
+		// persisted agent (from run.json) takes over inside
+		// runStageSession, matching openSdlcStage one workflow over.
 		switch stage {
 		case metaMoeReportDoc:
-			return openMetaMoeReport(projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return openMetaMoeReport(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "meta-moe: openMetaMoeStage: unknown stage %q\n", stage)
 			return 1

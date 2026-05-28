@@ -17,11 +17,14 @@ var openKbStage func(stage, projectID, runID string, headless, suppressNextStage
 
 func init() {
 	openKbStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+		// Cascade entry: no per-call --agent override. The run's
+		// persisted agent (from run.json) takes over inside
+		// runStageSession, matching openSdlcStage one workflow over.
 		switch stage {
 		case "research":
-			return openKbResearch(projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return openKbResearch(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		case "summarize":
-			return openKbSummarize(projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return openKbSummarize(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "kb: openKbStage: unknown stage %q\n", stage)
 			return 1

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -34,19 +35,26 @@ func claimCommand(workflow string, builder func(root, projectID string) (*wiki.C
 func runClaimSession(workflow string, builder func(root, projectID string) (*wiki.Config, error), args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" claim", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s claim <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s claim [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Record context for decided edits the operator made directly to managed docs.")
 		moePrintln(stderr, "Surfaces under the dash's TWIN rail, not in ACTIVE/BACKLOG/COMPLETED.")
 		moePrintln(stderr, "Bookkeeping only — does not edit managed docs.")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID := fs.Arg(0)
 
@@ -128,6 +136,7 @@ func runClaimSession(workflow string, builder func(root, projectID string) (*wik
 				FinalizeRunID:    runSlug,
 				FinalizeRunTitle: claimRunTitle(recentRun),
 				FinalizeClaim:    true,
+				Agent:            *agentOverride,
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					return buildClaimSystemPrompt(worktreeWiki)
 				},

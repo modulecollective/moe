@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -23,8 +24,9 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 	return func(args []string, stdout, stderr io.Writer) int {
 		fs := flag.NewFlagSet("twin "+stage, flag.ContinueOnError)
 		fs.SetOutput(stderr)
+		agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 		fs.Usage = func() {
-			moePrintf(stderr, "usage: moe twin %s <project>/<run>\n", stage)
+			moePrintf(stderr, "usage: moe twin %s [--agent <name>] <project>/<run>\n", stage)
 			moePrintln(stderr, "")
 			moePrintf(stderr, "Opens an interactive Claude Code session on the %s-stage canvas\n", stage)
 			moePrintln(stderr, "of a twin reflect run. First use on a run creates the document;")
@@ -37,12 +39,18 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 			fs.Usage()
 			return 2
 		}
+		if *agentOverride != "" {
+			if _, err := agent.Get(*agentOverride); err != nil {
+				moePrintf(stderr, "%v\n", err)
+				return 2
+			}
+		}
 		projectID, runID, err := splitProjectRun(fs.Arg(0))
 		if err != nil {
 			moePrintf(stderr, "twin %s: %v\n", stage, err)
 			return 2
 		}
-		return openTwinStage(stage, projectID, runID, false, false, stdout, stderr)
+		return openTwinStage(stage, projectID, runID, false, false, *agentOverride, stdout, stderr)
 	}
 }
 
@@ -57,10 +65,10 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 // Declared as a var and assigned in init() so the static reference
 // chain doesn't trip Go's init-order cycle checker — same shape
 // openSdlcStage uses, same reason.
-var openTwinStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
+var openTwinStage func(stage, projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int
 
 func init() {
-	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 		switch stage {
 		case "vision", "architecture", "patterns", "operations", "roadmap", "glossary", "finalize":
 			if code := requireTwinRun("twin "+stage, projectID, runID, stderr); code != 0 {
@@ -70,7 +78,7 @@ func init() {
 				moePrintf(stderr, "%v\n", err)
 				return 1
 			}
-			return runTwinStageSession(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
+			return runTwinStageSession(stage, projectID, runID, headless, suppressNextStage, agentOverride, stdout, stderr)
 		default:
 			moePrintf(stderr, "twin: openTwinStage: unknown stage %q\n", stage)
 			return 1
@@ -78,9 +86,11 @@ func init() {
 	}
 	// Register the dispatcher so generic chain-prompt / cascade code
 	// can reach twin stages via workflow name, not via a hardcoded
-	// switch on "sdlc".
+	// switch on "sdlc". The cascade carries no per-call --agent
+	// override — the run's persisted agent (from run.json) takes over
+	// inside runStageSession, matching openSdlcStage one workflow over.
 	registerCascadeDispatcher("twin", func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openTwinStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
+		return openTwinStage(stage, projectID, runID, headless, suppressNextStage, "", stdout, stderr)
 	})
 }
 
@@ -97,7 +107,7 @@ func init() {
 // InitialPrompt. Each stage sees the same payload — the design's "no
 // in-session iteration across docs, every stage reads the same
 // events list" contract.
-func runTwinStageSession(stage, projectID, runID string, headless bool, suppressNextStage bool, stdout, stderr io.Writer) int {
+func runTwinStageSession(stage, projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	kickoff, err := buildTwinStageKickoff(stage, projectID, headless)
 	if err != nil {
 		moePrintf(stderr, "twin %s: %v\n", stage, err)
@@ -106,6 +116,7 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, suppress
 	opts := stageSessionOpts{
 		Headless:      headless,
 		SkipNextStage: suppressNextStage,
+		Agent:         agentOverride,
 		InitialPrompt: kickoff,
 		WikiBuilder: func(root string, md *run.Metadata) (*wiki.Config, error) {
 			return twinWikiBuilder(root, projectID)

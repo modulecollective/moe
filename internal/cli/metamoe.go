@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -65,8 +66,9 @@ func init() {
 func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("meta-moe report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe meta-moe report <project>/<run>")
+		moePrintln(stderr, "usage: moe meta-moe report [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the report canvas.")
 		moePrintln(stderr, "The agent walks this project's run history (design canvases, transcripts,")
@@ -81,12 +83,18 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "meta-moe report: %v\n", err)
 		return 2
 	}
-	return openMetaMoeReport(projectID, runID, false, false, stdout, stderr)
+	return openMetaMoeReport(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openMetaMoeReport is the Go-level seam behind `moe meta-moe report`.
@@ -94,7 +102,7 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 // parses args, this helper does the per-stage scan, builds the kickoff,
 // and hands to runStageSession. The chain prompt's cascade driver
 // reaches it through openMetaMoeStage in metamoe_stages.go.
-func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
@@ -110,6 +118,7 @@ func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool
 		InitialPrompt:   kickoff,
 		Headless:        headless,
 		SkipNextStage:   suppressNextStage,
+		Agent:           agentOverride,
 		ExtraStagePaths: metaMoePublishCanvas,
 	}, stdout, stderr)
 }

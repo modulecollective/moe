@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
@@ -53,8 +54,9 @@ func init() {
 func runHooksCode(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hooks code", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe hooks code <project>/<run>")
+		moePrintln(stderr, "usage: moe hooks code [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens an interactive Claude Code session on the run's code canvas.")
 		moePrintln(stderr, "The agent edits scripts under projects/<project>/hooks/<event>.d/* and")
@@ -68,12 +70,18 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
+	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "hooks code: %v\n", err)
 		return 2
 	}
-	return openHooksCode(projectID, runID, false, false, stdout, stderr)
+	return openHooksCode(projectID, runID, false, false, *agentOverride, stdout, stderr)
 }
 
 // openHooksCode is the Go-level seam behind `moe hooks code`. Mirrors
@@ -81,7 +89,7 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 // Command.Run parses args; this helper does the requireRun guard and
 // hands to runStageSession. The chain prompt's cascade driver reaches
 // it through openHooksStage in hooks_stages.go.
-func openHooksCode(projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+func openHooksCode(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("hooks code", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -95,6 +103,7 @@ func openHooksCode(projectID, runID string, headless, suppressNextStage bool, st
 		InitialPrompt:   kickoff,
 		Headless:        headless,
 		SkipNextStage:   suppressNextStage,
+		Agent:           agentOverride,
 		ExtraStagePaths: hooksStageHooksDir,
 	}, stdout, stderr)
 }

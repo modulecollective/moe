@@ -309,7 +309,7 @@ func stubOpenTwinStage(t *testing.T, perStageExit map[string]int) *[]openTwinSta
 	t.Helper()
 	var captured []openTwinStageInvocation
 	prev := openTwinStage
-	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
+	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _ string, _, _ io.Writer) int {
 		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, headless, suppressNextStage})
 		return perStageExit[stage]
 	}

@@ -67,7 +67,7 @@ func TestKBLintRequiresProjectArg(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit on missing project arg, got 0\nstderr: %s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "usage: moe kb lint <project>") {
+	if !strings.Contains(errb.String(), "usage: moe kb lint") {
 		t.Fatalf("missing usage line in stderr:\n%s", errb.String())
 	}
 }
