@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -868,8 +869,8 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 // its stage) — every other workflow registers a dispatcher, so the
 // cascade legend is workflow-by-presence, not workflow-by-name.
 func TestPromptStageNextStageNoCascadeLegendWithoutDispatcher(t *testing.T) {
-	next := &Command{Name: ideaDocID, Run: func(_ []string, _, _ io.Writer) int { return 0 }}
-	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: ideaWorkflow, Status: run.StatusInProgress}
+	next := &Command{Name: dash.IdeaDocID, Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: dash.IdeaWorkflow, Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {

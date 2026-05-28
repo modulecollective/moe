@@ -33,12 +33,6 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// ideaDocID is the document id for the idea workflow's sole canvas
-// stage. Mirrors internal/cli/idea.go's private constant; duplicated
-// here so runopen avoids depending on internal/cli (which depends on
-// everything).
-const ideaDocID = "idea"
-
 // ErrNotIdea is returned when the slug names a run that
 // is not an in-progress idea — either a different workflow, or an
 // idea that has already been promoted/closed. Defence in depth: serve
@@ -162,7 +156,7 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 	if md.Status != run.StatusInProgress {
 		return nil, "", fmt.Errorf("--from-idea: idea %s/%s is already %s", projectID, slug, md.Status)
 	}
-	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
+	canvasRel := run.ContentPath(projectID, slug, dash.IdeaDocID)
 	b, err := os.ReadFile(filepath.Join(root, canvasRel))
 	if err != nil {
 		return nil, "", fmt.Errorf("--from-idea: read %s: %w", canvasRel, err)
@@ -337,8 +331,8 @@ func EditIdea(root, projectID, slug, body string) error {
 		return ErrNotIdea
 	}
 
-	canvasRel := run.ContentPath(projectID, slug, ideaDocID)
-	docDir := run.DocDir(projectID, slug, ideaDocID)
+	canvasRel := run.ContentPath(projectID, slug, dash.IdeaDocID)
+	docDir := run.DocDir(projectID, slug, dash.IdeaDocID)
 	if err := os.MkdirAll(filepath.Join(root, docDir), 0o755); err != nil {
 		return fmt.Errorf("runopen: mkdir doc dir: %w", err)
 	}
@@ -346,12 +340,12 @@ func EditIdea(root, projectID, slug, body string) error {
 		return fmt.Errorf("runopen: write canvas: %w", err)
 	}
 
-	msg := fmt.Sprintf("work: update %s\n\n", ideaDocID) +
+	msg := fmt.Sprintf("work: update %s\n\n", dash.IdeaDocID) +
 		trailers.Block{
 			Run:      slug,
 			Project:  projectID,
 			Workflow: dash.IdeaWorkflow,
-			Document: ideaDocID,
+			Document: dash.IdeaDocID,
 		}.String()
 	return withRepoLock(root, repolock.Options{
 		Purpose: "idea-edit",

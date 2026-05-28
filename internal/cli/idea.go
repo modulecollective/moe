@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -21,25 +22,16 @@ import (
 
 // `moe idea` is the backlog surface: a shelf of thoughts-worth-capturing
 // that sit between nothing and a full run. Ideas are just runs in a
-// dedicated single-stage workflow (ideaWorkflow, ideaDocID) so the slug
-// namespace, dash bucketing, and trailer conventions are the same as
-// sdlc/kb. The distinguishing discipline: `moe idea` verbs never
-// launch Claude unless --chat is passed — capture stays cheap.
+// dedicated single-stage workflow (dash.IdeaWorkflow, dash.IdeaDocID) so
+// the slug namespace, dash bucketing, and trailer conventions are the
+// same as sdlc/kb. The distinguishing discipline: `moe idea` verbs
+// never launch Claude unless --chat is passed — capture stays cheap.
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
 // workflow's top-level form. The Workflow registration is a separate
 // concern (run.Load, dash lookup, `--from-idea` resolution all key off
 // it); the operator-facing dispatch table is the top-level Command
 // registered here.
-
-// ideaWorkflow is the workflow name written to run.json's `workflow`
-// field for idea runs. Kept as a constant so the few places that
-// special-case it (dash, from-idea promotion) can key off one symbol.
-const ideaWorkflow = "idea"
-
-// ideaDocID is the document id for the idea's sole stage. Canvas lives
-// at projects/<p>/runs/<slug>/documents/idea/content.md.
-const ideaDocID = "idea"
 
 func init() {
 	g := NewCommandGroup("idea", "idea workflow: new, edit, close, list, cat")
@@ -66,12 +58,12 @@ func init() {
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump an idea's canvas to stdout",
-		Run:     runCat(ideaWorkflow, ideaDocID),
+		Run:     runCat(dash.IdeaWorkflow, dash.IdeaDocID),
 	})
 	g.Register(&Command{
 		Name:    "log",
 		Summary: "render an idea's agent transcript",
-		Run:     runLog(ideaWorkflow, ideaDocID),
+		Run:     runLog(dash.IdeaWorkflow, dash.IdeaDocID),
 	})
 	g.Register(&Command{
 		Name:    "move",
@@ -91,8 +83,8 @@ func init() {
 	// — operator-facing verbs (new/edit/close/list/cat) are group
 	// subcommands above. wf.Next reporting "idea" is fine: no chain
 	// prompt or resume path ever reaches the idea workflow today.
-	w := NewWorkflow(ideaWorkflow)
-	w.RegisterStage(ideaDocID)
+	w := NewWorkflow(dash.IdeaWorkflow)
+	w.RegisterStage(dash.IdeaDocID)
 	RegisterWorkflow(w)
 }
 
@@ -212,8 +204,8 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 
 	opts := run.Options{
 		ID:       slug,
-		Workflow: ideaWorkflow,
-		SeedDocs: map[string]string{ideaDocID: string(body)},
+		Workflow: dash.IdeaWorkflow,
+		SeedDocs: map[string]string{dash.IdeaDocID: string(body)},
 	}
 	var md *run.Metadata
 	err = withRepoLock(root, repolock.Options{
@@ -261,8 +253,8 @@ func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*
 		}
 		opts := run.Options{
 			ID:       candidate,
-			Workflow: ideaWorkflow,
-			SeedDocs: map[string]string{ideaDocID: body},
+			Workflow: dash.IdeaWorkflow,
+			SeedDocs: map[string]string{dash.IdeaDocID: body},
 			Trailers: extra,
 			// Callers (idea new, harvest) gate on dirty state above.
 			// The harvester in particular runs while followups.md is
@@ -325,7 +317,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	abs := filepath.Join(root, run.ContentPath(projectID, slug, ideaDocID))
+	abs := filepath.Join(root, run.ContentPath(projectID, slug, dash.IdeaDocID))
 	if _, err := os.Stat(abs); err != nil {
 		moePrintf(stderr, "idea: canvas missing: %v\n", err)
 		return 1
@@ -341,13 +333,13 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	docDir := run.DocDir(projectID, slug, ideaDocID)
-	msg := fmt.Sprintf("work: update %s\n\n", ideaDocID) +
+	docDir := run.DocDir(projectID, slug, dash.IdeaDocID)
+	msg := fmt.Sprintf("work: update %s\n\n", dash.IdeaDocID) +
 		trailers.Block{
 			Run:      slug,
 			Project:  projectID,
-			Workflow: ideaWorkflow,
-			Document: ideaDocID,
+			Workflow: dash.IdeaWorkflow,
+			Document: dash.IdeaDocID,
 		}.String()
 	err = withRepoLock(root, repolock.Options{
 		Purpose: "idea-edit",
@@ -372,7 +364,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 // idea <p>/<r>` subject shape that predates the shared helper (sdlc/kb
 // use `Close <wf> run <p>/<r>` — see design).
 func runIdeaClose(args []string, stdout, stderr io.Writer) int {
-	return runClose(ideaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)
+	return runClose(dash.IdeaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)
 }
 
 func runIdeaList(args []string, stdout, stderr io.Writer) int {
@@ -482,7 +474,7 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 		trailers.Block{
 			Run:           slug,
 			Project:       toProject,
-			Workflow:      ideaWorkflow,
+			Workflow:      dash.IdeaWorkflow,
 			IdeaMovedFrom: fromProject + "/" + slug,
 		}.String()
 
@@ -579,7 +571,7 @@ func scanOpenIdeas(root, projectID string) ([]ideaEntry, error) {
 	}
 	out := make([]ideaEntry, 0, len(mds))
 	for _, md := range mds {
-		if md.Workflow != ideaWorkflow {
+		if md.Workflow != dash.IdeaWorkflow {
 			continue
 		}
 		if md.Status != run.StatusInProgress {
@@ -607,7 +599,7 @@ func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
 		}
 		return nil, err
 	}
-	if md.Workflow != ideaWorkflow {
+	if md.Workflow != dash.IdeaWorkflow {
 		return nil, fmt.Errorf("run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
 	}
 	return md, nil
@@ -699,7 +691,7 @@ func buildIdeaChatPrompt(abs, mode string) string {
 	if soul := moe.Soul(); soul != "" {
 		sections = append(sections, soul)
 	}
-	if frag := moe.Stage(ideaWorkflow, mode); frag != "" {
+	if frag := moe.Stage(dash.IdeaWorkflow, mode); frag != "" {
 		sections = append(sections, frag)
 	}
 	sections = append(sections, fmt.Sprintf(

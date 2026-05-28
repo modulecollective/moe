@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -293,8 +294,8 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
 		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
 		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/!]"},
-		{name: "idea-no-bang-option", workflow: ideaWorkflow, input: "!\n", wantLabel: "[Y/n]"},
-		{name: "idea-default-runs", workflow: ideaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele/fix-it"}},
+		{name: "idea-no-bang-option", workflow: dash.IdeaWorkflow, input: "!\n", wantLabel: "[Y/n]"},
+		{name: "idea-default-runs", workflow: dash.IdeaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele/fix-it"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

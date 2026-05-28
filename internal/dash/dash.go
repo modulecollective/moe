@@ -24,11 +24,18 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// IdeaWorkflow is the workflow name that the idea workflow uses on
-// disk. Duplicated here (rather than imported from cli) so dash
-// doesn't depend on the cli package; the literal "idea" is the cross-
-// cutting contract.
-const IdeaWorkflow = "idea"
+// IdeaWorkflow and IdeaDocID are the cross-cutting contract for the
+// idea workflow: the workflow name written to run.json and the doc id
+// for the single canvas stage. Every non-test caller (cli, runopen,
+// serve) routes through these two symbols on purpose — they live in
+// dash because dash is the one package every caller already depends
+// on (it owns the home-screen render and is the lowest leaf that
+// names the idea workflow). The cli package can't host them without
+// pulling its dependency edge into runopen and serve.
+const (
+	IdeaWorkflow = "idea"
+	IdeaDocID    = "idea"
+)
 
 // DormantCutoff is the staleness threshold for the ACTIVE section.
 // A run with no MoE-Run-scoped commit in this window is considered

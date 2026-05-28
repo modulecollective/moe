@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -33,7 +34,7 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 		return nil, fmt.Errorf("enterTerminal: not a terminal status: %q", newStatus)
 	}
 	paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
-	if md.Workflow != ideaWorkflow {
+	if md.Workflow != dash.IdeaWorkflow {
 		if err := harvestFollowups(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
 			return nil, err
 		}

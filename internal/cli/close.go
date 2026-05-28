@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -50,7 +51,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	// trim the file ahead of time and keep close non-interactive.
 	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
 	fs.Usage = func() {
-		if workflow == ideaWorkflow {
+		if workflow == dash.IdeaWorkflow {
 			moePrintf(stderr, "usage: moe idea close <project>/<run>\n")
 		} else {
 			moePrintf(stderr, "usage: moe %s close [--no-edit] <project>/<run>\n", workflow)
@@ -92,7 +93,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	// that's where stage-time captures land — so the clean-tree gate
 	// ignores changes on those paths. Anything else dirty stays a
 	// refusal.
-	harvest := workflow != ideaWorkflow
+	harvest := workflow != dash.IdeaWorkflow
 	followupsRel := run.FollowupsPath(projectID, runID)
 	loreRel := run.FeedbackPath(projectID, runID, "lore")
 	if harvest {
@@ -156,7 +157,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	// from the stage session). A run that never reached `code` has no
 	// `code` entry to verify — same satisfaction model Workflow.Next
 	// uses.
-	if workflow != ideaWorkflow {
+	if workflow != dash.IdeaWorkflow {
 		docIDs := make([]string, 0, len(md.Documents))
 		for docID := range md.Documents {
 			docIDs = append(docIDs, docID)
@@ -221,7 +222,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // while the just-finished run is still fresh in the operator's head.
 func twinReflectNudge(root, projectID, runID, workflow string) string {
 	switch workflow {
-	case ideaWorkflow, "twin":
+	case dash.IdeaWorkflow, "twin":
 		return ""
 	}
 	cfg, err := twinWikiBuilder(root, projectID)

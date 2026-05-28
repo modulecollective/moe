@@ -530,7 +530,7 @@ func TestMetaMoeCloseRefusesEmptyCanvas(t *testing.T) {
 
 // TestIdeaCloseStillAllowsEmpty: idea is exempt — its content.md is
 // the operator's free-form capture, and an empty idea on close is
-// operator intent. Regression canary for the workflow != ideaWorkflow
+// operator intent. Regression canary for the workflow != dash.IdeaWorkflow
 // branch.
 func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "idea-empty", "idea", run.StatusInProgress)

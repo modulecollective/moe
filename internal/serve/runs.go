@@ -644,7 +644,7 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
 		ID:       slug,
 		Workflow: dash.IdeaWorkflow,
-		SeedDocs: map[string]string{"idea": body},
+		SeedDocs: map[string]string{dash.IdeaDocID: body},
 	})
 	if err != nil {
 		s.renderIdeaFormError(w, r, "open: "+err.Error())
@@ -707,7 +707,7 @@ func (s *Server) handleIdeaEditForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := os.ReadFile(filepath.Join(s.opts.Root, run.ContentPath(projectID, slug, "idea")))
+	body, err := os.ReadFile(filepath.Join(s.opts.Root, run.ContentPath(projectID, slug, dash.IdeaDocID)))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		s.logf("edit form: read canvas %s/%s: %v", projectID, slug, err)
 		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)

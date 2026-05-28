@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -323,13 +324,13 @@ func loadIdeaBacklog(root, projectID string) ([]ideaSummary, error) {
 		if md.Project != projectID {
 			continue
 		}
-		if md.Workflow != ideaWorkflow {
+		if md.Workflow != dash.IdeaWorkflow {
 			continue
 		}
 		if md.Status != run.StatusInProgress {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, ideaDocID)))
+		body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, dash.IdeaDocID)))
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read idea %s/%s: %w", md.Project, md.ID, err)
 		}

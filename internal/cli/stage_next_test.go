@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -349,7 +350,7 @@ func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 // nil." Use idea to test the genuine no-dispatcher case.
 func TestPromptStageNextStageBackForWorkflowWithoutDispatcher(t *testing.T) {
 	next := &Command{
-		Name: ideaDocID,
+		Name: dash.IdeaDocID,
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	var backRan bool
@@ -360,7 +361,7 @@ func TestPromptStageNextStageBackForWorkflowWithoutDispatcher(t *testing.T) {
 			return 0
 		},
 	}
-	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: ideaWorkflow, Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "lingering-workflows", Project: "moe", Workflow: dash.IdeaWorkflow, Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {

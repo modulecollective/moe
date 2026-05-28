@@ -576,7 +576,7 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	trailerstest.SeedRun(t, root, "tele", "search-idea", ideaWorkflow, run.StatusPromoted)
+	trailerstest.SeedRun(t, root, "tele", "search-idea", dash.IdeaWorkflow, run.StatusPromoted)
 	trailerstest.SeedRun(t, root, "tele", "search-impl", "sdlc", run.StatusInProgress)
 	trailerstest.CommitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
 		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
@@ -604,7 +604,7 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	trailerstest.SeedRun(t, root, "tele", "ghost-idea", ideaWorkflow, run.StatusPromoted)
+	trailerstest.SeedRun(t, root, "tele", "ghost-idea", dash.IdeaWorkflow, run.StatusPromoted)
 	trailerstest.CommitTrailer(t, root, "Promote idea tele/ghost-idea → tele/never-seeded",
 		"MoE-Run: ghost-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/never-seeded",
 		time.Time{})
