@@ -543,3 +543,69 @@ func TestTryCreateCleansUpTmpOnLoss(t *testing.T) {
 		}
 	}
 }
+
+// TestWithRunsFnAndReleases covers the happy path of With: fn runs while
+// the lock is held, and the lock file is gone once With returns.
+func TestWithRunsFnAndReleases(t *testing.T) {
+	root := t.TempDir()
+	lockPath := filepath.Join(root, ".moe", "lock")
+	ran := false
+	err := With(root, silentOpts("with"), func() error {
+		ran = true
+		if _, err := os.Stat(lockPath); err != nil {
+			t.Errorf("lock file absent while fn runs: %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("With: %v", err)
+	}
+	if !ran {
+		t.Error("fn did not run")
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock file still present after With: err=%v", err)
+	}
+}
+
+// TestWithPropagatesFnError verifies fn's error is returned verbatim and
+// the lock is still released on the error path.
+func TestWithPropagatesFnError(t *testing.T) {
+	root := t.TempDir()
+	want := errors.New("boom")
+	got := With(root, silentOpts("with"), func() error { return want })
+	if !errors.Is(got, want) {
+		t.Errorf("With error = %v, want %v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".moe", "lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock file still present after With error: err=%v", err)
+	}
+}
+
+// TestWithShortCircuitsOnAcquireError verifies that when Acquire fails
+// (here: a live holder plus an exhausted budget), With returns the
+// acquire error and never calls fn.
+func TestWithShortCircuitsOnAcquireError(t *testing.T) {
+	root := t.TempDir()
+	held, err := Acquire(root, silentOpts("holder"))
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	defer held.Release()
+
+	opts := silentOpts("with")
+	opts.Budget = 40 * time.Millisecond
+	opts.BackoffCap = 5 * time.Millisecond
+	ran := false
+	err = With(root, opts, func() error {
+		ran = true
+		return nil
+	})
+	if ran {
+		t.Error("fn ran despite acquire failure")
+	}
+	var te *TimeoutError
+	if !errors.As(err, &te) {
+		t.Fatalf("With error = %v, want *TimeoutError", err)
+	}
+}
