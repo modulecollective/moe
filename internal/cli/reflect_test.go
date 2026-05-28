@@ -61,11 +61,66 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 		"### Idea backlog",
 		"(no open ideas captured for this project)",
 		"### History summary",
-		"auth rewrite landed",
+		// By-path pointer, not the body: the kickoff names the file and
+		// tells the agent to read it.
+		"Read the rolling history summary at",
+		wiki.HistorySummaryPath(cfg),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("kickoff context missing %q in:\n%s", want, got)
 		}
+	}
+	// The summary body must NOT be inlined — that 116 KB-prone string on
+	// argv is what broke the launch with E2BIG. Only the path rides in
+	// the kickoff now.
+	if strings.Contains(got, "auth rewrite landed") {
+		t.Errorf("kickoff inlined the history-summary body; want a by-path pointer only:\n%s", got)
+	}
+}
+
+// TestReflectKickoffContextReferencesHistorySummaryByPath pins the
+// de-inline contract directly: a large summary file is named by absolute
+// path with a read imperative, and its body never lands in the kickoff
+// (the oversized argv element that failed execve with E2BIG).
+func TestReflectKickoffContextReferencesHistorySummaryByPath(t *testing.T) {
+	root := newTestBureaucracy(t)
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWikiDoc(t, twinDir, "vision.md", "# Vision\n\nReal content.\n"); err != nil {
+		t.Fatal(err)
+	}
+	// A body large enough to be the kind of string that overran the
+	// per-argv ceiling. A unique marker lets us assert it stays out.
+	marker := "UNIQUE-HISTORY-MARKER-9f3a"
+	body := marker + "\n" + strings.Repeat("history detail line\n", 8000)
+	if err := writeWikiDoc(t, twinDir, "history-summary.md", body); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := wiki.Config{
+		Mode:            wiki.Closed,
+		Name:            "twin",
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: root,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+	got, err := reflectKickoffContext(root, "tele", cfg)
+	if err != nil {
+		t.Fatalf("reflectKickoffContext: %v", err)
+	}
+	if strings.Contains(got, marker) {
+		t.Errorf("kickoff inlined the history-summary body (marker present); want path only")
+	}
+	if !strings.Contains(got, wiki.HistorySummaryPath(cfg)) {
+		t.Errorf("kickoff missing the history-summary path %q in:\n%s", wiki.HistorySummaryPath(cfg), got)
+	}
+	if !strings.Contains(got, "Read the rolling history summary at") {
+		t.Errorf("kickoff missing the read imperative in:\n%s", got)
 	}
 }
 

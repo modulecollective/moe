@@ -330,6 +330,17 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	return out, nil
 }
 
+// HistorySummaryPath returns the absolute path to the rolling
+// history-summary.md for cfg's twin. The reflect kickoff surfaces this
+// path to the agent rather than inlining the file body: the summary can
+// grow past the kernel's per-argv-string ceiling (MAX_ARG_STRLEN =
+// 128 KiB), and the kickoff rides on argv, so inlining it once broke the
+// launch with E2BIG. By-path delivery keeps the turn prompt bounded; the
+// agent reads the file on demand, the same contract the twin docs use.
+func HistorySummaryPath(cfg Config) string {
+	return historySummaryPath(cfg.ContentDir)
+}
+
 // ReadHistorySummary reads <ContentDir>/history-summary.md if present.
 // Returns ("", nil) when the file is absent or empty — both are normal
 // states (a fresh wiki has no summary, and the agent seeds it at the

@@ -305,12 +305,16 @@ func finalizeStageGate(root string, md *run.Metadata) (bool, error) {
 		testSectionFilled(sections["What I left"]), nil
 }
 
-// reflectKickoffContext returns the per-stage kickoff payload that
-// gets prepended to each stage's system prompt: events, history
-// summary, twin feedback, hygiene findings, and the open idea backlog
-// (for roadmap). The whole block carries pass-scoped context every
-// stage needs to see; the per-stage framing lives in the stage
-// fragment.
+// reflectKickoffContext returns the per-stage kickoff payload: events,
+// history summary, twin feedback, hygiene findings, and the open idea
+// backlog (for roadmap). It is wired as the InitialPrompt / turn prompt
+// (buildTwinStageKickoff → stageSessionOpts.InitialPrompt) — the first
+// user message the agent receives, distinct from the system prompt
+// (Request.Prompt) that stage_prompt.go assembles. Both ride on argv, so
+// neither may carry an unbounded string; the history summary is surfaced
+// by path, not inlined, for exactly that reason (see the History summary
+// block below). The whole block carries pass-scoped context every stage
+// needs to see; the per-stage framing lives in the stage fragment.
 //
 // Returns the rendered markdown block plus any error from the
 // underlying wiki / git reads. An empty block is valid (a fresh
@@ -397,8 +401,17 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 
 	b.WriteString("### History summary\n\n")
 	if historySummary != "" {
-		b.WriteString(historySummary)
-		b.WriteString("\n\n")
+		// Surface the summary by path, not inlined. It can grow past the
+		// kernel's per-argv-string ceiling (MAX_ARG_STRLEN = 128 KiB) and
+		// this kickoff rides on argv, so inlining it broke the launch with
+		// E2BIG. The imperative must be unambiguous: a path the agent
+		// skips is worse than the old inline.
+		fmt.Fprintf(&b, "Read the rolling history summary at `%s` now, "+
+			"before you start this stage — it is your primary context for "+
+			"what past reflect passes changed and why, the compressed memory "+
+			"of project history before the events listed below. Open it with "+
+			"your read tool; don't skip it.\n\n",
+			wiki.HistorySummaryPath(cfg))
 	} else {
 		b.WriteString("(no rolling summary yet — finalize will seed " +
 			"`history-summary.md` from this pass's events)\n\n")
