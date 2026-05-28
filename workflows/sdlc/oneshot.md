@@ -23,3 +23,11 @@ operator picks the run up interactively (`moe sdlc <stage>`) from there.
 
 Don't ask questions in your output. There is nobody on the other end to
 answer. Either ship the canvas or refuse silently.
+
+A note for the design stage in particular: a baked canvas (a promoted
+idea, a reopened run's prior design, an upstream seed) is still a
+design turn that needs a canvas edit on success. If the design is
+already code-ready, the edit is the `## Design review` note the stage
+fragment describes — not a no-op exit. If you can't tell whether it's
+code-ready, refuse silently as above; the unchanged-canvas gate stops
+the chain so an operator can pick the run up interactively.

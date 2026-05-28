@@ -134,6 +134,38 @@ func TestSdlcTestFragmentAllowsScopedMoeInvocations(t *testing.T) {
 	}
 }
 
+// TestSdlcDesignFragmentNamesBakedCanvasReviewNote pins the baked-seed
+// branch of the design fragment: when the canvas already carries a real
+// design (promoted idea, reopened run, upstream seed) and the agent
+// judges it complete, the stage instructs it to append a `## Design
+// review` note instead of exiting on an unchanged canvas. The
+// commit-time gate refuses no-op turns; without this guidance a headless
+// design agent reading a baked seed has nowhere to go but the gate.
+func TestSdlcDesignFragmentNamesBakedCanvasReviewNote(t *testing.T) {
+	got := moe.Stage("sdlc", "design")
+	for _, want := range []string{
+		"## Resumed or seeded designs",
+		"## Design review",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("design fragment missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestSdlcOneShotNamesBakedDesignReviewNote pins the headless addendum:
+// the one-shot fragment must echo the design-stage rule that a baked
+// canvas still needs a `## Design review` edit on success. Without the
+// reminder a headless cascade can read a complete seed and exit on the
+// unchanged canvas, stopping the chain at design with no recorded
+// review.
+func TestSdlcOneShotNamesBakedDesignReviewNote(t *testing.T) {
+	got := moe.OneShot("sdlc")
+	if !strings.Contains(got, "## Design review") {
+		t.Fatalf("sdlc oneshot fragment should name the ## Design review note for baked designs:\n%s", got)
+	}
+}
+
 // TestBuildSystemPromptMissingFragmentIsNotAnError registers a
 // throwaway workflow with a stage that has no embedded fragment and
 // confirms buildSystemPrompt still returns (no error, no ghost empty

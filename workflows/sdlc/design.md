@@ -61,6 +61,33 @@ Design is ready to hand back when:
 
 If you're polishing prose, you're done. Stop and hand it over.
 
+## Resumed or seeded designs
+
+The canvas may already carry a real design when you start — a
+promoted idea, a reopened run's prior design, or a baked seed from
+an upstream tool. **Read it before anything else** and decide
+whether it's complete enough that the first few code-stage steps
+are obvious.
+
+- **If it's not complete**, edit the design itself: tighten the
+  problem, refresh the approach, or write the blocking unknowns
+  clearly. That's the normal design turn.
+- **If it is complete**, append a short `## Design review` section
+  to the canvas. The note records that you re-read the design,
+  names the source or code facts you actually checked, and states
+  that the design is ready for code. It is not padding — downstream
+  code reads it to understand why the baked design was accepted.
+- **If you can't tell** whether the design is code-ready, say so
+  in the canvas as an open question rather than guessing. An
+  unwritten canvas is the system's "stage refused" signal; use it
+  deliberately rather than smuggling a half-formed judgement
+  through a review note.
+
+A successful design turn always leaves a canvas edit. The
+unchanged-canvas gate refuses an exit that did neither, which is
+the right behaviour — silently inheriting a seed is not a design
+decision.
+
 ## The project sandbox is read-only
 
 You have the same per-run sandbox clone code and test stages get,
