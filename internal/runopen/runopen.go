@@ -15,7 +15,7 @@
 //     Knowing the slug synchronously is what lets serve drop the
 //     `:promoting` placeholder + `opened run …` regex it used before.
 //
-// Open, Promote, CloseIdea, and ReopenIdea take the repolock
+// Open, Promote, CloseIdea, Reopen, and ReopenIdea take the repolock
 // around their mutations so concurrent invocations do not clobber
 // each other.s git index.
 package runopen
@@ -237,11 +237,41 @@ func CloseIdea(root, projectID, slug string) error {
 	})
 }
 
+// Reopen is the bare flip behind every reopen path: it sets a terminal
+// run's status back to in_progress and commits run.json under repolock
+// with a reopen trailer derived from the run's own workflow. The caller
+// owns all the policy — ReopenIdea's workflow/promoted-destination
+// guards, the chat verb's closed-only check — and hands a loaded md
+// here only once the run is known reopenable. md.Status is set in place.
+//
+// Workflow-derived subject ("Reopen idea …", "Reopen chat …"), trailer
+// block, and lock purpose keep each workflow's history greppable while
+// the flip itself lives in exactly one place.
+func Reopen(root string, md *run.Metadata) error {
+	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf("Reopen %s %s/%s\n\n", md.Workflow, md.Project, md.ID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+		}.String()
+	return repolock.With(root, repolock.Options{
+		Purpose: md.Workflow + "-reopen",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		md.Status = run.StatusInProgress
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
 // ReopenIdea flips a closed idea back to in_progress. For promoted
 // ideas, it preserves the old CLI policy: the promoted destination must
 // resolve through MoE-Promoted-To and be closed, otherwise reopening
 // would create two live owners of the same intent or resurrect shipped
-// work.
+// work. The flip itself routes through Reopen.
 func ReopenIdea(root, projectID, slug string) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
@@ -260,24 +290,7 @@ func ReopenIdea(root, projectID, slug string) error {
 	default:
 		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
 	}
-
-	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	msg := fmt.Sprintf("Reopen idea %s/%s\n\n", projectID, slug) +
-		trailers.Block{
-			Run:      slug,
-			Project:  projectID,
-			Workflow: dash.IdeaWorkflow,
-		}.String()
-	return repolock.With(root, repolock.Options{
-		Purpose: "idea-reopen",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		md.Status = run.StatusInProgress
-		if err := run.Save(root, md); err != nil {
-			return err
-		}
-		return run.StageAndCommit(root, msg, runJSONRel)
-	})
+	return Reopen(root, md)
 }
 
 func verifyPromotedDestinationClosed(root, projectID, slug string) error {
