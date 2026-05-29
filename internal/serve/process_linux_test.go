@@ -351,6 +351,38 @@ func TestShipPOSTSpawnsNextStageWithFlag(t *testing.T) {
 	}
 }
 
+// TestChainPOSTSpawnsNextStageWithFlag: the chain chip spawns the next
+// stage under --chain — the headless cascade that ships this run, then
+// rides the whole chain. Mirrors the ship test; the trailing flag is
+// the only difference.
+func TestChainPOSTSpawnsNextStageWithFlag(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/chain", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	c, ok := s.children.get("alpha/fix-it")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "sdlc code alpha/fix-it --chain" {
+		t.Errorf("spawn args = %q, want %q", got, "sdlc code alpha/fix-it --chain")
+	}
+}
+
 // withShortShutdownGrace shrinks the phase budgets for the duration
 // of a test so we don't spend 20+ seconds per shutdown case. Not
 // safe under t.Parallel.
