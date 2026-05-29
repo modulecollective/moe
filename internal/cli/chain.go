@@ -1,11 +1,15 @@
 // Package cli — chain verbs.
 //
 // `moe chain edit` opens a rebase-style editor over every active sdlc
-// run across every project. Saving the file produces a linear chain:
-// line i chains-to line i+1. Per Decision 4, the file is authoritative
-// for parents in it — any chain-to edge whose parent appears in the
-// file is dropped and replaced by the file's ordering; edges whose
-// parent isn't in the file are untouched.
+// run across every project, grouped into blocks that mirror the dash's
+// chains. A blank line is a chain boundary: each contiguous block of
+// run lines becomes one linear chain (line i chains-to line i+1 within
+// its block; the block's last line chains-to nothing). The editor is
+// WYSIWYG — the blocks you see are the chains you get. Per Decision 4,
+// the file is authoritative for parents in it — any chain-to edge whose
+// parent appears in the file is dropped and replaced by the file's
+// blocks; edges whose parent isn't in the file are untouched. So opening
+// the editor and saving unchanged is a no-op for any fan-in-free state.
 //
 // `moe chain clear` drops every currently-live chain edge in one
 // commit. Confirmation prompt by default; --yes skips.
@@ -63,11 +67,12 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe chain edit")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens $EDITOR on a list of every active sdlc run across every")
-		moePrintln(stderr, "project, annotated by chain state. Delete lines you don't want,")
-		moePrintln(stderr, "reorder the rest, and save — the remaining lines form a linear")
-		moePrintln(stderr, "chain in order (each chains-to the next). Edges whose parent is")
-		moePrintln(stderr, "absent from the file are untouched.")
+		moePrintln(stderr, "Opens $EDITOR on every active sdlc run across every project,")
+		moePrintln(stderr, "grouped into blocks that mirror the dash's chains. A blank line")
+		moePrintln(stderr, "separates chains: each block of run lines becomes one linear chain")
+		moePrintln(stderr, "(each chains-to the one below it within the block). Move a line into")
+		moePrintln(stderr, "another block to fold it in, isolate it in its own block to unchain")
+		moePrintln(stderr, "it, or delete it to leave its edge untouched.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -137,14 +142,18 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	activeKeys := make(map[string]bool, len(items))
-	for _, it := range items {
-		activeKeys[it.Key] = true
+	activeKeys := map[string]bool{}
+	for _, block := range items {
+		for _, it := range block {
+			activeKeys[it.Key] = true
+		}
 	}
-	for _, k := range desired {
-		if !activeKeys[k] {
-			moePrintf(stderr, "chain edit: %q is not an active sdlc run\n", k)
-			return 1
+	for _, block := range desired {
+		for _, k := range block {
+			if !activeKeys[k] {
+				moePrintf(stderr, "chain edit: %q is not an active sdlc run\n", k)
+				return 1
+			}
 		}
 	}
 
@@ -258,7 +267,11 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // reads the editor the way they read the dash and can fold a run into an
 // existing chain instead of rebuilding from scratch. The grouping is
 // shared with the dash via run.OrderChainUnits.
-func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) []chainItem {
+//
+// Each returned block is one chain unit (an orphan, or a head→tail
+// chain); renderChainEditFile emits a blank line between blocks so the
+// editor's blank lines are the chain boundaries.
+func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
 	chainedFrom := invertEffectiveChain(idx.ChainedChild, byKey)
 	itemByKey := map[string]chainItem{}
 	for _, md := range mds {
@@ -274,7 +287,7 @@ func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[
 	}
 	// Feed the shared grouper in newest-first order (Key tiebreak keeps
 	// equal-activity runs deterministic); it returns the head→tail units
-	// in dash order, which we flatten back into editor lines.
+	// in dash order, one block per unit.
 	order := make([]run.ChainOrderItem, 0, len(itemByKey))
 	for _, it := range itemByKey {
 		order = append(order, run.ChainOrderItem{Key: it.Key, When: it.When})
@@ -285,11 +298,14 @@ func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[
 		}
 		return order[i].When.After(order[j].When)
 	})
-	out := make([]chainItem, 0, len(itemByKey))
-	for _, u := range run.OrderChainUnits(order, idx, byKey) {
+	units := run.OrderChainUnits(order, idx, byKey)
+	out := make([][]chainItem, 0, len(units))
+	for _, u := range units {
+		block := make([]chainItem, 0, len(u))
 		for _, k := range u {
-			out = append(out, itemByKey[k])
+			block = append(block, itemByKey[k])
 		}
+		out = append(out, block)
 	}
 	return out
 }
@@ -333,42 +349,70 @@ func chainAnnotation(key string, chainedChild map[string]string, chainedFrom map
 }
 
 // renderChainEditFile produces the editor file body: a few lines of
-// instructions then one line per item, key padded to a column so the
-// `# annotation` suffixes line up.
-func renderChainEditFile(items []chainItem) string {
+// instructions then the blocks, one line per item with the key padded
+// to a column so the `# annotation` suffixes line up. A blank line
+// separates blocks, so the file's blank lines are the chain boundaries
+// the parser reads back.
+func renderChainEditFile(blocks [][]chainItem) string {
 	width := 0
-	for _, it := range items {
-		if len(it.Key) > width {
-			width = len(it.Key)
+	for _, block := range blocks {
+		for _, it := range block {
+			if len(it.Key) > width {
+				width = len(it.Key)
+			}
 		}
 	}
 	var sb strings.Builder
 	sb.WriteString("# moe chain edit\n")
 	sb.WriteString("#\n")
-	sb.WriteString("# Reorder lines to chain runs head-first. The remaining lines\n")
-	sb.WriteString("# become a linear chain: each chains-to the one below it.\n")
-	sb.WriteString("# Delete lines to leave them unchained. Lines starting with #\n")
-	sb.WriteString("# are ignored. Only the leading <project>/<slug> token is parsed.\n")
+	sb.WriteString("# A blank line separates chains. Each block of run lines below\n")
+	sb.WriteString("# becomes one linear chain: each line chains-to the one below it\n")
+	sb.WriteString("# within its block; the block's last line chains-to nothing.\n")
 	sb.WriteString("#\n")
-	sb.WriteString("# Save an empty file (or one with no run lines) for a no-op.\n")
+	sb.WriteString("# Move a line into another block to fold it into that chain, put\n")
+	sb.WriteString("# it alone (blank lines around it) to unchain it, or delete it to\n")
+	sb.WriteString("# leave its edge untouched. Lines starting with # are ignored;\n")
+	sb.WriteString("# only the leading <project>/<slug> token is parsed.\n")
 	sb.WriteString("#\n")
-	for _, it := range items {
-		fmt.Fprintf(&sb, "%-*s  # %s\n", width, it.Key, it.Anno)
+	sb.WriteString("# Save unchanged for a no-op.\n")
+	sb.WriteString("#\n")
+	for i, block := range blocks {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		for _, it := range block {
+			fmt.Fprintf(&sb, "%-*s  # %s\n", width, it.Key, it.Anno)
+		}
 	}
 	return sb.String()
 }
 
-// parseChainEditFile extracts the ordered list of qualified slugs the
-// editor file specifies. Lines that are blank or start with `#` are
-// skipped; for every other line the first whitespace-separated token
-// is taken as the slug. Returns an error on a malformed slug (not
-// `<project>/<run>` shape) or a duplicate.
-func parseChainEditFile(body string) ([]string, error) {
-	var out []string
+// parseChainEditFile splits the editor file into blocks of qualified
+// slugs — one block per contiguous run of non-blank run lines. A blank
+// line flushes the current block (it is a chain boundary); lines that
+// start with `#` are transparent (skipped without breaking a block);
+// for every run line the first whitespace-separated token is taken as
+// the slug. Empty blocks (e.g. the all-comment header) are dropped.
+// Returns an error on a malformed slug (not `<project>/<run>` shape) or
+// a duplicate. The duplicate check is global: a run can't appear in two
+// blocks.
+func parseChainEditFile(body string) ([][]string, error) {
+	var blocks [][]string
+	var cur []string
 	seen := map[string]bool{}
+	flush := func() {
+		if len(cur) > 0 {
+			blocks = append(blocks, cur)
+			cur = nil
+		}
+	}
 	for lineNo, raw := range strings.Split(body, "\n") {
 		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 		fields := strings.Fields(line)
@@ -380,30 +424,34 @@ func parseChainEditFile(body string) ([]string, error) {
 			return nil, fmt.Errorf("line %d: %q appears more than once", lineNo+1, key)
 		}
 		seen[key] = true
-		out = append(out, key)
+		cur = append(cur, key)
 	}
-	return out, nil
+	flush()
+	return blocks, nil
 }
 
 // diffChainEdit computes the trailer batches for one `chain edit`
-// save. desired is the ordered list of slugs from the saved file —
-// each slug at position i chains-to position i+1; the last slug has
-// no successor. live is the journal index's current chain map.
+// save. blocks are the saved file's chains — within each block, the
+// slug at position i chains-to position i+1 and the last slug has no
+// successor. Blocks don't chain into one another: a block boundary is a
+// chain boundary. live is the journal index's current chain map.
 //
 // Per Decision 4, parents IN the file are authoritative — their
 // desired live child replaces whatever the index says (including
-// clearing to no child if the parent is the file's last line).
+// clearing to no child if the parent is the last line of its block).
 // Parents NOT in the file are untouched.
 //
 // Each emitted trailer value is "<parent> <child>". Outputs are
 // sorted by parent for deterministic commit bodies and tests.
-func diffChainEdit(desired []string, live map[string]string) (adds, removes []string) {
-	want := make(map[string]string, len(desired))
-	for i, k := range desired {
-		if i+1 < len(desired) {
-			want[k] = desired[i+1]
-		} else {
-			want[k] = ""
+func diffChainEdit(blocks [][]string, live map[string]string) (adds, removes []string) {
+	want := map[string]string{}
+	for _, block := range blocks {
+		for i, k := range block {
+			if i+1 < len(block) {
+				want[k] = block[i+1]
+			} else {
+				want[k] = ""
+			}
 		}
 	}
 	parents := make([]string, 0, len(want))
