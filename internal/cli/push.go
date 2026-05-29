@@ -222,6 +222,22 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 1, nil
 	}
 	branch := branchPrefix + md.ID
+	// A clone left mid-rebase can only have come from a recovery turn
+	// that resolved a conflict but couldn't finalize `git rebase
+	// --continue` (codex-rebase-weirdness). EnsureRebasedOntoDefault is
+	// about to re-run and would fail confusingly against that state, and
+	// CheckCleanWorkTree would misread the staged resolution as an
+	// uncommitted-edit lapse. Catch it first and hand the operator the
+	// exact unblock — you can't stash out of a mid-rebase, so the only
+	// moves are finish it or abort it.
+	if push.RebaseInProgress(clonePath) {
+		moePrintf(stderr, `push: sandbox clone is mid-rebase — a previous rebase stopped at a conflict and was never finished
+       sandbox: %s
+       finish it: GIT_EDITOR=true git -C %s rebase --continue   (resolve any remaining conflicts and `+"`git add`"+` them first)
+       or abort:  git -C %s rebase --abort                       (discards the in-progress rebase; re-run `+"`moe %s push %s/%s`"+` to retry)
+`, clonePath, clonePath, clonePath, md.Workflow, md.Project, md.ID)
+		return 1, nil
+	}
 	if err := push.CheckCleanWorkTree(clonePath, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil

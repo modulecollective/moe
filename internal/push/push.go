@@ -202,6 +202,30 @@ func filterSandboxBindMounts(clonePath string, entries []git.StatusEntry) []git.
 	return out
 }
 
+// RebaseInProgress reports whether the sandbox clone is sitting
+// mid-rebase — a `.git/rebase-merge` or `.git/rebase-apply` directory
+// left by a rebase that stopped (conflict) and was never finished or
+// aborted. MoE's own rebase (EnsureRebasedOntoDefault) always aborts on
+// conflict, so the only thing that leaves this state is a recovery turn
+// whose agent resolved the conflict but couldn't finalize
+// `git rebase --continue` — the wedge codex-rebase-weirdness fixes. The
+// resolution is staged-but-uncommitted and can't be stashed out of, so
+// CheckCleanWorkTree would misreport it as "agent edited but did not
+// commit." Probed deterministically here (Go, outside the agent
+// sandbox) so the push gate fails loud with the right manual commands
+// instead. The clone is always a plain clone, so `.git` is a real
+// directory; a missing-or-error stat reads as "not mid-rebase" —
+// false negatives fall through to the existing clean-tree check.
+func RebaseInProgress(clonePath string) bool {
+	gitDir := filepath.Join(clonePath, ".git")
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		if info, err := os.Stat(filepath.Join(gitDir, name)); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckBranchHasCommits confirms the sandbox clone has `branch` and
 // that it's ahead of `base`. A branch at zero commits-ahead means the
 // agent didn't actually commit anything. `workflow` is the run's

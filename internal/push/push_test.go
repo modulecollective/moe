@@ -96,6 +96,51 @@ func TestCheckCleanWorkTreeIgnoresMoeDir(t *testing.T) {
 	}
 }
 
+// TestRebaseInProgress pins the mid-rebase probe: a `.git/rebase-merge`
+// or `.git/rebase-apply` directory means a rebase stopped and was never
+// finished (the codex-rebase-weirdness wedge). A clean clone, or a
+// like-named regular file, must read as not-mid-rebase so the probe
+// doesn't false-positive a normal push.
+func TestRebaseInProgress(t *testing.T) {
+	for _, state := range []string{"rebase-merge", "rebase-apply"} {
+		t.Run(state, func(t *testing.T) {
+			clone := t.TempDir()
+			gitDir := filepath.Join(clone, ".git")
+			if err := os.MkdirAll(filepath.Join(gitDir, state), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if !RebaseInProgress(clone) {
+				t.Fatalf("RebaseInProgress = false with %s present", state)
+			}
+		})
+	}
+
+	t.Run("clean", func(t *testing.T) {
+		clone := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if RebaseInProgress(clone) {
+			t.Fatal("RebaseInProgress = true on a clean clone")
+		}
+	})
+
+	t.Run("regular-file-not-dir", func(t *testing.T) {
+		clone := t.TempDir()
+		gitDir := filepath.Join(clone, ".git")
+		if err := os.MkdirAll(gitDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// A regular file named rebase-merge is not a stopped rebase.
+		if err := os.WriteFile(filepath.Join(gitDir, "rebase-merge"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if RebaseInProgress(clone) {
+			t.Fatal("RebaseInProgress = true for a regular file named rebase-merge")
+		}
+	})
+}
+
 // TestFilterSandboxBindMountsKeepsRegularFiles: the steady-state case.
 // Every entry is a normal file; the filter returns the slice unchanged
 // so a real uncommitted edit still gates the push.

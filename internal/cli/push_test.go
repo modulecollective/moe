@@ -352,6 +352,43 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	}
 }
 
+// TestPushFailsLoudOnWedgedMidRebase: a recovery turn that resolved a
+// conflict but couldn't finalize `git rebase --continue` leaves the
+// clone mid-rebase (codex-rebase-weirdness). The push preflight must
+// catch that state and abort with the manual unblock commands instead
+// of re-running the rebase against a wedged clone or misreading the
+// staged resolution as an uncommitted-edit lapse. Origin stays
+// untouched and the sandbox is left in place for the operator.
+func TestPushFailsLoudOnWedgedMidRebase(t *testing.T) {
+	f := newPushFixture(t)
+
+	// Simulate the wedge: a stopped rebase leaves .git/rebase-merge.
+	if err := os.MkdirAll(filepath.Join(f.clonePath, ".git", "rebase-merge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mainBefore := f.originHead()
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit on a wedged mid-rebase clone; stdout=%s stderr=%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "mid-rebase") {
+		t.Fatalf("expected a mid-rebase diagnostic; stderr=%s", stderr)
+	}
+	if !strings.Contains(stderr, "rebase --abort") || !strings.Contains(stderr, "rebase --continue") {
+		t.Fatalf("expected the manual finish/abort commands in the error; stderr=%s", stderr)
+	}
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin/main must not advance on a wedged clone: want %s, got %s", mainBefore, got)
+	}
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("sandbox must remain so the operator can unblock the rebase")
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status should remain in_progress, got %s", md.Status)
+	}
+}
+
 // TestRunPushReturnsDeferredOnRebaseRecovery pins the typed-error
 // contract added in cascade-message-was-a-lie: when push hands off to
 // a recovery session and that session exits cleanly (exit 0), the
