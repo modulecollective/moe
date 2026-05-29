@@ -14,8 +14,8 @@ import (
 
 // The hooks workflow journals edits to projects/<p>/hooks/<event>.d/*
 // scripts. NeedsSandbox: false — edits land in the bureaucracy itself,
-// so the per-turn commit IS the landing (same shape as meta-moe; no
-// push verb). Pair with `moe hook fire` (hook_cli.go) for the cheap
+// so the per-turn commit IS the landing (no push verb). Pair with
+// `moe hook fire` (hook_cli.go) for the cheap
 // iteration loop; this workflow is where edits get a design canvas,
 // a per-pass record, and trailers in the journal.
 
@@ -85,7 +85,7 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 }
 
 // openHooksCode is the Go-level seam behind `moe hooks code`. Mirrors
-// the equivalent seams in sdlc / twin / kb / meta-moe: the typed
+// the equivalent seams in sdlc / twin / kb: the typed
 // Command.Run parses args; this helper does the requireRun guard and
 // hands to runStageSession. The chain prompt's cascade driver reaches
 // it through openHooksStage in hooks_stages.go.

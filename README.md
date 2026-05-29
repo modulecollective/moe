@@ -185,7 +185,6 @@ mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 | `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `glossary` -> `finalize` | recorded project intent |
 | `hooks` | `code` | project-specific hook scripts |
 | `chores` | `code` | edit project chore definitions: what maintenance is due, and the run each one opens |
-| `meta-moe` | `report` | feedback about MoE itself |
 
 ### SDLC
 
@@ -318,7 +317,7 @@ moe chore open <project>/<chore>              # open the seeded run for a due ch
 journaled run. `moe chore open` refuses if the chore isn't due, already has an
 open run, or is cooling down.
 
-### Knowledge, Twin, Hooks, And Meta-MoE
+### Knowledge, Twin, And Hooks
 
 `moe kb new`, `moe kb research`, and `moe kb summarize` maintain open-schema
 knowledge articles for a project. `moe kb lint <project>` checks wiki hygiene
@@ -334,9 +333,6 @@ it creates a transient sandbox, runs one event's scripts once, prints the
 sandbox path, and exits.
 
 Chores get their own section above; the editing/supervision split mirrors hooks.
-
-`moe meta-moe new` and `moe meta-moe report` inspect a project's MoE history
-and produce maintainer-facing feedback about the harness itself.
 
 ## Concepts
 
@@ -392,7 +388,6 @@ MoE's memory improves through a few explicit channels:
   twin disagree, the twin wins until a deliberate edit updates it.
 - Lore stores portable facts that apply across projects. Agents see a compact
   catalog and open entries only when the "applies when" hint matches.
-- Meta-MoE reports are feedback about the harness itself.
 
 ## Command Reference
 
@@ -439,7 +434,6 @@ The catalog below is a map, not a replacement for `moe help`.
   journaled run.
 - `moe chores new|code|close|cat|log` edits project chore definitions through a
   journaled run.
-- `moe meta-moe new|report|close|cat|log` records MoE-maintenance feedback.
 
 ### Hooks And Environments
 

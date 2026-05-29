@@ -15,17 +15,17 @@ import (
 // `moe <workflow> log` renders a past stage's agent transcript
 // (thread-claude.jsonl / thread-codex.jsonl) as plain text using the
 // same renderer the post-headless auto-tail uses (internal/transcript),
-// no `--tail` cap. Nine per-workflow registrations (in idea/sdlc/kb/
-// metamoe/hooks_workflow/twin/audit/chat/chores) parse positional args
+// no `--tail` cap. Eight per-workflow registrations (in idea/sdlc/kb/
+// hooks_workflow/twin/audit/chat/chores) parse positional args
 // and delegate here; this file owns the resolver (project / @latest /
 // workflow / run / stage validation, agent disambiguation) and the
 // render to stdout. Most register a Command struct with Run: runLog(…);
 // chores registers inline with the same runLog, so the shape isn't
-// uniform across all nine.
+// uniform across all eight.
 //
 // Shape mirrors `runCat`: namespaced under each workflow group so
 // `@latest` and the stage list resolve in workflow context.
-// Single-stage workflows (idea, meta-moe, hooks) pass a non-empty
+// Single-stage workflows (idea, hooks) pass a non-empty
 // defaultStage so the operator can omit the stage argument.
 //
 // A stage with both thread-claude.jsonl and thread-codex.jsonl requires
@@ -36,7 +36,7 @@ import (
 // runLog returns the typed Command.Run for `moe <workflow> log`.
 // defaultStage, when non-empty, is the stage used when the operator
 // omits a stage argument — picked up automatically by single-stage
-// workflows (idea, meta-moe, hooks). Pass "" to force the operator
+// workflows (idea, hooks). Pass "" to force the operator
 // to name a stage.
 func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {

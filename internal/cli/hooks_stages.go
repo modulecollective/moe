@@ -4,7 +4,7 @@ import "io"
 
 // openHooksStage is the Go-level seam behind the chain prompt's
 // cascade driver (`!` / `!<stage>` / `!!` / `!!!`) for hooks runs. Same shape
-// as openSdlcStage / openTwinStage / openKbStage / openMetaMoeStage.
+// as openSdlcStage / openTwinStage / openKbStage.
 // Single-case switch — hooks is a one-stage workflow — but the switch
 // shape stays for symmetry with the other dispatchers, and so an
 // unexpected stage name surfaces as a stderr line rather than silently

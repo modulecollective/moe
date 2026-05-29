@@ -1212,20 +1212,12 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 	}
 }
 
-// openKbStageInvocation, openMetaMoeStageInvocation, and
-// openHooksStageInvocation mirror openSdlcStageInvocation /
-// openTwinStageInvocation for the kb / meta-moe / hooks cascade
-// dispatchers. Same fields — the cascade exercises identical shapes
-// across workflows, so a tighter type-share would lose more in test
-// readability than it'd save in lines.
+// openKbStageInvocation and openHooksStageInvocation mirror
+// openSdlcStageInvocation / openTwinStageInvocation for the kb / hooks
+// cascade dispatchers. Same fields — the cascade exercises identical
+// shapes across workflows, so a tighter type-share would lose more in
+// test readability than it'd save in lines.
 type openKbStageInvocation struct {
-	stage     string
-	projectID string
-	runID     string
-	headless  bool
-}
-
-type openMetaMoeStageInvocation struct {
 	stage     string
 	projectID string
 	runID     string
@@ -1239,9 +1231,9 @@ type openHooksStageInvocation struct {
 	headless  bool
 }
 
-// stubOpenKbStage / stubOpenMetaMoeStage / stubOpenHooksStage mirror
-// stubOpenSdlcStage / stubOpenTwinStage: replace the workflow's
-// dispatcher var with a recorder for the duration of the test.
+// stubOpenKbStage / stubOpenHooksStage mirror stubOpenSdlcStage /
+// stubOpenTwinStage: replace the workflow's dispatcher var with a
+// recorder for the duration of the test.
 func stubOpenKbStage(t *testing.T, perStageExit map[string]int) *[]openKbStageInvocation {
 	t.Helper()
 	var captured []openKbStageInvocation
@@ -1251,18 +1243,6 @@ func stubOpenKbStage(t *testing.T, perStageExit map[string]int) *[]openKbStageIn
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openKbStage = prev })
-	return &captured
-}
-
-func stubOpenMetaMoeStage(t *testing.T, perStageExit map[string]int) *[]openMetaMoeStageInvocation {
-	t.Helper()
-	var captured []openMetaMoeStageInvocation
-	prev := openMetaMoeStage
-	openMetaMoeStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
-		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, headless})
-		return perStageExit[stage]
-	}
-	t.Cleanup(func() { openMetaMoeStage = prev })
 	return &captured
 }
 
@@ -1334,53 +1314,11 @@ func TestCascadeFromGateKbYoloAutoCloses(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateMetaMoeYoloAutoCloses: meta-moe is single-stage;
-// `!!` from its one gate dispatches report then auto-closes. The
-// dispatcher exists for symmetry with the multi-stage workflows — the
-// operator's mental model is "every workflow with a dispatcher has
-// `!!`," not "only multi-stage workflows do."
-func TestCascadeFromGateMetaMoeYoloAutoCloses(t *testing.T) {
-	stageCaptured := stubOpenMetaMoeStage(t, nil)
-	closeCaptured := stubGroupCloseCommand(t, metaMoeWorkflow, 0)
-	md := &run.Metadata{ID: "meta-moe-2026-05-17", Project: "moe", Workflow: metaMoeWorkflow, Status: run.StatusInProgress}
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate(metaMoeReportDoc, "", false, false, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if !res.shipped {
-		t.Fatalf("meta-moe !! cascade must ship via close: %+v", res)
-	}
-	wantSteps := []string{metaMoeReportDoc, "close"}
-	if len(res.ran) != len(wantSteps) {
-		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
-	}
-	for i, s := range wantSteps {
-		if res.ran[i].stage != s {
-			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
-		}
-	}
-	dispatched := 0
-	for _, inv := range *stageCaptured {
-		if inv.stage == metaMoeReportDoc {
-			dispatched++
-		}
-	}
-	if dispatched != 1 {
-		t.Fatalf("%s dispatched %d times, want 1", metaMoeReportDoc, dispatched)
-	}
-	if len(*closeCaptured) != 1 {
-		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
-	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe/meta-moe-2026-05-17"; got != want {
-		t.Fatalf("close args = %q, want %q", got, want)
-	}
-}
-
-// TestCascadeFromGateHooksYoloAutoCloses: same shape as meta-moe one
-// workflow over. hooks is also single-stage; `!!` from its one gate
-// dispatches code then auto-closes.
+// TestCascadeFromGateHooksYoloAutoCloses: hooks is single-stage; `!!`
+// from its one gate dispatches code then auto-closes. The dispatcher
+// exists for symmetry with the multi-stage workflows — the operator's
+// mental model is "every workflow with a dispatcher has `!!`," not
+// "only multi-stage workflows do."
 func TestCascadeFromGateHooksYoloAutoCloses(t *testing.T) {
 	stageCaptured := stubOpenHooksStage(t, nil)
 	closeCaptured := stubGroupCloseCommand(t, hooksWorkflow, 0)

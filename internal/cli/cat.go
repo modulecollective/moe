@@ -14,8 +14,8 @@ import (
 )
 
 // `moe <workflow> cat` is the canvas-dump verb shared across every
-// run-bearing workflow. Six per-workflow wrappers (in idea/sdlc/kb/
-// metamoe/hooks_workflow/twin) parse positional args and delegate
+// run-bearing workflow. The per-workflow wrappers (in idea/sdlc/kb/
+// hooks_workflow/twin) parse positional args and delegate
 // here; this file owns the resolver (worktree-vs-checkout, @latest,
 // stage validation, error shapes) and the io.Copy to stdout.
 //
@@ -33,7 +33,7 @@ const latestRunSentinel = "@latest"
 // runCat returns the typed Command.Run for `moe <workflow> cat`.
 // defaultStage, when non-empty, is the stage used when the operator
 // omits a stage argument — picked up automatically by single-stage
-// workflows (idea, meta-moe, hooks). Pass "" to force the operator
+// workflows (idea, hooks). Pass "" to force the operator
 // to name a stage.
 func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {

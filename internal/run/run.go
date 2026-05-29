@@ -400,7 +400,7 @@ func FollowupsPath(projectID, id string) string {
 // FeedbackDir returns the path (relative to the bureaucracy root) of a
 // run's feedback/ directory: sibling of run.json that holds free-form
 // notes workflow agents leave for downstream recipients (twin reflect,
-// future meta-moe report, …). The directory is optional — a run that
+// …). The directory is optional — a run that
 // never produces feedback never has one on disk.
 func FeedbackDir(projectID, id string) string {
 	return filepath.Join(Dir(projectID, id), "feedback")

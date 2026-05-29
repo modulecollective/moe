@@ -31,7 +31,7 @@ func writeThread(t *testing.T, root, project, runID, stage, agent string, lines 
 // Skipping a workflow drops the shared shape — this test is the
 // tripwire, mirroring TestCatRegisteredOnEveryWorkflow.
 func TestLogRegisteredOnEveryWorkflow(t *testing.T) {
-	for _, wf := range []string{"idea", "sdlc", "kb", "meta-moe", "hooks", "twin"} {
+	for _, wf := range []string{"idea", "sdlc", "kb", "hooks", "twin"} {
 		g, err := LookupGroup(wf)
 		if err != nil {
 			t.Fatalf("workflow %q not registered as a group: %v", wf, err)
@@ -295,20 +295,20 @@ func TestMoeLog_SingleStageDefaults(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
-	trailerstest.SeedRun(t, root, "tele", "report-2026", "meta-moe", run.StatusInProgress)
-	writeThread(t, root, "tele", "report-2026", "report", "claude", []string{
-		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"report body"}}`,
+	trailerstest.SeedRun(t, root, "tele", "fix-hooks", "hooks", run.StatusInProgress)
+	writeThread(t, root, "tele", "fix-hooks", "code", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"hooks body"}}`,
 	})
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "log", "tele/report-2026"}, &out, &errb)
+	code := Run([]string{"hooks", "log", "tele/fix-hooks"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "report body") {
-		t.Fatalf("expected report body, got %q", out.String())
+	if !strings.Contains(out.String(), "hooks body") {
+		t.Fatalf("expected hooks body, got %q", out.String())
 	}
 }
 

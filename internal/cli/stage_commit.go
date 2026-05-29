@@ -127,10 +127,10 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 		allPaths = append(allPaths, followupsRel)
 	}
 	// feedback/*.md is the sibling directory for notes addressed to
-	// downstream recipients (twin reflect today, future meta-moe
-	// report). v1 picks up twin.md; a future moe.md lands here for
-	// free. Same conditional-stage pattern as followups so a turn
-	// that touched neither still trips ErrNothingToCommit cleanly.
+	// downstream recipients (twin reflect today). v1 picks up twin.md;
+	// another feedback/*.md lands here for free. Same conditional-stage
+	// pattern as followups so a turn that touched neither still trips
+	// ErrNothingToCommit cleanly.
 	allPaths = append(allPaths, stageableFeedback(root, md)...)
 	return run.StageAndCommit(root, msg, allPaths...)
 }

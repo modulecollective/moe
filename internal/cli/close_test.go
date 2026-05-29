@@ -308,76 +308,6 @@ func TestKBCloseRegisteredInUsage(t *testing.T) {
 	}
 }
 
-func TestMetaMoeCloseRegisteredInUsage(t *testing.T) {
-	var out, errb bytes.Buffer
-	if code := Run([]string{"meta-moe"}, &out, &errb); code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "close") {
-		t.Fatalf("meta-moe usage missing 'close':\n%s", out.String())
-	}
-}
-
-// TestMetaMoeCloseBumpsStatusAndCommits mirrors the kb close happy
-// path: meta-moe has no sandbox/branch cleanup either (NeedsSandbox
-// false), so close is just status flip + trailered commit.
-func TestMetaMoeCloseBumpsStatusAndCommits(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "abandon-mm", "meta-moe", run.StatusInProgress)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/abandon-mm"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "closed meta-moe tele/abandon-mm") {
-		t.Fatalf("missing close confirmation: %q", out.String())
-	}
-
-	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "abandon-mm", "run.json"))
-	if err != nil {
-		t.Fatalf("run.json missing: %v", err)
-	}
-	if !strings.Contains(string(body), `"status": "closed"`) {
-		t.Fatalf("run.json status not flipped:\n%s", body)
-	}
-
-	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close meta-moe run tele/abandon-mm") {
-		t.Fatalf("commit subject wrong:\n%s", head)
-	}
-	for _, want := range []string{
-		"MoE-Run: abandon-mm",
-		"MoE-Project: tele",
-		"MoE-Workflow: meta-moe",
-	} {
-		if !strings.Contains(head, want) {
-			t.Fatalf("commit missing trailer %q:\n%s", want, head)
-		}
-	}
-}
-
-// TestMetaMoeCloseMissingRun: a slug that was never opened should fail
-// fast with the standard does-not-exist error, same as the other
-// workflows on this code path.
-func TestMetaMoeCloseMissingRun(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/ghost"}, &out, &errb)
-	if code == 0 {
-		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
-	}
-	if !strings.Contains(errb.String(), "does not exist") {
-		t.Fatalf("expected does-not-exist error, got: %q", errb.String())
-	}
-}
-
 // addDocEntryAndCommit registers a document on the run's metadata and
 // optionally seeds its canvas, then commits so the close clean-tree
 // check passes. body == "" leaves the canvas absent — the
@@ -507,24 +437,6 @@ func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "moe kb research tele/kb-empty") {
 		t.Fatalf("kb refusal should suggest the kb verb: %q", errb.String())
-	}
-}
-
-// TestMetaMoeCloseRefusesEmptyCanvas: meta-moe close registration
-// landed recently; the inherited gate must hold there too.
-func TestMetaMoeCloseRefusesEmptyCanvas(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "mm-empty", "meta-moe", run.StatusInProgress)
-	addDocEntryAndCommit(t, root, "tele", "mm-empty", "scan", "")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"meta-moe", "close", "--no-edit", "tele/mm-empty"}, &out, &errb)
-	if code == 0 {
-		t.Fatalf("expected non-zero, stdout=%q", out.String())
-	}
-	if !strings.Contains(errb.String(), "documents/scan/content.md is empty") {
-		t.Fatalf("meta-moe refusal should name scan canvas: %q", errb.String())
 	}
 }
 

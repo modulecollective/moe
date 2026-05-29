@@ -4,7 +4,7 @@ import "io"
 
 // openAuditStage is the Go-level seam behind the chain prompt's
 // cascade driver (`!` / `!<stage>` / `!!` / `!!!`) for audit runs. Same shape
-// as openSdlcStage / openTwinStage / openKbStage / openMetaMoeStage:
+// as openSdlcStage / openTwinStage / openKbStage:
 // switch on the stage name, hand to the right helper, run headless.
 // An unknown stage surfaces as a stderr line rather than silently
 // routing somewhere wrong.

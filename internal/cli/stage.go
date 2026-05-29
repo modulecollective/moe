@@ -137,9 +137,9 @@ type stageSessionOpts struct {
 	// root and the run metadata; it may write files inside the
 	// worktree (e.g. publish a synthesized artifact) and returns
 	// extra path specs (relative to workRoot) to stage in the same
-	// per-turn commit. Used by meta-moe to copy the report canvas to
-	// projects/<p>/meta-moe.md so the project-root snapshot rides
-	// alongside the per-pass canvas in one commit.
+	// per-turn commit. Used by chores and hooks to stage the project's
+	// chores/ or hooks/ directory alongside the per-pass canvas, so the
+	// edits the agent made there ride in one commit.
 	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
 	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
 	// close. The per-stage twin stages (vision, architecture, …,
