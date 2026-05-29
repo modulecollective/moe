@@ -50,8 +50,9 @@ func Stage(workflow, docID string) string {
 // moe-bureaucracy skill. The body carries `{{.TwinFeedback}}`,
 // `{{.LoreFeedback}}`, and `{{.Followups}}` placeholders that the
 // session materialization step substitutes with per-run absolute
-// paths before writing into the session worktree's .claude/skills/
-// and .codex/skills/ trees. Never empty in a correctly built binary.
+// paths before writing into each backend's skills/ tree (claude under
+// sessionCwd, codex under the session worktree). Never empty in a
+// correctly built binary.
 func MoeBureaucracySkill() string {
 	return moeBureaucracySkill
 }
@@ -62,8 +63,9 @@ func MoeBureaucracySkill() string {
 // journal trailers, past stage transcripts). The body carries
 // `{{.Project}}`, `{{.Run}}`, `{{.BureaucracyRoot}}`, `{{.ClonePath}}`,
 // and `{{.HasClone}}` placeholders that the session materialization
-// step substitutes per run before writing into .claude/skills/ and
-// .codex/skills/. Never empty in a correctly built binary.
+// step substitutes per run before writing into each backend's skills/
+// tree (claude under sessionCwd, codex under the session worktree).
+// Never empty in a correctly built binary.
 func MoeContextSkill() string {
 	return moeContextSkill
 }

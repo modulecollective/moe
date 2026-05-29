@@ -11,24 +11,21 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// skillMaterializeDirs lists the per-backend skill discovery roots both
-// claude and codex walk for under workRoot. Discovery rules differ —
-// codex stops at the nearest .git anchor and claude walks unanchored
-// further up — but both look in `.<backend>/skills/<skill-name>/SKILL.md`.
-// The session worktree is a git worktree, which gives codex its anchor;
-// claude reaches the same file via its more permissive walk when its
-// cwd is under workRoot. Post-stable-cwd-fix, claude actually runs from
-// sessionCwd, so the materialiser also writes `.claude/skills/` under
-// sessionCwd — see writeSkill.
-var skillMaterializeDirs = []string{".claude", ".codex"}
+// skillMaterializeDirs lists the skill discovery roots written under
+// workRoot. Only codex reads from here: it runs cwd=workRoot and walks
+// up to the session worktree's .git anchor to find
+// `.codex/skills/<skill-name>/SKILL.md`. Claude is served entirely by
+// the sessionCwd write in writeSkill — it runs cwd=sessionCwd and
+// discovers `.claude/skills/` there directly — so no claude copy is
+// written under workRoot. (Kept as a slice so a third backend is a
+// one-line add.)
+var skillMaterializeDirs = []string{".codex"}
 
 // materializeMoeBureaucracySkill writes the moe-bureaucracy SKILL.md
-// into the session worktree's .claude/skills/ and .codex/skills/ trees
-// (codex discovery walks up from cwd=workRoot to the worktree's .git
-// anchor) and additionally under sessionCwd/.claude/skills/ (claude's
-// cwd-walkup starts from sessionCwd post-fix). The two claude targets
-// are belt-and-suspenders for now — the workRoot side stays so add-dir
-// walkup keeps working without a discovery audit.
+// into the session worktree's .codex/skills/ tree (codex discovery
+// walks up from cwd=workRoot to the worktree's .git anchor) and under
+// sessionCwd/.claude/skills/ (claude runs cwd=sessionCwd and discovers
+// the skill there directly).
 //
 // Materialized fresh on every BuildSpec call; the paths are
 // session-stable for the run but cheap to rewrite, and a refresh costs
@@ -59,8 +56,8 @@ func materializeMoeBureaucracySkill(workRoot, sessionCwd string, md *run.Metadat
 }
 
 // materializeMoeContextSkill writes the moe-context SKILL.md into the
-// session worktree's .claude/skills/ and .codex/skills/ trees, plus the
-// sessionCwd .claude/skills/ tree, with the run's project, run id,
+// session worktree's .codex/skills/ tree plus the sessionCwd
+// .claude/skills/ tree, with the run's project, run id,
 // bureaucracy root, and (if present) sandbox clone path pre-substituted.
 // Sibling to materializeMoeBureaucracySkill: the bureaucracy skill
 // teaches the agent how to *write* traces back into the bureaucracy;
@@ -98,21 +95,21 @@ func materializeMoeContextSkill(workRoot, sessionCwd string, md *run.Metadata, c
 }
 
 // materializeMoeHowtoSkill writes the chat workflow's moe-howto skill
-// (idea capture + backlog grooming) into the same .claude/skills/ and
-// .codex/skills/ trees as its two siblings. Unlike them it carries no
-// per-run template — the body is project-agnostic command guidance — so
-// it plants the embedded body verbatim. Chat is the only caller; a
-// workflow gate in BuildSpec keeps it off every other stage, so a
-// coding or reflect agent never sees the grooming verbs.
+// (idea capture + backlog grooming) into the same .codex/skills/ and
+// sessionCwd .claude/skills/ trees as its two siblings. Unlike them it
+// carries no per-run template — the body is project-agnostic command
+// guidance — so it plants the embedded body verbatim. Chat is the only
+// caller; a workflow gate in BuildSpec keeps it off every other stage,
+// so a coding or reflect agent never sees the grooming verbs.
 func materializeMoeHowtoSkill(workRoot, sessionCwd string) error {
 	return writeSkill(workRoot, sessionCwd, "moe-howto", []byte(moe.MoeHowtoSkill()))
 }
 
 // writeSkill plants the rendered SKILL.md body under each backend's
-// discovery roots. workRoot covers both backends (codex's anchor-walk,
-// claude's add-dir-side fallback); sessionCwd, when non-empty, gets
-// the claude tree alone so claude's cwd-walkup from sessionCwd finds
-// the skill. Codex never sees sessionCwd — its cwd stays at workRoot.
+// discovery root. workRoot/.codex/skills/ covers codex (its anchor-walk
+// from cwd=workRoot); sessionCwd/.claude/skills/, when sessionCwd is
+// non-empty, covers claude (its cwd-walkup from sessionCwd). Codex never
+// sees sessionCwd — its cwd stays at workRoot.
 func writeSkill(workRoot, sessionCwd, skillName string, body []byte) error {
 	for _, dir := range skillMaterializeDirs {
 		skillDir := filepath.Join(workRoot, dir, "skills", skillName)

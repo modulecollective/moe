@@ -1067,7 +1067,7 @@ func TestMoeBureaucracySkillCarriesAllThreeTraceChannels(t *testing.T) {
 		t.Fatalf("materialize: %v", err)
 	}
 
-	body, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
+	body, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-bureaucracy", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read materialised skill: %v", err)
 	}

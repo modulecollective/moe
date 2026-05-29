@@ -32,11 +32,12 @@ func TestMoeBureaucracySkillEmbedded(t *testing.T) {
 	}
 }
 
-// TestMaterializeMoeBureaucracySkillBothBackends pins the on-disk
-// shape both claude (.claude/skills/) and codex (.codex/skills/)
-// expect. Dropping one of the two directories silently disables the
-// skill for that backend.
-func TestMaterializeMoeBureaucracySkillBothBackends(t *testing.T) {
+// TestMaterializeMoeBureaucracySkillWorkRootCodexOnly pins the on-disk
+// shape codex (.codex/skills/) expects under workRoot, and that claude
+// gets *no* copy there: claude is served from sessionCwd, so a
+// workRoot/.claude/ tree would be dead weight. With sessionCwd="" only
+// the codex copy lands.
+func TestMaterializeMoeBureaucracySkillWorkRootCodexOnly(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
@@ -47,29 +48,33 @@ func TestMaterializeMoeBureaucracySkillBothBackends(t *testing.T) {
 	wantLore := filepath.Join(root, run.FeedbackPath(md.Project, md.ID, "lore"))
 	wantFollowups := filepath.Join(root, run.FollowupsPath(md.Project, md.ID))
 
-	for _, dir := range []string{".claude", ".codex"} {
-		path := filepath.Join(root, dir, "skills", "moe-bureaucracy", "SKILL.md")
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+	path := filepath.Join(root, ".codex", "skills", "moe-bureaucracy", "SKILL.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	got := string(body)
+	// Frontmatter survives substitution.
+	if !strings.Contains(got, "name: moe-bureaucracy") {
+		t.Errorf("missing name: frontmatter:\n%s", got)
+	}
+	// Placeholders substituted, not left as raw template text.
+	for _, raw := range []string{"{{.TwinFeedback}}", "{{.LoreFeedback}}", "{{.Followups}}"} {
+		if strings.Contains(got, raw) {
+			t.Errorf("placeholder %q left unsubstituted:\n%s", raw, got)
 		}
-		got := string(body)
-		// Frontmatter survives substitution.
-		if !strings.Contains(got, "name: moe-bureaucracy") {
-			t.Errorf("%s: missing name: frontmatter:\n%s", dir, got)
+	}
+	// Absolute per-run paths land in the body.
+	for _, want := range []string{wantTwin, wantLore, wantFollowups} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing substituted path %q:\n%s", want, got)
 		}
-		// Placeholders substituted, not left as raw template text.
-		for _, raw := range []string{"{{.TwinFeedback}}", "{{.LoreFeedback}}", "{{.Followups}}"} {
-			if strings.Contains(got, raw) {
-				t.Errorf("%s: placeholder %q left unsubstituted:\n%s", dir, raw, got)
-			}
-		}
-		// Absolute per-run paths land in the body.
-		for _, want := range []string{wantTwin, wantLore, wantFollowups} {
-			if !strings.Contains(got, want) {
-				t.Errorf("%s: missing substituted path %q:\n%s", dir, want, got)
-			}
-		}
+	}
+
+	// No claude copy under workRoot — claude discovers via sessionCwd.
+	stray := filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(stray); err == nil {
+		t.Errorf("claude skill should not appear under workRoot: %s", stray)
 	}
 }
 
@@ -93,12 +98,15 @@ func TestMaterializeMoeBureaucracySkillWritesUnderSessionCwd(t *testing.T) {
 	if _, err := os.Stat(sessClaude); err != nil {
 		t.Errorf("expected sessionCwd-side claude skill at %s: %v", sessClaude, err)
 	}
-	// workRoot side still gets both backends — codex anchors there.
-	for _, dir := range []string{".claude", ".codex"} {
-		path := filepath.Join(workRoot, dir, "skills", "moe-bureaucracy", "SKILL.md")
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("expected workRoot-side %s skill at %s: %v", dir, path, err)
-		}
+	// workRoot side gets only codex — codex anchors there; claude is
+	// served from sessionCwd, so no workRoot/.claude copy is written.
+	codex := filepath.Join(workRoot, ".codex", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(codex); err != nil {
+		t.Errorf("expected workRoot-side codex skill at %s: %v", codex, err)
+	}
+	strayClaude := filepath.Join(workRoot, ".claude", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(strayClaude); err == nil {
+		t.Errorf("claude skill should not appear under workRoot: %s", strayClaude)
 	}
 	// Codex must NOT be planted under sessionCwd — codex's cwd stays
 	// at workRoot and the sessionCwd-side dir is operator scratch under
@@ -119,11 +127,13 @@ func TestMaterializeMoeBureaucracySkillEmptySessionCwdSkipsExtraWrite(t *testing
 	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
-	for _, dir := range []string{".claude", ".codex"} {
-		path := filepath.Join(root, dir, "skills", "moe-bureaucracy", "SKILL.md")
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("expected %s skill at %s: %v", dir, path, err)
-		}
+	codex := filepath.Join(root, ".codex", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(codex); err != nil {
+		t.Errorf("expected codex skill at %s: %v", codex, err)
+	}
+	stray := filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md")
+	if _, err := os.Stat(stray); err == nil {
+		t.Errorf("claude skill should not appear under workRoot: %s", stray)
 	}
 }
 
@@ -138,14 +148,14 @@ func TestMaterializeMoeBureaucracySkillIsIdempotent(t *testing.T) {
 	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize (first): %v", err)
 	}
-	first, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
+	first, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-bureaucracy", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
 		t.Fatalf("materialize (second): %v", err)
 	}
-	second, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-bureaucracy", "SKILL.md"))
+	second, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-bureaucracy", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +187,11 @@ func TestMoeContextSkillEmbedded(t *testing.T) {
 	}
 }
 
-// TestMaterializeMoeContextSkillBothBackends pins the on-disk shape
-// both claude (.claude/skills/) and codex (.codex/skills/) expect for
-// the moe-context skill, in the sandbox-bearing case (clonePath
-// non-empty). Mirrors the bureaucracy backends test.
-func TestMaterializeMoeContextSkillBothBackends(t *testing.T) {
+// TestMaterializeMoeContextSkillWorkRootCodexOnly pins the on-disk
+// shape codex (.codex/skills/) expects for the moe-context skill under
+// workRoot, in the sandbox-bearing case (clonePath non-empty), and that
+// claude gets no copy there. Mirrors the bureaucracy codex-only test.
+func TestMaterializeMoeContextSkillWorkRootCodexOnly(t *testing.T) {
 	root := t.TempDir()
 	clone := "/tmp/clone-fixture/moe-tele"
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
@@ -189,31 +199,35 @@ func TestMaterializeMoeContextSkillBothBackends(t *testing.T) {
 		t.Fatalf("materialize: %v", err)
 	}
 
-	for _, dir := range []string{".claude", ".codex"} {
-		path := filepath.Join(root, dir, "skills", "moe-context", "SKILL.md")
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+	path := filepath.Join(root, ".codex", "skills", "moe-context", "SKILL.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	got := string(body)
+	if !strings.Contains(got, "name: moe-context") {
+		t.Errorf("missing name: frontmatter:\n%s", got)
+	}
+	// Placeholders substituted, not left as raw template text.
+	for _, raw := range []string{
+		"{{.Project}}", "{{.Run}}", "{{.BureaucracyRoot}}",
+		"{{.ClonePath}}", "{{.HasClone}}", "{{if",
+	} {
+		if strings.Contains(got, raw) {
+			t.Errorf("placeholder %q left unsubstituted:\n%s", raw, got)
 		}
-		got := string(body)
-		if !strings.Contains(got, "name: moe-context") {
-			t.Errorf("%s: missing name: frontmatter:\n%s", dir, got)
+	}
+	// Per-run substitutions land in the body verbatim.
+	for _, want := range []string{md.Project, md.ID, root, clone} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing substituted value %q:\n%s", want, got)
 		}
-		// Placeholders substituted, not left as raw template text.
-		for _, raw := range []string{
-			"{{.Project}}", "{{.Run}}", "{{.BureaucracyRoot}}",
-			"{{.ClonePath}}", "{{.HasClone}}", "{{if",
-		} {
-			if strings.Contains(got, raw) {
-				t.Errorf("%s: placeholder %q left unsubstituted:\n%s", dir, raw, got)
-			}
-		}
-		// Per-run substitutions land in the body verbatim.
-		for _, want := range []string{md.Project, md.ID, root, clone} {
-			if !strings.Contains(got, want) {
-				t.Errorf("%s: missing substituted value %q:\n%s", dir, want, got)
-			}
-		}
+	}
+
+	// No claude copy under workRoot — claude discovers via sessionCwd.
+	stray := filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md")
+	if _, err := os.Stat(stray); err == nil {
+		t.Errorf("claude skill should not appear under workRoot: %s", stray)
 	}
 }
 
@@ -228,7 +242,7 @@ func TestMaterializeMoeContextSkillDocumentOnly(t *testing.T) {
 	if err := materializeMoeContextSkill(root, "", md, ""); err != nil {
 		t.Fatalf("materialize: %v", err)
 	}
-	body, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))
+	body, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-context", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,14 +267,14 @@ func TestMaterializeMoeContextSkillIsIdempotent(t *testing.T) {
 	if err := materializeMoeContextSkill(root, "", md, clone); err != nil {
 		t.Fatalf("materialize (first): %v", err)
 	}
-	first, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))
+	first, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-context", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := materializeMoeContextSkill(root, "", md, clone); err != nil {
 		t.Fatalf("materialize (second): %v", err)
 	}
-	second, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "moe-context", "SKILL.md"))
+	second, err := os.ReadFile(filepath.Join(root, ".codex", "skills", "moe-context", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

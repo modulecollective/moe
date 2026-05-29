@@ -325,12 +325,10 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
 				return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
 			}
-			// Materialise the moe-bureaucracy skill into both the
-			// session worktree's .claude/skills/ and the sessionCwd
-			// .claude/skills/ so claude finds it whichever way its
-			// discovery walks (we keep both for now — see
-			// skill_materialize.go). Codex still writes only under
-			// workRoot/.codex/skills/. Refresh on every BuildSpec is
+			// Materialise the moe-bureaucracy skill into the sessionCwd
+			// .claude/skills/ (claude runs cwd=sessionCwd and finds it
+			// there) and workRoot/.codex/skills/ (codex anchors there).
+			// See skill_materialize.go. Refresh on every BuildSpec is
 			// cheap; the paths are session-stable but rewriting is
 			// faster than reasoning about staleness across resumes.
 			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {

@@ -283,10 +283,10 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 // followups) used to live here too, repeating ~90 lines on every
 // turn even when nothing got recorded. That block moved to the
 // moe-bureaucracy skill (skills/moe-bureaucracy/SKILL.md, materialised
-// into the session worktree's .claude/skills/ and .codex/skills/ at
-// session open) so both backends load it via progressive disclosure
-// and pay the prose cost only on turns where the agent actually
-// reaches for it.
+// into each backend's skills/ tree — claude under sessionCwd, codex
+// under the session worktree — at session open) so both backends load
+// it via progressive disclosure and pay the prose cost only on turns
+// where the agent actually reaches for it.
 func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
 	// Every agent-writable path is now its natural absolute bureaucracy
 	// path. Code-bearing stages run with cwd = bureaucracy session
