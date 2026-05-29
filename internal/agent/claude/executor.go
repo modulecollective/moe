@@ -344,8 +344,8 @@ func (Agent) TranscriptExists(sessionID, cwd string) (bool, error) {
 // bureaucracy-side mirror at mirrorPath. Both branches copy with a
 // top-level `cwd` rewrite so claude --resume can read the file from
 // the new canonical path without complaining about mismatched cwd.
-// Source files are left in place; `moe claude-cache gc` reaps the
-// orphaned cache dirs.
+// Source files are left in place (copy, don't move) so a crash between
+// copy and resume can't lose history.
 func (Agent) RestoreTranscript(sessionID, cwd, mirrorPath string) (agent.RestoreOutcome, error) {
 	// Cache glob first — the original is the most fidelity-preserving
 	// recovery and avoids the mirror's once-per-turn snapshot lag.

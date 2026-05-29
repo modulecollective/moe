@@ -122,8 +122,9 @@ func CopyTranscript(sessionID, dest string) (bool, error) {
 // path `--resume sessionID` will read from cwd, rewriting each line's
 // top-level "cwd" field to absCwd so claude's resume doesn't trip on the
 // mismatch. Source file is left in place (the design's "copy, don't move"
-// decision so `moe claude-cache gc` can reap the orphan separately).
-// Returns the source directory's basename so the caller can surface
+// decision: deleting mid-recovery would lose history if the caller crashes
+// between copy and resume). Returns the source directory's basename so the
+// caller can surface
 // "recovered from <bucket>" on stderr.
 //
 // Only top-level cwd is rewritten — tool-call paths nested inside message

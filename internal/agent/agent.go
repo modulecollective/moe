@@ -94,8 +94,8 @@ const (
 	// RestoreFromCache means the agent found the transcript in a
 	// non-canonical bucket under its on-disk cache (claude's case: a
 	// pre-Option-B encoded-cwd dir from an old worktree path) and
-	// copied it into place. The original is left for `moe claude-cache
-	// gc` to reap. Source carries the old bucket's dirname.
+	// copied it into place. The original is left in place. Source
+	// carries the old bucket's dirname.
 	RestoreFromCache
 	// RestoreFromMirror means the agent restored the transcript from
 	// the bureaucracy-side mirror (thread-<agent>.jsonl) — the

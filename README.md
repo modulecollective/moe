@@ -460,13 +460,10 @@ event in a transient sandbox without creating a run.
 - `moe session list|abandon|resolve|gc` inspects or cleans leftover stage
   session worktrees and branches.
 - `moe clone list|gc` inspects or removes orphan per-run sandbox clones.
-- `moe claude-cache gc` removes orphan Claude session cache files after their
-  mirrored transcripts have been recovered.
 - `moe workspace release` clears a stale named-workspace claim.
 
 Stage logic can recover orphaned Claude sessions from the Claude cache or from
-mirrored transcript files when the normal close path was interrupted. The GC
-verb is for cleanup after that recovery path has had its chance.
+mirrored transcript files when the normal close path was interrupted.
 
 ## How Agents Are Steered
 

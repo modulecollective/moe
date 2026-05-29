@@ -56,9 +56,8 @@ func TestRestoreTranscriptFromCacheGlobAndRewriteCwd(t *testing.T) {
 		}
 	}
 
-	// Source file is left in place — `moe claude-cache gc` is the one
-	// that reaps it. Mid-recovery deletion would lose history if the
-	// caller crashes between copy and resume.
+	// Source file is left in place. Mid-recovery deletion would lose
+	// history if the caller crashes between copy and resume.
 	if _, err := os.Stat(filepath.Join(cfg, "projects", oldBucket, sid+".jsonl")); err != nil {
 		t.Errorf("source file should remain after restore; stat err=%v", err)
 	}
