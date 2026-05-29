@@ -7,17 +7,38 @@ import (
 )
 
 // TestResolveAgentNamePrecedence pins the ladder design.md describes:
-// explicit → run.json.Agent → $MOE_AGENT → "claude".
+// $MOE_FORCE_AGENT → explicit → run.json.Agent → $MOE_AGENT → "claude".
 func TestResolveAgentNamePrecedence(t *testing.T) {
 	cases := []struct {
 		name       string
+		force      string
 		explicit   string
 		runDefault string
 		env        string
 		want       string
 	}{
 		{
-			name:     "explicit wins over everything",
+			name:     "force wins over explicit",
+			force:    "claude",
+			explicit: "codex",
+			env:      "codex",
+			want:     "claude",
+		},
+		{
+			name:       "force wins over runDefault",
+			force:      "claude",
+			runDefault: "codex",
+			env:        "codex",
+			want:       "claude",
+		},
+		{
+			name:  "force wins over env",
+			force: "claude",
+			env:   "codex",
+			want:  "claude",
+		},
+		{
+			name:     "explicit wins over everything below force",
 			explicit: "codex",
 			env:      "claude",
 			want:     "codex",
@@ -40,9 +61,12 @@ func TestResolveAgentNamePrecedence(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// t.Setenv always sets the var; explicit empty is the
+			// t.Setenv always sets the var; an empty value is the
 			// closest stand-in for "unset" without unsetting whatever
-			// the host shell injected.
+			// the host shell injected. Clearing MOE_FORCE_AGENT in the
+			// non-force cases is the regression guard: it keeps a host
+			// export from silently overriding the legacy ladder.
+			t.Setenv("MOE_FORCE_AGENT", c.force)
 			t.Setenv("MOE_AGENT", c.env)
 			if got := resolveAgentName(c.explicit, c.runDefault); got != c.want {
 				t.Fatalf("resolveAgentName(%q, %q) = %q, want %q",

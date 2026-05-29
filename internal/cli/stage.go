@@ -159,11 +159,23 @@ func stageAgentName(opts stageSessionOpts, md *run.Metadata) string {
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
-// explicit per-call override (--agent flag on this verb) → run-level
-// persisted default (run.json.Agent) → $MOE_AGENT → "claude". Keep
-// this helper as the single source for the operator-facing ladder;
-// stage call sites should go through stageAgentName.
+// $MOE_FORCE_AGENT (global override) → explicit per-call override
+// (--agent flag on this verb) → run-level persisted default
+// (run.json.Agent) → $MOE_AGENT → "claude". Keep this helper as the
+// single source for the operator-facing ladder; stage call sites
+// should go through stageAgentName.
+//
+// $MOE_FORCE_AGENT is the high-precedence inverse of the low-precedence
+// $MOE_AGENT default: it wins over everything, including an explicit
+// --agent flag, so an operator can flip every stage of every run in the
+// process onto one backend during an outage. It is read live (never
+// persisted to run.json); unsetting it reverts each run to its own
+// configured agent. A bad value flows through and fails legibly at
+// dispatch via agent.Get, same as any other unknown backend name.
 func resolveAgentName(explicit, runDefault string) string {
+	if v := os.Getenv("MOE_FORCE_AGENT"); v != "" {
+		return v
+	}
 	if explicit != "" {
 		return explicit
 	}
