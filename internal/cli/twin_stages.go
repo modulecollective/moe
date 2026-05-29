@@ -102,21 +102,24 @@ func init() {
 // canvas skeleton.
 //
 // The pass-scoped kickoff context (events, hygiene findings, twin
-// feedback, history summary) is read off the canonical
-// bureaucracy root once per stage open and folded into the
-// InitialPrompt. Each stage sees the same payload — the design's "no
-// in-session iteration across docs, every stage reads the same
-// events list" contract.
+// feedback, history summary) is assembled against the session worktree
+// via InitialPromptBuilder — after the worktree exists and the wiki cfg
+// is rewritten to worktree paths — and folded into the InitialPrompt.
+// Each stage sees the same payload — the design's "no in-session
+// iteration across docs, every stage reads the same events list"
+// contract.
 func runTwinStageSession(stage, projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
-	kickoff, err := buildTwinStageKickoff(projectID)
-	if err != nil {
-		moePrintf(stderr, "twin %s: %v\n", stage, err)
-		return 1
-	}
 	opts := stageSessionOpts{
-		Headless:      headless,
-		Agent:         agentOverride,
-		InitialPrompt: kickoff,
+		Headless: headless,
+		Agent:    agentOverride,
+		// Deferred so the kickoff's by-path references (history summary,
+		// managed docs) render against the worktree, not the canonical
+		// checkout. Building it eagerly here — before the worktree
+		// existed — handed the agent absolute canonical paths and let a
+		// reflect pass edit the operator's live tree.
+		InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+			return buildTwinStageKickoff(projectID, workRoot, worktreeWiki)
+		},
 		WikiBuilder: func(root string, md *run.Metadata) (*wiki.Config, error) {
 			return twinWikiBuilder(root, projectID)
 		},
@@ -140,28 +143,22 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, agentOve
 }
 
 // buildTwinStageKickoff renders the per-stage InitialPrompt: the
-// pass-scoped context block (events, hygiene findings, feedback, idea
-// backlog) every stage reads. The block is load-bearing data the agent
-// needs whether or not an operator is present, so it rides on both the
-// interactive and headless paths.
-func buildTwinStageKickoff(projectID string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
-		return "", err
-	}
-	cfg, err := twinWikiBuilder(root, projectID)
-	if err != nil {
-		return "", err
-	}
-	ctx, err := reflectKickoffContext(root, projectID, *cfg)
-	if err != nil {
-		return "", err
-	}
-	return ctx, nil
+// pass-scoped context block (events, hygiene findings, feedback,
+// history summary) every stage reads. The block is load-bearing data
+// the agent needs whether or not an operator is present, so it rides on
+// both the interactive and headless paths.
+//
+// Wired as stageSessionOpts.InitialPromptBuilder, so runStageSession
+// invokes it after the session worktree is open and worktreeWiki has
+// been rewritten to worktree paths. It renders entirely against that
+// worktree — workRoot is both the feedback-scan root and the
+// BureaucracyPath behind every absolute path the kickoff names — so the
+// agent's first instruction points inside the worktree. Assembling this
+// against the canonical root before the worktree existed is what let a
+// reflect pass write `glossary.md` / `history-summary.md` into the
+// operator's live checkout.
+func buildTwinStageKickoff(projectID, workRoot string, worktreeWiki *wiki.Config) (string, error) {
+	return reflectKickoffContext(workRoot, projectID, *worktreeWiki)
 }
 
 // finalizeCanvasSkeleton seeds the finalize canvas with the three
@@ -287,8 +284,8 @@ func finalizeStageGate(root string, md *run.Metadata) (bool, error) {
 // reflectKickoffContext returns the per-stage kickoff payload: events,
 // history summary, twin feedback, and hygiene findings. It is wired as
 // the InitialPrompt / turn prompt
-// (buildTwinStageKickoff → stageSessionOpts.InitialPrompt) — the first
-// user message the agent receives, distinct from the system prompt
+// (buildTwinStageKickoff → stageSessionOpts.InitialPromptBuilder) — the
+// first user message the agent receives, distinct from the system prompt
 // (Request.Prompt) that stage_prompt.go assembles. Both ride on argv, so
 // neither may carry an unbounded string; the history summary is surfaced
 // by path, not inlined, for exactly that reason (see the History summary

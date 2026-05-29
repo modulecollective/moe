@@ -76,6 +76,17 @@ type stageSessionOpts struct {
 	// blank prompt. In Headless mode it's the entire user turn for
 	// `claude -p` — typically the run title.
 	InitialPrompt string
+	// InitialPromptBuilder, when non-nil, supersedes InitialPrompt:
+	// runStageSession invokes it after the session worktree is open and
+	// the wiki cfg has been rewritten to worktree paths, handing it the
+	// worktree root and the rewritten cfg. Callers that bake absolute
+	// bureaucracy paths into the kickoff must use this instead of
+	// InitialPrompt so those paths resolve inside the worktree — twin
+	// reflect assembling its kickoff against the canonical root *before*
+	// the worktree existed is what walked a reflect pass into the
+	// operator's live checkout. Mirrors PreFinalizeGate's
+	// (workRoot, worktreeWiki) shape and runs at the same lifecycle point.
+	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config) (string, error)
 	// Headless drives the stage as a one-turn `claude -p` call instead
 	// of an interactive REPL. Output streams to the operator's
 	// terminal (no stdin), the workflow's oneshot.md fragment is
@@ -528,21 +539,22 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			}
 
 			return wikiTurnSpec{
-				Metadata:         md,
-				DocID:            docID,
-				ClonePath:        clonePath,
-				SessionCwd:       sessionCwd,
-				SessionUUID:      doc.Session,
-				NewSession:       newSession,
-				InitialPrompt:    initialPrompt,
-				Headless:         opts.Headless,
-				Model:            opts.Model,
-				Agent:            agentName,
-				FinalizeRunID:    md.ID,
-				FinalizeRunTitle: "",
-				SkipFinalize:     opts.SkipFinalize,
-				ExtraEnv:         mapToEnv(devEnv),
-				AddDirs:          devEnvWritableDirs(devEnv),
+				Metadata:             md,
+				DocID:                docID,
+				ClonePath:            clonePath,
+				SessionCwd:           sessionCwd,
+				SessionUUID:          doc.Session,
+				NewSession:           newSession,
+				InitialPrompt:        initialPrompt,
+				InitialPromptBuilder: opts.InitialPromptBuilder,
+				Headless:             opts.Headless,
+				Model:                opts.Model,
+				Agent:                agentName,
+				FinalizeRunID:        md.ID,
+				FinalizeRunTitle:     "",
+				SkipFinalize:         opts.SkipFinalize,
+				ExtraEnv:             mapToEnv(devEnv),
+				AddDirs:              devEnvWritableDirs(devEnv),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
 					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
 					if err != nil {
@@ -696,6 +708,13 @@ type wikiTurnSpec struct {
 	// message of the turn. In Headless mode it is the entire `claude
 	// -p` user prompt.
 	InitialPrompt string
+	// InitialPromptBuilder, when non-nil, is invoked after the wiki cfg
+	// is rewritten to worktree paths and supersedes InitialPrompt with
+	// its result. Lets a caller defer kickoff assembly until the
+	// worktree root and the rewritten cfg are known, so any absolute
+	// bureaucracy paths it renders resolve inside the worktree. See
+	// stageSessionOpts.InitialPromptBuilder for the why.
+	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config) (string, error)
 	// Headless flips runWikiSession from the interactive REPL path
 	// (executor.Execute) to the one-shot streaming path
 	// (executor.ExecuteOneShot): no stdin, no transcript mirror, exits
@@ -844,6 +863,24 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 				moePrintf(stderr, "wiki: %v\n", err)
 			}
 		}
+	}
+
+	// Assemble the kickoff now that the worktree exists and wikiCfg
+	// points at it. Callers that bake absolute bureaucracy paths into
+	// the first user message (twin reflect) defer to this builder so
+	// those paths land inside the worktree instead of the canonical
+	// checkout — assembling the kickoff before the worktree existed is
+	// what walked a reflect pass into the operator's live tree. Runs at
+	// the same post-rewrite point as BuildPrompt and supersedes any
+	// static spec.InitialPrompt.
+	if spec.InitialPromptBuilder != nil {
+		ip, err := spec.InitialPromptBuilder(workRoot, wikiCfg)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			closeBootstrapFailedSession(closeSess, stderr)
+			return 1
+		}
+		spec.InitialPrompt = ip
 	}
 
 	// Prompt paths point at the session worktree, where Claude's
