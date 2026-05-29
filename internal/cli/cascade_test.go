@@ -26,14 +26,14 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 				{stage: "code", code: 0},
 				{stage: "test", code: 0},
 			}},
-			want: "cascade: code ok · test ok",
+			want: "cascade moe/run: code ok · test ok",
 		},
 		{
 			name: "failed-stopped",
 			res: cascadeResult{ran: []cascadeStepResult{
 				{stage: "code", code: 1},
 			}},
-			want: "cascade: code failed (exit 1) — stopped",
+			want: "cascade moe/run: code failed (exit 1) — stopped",
 		},
 		{
 			name: "yolo-shipped",
@@ -45,7 +45,7 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 				},
 				shipped: true,
 			},
-			want: "cascade: code ok · test ok · push ok — shipped",
+			want: "cascade moe/run: code ok · test ok · push ok — shipped",
 		},
 		{
 			name: "yolo-aborted",
@@ -53,7 +53,7 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 				{stage: "code", code: 0},
 				{stage: "test", code: 2},
 			}},
-			want: "cascade: code ok · test failed (exit 2) — stopped",
+			want: "cascade moe/run: code ok · test failed (exit 2) — stopped",
 		},
 		{
 			name: "empty-no-summary",
@@ -63,7 +63,7 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := renderCascadeSummary(tc.res); got != tc.want {
+			if got := renderCascadeSummary("moe/run", tc.res); got != tc.want {
 				t.Fatalf("renderCascadeSummary = %q, want %q", got, tc.want)
 			}
 		})
@@ -452,8 +452,8 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 	// Summary ends with the close step and the shipped marker.
-	wantSummary := "cascade: vision ok · architecture ok · patterns ok · operations ok · roadmap ok · glossary ok · finalize ok · close ok — shipped"
-	if got := renderCascadeSummary(res); got != wantSummary {
+	wantSummary := "cascade moe/reflect-2026-05-17: vision ok · architecture ok · patterns ok · operations ok · roadmap ok · glossary ok · finalize ok · close ok — shipped"
+	if got := renderCascadeSummary("moe/reflect-2026-05-17", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
 }
@@ -653,8 +653,8 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "cascade: code ok") {
-		t.Fatalf("expected `cascade: code ok` summary in stdout, got: %q", got)
+	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
+		t.Fatalf("expected `cascade tele/fix-it: code ok` summary in stdout, got: %q", got)
 	}
 	if got := countInvocations(*captured, "code"); got != 1 {
 		t.Fatalf("code dispatched %d times, want 1", got)
@@ -694,8 +694,8 @@ func TestPromptStageNextStageBangForTwin(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture moe reflect-2026-05-17", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "cascade: architecture ok") {
-		t.Fatalf("expected `cascade: architecture ok` summary, got: %q", got)
+	if got := stdout.String(); !strings.Contains(got, "cascade moe/reflect-2026-05-17: architecture ok") {
+		t.Fatalf("expected `cascade moe/reflect-2026-05-17: architecture ok` summary, got: %q", got)
 	}
 	dispatched := 0
 	for _, inv := range *captured {
@@ -736,7 +736,7 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "cascade: code ok") {
+	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
 		t.Fatalf("expected summary line in stdout, got: %q", got)
 	}
 	// code dispatched once; test must NOT dispatch (it's the
@@ -1072,12 +1072,12 @@ func TestCascadeFromGateDrivenPushDeferredStops(t *testing.T) {
 		{
 			name:        "rebase-conflict",
 			recovery:    "rebase-conflict",
-			wantSummary: "cascade: code ok · test ok · push deferred to recovery (rebase conflict) — stopped",
+			wantSummary: "cascade tele/fix-it: code ok · test ok · push deferred to recovery (rebase conflict) — stopped",
 		},
 		{
 			name:        "hook-failure",
 			recovery:    "hook-failure",
-			wantSummary: "cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped",
+			wantSummary: "cascade tele/fix-it: code ok · test ok · push deferred to recovery (pre-push hook) — stopped",
 		},
 	}
 	for _, tc := range cases {
@@ -1110,7 +1110,7 @@ func TestCascadeFromGateDrivenPushDeferredStops(t *testing.T) {
 			if pushStep := res.ran[len(res.ran)-1]; pushStep.deferred != tc.recovery {
 				t.Fatalf("push step deferred tag: want %q, got %q", tc.recovery, pushStep.deferred)
 			}
-			if got := renderCascadeSummary(res); got != tc.wantSummary {
+			if got := renderCascadeSummary("tele/fix-it", res); got != tc.wantSummary {
 				t.Fatalf("summary = %q, want %q", got, tc.wantSummary)
 			}
 			// Driven dispatches push exactly once — no retry.
@@ -1152,8 +1152,8 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push dispatched %d times, want 1 (no retry after a non-zero recovery): %+v", len(*pushCaptured), *pushCaptured)
 	}
-	wantSummary := "cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped"
-	if got := renderCascadeSummary(res); got != wantSummary {
+	wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (pre-push hook) — stopped"
+	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
 }
@@ -1213,9 +1213,9 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			}
 			// Summary shows the recover-then-ship as two steps and
 			// ends with the ship marker, not "— stopped".
-			wantSummary := "cascade: code ok · test ok · push deferred to recovery (" +
+			wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (" +
 				deferredLabel(recovery) + ") · push ok — shipped"
-			if got := renderCascadeSummary(res); got != wantSummary {
+			if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 				t.Fatalf("summary = %q, want %q", got, wantSummary)
 			}
 			for _, inv := range *openCaptured {
@@ -1265,8 +1265,8 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 		}
 	}
-	wantSummary := "cascade: code ok · test ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
-	if got := renderCascadeSummary(res); got != wantSummary {
+	wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
+	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
 }
@@ -1390,8 +1390,8 @@ func TestCascadeFromGateKbYoloAutoCloses(t *testing.T) {
 	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele/dns-basics"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
-	wantSummary := "cascade: research ok · summarize ok · close ok — shipped"
-	if got := renderCascadeSummary(res); got != wantSummary {
+	wantSummary := "cascade tele/dns-basics: research ok · summarize ok · close ok — shipped"
+	if got := renderCascadeSummary("tele/dns-basics", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
 }

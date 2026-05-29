@@ -650,7 +650,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 		}
 	}
 	res, code := cascadeFromGate(startStage, destination, oneStep, driven, md, stdout, stderr)
-	if summary := renderCascadeSummary(res); summary != "" {
+	if summary := renderCascadeSummary(md.Project+"/"+md.ID, res); summary != "" {
 		moePrintln(stdout, summary)
 	}
 	if code != 0 {
@@ -967,7 +967,7 @@ func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Write
 	}
 	moePrintf(stdout, "chain: riding into %s at %s (%s)\n", childKey, nextStage, mode)
 	childRes, childCode := cascadeFromGate(nextStage, "", false, driven, childMD, stdout, stderr)
-	if summary := renderCascadeSummary(childRes); summary != "" {
+	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}
 	if childCode != 0 {
@@ -976,19 +976,21 @@ func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Write
 }
 
 // renderCascadeSummary formats the single-line summary printed after
-// a cascade finishes (success or failure). Empty res (no-op cascade)
-// returns "" so the caller skips the print — there's nothing to
-// summarise.
+// a cascade finishes (success or failure). runKey is the project/run
+// the cascade ran, rendered on the line so stacked summaries (a `!!`
+// chain riding from one run into the next) are told apart. Empty res
+// (no-op cascade) returns "" so the caller skips the print — there's
+// nothing to summarise.
 //
 // Examples:
 //
-//	cascade: code ok · test ok
-//	cascade: code failed (exit 1) — stopped
-//	cascade: code ok · test ok · push ok — shipped
-//	cascade: code ok · test failed (exit 2) — stopped
-//	cascade: code ok · test ok · push deferred to recovery (rebase conflict) — stopped
-//	cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped
-func renderCascadeSummary(res cascadeResult) string {
+//	cascade moe/run: code ok · test ok
+//	cascade moe/run: code failed (exit 1) — stopped
+//	cascade moe/run: code ok · test ok · push ok — shipped
+//	cascade moe/run: code ok · test failed (exit 2) — stopped
+//	cascade moe/run: code ok · test ok · push deferred to recovery (rebase conflict) — stopped
+//	cascade moe/run: code ok · test ok · push deferred to recovery (pre-push hook) — stopped
+func renderCascadeSummary(runKey string, res cascadeResult) string {
 	if len(res.ran) == 0 {
 		return ""
 	}
@@ -1003,7 +1005,7 @@ func renderCascadeSummary(res cascadeResult) string {
 			parts = append(parts, fmt.Sprintf("%s ok", r.stage))
 		}
 	}
-	s := "cascade: " + strings.Join(parts, " · ")
+	s := "cascade " + runKey + ": " + strings.Join(parts, " · ")
 	// The last recorded step decides the trailing clause. A deferred
 	// step that was followed by a clean push retry must not force
 	// "stopped" — the cascade recovered and shipped, and the final
