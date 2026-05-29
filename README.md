@@ -104,7 +104,7 @@ moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
 ```
 
 Promoting the idea will offer to jump into the design stage right away. When
-the design stage ends, MoE prints the chain prompt. Type `!!!` there to
+the design stage ends, MoE prints the chain prompt. Type `!!` there to
 run `code`, `test`, and `push` headlessly. The five-command block above is the
 same path spelled out by hand.
 
