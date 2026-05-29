@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Key}} — moe</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<script>
+(function () {
+  var t = localStorage.getItem('moe-theme') ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub">{{.Key}} · chore{{if .Builtin}} (builtin){{end}}</div>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </header>
+
+  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
+
+  <div class="run-fragment">
+    <p class="meta">
+      <span class="note">workflow {{.Workflow}}</span>
+      {{if .Due}}<span class="badge live">due</span>{{end}}
+    </p>
+
+    <section class="actions">
+      {{if .Openable}}
+      <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit">open</button></form>
+      {{else}}
+      <span class="action disabled" aria-disabled="true">open — {{.BlockReason}}</span>
+      {{end}}
+      {{if .OpenRun}}<a class="action" href="{{.OpenRunURL}}">open run: {{.OpenRun}}</a>{{end}}
+    </section>
+
+    <section class="canvases">
+      <h2>schedule</h2>
+      <ul>
+        <li><span class="slug">trigger</span> <span class="when">{{if .Trigger}}{{.Trigger}}{{else}}—{{end}}</span></li>
+        <li><span class="slug">cadence</span> <span class="when">{{.Cadence}}</span></li>
+        <li><span class="slug">cooldown</span> <span class="when">{{.Cooldown}}</span></li>
+        <li><span class="slug">last completed</span> <span class="when">{{.LastCompleted}}</span></li>
+        {{if .NextEligible}}<li><span class="slug">next eligible</span> <span class="when">{{.NextEligible}}</span></li>{{end}}
+        <li><span class="slug">due</span> <span class="when">{{if .Due}}yes — {{.Reasons}}{{else}}no{{end}}</span></li>
+      </ul>
+    </section>
+
+    {{if .Prompt}}
+    <section class="canvases">
+      <h2>prompt</h2>
+      <pre class="chore-prompt">{{.Prompt}}</pre>
+    </section>
+    {{end}}
+  </div>
+</main>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('moe-theme', next);
+});
+</script>
+</body>
+</html>

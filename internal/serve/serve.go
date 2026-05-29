@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 )
 
@@ -113,6 +114,21 @@ type Options struct {
 	// maps that to 409 and anything else to 500. Absent means the close
 	// route returns 500 for sdlc runs (idea closes don't need it).
 	CloseRun func(project, run string) error
+
+	// GatherChore returns the computed state of one chore for the chore
+	// detail page. ok=false means no chore by that project/name. The cli
+	// wrapper closes this over gatherChoreStates so serve stays free of
+	// the workflow registry. Absent means the chore page returns 500.
+	GatherChore func(project, name string) (state chore.State, ok bool, err error)
+
+	// OpenChore opens the chore's configured-workflow run in-process
+	// (mirroring `moe chore open`) and returns the destination run's
+	// identity plus the workflow + first stage serve must spawn to host
+	// it. Guard failures come back wrapping ErrChoreNotFound (→ 404) or
+	// ErrChoreNotOpenable (→ 409); cli/serve.go translates its internal
+	// guard errors into those so serve needn't import the cli package.
+	// Absent means the open route returns 500.
+	OpenChore func(project, name string) (dest ChoreOpen, err error)
 }
 
 // Server owns the HTTP listener and the registry of live PTY
@@ -235,6 +251,11 @@ func (s *Server) registerRoutes() {
 	// (the headless cascade through push).
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
+	// Chore detail page + open action. A chore isn't a run, so it has
+	// its own /chore namespace; "open" mints a fresh run of the chore's
+	// configured workflow (the analog of promoting an idea).
+	s.router.HandleFunc("GET /chore/{project}/{name}", s.handleChorePage)
+	s.router.HandleFunc("POST /chore/{project}/{name}/open", s.handleChoreOpen)
 
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.

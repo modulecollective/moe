@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
@@ -90,6 +93,42 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		CloseRun: func(project, runID string) error {
 			return closeRunInProcess(root, "sdlc", sdlcCloseSubject,
 				releaseWorkspaceCleanup, project, runID, true, io.Discard, io.Discard)
+		},
+		// GatherChore picks the named chore out of the per-project state
+		// gather. Keeps the workflow registry on the cli side of the seam.
+		GatherChore: func(project, name string) (chore.State, bool, error) {
+			states, err := gatherChoreStates(root, project)
+			if err != nil {
+				return chore.State{}, false, err
+			}
+			for _, st := range states {
+				if st.Definition.Name == name {
+					return st, true, nil
+				}
+			}
+			return chore.State{}, false, nil
+		},
+		// OpenChore runs the shared chore-open pipeline and translates its
+		// internal guard errors into the sentinels serve maps to 404/409.
+		OpenChore: func(project, name string) (serve.ChoreOpen, error) {
+			res, err := openChoreInProcess(root, project, name)
+			if err != nil {
+				var notFound *choreNotFoundError
+				var notOpenable *choreNotOpenableError
+				switch {
+				case errors.As(err, &notFound):
+					return serve.ChoreOpen{}, fmt.Errorf("%w: %v", serve.ErrChoreNotFound, err)
+				case errors.As(err, &notOpenable):
+					return serve.ChoreOpen{}, fmt.Errorf("%w: %v", serve.ErrChoreNotOpenable, err)
+				}
+				return serve.ChoreOpen{}, err
+			}
+			return serve.ChoreOpen{
+				Project:    res.Metadata.Project,
+				Slug:       res.Metadata.ID,
+				Workflow:   res.Workflow,
+				FirstStage: res.FirstStage,
+			}, nil
 		},
 	})
 	if err != nil {

@@ -568,10 +568,11 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	s.fillRunRow(&vm, projectID, slug, now)
-	// A live-parented run is an sdlc run (serve only spawns sdlc), which
-	// now carries a close-run chip once it's exited and idle next to its
-	// sandbox — so gate the chip on the on-disk metadata rather than
-	// assuming "live ⇒ no actions". A load failure just drops the chip.
+	// A live-parented run is usually sdlc, but opening a chore can spawn
+	// any configured workflow (e.g. twin-reflect's `twin`), so don't
+	// assume the workflow here — gate the action chips on the on-disk
+	// metadata (advanceActions / runActions are themselves sdlc-gated).
+	// A load failure just drops the chips.
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {

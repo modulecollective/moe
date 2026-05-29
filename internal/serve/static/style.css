@@ -239,6 +239,24 @@ section.actions {
   border-color: var(--muted);
   color: var(--fg);
 }
+/* A blocked chore's open affordance: rendered inert (no link/button) with
+   the reason inline, so it reads as "can't open yet, here's why" rather
+   than a clickable control. */
+.action.disabled {
+  color: var(--muted);
+  border-style: dashed;
+  cursor: default;
+}
+
+/* The chore seed prompt — the analog of an idea body. Wraps long lines
+   rather than forcing a horizontal scroll on a phone. */
+.chore-prompt {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 0.9rem/1.5 var(--mono, monospace);
+  color: var(--fg);
+  margin: 0.5rem 0 0;
+}
 
 .meta .note { color: var(--fg); margin-right: 0.5rem; }
 .meta .when { color: var(--muted); margin-right: 0.5rem; }

@@ -53,7 +53,7 @@
     <ul class="rows">
       {{range .Chores}}
       <li class="row">
-        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <a class="slug" href="/chore/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
       </li>
