@@ -1049,8 +1049,9 @@ func TestCloseRouteSDLCWithoutCallbackIs500(t *testing.T) {
 
 // TestRunPageRendersAdvanceAndShipChips: an in-progress sdlc run parked
 // at an advanceable stage (next=code) surfaces the "→ code" advance
-// chip (POST /advance) and the distinctly-styled "ship it" chip (POST
-// /ship), prepended ahead of the existing close-run chip.
+// chip (POST /advance) and the plain "ship it" chip (POST /ship),
+// prepended ahead of the existing close-run chip. The ship chip renders
+// as a neutral .action chip — no distinct presentation class.
 func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -1074,8 +1075,7 @@ func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
 		`action="/run/alpha/fix-it/advance"`,
 		`>→ code</button>`,
 		`action="/run/alpha/fix-it/ship"`,
-		`class="action ship"`,
-		`>ship it</button>`,
+		`class="action" type="submit">ship it</button>`,
 		`action="/run/alpha/fix-it/close"`, // base close chip still present
 	} {
 		if !strings.Contains(body, want) {

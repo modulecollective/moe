@@ -186,9 +186,7 @@ type runAction struct {
 	Href   string
 	Method string
 	// Class is an extra CSS class on the rendered button (POST actions
-	// only); "" renders the plain "action" chip. The ship chip sets
-	// "ship" so a one-click PR open/merge is styled apart from the safe
-	// single-step advance chip and can't be mistaken for it.
+	// only); "" renders the plain "action" chip.
 	Class string
 }
 
@@ -517,7 +515,7 @@ func advanceActions(projectID, slug, nextStage string, md *run.Metadata, live bo
 	base := "/run/" + projectID + "/" + slug
 	return []runAction{
 		{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
-		{Label: "ship it", Href: base + "/ship", Method: "POST", Class: "ship"},
+		{Label: "ship it", Href: base + "/ship", Method: "POST"},
 	}
 }
 

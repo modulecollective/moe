@@ -239,19 +239,6 @@ section.actions {
   border-color: var(--muted);
   color: var(--fg);
 }
-/* The "ship it" chip drives the run all the way through push — one
-   click can open/merge a PR. Styled in the warn colour so it reads as a
-   bigger lever than the plain advance/close chips and can't be
-   misclicked for them. */
-.action.ship {
-  border-color: var(--warn);
-  color: var(--warn);
-}
-.action.ship:hover, .action.ship:focus {
-  border-color: var(--warn);
-  background: var(--warn);
-  color: var(--bg);
-}
 
 .meta .note { color: var(--fg); margin-right: 0.5rem; }
 .meta .when { color: var(--muted); margin-right: 0.5rem; }
