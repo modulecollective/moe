@@ -1,11 +1,18 @@
 package serve
 
 import (
+	"encoding/json"
+	"html/template"
 	"math/rand"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 )
+
+// factoryFrameCount is how many factory-art frames the dash bakes into
+// the page for the client cross-fade. Lives in code, not config —
+// single-operator project.
+const factoryFrameCount = 10
 
 // dashRowVM is one row in the HTML dash — already string-formatted
 // so the template stays a flat presentation layer with no time math
@@ -39,17 +46,28 @@ type dashVM struct {
 	// FactoryArt is the same peripheral-vision rail the CLI dash draws
 	// under its banner — backlog feed, station glyphs for active runs,
 	// completed-output dots. One-line empty state, three lines populated.
+	// It is frame[0] of FactoryFrames: the server-rendered, no-JS fallback.
 	FactoryArt []string
+	// FactoryFramesJSON is json.Marshal of all factory-art frames, embedded
+	// in the page so the client can cross-fade through them without an XHR.
+	// It is template.JS, not string: html/template treats <script> content
+	// as a JS value context and would string-wrap a plain string (breaking
+	// JSON.parse), so the pre-marshalled JSON is emitted verbatim. Safe to do
+	// so because json.Marshal escapes <,>,& — no </script> breakout possible.
+	FactoryFramesJSON template.JS
 }
 
 func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, showAll bool) dashVM {
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(now.UnixNano()))
+	frames := dash.BuildFactoryFrames(state, dash.ArtWidth, factoryFrameCount, r)
+	framesJSON, _ := json.Marshal(frames) // [][]string never fails to marshal
 	vm := dashVM{
-		ProjectCount:   projectCount,
-		ActiveProjects: activeProjects,
-		ShowAll:        showAll,
-		FactoryArt:     dash.BuildFactoryArt(state, dash.ArtWidth, r),
+		ProjectCount:      projectCount,
+		ActiveProjects:    activeProjects,
+		ShowAll:           showAll,
+		FactoryArt:        frames[0],
+		FactoryFramesJSON: template.JS(framesJSON),
 	}
 	for _, r := range rows {
 		row := dashRowVM{

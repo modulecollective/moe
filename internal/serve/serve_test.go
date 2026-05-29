@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +181,64 @@ func TestNewDashVMCarriesChainMember(t *testing.T) {
 		if vm.Active[i].Run != want.run || vm.Active[i].Member != want.member {
 			t.Errorf("row %d = {run:%s member:%v}, want {run:%s member:%v}", i, vm.Active[i].Run, vm.Active[i].Member, want.run, want.member)
 		}
+	}
+}
+
+// TestNewDashVMBakesFactoryFrames: the VM carries factoryFrameCount
+// frames as marshalled JSON, and FactoryArt (the no-JS <pre> fallback)
+// is exactly frame[0].
+func TestNewDashVMBakesFactoryFrames(t *testing.T) {
+	now := time.Now().UTC()
+	rows := []dash.Row{
+		{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now},
+		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
+	}
+	vm := newDashVM(now, rows, 1, 1, false)
+	var frames [][]string
+	if err := json.Unmarshal([]byte(vm.FactoryFramesJSON), &frames); err != nil {
+		t.Fatalf("FactoryFramesJSON is not valid JSON: %v", err)
+	}
+	if len(frames) != factoryFrameCount {
+		t.Fatalf("frame count = %d, want %d", len(frames), factoryFrameCount)
+	}
+	if strings.Join(vm.FactoryArt, "\n") != strings.Join(frames[0], "\n") {
+		t.Fatalf("FactoryArt must equal frame[0]:\n art=%q\n f0 =%q", vm.FactoryArt, frames[0])
+	}
+}
+
+// TestDashRendersFactoryFramesScript guards the load-bearing escaping
+// concern: the marshalled frames must survive html/template and parse
+// back as JSON in the browser. html.UnescapeString mimics the browser
+// decoding the script element's textContent before JSON.parse.
+func TestDashRendersFactoryFramesScript(t *testing.T) {
+	now := time.Now().UTC()
+	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	const open = `<script type="application/json" id="factory-frames">`
+	i := strings.Index(body, open)
+	if i < 0 {
+		t.Fatalf("factory-frames script missing\n%s", body)
+	}
+	rest := body[i+len(open):]
+	j := strings.Index(rest, "</script>")
+	if j < 0 {
+		t.Fatalf("factory-frames script not closed\n%s", body)
+	}
+	var frames [][]string
+	raw := html.UnescapeString(rest[:j])
+	if err := json.Unmarshal([]byte(raw), &frames); err != nil {
+		t.Fatalf("embedded frames did not round-trip through the template: %v\nraw=%q", err, raw)
+	}
+	if len(frames) != factoryFrameCount {
+		t.Fatalf("embedded frame count = %d, want %d", len(frames), factoryFrameCount)
 	}
 }
 

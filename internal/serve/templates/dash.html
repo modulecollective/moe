@@ -23,6 +23,7 @@
       <div class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</div>
       <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
+      <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>
     </div>
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
   </header>
@@ -117,6 +118,45 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
   document.documentElement.dataset.theme = next;
   localStorage.setItem('moe-theme', next);
 });
+</script>
+<script>
+// Cross-fade the factory art through its pre-baked frames. Progressive
+// enhancement: with JS off, reduced motion, or a single frame, the static
+// <pre> server-rendered above stays as-is.
+(function () {
+  var data = document.getElementById('factory-frames');
+  var art = document.querySelector('.banner-art');
+  if (!data || !art) return;
+  var frames;
+  try { frames = JSON.parse(data.textContent); } catch (e) { return; }
+  if (!Array.isArray(frames) || frames.length <= 1) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  // Match the server render exactly (trailing newline) so the two layers
+  // are the same height and the grid cell doesn't jump when they swap.
+  function paint(frame) { return frame.join('\n') + '\n'; }
+
+  // Stack two <pre> layers in one grid cell and cross-fade their opacity.
+  var stack = document.createElement('div');
+  stack.className = 'banner-art-stack';
+  art.parentNode.insertBefore(stack, art);
+  stack.appendChild(art);
+  var back = art.cloneNode(false);
+  back.textContent = paint(frames[0]);
+  back.style.opacity = '0';
+  stack.appendChild(back);
+
+  var layers = [art, back]; // [0] showing, [1] hidden
+  var i = 0;
+  setInterval(function () {
+    i = (i + 1) % frames.length;
+    var hidden = layers[1];
+    hidden.textContent = paint(frames[i]);
+    layers[0].style.opacity = '0';
+    hidden.style.opacity = '1';
+    layers.reverse();
+  }, 3000);
+})();
 </script>
 </body>
 </html>

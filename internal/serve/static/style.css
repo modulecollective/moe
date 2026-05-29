@@ -91,6 +91,14 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   white-space: pre;
   overflow: hidden;
 }
+/* Animated art: JS stacks two <pre> layers in one grid cell and cross-fades
+   their opacity. Both layers always hold a same-shape frame, so the cell
+   size is stable. Without JS the single static <pre> renders unchanged. */
+.banner-art-stack { display: grid; }
+.banner-art-stack > .banner-art {
+  grid-area: 1 / 1;
+  transition: opacity 0.6s ease-in-out;
+}
 .banner-sub {
   margin-top: 0.2rem;
   color: var(--muted);
@@ -179,7 +187,11 @@ section h2 .count {
 @media (max-width: 640px) {
   html { font-size: 14px; }
   .banner-art {
-    font-size: 0.7rem;
+    /* The 61-col rail clips at 0.7rem once the flex theme-toggle eats into
+       the banner column. Scale with viewport width (capped at 0.7rem) so it
+       fits narrow phones; overflow-x stays as the backstop for a future
+       longer rail. */
+    font-size: min(0.7rem, 2.2vw);
     overflow-x: auto;
   }
 }
