@@ -42,6 +42,7 @@ const branchPrefix = "moe/"
 
 type pushRunOptions struct {
 	HeadlessRecovery bool
+	SkipTerminalEdit bool
 }
 
 // PushDeferredError is the typed value runPushTyped returns when the
@@ -295,7 +296,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		}
 		return openPRPath(root, md, pj, branch, stdout, stderr), nil
 	}
-	return mergePath(root, md, pj, clonePath, branch, stdout, stderr), nil
+	return mergePath(root, md, pj, clonePath, branch, opts.SkipTerminalEdit, stdout, stderr), nil
 }
 
 // init registers the rebase-onto-default check as the first pre-push
@@ -427,7 +428,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 // the sandbox, and mark the run merged. Sandbox and branch deletion
 // happen after the merge-push succeeds so a failure mid-flight leaves
 // both intact for retry.
-func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, stdout, stderr io.Writer) int {
+func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) int {
 	tipSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
 	if err != nil {
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
@@ -439,9 +440,9 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// ff-push: harvest (and any per-idea slug failures) must be
 	// reversible, and FastForwardToDefault is the point of no return
 	// for the merged transition. enterTerminal does the harvest under
-	// lock so each createIdea sees a held bureaucracy lock. skipEdit=
-	// false: push is the operator's termination decision, so the
-	// editor pops on followups.md before harvest just like close.
+	// lock so each createIdea sees a held bureaucracy lock. Interactive
+	// push keeps the editor pop just like close; cascade push harvests
+	// as-is so a headless ship has no hidden interactive surface.
 	priorStatus := md.Status
 	var paths []string
 	err = repolock.With(root, repolock.Options{
@@ -449,7 +450,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
 		var ferr error
-		paths, ferr = enterTerminal(root, md, run.StatusMerged, false)
+		paths, ferr = enterTerminal(root, md, run.StatusMerged, skipTerminalEdit)
 		return ferr
 	})
 	if err != nil {

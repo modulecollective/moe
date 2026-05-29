@@ -706,6 +706,53 @@ func TestPushFailsCleanlyWhenNoEditorAtMerge(t *testing.T) {
 	}
 }
 
+func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
+	f := newPushFixture(t)
+	noEditor(t)
+
+	writeFollowups(t, f.root, f.projectID, f.runID, strings.Join([]string{
+		"# Follow-ups",
+		"",
+		"- [ ] `cleanup-foo` — Clean up foo helper",
+		"",
+		"  Why: foo's internals leak; foo.go:42 is the load-bearing line.",
+		"",
+	}, "\n"))
+
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+	var stdout, stderr bytes.Buffer
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+		HeadlessRecovery: true,
+		SkipTerminalEdit: true,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runPushTypedWithOptions error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	if got := f.originHead(); got != f.tipSHA {
+		t.Fatalf("origin/main: want %s, got %s", f.tipSHA, got)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusMerged {
+		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
+	}
+
+	canvas, err := os.ReadFile(filepath.Join(f.root,
+		"projects", f.projectID, "runs", "cleanup-foo", "documents", "idea", "content.md"))
+	if err != nil {
+		t.Fatalf("read harvested idea canvas: %v", err)
+	}
+	if want := "Why: foo's internals leak; foo.go:42 is the load-bearing line."; !strings.Contains(string(canvas), want) {
+		t.Fatalf("idea canvas missing follow-up body %q:\n%s", want, canvas)
+	}
+	got := readFollowups(t, f.root, f.projectID, f.runID)
+	if !strings.Contains(got, "- [x] `cleanup-foo` — Clean up foo helper") {
+		t.Fatalf("followups.md not rewritten as harvested:\n%s", got)
+	}
+}
+
 // TestPushPRPathOpensPRAndKeepsSandbox regresses today's --pr flow:
 // the branch is pushed, a PR opens via gh, the run flips to
 // StatusPushed with a MoE-PR trailer, and the sandbox stays put.

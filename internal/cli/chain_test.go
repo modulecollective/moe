@@ -386,7 +386,7 @@ func feedStdin(t *testing.T, answer string) {
 }
 
 // TestPromptPushNextStageBangBangBangRidesChain pins Move 3: `!!!` at
-// the push gate ships this run (the stubbed merge path) and then rides
+// the push gate ships this run (the typed cascade merge path) and then rides
 // into the next live chained child, opening it at its first pending
 // stage. The push gate is a separate prompt handler from
 // dispatchCascade, so this ride is the bit the run added — before, the
@@ -394,8 +394,6 @@ func feedStdin(t *testing.T, answer string) {
 func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
 	root, parentMD := seedChainedPushGateRun(t)
 
-	// The merge path is stubbed by `next` returning 0 (parent ship). The
-	// child cascade then runs through the stubbed openSdlcStage / push.
 	var shipped bool
 	next := &Command{Name: "push", Run: func(_ []string, _, _ io.Writer) int { shipped = true; return 0 }}
 	openCaptured := stubOpenSdlcStage(t, nil)
@@ -406,8 +404,8 @@ func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, root, parentMD, "moe sdlc push tele parent-run", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if !shipped {
-		t.Fatalf("`!!!` at push gate must ship the parent via the merge path")
+	if shipped {
+		t.Fatalf("`!!!` at push gate must not dispatch through Command.Run")
 	}
 	// The child opens at design and walks to its own push.
 	wantStages := []string{"design", "code", "test"}
@@ -421,8 +419,14 @@ func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
 	if !reflect.DeepEqual(gotStages, wantStages) {
 		t.Fatalf("ridden child stages = %v, want %v\nstdout=%q", gotStages, wantStages, stdout.String())
 	}
-	if got := len(*pushCaptured); got != 1 {
-		t.Fatalf("child pushFromCascade dispatched %d times, want 1 (child ships)", got)
+	if got := len(*pushCaptured); got != 2 {
+		t.Fatalf("pushFromCascade dispatched %d times, want 2 (parent + child ships)", got)
+	}
+	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/parent-run"; got != want {
+		t.Fatalf("parent push args = %q, want %q", got, want)
+	}
+	if !(*pushCaptured)[0].options.SkipTerminalEdit {
+		t.Fatalf("parent push SkipTerminalEdit = false, want true")
 	}
 	if !strings.Contains(stdout.String(), "chain: riding into tele/child-run at design (headless)") {
 		t.Errorf("expected chain-ride preamble in stdout, got:\n%s", stdout.String())
@@ -446,14 +450,20 @@ func TestPromptPushNextStageBangBangDoesNotRide(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, root, parentMD, "moe sdlc push tele parent-run", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if !shipped {
-		t.Fatalf("`!!` at push gate must ship the parent")
+	if shipped {
+		t.Fatalf("`!!` at push gate must not dispatch through Command.Run")
 	}
 	if len(*openCaptured) != 0 {
 		t.Fatalf("`!!` must not ride into the child: got dispatches %+v", *openCaptured)
 	}
-	if len(*pushCaptured) != 0 {
-		t.Fatalf("`!!` must not run the child cascade: got pushes %+v", *pushCaptured)
+	if len(*pushCaptured) != 1 {
+		t.Fatalf("`!!` must ship only the parent: got pushes %+v", *pushCaptured)
+	}
+	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/parent-run"; got != want {
+		t.Fatalf("parent push args = %q, want %q", got, want)
+	}
+	if !(*pushCaptured)[0].options.SkipTerminalEdit {
+		t.Fatalf("parent push SkipTerminalEdit = false, want true")
 	}
 	if strings.Contains(stdout.String(), "chain: riding") {
 		t.Errorf("`!!` at push gate must not print a chain-ride preamble, stdout:\n%s", stdout.String())

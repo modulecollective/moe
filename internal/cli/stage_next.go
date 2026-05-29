@@ -569,29 +569,13 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		}
 		return maybeOfferChoreChain(root, md, choreChainOffer, stdout, stderr)
 	case "!!":
-		// `!!` at the push gate ships this run the same way `m` does,
-		// then stops. Keep the cascade no-prompt rule: report triggered
-		// chores without opening or chaining them.
-		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
-		if code != 0 {
-			return code
-		}
-		return maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+		// `!!` at the push gate uses the typed cascade push path, not
+		// Command.Run: cascade harvest is --no-edit even though manual
+		// `m` keeps the editor pop.
+		return promptPushCascadeShip(md, false, stdout, stderr)
 	case "!!!":
-		// `!!!` ships this run, then rides the chain into the next live
-		// child — the push-gate analogue of the cascadeFromGate
-		// post-ship ride. Chore note before ride, matching the ordering
-		// of the cascadeFromGate push-ship path. A Ctrl-C inside the
-		// ride propagates as exitInterrupted: stop the chain.
-		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
-		if code != 0 {
-			return code
-		}
-		choreCode := maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
-		if rideCode := maybeRideChain(md, true, stdout, stderr); rideCode == exitInterrupted {
-			return rideCode
-		}
-		return choreCode
+		// Same typed cascade push path as `!!`, plus the chain ride.
+		return promptPushCascadeShip(md, true, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
@@ -619,6 +603,15 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	// Anything else — blank, "n", or a typo — declines. Safer than
 	// guessing which ship path a garbled answer meant.
 	return 0
+}
+
+func promptPushCascadeShip(md *run.Metadata, rideChain bool, stdout, stderr io.Writer) int {
+	steps, shipped, code := cascadeShipStep(md.Workflow, md, rideChain, stdout, stderr)
+	res := cascadeResult{ran: steps, shipped: shipped}
+	if summary := renderCascadeSummary(md.Project+"/"+md.ID, res); summary != "" {
+		moePrintln(stdout, summary)
+	}
+	return code
 }
 
 // dispatchCascade parses the operator's `!`, `!<stage>`, `!!`, or `!!!` answer
@@ -892,6 +885,7 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 	for {
 		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
+			SkipTerminalEdit: true,
 		}, stdout, stderr)
 		var deferred *PushDeferredError
 		if errors.As(err, &deferred) {
