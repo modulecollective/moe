@@ -7,7 +7,7 @@ import (
 )
 
 // RenderOptions tune the renderer's output. Zero-value defaults are
-// "show everything readable", which is what `moe log` and the
+// "show everything readable", which is what `moe <workflow> log` and the
 // auto-tail both want. Future verbose modes (thinking, raw JSON) hook
 // in here without touching the call site.
 type RenderOptions struct {

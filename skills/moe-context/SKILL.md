@@ -75,7 +75,7 @@ project.
 
 ## Reading past stage transcripts
 
-The raw thread JSONL is awkward; `moe log {{.Project}} <run> <stage>`
+The raw thread JSONL is awkward; `moe <workflow> log {{.Project}}/<run> <stage>`
 renders a past stage's session the way the operator reads it — plain
 text, turn boundaries, tool calls collapsed. Reach for that, not
 `cat`, when you want to follow how a past stage arrived at its
@@ -106,7 +106,7 @@ considered it. Two passes are usually enough:
    every design canvas with the keyword in prose.
 
 A hit gives you a run slug; from there
-`moe log {{.Project}} <slug> design` renders the transcript, and
+`moe sdlc log {{.Project}}/<slug> design` renders the transcript, and
 `projects/{{.Project}}/runs/<slug>/documents/design/content.md` is the
 decided canvas. Either supersede the prior thinking, branch from it,
 or note in your own canvas that you reviewed it and why you're taking

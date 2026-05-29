@@ -1,6 +1,6 @@
 // Package transcript turns the per-agent JSONL files MoE mirrors next
 // to each document into operator-readable text. Two surfaces consume
-// it: `moe log <stage>` (render the full file on demand) and the
+// it: `moe <workflow> log <stage>` (render the full file on demand) and the
 // auto-tail printed after a one-shot stage exits. Both share one
 // renderer and a single normalised Event type; per-agent code is
 // confined to the adapter that produces those Events from a given
@@ -12,7 +12,7 @@
 // shapes. Collapsing them at parse time means the renderer doesn't
 // need to know which backend wrote the file, and a future third
 // backend slots in by dropping a sibling adapter without touching
-// the renderer or `moe log`.
+// the renderer or `moe <workflow> log`.
 package transcript
 
 import (

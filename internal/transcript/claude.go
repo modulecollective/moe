@@ -196,7 +196,7 @@ func decodeClaudeResultContent(raw json.RawMessage) string {
 // summariseClaudeInput produces the short "(args)" string the renderer
 // shows next to a tool name. Mirrors the per-tool cases in
 // internal/agent/claude/oneshot_progress.go so the one-shot progress
-// line and the `moe log` line read the same. Unknown tools render as
+// line and the `moe <workflow> log` line read the same. Unknown tools render as
 // an empty summary — better blank than a noisy JSON dump.
 func summariseClaudeInput(name string, in map[string]any) string {
 	switch name {
