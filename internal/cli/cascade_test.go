@@ -110,6 +110,47 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 	return &captured
 }
 
+// pushOutcome is one (exit, deferred) pair the sequencing stub hands
+// back on a given call. A nil deferred is a happy ship / bare failure;
+// a non-nil deferred is the typed deferral runPushTyped surfaces when
+// the pre-push gate hands off to a recovery session.
+type pushOutcome struct {
+	exit     int
+	deferred *PushDeferredError
+}
+
+// stubPushFromCascadeSeq swaps pushFromCascade for a recorder that
+// hands back a different outcome per call — the shape the retry loop
+// needs (first call defers, second call ships or re-defers). A call
+// past the end of the sequence fails the test: the retry bound means
+// the cascade must never call push more than len(outcomes) times, and
+// an over-call is exactly the runaway-retry regression worth catching.
+// Returns a pointer to the captured invocations so the test can assert
+// on call count and per-call options.
+func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCascadeInvocation {
+	t.Helper()
+	var captured []pushFromCascadeInvocation
+	prev := pushFromCascade
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
+		if len(captured) >= len(outcomes) {
+			t.Fatalf("pushFromCascade called %d times, want at most %d (runaway retry?)", len(captured)+1, len(outcomes))
+		}
+		out := outcomes[len(captured)]
+		captured = append(captured, pushFromCascadeInvocation{
+			args:    append([]string(nil), args...),
+			options: opts,
+			defer_:  out.deferred,
+			exit:    out.exit,
+		})
+		if out.deferred != nil {
+			return out.exit, out.deferred
+		}
+		return out.exit, nil
+	}
+	t.Cleanup(func() { pushFromCascade = prev })
+	return &captured
+}
+
 // openSdlcStageInvocation records one openSdlcStage dispatch — the
 // stage name, the (project, run) tuple, the headless flag (false under
 // driven `!!`), and the next-stage suppression flag. Tests assert on
@@ -1013,18 +1054,16 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateDoesNotShipOnPushDeferred pins the bug fix for
-// cascade-message-was-a-lie: when push hands off to a recovery code
-// session, the cascade must mark the step as deferred (not shipped),
-// render "push deferred to recovery (rebase conflict) — stopped" in
-// the summary, and not advance to a next stage (push is the last).
-// Before the fix, push returning 0 was treated as a successful ship
-// even when the 0 actually came from a clean-exit recovery session.
+// TestCascadeFromGateDrivenPushDeferredStops pins the driven (`!!`)
+// deferral: recovery is interactive, so the operator picks up at the
+// chain prompt — the cascade must not retry (it would race the human).
+// The push step is marked deferred (not shipped), the summary reads
+// "— stopped", and push dispatches exactly once.
 //
 // Two flavours: rebase-conflict (built-in hook check) and hook-failure
 // (project script). Both deserve the same summary shape and ship gate
 // behaviour.
-func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
+func TestCascadeFromGateDrivenPushDeferredStops(t *testing.T) {
 	cases := []struct {
 		name        string
 		recovery    string
@@ -1044,26 +1083,21 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			openCaptured := stubOpenSdlcStage(t, nil)
-			deferred := &PushDeferredError{
-				Recovery: tc.recovery,
-				Project:  "tele",
-				Run:      "fix-it",
-			}
-			// Recovery exited cleanly (exit 0) — the cascade must
-			// still treat this as a stop, not a ship.
-			pushCaptured := stubPushFromCascade(t, 0, deferred)
+			deferred := &PushDeferredError{Recovery: tc.recovery, Project: "tele", Run: "fix-it"}
+			// Driven recovery is interactive (exit 0 from the operator
+			// closing the session). The cascade must stop regardless —
+			// no retry under `!!`.
+			pushCaptured := stubPushFromCascadeSeq(t, []pushOutcome{{exit: 0, deferred: deferred}})
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+			res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("cascade exit=%d, want 0 (recovery exited cleanly); stderr=%q", code, stderr.String())
 			}
 			if res.shipped {
-				t.Fatalf("res.shipped = true on deferred push; the bug this test pins is the cascade claiming a ship that never happened")
+				t.Fatalf("res.shipped = true on deferred push; a deferral is not a ship")
 			}
-			// All three stages should appear in res.ran; push must
-			// be marked deferred with the recovery tag.
 			wantStages := []string{"code", "test", "push"}
 			if len(res.ran) != len(wantStages) {
 				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
@@ -1073,32 +1107,167 @@ func TestCascadeFromGateDoesNotShipOnPushDeferred(t *testing.T) {
 					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 				}
 			}
-			pushStep := res.ran[len(res.ran)-1]
-			if pushStep.deferred != tc.recovery {
+			if pushStep := res.ran[len(res.ran)-1]; pushStep.deferred != tc.recovery {
 				t.Fatalf("push step deferred tag: want %q, got %q", tc.recovery, pushStep.deferred)
 			}
-			// Summary renders the deferred branch verbatim — the
-			// design's chosen vocabulary, pinned end-to-end.
 			if got := renderCascadeSummary(res); got != tc.wantSummary {
 				t.Fatalf("summary = %q, want %q", got, tc.wantSummary)
 			}
-			// pushFromCascade was invoked exactly once (no retry).
+			// Driven dispatches push exactly once — no retry.
 			if len(*pushCaptured) != 1 {
-				t.Fatalf("push dispatched %d times, want 1: %+v", len(*pushCaptured), *pushCaptured)
+				t.Fatalf("push dispatched %d times, want 1 (driven never retries): %+v", len(*pushCaptured), *pushCaptured)
 			}
-			if !(*pushCaptured)[0].options.HeadlessRecovery {
-				t.Fatalf("deferred !!! push recovery option HeadlessRecovery = false, want true")
+			// Driven recovery is interactive, not headless.
+			if (*pushCaptured)[0].options.HeadlessRecovery {
+				t.Fatalf("driven `!!` push recovery option HeadlessRecovery = true, want false")
 			}
-			// No openSdlcStage call happened after the deferred push
-			// (push is the last stage in the sdlc ladder; this guards
-			// against a future ladder extension silently advancing
-			// past a deferred ship).
 			for _, inv := range *openCaptured {
 				if inv.stage == "push" {
 					t.Fatalf("openSdlcStage must not dispatch push (cascade routes push through pushFromCascade): %+v", inv)
 				}
 			}
 		})
+	}
+}
+
+// TestCascadeFromGateHeadlessRecoveryFailedStops: under `!!!`, a
+// recovery session that exits non-zero means the agent gave up. The
+// cascade stops with the deferred marker — no retry — and propagates
+// the recovery's exit code so the failure is visible.
+func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
+	stubOpenSdlcStage(t, nil)
+	deferred := &PushDeferredError{Recovery: "hook-failure", Project: "tele", Run: "fix-it"}
+	// Recovery exited 1 — the agent could not fix it.
+	pushCaptured := stubPushFromCascadeSeq(t, []pushOutcome{{exit: 1, deferred: deferred}})
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("cascade exit=%d, want 1 (recovery gave up); stderr=%q", code, stderr.String())
+	}
+	if res.shipped {
+		t.Fatalf("res.shipped = true after a failed recovery: %+v", res)
+	}
+	if len(*pushCaptured) != 1 {
+		t.Fatalf("push dispatched %d times, want 1 (no retry after a non-zero recovery): %+v", len(*pushCaptured), *pushCaptured)
+	}
+	wantSummary := "cascade: code ok · test ok · push deferred to recovery (pre-push hook) — stopped"
+	if got := renderCascadeSummary(res); got != wantSummary {
+		t.Fatalf("summary = %q, want %q", got, wantSummary)
+	}
+}
+
+// TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips is the
+// behaviour this run adds: under `!!!`, a recovery session that exits
+// cleanly (exit 0, fix committed) earns one push retry. The retry
+// re-runs the pre-push gate against the new commit; when it passes,
+// push ships and the cascade rides to completion. The deferred step
+// stays recorded, so the summary reads as two honest steps — the
+// recover, then the ship.
+func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
+	for _, recovery := range []string{"rebase-conflict", "hook-failure"} {
+		t.Run(recovery, func(t *testing.T) {
+			openCaptured := stubOpenSdlcStage(t, nil)
+			deferred := &PushDeferredError{Recovery: recovery, Project: "tele", Run: "fix-it"}
+			// First push defers to a clean (exit 0) recovery; the
+			// retry passes the gate and ships.
+			pushCaptured := stubPushFromCascadeSeq(t, []pushOutcome{
+				{exit: 0, deferred: deferred},
+				{exit: 0, deferred: nil},
+			})
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+			var stdout, stderr bytes.Buffer
+			res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("cascade exit=%d, want 0 (clean recovery then ship); stderr=%q", code, stderr.String())
+			}
+			if !res.shipped {
+				t.Fatalf("res.shipped = false after a clean recovery + retry that passed the gate: %+v", res)
+			}
+			// code, test, push (deferred), push (ok) — four steps.
+			wantStages := []string{"code", "test", "push", "push"}
+			if len(res.ran) != len(wantStages) {
+				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
+			}
+			for i, s := range wantStages {
+				if res.ran[i].stage != s {
+					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+				}
+			}
+			if got := res.ran[2].deferred; got != recovery {
+				t.Fatalf("first push step deferred tag = %q, want %q", got, recovery)
+			}
+			if got := res.ran[3]; got.deferred != "" || got.code != 0 {
+				t.Fatalf("second push step = %+v, want a clean ship (no deferred, code 0)", got)
+			}
+			// Push dispatched exactly twice: the deferral and the retry.
+			if len(*pushCaptured) != 2 {
+				t.Fatalf("push dispatched %d times, want 2 (deferral + one retry): %+v", len(*pushCaptured), *pushCaptured)
+			}
+			for i, inv := range *pushCaptured {
+				if !inv.options.HeadlessRecovery {
+					t.Fatalf("push call %d HeadlessRecovery = false, want true (`!!!`)", i)
+				}
+			}
+			// Summary shows the recover-then-ship as two steps and
+			// ends with the ship marker, not "— stopped".
+			wantSummary := "cascade: code ok · test ok · push deferred to recovery (" +
+				deferredLabel(recovery) + ") · push ok — shipped"
+			if got := renderCascadeSummary(res); got != wantSummary {
+				t.Fatalf("summary = %q, want %q", got, wantSummary)
+			}
+			for _, inv := range *openCaptured {
+				if inv.stage == "push" {
+					t.Fatalf("openSdlcStage must not dispatch push: %+v", inv)
+				}
+			}
+		})
+	}
+}
+
+// TestCascadeFromGateHeadlessRetryRedefersStopsAtBound pins the retry
+// bound: when the retry's pre-push gate defers a second time (the fix
+// didn't stick), the cascade stops rather than opening a third
+// headless turn. push dispatches exactly twice — the original and the
+// one retry — and the summary records both deferred steps and reads
+// "— stopped".
+func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
+	stubOpenSdlcStage(t, nil)
+	deferred := &PushDeferredError{Recovery: "rebase-conflict", Project: "tele", Run: "fix-it"}
+	// Both the original push and the retry defer to a clean recovery —
+	// the stub fails the test if the cascade calls push a third time.
+	pushCaptured := stubPushFromCascadeSeq(t, []pushOutcome{
+		{exit: 0, deferred: deferred},
+		{exit: 0, deferred: deferred},
+	})
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d, want 0 (both recoveries exited cleanly); stderr=%q", code, stderr.String())
+	}
+	if res.shipped {
+		t.Fatalf("res.shipped = true after the retry re-deferred: %+v", res)
+	}
+	// push dispatched exactly twice — the bound holds.
+	if len(*pushCaptured) != 2 {
+		t.Fatalf("push dispatched %d times, want 2 (one retry, then stop): %+v", len(*pushCaptured), *pushCaptured)
+	}
+	wantStages := []string{"code", "test", "push", "push"}
+	if len(res.ran) != len(wantStages) {
+		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
+	}
+	for i, s := range wantStages {
+		if res.ran[i].stage != s {
+			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
+		}
+	}
+	wantSummary := "cascade: code ok · test ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
+	if got := renderCascadeSummary(res); got != wantSummary {
+		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
 }
 

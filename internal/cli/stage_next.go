@@ -772,8 +772,9 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 		moePrintf(stdout, "cascade: %s (%s)\n", stage, mode)
 		if stage == "push" && yolo {
 			// `!!` / `!!!` at push ships via the merge path. runPushTyped
-			// owns synthesis before the shared ship gate, so the
-			// cascade only needs to call the typed push entry once.
+			// owns synthesis before the shared ship gate, so the cascade
+			// drives the ship through the one typed push entry — no
+			// separate synthesis call.
 			//
 			// Call runPushTyped via pushFromCascade (bypassing
 			// g.Lookup("push")) so the deferred-to-recovery signal —
@@ -785,39 +786,62 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 			// channel, a recovery session that exits 0 would look
 			// identical to a real ship and the cascade summary would
 			// claim "shipped" when nothing was pushed.
-			ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
-				HeadlessRecovery: !driven,
-			}, stdout, stderr)
-			var deferred *PushDeferredError
-			if errors.As(err, &deferred) {
-				res.ran = append(res.ran, cascadeStepResult{
-					stage:    stage,
-					code:     ship,
-					deferred: deferred.Recovery,
-				})
-				// Propagate the recovery session's exit verbatim:
-				// 0 if the agent resolved cleanly (operator's next
-				// move is to re-run push), non-zero if the agent
-				// gave up. Either way the deferred marker keeps
-				// the summary honest — this was not a ship.
-				return res, ship
+			// Headless (`!!!`) push earns one push retry after a clean
+			// recovery: when the pre-push gate hands off to a headless
+			// one-shot code session and that session resolves cleanly
+			// (exit 0, commit made), re-run the gate against the new
+			// commit. A resolved rebase fast-forwards on the retry; a
+			// fixed hook passes. Driven (`!!`) recovery is interactive —
+			// the operator picks up at the chain prompt, so retrying
+			// would race the human. retries bounds the loop at one: if
+			// the retry still defers, the fix didn't stick — stop with
+			// the deferred marker and let the operator look.
+			retries := 0
+			for {
+				ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
+					HeadlessRecovery: !driven,
+				}, stdout, stderr)
+				var deferred *PushDeferredError
+				if errors.As(err, &deferred) {
+					// Record the deferred step even when a retry will
+					// follow: a recover-then-ship reads honestly as two
+					// steps (`push deferred to recovery (…) · push ok`).
+					res.ran = append(res.ran, cascadeStepResult{
+						stage:    stage,
+						code:     ship,
+						deferred: deferred.Recovery,
+					})
+					// Stop when: driven (interactive recovery owns the
+					// next move), the recovery session gave up (non-zero
+					// exit), or the one retry is already spent. The
+					// deferred marker keeps the summary honest — this
+					// was not a ship.
+					if driven || ship != 0 || retries >= 1 {
+						return res, ship
+					}
+					// Headless clean recovery: the agent committed a
+					// fix. Re-run the pre-push gate once against it.
+					retries++
+					continue
+				}
+				res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
+				if ship != 0 {
+					return res, ship
+				}
+				res.shipped = true
+				root, rootErr := findRoot(stderr)
+				if rootErr == nil {
+					maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+				}
+				// Chain ride: after the parent's terminal stage ships, if a
+				// live chain edge points at an unresolved child, cascade
+				// into it in the same mode. Recursive by construction —
+				// the child's cascadeFromGate reaches its own push (sdlc)
+				// or auto-close (non-sdlc) and re-fires this hook on its
+				// own outgoing edge.
+				maybeRideChain(md, driven, stdout, stderr)
+				break
 			}
-			res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
-			if ship != 0 {
-				return res, ship
-			}
-			res.shipped = true
-			root, rootErr := findRoot(stderr)
-			if rootErr == nil {
-				maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
-			}
-			// Chain ride: after the parent's terminal stage ships, if a
-			// live chain edge points at an unresolved child, cascade
-			// into it in the same mode. Recursive by construction —
-			// the child's cascadeFromGate reaches its own push (sdlc)
-			// or auto-close (non-sdlc) and re-fires this hook on its
-			// own outgoing edge.
-			maybeRideChain(md, driven, stdout, stderr)
 			continue
 		}
 		code := dispatcher(stage, md.Project, md.ID, !driven, true, stdout, stderr)
@@ -954,23 +978,27 @@ func renderCascadeSummary(res cascadeResult) string {
 		return ""
 	}
 	parts := make([]string, 0, len(res.ran))
-	stopped := false
 	for _, r := range res.ran {
 		switch {
 		case r.deferred != "":
 			parts = append(parts, fmt.Sprintf("%s deferred to recovery (%s)", r.stage, deferredLabel(r.deferred)))
-			stopped = true
 		case r.code != 0:
 			parts = append(parts, fmt.Sprintf("%s failed (exit %d)", r.stage, r.code))
-			stopped = true
 		default:
 			parts = append(parts, fmt.Sprintf("%s ok", r.stage))
 		}
 	}
 	s := "cascade: " + strings.Join(parts, " · ")
-	if stopped {
+	// The last recorded step decides the trailing clause. A deferred
+	// step that was followed by a clean push retry must not force
+	// "stopped" — the cascade recovered and shipped, and the final
+	// `push ok` step says so. Only a trailing deferred or failed step
+	// (the cascade really stopped there) renders "— stopped".
+	last := res.ran[len(res.ran)-1]
+	switch {
+	case last.deferred != "" || last.code != 0:
 		s += " — stopped"
-	} else if res.shipped {
+	case res.shipped:
 		s += " — shipped"
 	}
 	return s

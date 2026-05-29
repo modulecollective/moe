@@ -171,7 +171,7 @@ var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, he
 // prompt preserved, and typed deferral for the cascade.
 func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, kickoff string, stdout, stderr io.Writer) (int, error) {
 	if headless {
-		moePrintf(stderr, "       opening a headless code recovery turn for %s; the cascade will stop after recovery\n", recovery)
+		moePrintf(stderr, "       opening a headless code recovery turn for %s; will retry push if recovery resolves cleanly\n", recovery)
 	} else {
 		moePrintf(stderr, "       opening a fresh code session for %s; the chain prompt will offer push next\n", recovery)
 	}
