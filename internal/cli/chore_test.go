@@ -15,6 +15,15 @@ import (
 // discovery at it.
 func seedChoreRoot(t *testing.T) string {
 	t.Helper()
+	return seedChoreRootWith(t, "")
+}
+
+// seedChoreRootWith is seedChoreRoot with an optional cooldown. When
+// cooldown is non-empty the chore gets that cooldown file and a recent
+// MoE-Chore-Skipped completion stamped after the touch, so it lands
+// cooling-down and not-due — the state `--now` exists to override.
+func seedChoreRootWith(t *testing.T, cooldown string) string {
+	t.Helper()
 	root := t.TempDir()
 	gittest.InitAt(t, root)
 	write := func(rel, body string) {
@@ -30,11 +39,21 @@ func seedChoreRoot(t *testing.T) string {
 	write("bureaucracy.conf", "")
 	write("projects/moe/project.json", `{"id":"moe"}`)
 	write("projects/moe/chores/readme-refresh/trigger", "README.md\n")
+	if cooldown != "" {
+		write("projects/moe/chores/readme-refresh/cooldown", cooldown+"\n")
+	}
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-m", "seed bureaucracy")
 	// Make the chore due: a changed-path touch with no completion yet.
 	gittest.Run(t, root, "commit", "--allow-empty", "-m",
 		"work: touch\n\nMoE-Chore-Touched: moe/readme-refresh\n")
+	if cooldown != "" {
+		// A recent completion after the touch: cooldown blocks, and the
+		// completion clears the changed-path due reason, so the chore is
+		// both cooling-down and not-due.
+		gittest.Run(t, root, "commit", "--allow-empty", "-m",
+			"chore skip\n\nMoE-Chore-Skipped: moe/readme-refresh\n")
+	}
 	t.Setenv("MOE_HOME", root)
 	return root
 }
@@ -96,5 +115,94 @@ func TestRunChoreSkipBadArg(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runChoreSkip([]string{"no-slash"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("runChoreSkip = %d, want 2 for malformed arg", code)
+	}
+}
+
+// choreOpenRun returns the chore's currently-open linked run, "" if none.
+// A non-empty result proves a run was opened with the MoE-Chore trailer:
+// OpenRun is only set when the journal index links a non-terminal run
+// back to the chore key.
+func choreOpenRun(t *testing.T, root, name string) string {
+	t.Helper()
+	states, err := gatherChoreStates(root, "moe")
+	if err != nil {
+		t.Fatalf("gatherChoreStates: %v", err)
+	}
+	for _, s := range states {
+		if s.Definition.Name == name {
+			return s.OpenRun
+		}
+	}
+	t.Fatalf("chore %q not found in states", name)
+	return ""
+}
+
+// A cooling-down chore refuses a normal open but opens under --now, and
+// the opened run is linked back to the chore (MoE-Chore trailer stamped).
+func TestOpenChoreNowOpensCoolingChore(t *testing.T) {
+	root := seedChoreRootWith(t, "720h")
+	if choreDue(t, root, "readme-refresh") {
+		t.Fatalf("precondition: cooling chore should not be due")
+	}
+
+	// Without --now: refused as cooling down, nothing opened.
+	var stdout, stderr bytes.Buffer
+	if _, code := openDueChore(root, "moe", "readme-refresh", false, &stdout, &stderr); code != 1 {
+		t.Fatalf("openDueChore(force=false) = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("cooling down")) {
+		t.Errorf("stderr should report cooldown refusal: %q", stderr.String())
+	}
+	if open := choreOpenRun(t, root, "readme-refresh"); open != "" {
+		t.Fatalf("refused open should leave no open run, got %q", open)
+	}
+
+	// With --now: opens, and the run is linked to the chore.
+	stdout.Reset()
+	stderr.Reset()
+	md, code := openDueChore(root, "moe", "readme-refresh", true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("openDueChore(force=true) = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if open := choreOpenRun(t, root, "readme-refresh"); open != md.ID {
+		t.Errorf("chore open run = %q, want %q (MoE-Chore trailer not linked)", open, md.ID)
+	}
+}
+
+// --now never bypasses the open-run guard: a chore that already has an
+// open linked run still refuses, force or not. Open one via the normal
+// due path, then attempt a forced second open.
+func TestOpenChoreNowStillRefusesWhenRunAlreadyOpen(t *testing.T) {
+	root := seedChoreRoot(t)
+
+	var stdout, stderr bytes.Buffer
+	if _, code := openDueChore(root, "moe", "readme-refresh", false, &stdout, &stderr); code != 0 {
+		t.Fatalf("first open = %d, want 0; stderr=%s", code, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if _, code := openDueChore(root, "moe", "readme-refresh", true, &stdout, &stderr); code != 1 {
+		t.Fatalf("forced second open = %d, want 1 (open-run guard must hold)", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("already has open run")) {
+		t.Errorf("stderr should report the open-run guard: %q", stderr.String())
+	}
+}
+
+// The --now flag parses and threads through runChoreOpen to the open
+// pipeline, opening a cooling chore the bare verb would refuse.
+func TestRunChoreOpenNowFlagOpensCoolingChore(t *testing.T) {
+	root := seedChoreRootWith(t, "720h")
+
+	var stdout, stderr bytes.Buffer
+	if code := runChoreOpen([]string{"--now", "moe/readme-refresh"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("runChoreOpen --now = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("opened chore moe/readme-refresh")) {
+		t.Errorf("stdout missing open confirmation: %q", stdout.String())
+	}
+	if open := choreOpenRun(t, root, "readme-refresh"); open == "" {
+		t.Errorf("chore should have an open run after --now")
 	}
 }

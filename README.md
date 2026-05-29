@@ -310,12 +310,13 @@ Two command families, mirroring hooks:
 moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
 moe chore list [--project <p>]                # show what's due
 moe chore check [<project>/<chore>]           # dry-run validation and due-state
-moe chore open <project>/<chore>              # open the seeded run for a due chore
+moe chore open [--now] <project>/<chore>      # open the seeded run for a due chore
 ```
 
 `moe chores …` edits definitions under `projects/<project>/chores/*` through a
 journaled run. `moe chore open` refuses if the chore isn't due, already has an
-open run, or is cooling down.
+open run, or is cooling down. Pass `--now` to open it anyway when it's cooling
+down or not yet due — it still refuses if a run is already open.
 
 ### Knowledge, Twin, And Hooks
 

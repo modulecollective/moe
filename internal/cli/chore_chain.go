@@ -101,7 +101,7 @@ func offerChoreChain(root string, parentMD *run.Metadata, s chore.State, stdout,
 	if answer != "" && !strings.HasPrefix(answer, "y") {
 		return 0
 	}
-	choreMD, code := openDueChore(root, s.Definition.Project, s.Definition.Name, stdout, stderr)
+	choreMD, code := openDueChore(root, s.Definition.Project, s.Definition.Name, false, stdout, stderr)
 	if code != 0 {
 		return code
 	}

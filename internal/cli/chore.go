@@ -131,8 +131,9 @@ func runChoreCheck(args []string, stdout, stderr io.Writer) int {
 func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chore open", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	now := fs.Bool("now", false, "open even if cooling down or not yet due (still refuses if a run is already open)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chore open <project>/<chore>")
+		moePrintln(stderr, "usage: moe chore open [--now] <project>/<chore>")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -150,7 +151,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
-	md, code := openDueChore(root, projectID, choreName, stdout, stderr)
+	md, code := openDueChore(root, projectID, choreName, *now, stdout, stderr)
 	if code != 0 {
 		return code
 	}
@@ -162,8 +163,8 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 // `moe chore open` (and the chore-chain prompt) print, and emits the
 // "opened chore …" stdout line on success. serve takes the typed-error
 // path directly via OpenChore instead.
-func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (*run.Metadata, int) {
-	res, err := openChoreInProcess(root, projectID, choreName)
+func openDueChore(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*run.Metadata, int) {
+	res, err := openChoreInProcess(root, projectID, choreName, force)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, 1
@@ -212,7 +213,12 @@ type choreOpenResult struct {
 // typed errors (*choreNotFoundError / *choreNotOpenableError) so callers
 // can branch on HTTP status or print to stderr; everything else is a
 // plain error.
-func openChoreInProcess(root, projectID, choreName string) (*choreOpenResult, error) {
+//
+// force is the `--now` override: it skips the soft due-state guards
+// (cooling down, not yet due) so the operator can open a chore's run
+// early. The open-run guard is never skipped — two runs both stamping
+// MoE-Chore for one chore is broken state, not an override.
+func openChoreInProcess(root, projectID, choreName string, force bool) (*choreOpenResult, error) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		return nil, err
@@ -230,11 +236,13 @@ func openChoreInProcess(root, projectID, choreName string) (*choreOpenResult, er
 	if state.OpenRun != "" {
 		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: fmt.Sprintf("already has open run %s/%s", projectID, state.OpenRun)}
 	}
-	if state.CooldownBlocking {
-		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
-	}
-	if !state.Due {
-		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is not due"}
+	if !force {
+		if state.CooldownBlocking {
+			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
+		}
+		if !state.Due {
+			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is not due"}
+		}
 	}
 	wf, err := LookupWorkflow(state.Definition.Workflow)
 	if err != nil {
