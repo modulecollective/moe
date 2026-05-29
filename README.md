@@ -182,7 +182,7 @@ mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 | `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
 | `kb` | `research` -> `summarize` | project knowledge articles |
 | `idea` | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
-| `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `roadmap` -> `glossary` -> `finalize` | recorded project intent |
+| `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `glossary` -> `finalize` | recorded project intent |
 | `hooks` | `code` | project-specific hook scripts |
 | `chores` | `code` | edit project chore definitions: what maintenance is due, and the run each one opens |
 | `meta-moe` | `report` | feedback about MoE itself |
@@ -388,7 +388,7 @@ MoE's memory improves through a few explicit channels:
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,
-  `patterns`, `operations`, `roadmap`, and `glossary` documents. When code and
+  `patterns`, `operations`, and `glossary` documents. When code and
   twin disagree, the twin wins until a deliberate edit updates it.
 - Lore stores portable facts that apply across projects. Agents see a compact
   catalog and open entries only when the "applies when" hint matches.
@@ -433,7 +433,7 @@ The catalog below is a map, not a replacement for `moe help`.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
-- `moe twin reflect|vision|architecture|patterns|operations|roadmap|glossary|finalize|claim|close|cat|log`
+- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|claim|close|cat|log`
   maintains recorded intent.
 - `moe hooks new|code|close|cat|log` edits project hook scripts through a
   journaled run.

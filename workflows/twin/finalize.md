@@ -1,6 +1,6 @@
 # Stage: finalize
 
-You are at the finalize stage. The per-doc walks are done; six
+You are at the finalize stage. The per-doc walks are done; five
 managed docs have been edited (or quietly left alone). Your job
 here is to **seal the pass**: clear remaining hygiene findings
 inline where you can, fold the events into `history-summary.md`,
@@ -35,8 +35,8 @@ during verification.
   reflect will need; do shed detail it won't.
 - **Walk the prior stage canvases.** Anything they flagged "for
   operator" or "needs follow-up" that didn't get acted on — fold
-  the residue into either an inline fix here, a feedback-twin
-  note, or a roadmap follow-up (if the operator agrees).
+  the residue into either an inline fix here or a feedback-twin
+  note (if the operator agrees).
 - **Surface what you can't fix.** If a finding genuinely needs a
   per-doc rewrite that isn't a cleanup, name it on the canvas
   under "What I left" with the reason it didn't fit a finalize
@@ -113,7 +113,7 @@ gate refuses both an empty canvas and a non-empty hygiene scan.
 
 ## Before you start
 
-Skim the six prior stage canvases (vision → glossary). Their
+Skim the five prior stage canvases (vision → glossary). Their
 `What I flagged` / `Open questions for the operator` /
 `No-change notes` sections are the surface this stage covers.
 A finding the kickoff lists but no upstream stage mentioned is

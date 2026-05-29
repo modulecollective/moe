@@ -12,15 +12,14 @@ import (
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
-	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // reflectCommand is the user-facing `moe twin reflect <project>`
-// entry. It mints a fresh `reflect-<timestamp>` run whose seven
-// stages (vision → architecture → patterns → operations → roadmap →
+// entry. It mints a fresh `reflect-<timestamp>` run whose six
+// stages (vision → architecture → patterns → operations →
 // glossary → finalize) walk the closed-schema twin, then dispatches
 // the first stage interactively. The chain prompt drives the
 // remainder of the ladder; the cascade vocabulary (`!<stage>` /
@@ -40,7 +39,7 @@ import (
 func reflectCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "reflect",
-		Summary: "mint a twin reflect run and walk the seven-stage ladder",
+		Summary: "mint a twin reflect run and walk the six-stage ladder",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runReflectSession(workflow, builder, args, stdout, stderr)
 		},
@@ -55,8 +54,8 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
-		moePrintln(stderr, "dispatches the first stage of the seven-stage ladder. Each managed doc")
-		moePrintln(stderr, "(vision, architecture, patterns, operations, roadmap, glossary) gets its")
+		moePrintln(stderr, "dispatches the first stage of the six-stage ladder. Each managed doc")
+		moePrintln(stderr, "(vision, architecture, patterns, operations, glossary) gets its")
 		moePrintln(stderr, "own per-stage canvas; finalize seals the pass — inline hygiene cleanup,")
 		moePrintln(stderr, "history-summary fold, checkpoint bump. The engine refuses to seal with")
 		moePrintln(stderr, "leftover findings; per-stage commits don't bump the checkpoint.")
@@ -237,15 +236,6 @@ func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 		docs, since, workflow)
 }
 
-// ideaSummary captures the minimum needed to render an open idea
-// into the reflect kickoff: the slug and verbatim canvas body. The
-// agent uses this to decide which ideas belong on the roadmap (and
-// at which horizon) versus which stay on the idea shelf.
-type ideaSummary struct {
-	slug string
-	body string
-}
-
 // twinFeedbackEntry is one note left under projects/<p>/runs/<slug>/
 // feedback/twin.md by a non-twin workflow agent, surfaced into the
 // next reflect's kickoff. Provenance (runID) lets the agent trace a
@@ -317,35 +307,5 @@ func loadTwinFeedback(root, projectID string, cfg wiki.Config) ([]twinFeedbackEn
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].when.After(out[j].when) })
-	return out, nil
-}
-
-// loadIdeaBacklog enumerates every open idea run for projectID and
-// loads each canvas body. "Backlog" means StatusInProgress idea
-// runs: closed/promoted ideas have already been spent. Sorted by
-// slug for stable kickoff ordering across passes.
-func loadIdeaBacklog(root, projectID string) ([]ideaSummary, error) {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return nil, err
-	}
-	var out []ideaSummary
-	for _, md := range mds {
-		if md.Project != projectID {
-			continue
-		}
-		if md.Workflow != dash.IdeaWorkflow {
-			continue
-		}
-		if md.Status != run.StatusInProgress {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, dash.IdeaDocID)))
-		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read idea %s/%s: %w", md.Project, md.ID, err)
-		}
-		out = append(out, ideaSummary{slug: md.ID, body: string(body)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].slug < out[j].slug })
 	return out, nil
 }

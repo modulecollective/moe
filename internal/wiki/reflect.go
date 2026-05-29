@@ -31,8 +31,7 @@ var firstReflectCommitCap = 500
 // system prompt for a closed-schema reflect session. Sibling of
 // IngestPromptSection / ClaimPromptSection: same preamble, different
 // framing — walk each managed doc against recent events and propose
-// updates, fold the roadmap forward, and clean up structural findings
-// before sealing the pass.
+// updates, and clean up structural findings before sealing the pass.
 //
 // Closed-schema only. Open-schema reflect (whether kb wants one) is
 // undecided; the seam exists, the implementation doesn't, so this
@@ -65,10 +64,9 @@ Single-home discipline: each rule, principle, or named shape has
 one home in the twin. If a rule already lives in another managed
 doc, point there (by section heading) instead of restating it.
 Architecture owns shape and boundaries; patterns owns named
-recurring or refused shapes; operations owns rituals and tools;
-roadmap owns intent over time. A line that could plausibly live
-in two docs lives in one — pick by which doc the reader would
-search first.
+recurring or refused shapes; operations owns rituals and tools.
+A line that could plausibly live in two docs lives in one — pick
+by which doc the reader would search first.
 
 Vision is asymmetric — but split into two registers.
 **Reference drift** (terminology, examples, names of tools or
@@ -80,17 +78,6 @@ problem statement, scope) stays surface-only — flag it; the
 operator runs ` + "`moe twin claim`" + ` if they agree. If you can't tell
 which register a drift belongs to, flag for the operator
 instead of editing.
-
-Roadmap convention: roadmap.md uses five ` + "`##`" + ` sections — Near
-term, Mid term, Long term, Directions, Parked. Near/Mid/Long are
-committed intent across horizons; Directions holds uncommitted
-"places the project could plausibly grow" (recorded so reflect
-conversations can promote them as appetite shifts); Parked is
-items the project deliberately is not doing. On a fresh
-roadmap.md (just ` + "`# Roadmap`" + ` and nothing else), establish the
-five headings at this pass. On subsequent passes, walk the prior
-content with the operator and promote / demote / retire entries
-against the idea backlog and recent activity.
 
 Glossary convention: glossary.md is a single alphabetical list of
 project-specific terms. Each entry is a ` + "`### Term`" + ` heading

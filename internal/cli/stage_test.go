@@ -1094,7 +1094,7 @@ func TestMoeBureaucracySkillCarriesAllThreeTraceChannels(t *testing.T) {
 	// recognize. Philosophical phrasing ("a decision the doc doesn't
 	// reflect") is what failed in claim-seems-broken; the names of
 	// the actual files are the load-bearing cue.
-	for _, doc := range []string{"architecture.md", "vision.md", "patterns.md", "operations.md", "roadmap.md"} {
+	for _, doc := range []string{"architecture.md", "vision.md", "patterns.md", "operations.md", "glossary.md"} {
 		if !strings.Contains(got, doc) {
 			t.Errorf("twin trigger missing twin doc name %q:\n%s", doc, got)
 		}

@@ -70,7 +70,7 @@ var openTwinStage func(stage, projectID, runID string, headless bool, agentOverr
 func init() {
 	openTwinStage = func(stage, projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 		switch stage {
-		case "vision", "architecture", "patterns", "operations", "roadmap", "glossary", "finalize":
+		case "vision", "architecture", "patterns", "operations", "glossary", "finalize":
 			if code := requireTwinRun("twin "+stage, projectID, runID, stderr); code != 0 {
 				return code
 			}
@@ -95,14 +95,14 @@ func init() {
 }
 
 // runTwinStageSession wraps runStageSession with the twin-specific
-// options the seven stages share: closed-schema wiki builder, no
+// options the six stages share: closed-schema wiki builder, no
 // sandbox (document-only), and SkipFinalize=true for every stage *but*
 // finalize. Finalize additionally wires the post-flight hygiene gate
 // (the engine refuses to seal the pass with leftover findings) and a
 // canvas skeleton.
 //
 // The pass-scoped kickoff context (events, hygiene findings, twin
-// feedback, idea backlog, history summary) is read off the canonical
+// feedback, history summary) is read off the canonical
 // bureaucracy root once per stage open and folded into the
 // InitialPrompt. Each stage sees the same payload — the design's "no
 // in-session iteration across docs, every stage reads the same
@@ -285,8 +285,8 @@ func finalizeStageGate(root string, md *run.Metadata) (bool, error) {
 }
 
 // reflectKickoffContext returns the per-stage kickoff payload: events,
-// history summary, twin feedback, hygiene findings, and the open idea
-// backlog (for roadmap). It is wired as the InitialPrompt / turn prompt
+// history summary, twin feedback, and hygiene findings. It is wired as
+// the InitialPrompt / turn prompt
 // (buildTwinStageKickoff → stageSessionOpts.InitialPrompt) — the first
 // user message the agent receives, distinct from the system prompt
 // (Request.Prompt) that stage_prompt.go assembles. Both ride on argv, so
@@ -307,10 +307,6 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 	if err != nil {
 		return "", fmt.Errorf("wiki: history summary: %w", err)
 	}
-	ideas, err := loadIdeaBacklog(root, projectID)
-	if err != nil {
-		return "", fmt.Errorf("wiki: ideas: %w", err)
-	}
 	feedback, err := loadTwinFeedback(root, projectID, cfg)
 	if err != nil {
 		return "", fmt.Errorf("wiki: feedback: %w", err)
@@ -324,9 +320,8 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 	b.WriteString("## Pass context\n\n")
 	b.WriteString("The blocks below are the same for every stage of this " +
 		"twin reflect pass. Read them once at vision and lean on them at " +
-		"each successor stage — the events list, the hygiene findings, " +
-		"the workflow feedback, and (for the roadmap stage) the open idea " +
-		"backlog all carry pass-scoped context.\n\n")
+		"each successor stage — the events list, the hygiene findings, and " +
+		"the workflow feedback all carry pass-scoped context.\n\n")
 
 	if !findings.IsEmpty() {
 		b.WriteString("### Hygiene findings\n\n")
@@ -352,25 +347,6 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 			body := strings.TrimSpace(fb.body)
 			if body == "" {
 				b.WriteString("(empty feedback file)\n\n")
-				continue
-			}
-			b.WriteString(body)
-			b.WriteString("\n\n")
-		}
-	}
-
-	b.WriteString("### Idea backlog\n\n")
-	if len(ideas) == 0 {
-		b.WriteString("(no open ideas captured for this project)\n\n")
-	} else {
-		b.WriteString("Open idea runs for this project. The roadmap stage " +
-			"folds these into the roadmap; earlier stages may reference " +
-			"them for context.\n\n")
-		for _, idea := range ideas {
-			fmt.Fprintf(&b, "#### %s\n\n", idea.slug)
-			body := strings.TrimSpace(idea.body)
-			if body == "" {
-				b.WriteString("(empty canvas)\n\n")
 				continue
 			}
 			b.WriteString(body)

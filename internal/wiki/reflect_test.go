@@ -212,11 +212,11 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	}
 }
 
-// reflectPromptSection now carries roadmap conventions and the
+// reflectPromptSection carries the glossary convention and the
 // hygiene-walk framing that used to live in PlanPromptSection /
 // LintPromptSection. Pin those so a future trim doesn't silently
 // drop them.
-func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
+func TestReflectPromptSectionCarriesConventionsAndHygiene(t *testing.T) {
 	got, err := reflectPromptSection(Config{
 		Mode:        Closed,
 		Name:        "twin",
@@ -231,11 +231,8 @@ func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
 	// runs of prose.
 	for _, want := range []string{
 		"Reflect pass (closed-schema)",
-		"Roadmap convention",
-		"Mid term",
-		"Long term",
-		"Directions",
-		"Parked",
+		"Glossary convention",
+		"Inclusion bar",
 		"Hygiene findings",
 		"refuses to seal",
 		"don't manufacture work",
@@ -247,6 +244,11 @@ func TestReflectPromptSectionCarriesRoadmapAndHygiene(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
 		}
+	}
+	// The roadmap convention is gone with the roadmap doc. Pin its
+	// absence so the dropped prose can't creep back in.
+	if strings.Contains(got, "Roadmap convention") {
+		t.Errorf("reflect prompt still carries the dropped roadmap convention:\n%s", got)
 	}
 }
 

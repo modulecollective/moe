@@ -329,7 +329,6 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"architecture.md",
 		"patterns.md",
 		"operations.md",
-		"roadmap.md",
 		"glossary.md",
 		"`moe twin claim`",
 		"`moe-bureaucracy`",

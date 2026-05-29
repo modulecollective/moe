@@ -11,7 +11,7 @@ worth recording for future runs. MoE keeps three places for this:
 
 - **The digital twin** (`digital-twin/<project>/`) records what a project *is*
   and *how it works* — vision, architecture, named patterns, operations,
-  roadmap, glossary. Code is the implementation; the twin is the intent. When
+  glossary. Code is the implementation; the twin is the intent. When
   the two disagree, the twin wins until someone updates it. Notes that would
   edit a twin doc go to twin feedback, below.
 - **Lore** (`lore/`) records portable operational facts that apply across
@@ -31,7 +31,7 @@ the first matching channel.
 
 If you notice something about the project that belongs in the digital
 twin — would acting on this note edit `digital-twin/<project>/`
-(architecture.md, vision.md, patterns.md, operations.md, roadmap.md)? —
+(architecture.md, vision.md, patterns.md, operations.md, glossary.md)? —
 append a note to:
 
   {{.TwinFeedback}}

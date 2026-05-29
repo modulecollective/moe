@@ -41,7 +41,7 @@ A term that appears in one doc stays in that doc.
 - **Read `digital-twin/<project>/glossary.md` first.** Note the
   existing entries.
 - **Walk the prior stages' canvases.** Vision, architecture,
-  patterns, operations, roadmap — every term those stages used
+  patterns, operations — every term those stages used
   load-bearingly is a glossary candidate. The prior canvases
   in this run are the freshest source.
 - **Promote new terms.** A term that hit the bar (2+ docs,
@@ -118,7 +118,7 @@ refuses an empty canvas.
 
 ## Before you start
 
-Skim all five prior stage canvases (vision → roadmap) for this
+Skim all four prior stage canvases (vision → operations) for this
 run. Glossary is downstream of the others by design — the
 sightings live in their canvases.
 

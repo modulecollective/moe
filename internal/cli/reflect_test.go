@@ -22,9 +22,9 @@ func writeWikiDoc(t *testing.T, dir, name, body string) error {
 
 // TestReflectKickoffContextRendersAllPassSections covers the
 // pass-scoped kickoff block every twin stage shares: hygiene findings
-// (when non-empty), workflow feedback, idea backlog, history summary,
-// events tail. Walks the assembly on real on-disk fixtures so the
-// markdown the agent ultimately sees gets exercised end-to-end.
+// (when non-empty), workflow feedback, history summary, events tail.
+// Walks the assembly on real on-disk fixtures so the markdown the
+// agent ultimately sees gets exercised end-to-end.
 func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 	root := newTestBureaucracy(t)
 	twinDir := wiki.TwinDir(root, "tele")
@@ -58,8 +58,6 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 		"## Pass context",
 		"### Workflow feedback",
 		"(no workflow feedback since the last reflect)",
-		"### Idea backlog",
-		"(no open ideas captured for this project)",
 		"### History summary",
 		// By-path pointer, not the body: the kickoff names the file and
 		// tells the agent to read it.
@@ -75,6 +73,11 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 	// the kickoff now.
 	if strings.Contains(got, "auth rewrite landed") {
 		t.Errorf("kickoff inlined the history-summary body; want a by-path pointer only:\n%s", got)
+	}
+	// The idea backlog block is gone with the roadmap stage — its only
+	// consumer. Pin its absence so a future re-add is a deliberate edit.
+	if strings.Contains(got, "### Idea backlog") {
+		t.Errorf("kickoff still renders the dropped idea-backlog section:\n%s", got)
 	}
 }
 
@@ -268,8 +271,7 @@ func TestTwinPriorStageWalksLadderForward(t *testing.T) {
 		{"architecture", "vision"},
 		{"patterns", "architecture"},
 		{"operations", "patterns"},
-		{"roadmap", "operations"},
-		{"glossary", "roadmap"},
+		{"glossary", "operations"},
 		{"finalize", "glossary"},
 		{"unknown", ""},
 	}

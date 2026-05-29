@@ -387,7 +387,7 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("twin !! cascade must ship via close: %+v", res)
 	}
-	wantSteps := []string{"vision", "architecture", "patterns", "operations", "roadmap", "glossary", "finalize", "close"}
+	wantSteps := []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize", "close"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
 	}
@@ -422,7 +422,7 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 	// Summary ends with the close step and the shipped marker.
-	wantSummary := "cascade moe/reflect-2026-05-17: vision ok · architecture ok · patterns ok · operations ok · roadmap ok · glossary ok · finalize ok · close ok — shipped"
+	wantSummary := "cascade moe/reflect-2026-05-17: vision ok · architecture ok · patterns ok · operations ok · glossary ok · finalize ok · close ok — shipped"
 	if got := renderCascadeSummary("moe/reflect-2026-05-17", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}

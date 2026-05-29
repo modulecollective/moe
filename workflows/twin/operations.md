@@ -26,7 +26,7 @@ If operations hasn't moved this pass, say so.
 ## What not to do
 
 - **Don't aspire.** Operations names what the project *does*, not
-  what you wish it did. Aspirational rituals belong in roadmap.
+  what you wish it did. Aspirational rituals don't belong here.
 - **Don't rewrite without a sighting.** A rewrite needs at least
   one recent event that justifies the new shape.
 - **Don't restate what another doc owns.** Operations owns the

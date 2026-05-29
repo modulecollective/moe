@@ -26,8 +26,7 @@ the canvas. A quiet pass is a valid pass.
 ## What not to do
 
 - **Don't speculate.** A future component that nobody is building
-  yet doesn't belong in architecture; that's the roadmap's
-  question.
+  yet doesn't belong in architecture.
 - **Don't rewrite decisions.** Updating a decision because the
   team *agrees* it changed is fine. Rewriting because *you* think
   it's wrong is a claim, not a reflect.

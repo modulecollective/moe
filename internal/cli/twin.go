@@ -12,7 +12,7 @@ import (
 //
 // `moe twin reflect <project>` is the operator-facing entry: it mints
 // a fresh `reflect-<timestamp>` run and dispatches the first stage of
-// the seven-stage ladder. Each managed doc gets its own stage canvas
+// the six-stage ladder. Each managed doc gets its own stage canvas
 // under `documents/<stage>/content.md`; finalize seals the pass with
 // hygiene cleanups, the history-summary fold, and the checkpoint bump.
 // The structural kinship with kb lives at the wiki layer (wiki.Config
@@ -22,12 +22,11 @@ import (
 // — it has no stage ladder and isn't part of the twin workflow DAG.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
-Six managed docs hold the durable layer: vision, architecture,
-patterns, operations, roadmap, and glossary. The doc set is fixed;
-reflect updates the contents based on observed events, folds the
-open idea backlog into the roadmap, and clears structural hygiene
-findings. Decided edits (vision pivots, architectural intent) are
-authored, recorded via claim, not derived.`
+Five managed docs hold the durable layer: vision, architecture,
+patterns, operations, and glossary. The doc set is fixed;
+reflect updates the contents based on observed events and clears
+structural hygiene findings. Decided edits (vision pivots,
+architectural intent) are authored, recorded via claim, not derived.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
 // project's twin gets. Names, titles, purposes, and per-doc reflect
@@ -73,16 +72,6 @@ var twinManagedDocs = []wiki.ManagedDoc{
 			"actually runs.",
 	},
 	{
-		Filename: "roadmap.md",
-		Title:    "Roadmap",
-		Purpose:  "What's next — prioritized intent across near, mid, long term, and parked.",
-		ReflectPrompt: "Flag drift between recent work and the stated " +
-			"roadmap: near-term items that look done, near-term lists " +
-			"recent work landed nothing on, long-term items now an open " +
-			"run, parked items the project is quietly doing anyway. Do " +
-			"not rewrite the roadmap — that's the plan verb's job.",
-	},
-	{
 		Filename: "glossary.md",
 		Title:    "Glossary",
 		Purpose:  "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
@@ -100,7 +89,7 @@ var twinManagedDocs = []wiki.ManagedDoc{
 
 // twinWikiBuilder is the (root, projectID) → *wiki.Config adapter
 // the twin facades call. Closed-schema; ManagedDocs is twin's fixed
-// six; AllowedPrimitives is empty (no split / merge / rename /
+// five; AllowedPrimitives is empty (no split / merge / rename /
 // retire on a closed-schema wiki).
 func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 	contentDir := filepath.Join(root, "projects", projectID, wiki.TwinDirRel)
@@ -118,30 +107,29 @@ func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 	return cfg, nil
 }
 
-// twinStageOrder is the canonical ladder for `moe twin reflect`. Six
+// twinStageOrder is the canonical ladder for `moe twin reflect`. Five
 // per-doc stages walk the managed docs in dependency order — vision /
 // architecture set the frame, patterns / operations encode conventions,
-// roadmap is planning, glossary is the index that cross-refs everything
-// — and finalize seals the pass (hygiene cleanups, history-summary
-// fold, checkpoint bump). Exported as a package-level slice so the
-// stage entry points and the dispatcher iterate one list.
+// glossary is the index that cross-refs everything — and finalize seals
+// the pass (hygiene cleanups, history-summary fold, checkpoint bump).
+// Exported as a package-level slice so the stage entry points and the
+// dispatcher iterate one list.
 var twinStageOrder = []string{
 	"vision",
 	"architecture",
 	"patterns",
 	"operations",
-	"roadmap",
 	"glossary",
 	"finalize",
 }
 
 func init() {
-	g := NewCommandGroup("twin", "digital-twin verbs: reflect, vision, architecture, patterns, operations, roadmap, glossary, finalize, claim, close")
+	g := NewCommandGroup("twin", "digital-twin verbs: reflect, vision, architecture, patterns, operations, glossary, finalize, claim, close")
 	// `moe twin reflect <project>` is the user-facing entry. It mints
 	// a fresh run and dispatches the first stage; the chain prompt
 	// drives the rest of the ladder.
 	g.Register(reflectCommand("twin", twinWikiBuilder))
-	// Per-stage entry points (six doc stages plus finalize). Each opens
+	// Per-stage entry points (five doc stages plus finalize). Each opens
 	// an interactive Claude Code session against the named stage's
 	// canvas; the dispatcher behind them (openTwinStage) routes the
 	// chain prompt's cascade driver (`!` / `!<stage>` / `!!` / `!!!`). Stage
@@ -166,11 +154,6 @@ func init() {
 		Name:    "operations",
 		Summary: "open a Claude Code session on the run's operations-stage canvas",
 		Run:     twinStageRun("operations"),
-	})
-	g.Register(&Command{
-		Name:    "roadmap",
-		Summary: "open a Claude Code session on the run's roadmap-stage canvas",
-		Run:     twinStageRun("roadmap"),
 	})
 	g.Register(&Command{
 		Name:    "glossary",
@@ -206,8 +189,7 @@ func init() {
 	w.RegisterStage("architecture", "vision")
 	w.RegisterStage("patterns", "architecture")
 	w.RegisterStage("operations", "patterns")
-	w.RegisterStage("roadmap", "operations")
-	w.RegisterStage("glossary", "roadmap")
+	w.RegisterStage("glossary", "operations")
 	w.RegisterStage("finalize", "glossary")
 	// Finalize is the working-stage equivalent of sdlc's test: anti-
 	// theater on the canvas (both `What I fixed` and `What I left`

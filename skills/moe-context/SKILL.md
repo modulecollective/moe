@@ -43,7 +43,7 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
 - `projects/<p>/runs/<slug>/followups.md` — deferred work each run
   noticed but didn't act on.
 - `projects/<p>/digital-twin/*.md` — the project's vision,
-  architecture, patterns, operations, roadmap, glossary. Your
+  architecture, patterns, operations, glossary. Your
   always-on stage prompt already points here; named again so you
   don't re-discover it.
 - `projects/<p>/knowledge/topics/` — the project's open-schema wiki.
