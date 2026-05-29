@@ -323,6 +323,36 @@ func TestFilteredEnvDropsAPIKey(t *testing.T) {
 	}
 }
 
+// TestFilteredEnvPinsNoEditor: every codex turn gets GIT_EDITOR=true and
+// GIT_SEQUENCE_EDITOR=true so an editor-spawning git op (rebase
+// --continue, commit with no -m) never hangs on vim in a no-TTY turn
+// (codex-rebase-weirdness). The pin must override an inherited
+// GIT_EDITOR — git reads the last occurrence, so the pin has to appear
+// after the inherited environment.
+func TestFilteredEnvPinsNoEditor(t *testing.T) {
+	t.Setenv("GIT_EDITOR", "vim")
+
+	got := filteredEnv(nil)
+
+	if !slices.Contains(got, "GIT_EDITOR=true") {
+		t.Errorf("GIT_EDITOR=true not pinned: %v", got)
+	}
+	if !slices.Contains(got, "GIT_SEQUENCE_EDITOR=true") {
+		t.Errorf("GIT_SEQUENCE_EDITOR=true not pinned: %v", got)
+	}
+	// The inherited GIT_EDITOR=vim is still present; the pin wins only by
+	// coming later. Assert the last GIT_EDITOR= entry is the pin.
+	last := ""
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "GIT_EDITOR=") {
+			last = kv
+		}
+	}
+	if last != "GIT_EDITOR=true" {
+		t.Errorf("inherited GIT_EDITOR must be overridden by the pin; last GIT_EDITOR entry = %q", last)
+	}
+}
+
 // TestFilteredEnvEmptyExtra: filter still runs with nil ExtraEnv, so
 // an inherited OPENAI_API_KEY is scrubbed on a no-extras spawn (the
 // case the old `if len(ExtraEnv) > 0` gate missed).

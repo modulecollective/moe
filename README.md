@@ -160,7 +160,13 @@ If you use the `codex` backend interactively, add this profile to
 
 MoE selects it with `-c default_permissions=workspace-git`. Without the profile,
 interactive Codex sessions can fail when Git needs to write
-`<clone>/.git/index.lock`. Headless Codex and Claude are unaffected.
+`<clone>/.git/index.lock`.
+
+Separately, MoE pins `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true` for every
+Codex turn (interactive and headless): Codex never has a TTY for an editor, so a
+Git operation that would open one — `git rebase --continue` finalizing a rebase,
+`git commit` with no `-m` — otherwise hangs on vim and can leave a clone wedged
+mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 
 ## Ways To Use MoE
 

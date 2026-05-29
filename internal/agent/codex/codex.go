@@ -66,12 +66,31 @@ var scrubbedKeys = []string{
 	"OPENAI_API_KEY",
 }
 
+// noEditorEnv pins git's editors to `true` (the no-op shell builtin
+// that exits 0) for every codex subprocess. Without it, git falls back
+// to vim for the rare editor-spawning operation — `git rebase
+// --continue` finalizing a rebase, `git commit` with no `-m`, an
+// interactive-rebase todo list — and vim hangs with no TTY in a
+// headless turn, leaving the clone wedged mid-rebase with the
+// resolution staged-but-uncommitted (run codex-rebase-weirdness). With
+// `true`, git proceeds non-interactively using the preserved/default
+// message, so the agent's bare `git rebase --continue` finalizes the
+// step. Applied to interactive and headless turns alike: the operator
+// decision is that MoE-managed codex never pops an editor.
+var noEditorEnv = []string{
+	"GIT_EDITOR=true",
+	"GIT_SEQUENCE_EDITOR=true",
+}
+
 // filteredEnv returns os.Environ() with scrubbedKeys removed, then
-// appends extra. Same shape as the claude backend's helper; kept
-// per-package so the drop list lives next to the backend that owns it.
+// appends the no-editor pins and extra. Same shape as the claude
+// backend's helper; kept per-package so the drop list lives next to
+// the backend that owns it. noEditorEnv is appended after the
+// inherited environment so it overrides any inherited GIT_EDITOR;
+// extra (the caller's ExtraEnv) stays last so dev-env vars win.
 func filteredEnv(extra []string) []string {
 	src := os.Environ()
-	out := make([]string, 0, len(src)+len(extra))
+	out := make([]string, 0, len(src)+len(noEditorEnv)+len(extra))
 	for _, kv := range src {
 		drop := false
 		for _, k := range scrubbedKeys {
@@ -85,6 +104,7 @@ func filteredEnv(extra []string) []string {
 		}
 		out = append(out, kv)
 	}
+	out = append(out, noEditorEnv...)
 	return append(out, extra...)
 }
 
