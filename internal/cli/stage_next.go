@@ -547,11 +547,21 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	switch answer {
-	case "m", "!!", "!!!":
+	case "m":
+		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		return maybeOfferChoreChain(root, md, choreChainOffer, stdout, stderr)
+	case "!!", "!!!":
 		// `!!` and `!!!` at the push gate both ship the same way `m`
-		// does — the driven-vs-headless distinction is moot when there
-		// are no stages left to walk before the ship.
-		return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+		// does, but keep the cascade no-prompt rule: report triggered
+		// chores without opening or chaining them.
+		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		return maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
@@ -797,6 +807,10 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 				return res, ship
 			}
 			res.shipped = true
+			root, rootErr := findRoot(stderr)
+			if rootErr == nil {
+				maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+			}
 			// Chain ride: after the parent's terminal stage ships, if a
 			// live chain edge points at an unresolved child, cascade
 			// into it in the same mode. Recursive by construction —

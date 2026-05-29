@@ -148,10 +148,18 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
+	md, code := openDueChore(root, projectID, choreName, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+	return promptNextStage(root, md, "", stdout, stderr)
+}
+
+func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (*run.Metadata, int) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, 1
 	}
 	var state *chore.State
 	for i := range states {
@@ -162,29 +170,29 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	}
 	if state == nil {
 		moePrintf(stderr, "chore open: %s/%s not found\n", projectID, choreName)
-		return 1
+		return nil, 1
 	}
 	if state.OpenRun != "" {
 		moePrintf(stderr, "chore open: %s already has open run %s/%s\n", state.Definition.Key(), projectID, state.OpenRun)
-		return 1
+		return nil, 1
 	}
 	if state.CooldownBlocking {
 		moePrintf(stderr, "chore open: %s is cooling down until %s\n", state.Definition.Key(), state.NextEligible.Format(time.RFC3339))
-		return 1
+		return nil, 1
 	}
 	if !state.Due {
 		moePrintf(stderr, "chore open: %s is not due\n", state.Definition.Key())
-		return 1
+		return nil, 1
 	}
 	wf, err := LookupWorkflow(state.Definition.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, 1
 	}
 	stages := wf.Stages()
 	if len(stages) == 0 {
 		moePrintf(stderr, "chore open: workflow %q has no stages\n", state.Definition.Workflow)
-		return 1
+		return nil, 1
 	}
 	prompt := state.Definition.Prompt
 	if strings.TrimSpace(prompt) == "" {
@@ -206,10 +214,10 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, 1
 	}
 	moePrintf(stdout, "opened chore %s as %s/%s\n", state.Definition.Key(), md.Project, md.ID)
-	return promptNextStage(root, md, "", stdout, stderr)
+	return md, 0
 }
 
 func gatherChoreStates(root, projectFilter string) ([]chore.State, error) {
