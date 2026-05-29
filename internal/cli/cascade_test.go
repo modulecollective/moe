@@ -56,6 +56,17 @@ func TestRenderCascadeSummaryShapes(t *testing.T) {
 			want: "cascade moe/run: code ok · test failed (exit 2) — stopped",
 		},
 		{
+			// An operator Ctrl-C reads as "interrupted", not
+			// "failed (exit 130)" — distinct from a stage barf, and the
+			// trailing "— stopped" still fires because the cascade halted.
+			name: "interrupted-stopped",
+			res: cascadeResult{ran: []cascadeStepResult{
+				{stage: "code", code: 0},
+				{stage: "test", code: exitInterrupted},
+			}},
+			want: "cascade moe/run: code ok · test interrupted — stopped",
+		},
+		{
 			name: "empty-no-summary",
 			res:  cascadeResult{},
 			want: "",
@@ -518,6 +529,37 @@ func TestCascadeFromGateStopsOnFailure(t *testing.T) {
 	}
 	if got := countInvocations(*captured, "test"); got != 0 {
 		t.Fatalf("test must not dispatch after code failed: got %d invocations", got)
+	}
+}
+
+// TestCascadeFromGateStopsOnInterrupt: an operator Ctrl-C during a
+// cascaded stage (the stage exits exitInterrupted) stops the cascade
+// like any non-zero exit, but the summary reads "interrupted", and the
+// code propagates as exitInterrupted so the caller (dispatchCascade)
+// can tell stop-the-chain from a stage failure. Stages downstream of
+// the interrupt never dispatch.
+func TestCascadeFromGateStopsOnInterrupt(t *testing.T) {
+	captured := stubOpenSdlcStage(t, map[string]int{"test": exitInterrupted})
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	if code != exitInterrupted {
+		t.Fatalf("cascade exit=%d, want %d (exitInterrupted); stderr=%q", code, exitInterrupted, stderr.String())
+	}
+	if res.shipped {
+		t.Fatalf("an interrupted cascade must not mark shipped: %+v", res)
+	}
+	wantRan := []cascadeStepResult{{stage: "code", code: 0}, {stage: "test", code: exitInterrupted}}
+	if len(res.ran) != len(wantRan) || res.ran[1].code != exitInterrupted {
+		t.Fatalf("ran = %+v, want code ok then test interrupted", res.ran)
+	}
+	// push never dispatched — the cascade stopped at the interrupted test.
+	if got := countInvocations(*captured, "push"); got != 0 {
+		t.Fatalf("push must not dispatch after an interrupt: got %d", got)
+	}
+	if got := renderCascadeSummary("tele/fix-it", res); got != "cascade tele/fix-it: code ok · test interrupted — stopped" {
+		t.Fatalf("summary = %q, want interrupted shape", got)
 	}
 }
 

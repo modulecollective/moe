@@ -1070,6 +1070,16 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	return sess, closeSess, nil
 }
 
+// exitInterrupted is the exit code reportWikiSessionExit mints when the
+// turn was cut short by an operator Ctrl-C (runErr is
+// agent.ErrInterrupted) rather than a genuine stage failure. 130 is the
+// conventional 128+SIGINT — distinct from the bare 1 a failed turn
+// returns, so the cascade decision points (cascadeFromGate,
+// maybeRideChain, dispatchCascade) can tell "operator interrupted a good
+// turn" from "the stage failed" and hard-stop the chain instead of
+// reacting as if a stage barfed.
+const exitInterrupted = 130
+
 // reportWikiSessionExit prints the closing per-turn messages and
 // returns the exit code for runWikiSession. It is the one place that
 // decides how the possible failures (claude run, gate, commit, close,
@@ -1080,6 +1090,12 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 // let the operator move on without noticing. Gate failure means we
 // deliberately skipped both finalize and commit; the gate's own
 // stderr block carries the explanation.
+//
+// An operator Ctrl-C is the one runErr that exits 130 (exitInterrupted)
+// rather than 1: the turn's commit is kept (the work is on disk, and
+// push is already suppressed upstream because okToPush gates on
+// runErr == nil), but the distinct code lets the cascade halt the whole
+// chain instead of mistaking the interrupt for a failed stage.
 func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr, gateErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
 		// in.Agent is populated by runWikiSession after agent resolution.
@@ -1109,6 +1125,14 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		return 1
 	}
 	if runErr != nil || finalizeErr != nil || gateErr != nil {
+		// An operator Ctrl-C during the turn is a stop, not a failure:
+		// surface it as exitInterrupted so the cascade halts the chain
+		// rather than reacting as if the stage barfed. finalizeErr /
+		// gateErr collateral of an interrupted turn rides under the same
+		// code — the interrupt is the dominant intent.
+		if errors.Is(runErr, agent.ErrInterrupted) {
+			return exitInterrupted
+		}
 		return 1
 	}
 	return 0

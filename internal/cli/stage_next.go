@@ -853,8 +853,14 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 				// into it in the same mode. Recursive by construction —
 				// the child's cascadeFromGate reaches its own push (sdlc)
 				// or auto-close (non-sdlc) and re-fires this hook on its
-				// own outgoing edge.
-				maybeRideChain(md, driven, stdout, stderr)
+				// own outgoing edge. An operator Ctrl-C inside the ride
+				// propagates back as exitInterrupted: stop the whole chain
+				// now rather than returning to a re-prompt. The parent has
+				// already shipped — res records that honestly — but the
+				// abort code halts everything above it.
+				if rideCode := maybeRideChain(md, driven, stdout, stderr); rideCode == exitInterrupted {
+					return res, rideCode
+				}
 				break
 			}
 			continue
@@ -877,8 +883,11 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 		// design, the ride sits between "all real stages committed"
 		// and the terminal action. For sdlc the analogous slot is
 		// "after push success" in the loop above; this branch is the
-		// non-sdlc analogue.
-		maybeRideChain(md, driven, stdout, stderr)
+		// non-sdlc analogue. A Ctrl-C inside the ride halts the chain
+		// before the auto-close, same as the sdlc push branch.
+		if rideCode := maybeRideChain(md, driven, stdout, stderr); rideCode == exitInterrupted {
+			return res, rideCode
+		}
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
 			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
@@ -900,66 +909,73 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 // this hook on its own outgoing edge, so `!!!` rides the whole chain
 // in one shot.
 //
-// Best-effort: every failure mode (missing index, malformed child key,
-// terminal child, child missing from disk) is silently a no-op except
-// where it's worth a stderr line (a child cascade exits non-zero, or
-// the index can't be built). The parent's cascade outcome is the
-// authoritative one — a chain ride that goes sideways must not
-// retroactively mark the parent's ship as failed.
+// Returns the exit code the parent should propagate: 0 for "carry on"
+// (the common case) and exitInterrupted when the child ride was cut
+// short by an operator Ctrl-C. An interrupt is the one child-ride
+// outcome that halts the parent — the operator asked to stop the whole
+// cascade, not just the child — so the caller returns it up the stack.
+// Every other failure stays swallowed (returns 0): the parent's cascade
+// outcome is the authoritative one, and a child ride that goes sideways
+// must not retroactively mark the parent's ship as failed.
+//
+// Best-effort otherwise: every no-op mode (missing index, malformed
+// child key, terminal child, child missing from disk) returns 0
+// silently except where it's worth a stderr line (the index can't be
+// built, or a non-interrupt child cascade exits non-zero).
 //
 // findRoot is re-derived here so the helper's signature stays a
 // drop-in at any cascade seam; the cost is one extra git rev-parse
 // per terminal stage in a chain, which is rounding error next to the
 // stage dispatch itself.
-func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Writer) {
+func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
-		return
+		return 0
 	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		moePrintf(stderr, "chain ride: build index: %v\n", err)
-		return
+		return 0
 	}
 	parentKey := parentMD.Project + "/" + parentMD.ID
 	childKey := idx.ChainedChild[parentKey]
 	if childKey == "" {
-		return
+		return 0
 	}
 	childProj, childID, err := splitProjectRun(childKey)
 	if err != nil {
 		moePrintf(stderr, "chain ride: malformed child key %q: %v\n", childKey, err)
-		return
+		return 0
 	}
 	childMD, err := run.Load(root, childProj, childID)
 	if err != nil {
 		// Trailer references a child that doesn't exist on disk
 		// (race with delete, or a typo from a hand-edited file).
 		// Quiet skip — surfacing it on every ride would spam.
-		return
+		return 0
 	}
 	switch childMD.Status {
 	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
 		// Decision 1: terminal children skipped at the chain prompt.
 		// StatusPushed too — there's no stage left for the cascade
 		// to drive, only a human-owed merge click.
-		return
+		return 0
 	}
 	wf, err := LookupWorkflow(childMD.Workflow)
 	if err != nil {
 		moePrintf(stderr, "chain ride: %v\n", err)
-		return
+		return 0
 	}
 	nextStage, kind, err := wf.Next(root, childMD)
 	if err != nil {
 		moePrintf(stderr, "chain ride: next stage: %v\n", err)
-		return
+		return 0
 	}
 	if kind != NextKindStage || nextStage == "" {
 		// Nothing pending — done-but-not-closed runs surface a
 		// `· close?` hint in the dash already; chain ride does not
 		// auto-close someone else's parked run.
-		return
+		return 0
 	}
 	mode := "headless"
 	if driven {
@@ -970,9 +986,16 @@ func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Write
 	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}
+	if childCode == exitInterrupted {
+		// Propagate the stop: the child summary already read
+		// "… interrupted — stopped"; the parent halts on the same code
+		// instead of swallowing it and riding onward.
+		return exitInterrupted
+	}
 	if childCode != 0 {
 		moePrintf(stderr, "chain ride into %s exited %d\n", childKey, childCode)
 	}
+	return 0
 }
 
 // renderCascadeSummary formats the single-line summary printed after
@@ -988,6 +1011,7 @@ func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Write
 //	cascade moe/run: code failed (exit 1) — stopped
 //	cascade moe/run: code ok · test ok · push ok — shipped
 //	cascade moe/run: code ok · test failed (exit 2) — stopped
+//	cascade moe/run: code ok · test interrupted — stopped
 //	cascade moe/run: code ok · test ok · push deferred to recovery (rebase conflict) — stopped
 //	cascade moe/run: code ok · test ok · push deferred to recovery (pre-push hook) — stopped
 func renderCascadeSummary(runKey string, res cascadeResult) string {
@@ -999,6 +1023,13 @@ func renderCascadeSummary(runKey string, res cascadeResult) string {
 		switch {
 		case r.deferred != "":
 			parts = append(parts, fmt.Sprintf("%s deferred to recovery (%s)", r.stage, deferredLabel(r.deferred)))
+		case r.code == exitInterrupted:
+			// An operator Ctrl-C, not a stage failure — read it as
+			// "interrupted" so the summary doesn't libel a clean,
+			// cut-short turn as a barf. The trailing "— stopped" clause
+			// still fires below (code != 0), which is correct: the
+			// cascade did stop here.
+			parts = append(parts, fmt.Sprintf("%s interrupted", r.stage))
 		case r.code != 0:
 			parts = append(parts, fmt.Sprintf("%s failed (exit %d)", r.stage, r.code))
 		default:

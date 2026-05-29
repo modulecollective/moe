@@ -289,6 +289,116 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	}
 }
 
+// TestCascadeFromGateRideInterruptHaltsParent is the verified-incident
+// regression: an operator Ctrl-C inside a chain-ridden child halts the
+// whole cascade instead of being swallowed. The parent ships, rides into
+// the child, the child's first stage (design) is interrupted
+// (exitInterrupted), and that code propagates back through maybeRideChain
+// so the parent cascade returns exitInterrupted — no further child stages
+// dispatch, no re-prompt. res.shipped stays true because the parent
+// genuinely did ship before the ride; the abort code halts everything
+// above it.
+func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "parent-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/parent-run tele/child-run\n")
+
+	t.Chdir(root)
+	// The child starts at design; interrupt it there. Parent starts at
+	// code, so design only ever fires for the child — the parent's own
+	// walk (code, test) is unaffected.
+	openCaptured := stubOpenSdlcStage(t, map[string]int{"design": exitInterrupted})
+	pushCaptured := stubPushFromCascade(t, 0, nil)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	if code != exitInterrupted {
+		t.Fatalf("cascade exit=%d, want %d (interrupt propagates from the ride); stderr=%q", code, exitInterrupted, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("parent shipped before the ride; res.shipped must stay true: %+v", res)
+	}
+	// Parent: code, test, push (ship). Child: design only — interrupted
+	// there, so the child's code/test never dispatch.
+	wantStages := []string{"code", "test", "design"}
+	gotStages := make([]string, 0, len(*openCaptured))
+	for _, inv := range *openCaptured {
+		gotStages = append(gotStages, inv.stage)
+	}
+	if !reflect.DeepEqual(gotStages, wantStages) {
+		t.Fatalf("openSdlcStage stages = %v, want %v (interrupt stops the child walk)\nstdout=%q", gotStages, wantStages, stdout.String())
+	}
+	// Parent shipped exactly once; the child never reached its push.
+	if got := len(*pushCaptured); got != 1 {
+		t.Fatalf("pushFromCascade dispatched %d times, want 1 (parent only; child interrupted before its push)", got)
+	}
+	// The operator sees the child's interrupted summary.
+	if !strings.Contains(stdout.String(), "design interrupted — stopped") {
+		t.Errorf("expected child interrupted summary in stdout, got:\n%s", stdout.String())
+	}
+}
+
+// TestCascadeFromGateRideOrdinaryFailureStillSwallowed is the contract's
+// other half: an ordinary (non-interrupt) child-cascade failure stays
+// best-effort swallowed — the parent's ship is authoritative and a
+// sideways child must not retroactively fail it. Only Ctrl-C halts the
+// parent. Mirror of the interrupt test with a bare exit 1 in the child.
+func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "parent-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/parent-run tele/child-run\n")
+
+	t.Chdir(root)
+	openCaptured := stubOpenSdlcStage(t, map[string]int{"design": 1})
+	stubPushFromCascade(t, 0, nil)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d, want 0 (ordinary child failure stays swallowed); stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("parent cascade must still ship: %+v", res)
+	}
+	// Child interrupted-free failure: design dispatched, code/test did not.
+	wantStages := []string{"code", "test", "design"}
+	gotStages := make([]string, 0, len(*openCaptured))
+	for _, inv := range *openCaptured {
+		gotStages = append(gotStages, inv.stage)
+	}
+	if !reflect.DeepEqual(gotStages, wantStages) {
+		t.Fatalf("openSdlcStage stages = %v, want %v", gotStages, wantStages)
+	}
+	// The swallow is logged on stderr (not propagated as the parent's code).
+	if !strings.Contains(stderr.String(), "chain ride into tele/child-run exited 1") {
+		t.Errorf("expected swallowed-failure stderr line, got:\n%s", stderr.String())
+	}
+}
+
 // TestCascadeFromGateSkipsRideWhenChildTerminal pins Decision 1:
 // the chain ride filters terminal children at read time, so a
 // trailer that points at a closed/merged/promoted run does not

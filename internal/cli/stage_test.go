@@ -11,6 +11,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -882,6 +883,36 @@ func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
 				t.Errorf("codex run still surfaced as 'claude exited:': %q", stderr.String())
 			}
 		})
+	}
+}
+
+// TestReportWikiSessionExitInterruptedReturns130 pins the interrupt
+// classification: an operator Ctrl-C surfaces as agent.ErrInterrupted in
+// runErr, and reportWikiSessionExit must exit 130 (exitInterrupted), not
+// the bare 1 a failed turn returns — that distinct code is what lets the
+// cascade halt the chain instead of mistaking the interrupt for a stage
+// failure. The turn's commit is kept (commitErr nil here), so the
+// "committed turn" line still prints: the work is on disk, push is
+// suppressed upstream, the run stays at its stage.
+func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "test", Agent: "claude"}
+	var stdout, stderr bytes.Buffer
+	// Wrap the sentinel to prove errors.Is, not ==, is the check —
+	// runErr threads through several layers before reaching here.
+	runErr := fmt.Errorf("execute turn: %w", agent.ErrInterrupted)
+	code := reportWikiSessionExit(in, runErr, nil, nil, nil, nil, &stdout, &stderr)
+	if code != exitInterrupted {
+		t.Errorf("exit code = %d, want %d (exitInterrupted) on operator Ctrl-C", code, exitInterrupted)
+	}
+	if !strings.Contains(stdout.String(), "committed test turn for moe/r") {
+		t.Errorf("interrupted turn must keep its commit; stdout missing committed-turn line: %q", stdout.String())
+	}
+	// A genuine non-interrupt failure must still be the bare 1 — the
+	// negative control so the test can't pass against a function that
+	// always returns 130.
+	plain := reportWikiSessionExit(in, errors.New("turn.failed"), nil, nil, nil, nil, &stdout, &stderr)
+	if plain != 1 {
+		t.Errorf("exit code = %d, want 1 on an ordinary run failure", plain)
 	}
 }
 
