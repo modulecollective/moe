@@ -801,84 +801,17 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		stage := stages[i]
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
-			// `!!` / `!!!` at push ships via the merge path. runPushTyped
-			// owns synthesis before the shared ship gate, so the cascade
-			// drives the ship through the one typed push entry — no
-			// separate synthesis call.
-			//
-			// Call runPushTyped via pushFromCascade (bypassing
-			// g.Lookup("push")) so the deferred-to-recovery signal —
-			// when push's pre-push gate hands off to a fresh code
-			// session — comes back as a typed *PushDeferredError. The
-			// command-group indirection used by !<stage> cascades
-			// discards that error to preserve the Command.Run
-			// contract; only this path needs it. Without the typed
-			// channel, a recovery session that exits 0 would look
-			// identical to a real ship and the cascade summary would
-			// claim "shipped" when nothing was pushed.
-			// Headless (`!!!`) push earns one push retry after a clean
-			// recovery: when the pre-push gate hands off to a headless
-			// one-shot code session and that session resolves cleanly
-			// (exit 0, commit made), re-run the gate against the new
-			// commit. A resolved rebase fast-forwards on the retry; a
-			// fixed hook passes. Driven (`!!`) recovery is interactive —
-			// the operator picks up at the chain prompt, so retrying
-			// would race the human. retries bounds the loop at one: if
-			// the retry still defers, the fix didn't stick — stop with
-			// the deferred marker and let the operator look.
-			retries := 0
-			for {
-				ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
-					HeadlessRecovery: true,
-				}, stdout, stderr)
-				var deferred *PushDeferredError
-				if errors.As(err, &deferred) {
-					// Record the deferred step even when a retry will
-					// follow: a recover-then-ship reads honestly as two
-					// steps (`push deferred to recovery (…) · push ok`).
-					res.ran = append(res.ran, cascadeStepResult{
-						stage:    stage,
-						code:     ship,
-						deferred: deferred.Recovery,
-					})
-					// Stop when: the recovery session gave up (non-zero
-					// exit), or the one retry is already spent. The
-					// deferred marker keeps the summary honest — this
-					// was not a ship.
-					if ship != 0 || retries >= 1 {
-						return res, ship
-					}
-					// Headless clean recovery: the agent committed a
-					// fix. Re-run the pre-push gate once against it.
-					retries++
-					continue
-				}
-				res.ran = append(res.ran, cascadeStepResult{stage: stage, code: ship})
-				if ship != 0 {
-					return res, ship
-				}
-				res.shipped = true
-				root, rootErr := findRoot(stderr)
-				if rootErr == nil {
-					maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
-				}
-				// Chain ride (`!!!` only): after the parent's terminal
-				// stage ships, if a live chain edge points at an
-				// unresolved child, cascade into it. `!!` stops here —
-				// rideChain is the gate. Recursive by construction — the
-				// child's cascadeFromGate reaches its own push (sdlc) or
-				// auto-close (non-sdlc) and re-fires this hook on its own
-				// outgoing edge. An operator Ctrl-C inside the ride
-				// propagates back as exitInterrupted: stop the whole chain
-				// now rather than returning to a re-prompt. The parent has
-				// already shipped — res records that honestly — but the
-				// abort code halts everything above it.
-				if rideChain {
-					if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
-						return res, rideCode
-					}
-				}
-				break
+			// The sdlc terminal ship — merge-path push, its bounded
+			// retry-after-recovery loop, and (for `!!!`) the chain ride —
+			// lives in cascadeShipStep so this loop body reads uniformly.
+			// shipped is false for any deferred-stop or push failure;
+			// code carries the exit to propagate. Return early unless the
+			// ship completed cleanly.
+			steps, shipped, code := cascadeShipStep(md.Workflow, md, rideChain, stdout, stderr)
+			res.ran = append(res.ran, steps...)
+			res.shipped = res.shipped || shipped
+			if code != 0 || !shipped {
+				return res, code
 			}
 			continue
 		}
@@ -919,6 +852,93 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		}
 	}
 	return res, 0
+}
+
+// cascadeShipStep runs the sdlc terminal ship for a `!!` / `!!!` cascade:
+// the merge-path push, its bounded retry-after-recovery loop, and (for
+// `!!!`) the chain ride into the next live child. It owns the slice of
+// cascadeFromGate the recent headless bugs lived in, so the stage loop
+// above reads uniformly — dispatch each stage; the terminal ship is one
+// call.
+//
+// `!!` / `!!!` at push ship via the merge path. runPushTyped owns
+// synthesis before the shared ship gate, so the cascade drives the ship
+// through the one typed push entry — no separate synthesis call. The push
+// goes through pushFromCascade (bypassing g.Lookup("push")) so the
+// deferred-to-recovery signal — when push's pre-push gate hands off to a
+// fresh code session — comes back as a typed *PushDeferredError. The
+// command-group indirection used by !<stage> cascades discards that error
+// to preserve the Command.Run contract; only this path needs it. Without
+// the typed channel, a recovery session that exits 0 would look identical
+// to a real ship and the cascade summary would claim "shipped" when
+// nothing was pushed.
+//
+// Headless (`!!!`) push earns one push retry after a clean recovery: when
+// the pre-push gate hands off to a headless one-shot code session and
+// that session resolves cleanly (exit 0, commit made), re-run the gate
+// against the new commit. A resolved rebase fast-forwards on the retry; a
+// fixed hook passes. Driven (`!!`) recovery is interactive — the operator
+// picks up at the chain prompt, so retrying would race the human. retries
+// bounds the loop at one: if the retry still defers, the fix didn't stick
+// — stop with the deferred marker and let the operator look.
+//
+// Returns the dispatched step(s), whether the ship completed (false for
+// any deferred-stop or push failure, true only for a real ship), and the
+// exit code the cascade should propagate. The caller appends the steps,
+// ORs shipped into its result, and returns early unless shipped is true
+// and code is 0.
+func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, stderr io.Writer) (steps []cascadeStepResult, shipped bool, code int) {
+	retries := 0
+	for {
+		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
+			HeadlessRecovery: true,
+		}, stdout, stderr)
+		var deferred *PushDeferredError
+		if errors.As(err, &deferred) {
+			// Record the deferred step even when a retry will follow: a
+			// recover-then-ship reads honestly as two steps (`push
+			// deferred to recovery (…) · push ok`).
+			steps = append(steps, cascadeStepResult{
+				stage:    "push",
+				code:     ship,
+				deferred: deferred.Recovery,
+			})
+			// Stop when: the recovery session gave up (non-zero exit), or
+			// the one retry is already spent. The deferred marker keeps
+			// the summary honest — this was not a ship.
+			if ship != 0 || retries >= 1 {
+				return steps, false, ship
+			}
+			// Headless clean recovery: the agent committed a fix. Re-run
+			// the pre-push gate once against it.
+			retries++
+			continue
+		}
+		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
+		if ship != 0 {
+			return steps, false, ship
+		}
+		root, rootErr := findRoot(stderr)
+		if rootErr == nil {
+			maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+		}
+		// Chain ride (`!!!` only): after the parent's terminal stage
+		// ships, if a live chain edge points at an unresolved child,
+		// cascade into it. `!!` stops here — rideChain is the gate.
+		// Recursive by construction — the child's cascadeFromGate reaches
+		// its own push (sdlc) or auto-close (non-sdlc) and re-fires this
+		// hook on its own outgoing edge. An operator Ctrl-C inside the
+		// ride propagates back as exitInterrupted: stop the whole chain
+		// now rather than returning to a re-prompt. The parent has already
+		// shipped — steps records that honestly — but the abort code halts
+		// everything above it.
+		if rideChain {
+			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
+				return steps, true, rideCode
+			}
+		}
+		return steps, true, 0
+	}
 }
 
 // maybeRideChain dispatches the parent's chained child at the end of a
