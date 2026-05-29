@@ -310,12 +310,20 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	showAll := r.URL.Query().Get("all") != ""
+	routeStart := time.Now()
 	rows, projectCount, activeProjects, err := s.opts.GatherDash(showAll)
 	if err != nil {
 		s.logf("dash gather: %v", err)
 		http.Error(w, "dash error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	gatherDur := time.Since(routeStart)
+	// vm timing covers newDashVM — the factory-art frame build that's
+	// the standing "is the animation slow?" suspect. The gather path
+	// logs its own segment line (scan/journal/…); this line carries
+	// what the gather can't see (frame build, template render) so the
+	// suspect can be ruled in or out from the same serve log.
+	vmStart := time.Now()
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
@@ -330,7 +338,14 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	vmDur := time.Since(vmStart)
+	renderStart := time.Now()
 	s.render(w, r, "dash.html", vm)
+	s.logf("serve-timing route=/ total=%s gather=%s vm=%s render=%s",
+		time.Since(routeStart).Round(time.Microsecond),
+		gatherDur.Round(time.Microsecond),
+		vmDur.Round(time.Microsecond),
+		time.Since(renderStart).Round(time.Microsecond))
 }
 
 // render runs a named template with data and surfaces template
