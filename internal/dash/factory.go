@@ -115,6 +115,23 @@ func BuildFactoryArt(state FactoryState, width int, r *rand.Rand) []string {
 	return []string{padRight(top, width), padRight(base, width), padRight(rail, width)}
 }
 
+// BuildFactoryFrames renders n successive factory-art frames against
+// the same RNG. Each BuildFactoryArt call advances r, so consecutive
+// frames differ wherever the art is randomised — today that's the two
+// smoke rows; the rail is deterministic from state, so it holds steady
+// across frames. The helper makes no "only smoke moves" assumption: the
+// day the rail gets its own RNG, these frames animate it too.
+//
+// An empty state yields n identical one-line frames; the client cycle
+// over them is a harmless visual no-op.
+func BuildFactoryFrames(state FactoryState, width, n int, r *rand.Rand) [][]string {
+	frames := make([][]string, n)
+	for i := range frames {
+		frames[i] = BuildFactoryArt(state, width, r)
+	}
+	return frames
+}
+
 func emptyArt(width int) string {
 	pairs := width / 2
 	if pairs < 1 {
