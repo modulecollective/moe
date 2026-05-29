@@ -56,10 +56,10 @@ func runChoresCode(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "chores code: %v\n", err)
 		return 2
 	}
-	return openChoresCode(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openChoresCode(projectID, runID, false, *agentOverride, stdout, stderr)
 }
 
-func openChoresCode(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
+func openChoresCode(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	if code := requireRun("chores code", projectID, runID, stderr); code != 0 {
 		return code
 	}
@@ -67,7 +67,6 @@ func openChoresCode(projectID, runID string, headless, suppressNextStage bool, a
 		NeedsSandbox:    false,
 		InitialPrompt:   "Read the canvas and the project's chores/ directory. Edit definitions under projects/<project>/chores/<name>/ and use `moe chore check` as the dry-run loop.",
 		Headless:        headless,
-		SkipNextStage:   suppressNextStage,
 		Agent:           agentOverride,
 		ExtraStagePaths: choresStageDir,
 	}, stdout, stderr)

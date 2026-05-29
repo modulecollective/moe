@@ -14,22 +14,22 @@ import "io"
 // terminal-close prompt and `!!` / `!!!` auto-close land for hooks too: every
 // workflow with a close command now follows exactly one rule for "what
 // happens after the last stage commits."
-var openHooksStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
+var openHooksStage func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 func init() {
-	openHooksStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openHooksStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 		// Cascade entry: no per-call --agent override. The run's
 		// persisted agent (from run.json) takes over inside
 		// runStageSession, matching openSdlcStage one workflow over.
 		switch stage {
 		case hooksCodeDoc:
-			return openHooksCode(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
+			return openHooksCode(projectID, runID, headless, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "hooks: openHooksStage: unknown stage %q\n", stage)
 			return 1
 		}
 	}
-	registerCascadeDispatcher(hooksWorkflow, func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openHooksStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
+	registerCascadeDispatcher(hooksWorkflow, func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+		return openHooksStage(stage, projectID, runID, headless, stdout, stderr)
 	})
 }

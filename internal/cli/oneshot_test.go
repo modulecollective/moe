@@ -119,7 +119,7 @@ exit 0
 	}
 	out.Reset()
 	errb.Reset()
-	if code := openSdlcDesign("tele", "per-stage-design", true, false, "", &out, &errb); code != 0 {
+	if code := openSdlcDesign("tele", "per-stage-design", true, "", &out, &errb); code != 0 {
 		t.Fatalf("openSdlcDesign headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
@@ -170,7 +170,7 @@ func TestRunCodeOneShot(t *testing.T) {
 	// something to work against.
 	out.Reset()
 	errb.Reset()
-	if code := openSdlcDesign("tele", "per-stage-code", true, false, "", &out, &errb); code != 0 {
+	if code := openSdlcDesign("tele", "per-stage-code", true, "", &out, &errb); code != 0 {
 		t.Fatalf("openSdlcDesign headless exit=%d stderr=%q", code, errb.String())
 	}
 	designCanvas := filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "design", "content.md")
@@ -181,7 +181,7 @@ func TestRunCodeOneShot(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := openSdlcCode("tele", "per-stage-code", true, false, "", &out, &errb); code != 0 {
+	if code := openSdlcCode("tele", "per-stage-code", true, "", &out, &errb); code != 0 {
 		t.Fatalf("openSdlcCode headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
@@ -247,7 +247,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		{
 			label: "openSdlcCode headless",
 			run: func(o, e *bytes.Buffer) int {
-				return openSdlcCode("tele", "no-design", true, false, "", o, e)
+				return openSdlcCode("tele", "no-design", true, "", o, e)
 			},
 		},
 	} {
@@ -275,7 +275,7 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 // promptStageNextStage carries [Y/n/!] for workflows with a headless
 // dispatcher and [Y/n] for those without. Bare `!` at an sdlc gate
 // dispatches the next stage headless via openSdlcStage (one cascade
-// step, suppressNextStage=true). Workflows without a dispatcher — idea
+// step; headless skips the post-turn prompt). Workflows without a dispatcher — idea
 // today — treat `!` as a typo: the option is absent from the bracket
 // and the prefix-match falls through to the decline arm.
 func TestPromptNextStageBangAdvancesOne(t *testing.T) {
@@ -332,8 +332,8 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 				t.Fatalf("expected label %q in prompt, got: %q", tc.wantLabel, stdout.String())
 			}
 			if tc.wantHeadless != "" {
-				if len(*headless) != 1 || (*headless)[0].stage != tc.wantHeadless || (*headless)[0].projectID != "tele" || (*headless)[0].runID != "fix-it" || !(*headless)[0].suppressNextStage {
-					t.Fatalf("openSdlcStage want one call for stage %q with (tele, fix-it, suppressNextStage=true), got: %+v", tc.wantHeadless, *headless)
+				if len(*headless) != 1 || (*headless)[0].stage != tc.wantHeadless || (*headless)[0].projectID != "tele" || (*headless)[0].runID != "fix-it" || !(*headless)[0].headless {
+					t.Fatalf("openSdlcStage want one call for stage %q with (tele, fix-it, headless=true), got: %+v", tc.wantHeadless, *headless)
 				}
 				if rec.ran {
 					t.Fatalf("interactive next.Run must not fire on `!`; got args=%v", rec.args)

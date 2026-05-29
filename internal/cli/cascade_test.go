@@ -169,11 +169,10 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 // carved away the `--one-shot` prefix that used to be the assertion
 // target.
 type openSdlcStageInvocation struct {
-	stage             string
-	projectID         string
-	runID             string
-	headless          bool
-	suppressNextStage bool
+	stage     string
+	projectID string
+	runID     string
+	headless  bool
 }
 
 // stubOpenSdlcStage replaces openSdlcStage with a recorder for the
@@ -184,8 +183,8 @@ func stubOpenSdlcStage(t *testing.T, perStageExit map[string]int) *[]openSdlcSta
 	t.Helper()
 	var captured []openSdlcStageInvocation
 	prev := openSdlcStage
-	openSdlcStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID, headless, suppressNextStage})
+	openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		captured = append(captured, openSdlcStageInvocation{stage, projectID, runID, headless})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openSdlcStage = prev })
@@ -241,8 +240,8 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 		}
 	}
 	for _, inv := range *captured {
-		if inv.projectID != "tele" || inv.runID != "fix-it" || !inv.suppressNextStage {
-			t.Fatalf("openSdlcStage args = %+v, want (tele, fix-it, suppressNextStage=true)", inv)
+		if inv.projectID != "tele" || inv.runID != "fix-it" || !inv.headless {
+			t.Fatalf("openSdlcStage args = %+v, want (tele, fix-it, headless=true)", inv)
 		}
 	}
 	// push was NOT dispatched.
@@ -291,9 +290,6 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		t.Fatalf("push must not dispatch via openSdlcStage: got %d", got)
 	}
 	for _, inv := range *openCaptured {
-		if !inv.suppressNextStage {
-			t.Fatalf("cascade openSdlcStage args = %+v, want suppressNextStage=true", inv)
-		}
 		if !inv.headless {
 			t.Fatalf("!!! cascade openSdlcStage args = %+v, want headless=true", inv)
 		}
@@ -319,11 +315,10 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 // twin cascade dispatcher: stage name, (project, run), headless flag,
 // suppression.
 type openTwinStageInvocation struct {
-	stage             string
-	projectID         string
-	runID             string
-	headless          bool
-	suppressNextStage bool
+	stage     string
+	projectID string
+	runID     string
+	headless  bool
 }
 
 // stubOpenTwinStage swaps openTwinStage for a recorder so cascade tests
@@ -333,8 +328,8 @@ func stubOpenTwinStage(t *testing.T, perStageExit map[string]int) *[]openTwinSta
 	t.Helper()
 	var captured []openTwinStageInvocation
 	prev := openTwinStage
-	openTwinStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _ string, _, _ io.Writer) int {
-		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, headless, suppressNextStage})
+	openTwinStage = func(stage, projectID, runID string, headless bool, _ string, _, _ io.Writer) int {
+		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, headless})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openTwinStage = prev })
@@ -633,8 +628,9 @@ func TestCascadeFromGateOneStepAtTerminalStage(t *testing.T) {
 }
 
 // TestPromptStageNextStageBangAdvancesOneStage: typing bare `!` at
-// the design→code gate dispatches code once (suppressNextStage=true)
-// and re-prompts at the test gate. The cascade summary lands on
+// the design→code gate dispatches code once (headless, so the
+// post-turn prompt is skipped) and re-prompts at the test gate. The
+// cascade summary lands on
 // stdout — proof we walked through `cascadeFromGate`, not the legacy
 // dispatcher-direct path.
 func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
@@ -669,8 +665,8 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 		t.Fatalf("test must not dispatch on bare `!`: got %d", got)
 	}
 	for _, inv := range *captured {
-		if !inv.suppressNextStage {
-			t.Fatalf("bare `!` dispatch must carry suppressNextStage=true, got: %+v", inv)
+		if !inv.headless {
+			t.Fatalf("bare `!` dispatch must be headless (skips the post-turn prompt), got: %+v", inv)
 		}
 	}
 }
@@ -1211,27 +1207,24 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 // across workflows, so a tighter type-share would lose more in test
 // readability than it'd save in lines.
 type openKbStageInvocation struct {
-	stage             string
-	projectID         string
-	runID             string
-	headless          bool
-	suppressNextStage bool
+	stage     string
+	projectID string
+	runID     string
+	headless  bool
 }
 
 type openMetaMoeStageInvocation struct {
-	stage             string
-	projectID         string
-	runID             string
-	headless          bool
-	suppressNextStage bool
+	stage     string
+	projectID string
+	runID     string
+	headless  bool
 }
 
 type openHooksStageInvocation struct {
-	stage             string
-	projectID         string
-	runID             string
-	headless          bool
-	suppressNextStage bool
+	stage     string
+	projectID string
+	runID     string
+	headless  bool
 }
 
 // stubOpenKbStage / stubOpenMetaMoeStage / stubOpenHooksStage mirror
@@ -1241,8 +1234,8 @@ func stubOpenKbStage(t *testing.T, perStageExit map[string]int) *[]openKbStageIn
 	t.Helper()
 	var captured []openKbStageInvocation
 	prev := openKbStage
-	openKbStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openKbStageInvocation{stage, projectID, runID, headless, suppressNextStage})
+	openKbStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		captured = append(captured, openKbStageInvocation{stage, projectID, runID, headless})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openKbStage = prev })
@@ -1253,8 +1246,8 @@ func stubOpenMetaMoeStage(t *testing.T, perStageExit map[string]int) *[]openMeta
 	t.Helper()
 	var captured []openMetaMoeStageInvocation
 	prev := openMetaMoeStage
-	openMetaMoeStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, headless, suppressNextStage})
+	openMetaMoeStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		captured = append(captured, openMetaMoeStageInvocation{stage, projectID, runID, headless})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openMetaMoeStage = prev })
@@ -1265,8 +1258,8 @@ func stubOpenHooksStage(t *testing.T, perStageExit map[string]int) *[]openHooksS
 	t.Helper()
 	var captured []openHooksStageInvocation
 	prev := openHooksStage
-	openHooksStage = func(stage, projectID, runID string, headless, suppressNextStage bool, _, _ io.Writer) int {
-		captured = append(captured, openHooksStageInvocation{stage, projectID, runID, headless, suppressNextStage})
+	openHooksStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		captured = append(captured, openHooksStageInvocation{stage, projectID, runID, headless})
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openHooksStage = prev })

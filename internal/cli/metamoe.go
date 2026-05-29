@@ -94,7 +94,7 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "meta-moe report: %v\n", err)
 		return 2
 	}
-	return openMetaMoeReport(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openMetaMoeReport(projectID, runID, false, *agentOverride, stdout, stderr)
 }
 
 // openMetaMoeReport is the Go-level seam behind `moe meta-moe report`.
@@ -102,7 +102,7 @@ func runMetaMoeReport(args []string, stdout, stderr io.Writer) int {
 // parses args, this helper does the per-stage scan, builds the kickoff,
 // and hands to runStageSession. The chain prompt's cascade driver
 // reaches it through openMetaMoeStage in metamoe_stages.go.
-func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
+func openMetaMoeReport(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
@@ -117,7 +117,6 @@ func openMetaMoeReport(projectID, runID string, headless, suppressNextStage bool
 		NeedsSandbox:    false,
 		InitialPrompt:   kickoff,
 		Headless:        headless,
-		SkipNextStage:   suppressNextStage,
 		Agent:           agentOverride,
 		ExtraStagePaths: metaMoePublishCanvas,
 	}, stdout, stderr)

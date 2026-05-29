@@ -744,9 +744,9 @@ type cascadeResult struct {
 // dispatcher — the Go-level seam the cascade driver (`!` / `!<stage>`
 // / `!!` / `!!!`) reaches into — so stage-specific pre-flight
 // (requireDesignCanvas, requireCodeCanvas, canvas skeleton seeding)
-// still fires. The suppressNextStage flag
-// suppresses each stage's inner promptNextStage so the cascade owns
-// routing.
+// still fires. Every dispatch is headless, and a headless turn skips
+// its own inner promptNextStage (runStageSession's tail guards on
+// opts.Headless), so the cascade owns routing.
 //
 // At push in cascade-to-ship mode the dispatch is the merge path
 // (pushCmd.Run with no flags). `!!` and `!!!` default to fast-forward
@@ -882,7 +882,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 			}
 			continue
 		}
-		code := dispatcher(stage, md.Project, md.ID, true, true, stdout, stderr)
+		code := dispatcher(stage, md.Project, md.ID, true, stdout, stderr)
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code
@@ -1102,9 +1102,12 @@ func indexOfString(xs []string, s string) int {
 // registers so the chain prompt's cascade driver (`!` / `!<stage>` /
 // `!!` / `!!!`) can drive a stage without a hardcoded switch on
 // workflow name. The contract matches openSdlcStage / openTwinStage
-// exactly: take (stage, projectID, runID, headless, suppressNextStage,
-// stdout, stderr), invoke the right per-stage helper, return its exit code.
-type cascadeDispatcher func(stage, projectID, runID string, headless bool, suppressNextStage bool, stdout, stderr io.Writer) int
+// exactly: take (stage, projectID, runID, headless, stdout, stderr),
+// invoke the right per-stage helper, return its exit code. Every
+// cascade dispatch is headless, and a headless turn skips the post-turn
+// prompt structurally (runStageSession's tail guards on opts.Headless),
+// so there is no separate "suppress next stage" flag to thread.
+type cascadeDispatcher func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 var cascadeDispatchers = map[string]cascadeDispatcher{}
 

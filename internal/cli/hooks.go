@@ -191,7 +191,6 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 		NeedsSandbox:      true,
 		Headless:          headless,
 		InitialPrompt:     kickoff,
-		SkipNextStage:     headless,
 		NextStageOverride: "push",
 	}, stdout, stderr)
 	return code, &PushDeferredError{

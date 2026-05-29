@@ -108,7 +108,7 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "audit plan: %v\n", err)
 		return 2
 	}
-	return openAuditPlan(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openAuditPlan(projectID, runID, false, *agentOverride, stdout, stderr)
 }
 
 // openAuditPlan is the Go-level seam behind `moe audit plan`. The
@@ -117,13 +117,12 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 // verify a path the operator names in passing exists; the
 // design-stage's tracked-change guard is re-used to enforce the
 // read-only character of the stage.
-func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
+func openAuditPlan(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, auditPlanDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
-			SkipNextStage:          suppressNextStage,
 			Agent:                  agentOverride,
 			CanvasSkeleton:         auditPlanCanvasSkeleton,
 		}, stdout, stderr)
@@ -160,7 +159,7 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "audit report: %v\n", err)
 		return 2
 	}
-	return openAuditReport(projectID, runID, false, false, *agentOverride, stdout, stderr)
+	return openAuditReport(projectID, runID, false, *agentOverride, stdout, stderr)
 }
 
 // openAuditReport is the Go-level seam behind `moe audit report`.
@@ -169,13 +168,12 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 // (an empty `## Scope` falls through to "everything" at read-time),
 // so the report stage opens against whatever the plan left — even a
 // fresh run that skipped plan entirely.
-func openAuditReport(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
+func openAuditReport(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, auditReportDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
-			SkipNextStage:          suppressNextStage,
 			Agent:                  agentOverride,
 			CanvasSkeleton:         auditReportCanvasSkeleton,
 		}, stdout, stderr)

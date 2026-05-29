@@ -2158,9 +2158,12 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 			}
 			// Headless recovery suppresses the post-turn prompt so the
 			// cascade's push retry loop regains control; interactive
-			// recovery keeps it so the operator is offered the retry.
-			if capturedOpts.SkipNextStage != tc.wantHeadless {
-				t.Fatalf("SkipNextStage: want %v (=headless), got %v", tc.wantHeadless, capturedOpts.SkipNextStage)
+			// recovery keeps it so the operator is offered the retry. That
+			// suppression is structural now — the post-turn guard skips on
+			// opts.Headless (asserted below) — so the recovery opener no
+			// longer sets SkipNextStage itself.
+			if capturedOpts.SkipNextStage {
+				t.Fatalf("SkipNextStage: want false (headless suppression rides on opts.Headless), got true")
 			}
 			// Either flavour offers push next, never code's successor
 			// (test): the prompt only fires for interactive recovery, but

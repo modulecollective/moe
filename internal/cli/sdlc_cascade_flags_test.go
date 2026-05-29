@@ -488,9 +488,6 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 				if inv.headless != tc.expect.wantHeadless {
 					t.Fatalf("openSdlcStage[%d].headless = %v, want %v", i, inv.headless, tc.expect.wantHeadless)
 				}
-				if !inv.suppressNextStage {
-					t.Fatalf("openSdlcStage[%d].suppressNextStage = false, want true", i)
-				}
 			}
 			wantPushes := 0
 			if tc.expect.wantShipPushed {

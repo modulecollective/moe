@@ -14,22 +14,22 @@ import "io"
 // terminal-close prompt and `!!` / `!!!` auto-close land for meta-moe too:
 // every workflow with a close command now follows exactly one rule
 // for "what happens after the last stage commits."
-var openMetaMoeStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
+var openMetaMoeStage func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 func init() {
-	openMetaMoeStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openMetaMoeStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 		// Cascade entry: no per-call --agent override. The run's
 		// persisted agent (from run.json) takes over inside
 		// runStageSession, matching openSdlcStage one workflow over.
 		switch stage {
 		case metaMoeReportDoc:
-			return openMetaMoeReport(projectID, runID, headless, suppressNextStage, "", stdout, stderr)
+			return openMetaMoeReport(projectID, runID, headless, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "meta-moe: openMetaMoeStage: unknown stage %q\n", stage)
 			return 1
 		}
 	}
-	registerCascadeDispatcher(metaMoeWorkflow, func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openMetaMoeStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
+	registerCascadeDispatcher(metaMoeWorkflow, func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+		return openMetaMoeStage(stage, projectID, runID, headless, stdout, stderr)
 	})
 }

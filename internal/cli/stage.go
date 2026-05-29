@@ -620,9 +620,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if opts.SkipNextStage || opts.Headless {
 		// Headless ⇒ skip is structural, not a caller convention: a
 		// headless turn has no stdin to answer the post-turn prompt, so
-		// it must never fire one. The `|| opts.Headless` term closes the
-		// gap for any caller that sets Headless without remembering to
-		// pair it with SkipNextStage. See the field doc comments above.
+		// it must never fire one. Every cascade dispatch is headless and
+		// no longer threads a separate suppress flag, so the
+		// `|| opts.Headless` term is what makes the cascade skip. The
+		// SkipNextStage term stays for the interactive callers that skip
+		// without being headless — serve, chat, push. See the field doc
+		// comments above.
 		return 0
 	}
 	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, stdout, stderr)

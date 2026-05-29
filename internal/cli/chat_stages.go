@@ -12,17 +12,17 @@ import "io"
 // is registered for surface uniformity — the cascade machinery stays
 // workflow-agnostic and doesn't special-case "no dispatcher" for chat —
 // but there is no headless chat: the headless flag is ignored and
-// openChat always opens an interactive REPL. (suppressNextStage is moot
-// too — openChat always sets SkipNextStage.) The design's "register the
-// dispatcher ... but don't wire a yolo path" lands exactly here.
+// openChat always opens an interactive REPL that always sets
+// SkipNextStage. The design's "register the dispatcher ... but don't
+// wire a yolo path" lands exactly here.
 //
 // Declared as a var and assigned in init() so the static reference
 // chain stays clear of Go's package init-order cycle checker — same
 // shape openSdlcStage / openAuditStage use.
-var openChatStage func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int
+var openChatStage func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 func init() {
-	openChatStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
+	openChatStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 		switch stage {
 		case chatDoc:
 			return openChat(projectID, runID, "", stdout, stderr)
@@ -31,7 +31,7 @@ func init() {
 			return 1
 		}
 	}
-	registerCascadeDispatcher(chatWorkflow, func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
-		return openChatStage(stage, projectID, runID, headless, suppressNextStage, stdout, stderr)
+	registerCascadeDispatcher(chatWorkflow, func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+		return openChatStage(stage, projectID, runID, headless, stdout, stderr)
 	})
 }
