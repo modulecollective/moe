@@ -12,7 +12,9 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // The SDLC workflow owns the design→code→push lifecycle. Stages are
@@ -136,25 +138,25 @@ type stageVerbCfg struct {
 // runSDLCStage is the shared body behind runDesign / runCode / runTest:
 // parse the per-stage flags, branch to interactive (no cascade flag)
 // or cascade (one of --once / --to / --drive / --ship), and surface
-// the mutual-exclusion / agent-vs-cascade refusals at parse time.
+// cascade-mode mutual exclusion at parse time.
 // Same shape every sdlc stage verb takes — keeping the body in one
 // place is what made adding the four cascade flags a one-stop edit.
 func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(cfg.verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
+	agentOverride := fs.String("agent", "", "set the run's agent (claude/codex); persists to run.json")
 	once := fs.Bool("once", false, "run "+cfg.stage+" headless and park at the next chain prompt (= ! at the chain prompt)")
 	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
 	drive := fs.Bool("drive", false, "driven cascade through push, interactive per stage (= !!)")
 	ship := fs.Bool("ship", false, "headless cascade through push (= !!!)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>\n", cfg.verb)
+		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --drive | --ship] <project>/<run>\n", cfg.verb)
 		moePrintln(stderr, "")
 		for _, line := range cfg.usage {
 			moePrintln(stderr, line)
 		}
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Cascade mode flags (mutually exclusive; cannot mix with --agent):")
+		moePrintln(stderr, "Cascade mode flags (mutually exclusive):")
 		moePrintln(stderr, "  --once         dispatch one stage headless, park at the next gate (= !)")
 		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")
 		moePrintln(stderr, "  --drive        driven cascade through push, interactive per stage (= !!)")
@@ -183,14 +185,61 @@ func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --drive, --ship) are mutually exclusive\n", cfg.verb)
 		return 2
 	}
+	if *agentOverride != "" {
+		resolvedRunID, code := persistSDLCStageAgent(cfg.verb, cfg.stage, projectID, runID, *agentOverride, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		runID = resolvedRunID
+	}
 	if answer == "" {
 		return cfg.open(projectID, runID, false, serveAgentSuppress(), *agentOverride, stdout, stderr)
 	}
-	if *agentOverride != "" {
-		moePrintf(stderr, "%s: --agent cannot combine with a cascade mode flag — cascade walks multiple stages on the run's persisted agent (edit run.json or run one stage interactively to pick a backend)\n", cfg.verb)
-		return 2
-	}
 	return dispatchCascadeForStage(cfg.verb, cfg.stage, projectID, runID, answer, stdout, stderr)
+}
+
+func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
+	resolvedRunID, code := resolveSDLCRunSlug(verb, projectID, runID, stdout, stderr)
+	if code != 0 {
+		return "", code
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return "", 1
+	}
+	md, err := run.Load(root, projectID, resolvedRunID)
+	if err != nil {
+		moePrintf(stderr, "%s: %v\n", verb, err)
+		return "", 1
+	}
+	if md.Agent == agentName {
+		return resolvedRunID, 0
+	}
+	md.Agent = agentName
+	if err := run.Save(root, md); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", 1
+	}
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	msg := fmt.Sprintf("switch agent: %s/%s to %s\n\n", md.Project, md.ID, agentName) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: stage,
+		}.String()
+	err = repolock.With(root, repolock.Options{
+		Purpose: "switch-agent",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		return run.StageAndCommit(root, msg, runJSON)
+	})
+	if err != nil {
+		moePrintf(stderr, "commit agent switch: %v\n", err)
+		return "", 1
+	}
+	moePrintf(stdout, "switched run agent to %s\n", agentName)
+	return resolvedRunID, 0
 }
 
 // cascadeAnswerFromFlags translates the four mode flags (--once,

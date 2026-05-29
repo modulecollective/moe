@@ -137,24 +137,138 @@ func TestSDLCStageFlagMutualExclusion(t *testing.T) {
 	}
 }
 
-// TestSDLCStageRefusesAgentWithCascadeFlag: combining --agent with a
-// cascade mode flag is a parse-time error — the cascade walks every
-// remaining stage on the run's persisted agent (same as the
-// chain-prompt bangs), and the per-turn override would silently pick
-// one meaning. Refuse explicitly so the operator edits run.json or
-// runs one stage interactively.
-func TestSDLCStageRefusesAgentWithCascadeFlag(t *testing.T) {
+// TestSDLCStagePersistsAgentWithCascadeFlag: combining --agent with a
+// cascade mode flag flips run.json before dispatch, so every cascaded
+// stage resolves the same persisted backend.
+func TestSDLCStagePersistsAgentWithCascadeFlag(t *testing.T) {
 	for _, sv := range sdlcStageVerbs {
 		t.Run(sv.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			seedSdlcOneShotProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+			stubEditor(t)
+			suppressNextStagePrompt(t)
+
 			var out, errb bytes.Buffer
-			code := sv.run([]string{"--drive", "--agent", "claude", "tele/ghost"}, &out, &errb)
-			if code != 2 {
-				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+			slug := "cascade-agent-" + sv.name
+			if code := runNew("sdlc", []string{"tele/" + slug}, &out, &errb); code != 0 {
+				t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 			}
-			if !strings.Contains(errb.String(), "--agent cannot combine with a cascade mode flag") {
-				t.Fatalf("expected agent+cascade refusal, got: %q", errb.String())
+
+			stages := stubOpenSdlcStage(t, nil)
+			stubPushFromCascade(t, 0, nil)
+
+			out.Reset()
+			errb.Reset()
+			code := sv.run([]string{"--once", "--agent", "codex", "tele/" + slug}, &out, &errb)
+			if code != 0 {
+				t.Fatalf("exit=%d, want 0; stderr=%q stdout=%q", code, errb.String(), out.String())
+			}
+			if !strings.Contains(out.String(), "switched run agent to codex") {
+				t.Fatalf("expected switch announcement, got stdout=%q", out.String())
+			}
+			md, err := run.Load(root, "tele", slug)
+			if err != nil {
+				t.Fatalf("load run: %v", err)
+			}
+			if md.Agent != "codex" {
+				t.Fatalf("run agent = %q, want codex", md.Agent)
+			}
+			if len(*stages) != 1 {
+				t.Fatalf("openSdlcStage invocations = %d, want 1", len(*stages))
+			}
+			log := gitLogFormat(t, root, 1, "HEAD", "%s%n%B")
+			for _, want := range []string{
+				"switch agent: tele/" + slug + " to codex",
+				"MoE-Run: " + slug,
+				"MoE-Project: tele",
+				"MoE-Workflow: sdlc",
+				"MoE-Document: " + sv.name,
+			} {
+				if !strings.Contains(log, want) {
+					t.Fatalf("switch-agent commit missing %q; log=%q", want, log)
+				}
 			}
 		})
+	}
+}
+
+func TestSDLCStagePersistsAgentWithoutCascadeFlag(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele/single-agent"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	prev := runStageSession
+	runStageSession = func(projectID, runID, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+		if projectID != "tele" || runID != "single-agent" || docID != "design" {
+			t.Fatalf("session target = %s/%s %s, want tele/single-agent design", projectID, runID, docID)
+		}
+		if opts.Agent != "codex" {
+			t.Fatalf("session agent override = %q, want codex", opts.Agent)
+		}
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	out.Reset()
+	errb.Reset()
+	if code := runDesign([]string{"--agent", "codex", "tele/single-agent"}, &out, &errb); code != 0 {
+		t.Fatalf("runDesign exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "switched run agent to codex") {
+		t.Fatalf("expected switch announcement, got stdout=%q", out.String())
+	}
+	md, err := run.Load(root, "tele", "single-agent")
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if md.Agent != "codex" {
+		t.Fatalf("run agent = %q, want codex", md.Agent)
+	}
+}
+
+func TestSDLCStageAgentNoOpWhenAlreadyPersisted(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"--agent", "codex", "tele/agent-noop"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
+
+	prev := runStageSession
+	runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int {
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	out.Reset()
+	errb.Reset()
+	if code := runDesign([]string{"--agent", "codex", "tele/agent-noop"}, &out, &errb); code != 0 {
+		t.Fatalf("runDesign exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	headAfter := gitLogFormat(t, root, 1, "HEAD", "%H")
+	if headAfter != headBefore {
+		t.Fatalf("HEAD changed for no-op agent switch: before=%s after=%s", headBefore, headAfter)
+	}
+	if strings.Contains(out.String(), "switched run agent") {
+		t.Fatalf("unexpected switch announcement for no-op: stdout=%q", out.String())
 	}
 }
 
