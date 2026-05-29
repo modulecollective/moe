@@ -13,3 +13,9 @@ Definitions live under `projects/<project>/chores/<name>/`:
 
 Use `moe chore check [--project <project>] [<project>/<name>]` as the
 dry-run loop. Do not open a chore run just to test a definition.
+
+Some chores are built into the binary and have no
+`projects/<project>/chores/<name>/` directory. For example,
+`twin-reflect` is added automatically for projects with a digital twin;
+it can appear in `moe chore check`, but it cannot be edited under
+`chores/`.
