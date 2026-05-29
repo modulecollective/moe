@@ -8,9 +8,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 func TestBackTargetsIncludesJustFinished(t *testing.T) {
@@ -95,7 +97,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 
 // TestPromptStageNextStagePrintsDesignCanvas: when the next stage is
 // code and a design canvas exists on disk, its bytes appear above the
-// [Y/n/!] prompt verbatim (no header, no decoration). This is the
+// [Y/n/a/!] prompt verbatim (no header, no decoration). This is the
 // operator's one chance to read the canvas at the design→code gate
 // before authorising the next stage.
 func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
@@ -140,7 +142,7 @@ func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 	if !strings.Contains(got, body) {
 		t.Errorf("canvas body not printed verbatim:\n%s", got)
 	}
-	if i, j := strings.Index(got, body), strings.Index(got, "[Y/n/!]"); i < 0 || j < 0 || i >= j {
+	if i, j := strings.Index(got, body), strings.Index(got, "[Y/n/a/!]"); i < 0 || j < 0 || i >= j {
 		t.Errorf("canvas should appear above the prompt label; canvas=%d prompt=%d", i, j)
 	}
 }
@@ -279,7 +281,7 @@ func TestPromptStageNextStageNonCodeStageSkipsCanvas(t *testing.T) {
 }
 
 // TestPromptStageNextStageOffersBackWhenJustFinished: passing a non-nil
-// back command produces the [Y/n/b/!] label plus a legend that names
+// back command produces the [Y/n/a/b/!] label plus a legend that names
 // the back target, and `b\n` on stdin dispatches back.Run with
 // [project, run] (no --one-shot — back is an interactive correction).
 func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
@@ -322,10 +324,10 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/b/!]") {
-		t.Fatalf("expected [Y/n/b/!] label in prompt, got: %q", got)
+	if !strings.Contains(got, "[Y/n/a/b/!]") {
+		t.Fatalf("expected [Y/n/a/b/!] label in prompt, got: %q", got)
 	}
-	if !strings.Contains(got, "Y = run · n = decline · b = back to design · ! = cascade one stage") {
+	if !strings.Contains(got, "Y = run · n = decline · a = decline, advance to code · b = back to design · ! = cascade one stage") {
 		t.Fatalf("expected legend with back target in prompt, got: %q", got)
 	}
 	if rec.ran {
@@ -340,7 +342,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 }
 
 // TestPromptStageNextStageNoBackWhenNil: a nil back collapses the
-// label back to [Y/n/!] (no /b) and the legend omits the b row. Pins
+// label back to [Y/n/a/!] (no /b) and the legend omits the b row. Pins
 // the empty-justFinished path — fresh-run callers must not see a
 // back option that would dispatch nil.
 func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
@@ -372,8 +374,8 @@ func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/!]") {
-		t.Fatalf("expected [Y/n/!] label without /b, got: %q", got)
+	if !strings.Contains(got, "[Y/n/a/!]") {
+		t.Fatalf("expected [Y/n/a/!] label without /b, got: %q", got)
 	}
 	if strings.Contains(got, "/b") {
 		t.Fatalf("expected no /b in label, got: %q", got)
@@ -440,8 +442,112 @@ func TestPromptStageNextStageBackForWorkflowWithoutDispatcher(t *testing.T) {
 	}
 }
 
+// TestPromptStageNextStageAdvanceMarksAndDeclines drives the click-forward
+// key end-to-end: at the design→code gate, typing `a` declines running
+// code (next.Run must not fire) but writes an `advance: design` marker.
+// The proof is behavioural — after the marker lands, Workflow.Next reports
+// code instead of re-opening the parked design stage, which is exactly the
+// re-run the feature exists to avoid.
+func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
+	root := newTestBureaucracy(t)
+	// A design work-turn exists; without a code turn the run is parked at
+	// design (the re-run pain). t0 is in the past so the live-clock advance
+	// marker is newer than it.
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+
+	rec := &promptDispatchRecord{}
+	next := &Command{
+		Name: "code",
+		Run: func(args []string, _, _ io.Writer) int {
+			rec.ran = true
+			rec.args = append([]string(nil), args...)
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "a\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if rec.ran {
+		t.Fatalf("`a` must not dispatch the next stage; got args=%v", rec.args)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "[Y/n/a/!]") {
+		t.Fatalf("expected [Y/n/a/!] label, got: %q", got)
+	}
+	if !strings.Contains(got, "advanced past design") {
+		t.Fatalf("expected advance confirmation in stdout, got: %q", got)
+	}
+	// Behavioural proof: the marker satisfies design, so Next steps to code.
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, kind, err := wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || stage != "code" {
+		t.Fatalf("after advance: Next should return code, got kind=%v stage=%q", kind, stage)
+	}
+}
+
+// TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow: a non-sdlc workflow
+// must not offer `a`. The click-forward key is gated to sdlc's design→code
+// and code→test gates, where priorCanvas names the stage to mark; the twin
+// ladder and idea keep the plain decline. Mirrors the skip-to-push gating
+// guard.
+func TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow(t *testing.T) {
+	next := &Command{
+		Name: "architecture",
+		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+	}
+	md := &run.Metadata{ID: "twin", Project: "tele", Workflow: "twin", Status: run.StatusInProgress}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := io.WriteString(w, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture tele twin", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if strings.Contains(got, "/a/") || strings.Contains(got, "/a]") {
+		t.Fatalf("non-sdlc prompt must not offer /a, got: %q", got)
+	}
+	if strings.Contains(got, "a = decline, advance") {
+		t.Fatalf("non-sdlc legend must not name the advance key, got: %q", got)
+	}
+}
+
 // TestPromptStageNextStageOffersScuttleWhenRegistered: a non-nil scuttle
-// command extends the [Y/n/!] label to [Y/n/x/!] (scuttle adjacent to
+// command extends the [Y/n/a/!] label to [Y/n/x/a/!] (scuttle adjacent to
 // the decline key — both are "no" answers), the legend names "scuttle
 // (close)", and typing `x\n` dispatches scuttle.Run([project, run]).
 // The next stage and back command must not fire on the scuttle path.
@@ -485,8 +591,8 @@ func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/x/!]") {
-		t.Fatalf("expected [Y/n/x/!] label, got: %q", got)
+	if !strings.Contains(got, "[Y/n/x/a/!]") {
+		t.Fatalf("expected [Y/n/x/a/!] label, got: %q", got)
 	}
 	if !strings.Contains(got, "x = scuttle (close)") {
 		t.Fatalf("expected legend entry for scuttle, got: %q", got)
@@ -503,7 +609,7 @@ func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
 }
 
 // TestPromptStageNextStageScuttleWithBack: scuttle and back both
-// registered produce [Y/n/x/b/!] — scuttle adjacent to n, back before
+// registered produce [Y/n/x/a/b/!] — scuttle adjacent to n, back before
 // the bang tail — and the legend lists all four. Pins the option
 // ordering against future drift; the order is the operator's muscle
 // memory.
@@ -540,16 +646,16 @@ func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/x/b/!]") {
-		t.Fatalf("expected [Y/n/x/b/!] label, got: %q", got)
+	if !strings.Contains(got, "[Y/n/x/a/b/!]") {
+		t.Fatalf("expected [Y/n/x/a/b/!] label, got: %q", got)
 	}
-	if !strings.Contains(got, "Y = run · n = decline · x = scuttle (close) · b = back to design · ! = cascade one stage") {
+	if !strings.Contains(got, "Y = run · n = decline · x = scuttle (close) · a = decline, advance to code · b = back to design · ! = cascade one stage") {
 		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
 	}
 }
 
 // TestPromptStageNextStageNoScuttleWhenNil: a nil scuttle keeps the
-// label at [Y/n/!] and the legend free of any `x =` entry. Pins the
+// label at [Y/n/a/!] and the legend free of any `x =` entry. Pins the
 // "workflow doesn't register close → no scuttle option" path so a
 // future workflow without close stays honest.
 func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
@@ -577,8 +683,8 @@ func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/!]") {
-		t.Fatalf("expected [Y/n/!] label without /x, got: %q", got)
+	if !strings.Contains(got, "[Y/n/a/!]") {
+		t.Fatalf("expected [Y/n/a/!] label without /x, got: %q", got)
 	}
 	if strings.Contains(got, "/x") {
 		t.Fatalf("expected no /x in label, got: %q", got)
@@ -619,8 +725,8 @@ func TestPromptStageNextStageOffersSkipToPush(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/s/!]") {
-		t.Fatalf("expected [Y/n/s/!] label, got: %q", got)
+	if !strings.Contains(got, "[Y/n/a/s/!]") {
+		t.Fatalf("expected [Y/n/a/s/!] label, got: %q", got)
 	}
 	if !strings.Contains(got, "s = skip to push") {
 		t.Fatalf("expected legend with skip-to-push entry, got: %q", got)
@@ -749,9 +855,9 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 	if !strings.Contains(got, "moe sdlc push tele/fix-it") {
 		t.Fatalf("expected push prompt hint with project/run, got: %q", got)
 	}
-	// The test prompt's [Y/n/s/!] label must still appear before the
+	// The test prompt's [Y/n/a/s/!] label must still appear before the
 	// push prompt's [N/m/p] — proves the cascade order.
-	if i, j := strings.Index(got, "[Y/n/s/!]"), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
+	if i, j := strings.Index(got, "[Y/n/a/s/!]"), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
 		t.Fatalf("expected post-code prompt before push prompt; post-code=%d push=%d", i, j)
 	}
 }

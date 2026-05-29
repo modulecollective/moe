@@ -290,10 +290,10 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 		wantArgs     []string
 		wantHeadless string
 	}{
-		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n/!]", wantHeadless: "code"},
-		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
-		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/!]", wantArgs: []string{"tele/fix-it"}},
-		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/!]"},
+		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n/a/!]", wantHeadless: "code"},
+		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/a/!]", wantArgs: []string{"tele/fix-it"}},
+		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/a/!]", wantArgs: []string{"tele/fix-it"}},
+		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/a/!]"},
 		{name: "idea-no-bang-option", workflow: dash.IdeaWorkflow, input: "!\n", wantLabel: "[Y/n]"},
 		{name: "idea-default-runs", workflow: dash.IdeaWorkflow, input: "\n", wantLabel: "[Y/n]", wantArgs: []string{"tele/fix-it"}},
 	}

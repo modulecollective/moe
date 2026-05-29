@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -36,6 +37,38 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 		return nil
 	}
 	return err
+}
+
+// commitAdvance records that docID's stage is done without producing a
+// work-turn for the next stage. The operator hit the chain prompt's
+// "decline, advance" key: they don't want to run the next stage now, but
+// they don't want the run to re-open and re-run docID's agent the next
+// time it's picked up either.
+//
+// The marker is an empty commit carrying a distinct `advance: <doc>`
+// subject plus the standard MoE-* trailers. stageSatisfied treats docID
+// as satisfied when this marker is at least as recent as docID's own
+// latest work-turn, so Workflow.Next steps to the successor stage instead
+// of re-opening docID. A later re-edit of docID lands a fresher work-turn
+// that out-dates the marker and flips the run back — re-open fidelity
+// falls out of the same timestamp rule.
+//
+// Modelled on commitSessionStart (a non-work-turn marker the work-turn
+// grep deliberately ignores) but committed empty: under option C there is
+// no file to change, so the marker *is* the message. git.Run is the
+// sanctioned internal/git seam, and --allow-empty is the same form
+// production already uses for marker commits (chain, chore). No repolock
+// wrapper for the same reason commitSessionStart needs none — internal/git
+// owns the index-lock retry.
+func commitAdvance(root string, md *run.Metadata, docID string) error {
+	msg := fmt.Sprintf("advance: %s\n\n", docID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: docID,
+		}.String()
+	return git.Run(root, "commit", "--allow-empty", "-m", msg)
 }
 
 // commitWikiTurn stages the wiki content dir alongside the per-run

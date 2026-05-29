@@ -350,6 +350,18 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if scuttle != nil {
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
+	// `a` is "decline running the next stage, but record the just-finished
+	// one as done" — the click-forward key. Without it, declining parks the
+	// run at the just-finished stage and the next pickup re-opens and
+	// re-runs its agent (Workflow.Next reports the parked stage). The
+	// advance marker satisfies that stage so the next pickup starts at the
+	// successor instead. Gated to sdlc's design→code and code→test gates,
+	// where priorCanvas names the stage to mark; other gates (the twin
+	// ladder, idea) keep the plain decline.
+	offerAdvance := md.Workflow == "sdlc" && priorCanvas != ""
+	if offerAdvance {
+		opts = append(opts, promptOption{key: 'a', hint: "decline, advance to " + next.Name})
+	}
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
 	// `s` is the cascade-only shortcut to jump from post-code straight
 	// to the push prompt, skipping test. Gated to sdlc + next.Name ==
@@ -428,6 +440,19 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	}
 	if len(back) > 0 && answer == "b" {
 		return dispatchBack(back, md, stdout, stderr)
+	}
+	if offerAdvance && answer == "a" {
+		// Mark the just-finished stage (priorCanvas) done, then stop —
+		// `a` is a decline, so the next stage is not dispatched. The
+		// marker makes Workflow.Next return the successor on the next
+		// pickup instead of re-opening priorCanvas.
+		if err := commitAdvance(root, md, priorCanvas); err != nil {
+			moePrintf(stderr, "advance: %v\n", err)
+			return 1
+		}
+		moePrintf(stdout, "advanced past %s — next pickup of %s/%s starts at %s\n",
+			priorCanvas, md.Project, md.ID, next.Name)
+		return 0
 	}
 	accepted := answer == "" || strings.HasPrefix(answer, "y")
 	if !accepted {
