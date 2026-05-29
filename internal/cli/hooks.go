@@ -149,29 +149,39 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 	return nil
 }
 
-// openCodeSessionForHookFailure is the generic chain-back for project
-// hook failures: spawn a fresh code session against the same run with
-// a kickoff that names the failing event + script and dumps the
-// captured output verbatim, then propagate that session's exit code so
-// a clean fix-and-commit lets the workflow's chain prompt offer push
-// next — same shape `moe <wf> code` already produces. Built-ins with
-// richer semantics (the rebase check) keep their own chain-back —
-// see openCodeSessionForRebaseConflict. The second return is a
-// *PushDeferredError marking the deferral so the cascade renders
-// "deferred to recovery" instead of mistaking the recovery's clean
-// exit for a successful ship.
+// openCodeSessionForHookFailure builds the generic chain-back kickoff for
+// project hook failures. It names the failing event + script, dumps the
+// captured output verbatim, and opens a fresh code session against the same
+// run. The session's exit code is propagated so a clean fix-and-commit lets
+// the workflow's chain prompt offer push next — same shape `moe <wf> code`
+// already produces. Built-ins with richer semantics (the rebase check) keep
+// their own kickoff — see openCodeSessionForRebaseConflict. The second return
+// is a *PushDeferredError marking the deferral so the cascade renders
+// "deferred to recovery" instead of mistaking the recovery's clean exit for a
+// successful ship.
 //
-// Overridable in tests; the default invokes runStageSession with
-// docID="code", same as `moe <wf> code` would.
-var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, stdout, stderr io.Writer) (int, error) {
-	moePrintln(stderr, "       opening a fresh code session — fix the hook failure and commit; the chain prompt will offer push next")
+// Overridable in tests.
+var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, headless bool, stdout, stderr io.Writer) (int, error) {
 	kickoff := buildHookFailureKickoff(md.Workflow, fail)
+	return openCodeRecoverySession(md, "hook-failure", headless, kickoff, stdout, stderr)
+}
+
+// openCodeRecoverySession owns the common push-recovery session shape:
+// code document, sandbox on, optional headless one-shot, post-turn chain
+// prompt preserved, and typed deferral for the cascade.
+func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, kickoff string, stdout, stderr io.Writer) (int, error) {
+	if headless {
+		moePrintf(stderr, "       opening a headless code recovery turn for %s; the cascade will stop after recovery\n", recovery)
+	} else {
+		moePrintf(stderr, "       opening a fresh code session for %s; the chain prompt will offer push next\n", recovery)
+	}
 	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
 		NeedsSandbox:  true,
+		Headless:      headless,
 		InitialPrompt: kickoff,
 	}, stdout, stderr)
 	return code, &PushDeferredError{
-		Recovery: "hook-failure",
+		Recovery: recovery,
 		Project:  md.Project,
 		Run:      md.ID,
 	}

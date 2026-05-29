@@ -253,7 +253,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		var fail *hookFailure
 		if errors.As(err, &fail) {
 			moePrintf(stderr, "%v\n", fail)
-			return openCodeSessionForHookFailure(md, fail, stdout, stderr)
+			return openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
 		}
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil
@@ -297,8 +297,8 @@ func init() {
 	})
 }
 
-// openCodeSessionForRebaseConflict is the chain-back: spawn a fresh code
-// session against the same run with a kickoff prompt that names the
+// openCodeSessionForRebaseConflict builds the rebase-specific chain-back
+// kickoff for a fresh code session against the same run. It names the
 // conflicting paths and the target branch, then propagate that session's
 // exit code so a clean resolve-and-commit lets the workflow's chain prompt
 // offer push next — same shape `moe <wf> code` already produces. Headless
@@ -308,25 +308,10 @@ func init() {
 // "deferred to recovery" instead of mistaking the recovery's clean exit for
 // a successful ship.
 //
-// Overridable in tests; the default invokes runStageSession directly
-// with docID="code", same as `moe <wf> code` would.
+// Overridable in tests.
 var openCodeSessionForRebaseConflict = func(md *run.Metadata, conflict *push.RebaseConflictError, headless bool, stdout, stderr io.Writer) (int, error) {
-	if headless {
-		moePrintln(stderr, "       opening a headless code recovery turn — resolve the conflicts and commit; the cascade will stop after recovery")
-	} else {
-		moePrintln(stderr, "       opening a fresh code session — resolve the conflicts and commit; the chain prompt will offer push next")
-	}
 	kickoff := buildRebaseConflictKickoff(md.Workflow, conflict)
-	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
-		NeedsSandbox:  true,
-		Headless:      headless,
-		InitialPrompt: kickoff,
-	}, stdout, stderr)
-	return code, &PushDeferredError{
-		Recovery: "rebase-conflict",
-		Project:  md.Project,
-		Run:      md.ID,
-	}
+	return openCodeRecoverySession(md, "rebase-conflict", headless, kickoff, stdout, stderr)
 }
 
 // buildRebaseConflictKickoff is the agent-facing kickoff prompt for a

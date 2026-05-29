@@ -435,7 +435,10 @@ exit 7
 `)
 
 		prev := openCodeSessionForHookFailure
-		openCodeSessionForHookFailure = func(md *run.Metadata, _ *hookFailure, _, _ io.Writer) (int, error) {
+		openCodeSessionForHookFailure = func(md *run.Metadata, _ *hookFailure, headless bool, _, _ io.Writer) (int, error) {
+			if headless {
+				t.Fatalf("runPushTyped without options should open interactive recovery")
+			}
 			return 0, &PushDeferredError{
 				Recovery: "hook-failure",
 				Project:  md.Project,
@@ -511,6 +514,47 @@ func TestRunPushHeadlessRecoveryOptionReachesRebaseChainBack(t *testing.T) {
 	}
 	if !*capturedHeadless {
 		t.Fatalf("rebase recovery headless flag = false, want true")
+	}
+}
+
+func TestRunPushHeadlessRecoveryOptionReachesHookFailureChainBack(t *testing.T) {
+	f := newPushFixture(t)
+
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-fail.sh", `#!/bin/sh
+echo "intentional hook output"
+exit 7
+`)
+
+	var capturedHeadless *bool
+	prev := openCodeSessionForHookFailure
+	openCodeSessionForHookFailure = func(md *run.Metadata, _ *hookFailure, headless bool, _, _ io.Writer) (int, error) {
+		capturedHeadless = &headless
+		return 0, &PushDeferredError{
+			Recovery: "hook-failure",
+			Project:  md.Project,
+			Run:      md.ID,
+		}
+	}
+	t.Cleanup(func() { openCodeSessionForHookFailure = prev })
+
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+	var stdout, stderr bytes.Buffer
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+		HeadlessRecovery: true,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runPushTypedWithOptions exit: want 0, got %d; stderr=%s", code, stderr.String())
+	}
+	var deferred *PushDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("runPushTypedWithOptions error: want *PushDeferredError, got %T (%v)", err, err)
+	}
+	if capturedHeadless == nil {
+		t.Fatal("expected hook recovery helper to be invoked")
+	}
+	if !*capturedHeadless {
+		t.Fatalf("hook recovery headless flag = false, want true")
 	}
 }
 
@@ -1904,7 +1948,10 @@ exit 7
 	var captured *hookFailure
 	var capturedRun *run.Metadata
 	prev := openCodeSessionForHookFailure
-	openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, _, _ io.Writer) (int, error) {
+	openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, headless bool, _, _ io.Writer) (int, error) {
+		if headless {
+			t.Fatalf("standalone push should open interactive hook recovery")
+		}
 		capturedRun = md
 		captured = fail
 		return 1, &PushDeferredError{Recovery: "hook-failure", Project: md.Project, Run: md.ID}
@@ -1972,6 +2019,7 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 		invoke       func(md *run.Metadata) (int, error)
 		stubReturns  int
 		wantRecovery string
+		wantHeadless bool
 	}{
 		{
 			name: "hook failure",
@@ -1980,7 +2028,7 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 					event:  hookEventPrePush,
 					script: "10-fail.sh",
 					output: "boom\n",
-				}, io.Discard, io.Discard)
+				}, false, io.Discard, io.Discard)
 			},
 			stubReturns:  0,
 			wantRecovery: "hook-failure",
@@ -1992,10 +2040,23 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 					event:  hookEventPrePush,
 					script: "10-fail.sh",
 					output: "boom\n",
-				}, io.Discard, io.Discard)
+				}, false, io.Discard, io.Discard)
 			},
 			stubReturns:  1,
 			wantRecovery: "hook-failure",
+		},
+		{
+			name: "hook failure headless",
+			invoke: func(md *run.Metadata) (int, error) {
+				return openCodeSessionForHookFailure(md, &hookFailure{
+					event:  hookEventPrePush,
+					script: "10-fail.sh",
+					output: "boom\n",
+				}, true, io.Discard, io.Discard)
+			},
+			stubReturns:  0,
+			wantRecovery: "hook-failure",
+			wantHeadless: true,
 		},
 		{
 			name: "rebase conflict",
@@ -2057,6 +2118,9 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 			}
 			if capturedOpts.SkipNextStage {
 				t.Fatalf("SkipNextStage must be false so the post-turn prompt offers push next")
+			}
+			if capturedOpts.Headless != tc.wantHeadless {
+				t.Fatalf("Headless: want %v, got %v", tc.wantHeadless, capturedOpts.Headless)
 			}
 			if capturedOpts.InitialPrompt == "" {
 				t.Fatalf("InitialPrompt: want non-empty kickoff, got blank")
