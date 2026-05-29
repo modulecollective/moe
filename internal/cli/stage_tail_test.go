@@ -17,7 +17,7 @@ func TestTailHeadlessTranscript_MissingFileIsSoft(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thread-claude.jsonl")
 	var w bytes.Buffer
-	tailHeadlessTranscript("claude", path, &w)
+	tailHeadlessTranscript("claude", path, "moe sdlc log moe/demo design", &w)
 	if w.Len() != 0 {
 		t.Fatalf("expected no output for missing transcript, got %q", w.String())
 	}
@@ -35,9 +35,9 @@ func TestTailHeadlessTranscript_RendersTail(t *testing.T) {
 	}
 
 	var w bytes.Buffer
-	tailHeadlessTranscript("claude", path, &w)
+	tailHeadlessTranscript("claude", path, "moe sdlc log moe/demo design", &w)
 	got := w.String()
-	for _, want := range []string{"last", "transcript events", "user", "assistant", "ok"} {
+	for _, want := range []string{"last", "transcript events", "moe sdlc log moe/demo design", "user", "assistant", "ok"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q\n---output---\n%s", want, got)
 		}
@@ -55,7 +55,7 @@ func TestTailHeadlessTranscript_BookkeepingOnlyDoesNotPrintBanner(t *testing.T) 
 		t.Fatal(err)
 	}
 	var w bytes.Buffer
-	tailHeadlessTranscript("claude", path, &w)
+	tailHeadlessTranscript("claude", path, "moe sdlc log moe/demo design", &w)
 	if w.Len() != 0 {
 		t.Fatalf("expected empty output for bookkeeping-only transcript, got %q", w.String())
 	}

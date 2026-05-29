@@ -878,11 +878,15 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		})
 		// Auto-tail: render the last few normalised events to stderr
 		// so the operator sees "what just happened" without having
-		// to `moe log` after every headless exit. Best-effort — a
+		// to `moe <workflow> log` after every headless exit. Best-effort — a
 		// missing or parse-broken transcript is reported softly and
 		// doesn't override the executor's exit status.
 		if threadPath != "" {
-			tailHeadlessTranscript(in.Agent, threadPath, stderr)
+			// spec.Metadata and spec.DocID are non-nil here by the same
+			// guard that set threadPath above, so the command is fully
+			// concrete — no placeholder fallback.
+			logCmd := fmt.Sprintf("moe %s log %s/%s %s", spec.Metadata.Workflow, spec.Metadata.Project, spec.Metadata.ID, spec.DocID)
+			tailHeadlessTranscript(in.Agent, threadPath, logCmd, stderr)
 		}
 	} else {
 		returnedSid, runErr = a.Execute(agent.Request{
@@ -1165,7 +1169,7 @@ const headlessTailLines = 20
 // before writing anything), a parse error, a render write error each
 // produce a short note rather than overriding the executor's exit
 // status. The auto-tail is "extra context", not a gate.
-func tailHeadlessTranscript(agentName, threadPath string, w io.Writer) {
+func tailHeadlessTranscript(agentName, threadPath, logCmd string, w io.Writer) {
 	f, err := os.Open(threadPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1184,7 +1188,7 @@ func tailHeadlessTranscript(agentName, threadPath string, w io.Writer) {
 		return
 	}
 	moePrintln(w, "")
-	moePrintf(w, "--- last %d transcript events (moe log for full) ---\n", min(headlessTailLines, len(events)))
+	moePrintf(w, "--- last %d transcript events (%s for full) ---\n", min(headlessTailLines, len(events)), logCmd)
 	if err := transcript.Render(w, transcript.Tail(events, headlessTailLines), transcript.RenderOptions{}); err != nil {
 		moePrintf(w, "auto-tail render: %v\n", err)
 	}
