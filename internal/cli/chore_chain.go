@@ -121,7 +121,7 @@ func spliceChoreChain(root, parentKey, choreKey string) error {
 	if child := idx.ChainedChild[parentKey]; child != "" {
 		desired = append(desired, child)
 	}
-	adds, removes := diffChainEdit(desired, idx.ChainedChild)
+	adds, removes := diffChainEdit([][]string{desired}, idx.ChainedChild)
 	if len(adds) == 0 && len(removes) == 0 {
 		return nil
 	}
