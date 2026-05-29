@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/agent"
@@ -41,6 +42,13 @@ import (
 // from the appended one-shot addendum, matching the section delimiter
 // buildSystemPrompt uses internally.
 const oneShotPromptDelimiter = "\n---\n\n"
+
+// headlessTurnTimeout hard-caps a headless stage turn's wall-clock.
+// Headless turns have no operator on stdin to Ctrl-C a wedge, so without
+// a cap an agent that backgrounds a long-lived subprocess (the dominant
+// failure mode) hangs the turn indefinitely. 60min clears any legitimate
+// well-scoped stage turn with margin while still bounding the wedge.
+const headlessTurnTimeout = 60 * time.Minute
 
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
@@ -101,10 +109,10 @@ type stageSessionOpts struct {
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
 	// branch). Lets stages with a fixed structural canvas — test stage's
-	// "What was verified / What wasn't verified / Fixes applied /
-	// Operator spot-check" headings — seed the agent's first read with
-	// the shape it has to fill, instead of relying on the prompt
-	// fragment alone. Skipped on resume turns.
+	// "What was verified / What wasn't verified / Fixes applied"
+	// headings — seed the agent's first read with the shape it has to
+	// fill, instead of relying on the prompt fragment alone. Skipped on
+	// resume turns.
 	CanvasSkeleton string
 	// WikiBuilder, when non-nil, is invoked after the bureaucracy
 	// root and run metadata are resolved. It returns the wiki engine
@@ -856,6 +864,14 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	var runErr error
 	var returnedSid string
 	if spec.Headless {
+		// Hard-cap every headless turn's wall-clock. A headless stage has
+		// no operator on stdin to Ctrl-C a wedged turn, and the dominant
+		// wedge is an agent backgrounding a long-lived subprocess (e.g.
+		// `moe serve`): a Claude Code turn won't end while a background
+		// task is alive, so the turn hangs forever. 60min is well clear of
+		// any legitimate well-scoped stage turn while still bounding the
+		// wedge — model-independent, and a net under every future
+		// "agent wedged a turn" variant, not just serve.
 		// ThreadPath enables transcript mirroring on one-shot so the
 		// post-Wait auto-tail has something to render. Empty for
 		// run-less callers (e.g. the rebase-resolve fallback).
@@ -875,6 +891,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			ExtraEnv:   spec.ExtraEnv,
 			AddDirs:    spec.AddDirs,
 			ThreadPath: threadPath,
+			Timeout:    headlessTurnTimeout,
 		})
 		// Auto-tail: render the last few normalised events to stderr
 		// so the operator sees "what just happened" without having

@@ -37,6 +37,17 @@ end-to-end CLI path. Use the run's configured dev environment, keep the
 invocation scoped to the surface under test, and record the command and
 result on the test canvas.
 
+In test stage, **don't** spawn `moe serve` to check rendered HTML or
+HTTP status — assert it in-process with `httptest` against
+`s.Handler()` (the existing `internal/serve` test idiom). If a live
+server is genuinely unavoidable, run it inside a single Bash call:
+`serve & PID=$!; <readiness-poll>; <probe>; kill $PID; wait`. Never
+`run_in_background` a server and never a bare blocking `moe serve` —
+both detach into their own network namespace (curl from a later call
+can't reach them) and wedge the turn. Browser- or TTY-only checks
+can't be curled at all; record them under `What wasn't verified`,
+don't defer them to a human.
+
 ## Tools worth reaching for
 
 Go's off-putting CLIs are agent superpowers — the ergonomics that make

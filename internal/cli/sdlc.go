@@ -484,7 +484,7 @@ func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool
 		"Read the canvas file before replying, so your acknowledgement reflects " +
 		"what's actually on it. In one or two sentences, acknowledge where " +
 		"verification stands (fresh start vs. resumed) and ask what they'd " +
-		"like to verify or spot-check next. Then wait for their reply."
+		"like to verify next. Then wait for their reply."
 	return runStageSession(projectID, runID, "test",
 		stageSessionOpts{
 			NeedsSandbox:   true,
@@ -560,10 +560,6 @@ const testCanvasSkeleton = `# Test
 ## Fixes applied during this stage
 
 (agent fills: one row per in-place fix; empty if none)
-
-## Operator spot-check
-
-(optional; the operator may fill if they drove the change manually)
 `
 
 // requireRun fails the stage entry point fast when the run doesn't

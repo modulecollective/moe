@@ -18,8 +18,8 @@ import (
 // anti-theater move the design twin records: committing the skeleton
 // without filling it should not count as "tested."
 //
-// The "Fixes applied" and "Operator spot-check" sections are
-// intentionally exempt — both are legitimately empty for clean runs.
+// The "Fixes applied" section is intentionally exempt — it's
+// legitimately empty for clean runs.
 func testStageGate(root string, md *run.Metadata) (bool, error) {
 	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
 	body, err := os.ReadFile(canvas)

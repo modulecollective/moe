@@ -59,8 +59,7 @@ Two gaps that code stage can't reliably close on its own:
   spread the fix across this stage.
 - **Name what's outside your reach.** UI rendering, agent
   behaviour against real Claude, anything that needs prod-shaped
-  data — say so on the canvas. The operator decides whether to
-  spot-check.
+  data — say so on the canvas under `What wasn't verified`.
 
 ## What not to do
 
@@ -78,6 +77,14 @@ Two gaps that code stage can't reliably close on its own:
   surface" is a valid `What wasn't verified` entry.
 - **Don't disable hooks, tests, or lints to get green.** Same
   rule as code stage. Fix the underlying issue or flag it.
+- **Don't spawn open-ended subprocesses to verify something.** If
+  you must run a server or daemon, bind start → probe → teardown
+  into a single step so it's gone before the step returns; never
+  leave one running in the background. A turn that leaves a
+  background process alive won't end — it hangs until something
+  kills it. And don't start a process and ask a human to go look
+  at it — verify it yourself or record it under `What wasn't
+  verified`.
 
 ## Canvas shape
 
@@ -98,10 +105,6 @@ acceptable for pure-backend work.)
 
 ## Fixes applied during this stage
 (one row per in-place fix; empty if none)
-
-## Operator spot-check
-(optional; the operator may fill if they drove the change
-manually)
 ```
 
 The first two sections are load-bearing. The stage refuses to
@@ -116,8 +119,8 @@ reads as "skipped," which is what test stage exists to prevent.
 - **Name the end-to-end path you drove.** Not "verified it works"
   — the specific `curl`, the specific script, the specific repro
   steps. If the surface is one you can't drive from `Bash` (a
-  Claude Code TUI, a browser-rendered UI), say so explicitly and
-  defer to operator spot-check.
+  Claude Code TUI, a browser-rendered UI), say so explicitly under
+  `What wasn't verified`.
 - **Coverage gaps go on the canvas.** What you skipped and why —
   always. Silence is not a valid answer.
 - **Any `Edit` during this stage is a row in `Fixes applied`.**
@@ -127,11 +130,10 @@ reads as "skipped," which is what test stage exists to prevent.
 
 ## How to work with the operator
 
-- **Tell them what to spot-check.** If the change has a surface
-  you can't drive (rendered UI, agent behaviour, anything
-  human-shaped), name it on the canvas and tell the operator
-  what to look at. Their spot-check section is where they record
-  what they found.
+- **Name what you couldn't drive.** If the change has a surface
+  you can't exercise from `Bash` (rendered UI, agent behaviour,
+  anything human-shaped), record it under `What wasn't verified`
+  so the gap is on the record rather than in your head.
 - **Surface deep failures loudly.** If you can't make the change
   work and you don't know why, stop and write findings. The
   operator sees the canvas at the next-stage prompt and decides
