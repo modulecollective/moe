@@ -1,12 +1,99 @@
 package chore
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 )
+
+// writeChore lays down projects/<proj>/chores/<name>/ with the given
+// files under root, creating parents as needed.
+func writeChore(t *testing.T, root, rel, body string) {
+	t.Helper()
+	p := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadAllReadsChoreJSON(t *testing.T) {
+	root := t.TempDir()
+	writeChore(t, root, "projects/moe/project.json", `{"id":"moe"}`)
+	writeChore(t, root, "projects/moe/chores/bump-deps/chore.json",
+		`{"trigger":"go.mod","workflow":"sdlc","cadence":"720h","cooldown":"48h"}`)
+	writeChore(t, root, "projects/moe/chores/bump-deps/prompt.md", "bump the deps\n")
+
+	defs, err := LoadAll(root)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(defs) != 1 {
+		t.Fatalf("len(defs)=%d, want 1", len(defs))
+	}
+	got := defs[0]
+	want := Definition{
+		Project:  "moe",
+		Name:     "bump-deps",
+		Trigger:  "go.mod",
+		Workflow: "sdlc",
+		Cadence:  720 * time.Hour,
+		Cooldown: 48 * time.Hour,
+		Prompt:   "bump the deps\n",
+	}
+	got.EditedAt = time.Time{} // git log on a non-repo temp dir; not under test
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("def=%+v\nwant=%+v", got, want)
+	}
+}
+
+func TestLoadAllDefaultsWorkflowAndDayShorthand(t *testing.T) {
+	root := t.TempDir()
+	writeChore(t, root, "projects/moe/project.json", `{"id":"moe"}`)
+	// workflow omitted -> DefaultWorkflow; cooldown uses the d shorthand.
+	writeChore(t, root, "projects/moe/chores/readme/chore.json", `{"trigger":"*","cooldown":"7d"}`)
+
+	defs, err := LoadAll(root)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(defs) != 1 {
+		t.Fatalf("len(defs)=%d, want 1", len(defs))
+	}
+	if got := defs[0].Workflow; got != DefaultWorkflow {
+		t.Errorf("Workflow=%q, want %q", got, DefaultWorkflow)
+	}
+	if got := defs[0].Cooldown; got != 7*24*time.Hour {
+		t.Errorf("Cooldown=%v, want %v", got, 7*24*time.Hour)
+	}
+}
+
+func TestLoadAllMissingChoreJSON(t *testing.T) {
+	root := t.TempDir()
+	writeChore(t, root, "projects/moe/project.json", `{"id":"moe"}`)
+	// A chore directory with no chore.json is a load error, not silent zeros.
+	if err := os.MkdirAll(filepath.Join(root, "projects/moe/chores/orphan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadAll(root); err == nil {
+		t.Fatal("LoadAll: expected error for missing chore.json, got nil")
+	}
+}
+
+func TestLoadAllMalformedChoreJSON(t *testing.T) {
+	root := t.TempDir()
+	writeChore(t, root, "projects/moe/project.json", `{"id":"moe"}`)
+	writeChore(t, root, "projects/moe/chores/broken/chore.json", `{not json`)
+	if _, err := LoadAll(root); err == nil {
+		t.Fatal("LoadAll: expected error for malformed chore.json, got nil")
+	}
+}
 
 func TestEvaluateDueFromTouchedAfterCompletion(t *testing.T) {
 	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)

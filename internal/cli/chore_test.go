@@ -19,8 +19,8 @@ func seedChoreRoot(t *testing.T) string {
 }
 
 // seedChoreRootWith is seedChoreRoot with an optional cooldown. When
-// cooldown is non-empty the chore gets that cooldown file and a recent
-// MoE-Chore-Skipped completion stamped after the touch, so it lands
+// cooldown is non-empty the chore.json carries that cooldown and a recent
+// MoE-Chore-Skipped completion is stamped after the touch, so it lands
 // cooling-down and not-due — the state `--now` exists to override.
 func seedChoreRootWith(t *testing.T, cooldown string) string {
 	t.Helper()
@@ -38,9 +38,11 @@ func seedChoreRootWith(t *testing.T, cooldown string) string {
 	}
 	write("bureaucracy.conf", "")
 	write("projects/moe/project.json", `{"id":"moe"}`)
-	write("projects/moe/chores/readme-refresh/trigger", "README.md\n")
 	if cooldown != "" {
-		write("projects/moe/chores/readme-refresh/cooldown", cooldown+"\n")
+		write("projects/moe/chores/readme-refresh/chore.json",
+			`{"trigger":"README.md","cooldown":"`+cooldown+`"}`)
+	} else {
+		write("projects/moe/chores/readme-refresh/chore.json", `{"trigger":"README.md"}`)
 	}
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-m", "seed bureaucracy")

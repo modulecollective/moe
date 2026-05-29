@@ -3,6 +3,7 @@
 package chore
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -91,31 +92,39 @@ func loadProject(root, projectID string) ([]Definition, error) {
 	return defs, nil
 }
 
+// choreJSON is the on-disk wire shape of chore.json. Durations stay
+// strings so the d-suffix shorthand survives and the file stays
+// hand-editable; parseDuration turns them into time.Duration.
+type choreJSON struct {
+	Trigger  string `json:"trigger,omitempty"`
+	Workflow string `json:"workflow,omitempty"`
+	Cadence  string `json:"cadence,omitempty"`
+	Cooldown string `json:"cooldown,omitempty"`
+}
+
 func loadOne(root, projectID, name string) (Definition, error) {
 	dir := filepath.Join(root, project.Dir(projectID), "chores", name)
 	d := Definition{Project: projectID, Name: name, Workflow: DefaultWorkflow}
-	var err error
-	d.Trigger, err = readScalar(dir, "trigger")
+	b, err := os.ReadFile(filepath.Join(dir, "chore.json"))
 	if err != nil {
-		return d, err
+		return d, fmt.Errorf("chore %s/%s: read chore.json: %w", projectID, name, err)
 	}
-	if wf, err := readScalar(dir, "workflow"); err != nil {
-		return d, err
-	} else if wf != "" {
-		d.Workflow = wf
+	var cj choreJSON
+	if err := json.Unmarshal(b, &cj); err != nil {
+		return d, fmt.Errorf("chore %s/%s: parse chore.json: %w", projectID, name, err)
 	}
-	if s, err := readScalar(dir, "cooldown"); err != nil {
-		return d, err
-	} else if s != "" {
-		d.Cooldown, err = parseDuration(s)
+	d.Trigger = cj.Trigger
+	if cj.Workflow != "" {
+		d.Workflow = cj.Workflow
+	}
+	if cj.Cooldown != "" {
+		d.Cooldown, err = parseDuration(cj.Cooldown)
 		if err != nil {
 			return d, fmt.Errorf("chore %s/%s cooldown: %w", projectID, name, err)
 		}
 	}
-	if s, err := readScalar(dir, "cadence"); err != nil {
-		return d, err
-	} else if s != "" {
-		d.Cadence, err = parseDuration(s)
+	if cj.Cadence != "" {
+		d.Cadence, err = parseDuration(cj.Cadence)
 		if err != nil {
 			return d, fmt.Errorf("chore %s/%s cadence: %w", projectID, name, err)
 		}
@@ -225,17 +234,6 @@ func MatchChangedPaths(defs []Definition, projectID string, paths []string) []st
 	}
 	sort.Strings(out)
 	return out
-}
-
-func readScalar(dir, name string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("chore: read %s: %w", name, err)
-	}
-	return strings.TrimSpace(string(b)), nil
 }
 
 func parseDuration(s string) (time.Duration, error) {
