@@ -219,80 +219,32 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	active := rows[:n]
 	keyOf := func(r Row) string { return r.Project + "/" + r.Run }
 
-	inActive := make(map[string]bool, n)
-	for _, r := range active {
-		inActive[keyOf(r)] = true
+	// The unit ordering is shared with `chain edit` via run.OrderChainUnits
+	// — active rows arrive recency-sorted, so the items feed it in order.
+	items := make([]run.ChainOrderItem, n)
+	rowByKey := make(map[string]Row, n)
+	for i, r := range active {
+		k := keyOf(r)
+		items[i] = run.ChainOrderItem{Key: k, When: r.When}
+		rowByKey[k] = r
 	}
+	units := run.OrderChainUnits(items, idx, byKey)
 
-	// Live edges with both endpoints active. childOf is ≤1 per parent
-	// (ChainedChild is a map); parentOf records the active incoming edge
-	// — its value is unused, so fan-in's last-writer-wins is harmless.
-	childOf := make(map[string]string)
-	parentOf := make(map[string]string)
-	for parent, child := range idx.ChainedChild {
-		if inActive[parent] && inActive[child] && chainChildLive(child, byKey) {
-			childOf[parent] = child
-			parentOf[child] = parent
-		}
-	}
-
-	shownEdge := make(map[string]bool) // parents whose child is drawn adjacently
-	if len(childOf) > 0 {
-		rowByKey := make(map[string]Row, n)
-		for _, r := range active {
-			rowByKey[keyOf(r)] = r
-		}
-		type unit struct {
-			keys []string
-			rep  time.Time // representative time = most-recent member
-		}
-		consumed := make(map[string]bool, n)
-		var units []unit
-		for _, r := range active { // recency order
-			k := keyOf(r)
-			if consumed[k] {
-				continue
-			}
-			if _, hasParent := parentOf[k]; hasParent {
-				continue // a member; emitted within its head's unit
-			}
-			if _, hasChild := childOf[k]; !hasChild {
-				consumed[k] = true
-				units = append(units, unit{keys: []string{k}, rep: r.When})
-				continue
-			}
-			// Head: walk childOf transitively, cycle-guarded by consumed.
-			var u unit
-			for cur := k; cur != "" && !consumed[cur]; cur = childOf[cur] {
-				consumed[cur] = true
-				u.keys = append(u.keys, cur)
-				if w := rowByKey[cur].When; w.After(u.rep) {
-					u.rep = w
-				}
-			}
-			units = append(units, u)
-		}
-		// Safety net for a parentless cycle (no head): keep any unplaced
-		// row in its recency slot rather than dropping it.
-		for _, r := range active {
-			if k := keyOf(r); !consumed[k] {
-				consumed[k] = true
-				units = append(units, unit{keys: []string{k}, rep: r.When})
-			}
-		}
-		sort.SliceStable(units, func(i, j int) bool {
-			return units[i].rep.After(units[j].rep)
-		})
-		i := 0
-		for _, u := range units {
-			for pos, k := range u.keys {
-				row := rowByKey[k]
-				row.Member = len(u.keys) >= 2 && pos > 0
-				active[i] = row
-				i++
-				if c, ok := childOf[k]; ok && pos+1 < len(u.keys) && u.keys[pos+1] == c {
-					shownEdge[k] = true
-				}
+	// Emit units head-first. A run past the head of a multi-run unit is a
+	// Member (the renderer draws its connector). A parent whose live child
+	// follows it in the unit has that edge shown adjacently, so it skips
+	// the textual hint below; every other consecutive pair came from the
+	// childOf walk, so "has a successor in its unit" is exactly that set.
+	shownEdge := make(map[string]bool)
+	i := 0
+	for _, u := range units {
+		for pos, k := range u {
+			row := rowByKey[k]
+			row.Member = len(u) >= 2 && pos > 0
+			active[i] = row
+			i++
+			if pos+1 < len(u) {
+				shownEdge[k] = true
 			}
 		}
 	}
@@ -407,29 +359,10 @@ func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunK
 // time).
 func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run.Metadata) string {
 	childKey := idx.ChainedChild[md.Project+"/"+md.ID]
-	if !chainChildLive(childKey, byRunKey) {
+	if !run.ChainChildLive(childKey, byRunKey) {
 		return ""
 	}
 	return " · chained → " + childKey
-}
-
-// chainChildLive reports whether childKey names a run that's on disk and
-// not terminal — the read-side of Decision 1 (terminal children are
-// filtered, so a chain edge to one wouldn't fire on the ride). Empty or
-// missing-from-byRunKey counts as not live.
-func chainChildLive(childKey string, byRunKey map[string]*run.Metadata) bool {
-	if childKey == "" {
-		return false
-	}
-	child, ok := byRunKey[childKey]
-	if !ok {
-		return false
-	}
-	switch child.Status {
-	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
-		return false
-	}
-	return true
 }
 
 // winningRunningDoc picks the open-session doc that "wins" the row's
