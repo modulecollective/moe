@@ -248,9 +248,11 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
 	// Stage advancement for in-progress sdlc runs: /advance spawns the
 	// next stage as a single headless step; /ship spawns it under --ship
-	// (the headless cascade through push).
+	// (headless cascade through push, ship this run); /chain spawns it
+	// under --chain (ship this run, then ride the whole chain).
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
+	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
 	// Chore detail page + open action. A chore isn't a run, so it has
 	// its own /chore namespace; "open" mints a fresh run of the chore's
 	// configured workflow (the analog of promoting an idea).

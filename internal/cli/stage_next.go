@@ -375,7 +375,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if dispatcher != nil {
-		moePrintln(stdout, "  !<stage> = cascade to gate · !! = driven cascade · !!! = headless cascade")
+		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -545,7 +545,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if md.Workflow == "sdlc" {
-		moePrintln(stdout, "  !! / !!! = ship now (same as m)")
+		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -568,15 +568,30 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 			return code
 		}
 		return maybeOfferChoreChain(root, md, choreChainOffer, stdout, stderr)
-	case "!!", "!!!":
-		// `!!` and `!!!` at the push gate both ship the same way `m`
-		// does, but keep the cascade no-prompt rule: report triggered
+	case "!!":
+		// `!!` at the push gate ships this run the same way `m` does,
+		// then stops. Keep the cascade no-prompt rule: report triggered
 		// chores without opening or chaining them.
 		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 		if code != 0 {
 			return code
 		}
 		return maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+	case "!!!":
+		// `!!!` ships this run, then rides the chain into the next live
+		// child — the push-gate analogue of the cascadeFromGate
+		// post-ship ride. Chore note before ride, matching the ordering
+		// of the cascadeFromGate push-ship path. A Ctrl-C inside the
+		// ride propagates as exitInterrupted: stop the chain.
+		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		choreCode := maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
+		if rideCode := maybeRideChain(md, true, stdout, stderr); rideCode == exitInterrupted {
+			return rideCode
+		}
+		return choreCode
 	case "p":
 		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
@@ -596,7 +611,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		wf, werr := LookupWorkflow(md.Workflow)
 		if werr == nil {
 			moePrintf(stderr,
-				"cascade: `%s` is at or behind the push gate; type `!!` / `!!!` to ship or pick m/p/n/x/b. (stages: %s)\n",
+				"cascade: `%s` is at or behind the push gate; type `!!` (ship this run) / `!!!` (ship + ride the chain) or pick m/p/n/x/b. (stages: %s)\n",
 				answer, strings.Join(wf.Stages(), ", "))
 		}
 		return 0
@@ -617,21 +632,22 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 // Bare `!` dispatches exactly one stage (startStage) headless and
 // re-prompts at the resulting gate. `!<stage>` walks headless up to
 // but not including the named stage. `!!` walks every remaining stage
-// driven (interactive per stage) and ships (or auto-closes, for
-// workflows without push). `!!!` is the same walk as `!!`, but headless.
+// headless and ships **this run** (or auto-closes, for workflows
+// without push), then stops. `!!!` is the same walk as `!!` but rides
+// the whole chain — after this run ships it cascades into the next
+// live chained child.
 //
 // Returns the exit code to bubble up: the failing stage's code on a
 // cascade failure, 0 on a successful park-at-gate or ship.
 func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, stderr io.Writer) int {
 	var destination string
 	oneStep := false
-	driven := false
+	rideChain := false
 	switch {
 	case answer == "!!":
-		driven = true
-		destination = ""
+		// Ship this run and stop — no chain ride.
 	case answer == "!!!":
-		destination = ""
+		rideChain = true
 	case answer == "!":
 		oneStep = true
 	default:
@@ -649,7 +665,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 			return 0
 		}
 	}
-	res, code := cascadeFromGate(startStage, destination, oneStep, driven, md, stdout, stderr)
+	res, code := cascadeFromGate(startStage, destination, oneStep, rideChain, md, stdout, stderr)
 	if summary := renderCascadeSummary(md.Project+"/"+md.ID, res); summary != "" {
 		moePrintln(stdout, summary)
 	}
@@ -708,8 +724,11 @@ type cascadeResult struct {
 
 // cascadeFromGate dispatches stages from startStage up to, but not
 // including, destination. An empty destination is the cascade-to-ship
-// variant (`!!` driven, `!!!` headless): it walks every remaining stage
-// and ships at push.
+// variant (`!!` and `!!!`): it walks every remaining stage headless and
+// ships at push. rideChain distinguishes the two — false for `!!` (ship
+// this run, then stop), true for `!!!` (ship, then ride into the next
+// live chained child). Every cascaded stage runs headless regardless;
+// rideChain only governs the chain-ride hook after a successful ship.
 // When oneStep is true, destination is ignored and the cascade
 // dispatches exactly one stage (startStage) — the bare-`!` form.
 // oneStep at the terminal stage still dispatches that stage without
@@ -733,7 +752,7 @@ type cascadeResult struct {
 // (pushCmd.Run with no flags). `!!` and `!!!` default to fast-forward
 // merge; runPushTyped writes the merge-path push note after deterministic
 // hooks and shipping.
-func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
+func cascadeFromGate(startStage, destination string, oneStep bool, rideChain bool, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
@@ -780,11 +799,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 	}
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
-		mode := "headless"
-		if driven {
-			mode = "driven"
-		}
-		moePrintf(stdout, "cascade: %s (%s)\n", stage, mode)
+		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
 			// `!!` / `!!!` at push ships via the merge path. runPushTyped
 			// owns synthesis before the shared ship gate, so the cascade
@@ -814,7 +829,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 			retries := 0
 			for {
 				ship, err := pushFromCascade(md.Workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
-					HeadlessRecovery: !driven,
+					HeadlessRecovery: true,
 				}, stdout, stderr)
 				var deferred *PushDeferredError
 				if errors.As(err, &deferred) {
@@ -826,12 +841,11 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 						code:     ship,
 						deferred: deferred.Recovery,
 					})
-					// Stop when: driven (interactive recovery owns the
-					// next move), the recovery session gave up (non-zero
+					// Stop when: the recovery session gave up (non-zero
 					// exit), or the one retry is already spent. The
 					// deferred marker keeps the summary honest — this
 					// was not a ship.
-					if driven || ship != 0 || retries >= 1 {
+					if ship != 0 || retries >= 1 {
 						return res, ship
 					}
 					// Headless clean recovery: the agent committed a
@@ -848,24 +862,27 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 				if rootErr == nil {
 					maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
 				}
-				// Chain ride: after the parent's terminal stage ships, if a
-				// live chain edge points at an unresolved child, cascade
-				// into it in the same mode. Recursive by construction —
-				// the child's cascadeFromGate reaches its own push (sdlc)
-				// or auto-close (non-sdlc) and re-fires this hook on its
-				// own outgoing edge. An operator Ctrl-C inside the ride
+				// Chain ride (`!!!` only): after the parent's terminal
+				// stage ships, if a live chain edge points at an
+				// unresolved child, cascade into it. `!!` stops here —
+				// rideChain is the gate. Recursive by construction — the
+				// child's cascadeFromGate reaches its own push (sdlc) or
+				// auto-close (non-sdlc) and re-fires this hook on its own
+				// outgoing edge. An operator Ctrl-C inside the ride
 				// propagates back as exitInterrupted: stop the whole chain
 				// now rather than returning to a re-prompt. The parent has
 				// already shipped — res records that honestly — but the
 				// abort code halts everything above it.
-				if rideCode := maybeRideChain(md, driven, stdout, stderr); rideCode == exitInterrupted {
-					return res, rideCode
+				if rideChain {
+					if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
+						return res, rideCode
+					}
 				}
 				break
 			}
 			continue
 		}
-		code := dispatcher(stage, md.Project, md.ID, !driven, true, stdout, stderr)
+		code := dispatcher(stage, md.Project, md.ID, true, true, stdout, stderr)
 		res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
 		if code != 0 {
 			return res, code
@@ -879,14 +896,17 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 	// non-interactive (followups.md harvests as-is); a hands-off cascade
 	// should never block on an editor.
 	if yolo && !res.shipped {
-		// Chain ride fires before the synthetic auto-close — per
-		// design, the ride sits between "all real stages committed"
-		// and the terminal action. For sdlc the analogous slot is
-		// "after push success" in the loop above; this branch is the
-		// non-sdlc analogue. A Ctrl-C inside the ride halts the chain
-		// before the auto-close, same as the sdlc push branch.
-		if rideCode := maybeRideChain(md, driven, stdout, stderr); rideCode == exitInterrupted {
-			return res, rideCode
+		// Chain ride (`!!!` only) fires before the synthetic auto-close
+		// — per design, the ride sits between "all real stages
+		// committed" and the terminal action. For sdlc the analogous
+		// slot is "after push success" in the loop above; this branch is
+		// the non-sdlc analogue. `!!` stops here — rideChain is the gate.
+		// A Ctrl-C inside the ride halts the chain before the
+		// auto-close, same as the sdlc push branch.
+		if rideChain {
+			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
+				return res, rideCode
+			}
 		}
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
@@ -902,12 +922,13 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 }
 
 // maybeRideChain dispatches the parent's chained child at the end of a
-// `!!` / `!!!` cascade, if a live unresolved edge exists. The child
-// opens at its first pending stage (Workflow.Next) and inherits the
-// parent's driven/headless mode. Recursive by construction — the
-// child's cascadeFromGate reaches its own terminal stage and re-fires
-// this hook on its own outgoing edge, so `!!!` rides the whole chain
-// in one shot.
+// `!!!` cascade, if a live unresolved edge exists. The caller gates the
+// call on rideChain (only `!!!` rides); rideChain is threaded through to
+// the child cascade so the ride propagates. The child opens at its
+// first pending stage (Workflow.Next) and runs headless. Recursive by
+// construction — the child's cascadeFromGate reaches its own terminal
+// stage and re-fires this hook on its own outgoing edge, so `!!!` rides
+// the whole chain in one shot.
 //
 // Returns the exit code the parent should propagate: 0 for "carry on"
 // (the common case) and exitInterrupted when the child ride was cut
@@ -927,7 +948,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, driven bool, 
 // drop-in at any cascade seam; the cost is one extra git rev-parse
 // per terminal stage in a chain, which is rounding error next to the
 // stage dispatch itself.
-func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Writer) int {
+func maybeRideChain(parentMD *run.Metadata, rideChain bool, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 0
@@ -977,12 +998,8 @@ func maybeRideChain(parentMD *run.Metadata, driven bool, stdout, stderr io.Write
 		// auto-close someone else's parked run.
 		return 0
 	}
-	mode := "headless"
-	if driven {
-		mode = "driven"
-	}
-	moePrintf(stdout, "chain: riding into %s at %s (%s)\n", childKey, nextStage, mode)
-	childRes, childCode := cascadeFromGate(nextStage, "", false, driven, childMD, stdout, stderr)
+	moePrintf(stdout, "chain: riding into %s at %s (headless)\n", childKey, nextStage)
+	childRes, childCode := cascadeFromGate(nextStage, "", false, rideChain, childMD, stdout, stderr)
 	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}

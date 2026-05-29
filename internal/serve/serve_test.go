@@ -1049,9 +1049,10 @@ func TestCloseRouteSDLCWithoutCallbackIs500(t *testing.T) {
 
 // TestRunPageRendersAdvanceAndShipChips: an in-progress sdlc run parked
 // at an advanceable stage (next=code) surfaces the "→ code" advance
-// chip (POST /advance) and the plain "ship it" chip (POST /ship),
-// prepended ahead of the existing close-run chip. The ship chip renders
-// as a neutral .action chip — no distinct presentation class.
+// chip (POST /advance), the "ship" chip (POST /ship), and the "chain"
+// chip (POST /chain), prepended ahead of the existing close-run chip.
+// The ship/chain chips render as neutral .action chips — no distinct
+// presentation class.
 func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -1075,7 +1076,9 @@ func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
 		`action="/run/alpha/fix-it/advance"`,
 		`>→ code</button>`,
 		`action="/run/alpha/fix-it/ship"`,
-		`class="action" type="submit">ship it</button>`,
+		`class="action" type="submit">ship</button>`,
+		`action="/run/alpha/fix-it/chain"`,
+		`class="action" type="submit">chain</button>`,
 		`action="/run/alpha/fix-it/close"`, // base close chip still present
 	} {
 		if !strings.Contains(body, want) {
@@ -1113,6 +1116,7 @@ func TestRunPageHidesAdvanceChipsBeforePush(t *testing.T) {
 	for _, banned := range []string{
 		`/run/alpha/fix-it/advance`,
 		`/run/alpha/fix-it/ship`,
+		`/run/alpha/fix-it/chain`,
 	} {
 		if strings.Contains(body, banned) {
 			t.Errorf("push-parked run must not render %q\n%s", banned, body)
@@ -1151,6 +1155,7 @@ func TestRunPageHidesAdvanceChipsForLiveChild(t *testing.T) {
 	for _, banned := range []string{
 		`/run/alpha/fix-it/advance`,
 		`/run/alpha/fix-it/ship`,
+		`/run/alpha/fix-it/chain`,
 	} {
 		if strings.Contains(body, banned) {
 			t.Errorf("live-child page must not render %q\n%s", banned, body)

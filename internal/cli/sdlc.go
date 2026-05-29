@@ -137,20 +137,20 @@ type stageVerbCfg struct {
 
 // runSDLCStage is the shared body behind runDesign / runCode / runTest:
 // parse the per-stage flags, branch to interactive (no cascade flag)
-// or cascade (one of --once / --to / --drive / --ship), and surface
+// or cascade (one of --once / --to / --ship / --chain), and surface
 // cascade-mode mutual exclusion at parse time.
 // Same shape every sdlc stage verb takes — keeping the body in one
-// place is what made adding the four cascade flags a one-stop edit.
+// place is what made adding the cascade flags a one-stop edit.
 func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(cfg.verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "set the run's agent (claude/codex); persists to run.json")
 	once := fs.Bool("once", false, "run "+cfg.stage+" headless and park at the next chain prompt (= ! at the chain prompt)")
 	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
-	drive := fs.Bool("drive", false, "driven cascade through push, interactive per stage (= !!)")
-	ship := fs.Bool("ship", false, "headless cascade through push (= !!!)")
+	ship := fs.Bool("ship", false, "headless cascade through push, ship this run (= !!)")
+	chain := fs.Bool("chain", false, "headless cascade through push, then ride the whole chain (= !!!)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --drive | --ship] <project>/<run>\n", cfg.verb)
+		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb)
 		moePrintln(stderr, "")
 		for _, line := range cfg.usage {
 			moePrintln(stderr, line)
@@ -159,8 +159,8 @@ func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintln(stderr, "Cascade mode flags (mutually exclusive):")
 		moePrintln(stderr, "  --once         dispatch one stage headless, park at the next gate (= !)")
 		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")
-		moePrintln(stderr, "  --drive        driven cascade through push, interactive per stage (= !!)")
-		moePrintln(stderr, "  --ship         headless cascade through push (= !!!)")
+		moePrintln(stderr, "  --ship         headless cascade through push, ship this run (= !!)")
+		moePrintln(stderr, "  --chain        headless cascade through push, then ride the whole chain (= !!!)")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -180,9 +180,9 @@ func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintf(stderr, "%s: %v\n", cfg.verb, err)
 		return 2
 	}
-	answer, ok := cascadeAnswerFromFlags(*once, *to, *drive, *ship)
+	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship, *chain)
 	if !ok {
-		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --drive, --ship) are mutually exclusive\n", cfg.verb)
+		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --ship, --chain) are mutually exclusive\n", cfg.verb)
 		return 2
 	}
 	if *agentOverride != "" {
@@ -243,7 +243,7 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 }
 
 // cascadeAnswerFromFlags translates the four mode flags (--once,
-// --to, --drive, --ship) into the bang answer dispatchCascade
+// --to, --ship, --chain) into the bang answer dispatchCascade
 // understands at the chain prompt. Exactly one of the four may be
 // set; otherwise the flags conflict and ok=false. An empty answer
 // with ok=true signals the no-flag case the caller routes through
@@ -253,9 +253,9 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 //
 //	--once        → "!"            run startStage headless, park
 //	--to=<stage>  → "!" + <stage>  walk headless to that gate
-//	--drive       → "!!"           driven cascade through ship
-//	--ship        → "!!!"          headless cascade through ship
-func cascadeAnswerFromFlags(once bool, to string, drive, ship bool) (answer string, ok bool) {
+//	--ship        → "!!"           headless cascade, ship this run
+//	--chain       → "!!!"          headless cascade, ship + ride the chain
+func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer string, ok bool) {
 	set := 0
 	if once {
 		set++
@@ -263,10 +263,10 @@ func cascadeAnswerFromFlags(once bool, to string, drive, ship bool) (answer stri
 	if to != "" {
 		set++
 	}
-	if drive {
+	if ship {
 		set++
 	}
-	if ship {
+	if chain {
 		set++
 	}
 	if set > 1 {
@@ -277,9 +277,9 @@ func cascadeAnswerFromFlags(once bool, to string, drive, ship bool) (answer stri
 		return "!", true
 	case to != "":
 		return "!" + to, true
-	case drive:
-		return "!!", true
 	case ship:
+		return "!!", true
+	case chain:
 		return "!!!", true
 	}
 	return "", true
@@ -524,8 +524,9 @@ func init() {
 	openSdlcStage = func(stage, projectID, runID string, headless, suppressNextStage bool, stdout, stderr io.Writer) int {
 		// Chain / cascade entry: no per-call --agent override. The run's
 		// persisted agent (from run.json) takes over inside
-		// runStageSession. headless flips between `!!!` (yolo) and
-		// `!!` (driven); the bare-`!` / `!<stage>` callers pass true.
+		// runStageSession. Every cascade path is headless now — the
+		// dispatcher always passes headless=true — so `!` / `!<stage>` /
+		// `!!` / `!!!` all run `claude -p`.
 		switch stage {
 		case "design":
 			return openSdlcDesign(projectID, runID, headless, suppressNextStage, "", stdout, stderr)

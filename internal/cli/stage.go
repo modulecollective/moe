@@ -83,12 +83,23 @@ type stageSessionOpts struct {
 	// skipped (the canvas + per-turn commit are the durable
 	// artifacts). Set by the chain prompt's cascade driver
 	// (`!` / `!<stage>` / `!!` / `!!!`).
+	//
+	// Headless implies SkipNextStage: a headless turn has no stdin to
+	// answer the post-turn chain prompt, so the post-turn guard
+	// (runStageSession's tail) treats Headless as a skip on its own. A
+	// caller may still set SkipNextStage explicitly — the two are kept
+	// as independent fields because the non-cascade serve path skips the
+	// prompt while running interactive (headless=false, skip=true) — but
+	// it never needs to pair them by hand to keep a headless turn from
+	// prompting.
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by the cascade driver, which composes
 	// its own chain (design → code → test → push) and never wants the
-	// interactive next-stage
-	// prompt to fire mid-chain.
+	// interactive next-stage prompt to fire mid-chain. Headless turns
+	// skip the prompt regardless of this field (see Headless above); the
+	// field stays meaningful for the interactive-but-suppressed serve
+	// path.
 	SkipNextStage bool
 	// NextStageOverride, when non-empty, replaces the stage the
 	// post-turn prompt offers — without touching the back-targets,
@@ -606,7 +617,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
-	if opts.SkipNextStage {
+	if opts.SkipNextStage || opts.Headless {
+		// Headless ⇒ skip is structural, not a caller convention: a
+		// headless turn has no stdin to answer the post-turn prompt, so
+		// it must never fire one. The `|| opts.Headless` term closes the
+		// gap for any caller that sets Headless without remembering to
+		// pair it with SkipNextStage. See the field doc comments above.
 		return 0
 	}
 	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, stdout, stderr)

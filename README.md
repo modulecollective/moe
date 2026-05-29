@@ -85,11 +85,15 @@ branch, or opens a PR with `--pr`.
 
 At the end of a stage, MoE prints a chain prompt. The shortcuts are:
 
+More bangs go further. Every cascade is headless — the axis is *how far*,
+not *how*:
+
 - `!` runs exactly the next stage headlessly and then parks at the next gate.
 - `!<stage>` runs headlessly up to that named gate, without shipping.
-- `!!` runs every remaining stage in driven mode, opening interactive agent
-  sessions and then shipping or auto-closing.
-- `!!!` runs every remaining stage headlessly and then ships or auto-closes.
+- `!!` runs every remaining stage headlessly and ships **this run** (or
+  auto-closes, for workflows without a push gate), then stops.
+- `!!!` is the same as `!!`, but after this run ships it **rides the whole
+  chain** — cascading into the next live chained run.
 
 In practice the everyday path is lighter: jot an idea, shape the design in one
 conversation, then let the rest run:
@@ -105,10 +109,11 @@ run `code`, `test`, and `push` headlessly. The five-command block above is the
 same path spelled out by hand.
 
 When several SDLC runs are already designed and ready for code/test, use
-`moe chain edit` to order the active runs in `$EDITOR`. After a `!!` or `!!!`
-cascade finishes one run, MoE can ride into the next live chained run at its
-first pending stage. Use `!!` when you still want an interactive session at
-each stage, or `!!!` when the queued work is routine enough to run headlessly.
+`moe chain edit` to order the active runs in `$EDITOR`. `!!!` is the chain
+lever: after it ships one run, MoE rides into the next live chained run at
+its first pending stage and keeps going. `!!` ships just the run in front of
+you and stops — reach for it when you want to ship one thing without setting
+the whole queue in motion.
 
 `moe dash` is the terminal home screen for re-entry. `moe serve` starts a local
 web UI, bound to `127.0.0.1:4242` by default, that shows the dashboard, run
@@ -188,9 +193,9 @@ mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 
 ```sh
 moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
-moe sdlc design [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
-moe sdlc code   [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
-moe sdlc test   [--agent <name> | --once | --to=<stage> | --drive | --ship] <project>/<run>
+moe sdlc design [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc code   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc test   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 ```
 
@@ -202,18 +207,19 @@ when a closed or merged topic still has more work behind it.
 The cascade mode flags on `design`/`code`/`test` mirror the post-stage chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
-headless to a named gate; `--drive` (= `!!`) is a driven cascade through
-push; `--ship` (= `!!!`) is its headless counterpart. They are mutually
-exclusive and cannot combine with `--agent` (cascade walks multiple stages
-on the run's persisted agent).
+headless to a named gate; `--ship` (= `!!`) cascades headless through push
+and ships this run; `--chain` (= `!!!`) does the same and then rides the
+whole chain. They are mutually exclusive and cannot combine with `--agent`
+(cascade walks multiple stages on the run's persisted agent).
 
 Chains are the batch version of that same forward motion for active SDLC runs.
 `moe chain edit` opens every active SDLC run across projects; reorder the lines
 to make a sequence, delete lines you want left unchained, and save. `moe dash`
 shows a `chained -> <project>/<run>` hint for active parents with a live child.
-When a `!!` or `!!!` cascade reaches the end of a chained parent, MoE starts
-the child at its first pending stage: a fresh child starts at `design`, while a
-partly completed child resumes where it is parked.
+When a `!!!` cascade reaches the end of a chained parent, MoE starts the child
+at its first pending stage: a fresh child starts at `design`, while a partly
+completed child resumes where it is parked. (`!!` ships the parent and stops —
+it does not ride into the child.)
 
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask

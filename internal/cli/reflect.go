@@ -157,8 +157,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	// Hand off to the chain prompt's fresh-run path. justFinished="" so
 	// promptNextStage falls back to Workflow.Next, which returns the
 	// first parked stage (vision). The chain prompt offers `Y` to run
-	// it; `!!` / `!!!` to cascade through the ladder (driven / headless);
-	// `!` for headless dispatch of just the next stage.
+	// it; `!!` to cascade headless through the ladder and ship this run,
+	// `!!!` to also ride the chain; `!` for headless dispatch of just
+	// the next stage.
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

@@ -163,10 +163,11 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 }
 
 // openSdlcStageInvocation records one openSdlcStage dispatch — the
-// stage name, the (project, run) tuple, the headless flag (false under
-// driven `!!`), and the next-stage suppression flag. Tests assert on
-// these directly instead of an args slice; the rename run carved away
-// the `--one-shot` prefix that used to be the assertion target.
+// stage name, the (project, run) tuple, the headless flag (always true
+// on the cascade path now), and the next-stage suppression flag. Tests
+// assert on these directly instead of an args slice; the rename run
+// carved away the `--one-shot` prefix that used to be the assertion
+// target.
 type openSdlcStageInvocation struct {
 	stage             string
 	projectID         string
@@ -250,13 +251,14 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateYoloShipsAtPush pins the !!! shape: cascade
-// walks every remaining stage headless and ships at push. code/test
-// go through openSdlcStage (headless=true), push goes through
-// pushFromCascade (the typed entry that wraps runPushTyped — merge
-// path, no flags). There is no separate cascade synthesis step:
-// `!!!` defaults to fast-forward merge and runPushTyped writes the
-// merge-path push note.
+// TestCascadeFromGateYoloShipsAtPush pins the cascade-ship shape (`!!`,
+// rideChain=false): the cascade walks every remaining stage headless
+// and ships at push. code/test go through openSdlcStage (headless=true),
+// push goes through pushFromCascade (the typed entry that wraps
+// runPushTyped — merge path, no flags). There is no separate cascade
+// synthesis step: cascade push defaults to fast-forward merge and
+// runPushTyped writes the merge-path push note. The `!!!` half (same
+// walk, plus a chain ride) is covered by the chain_test.go ride pair.
 func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	openCaptured := stubOpenSdlcStage(t, nil)
 	pushCaptured := stubPushFromCascade(t, 0, nil)
@@ -268,7 +270,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
 	if !res.shipped {
-		t.Fatalf("!! cascade must ship: %+v", res)
+		t.Fatalf("cascade-ship must ship: %+v", res)
 	}
 	wantSteps := []string{"code", "test", "push"}
 	if len(res.ran) != len(wantSteps) {
@@ -310,44 +312,6 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	// Summary line tags the headless mode per stage.
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
-	}
-}
-
-// TestCascadeFromGateDrivenShipsAtPush pins the `!!` (driven) shape:
-// each stage opens interactively (headless=false) but the cascade
-// otherwise walks the same ladder and ships at push. Mirrors the
-// `!!!` shape one variant over — the only ambient difference is the
-// `headless` flag threaded into each opener and the `(driven)` tag in
-// the per-stage cascade announcement.
-func TestCascadeFromGateDrivenShipsAtPush(t *testing.T) {
-	openCaptured := stubOpenSdlcStage(t, nil)
-	pushCaptured := stubPushFromCascade(t, 0, nil)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if !res.shipped {
-		t.Fatalf("driven cascade must ship at push: %+v", res)
-	}
-	for _, inv := range *openCaptured {
-		if inv.headless {
-			t.Fatalf("driven cascade openSdlcStage args = %+v, want headless=false", inv)
-		}
-		if !inv.suppressNextStage {
-			t.Fatalf("driven cascade openSdlcStage args = %+v, want suppressNextStage=true", inv)
-		}
-	}
-	if len(*pushCaptured) != 1 {
-		t.Fatalf("push ship dispatched %d times, want 1: %v", len(*pushCaptured), *pushCaptured)
-	}
-	if (*pushCaptured)[0].options.HeadlessRecovery {
-		t.Fatalf("!! push recovery option HeadlessRecovery = true, want false")
-	}
-	if got := stdout.String(); !strings.Contains(got, "cascade: code (driven)") {
-		t.Fatalf("expected per-stage `(driven)` mode tag in stdout, got: %q", got)
 	}
 }
 
@@ -791,13 +755,13 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageBangBangDispatchesDriven: typing `!!` at
-// the design→code gate parses as the driven variant — every
-// openSdlcStage dispatch in the resulting cascade sees headless=false,
-// and the per-stage announcement carries the `(driven)` mode tag.
-// Pins the swap: pre-swap, `!!` meant headless yolo; post-swap it
-// means driven.
-func TestPromptStageNextStageBangBangDispatchesDriven(t *testing.T) {
+// TestPromptStageNextStageBangBangDispatchesHeadless: typing `!!` at
+// the design→code gate runs a headless cascade — every openSdlcStage
+// dispatch sees headless=true and the per-stage announcement reads
+// `(headless)`. Pins the new axis: post-swap, `!!` is headless (ship
+// this run), not the old driven variant. The chain-ride difference
+// between `!!` and `!!!` is pinned in chain_test.go's ride pair.
+func TestPromptStageNextStageBangBangDispatchesHeadless(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
 	stubPushFromCascade(t, 0, nil)
 	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
@@ -824,20 +788,23 @@ func TestPromptStageNextStageBangBangDispatchesDriven(t *testing.T) {
 		t.Fatalf("!! must dispatch at least one stage; got no openSdlcStage calls")
 	}
 	for _, inv := range *captured {
-		if inv.headless {
-			t.Fatalf("!! cascade openSdlcStage args = %+v, want headless=false (driven)", inv)
+		if !inv.headless {
+			t.Fatalf("!! cascade openSdlcStage args = %+v, want headless=true", inv)
 		}
 	}
-	if got := stdout.String(); !strings.Contains(got, "(driven)") {
-		t.Fatalf("expected `(driven)` cascade mode tag in stdout, got: %q", got)
+	if got := stdout.String(); !strings.Contains(got, "(headless)") {
+		t.Fatalf("expected `(headless)` cascade mode tag in stdout, got: %q", got)
+	}
+	if got := stdout.String(); strings.Contains(got, "(driven)") {
+		t.Fatalf("driven mode is gone; stdout must not contain `(driven)`: %q", got)
 	}
 }
 
 // TestPromptStageNextStageBangBangBangDispatchesHeadless: typing
-// `!!!` at the same gate parses as the headless yolo variant —
-// openSdlcStage sees headless=true and the announcement reads
-// `(headless)`. The sibling to TestPromptStageNextStageBangBangDispatchesDriven
-// pinning the other half of the swap.
+// `!!!` at the same gate also runs a headless cascade — openSdlcStage
+// sees headless=true and the announcement reads `(headless)`, same as
+// `!!`. The only difference is the chain ride after ship, pinned in
+// chain_test.go.
 func TestPromptStageNextStageBangBangBangDispatchesHeadless(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
 	stubPushFromCascade(t, 0, nil)
@@ -938,11 +905,11 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	if !strings.Contains(stdout.String(), "!<stage> = cascade to gate") {
 		t.Fatalf("expected cascade legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!! = driven cascade") {
-		t.Fatalf("expected !! driven legend in stdout, got: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "!! = ship this run") {
+		t.Fatalf("expected !! ship-this-run legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!!! = headless cascade") {
-		t.Fatalf("expected !!! headless legend in stdout, got: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "!!! = ship + ride the chain") {
+		t.Fatalf("expected !!! ride-the-chain legend in stdout, got: %q", stdout.String())
 	}
 	// The cascade-extras line is reserved for the genuinely multi-char
 	// forms now; bare `!` lives in the main legend instead. Guards
@@ -1091,88 +1058,12 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d", code)
 	}
-	if !strings.Contains(stdout.String(), "!! / !!! = ship now") {
+	if !strings.Contains(stdout.String(), "!! = ship this run · !!! = ship + ride the chain") {
 		t.Fatalf("expected !! / !!! legend at push gate, got: %q", stdout.String())
 	}
 }
 
-// TestCascadeFromGateDrivenPushDeferredStops pins the driven (`!!`)
-// deferral: recovery is interactive, so the operator picks up at the
-// chain prompt — the cascade must not retry (it would race the human).
-// The push step is marked deferred (not shipped), the summary reads
-// "— stopped", and push dispatches exactly once.
-//
-// Two flavours: rebase-conflict (built-in hook check) and hook-failure
-// (project script). Both deserve the same summary shape and ship gate
-// behaviour.
-func TestCascadeFromGateDrivenPushDeferredStops(t *testing.T) {
-	cases := []struct {
-		name        string
-		recovery    string
-		wantSummary string
-	}{
-		{
-			name:        "rebase-conflict",
-			recovery:    "rebase-conflict",
-			wantSummary: "cascade tele/fix-it: code ok · test ok · push deferred to recovery (rebase conflict) — stopped",
-		},
-		{
-			name:        "hook-failure",
-			recovery:    "hook-failure",
-			wantSummary: "cascade tele/fix-it: code ok · test ok · push deferred to recovery (pre-push hook) — stopped",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			openCaptured := stubOpenSdlcStage(t, nil)
-			deferred := &PushDeferredError{Recovery: tc.recovery, Project: "tele", Run: "fix-it"}
-			// Driven recovery is interactive (exit 0 from the operator
-			// closing the session). The cascade must stop regardless —
-			// no retry under `!!`.
-			pushCaptured := stubPushFromCascadeSeq(t, []pushOutcome{{exit: 0, deferred: deferred}})
-			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-
-			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
-			if code != 0 {
-				t.Fatalf("cascade exit=%d, want 0 (recovery exited cleanly); stderr=%q", code, stderr.String())
-			}
-			if res.shipped {
-				t.Fatalf("res.shipped = true on deferred push; a deferral is not a ship")
-			}
-			wantStages := []string{"code", "test", "push"}
-			if len(res.ran) != len(wantStages) {
-				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
-			}
-			for i, s := range wantStages {
-				if res.ran[i].stage != s {
-					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
-				}
-			}
-			if pushStep := res.ran[len(res.ran)-1]; pushStep.deferred != tc.recovery {
-				t.Fatalf("push step deferred tag: want %q, got %q", tc.recovery, pushStep.deferred)
-			}
-			if got := renderCascadeSummary("tele/fix-it", res); got != tc.wantSummary {
-				t.Fatalf("summary = %q, want %q", got, tc.wantSummary)
-			}
-			// Driven dispatches push exactly once — no retry.
-			if len(*pushCaptured) != 1 {
-				t.Fatalf("push dispatched %d times, want 1 (driven never retries): %+v", len(*pushCaptured), *pushCaptured)
-			}
-			// Driven recovery is interactive, not headless.
-			if (*pushCaptured)[0].options.HeadlessRecovery {
-				t.Fatalf("driven `!!` push recovery option HeadlessRecovery = true, want false")
-			}
-			for _, inv := range *openCaptured {
-				if inv.stage == "push" {
-					t.Fatalf("openSdlcStage must not dispatch push (cascade routes push through pushFromCascade): %+v", inv)
-				}
-			}
-		})
-	}
-}
-
-// TestCascadeFromGateHeadlessRecoveryFailedStops: under `!!!`, a
+// TestCascadeFromGateHeadlessRecoveryFailedStops: under a cascade ship, a
 // recovery session that exits non-zero means the agent gave up. The
 // cascade stops with the deferred marker — no retry — and propagates
 // the recovery's exit code so the failure is visible.
@@ -1200,10 +1091,10 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips is the
-// behaviour this run adds: under `!!!`, a recovery session that exits
-// cleanly (exit 0, fix committed) earns one push retry. The retry
-// re-runs the pre-push gate against the new commit; when it passes,
+// TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips: a cascade
+// recovery session that exits cleanly (exit 0, fix committed) earns one
+// push retry. The retry re-runs the pre-push gate against the new
+// commit; when it passes,
 // push ships and the cascade rides to completion. The deferred step
 // stays recorded, so the summary reads as two honest steps — the
 // recover, then the ship.
@@ -1250,7 +1141,7 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			}
 			for i, inv := range *pushCaptured {
 				if !inv.options.HeadlessRecovery {
-					t.Fatalf("push call %d HeadlessRecovery = false, want true (`!!!`)", i)
+					t.Fatalf("push call %d HeadlessRecovery = false, want true (cascade push)", i)
 				}
 			}
 			// Summary shows the recover-then-ship as two steps and

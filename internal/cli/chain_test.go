@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -217,11 +219,11 @@ func TestChainAnnotationSuppressesTerminalEdges(t *testing.T) {
 }
 
 // TestCascadeFromGateRidesIntoLiveChainChild pins the end-of-cascade
-// chain ride: when a parent ships at push and a live trailer points
-// at an unresolved child, the cascade transparently opens that child
-// at its first pending stage in the same mode. The recursion is by
-// construction — the child's own push then re-fires the hook on its
-// outgoing edge, so `!!!` rides the whole chain in one shot.
+// chain ride: when a `!!!` parent (rideChain=true) ships at push and a
+// live trailer points at an unresolved child, the cascade transparently
+// opens that child at its first pending stage, headless. The recursion
+// is by construction — the child's own push then re-fires the hook on
+// its outgoing edge, so `!!!` rides the whole chain in one shot.
 func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -247,7 +249,7 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -289,6 +291,175 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	}
 }
 
+// TestCascadeFromGateShipDoesNotRide pins the `!!` half of the new axis:
+// rideChain=false ships this run and stops, even with a live chained
+// child. Same fixture as TestCascadeFromGateRidesIntoLiveChainChild —
+// the only difference is the rideChain flag — so the two read as a
+// matched pair: `!!!` rides, `!!` doesn't.
+func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "parent-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/parent-run tele/child-run\n")
+
+	t.Chdir(root)
+	openCaptured := stubOpenSdlcStage(t, nil)
+	pushCaptured := stubPushFromCascade(t, 0, nil)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("parent cascade must ship: %+v", res)
+	}
+	// Parent only: code, test, push. The child is never opened.
+	if got := len(*pushCaptured); got != 1 {
+		t.Fatalf("pushFromCascade dispatched %d times, want 1 (`!!` ships this run only)", got)
+	}
+	wantStages := []string{"code", "test"}
+	gotStages := make([]string, 0, len(*openCaptured))
+	for _, inv := range *openCaptured {
+		gotStages = append(gotStages, inv.stage)
+	}
+	if !reflect.DeepEqual(gotStages, wantStages) {
+		t.Fatalf("openSdlcStage stages = %v, want %v (`!!` must not ride into the child)", gotStages, wantStages)
+	}
+	if strings.Contains(stdout.String(), "chain: riding") {
+		t.Errorf("`!!` must not print a chain-ride preamble, stdout:\n%s", stdout.String())
+	}
+}
+
+// seedChainedPushGateRun stands up a parent+child sdlc chain and chdirs
+// into the root, the shared fixture for the two push-gate ride tests.
+// Returns the bureaucracy root and the parent metadata the prompt is
+// driven against.
+func seedChainedPushGateRun(t *testing.T) (string, *run.Metadata) {
+	t.Helper()
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "parent-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/parent-run tele/child-run\n")
+	t.Chdir(root)
+	return root, parentMD
+}
+
+// feedStdin pipes a single answer line into os.Stdin for a chain-prompt
+// test, restoring the original on cleanup.
+func feedStdin(t *testing.T, answer string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	if _, err := io.WriteString(w, answer+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+}
+
+// TestPromptPushNextStageBangBangBangRidesChain pins Move 3: `!!!` at
+// the push gate ships this run (the stubbed merge path) and then rides
+// into the next live chained child, opening it at its first pending
+// stage. The push gate is a separate prompt handler from
+// dispatchCascade, so this ride is the bit the run added — before, the
+// push gate never rode the chain at all.
+func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
+	root, parentMD := seedChainedPushGateRun(t)
+
+	// The merge path is stubbed by `next` returning 0 (parent ship). The
+	// child cascade then runs through the stubbed openSdlcStage / push.
+	var shipped bool
+	next := &Command{Name: "push", Run: func(_ []string, _, _ io.Writer) int { shipped = true; return 0 }}
+	openCaptured := stubOpenSdlcStage(t, nil)
+	pushCaptured := stubPushFromCascade(t, 0, nil)
+	feedStdin(t, "!!!")
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, root, parentMD, "moe sdlc push tele parent-run", &stdout, &stderr); code != 0 {
+		t.Fatalf("push prompt exit=%d stderr=%q", code, stderr.String())
+	}
+	if !shipped {
+		t.Fatalf("`!!!` at push gate must ship the parent via the merge path")
+	}
+	// The child opens at design and walks to its own push.
+	wantStages := []string{"design", "code", "test"}
+	gotStages := make([]string, 0, len(*openCaptured))
+	for _, inv := range *openCaptured {
+		gotStages = append(gotStages, inv.stage)
+		if inv.runID != "child-run" {
+			t.Errorf("ride dispatch routed to %q, want child-run: %+v", inv.runID, inv)
+		}
+	}
+	if !reflect.DeepEqual(gotStages, wantStages) {
+		t.Fatalf("ridden child stages = %v, want %v\nstdout=%q", gotStages, wantStages, stdout.String())
+	}
+	if got := len(*pushCaptured); got != 1 {
+		t.Fatalf("child pushFromCascade dispatched %d times, want 1 (child ships)", got)
+	}
+	if !strings.Contains(stdout.String(), "chain: riding into tele/child-run at design (headless)") {
+		t.Errorf("expected chain-ride preamble in stdout, got:\n%s", stdout.String())
+	}
+}
+
+// TestPromptPushNextStageBangBangDoesNotRide is the matched `!!` half:
+// at the push gate `!!` ships this run and stops — no ride into the
+// live child, even though the chain edge exists. Same fixture as the
+// `!!!` test; the only difference is the answer.
+func TestPromptPushNextStageBangBangDoesNotRide(t *testing.T) {
+	root, parentMD := seedChainedPushGateRun(t)
+
+	var shipped bool
+	next := &Command{Name: "push", Run: func(_ []string, _, _ io.Writer) int { shipped = true; return 0 }}
+	openCaptured := stubOpenSdlcStage(t, nil)
+	pushCaptured := stubPushFromCascade(t, 0, nil)
+	feedStdin(t, "!!")
+
+	var stdout, stderr bytes.Buffer
+	if code := promptPushNextStage(next, nil, nil, root, parentMD, "moe sdlc push tele parent-run", &stdout, &stderr); code != 0 {
+		t.Fatalf("push prompt exit=%d stderr=%q", code, stderr.String())
+	}
+	if !shipped {
+		t.Fatalf("`!!` at push gate must ship the parent")
+	}
+	if len(*openCaptured) != 0 {
+		t.Fatalf("`!!` must not ride into the child: got dispatches %+v", *openCaptured)
+	}
+	if len(*pushCaptured) != 0 {
+		t.Fatalf("`!!` must not run the child cascade: got pushes %+v", *pushCaptured)
+	}
+	if strings.Contains(stdout.String(), "chain: riding") {
+		t.Errorf("`!!` at push gate must not print a chain-ride preamble, stdout:\n%s", stdout.String())
+	}
+}
+
 // TestCascadeFromGateRideInterruptHaltsParent is the verified-incident
 // regression: an operator Ctrl-C inside a chain-ridden child halts the
 // whole cascade instead of being swallowed. The parent ships, rides into
@@ -323,7 +494,7 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Fatalf("cascade exit=%d, want %d (interrupt propagates from the ride); stderr=%q", code, exitInterrupted, stderr.String())
 	}
@@ -377,7 +548,7 @@ func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d, want 0 (ordinary child failure stays swallowed); stderr=%q", code, stderr.String())
 	}
@@ -434,7 +605,7 @@ func TestCascadeFromGateSkipsRideWhenChildTerminal(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -483,7 +654,7 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}

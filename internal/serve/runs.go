@@ -319,42 +319,87 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
+// spawnMode selects which cascade flag (if any) spawnNextStage appends
+// to `moe sdlc <stage> <id>`. The three web chips map one-to-one onto
+// the modes, and each mode onto the bang vocabulary: advance (= `!`,
+// no flag), ship (= `!!`, --ship, ship this run), chain (= `!!!`,
+// --chain, ship + ride the whole chain).
+type spawnMode int
+
+const (
+	spawnAdvance spawnMode = iota
+	spawnShip
+	spawnChain
+)
+
+// verb is the human-facing label spawnNextStage uses in log lines and
+// error bodies for each mode.
+func (m spawnMode) verb() string {
+	switch m {
+	case spawnShip:
+		return "ship"
+	case spawnChain:
+		return "chain"
+	default:
+		return "advance"
+	}
+}
+
+// flag is the cascade flag spawnNextStage appends for each mode, or ""
+// for advance (a single headless step, no cascade flag).
+func (m spawnMode) flag() string {
+	switch m {
+	case spawnShip:
+		return "--ship"
+	case spawnChain:
+		return "--chain"
+	default:
+		return ""
+	}
+}
+
 // handleAdvance spawns the run's next sdlc stage as a single headless
 // turn (no cascade flag): one stage runs under SkipNextStage and the
 // child exits at the chain prompt it never reaches. The "→ <stage>"
 // chip on the per-run page posts here.
 func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, false)
+	s.spawnNextStage(w, r, spawnAdvance)
 }
 
 // handleShip spawns the run's next sdlc stage under --ship: the
-// headless yolo cascade that drives every remaining stage all the way
-// through push. The "ship it" chip posts here. Bigger lever than
-// advance — one click can open/merge a PR — but still operator-
+// headless cascade that drives every remaining stage through push and
+// ships this run, then stops. The "ship" chip posts here. Bigger lever
+// than advance — one click can open/merge a PR — but still operator-
 // triggered, and guarded downstream by the test-stage anti-theater gate
 // and the pre-push hooks.
 func (s *Server) handleShip(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, true)
+	s.spawnNextStage(w, r, spawnShip)
 }
 
-// spawnNextStage is the shared body behind /advance and /ship. It
-// re-derives the next stage server-side (never trusting a possibly-
+// handleChain spawns the run's next sdlc stage under --chain: the same
+// headless cascade as ship, but after this run ships it rides the chain
+// into the next live child. The "chain" chip posts here — the biggest
+// lever on the page, and like ship it stays operator-triggered.
+func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
+	s.spawnNextStage(w, r, spawnChain)
+}
+
+// spawnNextStage is the shared body behind /advance, /ship, and /chain.
+// It re-derives the next stage server-side (never trusting a possibly-
 // stale page) and applies the same guard set the close route uses,
-// then spawns `moe sdlc <stage> <id>` — appending --ship when ship is
-// true. The server-side re-derivation plus spawn's own dup-guard mean a
-// double-click or a stale button can't double-spawn or skip a stage.
+// then spawns `moe sdlc <stage> <id>` — appending the mode's cascade
+// flag (--ship / --chain, or none for advance). The server-side
+// re-derivation plus spawn's own dup-guard mean a double-click or a
+// stale button can't double-spawn or skip a stage.
 //
 // A direct spawn deliberately bypasses the design-stage cascade's
 // tracked-change refusal (EnforceSandboxBoundary): the explicit click
 // is the consent that guard asks for at the chain prompt.
-func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, ship bool) {
+func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spawnMode) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
-	verb := "advance"
-	if ship {
-		verb = "ship"
-	}
+	verb := mode.verb()
 
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
@@ -404,8 +449,8 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, ship boo
 	}
 
 	args := []string{"sdlc", stage, id}
-	if ship {
-		args = append(args, "--ship")
+	if flag := mode.flag(); flag != "" {
+		args = append(args, flag)
 	}
 	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		s.logf("%s %s: spawn: %v", verb, id, err)
@@ -492,17 +537,18 @@ func runActions(projectID, slug string, md *run.Metadata) []runAction {
 }
 
 // advanceActions returns the stage-advancement chips — "→ <stage>"
-// (single headless step) and "ship it" (--ship cascade through push) —
-// prepended ahead of the base actions on an in-progress sdlc run's
-// page. nextStage is the bare next-stage name re-derived from the dash
-// row; live is true when an agent is mid-turn.
+// (single headless step), "ship" (--ship cascade through push, ship
+// this run), and "chain" (--chain cascade, ship + ride the whole
+// chain) — prepended ahead of the base actions on an in-progress sdlc
+// run's page. nextStage is the bare next-stage name re-derived from the
+// dash row; live is true when an agent is mid-turn.
 //
 // Returns nil unless the run is an in-progress sdlc run, no agent is
 // live (advancing past a stage whose agent is still running would race
 // it for the sandbox clone), and the next stage is design/code/test. A
 // "" or "push" next stage yields no chips: push stays terminal/CLI-only
 // — the bang vocabulary collapses there — so a run parked right before
-// push shows neither chip.
+// push shows none.
 func advanceActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	if md.Workflow != promotedWorkflow || md.Status != run.StatusInProgress || live {
 		return nil
@@ -515,7 +561,8 @@ func advanceActions(projectID, slug, nextStage string, md *run.Metadata, live bo
 	base := "/run/" + projectID + "/" + slug
 	return []runAction{
 		{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
-		{Label: "ship it", Href: base + "/ship", Method: "POST"},
+		{Label: "ship", Href: base + "/ship", Method: "POST"},
+		{Label: "chain", Href: base + "/chain", Method: "POST"},
 	}
 }
 
