@@ -157,11 +157,65 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 
+// openDueChore is the CLI-facing wrapper around openChoreInProcess: it
+// maps the typed guard errors back to the stderr messages + exit 1 that
+// `moe chore open` (and the chore-chain prompt) print, and emits the
+// "opened chore …" stdout line on success. serve takes the typed-error
+// path directly via OpenChore instead.
 func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (*run.Metadata, int) {
-	states, err := gatherChoreStates(root, projectID)
+	res, err := openChoreInProcess(root, projectID, choreName)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, 1
+	}
+	moePrintf(stdout, "opened chore %s/%s as %s/%s\n", projectID, choreName, res.Metadata.Project, res.Metadata.ID)
+	return res.Metadata, 0
+}
+
+// choreNotFoundError is returned by openChoreInProcess when no chore
+// matches project/name. serve maps it to 404.
+type choreNotFoundError struct {
+	Project string
+	Name    string
+}
+
+func (e *choreNotFoundError) Error() string {
+	return fmt.Sprintf("chore open: %s/%s not found", e.Project, e.Name)
+}
+
+// choreNotOpenableError is returned when the chore exists but its state
+// forbids opening (an open run already exists, it's cooling down, or
+// it's simply not due). serve maps it to 409. Reason is the human tail
+// appended after the chore key.
+type choreNotOpenableError struct {
+	Key    string
+	Reason string
+}
+
+func (e *choreNotOpenableError) Error() string {
+	return fmt.Sprintf("chore open: %s %s", e.Key, e.Reason)
+}
+
+// choreOpenResult carries what a successful in-process chore open
+// produced: the destination run metadata plus the workflow + first
+// stage that callers must spawn to host the run (serve can't look the
+// workflow up itself — it stays registry-free).
+type choreOpenResult struct {
+	Metadata   *run.Metadata
+	Workflow   string
+	FirstStage string
+}
+
+// openChoreInProcess is the single chore-open pipeline shared by the CLI
+// verb and serve's OpenChore callback: gather → guard → workflow lookup
+// → runopen.Open with the Chore trailer. Guard failures come back as
+// typed errors (*choreNotFoundError / *choreNotOpenableError) so callers
+// can branch on HTTP status or print to stderr; everything else is a
+// plain error.
+func openChoreInProcess(root, projectID, choreName string) (*choreOpenResult, error) {
+	states, err := gatherChoreStates(root, projectID)
+	if err != nil {
+		return nil, err
 	}
 	var state *chore.State
 	for i := range states {
@@ -171,30 +225,24 @@ func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (
 		}
 	}
 	if state == nil {
-		moePrintf(stderr, "chore open: %s/%s not found\n", projectID, choreName)
-		return nil, 1
+		return nil, &choreNotFoundError{Project: projectID, Name: choreName}
 	}
 	if state.OpenRun != "" {
-		moePrintf(stderr, "chore open: %s already has open run %s/%s\n", state.Definition.Key(), projectID, state.OpenRun)
-		return nil, 1
+		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: fmt.Sprintf("already has open run %s/%s", projectID, state.OpenRun)}
 	}
 	if state.CooldownBlocking {
-		moePrintf(stderr, "chore open: %s is cooling down until %s\n", state.Definition.Key(), state.NextEligible.Format(time.RFC3339))
-		return nil, 1
+		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
 	}
 	if !state.Due {
-		moePrintf(stderr, "chore open: %s is not due\n", state.Definition.Key())
-		return nil, 1
+		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is not due"}
 	}
 	wf, err := LookupWorkflow(state.Definition.Workflow)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return nil, 1
+		return nil, err
 	}
 	stages := wf.Stages()
 	if len(stages) == 0 {
-		moePrintf(stderr, "chore open: workflow %q has no stages\n", state.Definition.Workflow)
-		return nil, 1
+		return nil, fmt.Errorf("chore open: workflow %q has no stages", state.Definition.Workflow)
 	}
 	prompt := state.Definition.Prompt
 	if strings.TrimSpace(prompt) == "" {
@@ -215,11 +263,9 @@ func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (
 		return nil
 	})
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return nil, 1
+		return nil, err
 	}
-	moePrintf(stdout, "opened chore %s as %s/%s\n", state.Definition.Key(), md.Project, md.ID)
-	return md, 0
+	return &choreOpenResult{Metadata: md, Workflow: state.Definition.Workflow, FirstStage: stages[0]}, nil
 }
 
 func runChoreSkip(args []string, stdout, stderr io.Writer) int {
