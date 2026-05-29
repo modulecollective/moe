@@ -23,8 +23,8 @@ import (
 // The harvest path at `close` matches every other workflow: the shared
 // closeCommand harvester opens followups.md in $EDITOR and promotes
 // surviving entries to ideas; feedback/lore.md and feedback/twin.md
-// ride the standard close paths (lore promotion, next-twin-reflect
-// pickup). Both stages run in a sandbox clone with the design-stage's
+// ride the standard close paths (lore promotion, next `moe twin
+// reflect` pickup). Both stages run in a sandbox clone with the design-stage's
 // tracked-change guard re-used to enforce the read-only character —
 // the report stage's job is to write notes, not edit project code.
 

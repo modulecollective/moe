@@ -616,7 +616,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	s.fillRunRow(&vm, projectID, slug, now)
 	// A live-parented run is usually sdlc, but opening a chore can spawn
-	// any configured workflow (e.g. twin-reflect's `twin`), so don't
+	// any configured workflow (e.g. a chore whose `workflow` is `twin`), so don't
 	// assume the workflow here — gate the action chips on the on-disk
 	// metadata (advanceActions / runActions are themselves sdlc-gated).
 	// A load failure just drops the chips.

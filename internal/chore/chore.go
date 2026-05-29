@@ -14,7 +14,6 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 const DefaultWorkflow = "sdlc"
@@ -28,7 +27,6 @@ type Definition struct {
 	Cadence  time.Duration
 	Prompt   string
 	EditedAt time.Time
-	Builtin  bool
 }
 
 func (d Definition) Key() string { return d.Project + "/" + d.Name }
@@ -65,9 +63,6 @@ func LoadAll(root string) ([]Definition, error) {
 			return nil, err
 		}
 		defs = append(defs, ds...)
-		if hasTwin(root, p.ID) {
-			defs = append(defs, builtinTwinReflect(p.ID))
-		}
 	}
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Key() < defs[j].Key() })
 	return defs, nil
@@ -272,23 +267,5 @@ func isTerminal(status string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func hasTwin(root, projectID string) bool {
-	st, err := os.Stat(filepath.Join(root, project.Dir(projectID), wiki.TwinDirRel))
-	return err == nil && st.IsDir()
-}
-
-func builtinTwinReflect(projectID string) Definition {
-	return Definition{
-		Project:  projectID,
-		Name:     "twin-reflect",
-		Trigger:  "*",
-		Workflow: "twin",
-		Cooldown: 24 * time.Hour,
-		Prompt: "Reflect the project's digital twin after recent merged project work. " +
-			"Read the existing twin, recent run history, and feedback traces; update only durable intent that the evidence supports.\n",
-		Builtin: true,
 	}
 }

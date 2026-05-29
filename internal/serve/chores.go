@@ -38,7 +38,6 @@ type choreVM struct {
 	Name     string
 	Key      string
 	Workflow string
-	Builtin  bool
 
 	Trigger  string
 	Cadence  string
@@ -75,7 +74,6 @@ func newChoreVM(now time.Time, st chore.State) choreVM {
 		Name:          d.Name,
 		Key:           d.Key(),
 		Workflow:      d.Workflow,
-		Builtin:       d.Builtin,
 		Trigger:       d.Trigger,
 		Cadence:       humanChoreInterval(d.Cadence),
 		Cooldown:      humanChoreInterval(d.Cooldown),
