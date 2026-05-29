@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/chore"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -17,10 +18,11 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("chore", "project chores: list, check, open")
+	g := NewCommandGroup("chore", "project chores: list, check, open, skip")
 	g.Register(&Command{Name: "list", Summary: "list due project chores", Run: runChoreList})
 	g.Register(&Command{Name: "check", Summary: "dry-run chore validation and due-state evaluation", Run: runChoreCheck})
 	g.Register(&Command{Name: "open", Summary: "open the workflow run for a due chore", Run: runChoreOpen})
+	g.Register(&Command{Name: "skip", Summary: "clear a due chore until it is next triggered", Run: runChoreSkip})
 	RegisterGroup(g)
 }
 
@@ -218,6 +220,71 @@ func openDueChore(root, projectID, choreName string, stdout, stderr io.Writer) (
 	}
 	moePrintf(stdout, "opened chore %s as %s/%s\n", state.Definition.Key(), md.Project, md.ID)
 	return md, 0
+}
+
+func runChoreSkip(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("chore skip", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe chore skip <project>/<chore>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Records the chore as satisfied as of now, clearing it from the")
+		moePrintln(stderr, "dash until it is next triggered (a matching change, a definition")
+		moePrintln(stderr, "edit, or the cadence elapsing). Use it to decline a chore or to")
+		moePrintln(stderr, "mark one already done by hand.")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	projectID, choreName, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "chore skip: %v\n", err)
+		return 2
+	}
+	root, ok := choreRoot(stderr)
+	if !ok {
+		return 1
+	}
+	states, err := gatherChoreStates(root, projectID)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	var state *chore.State
+	for i := range states {
+		if states[i].Definition.Name == choreName {
+			state = &states[i]
+			break
+		}
+	}
+	if state == nil {
+		moePrintf(stderr, "chore skip: %s/%s not found\n", projectID, choreName)
+		return 1
+	}
+	// An open linked run is the live way the chore is being handled;
+	// skipping behind its back would clear the dash while the run is
+	// still in flight. Point the operator at it instead. (A not-due
+	// chore is fine to skip — Decision 5 — so there's no Due gate.)
+	if state.OpenRun != "" {
+		moePrintf(stderr, "chore skip: %s has open run %s/%s — close it instead\n", state.Definition.Key(), projectID, state.OpenRun)
+		return 1
+	}
+	key := state.Definition.Key()
+	block := trailers.Block{ChoreSkipped: key}
+	msg := "chore: skip " + key + "\n\n" + block.String()
+	err = repolock.With(root, repolock.Options{Purpose: "chore-skip", Run: key}, func() error {
+		return git.Run(root, "commit", "--allow-empty", "-m", msg)
+	})
+	if err != nil {
+		moePrintf(stderr, "chore skip: %v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "skipped chore %s\n", key)
+	return 0
 }
 
 func gatherChoreStates(root, projectFilter string) ([]chore.State, error) {
