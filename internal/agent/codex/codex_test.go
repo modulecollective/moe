@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -384,6 +385,59 @@ func indexOf(args []string, needle string) int {
 		}
 	}
 	return -1
+}
+
+// TestExecuteOneShotTimeoutMirrorsAndReturnsSid drives ExecuteOneShot
+// against a fake `codex` that emits its thread.started event then hangs
+// past the deadline. The regression this run fixes: on the timeout kill
+// codex used to return "" with no transcript mirror; it must now return
+// the captured sid and mirror the rollout to ThreadPath, matching claude
+// — so the post-headless auto-tail has something to render and the next
+// turn can --resume the timed-out session.
+func TestExecuteOneShotTimeoutMirrorsAndReturnsSid(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	sid := "019e28c3-feb5-7291-aafb-12a7071a8fdb"
+	// Pre-plant the rollout the fake CLI's session would have written so
+	// the post-timeout mirror has a source to copy.
+	writeFakeRollout(t, codexHome, "2026/05/14", sid, `{"type":"session_meta"}`+"\n")
+
+	// Fake `codex`: announce the session id, then hang well past the
+	// deadline. `exec sleep` replaces the shell so the context kill hits
+	// the sleep directly and nothing lingers holding the stdout pipe.
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		`printf '%s\n' '{"type":"thread.started","thread_id":"` + sid + `"}'` + "\n" +
+		"exec sleep 30\n"
+	if err := os.WriteFile(filepath.Join(binDir, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dest := filepath.Join(t.TempDir(), "thread-codex.jsonl")
+	r := agent.OneShotRequest{
+		Root:       t.TempDir(),
+		UserPrompt: "go",
+		Timeout:    500 * time.Millisecond,
+		ThreadPath: dest,
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	}
+
+	start := time.Now()
+	gotSid, err := Agent{}.ExecuteOneShot(r)
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("ExecuteOneShot ran %s — the deadline kill didn't fire", elapsed)
+	}
+	if gotSid != sid {
+		t.Errorf(`sid = %q, want %q (must return the sid on timeout, not "")`, gotSid, sid)
+	}
+	if err == nil || !strings.Contains(err.Error(), "codex: exec timed out") {
+		t.Errorf("err = %v, want a codex timeout error", err)
+	}
+	if _, statErr := os.Stat(dest); statErr != nil {
+		t.Errorf("transcript not mirrored to ThreadPath: %v", statErr)
+	}
 }
 
 func writeFakeRollout(t *testing.T, codexHome, shard, sid, body string) string {
