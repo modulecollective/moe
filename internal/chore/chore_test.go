@@ -67,6 +67,76 @@ func TestEvaluateCooldownBlocksDue(t *testing.T) {
 	}
 }
 
+func TestEvaluateSkipClearsDue(t *testing.T) {
+	// A chore due from a changed-path trigger drops off once a later
+	// skip folds into LastCompleted: the touch no longer postdates it.
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	def := Definition{
+		Project:  "moe",
+		Name:     "readme-refresh",
+		Trigger:  "README.md",
+		Workflow: "sdlc",
+	}
+	idx := &run.JournalIndex{
+		ChoreTouched: map[string]time.Time{"moe/readme-refresh": now.Add(-2 * time.Hour)},
+		ChoreSkipped: map[string]time.Time{"moe/readme-refresh": now.Add(-time.Hour)},
+	}
+
+	state := Evaluate(def, nil, idx, now)
+	if state.Due {
+		t.Fatalf("skip after touch should clear due; reasons=%v", state.Reasons)
+	}
+	if !state.LastCompleted.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("LastCompleted=%v, want skip time %v", state.LastCompleted, now.Add(-time.Hour))
+	}
+}
+
+func TestEvaluateSkipImposesCooldown(t *testing.T) {
+	// Decision 2: a skip behaves like a completion, so the cooldown
+	// window holds from the skip time even with a fresh trigger.
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	def := Definition{
+		Project:  "moe",
+		Name:     "readme-refresh",
+		Trigger:  "*",
+		Workflow: "sdlc",
+		Cooldown: 24 * time.Hour,
+	}
+	idx := &run.JournalIndex{
+		ChoreTouched: map[string]time.Time{"moe/readme-refresh": now},
+		ChoreSkipped: map[string]time.Time{"moe/readme-refresh": now.Add(-time.Hour)},
+	}
+
+	state := Evaluate(def, nil, idx, now)
+	if state.Due {
+		t.Fatalf("cooldown from skip should block due; reasons=%v", state.Reasons)
+	}
+	if !state.CooldownBlocking {
+		t.Fatalf("expected cooldown blocking after skip")
+	}
+}
+
+func TestEvaluateSkipDoesNotMaskNewerTouch(t *testing.T) {
+	// A trigger landing after the skip re-surfaces the chore — the skip
+	// only satisfies it up to the skip time.
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	def := Definition{
+		Project:  "moe",
+		Name:     "readme-refresh",
+		Trigger:  "README.md",
+		Workflow: "sdlc",
+	}
+	idx := &run.JournalIndex{
+		ChoreSkipped: map[string]time.Time{"moe/readme-refresh": now.Add(-2 * time.Hour)},
+		ChoreTouched: map[string]time.Time{"moe/readme-refresh": now.Add(-time.Hour)},
+	}
+
+	state := Evaluate(def, nil, idx, now)
+	if !state.Due {
+		t.Fatalf("touch after skip should re-surface the chore")
+	}
+}
+
 func TestMatchChangedPaths(t *testing.T) {
 	defs := []Definition{
 		{Project: "moe", Name: "docs", Trigger: "docs/*.md"},

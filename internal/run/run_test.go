@@ -652,3 +652,29 @@ func TestJournalIndexChainedChildIgnoresMalformed(t *testing.T) {
 		t.Errorf("ChainedChild should contain only the well-formed edge: got %v", idx.ChainedChild)
 	}
 }
+
+// TestJournalIndexChoreSkipped: a `moe chore skip` commit lands a
+// MoE-Chore-Skipped trailer with no MoE-Run scope (like chain edits).
+// The index must pick it up via the "^MoE-Chore" grep widening, and
+// the most recent skip per chore wins (HEAD-first, first-seen).
+func TestJournalIndexChoreSkipped(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commitWith("chore: skip moe/readme-refresh",
+		"MoE-Chore-Skipped: moe/readme-refresh\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if _, ok := idx.ChoreSkipped["moe/readme-refresh"]; !ok {
+		t.Fatalf("ChoreSkipped[moe/readme-refresh] absent: %v", idx.ChoreSkipped)
+	}
+	// A bare MoE-Chore: line must not be misparsed as a skip.
+	if _, ok := idx.ChoreSkipped["moe/other"]; ok {
+		t.Errorf("ChoreSkipped should not contain an unrelated chore")
+	}
+}

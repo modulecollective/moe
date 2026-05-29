@@ -183,6 +183,12 @@ func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time
 		}
 	}
 	_ = lastCompletedSlug
+	// A `moe chore skip` marker counts as a completion as of its commit
+	// time: fold it into LastCompleted so every downstream gate (cooldown
+	// and all three reasons) treats the chore as satisfied then.
+	if sk := idx.ChoreSkipped[d.Key()]; sk.After(s.LastCompleted) {
+		s.LastCompleted = sk
+	}
 	if !s.LastCompleted.IsZero() && d.Cooldown > 0 {
 		s.NextEligible = s.LastCompleted.Add(d.Cooldown)
 		if now.Before(s.NextEligible) {

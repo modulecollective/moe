@@ -111,6 +111,16 @@ func TestBlockChoreTrailers(t *testing.T) {
 	}
 }
 
+func TestBlockChoreSkippedTrailer(t *testing.T) {
+	// `moe chore skip` writes a trailer-only commit carrying exactly one
+	// MoE-Chore-Skipped, rendered adjacent to (just after) MoE-Chore.
+	got := (Block{ChoreSkipped: "moe/readme-refresh"}).String()
+	want := "MoE-Chore-Skipped: moe/readme-refresh\n"
+	if got != want {
+		t.Fatalf("trailers:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestBlockOrderIndependentOfFieldAssignment(t *testing.T) {
 	// Renders should not depend on which fields the caller populated
 	// first — the struct field order is what determines wire order.

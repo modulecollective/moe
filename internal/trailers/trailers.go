@@ -34,6 +34,11 @@ type Block struct {
 	IdeaMovedFrom string
 	ReopenOf      string
 	Chore         string
+	// ChoreSkipped carries "<project>/<chore>" on the empty commit
+	// written by `moe chore skip`. Its commit time records that the
+	// chore is satisfied as of the skip, folding into the value the
+	// due reasons compare against exactly as a completed run would.
+	ChoreSkipped string
 	// ChoreTouched repeats once per chore whose trigger matched the
 	// target-repo change landed by this terminal transition. Values are
 	// "<project>/<chore>".
@@ -67,6 +72,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
 	write(&sb, "MoE-Chore", b.Chore)
+	write(&sb, "MoE-Chore-Skipped", b.ChoreSkipped)
 	for _, v := range b.ChoreTouched {
 		write(&sb, "MoE-Chore-Touched", v)
 	}

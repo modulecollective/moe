@@ -705,6 +705,11 @@ type JournalIndex struct {
 	// ChoreTouched maps "<project>/<chore>" to the most recent
 	// reachable commit time carrying MoE-Chore-Touched for that chore.
 	ChoreTouched map[string]time.Time
+	// ChoreSkipped maps "<project>/<chore>" to the most recent
+	// reachable commit time carrying MoE-Chore-Skipped for that chore,
+	// written by `moe chore skip`. Evaluate folds it into the value the
+	// due reasons compare against, as if a run had completed then.
+	ChoreSkipped map[string]time.Time
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -869,6 +874,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		ChainedChild: make(map[string]string),
 		ChoreByRun:   make(map[string]string),
 		ChoreTouched: make(map[string]time.Time),
+		ChoreSkipped: make(map[string]time.Time),
 	}
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
@@ -889,7 +895,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			subject = body[:nl]
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf, chore string
+		var promotedTo, prURL, projectID, docID, reopenOf, chore, choreSkipped string
 		var choreTouched []string
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
@@ -940,6 +946,16 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			if v, ok := strings.CutPrefix(line, "MoE-Chore-Touched:"); ok {
 				if touched := strings.TrimSpace(v); touched != "" {
 					choreTouched = append(choreTouched, touched)
+				}
+				continue
+			}
+			// MoE-Chore-Skipped must be matched before MoE-Chore — the
+			// latter is a prefix of the former. (CutPrefix("MoE-Chore:")
+			// can't match "MoE-Chore-Skipped:" since the next char is '-',
+			// not ':', but match it first to mirror the Touched arm.)
+			if v, ok := strings.CutPrefix(line, "MoE-Chore-Skipped:"); ok {
+				if choreSkipped == "" {
+					choreSkipped = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -996,6 +1012,11 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		for _, touched := range choreTouched {
 			if _, ok := idx.ChoreTouched[touched]; !ok {
 				idx.ChoreTouched[touched] = time.Unix(epoch, 0).UTC()
+			}
+		}
+		if choreSkipped != "" {
+			if _, ok := idx.ChoreSkipped[choreSkipped]; !ok {
+				idx.ChoreSkipped[choreSkipped] = time.Unix(epoch, 0).UTC()
 			}
 		}
 		if slug == "" {
