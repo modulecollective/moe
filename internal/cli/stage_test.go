@@ -1004,6 +1004,75 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 	}
 }
 
+// TestRunWikiSessionBuildsInitialPromptAgainstWorktree pins the fix the
+// twin-pooped-in-bureaucracy run was opened against: a deferred
+// InitialPromptBuilder must receive the *worktree-rewritten* wiki cfg,
+// not the canonical one. Reflect bakes absolute bureaucracy paths (the
+// history summary, the managed docs) into the agent's first instruction;
+// before this fix the kickoff was assembled against the canonical root
+// before the worktree existed, the agent followed the canonical path,
+// and a reflect pass edited the operator's live checkout. The builder
+// now runs after the rewrite, so the cfg it sees must point inside
+// <root>/.moe/worktrees/<uuid>/ and never at the canonical content dir.
+func TestRunWikiSessionBuildsInitialPromptAgainstWorktree(t *testing.T) {
+	root := newTestBureaucracy(t)
+	canonicalContentDir := filepath.Join(root, "projects", "moe", "digital-twin")
+
+	var gotWorkRoot string
+	var gotCfg *wiki.Config
+	in := wikiSessionInputs{
+		Project:     "moe",
+		RunSlug:     "kickoff-binding",
+		DocID:       "vision",
+		LockPurpose: "stage",
+		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
+			// Open schema keeps EnsureManagedDocs a no-op, so the turn
+			// reaches the builder without managed-doc fixtures.
+			return &wiki.Config{
+				Name:            "twin",
+				Mode:            wiki.Open,
+				ContentDir:      canonicalContentDir,
+				BureaucracyPath: canonicalRoot,
+			}, nil
+		},
+		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			return wikiTurnSpec{
+				InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+					gotWorkRoot = workRoot
+					gotCfg = worktreeWiki
+					return "kickoff", nil
+				},
+				// Fail fast right after the builder captures so the test
+				// never needs a real agent / executor.
+				BuildPrompt: func(string, *wiki.Config) (string, error) {
+					return "", errors.New("stop before executor")
+				},
+			}, nil
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	runWikiSession(root, in, &stdout, &stderr)
+
+	if gotCfg == nil {
+		t.Fatalf("InitialPromptBuilder never ran (stderr=%q)", stderr.String())
+	}
+	if !strings.Contains(gotWorkRoot, filepath.Join(".moe", "worktrees")) {
+		t.Errorf("builder workRoot %q is not a session worktree", gotWorkRoot)
+	}
+	// The whole point: the cfg the builder renders against lives inside
+	// the worktree, not the operator's canonical checkout.
+	if gotCfg.ContentDir == canonicalContentDir {
+		t.Errorf("builder got the canonical ContentDir %q; want the worktree copy", gotCfg.ContentDir)
+	}
+	if !strings.HasPrefix(gotCfg.ContentDir, gotWorkRoot) {
+		t.Errorf("builder ContentDir %q not under worktree %q", gotCfg.ContentDir, gotWorkRoot)
+	}
+	if gotCfg.BureaucracyPath != gotWorkRoot {
+		t.Errorf("builder BureaucracyPath = %q, want worktree root %q", gotCfg.BureaucracyPath, gotWorkRoot)
+	}
+}
+
 // TestSessionDocCwdIsStableAcrossTurns is the regression for this run:
 // document-only stages must hand claude a cwd that's identical across
 // turns, so the encoded-cwd project dir under ~/.claude/projects/ stays

@@ -127,6 +127,43 @@ func TestReflectKickoffContextReferencesHistorySummaryByPath(t *testing.T) {
 	}
 }
 
+// TestBuildTwinStageKickoffRendersHandedConfig pins that the kickoff
+// builder renders entirely against the (workRoot, worktreeWiki) it is
+// handed — never a canonically re-derived config. The old builder ran
+// its own bureaucracy.Find + twinWikiBuilder and so named canonical
+// paths regardless of where the agent would actually write; this test
+// fails if that re-derivation creeps back, because the history-summary
+// path it names must sit under the handed workRoot.
+func TestBuildTwinStageKickoffRendersHandedConfig(t *testing.T) {
+	workRoot := newTestBureaucracy(t)
+	twinDir := wiki.TwinDir(workRoot, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWikiDoc(t, twinDir, "history-summary.md", "prior horizons.\n"); err != nil {
+		t.Fatal(err)
+	}
+	worktreeCfg := wiki.Config{
+		Mode:            wiki.Closed,
+		Name:            "twin",
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: workRoot,
+	}
+
+	got, err := buildTwinStageKickoff("tele", workRoot, &worktreeCfg)
+	if err != nil {
+		t.Fatalf("buildTwinStageKickoff: %v", err)
+	}
+	wantPath := wiki.HistorySummaryPath(worktreeCfg)
+	if !strings.HasPrefix(wantPath, workRoot) {
+		t.Fatalf("test setup: history-summary path %q not under workRoot %q", wantPath, workRoot)
+	}
+	if !strings.Contains(got, wantPath) {
+		t.Errorf("kickoff missing the worktree history-summary path %q in:\n%s", wantPath, got)
+	}
+}
+
 // Hygiene findings — when the pre-flight scan surfaces issues, they
 // land in the context block. Missing managed docs are the simplest
 // trigger (the wiki dir doesn't have vision.md yet).
