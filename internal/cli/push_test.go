@@ -2006,13 +2006,16 @@ exit 7
 
 // TestChainBackPropagatesStageExitAndChainsForward verifies the
 // design contract for both chain-backs: drop the inner runStageSession's
-// exit code straight through, and don't suppress the post-turn chain
-// prompt — so a clean fix-and-commit lets the workflow's `next: moe
-// <wf> push` prompt fire, the same way `moe <wf> code` already chains.
+// exit code straight through, and chain forward to push next — so a
+// clean interactive fix-and-commit lets the workflow's `next: moe <wf>
+// push` prompt fire (NextStageOverride: "push"), while a headless
+// recovery suppresses the prompt (SkipNextStage: headless) and returns
+// to the cascade's push retry loop.
 //
 // Stubs runStageSession so the chain-back closures can be exercised
 // without spinning a real session worktree, and asserts the opts the
-// closure passes through (no SkipNextStage, docID="code", sandbox on).
+// closure passes through (SkipNextStage tracks headless,
+// NextStageOverride="push", docID="code", sandbox on).
 func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -2116,8 +2119,18 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 			if !capturedOpts.NeedsSandbox {
 				t.Fatalf("NeedsSandbox: want true (chain-back is a code stage)")
 			}
-			if capturedOpts.SkipNextStage {
-				t.Fatalf("SkipNextStage must be false so the post-turn prompt offers push next")
+			// Headless recovery suppresses the post-turn prompt so the
+			// cascade's push retry loop regains control; interactive
+			// recovery keeps it so the operator is offered the retry.
+			if capturedOpts.SkipNextStage != tc.wantHeadless {
+				t.Fatalf("SkipNextStage: want %v (=headless), got %v", tc.wantHeadless, capturedOpts.SkipNextStage)
+			}
+			// Either flavour offers push next, never code's successor
+			// (test): the prompt only fires for interactive recovery, but
+			// the override is set unconditionally and is the load-bearing
+			// bit for the interactive case.
+			if capturedOpts.NextStageOverride != "push" {
+				t.Fatalf("NextStageOverride: want %q so the prompt offers the push retry, got %q", "push", capturedOpts.NextStageOverride)
 			}
 			if capturedOpts.Headless != tc.wantHeadless {
 				t.Fatalf("Headless: want %v, got %v", tc.wantHeadless, capturedOpts.Headless)

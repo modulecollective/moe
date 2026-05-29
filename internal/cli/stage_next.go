@@ -41,13 +41,28 @@ import (
 // the stage they just read, or skip over intermediate stages (test →
 // design) instead of stepping back one at a time.
 func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
+	return promptNextStageOverride(root, md, justFinished, "", stdout, stderr)
+}
+
+// promptNextStageOverride is promptNextStage with an optional override
+// for the offered stage. When override is non-empty it replaces the
+// stage the prompt offers, leaving back-targets keyed off justFinished
+// untouched. The push-gate recovery session passes override="push": the
+// recovery is a code turn, so justFinished is "code" (back offers
+// code/design to re-fix the rebase), but the next step to offer is the
+// push retry, not code's successor (test). Every other caller goes
+// through promptNextStage with override="" — byte-for-byte the old path.
+func promptNextStageOverride(root string, md *run.Metadata, justFinished, override string, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	var stage string
-	if justFinished != "" {
+	switch {
+	case override != "":
+		stage = override
+	case justFinished != "":
 		stage = wf.Successor(justFinished)
 		if stage == "" {
 			// Terminal stage — no successor to offer. If the workflow
@@ -72,7 +87,7 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 			}
 			return 0
 		}
-	} else {
+	default:
 		n, kind, err := wf.Next(root, md)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)

@@ -51,6 +51,48 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 	}
 }
 
+// TestPromptNextStageOverrideOffersStage pins the recovery contract:
+// promptNextStageOverride("push") offers the push retry, not code's
+// ordinary successor (test). An empty override falls through to the
+// successor lookup unchanged — the guard that every non-recovery caller
+// is byte-for-byte the old behaviour.
+//
+// Driven against non-terminal stdin so the prompt takes its print-only
+// branch (`next: <hint>`); the hint is what the operator would see and
+// is enough to distinguish push from test.
+func TestPromptNextStageOverrideOffersStage(t *testing.T) {
+	cases := []struct {
+		name     string
+		override string
+		want     string
+	}{
+		{name: "override push", override: "push", want: "moe sdlc push tele/fix-it"},
+		{name: "no override uses successor", override: "", want: "moe sdlc test tele/fix-it"},
+	}
+
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+	oldStdin := os.Stdin
+	os.Stdin = devnull
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+			var stdout, stderr bytes.Buffer
+			if code := promptNextStageOverride(t.TempDir(), md, "code", tc.override, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "next: "+tc.want) {
+				t.Fatalf("want offered stage %q, got: %q", tc.want, stdout.String())
+			}
+		})
+	}
+}
+
 // TestPromptStageNextStagePrintsDesignCanvas: when the next stage is
 // code and a design canvas exists on disk, its bytes appear above the
 // [Y/n/!] prompt verbatim (no header, no decoration). This is the

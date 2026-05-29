@@ -82,6 +82,15 @@ type stageSessionOpts struct {
 	// interactive next-stage
 	// prompt to fire mid-chain.
 	SkipNextStage bool
+	// NextStageOverride, when non-empty, replaces the stage the
+	// post-turn prompt offers — without touching the back-targets,
+	// which still key off the document that just finished. The
+	// push-gate recovery session sets it to "push": the recovery is a
+	// code turn, but the operator should be offered the push retry, not
+	// code's ordinary successor (test). Empty leaves the successor
+	// lookup unchanged — the case for every stage but recovery. Ignored
+	// when SkipNextStage is set (no prompt fires at all).
+	NextStageOverride string
 	// Model, if non-empty, is the `--model` value for the headless
 	// claude invocation. Empty string defers to the operator's
 	// configured default — the right answer for stage turns where the
@@ -592,7 +601,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if opts.SkipNextStage {
 		return 0
 	}
-	return promptNextStage(root, md, docID, stdout, stderr)
+	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, stdout, stderr)
 }
 
 // wikiSessionInputs is everything runWikiSession needs to drive a

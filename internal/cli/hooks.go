@@ -154,7 +154,9 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 // captured output verbatim, and opens a fresh code session against the same
 // run. The session's exit code is propagated so a clean fix-and-commit lets
 // the workflow's chain prompt offer push next — same shape `moe <wf> code`
-// already produces. Built-ins with richer semantics (the rebase check) keep
+// already produces (interactive recovery). A headless recovery skips that
+// prompt and returns to the cascade's push retry loop instead — see
+// openCodeRecoverySession. Built-ins with richer semantics (the rebase check) keep
 // their own kickoff — see openCodeSessionForRebaseConflict. The second return
 // is a *PushDeferredError marking the deferral so the cascade renders
 // "deferred to recovery" instead of mistaking the recovery's clean exit for a
@@ -167,8 +169,18 @@ var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, he
 }
 
 // openCodeRecoverySession owns the common push-recovery session shape:
-// code document, sandbox on, optional headless one-shot, post-turn chain
-// prompt preserved, and typed deferral for the cascade.
+// code document, sandbox on, optional headless one-shot, and typed
+// deferral for the cascade. The post-turn chain prompt is preserved for
+// interactive recovery (so the operator is offered the push retry) but
+// suppressed for headless, so the recovery returns cleanly and the
+// cascade's push retry loop regains control instead of blocking on a
+// prompt no one can answer.
+//
+// The recovery is a "code" turn, but the stage it should chain to is
+// push, not code's successor (test): NextStageOverride: "push" makes the
+// interactive prompt offer the push retry. "push" is a literal because
+// the recovery is only ever reached from the push gate (see push.go) —
+// push is, by construction, the stage being retried.
 func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, kickoff string, stdout, stderr io.Writer) (int, error) {
 	if headless {
 		moePrintf(stderr, "       opening a headless code recovery turn for %s; will retry push if recovery resolves cleanly\n", recovery)
@@ -176,9 +188,11 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 		moePrintf(stderr, "       opening a fresh code session for %s; the chain prompt will offer push next\n", recovery)
 	}
 	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
-		NeedsSandbox:  true,
-		Headless:      headless,
-		InitialPrompt: kickoff,
+		NeedsSandbox:      true,
+		Headless:          headless,
+		InitialPrompt:     kickoff,
+		SkipNextStage:     headless,
+		NextStageOverride: "push",
 	}, stdout, stderr)
 	return code, &PushDeferredError{
 		Recovery: recovery,
