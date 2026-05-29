@@ -492,6 +492,80 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 	}
 }
 
+// TestJournalIndexAdvanceTimeMatchesLatestAdvanceSHA is the advance-marker
+// twin of TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA: every
+// (project, run, doc) the index claims an AdvanceTime for must match what
+// LatestAdvanceSHA returns for the same key. stageSatisfied's advance
+// check reads AdvanceTime on the dash index path and LatestAdvanceSHA on
+// the per-call fork — they must agree or dash picks a different next stage
+// than the chain prompt. Also pins that a `work: update` commit does not
+// register an advance time (and vice versa): the two subjects key disjoint
+// maps.
+func TestJournalIndexAdvanceTimeMatchesLatestAdvanceSHA(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string, when time.Time) {
+		t.Helper()
+		args := []string{"commit", "--allow-empty", "-m", subject + "\n\n" + body}
+		if !when.IsZero() {
+			stamp := when.Format(time.RFC3339)
+			gittest.RunWithEnv(t, root, []string{
+				"GIT_AUTHOR_DATE=" + stamp,
+				"GIT_COMMITTER_DATE=" + stamp,
+			}, args...)
+			return
+		}
+		gittest.Run(t, root, args...)
+	}
+	commit := func(subject, projectID, runID, docID string, when time.Time) {
+		commitWith(
+			subject,
+			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n",
+			when,
+		)
+	}
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	// design advanced; code worked but never advanced.
+	commit("work: update design", "a", "fix-bug", "design", t0)
+	commit("advance: design", "a", "fix-bug", "design", t0.Add(time.Minute))
+	commit("work: update code", "a", "fix-bug", "code", t0.Add(time.Hour))
+	// Same slug in another project must not cross-satisfy.
+	commit("advance: design", "b", "fix-bug", "design", t0.Add(2*time.Hour))
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	cases := []struct {
+		project, run, doc string
+	}{
+		{"a", "fix-bug", "design"}, // has an advance marker
+		{"a", "fix-bug", "code"},   // work-turn only, no advance → zero
+		{"b", "fix-bug", "design"}, // advance in the other project
+		{"never", "nope", "design"},
+	}
+	for _, tc := range cases {
+		_, want, err := LatestAdvanceSHA(root, tc.project, tc.run, tc.doc)
+		if err != nil {
+			t.Fatalf("LatestAdvanceSHA(%v): %v", tc, err)
+		}
+		got := idx.AdvanceTime[WorkTurnKey{Project: tc.project, Run: tc.run, Doc: tc.doc}]
+		if !got.Equal(want) {
+			t.Errorf("(%s/%s/%s): index=%v LatestAdvanceSHA=%v", tc.project, tc.run, tc.doc, got, want)
+		}
+	}
+	// A work-turn commit must not leak into AdvanceTime, and the advance
+	// marker must not leak into WorkTurnTime — disjoint subjects, disjoint
+	// maps.
+	codeKey := WorkTurnKey{Project: "a", Run: "fix-bug", Doc: "code"}
+	if v, ok := idx.AdvanceTime[codeKey]; ok {
+		t.Errorf("code has no advance marker but AdvanceTime[code]=%v", v)
+	}
+	designKey := WorkTurnKey{Project: "a", Run: "fix-bug", Doc: "design"}
+	if idx.WorkTurnTime[designKey].IsZero() {
+		t.Errorf("design has a work-turn but WorkTurnTime[design] is zero")
+	}
+}
+
 // TestJournalIndexPicksMostRecentTrailerValue: when a slug shows up
 // on multiple commits each carrying a different MoE-PR (the closed →
 // reopened case), the most recent value wins — same answer the

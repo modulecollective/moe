@@ -113,6 +113,80 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 	}
 }
 
+// TestWorkflowNextAdvanceMarkerSatisfiesStage covers the click-forward
+// path: design has a work-turn but code has none, so under the plain
+// forward-walking rule design is parked (Next returns design — the
+// re-run the operator hits). An `advance: design` marker no older than
+// design's work-turn satisfies design, so Next steps to code instead.
+// Then re-opening design (a fresh work-turn newer than the marker)
+// out-dates the marker and flips the run back to design — re-open
+// fidelity falls out of the same timestamp rule.
+func TestWorkflowNextAdvanceMarkerSatisfiesStage(t *testing.T) {
+	root := newTestBureaucracy(t)
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
+	// Parked at design with no code turn — the pain the feature fixes.
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("before advance: expected stage design (parked), got kind=%v name=%q", kind, next)
+	}
+
+	// Operator declines code but clicks design forward: an advance marker
+	// for design, no older than design's work-turn.
+	trailerstest.CommitAdvanceAt(t, root, "p", "r", "sdlc", "design", t0.Add(time.Minute))
+	next, kind, err = wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next != "code" {
+		t.Fatalf("after advance: expected stage code, got kind=%v name=%q", kind, next)
+	}
+
+	// Re-open design after the marker — the fresh work-turn out-dates the
+	// marker, so design parks again awaiting a code turn.
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0.Add(2*time.Hour))
+	next, kind, err = wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("re-opened design after advance: expected stage design, got kind=%v name=%q", kind, next)
+	}
+}
+
+// TestWorkflowNextAdvanceMarkerWithoutWorkTurnIsInert pins that a stray
+// advance marker can't satisfy a stage that never produced a work-turn:
+// stageSatisfied's leading work-turn check returns early when the stage's
+// own time is zero, so the marker is never consulted. Belt-and-suspenders
+// against a marker leaking a stage forward before its agent ever ran.
+func TestWorkflowNextAdvanceMarkerWithoutWorkTurnIsInert(t *testing.T) {
+	root := newTestBureaucracy(t)
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	trailerstest.CommitAdvanceAt(t, root, "p", "r", "sdlc", "design", t0)
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next != "design" {
+		t.Fatalf("advance marker without a work-turn must not satisfy design, got kind=%v name=%q", kind, next)
+	}
+}
+
 // TestWorkflowNextUnknownWorkflow verifies LookupWorkflow surfaces a
 // useful error for typos — it's the first line of defense against
 // "workflow silently forgot what it was" bugs. Empty now errors the
@@ -228,6 +302,12 @@ func TestWorkflowNextWithIndexMatchesForkingPath(t *testing.T) {
 	checkpoints := []func(){
 		func() {},
 		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0) },
+		// Click design forward with an advance marker — both paths must
+		// agree code is next (exercises AdvanceTime map vs LatestAdvanceSHA
+		// fork). The later re-design checkpoint then out-dates the marker.
+		func() {
+			trailerstest.CommitAdvanceAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(30*time.Minute))
+		},
 		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour)) },
 		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(2*time.Hour)) },
 		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(3*time.Hour)) },

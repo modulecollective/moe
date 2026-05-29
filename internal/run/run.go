@@ -565,6 +565,42 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 	return parts[0], time.Unix(epoch, 0).UTC(), nil
 }
 
+// LatestAdvanceSHA returns the SHA and committer time of the most recent
+// `advance: <docID>` marker commit for the run — the click-forward marker
+// the chain prompt writes when the operator declines the next stage but
+// records the current one as done (commitAdvance). Mirrors
+// LatestWorkTurnSHA's scoping (anchored subject grep + the same
+// project/run/document trailer greps) but matches the advance subject
+// instead of the work-turn subject. Returns ("", time.Time{}, nil) when no
+// advance marker exists yet — the stage was never click-advanced.
+func LatestAdvanceSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
+	out, err := git.Output(root,
+		"log", "-1",
+		"--all-match",
+		"--grep", fmt.Sprintf("^advance: %s$", regexp.QuoteMeta(docID)),
+		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
+		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
+		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
+		"--format=%H %ct",
+	)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("run: git log: %w", err)
+	}
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return "", time.Time{}, nil
+	}
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) != 2 {
+		return "", time.Time{}, fmt.Errorf("run: unexpected git log output %q", line)
+	}
+	epoch, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", parts[1], err)
+	}
+	return parts[0], time.Unix(epoch, 0).UTC(), nil
+}
+
 // Load reads projects/<project>/runs/<id>/run.json.
 func Load(root, projectID, id string) (*Metadata, error) {
 	path := filepath.Join(root, Dir(projectID, id), "run.json")
@@ -672,6 +708,12 @@ type JournalIndex struct {
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
 	// time means "no work turn on record yet."
 	WorkTurnTime map[WorkTurnKey]time.Time
+	// AdvanceTime maps (project, run, doc) → committer time of the
+	// most recent `advance: <doc>` marker commit scoped to that run.
+	// Same key and contract as WorkTurnTime, populated in the same
+	// scan and read by stageSatisfied's advance check, so dash's
+	// index path agrees with the per-call LatestAdvanceSHA fork.
+	AdvanceTime map[WorkTurnKey]time.Time
 	// ReopenedFrom maps new run slug → prior run slug, populated from
 	// the MoE-Reopen-Of trailer carried on a reopened run's open
 	// commit. Parallel in shape to PromotedTo, but read in the
@@ -870,6 +912,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		PromotedTo:   make(map[string]string),
 		PRURL:        make(map[string]string),
 		WorkTurnTime: make(map[WorkTurnKey]time.Time),
+		AdvanceTime:  make(map[WorkTurnKey]time.Time),
 		ReopenedFrom: make(map[string]string),
 		ChainedChild: make(map[string]string),
 		ChoreByRun:   make(map[string]string),
@@ -1053,6 +1096,15 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			k := WorkTurnKey{Project: projectID, Run: slug, Doc: docID}
 			if _, ok := idx.WorkTurnTime[k]; !ok {
 				idx.WorkTurnTime[k] = time.Unix(epoch, 0).UTC()
+			}
+		}
+		// Advance markers share the work-turn keying; the distinct
+		// subject pin keeps them in their own map, mirroring
+		// LatestAdvanceSHA's grep.
+		if projectID != "" && docID != "" && subject == "advance: "+docID {
+			k := WorkTurnKey{Project: projectID, Run: slug, Doc: docID}
+			if _, ok := idx.AdvanceTime[k]; !ok {
+				idx.AdvanceTime[k] = time.Unix(epoch, 0).UTC()
 			}
 		}
 	}

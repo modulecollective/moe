@@ -71,6 +71,27 @@ func CommitWorkTurnAt(t *testing.T, root, projectID, runID, workflow, docID stri
 	return gittest.HeadSHA(t, root)
 }
 
+// CommitAdvanceAt records an `advance: <docID>` marker commit with the
+// trailers commitAdvance writes in production (Run/Project/Workflow/
+// Document), dated to when. The marker subject is what stageSatisfied's
+// advance check matches; tests use this to drive the click-forward
+// timeline the same way CommitWorkTurnAt drives the work-turn timeline.
+func CommitAdvanceAt(t *testing.T, root, projectID, runID, workflow, docID string, when time.Time) {
+	t.Helper()
+	block := trailers.Block{
+		Run:      runID,
+		Project:  projectID,
+		Workflow: workflow,
+		Document: docID,
+	}.String()
+	// Same trailing-newline shaping as CommitWorkTurnAt: Block.String()
+	// ends in '\n' and CommitTrailer appends its own.
+	if n := len(block); n > 0 && block[n-1] == '\n' {
+		block = block[:n-1]
+	}
+	CommitTrailer(t, root, "advance: "+docID, block, when)
+}
+
 // SeedProject writes a minimal project.json so the project-registered
 // check in commands like idea/runNew passes. Commits everything
 // currently pending (including the bureaucracy.conf marker laid down

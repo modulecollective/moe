@@ -229,6 +229,23 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 			return false, nil
 		}
 	}
+	// An advance marker at least as recent as the stage's own latest
+	// work-turn means the operator clicked the run forward at this
+	// stage's chain prompt (declined the next stage, recorded this one
+	// as done). It satisfies the stage exactly as a fresher successor
+	// turn would, so Next steps to the successor instead of re-opening
+	// this stage. A later re-edit of this stage lands a newer work-turn
+	// that out-dates the marker and the check stops firing — re-open
+	// fidelity falls out of the same timestamp comparison the successor
+	// rule uses below. Layered after the gate so a gated stage can't be
+	// click-advanced past an unfilled canvas.
+	advWhen, err := advanceTime(root, md.Project, md.ID, stage, idx)
+	if err != nil {
+		return false, err
+	}
+	if !advWhen.IsZero() && !advWhen.Before(stageWhen) {
+		return true, nil
+	}
 	succs := w.successors[stage]
 	if len(succs) == 0 {
 		return true, nil
@@ -265,6 +282,19 @@ func workTurnTime(root, projectID, runID, docID string, idx *run.JournalIndex) (
 		return idx.WorkTurnTime[run.WorkTurnKey{Project: projectID, Run: runID, Doc: docID}], nil
 	}
 	_, when, err := run.LatestWorkTurnSHA(root, projectID, runID, docID)
+	return when, err
+}
+
+// advanceTime returns the committer time of (project, run, doc)'s latest
+// `advance:` marker commit, reading from idx when supplied and falling
+// back to a per-call LatestAdvanceSHA fork otherwise. Returns the zero
+// time when no marker exists — the same "never click-advanced" signal
+// LatestAdvanceSHA produces. Mirror of workTurnTime.
+func advanceTime(root, projectID, runID, docID string, idx *run.JournalIndex) (time.Time, error) {
+	if idx != nil {
+		return idx.AdvanceTime[run.WorkTurnKey{Project: projectID, Run: runID, Doc: docID}], nil
+	}
+	_, when, err := run.LatestAdvanceSHA(root, projectID, runID, docID)
 	return when, err
 }
 
