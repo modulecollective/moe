@@ -252,29 +252,45 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 }
 
 // activeSDLCChainItems gathers the active sdlc runs and annotates each
-// with its current chain state. Sort order is newest-activity-first so
-// the editor opens with recent work at the top — the operator's
-// strongest mental anchor when sequencing a backlog.
+// with its current chain state. Render order matches the dash's ACTIVE
+// section — chains render as contiguous head→tail blocks, each block (or
+// standalone run) floating by its most-recent member — so the operator
+// reads the editor the way they read the dash and can fold a run into an
+// existing chain instead of rebuilding from scratch. The grouping is
+// shared with the dash via run.OrderChainUnits.
 func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) []chainItem {
 	chainedFrom := invertEffectiveChain(idx.ChainedChild, byKey)
-	out := []chainItem{}
+	itemByKey := map[string]chainItem{}
 	for _, md := range mds {
 		if md.Workflow != "sdlc" || md.Status != run.StatusInProgress {
 			continue
 		}
 		key := md.Project + "/" + md.ID
-		out = append(out, chainItem{
+		itemByKey[key] = chainItem{
 			Key:  key,
 			When: idx.LastActivity[md.ID],
 			Anno: chainAnnotation(key, idx.ChainedChild, chainedFrom, byKey),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].When.Equal(out[j].When) {
-			return out[i].Key < out[j].Key
 		}
-		return out[i].When.After(out[j].When)
+	}
+	// Feed the shared grouper in newest-first order (Key tiebreak keeps
+	// equal-activity runs deterministic); it returns the head→tail units
+	// in dash order, which we flatten back into editor lines.
+	order := make([]run.ChainOrderItem, 0, len(itemByKey))
+	for _, it := range itemByKey {
+		order = append(order, run.ChainOrderItem{Key: it.Key, When: it.When})
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if order[i].When.Equal(order[j].When) {
+			return order[i].Key < order[j].Key
+		}
+		return order[i].When.After(order[j].When)
 	})
+	out := make([]chainItem, 0, len(itemByKey))
+	for _, u := range run.OrderChainUnits(order, idx, byKey) {
+		for _, k := range u {
+			out = append(out, itemByKey[k])
+		}
+	}
 	return out
 }
 
@@ -286,7 +302,7 @@ func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[
 func invertEffectiveChain(chainedChild map[string]string, byKey map[string]*run.Metadata) map[string][]string {
 	out := map[string][]string{}
 	for parent, child := range chainedChild {
-		if !chainChildIsLive(child, byKey) {
+		if !run.ChainChildLive(child, byKey) {
 			continue
 		}
 		out[child] = append(out[child], parent)
@@ -297,24 +313,6 @@ func invertEffectiveChain(chainedChild map[string]string, byKey map[string]*run.
 	return out
 }
 
-// chainChildIsLive applies Decision 1: a child is "live" only if it
-// exists on disk and is not terminal. Empty or missing-from-byKey
-// counts as not live.
-func chainChildIsLive(childKey string, byKey map[string]*run.Metadata) bool {
-	if childKey == "" {
-		return false
-	}
-	md, ok := byKey[childKey]
-	if !ok {
-		return false
-	}
-	switch md.Status {
-	case run.StatusClosed, run.StatusMerged, run.StatusPromoted, run.StatusPushed:
-		return false
-	}
-	return true
-}
-
 // chainAnnotation builds the per-line comment for the editor view.
 // One of: "orphan", "chains-to X", "chained-from Y[, Z]",
 // "chains-to X, chained-from Y". Cross-references that point at
@@ -322,7 +320,7 @@ func chainChildIsLive(childKey string, byKey map[string]*run.Metadata) bool {
 // advertise stale state.
 func chainAnnotation(key string, chainedChild map[string]string, chainedFrom map[string][]string, byKey map[string]*run.Metadata) string {
 	var parts []string
-	if child, ok := chainedChild[key]; ok && chainChildIsLive(child, byKey) {
+	if child, ok := chainedChild[key]; ok && run.ChainChildLive(child, byKey) {
 		parts = append(parts, "chains-to "+child)
 	}
 	if parents := chainedFrom[key]; len(parents) > 0 {

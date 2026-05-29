@@ -5,7 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
@@ -352,6 +354,72 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotStages, wantStages) {
 		t.Fatalf("openSdlcStage stages = %v, want %v (cleared edge must not ride)", gotStages, wantStages)
+	}
+}
+
+// TestActiveSDLCChainItemsMatchDashOrder pins the render order: the
+// `chain edit` file lists runs in the same grouped order the dash's
+// ACTIVE section shows — chains as contiguous head→tail blocks, each
+// unit floating by its most-recent member. Built over one fixture (an
+// orphan, a 3-run chain, a 2-run chain) and asserted against both the
+// expected sequence and a live dash.BuildRows pass, so the two views
+// can't drift apart.
+func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	mk := func(project, id string) *run.Metadata {
+		return &run.Metadata{ID: id, Project: project, Workflow: "sdlc", Status: run.StatusInProgress}
+	}
+	mds := []*run.Metadata{
+		mk("p", "a"), mk("p", "b"), mk("p", "c"), // chain a→b→c, rep = c (14:00)
+		mk("p", "d"), mk("p", "e"), // chain d→e, rep = e (10:00)
+		mk("p", "x"), // orphan (11:00)
+	}
+	when := map[string]time.Time{
+		"a": base.Add(-6 * time.Hour),
+		"b": base.Add(-5 * time.Hour),
+		"c": base,
+		"d": base.Add(-7 * time.Hour),
+		"e": base.Add(-4 * time.Hour),
+		"x": base.Add(-3 * time.Hour),
+	}
+	chained := map[string]string{"p/a": "p/b", "p/b": "p/c", "p/d": "p/e"}
+	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}
+	byKey := map[string]*run.Metadata{}
+	for _, md := range mds {
+		byKey[md.Project+"/"+md.ID] = md
+	}
+
+	var gotChain []string
+	for _, it := range activeSDLCChainItems(mds, idx, byKey) {
+		gotChain = append(gotChain, it.Key)
+	}
+	want := []string{"p/a", "p/b", "p/c", "p/x", "p/d", "p/e"}
+	if !reflect.DeepEqual(gotChain, want) {
+		t.Fatalf("chain edit order = %v, want %v", gotChain, want)
+	}
+
+	// The same inputs through the dash must yield the same ACTIVE order.
+	next := map[string]dash.NextDecision{}
+	for _, md := range mds {
+		next[md.ID] = dash.NextDecision{Stage: "code"}
+	}
+	rows, err := dash.BuildRows(dash.Inputs{
+		Now:       base.Add(time.Hour),
+		Runs:      mds,
+		Index:     idx,
+		NextByRun: next,
+	})
+	if err != nil {
+		t.Fatalf("BuildRows: %v", err)
+	}
+	var gotDash []string
+	for _, r := range rows {
+		if r.Bucket == dash.BucketActiveRuns {
+			gotDash = append(gotDash, r.Project+"/"+r.Run)
+		}
+	}
+	if !reflect.DeepEqual(gotChain, gotDash) {
+		t.Fatalf("chain edit order %v != dash ACTIVE order %v", gotChain, gotDash)
 	}
 }
 
