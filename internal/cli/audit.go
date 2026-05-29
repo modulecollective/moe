@@ -118,27 +118,11 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 // design-stage's tracked-change guard is re-used to enforce the
 // read-only character of the stage.
 func openAuditPlan(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	if headless {
-		return runStageSession(projectID, runID, auditPlanDoc,
-			stageSessionOpts{
-				NeedsSandbox:           true,
-				EnforceSandboxBoundary: true,
-				Headless:               true,
-				SkipNextStage:          suppressNextStage,
-				Agent:                  agentOverride,
-				CanvasSkeleton:         auditPlanCanvasSkeleton,
-			}, stdout, stderr)
-	}
-	const kickoff = "The operator just opened this review plan session. " +
-		"Read the canvas file before replying, so your acknowledgement reflects " +
-		"what's actually on it. In one sentence, acknowledge where the plan stands " +
-		"(fresh vs. resumed). Then ask the one question: what should this review " +
-		"cover? Wait for their reply, then write the answer to the Scope section."
 	return runStageSession(projectID, runID, auditPlanDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
-			InitialPrompt:          kickoff,
+			Headless:               headless,
 			SkipNextStage:          suppressNextStage,
 			Agent:                  agentOverride,
 			CanvasSkeleton:         auditPlanCanvasSkeleton,
@@ -186,30 +170,11 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 // so the report stage opens against whatever the plan left — even a
 // fresh run that skipped plan entirely.
 func openAuditReport(projectID, runID string, headless, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	if headless {
-		return runStageSession(projectID, runID, auditReportDoc,
-			stageSessionOpts{
-				NeedsSandbox:           true,
-				EnforceSandboxBoundary: true,
-				Headless:               true,
-				SkipNextStage:          suppressNextStage,
-				Agent:                  agentOverride,
-				CanvasSkeleton:         auditReportCanvasSkeleton,
-			}, stdout, stderr)
-	}
-	const kickoff = "The operator just opened this review report session. " +
-		"Read the plan canvas at documents/plan/content.md first — it names the " +
-		"scope this pass should cover (an empty or missing Scope collapses to " +
-		"'everything in this project'). Then read the report canvas to see " +
-		"whether this is a fresh start or a resume. In one or two sentences, " +
-		"acknowledge the scope you read off the plan and ask the operator " +
-		"whether to begin the review or refine the scope first. Then wait for " +
-		"their reply."
 	return runStageSession(projectID, runID, auditReportDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
-			InitialPrompt:          kickoff,
+			Headless:               headless,
 			SkipNextStage:          suppressNextStage,
 			Agent:                  agentOverride,
 			CanvasSkeleton:         auditReportCanvasSkeleton,

@@ -396,30 +396,11 @@ func openSdlcDesign(projectID, runID string, headless bool, suppressNextStage bo
 		return code
 	}
 	runID = resolved
-	if headless {
-		return runStageSession(projectID, runID, "design",
-			stageSessionOpts{
-				NeedsSandbox:           true,
-				EnforceSandboxBoundary: true,
-				Headless:               true,
-				SkipNextStage:          suppressNextStage,
-				Agent:                  agentOverride,
-			}, stdout, stderr)
-	}
-	// The agent produces the user-facing cue itself: the interactive TUI
-	// has no way to pre-seed the input box with editable text, so instead
-	// of a printed banner (which the TUI would cover on launch) we ask
-	// the agent to greet the operator and prompt for input.
-	const kickoff = "The operator just opened this design session. " +
-		"Read the canvas file before replying, so your acknowledgement reflects " +
-		"what's actually on it. In one or two sentences, acknowledge where the " +
-		"design stands (fresh start vs. resumed) and ask what they'd like to " +
-		"work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "design",
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
-			InitialPrompt:          kickoff,
+			Headless:               headless,
 			SkipNextStage:          suppressNextStage,
 			Agent:                  agentOverride,
 		}, stdout, stderr)
@@ -442,17 +423,8 @@ func openSdlcCode(projectID, runID string, headless bool, suppressNextStage bool
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if headless {
-		return runStageSession(projectID, runID, "code",
-			stageSessionOpts{NeedsSandbox: true, Headless: true, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
-	}
-	const kickoff = "The operator just opened this code session. " +
-		"Read the canvas file before replying, so your acknowledgement reflects " +
-		"what's actually on it. In one or two sentences, acknowledge where the " +
-		"implementation stands (fresh start vs. resumed) and ask what they'd " +
-		"like to work on next. Then wait for their reply."
 	return runStageSession(projectID, runID, "code",
-		stageSessionOpts{NeedsSandbox: true, InitialPrompt: kickoff, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{NeedsSandbox: true, Headless: headless, SkipNextStage: suppressNextStage, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
@@ -470,25 +442,10 @@ func openSdlcTest(projectID, runID string, headless bool, suppressNextStage bool
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if headless {
-		return runStageSession(projectID, runID, "test",
-			stageSessionOpts{
-				NeedsSandbox:   true,
-				Headless:       true,
-				SkipNextStage:  suppressNextStage,
-				CanvasSkeleton: testCanvasSkeleton,
-				Agent:          agentOverride,
-			}, stdout, stderr)
-	}
-	const kickoff = "The operator just opened this test session. " +
-		"Read the canvas file before replying, so your acknowledgement reflects " +
-		"what's actually on it. In one or two sentences, acknowledge where " +
-		"verification stands (fresh start vs. resumed) and ask what they'd " +
-		"like to verify next. Then wait for their reply."
 	return runStageSession(projectID, runID, "test",
 		stageSessionOpts{
 			NeedsSandbox:   true,
-			InitialPrompt:  kickoff,
+			Headless:       headless,
 			SkipNextStage:  suppressNextStage,
 			CanvasSkeleton: testCanvasSkeleton,
 			Agent:          agentOverride,

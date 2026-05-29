@@ -108,7 +108,7 @@ func init() {
 // in-session iteration across docs, every stage reads the same
 // events list" contract.
 func runTwinStageSession(stage, projectID, runID string, headless bool, suppressNextStage bool, agentOverride string, stdout, stderr io.Writer) int {
-	kickoff, err := buildTwinStageKickoff(stage, projectID, headless)
+	kickoff, err := buildTwinStageKickoff(projectID)
 	if err != nil {
 		moePrintf(stderr, "twin %s: %v\n", stage, err)
 		return 1
@@ -140,11 +140,12 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, suppress
 	return runStageSession(projectID, runID, stage, opts, stdout, stderr)
 }
 
-// buildTwinStageKickoff renders the per-stage InitialPrompt: a brief
-// greeting (interactive only) plus the pass-scoped context block.
-// Headless mode skips the greeting — the oneshot.md fragment already
-// tells the agent there's no operator on stdin.
-func buildTwinStageKickoff(stage, projectID string, headless bool) (string, error) {
+// buildTwinStageKickoff renders the per-stage InitialPrompt: the
+// pass-scoped context block (events, hygiene findings, feedback, idea
+// backlog) every stage reads. The block is load-bearing data the agent
+// needs whether or not an operator is present, so it rides on both the
+// interactive and headless paths.
+func buildTwinStageKickoff(projectID string) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -161,28 +162,7 @@ func buildTwinStageKickoff(stage, projectID string, headless bool) (string, erro
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	if !headless {
-		b.WriteString(twinStageGreeting(stage))
-		b.WriteString("\n")
-	}
-	b.WriteString(ctx)
-	return b.String(), nil
-}
-
-// twinStageGreeting is the one- or two-sentence framing that opens an
-// interactive twin stage session — the same "acknowledge where things
-// stand, then wait for the operator" shape openSdlcDesign and friends
-// use.
-func twinStageGreeting(stage string) string {
-	return fmt.Sprintf(
-		"The operator just opened the %s stage of a twin reflect pass. "+
-			"Read the pass-context block below and the canvas file before "+
-			"replying. In one or two sentences, acknowledge where the walk "+
-			"stands (fresh start vs. resumed) and what you'd touch on this "+
-			"stage. Then wait for the operator's go-ahead.\n",
-		stage,
-	)
+	return ctx, nil
 }
 
 // finalizeCanvasSkeleton seeds the finalize canvas with the three
