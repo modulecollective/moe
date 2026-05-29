@@ -55,6 +55,8 @@ You might want MoE if:
   artifacts instead of one long prompt;
 - you want follow-up ideas, project intent, and cross-project lessons to feed
   future runs automatically;
+- you want recurring maintenance — dependency bumps, doc sync, changelog
+  updates — to surface as ready-to-open runs instead of living in your memory;
 - you prefer explicit CLI commands and Git history over a hosted coordination
   product.
 
@@ -266,6 +268,44 @@ an agent to help shape the note. Promoting an idea to SDLC preserves lineage in
 the journal. `idea reopen` is for a promoted idea whose destination run was
 abandoned and should become backlog again.
 
+### Chores
+
+Chores turn recurring project maintenance into runs you open on demand. A chore
+definition says what maintenance is due, when it becomes due, and which workflow
+run to open for it. MoE evaluates chores against the journal and surfaces the due
+ones — but nothing fires on its own. A due chore is a seeded run waiting in
+`moe dash` until you choose to open it.
+
+A chore is a directory of small files under `projects/<project>/chores/<name>/`:
+
+    projects/my-project/chores/bump-deps/
+      cadence      # 720h     -> due monthly
+      cooldown     # 48h       -> don't re-open within 48h of finishing
+      prompt.md               -> the seed prompt the opened run starts from
+
+    projects/my-project/chores/regen-docs/
+      trigger      # go.mod    -> due when a merged change touches this path
+      workflow     # sdlc      -> the run to open (sdlc is the default)
+      prompt.md               -> "Regenerate the dependency table; go.mod changed."
+
+A chore needs a `trigger`, a `cadence`, or both. `trigger` is a path glob (or
+`*` for any merged project change); `cadence` makes it due on a clock. A chore
+goes due when its trigger matches new merged work, its cadence elapses, or its
+own definition changes — unless it is cooling down or already has an open run.
+
+Two command families, mirroring hooks:
+
+```sh
+moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
+moe chore list [--project <p>]                # show what's due
+moe chore check [<project>/<chore>]           # dry-run validation and due-state
+moe chore open <project>/<chore>              # open the seeded run for a due chore
+```
+
+`moe chores …` edits definitions under `projects/<project>/chores/*` through a
+journaled run. `moe chore open` refuses if the chore isn't due, already has an
+open run, or is cooling down.
+
 ### Knowledge, Twin, Hooks, And Meta-MoE
 
 `moe kb new`, `moe kb research`, and `moe kb summarize` maintain open-schema
@@ -281,17 +321,7 @@ for project hook scripts. `moe hook fire <project> <event>` is the fast loop:
 it creates a transient sandbox, runs one event's scripts once, prints the
 sandbox path, and exits.
 
-Chores mirror that same split. `moe chores new|code|close` is the journaled
-loop for editing chore definitions; its edits land under
-`projects/<project>/chores/*`, not in target-project source. `moe chore
-list|check|open` is the supervision/fast loop: `list` shows due chores, `check`
-dry-runs a definition's validation and due-state, and `open` opens the chore's
-configured workflow run seeded with its prompt (refusing if the chore isn't
-due, already has an open run, or is cooling down). A chore definition carries a
-`trigger` (path glob, or `*` for any merged project change), a `workflow`
-(defaults to `sdlc`), an optional `cooldown` and `cadence`, and a `prompt.md`
-seed. Due chores surface in `moe dash` under a CHORES bucket; nothing fires on
-its own, so you open a due chore when you choose to.
+Chores get their own section above; the editing/supervision split mirrors hooks.
 
 `moe meta-moe new` and `moe meta-moe report` inspect a project's MoE history
 and produce maintainer-facing feedback about the harness itself.
