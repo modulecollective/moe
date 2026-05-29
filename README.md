@@ -287,17 +287,22 @@ run to open for it. MoE evaluates chores against the journal and surfaces the du
 ones — but nothing fires on its own. A due chore is a seeded run waiting in
 `moe dash` until you choose to open it.
 
-A chore is a directory of small files under `projects/<project>/chores/<name>/`:
+A chore is a directory under `projects/<project>/chores/<name>/` holding a
+`chore.json` of scheduler scalars and a `prompt.md` seed:
 
     projects/my-project/chores/bump-deps/
-      cadence      # 720h     -> due monthly
-      cooldown     # 48h       -> don't re-open within 48h of finishing
-      prompt.md               -> the seed prompt the opened run starts from
+      chore.json   # {"cadence":"720h","cooldown":"48h"}  -> due monthly, 48h cooldown
+      prompt.md                                           -> the seed prompt the opened run starts from
 
     projects/my-project/chores/regen-docs/
-      trigger      # go.mod    -> due when a merged change touches this path
-      workflow     # sdlc      -> the run to open (sdlc is the default)
-      prompt.md               -> "Regenerate the dependency table; go.mod changed."
+      chore.json   # {"trigger":"go.mod","workflow":"sdlc"} -> due when merged work touches go.mod
+      prompt.md                                            -> "Regenerate the dependency table; go.mod changed."
+
+`chore.json` keys are all optional: `trigger` (path glob, or `*` for any merged
+project change), `cadence` and `cooldown` (duration strings like `"720h"` or
+`"30d"`), and `workflow` (the run to open; defaults to `sdlc`). `prompt.md`
+stays a markdown sibling — the opened run reads it verbatim. A chore directory
+must contain a parseable `chore.json`.
 
 A chore needs a `trigger`, a `cadence`, or both. `trigger` is a path glob (or
 `*` for any merged project change); `cadence` makes it due on a clock. A chore
