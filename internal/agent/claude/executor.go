@@ -303,24 +303,11 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	waitErr := ac.Wait()
 	<-done
 	close(sidCh)
-	var sid string
-	select {
-	case sid = <-sidCh:
-	default:
-	}
-	// Mirror the per-session JSONL when the caller asked for one and
-	// we managed to learn the session id. A copy error surfaces on
-	// r.Stderr (same shape as Execute's mirror) but doesn't override
-	// the subprocess exit status.
-	if r.ThreadPath != "" && sid != "" {
-		if _, err := CopyTranscript(sid, r.ThreadPath); err != nil && r.Stderr != nil {
-			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
-		}
-	}
-	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
-		return sid, fmt.Errorf("claude: -p timed out after %s", r.Timeout)
-	}
-	return sid, waitErr
+	// Shared post-Wait tail: drain the sid, mirror the transcript, map
+	// the exit to a timeout or the raw waitErr. Routed through the agent
+	// package so claude and codex can't diverge on the timeout path.
+	timedOut := waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded
+	return agent.FinishOneShot(sidCh, r, timedOut, waitErr, "claude: -p", CopyTranscript)
 }
 
 // CopyTranscript is the Agent method form of the package-level

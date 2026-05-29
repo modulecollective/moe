@@ -250,27 +250,13 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	waitErr := ac.Wait()
 	<-done
 	close(sidCh)
-	if waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("codex: exec timed out after %s", r.Timeout)
-	}
-	// Drain whatever the translator captured. sidCh is buffered so the
-	// translator non-blocks on send; we take the first id (codex emits
-	// exactly one thread.started per session).
-	var sid string
-	select {
-	case sid = <-sidCh:
-	default:
-	}
-	// Mirror the per-session JSONL when the caller asked for one and
-	// we managed to capture the session id. A copy error surfaces on
-	// r.Stderr but doesn't override the subprocess exit status — same
-	// shape as Execute's mirror.
-	if r.ThreadPath != "" && sid != "" {
-		if _, err := CopyTranscript(sid, r.ThreadPath); err != nil && r.Stderr != nil {
-			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
-		}
-	}
-	return sid, waitErr
+	// Shared post-Wait tail: drain the sid, mirror the transcript, map
+	// the exit to a timeout or the raw waitErr. Routed through the agent
+	// package so codex matches claude on the timeout path — it used to
+	// return "" with no mirror on a deadline kill, losing the auto-tail
+	// render and the resumable session.
+	timedOut := waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded
+	return agent.FinishOneShot(sidCh, r, timedOut, waitErr, "codex: exec", CopyTranscript)
 }
 
 // CopyTranscript globs `~/.codex/sessions/*/*/*/rollout-*-<sid>.jsonl`
