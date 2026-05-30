@@ -173,6 +173,29 @@ Git operation that would open one — `git rebase --continue` finalizing a rebas
 `git commit` with no `-m` — otherwise hangs on vim and can leave a clone wedged
 mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 
+### Shell Completion
+
+`moe completion <shell>` prints a completion script for `bash`, `zsh`, or
+`fish`. Source it from your shell's startup file:
+
+```sh
+# bash — in ~/.bashrc
+eval "$(moe completion bash)"
+
+# zsh — in ~/.zshrc, after `autoload -U compinit && compinit`
+eval "$(moe completion zsh)"
+
+# fish — in ~/.config/fish/config.fish
+moe completion fish | source
+```
+
+Completion covers verbs and subcommands (`moe sd⇥` → `sdlc`, `moe sdlc ⇥` →
+`design code test …`) and the `<project>/<run>` slug for run-taking verbs
+(`moe sdlc code ⇥`), plus idea slugs (including `--from-idea`) and named
+workspaces. The script itself never changes as commands are added — all the
+logic lives in `moe` and is best-effort, so completion stays silent outside a
+bureaucracy rather than erroring.
+
 ## Ways To Use MoE
 
 | Workflow | Stages | Use it for |
