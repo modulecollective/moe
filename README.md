@@ -462,6 +462,44 @@ bureaucracy:
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run.
 
+#### Per-project dev secrets
+
+Dev and test runs often need secrets (API keys, DB URLs, tokens) that must never
+be committed and must not leak across projects. The `dev-env.d` hook is the seam,
+no new subsystem required. A script decrypts a per-project file and emits its
+`KEY=VALUE` lines; MoE caches them at the tree's gitignored `.moe/dev-env.env`
+and sources them into the agent session and `moe workspace shell`. Decryption
+runs operator-side at stage open, before the agent subprocess exists, so the
+agent receives only the decrypted vars for its own project and never reads the
+key. Per-project scoping is structural: only that project's `dev-env.d` runs for
+its trees.
+
+Store the ciphertext as a sibling of the hook dir,
+`projects/<project>/secrets.env.age`, encrypted with
+[age](https://github.com/FiloSottile/age):
+
+```sh
+age-keygen -o /<volume>/age/keys.txt                             # one-time: prints age1... pubkey
+age -r age1<pubkey> -o projects/<p>/secrets.env.age secrets.env  # encrypt, then git add the .age
+```
+
+```sh
+# projects/<p>/hooks/dev-env.d/50-secrets.sh
+age -d -i /<volume>/age/keys.txt \
+  "$MOE_BUREAUCRACY/projects/$MOE_PROJECT/secrets.env.age"
+# stdout: KEY=VALUE lines -> MoE caches and sources them
+```
+
+age decrypts with no passphrase, so the same hook survives the headless `!!!`
+cascade, which has no operator to answer a prompt. Keep the keyfile outside the
+bureaucracy (e.g. on a persistent volume, with the secret line backed up in a
+password manager); a leaked bureaucracy clone is then ciphertext only. Rotating a
+secret re-decrypts on the next run; a named workspace needs `moe workspace
+refresh` to pick up new values. If a framework insists on reading a `.env` off
+disk, redirect the same `age -d` output to `"$MOE_SANDBOX/.env"` instead — but
+only when the target repo already gitignores that file, since `pre-push` refuses
+to ship with any untracked file present.
+
 ### Cleanup And Recovery
 
 - `moe session list|abandon|resolve|gc` inspects or cleans leftover stage
