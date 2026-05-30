@@ -480,7 +480,7 @@ Store the ciphertext as a sibling of the hook dir,
 
 ```sh
 age-keygen -o /<volume>/age/keys.txt                             # one-time: prints age1... pubkey
-age -r age1<pubkey> -o projects/<p>/secrets.env.age secrets.env  # encrypt, then git add the .age
+age -r <pubkey> -o projects/<p>/secrets.env.age secrets.env  # encrypt, then git add the .age
 ```
 
 ```sh
