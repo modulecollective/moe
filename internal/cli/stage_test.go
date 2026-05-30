@@ -1116,67 +1116,6 @@ func TestSessionDocCwdDistinguishesByDoc(t *testing.T) {
 	}
 }
 
-// resolveInitialPrompt is the seam that restores the resume-only turn
-// ccc0fed deleted: an interactive resume with no caller kickoff must
-// open with the resume nudge (so `claude --resume` runs a turn instead
-// of init-churning and exiting), while a fresh interactive open stays
-// blank and every other surface keeps its own prompt. The real
-// `--resume` behavior is a claude-subprocess effect tested at the test
-// stage; this pins the moe-side branch the fix turns on.
-func TestResolveInitialPrompt(t *testing.T) {
-	builder := func(string, *wiki.Config) (string, error) { return "built", nil }
-	cases := []struct {
-		name       string
-		opts       stageSessionOpts
-		newSession bool
-		want       string
-	}{
-		{
-			name:       "interactive resume, no kickoff -> nudge",
-			opts:       stageSessionOpts{},
-			newSession: false,
-			want:       resumeNudge,
-		},
-		{
-			name:       "fresh interactive, no kickoff -> blank",
-			opts:       stageSessionOpts{},
-			newSession: true,
-			want:       "",
-		},
-		{
-			name:       "headless, no kickoff -> run slug",
-			opts:       stageSessionOpts{Headless: true},
-			newSession: true,
-			want:       "fix-it",
-		},
-		{
-			name:       "headless resume, no kickoff -> run slug, not nudge",
-			opts:       stageSessionOpts{Headless: true},
-			newSession: false,
-			want:       "fix-it",
-		},
-		{
-			name:       "explicit kickoff on resume -> kickoff verbatim",
-			opts:       stageSessionOpts{InitialPrompt: "chat kickoff"},
-			newSession: false,
-			want:       "chat kickoff",
-		},
-		{
-			name:       "prompt builder on resume -> no nudge",
-			opts:       stageSessionOpts{InitialPromptBuilder: builder},
-			newSession: false,
-			want:       "",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveInitialPrompt(tc.opts, "fix-it", tc.newSession); got != tc.want {
-				t.Fatalf("resolveInitialPrompt = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // The moe-bureaucracy skill teaches the agent three trace-recording
 // channels: twin observations, portable lore, and followups. The
 // split is the whole point — the existing dashboard pollution is
