@@ -186,6 +186,50 @@ type stageSessionOpts struct {
 	CanvasOnOpen func(workRoot string, md *run.Metadata) error
 }
 
+// resumeNudge is the user turn handed to the interactive REPL when a
+// stage is resumed (`--resume <sid>`) with no caller-supplied kickoff.
+// `claude --resume` of a session sitting at a completed assistant turn,
+// with no pending user prompt, re-initializes and exits instead of
+// dropping into the REPL — so the operator never gets to type. Handing
+// it a turn moves the resume into the proven-working `--resume + prompt`
+// shape (the same one chat re-entry relies on every open), which runs
+// the turn and then leaves the operator at an interactive prompt.
+//
+// Fresh stages stay blank: ccc0fed deleted the interactive greeting from
+// both fresh and resume because the operator wanted a blank fresh prompt.
+// That was right for fresh and wrong for resume; this restores the resume
+// half only. See resolveInitialPrompt for the gating.
+const resumeNudge = "Resuming this session. Re-read the canvas and the conversation so " +
+	"far, then note where things stand in 2–3 lines and ask what I'd like to do next. " +
+	"Then wait for my reply."
+
+// resolveInitialPrompt picks the user turn the session opens with, in
+// precedence order:
+//   - Headless with no explicit prompt: the run slug, the seed shape the
+//     cascade driver depends on.
+//   - Interactive resume with no explicit prompt and no prompt builder:
+//     the resumeNudge re-entry turn (see its doc for why resume needs one).
+//   - Otherwise: the caller's InitialPrompt verbatim — a non-empty kickoff
+//     (chat, twin, audit) passes through untouched, and an empty fresh
+//     interactive prompt stays blank.
+//
+// newSession is decided inside BuildSpec (a fresh sid is minted there, or
+// re-minted on a transcript miss), so this is the only layer that can tell
+// fresh from resume — the per-stage openers cannot, which is why the nudge
+// lives here rather than in openSdlcDesign and friends.
+func resolveInitialPrompt(opts stageSessionOpts, runID string, newSession bool) string {
+	if opts.InitialPrompt != "" {
+		return opts.InitialPrompt
+	}
+	if opts.Headless {
+		return runID
+	}
+	if !newSession && opts.InitialPromptBuilder == nil {
+		return resumeNudge
+	}
+	return ""
+}
+
 // stageAgentName resolves the agent backend for a stage turn. It is
 // the contract layer between the per-stage call sites in
 // runStageSession and the precedence ladder in resolveAgentName.
@@ -529,14 +573,10 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 			}
 
-			// Headless mode has no operator on stdin to type the seed
-			// prompt, so default it to the run slug — the same shape
-			// the cascade driver depends on.
-			// Callers that pass an explicit InitialPrompt keep theirs.
-			initialPrompt := opts.InitialPrompt
-			if opts.Headless && initialPrompt == "" {
-				initialPrompt = md.ID
-			}
+			// Resolve the opening user turn: caller kickoff if any, else
+			// the run slug under Headless, else the resume re-entry nudge
+			// on an interactive resume. See resolveInitialPrompt.
+			initialPrompt := resolveInitialPrompt(opts, md.ID, newSession)
 
 			return wikiTurnSpec{
 				Metadata:             md,
