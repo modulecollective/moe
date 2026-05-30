@@ -196,6 +196,7 @@ moe sdlc design [--agent <name> | --once | --to=<stage> | --ship | --chain] <pro
 moe sdlc code   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc test   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
+moe sdlc shell  <project>/<run>
 ```
 
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
@@ -316,6 +317,7 @@ moe chores new|code|close <project>/<run>     # edit chore definitions (journale
 moe chore list [--project <p>]                # show what's due
 moe chore check [<project>/<chore>]           # dry-run validation and due-state
 moe chore open [--now] <project>/<chore>      # open the seeded run for a due chore
+moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
 `moe chores …` edits definitions under `projects/<project>/chores/*` through a
@@ -381,6 +383,10 @@ A named workspace can be claimed by one run at a time, but the directory
 survives run close. `refresh` rebuilds cached `dev-env.d/*` output in place;
 `release` clears a stuck claim.
 
+`moe sdlc shell <project>/<run>` drops you into the run's working tree (its
+sandbox clone or named workspace, whichever it was opened with); `moe workspace
+shell` does the same for a named workspace directly.
+
 ### Feedback Channels
 
 MoE's memory improves through a few explicit channels:
@@ -404,8 +410,9 @@ The catalog below is a map, not a replacement for `moe help`.
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
   dashboard, including a CHORES bucket for due project chores.
 - `moe serve [--addr <host[:port]>] [--port <n>]` runs the local web UI.
-- `moe chore list|check|open` lists due project chores, dry-runs a chore
-  definition, or opens the run a due chore configures.
+- `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
+  definition, opens the run a due chore configures, or clears a due chore until
+  it is next triggered.
 - `moe where` prints the resolved bureaucracy path.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
 - `moe <workflow> log <project>/<run> [<stage>]` renders a past stage
@@ -428,7 +435,7 @@ The catalog below is a map, not a replacement for `moe help`.
 
 ### Workflows
 
-- `moe sdlc new|design|code|test|push|reopen|cat|log` drives designed
+- `moe sdlc new|design|code|test|push|shell|reopen|cat|log` drives designed
   code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
