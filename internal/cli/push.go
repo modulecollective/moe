@@ -35,6 +35,7 @@ func pushCommand(workflow string) *Command {
 			code, _ := runPushTyped(workflow, args, stdout, stderr)
 			return code
 		},
+		argKind: argProjectRun,
 	}
 }
 

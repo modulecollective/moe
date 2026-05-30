@@ -38,6 +38,7 @@ func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runClose(workflow, subject, cleanup, args, stdout, stderr)
 		},
+		argKind: argProjectRun,
 	}
 }
 

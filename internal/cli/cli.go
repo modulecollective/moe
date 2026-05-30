@@ -21,6 +21,12 @@ type Command struct {
 	// workflow's single stage is load-bearing for Workflow.Next but
 	// isn't an operator-facing verb).
 	Hidden bool
+	// argKind tags this command's first positional with the value
+	// source shell completion should draw from (see completion.go). The
+	// zero value (argNone) leaves the command with tree-only completion
+	// — a missing annotation degrades safely, never to a wrong
+	// suggestion.
+	argKind argKind
 }
 
 var commands = map[string]*Command{}

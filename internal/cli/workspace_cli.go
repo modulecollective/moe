@@ -70,6 +70,7 @@ func init() {
 		Name:    "new",
 		Summary: "create a named workspace for a project (idempotent)",
 		Run:     runWorkspaceNew,
+		argKind: argWorkspace,
 	})
 	g.Register(&Command{
 		Name:    "list",
@@ -80,21 +81,25 @@ func init() {
 		Name:    "shell",
 		Summary: "drop into a shell rooted at a named workspace (lazily creates)",
 		Run:     runWorkspaceShell,
+		argKind: argWorkspace,
 	})
 	g.Register(&Command{
 		Name:    "remove",
 		Summary: "tear down dev-env and delete a named workspace",
 		Run:     runWorkspaceRemove,
+		argKind: argWorkspace,
 	})
 	g.Register(&Command{
 		Name:    "release",
 		Summary: "clear a stuck claim on a named workspace",
 		Run:     runWorkspaceRelease,
+		argKind: argWorkspace,
 	})
 	g.Register(&Command{
 		Name:    "refresh",
 		Summary: "rebuild a workspace's cached dev-env in place",
 		Run:     runWorkspaceRefresh,
+		argKind: argWorkspace,
 	})
 	RegisterGroup(g)
 }

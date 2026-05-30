@@ -35,38 +35,45 @@ func init() {
 		Name:    "design",
 		Summary: "open a Claude Code session on the run's design document",
 		Run:     runDesign,
+		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "code",
 		Summary: "open a Claude Code session on the run's code document (in a sandbox clone)",
 		Run:     runCode,
+		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "test",
 		Summary: "open a Claude Code session on the run's test document — verify the code stage's work",
 		Run:     runTest,
+		argKind: argProjectRun,
 	})
 	g.Register(pushCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "shell",
 		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
 		Run:     runShell,
+		argKind: argProjectRun,
 	})
 	g.Register(closeCommand("sdlc", sdlcCloseSubject, releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (sdlc cat <project>/<run> <stage>)",
 		Run:     runCat("sdlc", ""),
+		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "log",
 		Summary: "render a stage's agent transcript (sdlc log <project>/<run> <stage>)",
 		Run:     runLog("sdlc", ""),
+		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "reopen",
 		Summary: "open a fresh sdlc run seeded with the design canvas of a terminal prior run",
 		Run:     runSDLCReopen,
+		argKind: argProjectRun,
 	})
 	RegisterGroup(g)
 

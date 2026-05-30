@@ -44,11 +44,13 @@ func init() {
 		Name:    "edit",
 		Summary: "refine a captured idea ($EDITOR, or --chat for Claude Code)",
 		Run:     runIdeaEdit,
+		argKind: argIdea,
 	})
 	g.Register(&Command{
 		Name:    "close",
 		Summary: "close a captured idea without promoting (status → closed)",
 		Run:     runIdeaClose,
+		argKind: argIdea,
 	})
 	g.Register(&Command{
 		Name:    "list",
@@ -59,21 +61,25 @@ func init() {
 		Name:    "cat",
 		Summary: "dump an idea's canvas to stdout",
 		Run:     runCat(dash.IdeaWorkflow, dash.IdeaDocID),
+		argKind: argIdea,
 	})
 	g.Register(&Command{
 		Name:    "log",
 		Summary: "render an idea's agent transcript",
 		Run:     runLog(dash.IdeaWorkflow, dash.IdeaDocID),
+		argKind: argIdea,
 	})
 	g.Register(&Command{
 		Name:    "move",
 		Summary: "re-home an open idea under a different project",
 		Run:     runIdeaMove,
+		argKind: argIdea,
 	})
 	g.Register(&Command{
 		Name:    "reopen",
 		Summary: "flip a promoted idea back to in_progress after its destination run was abandoned",
 		Run:     runIdeaReopen,
+		argKind: argIdea,
 	})
 	RegisterGroup(g)
 
