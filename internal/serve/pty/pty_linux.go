@@ -7,11 +7,11 @@
 // pty_other.go errors at runtime on non-Linux so the rest of moe
 // still builds (the operator runs serve on Linux only).
 //
-// The package is a thin shim around golang.org/x/sys/unix: open
-// /dev/ptmx, unlock the slave (TIOCSPTLCK), resolve the slave path
-// (TIOCGPTN), then start the child with setsid + setctty so it
-// receives the slave as its controlling terminal. ~80 LOC we own
-// end-to-end rather than pulling a community library.
+// The package shims syscall directly: open /dev/ptmx, unlock the slave
+// (TIOCSPTLCK), resolve the slave path (TIOCGPTN), then start the child
+// with setsid + setctty so it receives the slave as its controlling
+// terminal. ~80 LOC we own end-to-end rather than pulling a community
+// library.
 package pty
 
 import (
@@ -20,9 +20,22 @@ import (
 	"os/exec"
 	"strconv"
 	"syscall"
-
-	"golang.org/x/sys/unix"
+	"unsafe"
 )
+
+// ioctl wraps a single ioctl(2) call. The TTY ioctls below pass a
+// pointer argument; the canonical, vet-approved idiom is to build the
+// uintptr from unsafe.Pointer inside the Syscall call itself.
+func ioctl(fd, req, arg uintptr) error {
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, req, arg); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// winsize mirrors struct winsize from <termios.h>. syscall has no
+// Winsize type (unlike golang.org/x/sys/unix), so we define our own.
+type winsize struct{ Row, Col, Xpixel, Ypixel uint16 }
 
 // Pty is the parent's side of a PTY pair: the master file the parent
 // reads/writes through, plus the child *exec.Cmd it's wired to.
@@ -48,16 +61,17 @@ func Start(cmd *exec.Cmd) (*Pty, error) {
 
 	// Linux Openpt-equivalent: unlock the slave end, then read the
 	// device number to construct its path.
-	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
+	var lock int32
+	if err := ioctl(master.Fd(), syscall.TIOCSPTLCK, uintptr(unsafe.Pointer(&lock))); err != nil {
 		master.Close()
 		return nil, fmt.Errorf("pty: TIOCSPTLCK: %w", err)
 	}
-	n, err := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPTN)
-	if err != nil {
+	var n uint32
+	if err := ioctl(master.Fd(), syscall.TIOCGPTN, uintptr(unsafe.Pointer(&n))); err != nil {
 		master.Close()
 		return nil, fmt.Errorf("pty: TIOCGPTN: %w", err)
 	}
-	slavePath := "/dev/pts/" + strconv.Itoa(n)
+	slavePath := "/dev/pts/" + strconv.Itoa(int(n))
 	slave, err := os.OpenFile(slavePath, os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
 		master.Close()
@@ -104,8 +118,8 @@ func (p *Pty) Cmd() *exec.Cmd { return p.cmd }
 
 // SetSize updates the master's window size. Pre-spawn or live.
 func SetSize(master *os.File, rows, cols uint16) error {
-	ws := &unix.Winsize{Row: rows, Col: cols}
-	return unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, ws)
+	ws := winsize{Row: rows, Col: cols}
+	return ioctl(master.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
 }
 
 // Close sends SIGTERM to the child (if still running) and releases
