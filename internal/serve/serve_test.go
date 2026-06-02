@@ -23,7 +23,7 @@ import (
 
 func TestDashRouteRendersBuckets(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return []dash.Row{
 			{Project: "p1", Run: "r1", Note: "sdlc:design", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p2", Run: "r2", Note: "idea:capture", Bucket: dash.BucketBacklog, When: now.Add(-2 * time.Hour)},
@@ -64,7 +64,7 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: root,
-		GatherDash: func(showAll bool) ([]dash.Row, int, int, error) {
+		GatherDash: func() ([]dash.Row, int, int, error) {
 			return []dash.Row{{Project: "alpha", Run: "fix-it", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
 		},
 		ResolveCanvas: func(_, _, _ string) (string, error) {
@@ -135,7 +135,7 @@ func TestDashShowAllStripsCap(t *testing.T) {
 			When:    now,
 		})
 	}
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return rows, 1, 0, nil
 	}
 	s := newTestServer(t, Options{
@@ -212,7 +212,7 @@ func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 // decoding the script element's textContent before JSON.parse.
 func TestDashRendersFactoryFramesScript(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
@@ -244,7 +244,7 @@ func TestDashRendersFactoryFramesScript(t *testing.T) {
 
 func TestDashRendersChainedClass(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
 			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
@@ -267,7 +267,7 @@ func TestDashRendersChainedClass(t *testing.T) {
 // the state, since natural exit leaves the *child behind.
 func TestDashLiveBadgeReflectsExitState(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "running", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p", Run: "exited", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
@@ -1494,7 +1494,7 @@ func TestPromoteRefusesMissingRun(t *testing.T) {
 // the row needing a separate "view" affordance.
 func TestDashRowsRenderAnchors(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(showAll bool) ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "live-run", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p", Run: "done", Note: "sdlc:merged", Bucket: dash.BucketCompletedRuns, When: now.Add(-24 * time.Hour)},

@@ -76,11 +76,8 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
-	// Relative to now so the work-turn timestamps stay inside the
-	// 30-day dormancy cutoff regardless of when the suite runs. The
-	// fixture used to use a hard-coded April 10 2026; once "now" was
-	// 30+ days past that, dash filtered the run out and the test
-	// failed for date-decay reasons unrelated to what it's checking.
+	// Timestamps are relative to now rather than hard-coded so the
+	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
@@ -116,11 +113,8 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
 
-	// Relative to now so the work-turn timestamps stay inside the
-	// 30-day dormancy cutoff regardless of when the suite runs. The
-	// fixture used to use a hard-coded April 10 2026; once "now" was
-	// 30+ days past that, dash filtered the run out and the test
-	// failed for date-decay reasons unrelated to what it's checking.
+	// Timestamps are relative to now rather than hard-coded so the
+	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
@@ -309,7 +303,12 @@ func TestDashKBRunAfterResearchShowsResearchParked(t *testing.T) {
 	}
 }
 
-func TestDashDormantHiddenWithoutAll(t *testing.T) {
+// TestDashStaleInProgressRunSurfacesInActive: a 60-day-old in-progress
+// run shows up in ACTIVE *without* --all, carrying its real age. There
+// is no longer a dormancy filter — stale in-progress work is surfaced
+// for grooming, not hidden. (Inverts the former
+// TestDashDormantHiddenWithoutAll, which asserted the opposite.)
+func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -320,25 +319,52 @@ func TestDashDormantHiddenWithoutAll(t *testing.T) {
 		"MoE-Run: old-one\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
-	// Default: hidden.
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE (0)") {
-		t.Fatalf("dormant run should be hidden, got:\n%s", out.String())
+	got := out.String()
+	if !strings.Contains(got, "ACTIVE (1)") {
+		t.Fatalf("stale in-progress run should surface in ACTIVE, got:\n%s", got)
 	}
+	if !strings.Contains(got, "old-one") {
+		t.Fatalf("expected the stale run row to be present, got:\n%s", got)
+	}
+	// The age is the grooming signal: 60 days reads as "60d ago".
+	if !strings.Contains(got, "60d ago") {
+		t.Fatalf("expected the stale run to show its real age '60d ago', got:\n%s", got)
+	}
+}
 
-	// --all: shown.
-	out.Reset()
-	errb.Reset()
-	code = Run([]string{"dash", "--all"}, &out, &errb)
+// TestDashStaleMergedRunCountsInCompleted is the regression guard for
+// "what happened to 750?": a run merged 60 days ago must still count in
+// COMPLETED without --all. The old dormancy gate subtracted such runs
+// from the completed total once they aged past 30 days, so the header
+// drifted down day by day. The completed count is cumulative history —
+// it should only climb.
+func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	trailerstest.SeedRun(t, root, "tele", "long-merged", "sdlc", run.StatusMerged)
+	trailerstest.CommitTrailer(t, root, "push: long-merged merged",
+		"MoE-Run: long-merged\nMoE-Merged: abc1234567890",
+		time.Now().UTC().Add(-60*24*time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ACTIVE (1)") {
-		t.Fatalf("--all should reveal dormant run, got:\n%s", out.String())
+	got := out.String()
+	if !strings.Contains(got, "COMPLETED (1)") {
+		t.Fatalf("stale merged run should still count in COMPLETED, got:\n%s", got)
+	}
+	if !containsRunRow(got, "tele", "long-merged", "sdlc:merged") {
+		t.Fatalf("expected the stale merged run row, got:\n%s", got)
 	}
 }
 
@@ -798,11 +824,8 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	// Relative to now so the work-turn timestamps stay inside the
-	// 30-day dormancy cutoff regardless of when the suite runs. The
-	// fixture used to use a hard-coded April 10 2026; once "now" was
-	// 30+ days past that, dash filtered the run out and the test
-	// failed for date-decay reasons unrelated to what it's checking.
+	// Timestamps are relative to now rather than hard-coded so the
+	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
