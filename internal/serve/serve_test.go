@@ -411,13 +411,21 @@ func TestNewRunFormWithProjects(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		`<form`, `name="project"`, `name="slug"`, `name="agent"`,
-		`>alpha<`, `>beta<`,
+		`<form`, `name="id"`, `name="agent"`,
+		// Single project/slug field plus a datalist of project/ prefixes.
+		`placeholder="project/slug"`,
+		`<datalist`, `value="alpha/"`, `value="beta/"`,
 		`>claude<`, `>codex<`,
 		`(default)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("form missing %q\n%s", want, body)
+		}
+	}
+	// The old split project/slug controls are gone.
+	for _, banned := range []string{`name="project"`, `name="slug"`} {
+		if strings.Contains(body, banned) {
+			t.Errorf("form should not carry the old %q control\n%s", banned, body)
 		}
 	}
 }
@@ -490,10 +498,11 @@ func TestNewIdeaFormWithProjects(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`<form`, `action="/idea/new"`,
-		`name="project"`, `name="slug"`, `name="body"`,
-		`>alpha<`, `>beta<`,
+		`name="id"`, `name="body"`,
+		`placeholder="project/slug"`,
+		`<datalist`, `value="alpha/"`, `value="beta/"`,
 		`<textarea`,
-		// Mobile keyboard attrs on slug — the whole point of the
+		// Mobile keyboard attrs on the id field — the whole point of the
 		// secondary "phone fights the kebab-case pattern" fix.
 		`autocapitalize="none"`,
 		`autocorrect="off"`,
@@ -503,9 +512,10 @@ func TestNewIdeaFormWithProjects(t *testing.T) {
 			t.Errorf("form missing %q\n%s", want, body)
 		}
 	}
-	// No workspace/agent dropdowns — idea runs have neither.
+	// No split project/slug controls, and no workspace/agent dropdowns —
+	// idea runs have neither.
 	for _, banned := range []string{
-		`name="workspace"`, `name="agent"`,
+		`name="project"`, `name="slug"`, `name="workspace"`, `name="agent"`,
 	} {
 		if strings.Contains(body, banned) {
 			t.Errorf("idea form must not have %q\n%s", banned, body)
@@ -530,14 +540,15 @@ func TestNewIdeaMethodNotAllowed(t *testing.T) {
 
 // TestNewIdeaSubmitInvalidSlug: POST with a slug that doesn't match
 // the kebab-case pattern re-renders the form with the inline banner
-// at 422, no run gets opened on disk. Mirrors the validation shape of
+// at 422, echoes the operator's raw id + body back into the form, and
+// opens no run on disk. Mirrors the validation shape of
 // handleNewRunSubmit.
 func TestNewIdeaSubmitInvalidSlug(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
-	form := "project=alpha&slug=Bad_Slug&body=hello"
+	form := "id=alpha/Bad_Slug&body=keep+this+text"
 	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -550,19 +561,28 @@ func TestNewIdeaSubmitInvalidSlug(t *testing.T) {
 	if !strings.Contains(body, "slug:") {
 		t.Errorf("body should carry an inline 'slug:' banner, got:\n%s", body)
 	}
+	// The typed id and idea body survive the re-render.
+	if !strings.Contains(body, `value="alpha/Bad_Slug"`) {
+		t.Errorf("form should echo the raw typed id, got:\n%s", body)
+	}
+	if !strings.Contains(body, "keep this text") {
+		t.Errorf("form should seed the typed body back into the textarea, got:\n%s", body)
+	}
 	// No run should have been opened.
 	if _, err := os.Stat(filepath.Join(root, "projects", "alpha", "runs")); !os.IsNotExist(err) {
 		t.Errorf("validation failure must not create runs dir (stat err=%v)", err)
 	}
 }
 
-// TestNewIdeaSubmitInvalidProject: same shape as the slug test, for
-// the project field. Closes the form-redirect loop on validation.
-func TestNewIdeaSubmitInvalidProject(t *testing.T) {
+// TestNewIdeaSubmitMalformedID: an id with no slash can't split into
+// project/slug and fails on-page with the "expected `project/slug`"
+// banner.
+func TestNewIdeaSubmitMalformedID(t *testing.T) {
 	root := t.TempDir()
+	seedProject(t, root, "alpha")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
-	form := "project=&slug=valid-slug&body=hello"
+	form := "id=noslash&body=hello"
 	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -571,8 +591,30 @@ func TestNewIdeaSubmitInvalidProject(t *testing.T) {
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "project:") {
-		t.Errorf("body should carry an inline 'project:' banner, got:\n%s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "project/slug") {
+		t.Errorf("body should carry the 'expected project/slug' banner, got:\n%s", rr.Body.String())
+	}
+}
+
+// TestNewIdeaSubmitUnknownProject: a well-formed id whose project isn't
+// registered is rejected on-page with an "unknown project" banner
+// rather than leaking a downstream open error.
+func TestNewIdeaSubmitUnknownProject(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	form := "id=ghost/valid-slug&body=hello"
+	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unknown project: ghost") {
+		t.Errorf("body should carry an 'unknown project' banner, got:\n%s", rr.Body.String())
 	}
 }
 

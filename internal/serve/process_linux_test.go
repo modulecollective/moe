@@ -104,8 +104,7 @@ func TestPOSTNewRunOpensAndSpawnsAgent(t *testing.T) {
 	})
 
 	form := url.Values{}
-	form.Set("project", "alpha")
-	form.Set("slug", "first-thing")
+	form.Set("id", "alpha/first-thing")
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -141,8 +140,7 @@ func TestPOSTNewRunRejectsBadSlug(t *testing.T) {
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	form := url.Values{}
-	form.Set("project", "alpha")
-	form.Set("slug", "Bad Slug!")
+	form.Set("id", "alpha/Bad Slug!")
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -153,6 +151,60 @@ func TestPOSTNewRunRejectsBadSlug(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "kebab-case") {
 		t.Errorf("error banner should mention kebab-case, got:\n%s", rr.Body.String())
+	}
+}
+
+// TestPOSTNewRunRejectsUnknownProject: a well-formed `project/slug`
+// whose project isn't registered must fail on-page at 422 with an
+// "unknown project" banner — not slip through to a downstream open
+// error. The free-text id field reintroduced this path; the dropdown
+// made it unreachable.
+func TestPOSTNewRunRejectsUnknownProject(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	form := url.Values{}
+	form.Set("id", "ghost/first-thing")
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unknown project: ghost") {
+		t.Errorf("body should carry an 'unknown project' banner, got:\n%s", rr.Body.String())
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("unknown project must not spawn any child; registry has %d", len(s.children.all))
+	}
+}
+
+// TestPOSTNewRunPreservesInputOnError: an invalid slug re-renders the
+// form with the operator's raw `project/slug` text and chosen agent
+// still in place, so a validation slip doesn't wipe what they typed.
+func TestPOSTNewRunPreservesInputOnError(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	form := url.Values{}
+	form.Set("id", "alpha/Bad_Slug")
+	form.Set("agent", "codex")
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `value="alpha/Bad_Slug"`) {
+		t.Errorf("form should echo the raw typed id, got:\n%s", body)
+	}
+	if !strings.Contains(body, `value="codex" selected`) {
+		t.Errorf("form should re-select the chosen agent, got:\n%s", body)
 	}
 }
 
