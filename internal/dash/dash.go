@@ -49,11 +49,6 @@ const (
 	ChatDocID    = "chat"
 )
 
-// DormantCutoff is the staleness threshold for the ACTIVE section.
-// A run with no MoE-Run-scoped commit in this window is considered
-// dormant and hidden unless the caller passes All=true.
-const DormantCutoff = 30 * 24 * time.Hour
-
 // CompletedCap bounds the COMPLETED section. Finished runs are
 // history — useful as recent context, not as a backlog — so the dash
 // shows the newest N and lets the bureaucracy repo itself be the
@@ -71,7 +66,7 @@ const (
 	BucketChores                      // due project chores, before they become runs
 	BucketBacklog                     // captured ideas, not yet promoted to a run
 	BucketCompletedRuns               // pushed or terminal runs, shown as "done"
-	BucketNone                        // filtered out entirely (dormant without --all)
+	BucketNone                        // not placed in any section (idea with an unrecognised status; in-progress non-idea run with no next-stage decision)
 )
 
 // Row is one entry in the dashboard. Kept flat so tabwriter can
@@ -113,7 +108,6 @@ type ChoreInput struct {
 // to keep the hot path off-disk.
 type Inputs struct {
 	Now              time.Time
-	All              bool
 	ProjectFilter    string
 	WorkflowFilter   string
 	Runs             []*run.Metadata
@@ -144,7 +138,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 			continue
 		}
 		last := in.Index.LastActivity[md.ID]
-		b, note, stage, runningDoc := classify(md, last, in.Now, in.All, byRunKey, in.Index, in.SessionDocsByRun[md.ID], in.NextByRun)
+		b, note, stage, runningDoc := classify(md, byRunKey, in.Index, in.SessionDocsByRun[md.ID], in.NextByRun)
 		if b == BucketNone {
 			continue
 		}
@@ -262,10 +256,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // the bare next-stage name the factory art uses to pick a station
 // glyph, and the doc with an open session that "wins" the liveness
 // slot. Pure over its inputs — no disk I/O.
-func classify(md *run.Metadata, last, now time.Time, includeDormant bool, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string, nextByRun map[string]NextDecision) (Bucket, string, string, string) {
-	if !includeDormant && !last.IsZero() && now.Sub(last) > DormantCutoff {
-		return BucketNone, "", "", ""
-	}
+func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string, nextByRun map[string]NextDecision) (Bucket, string, string, string) {
 	prefix := md.Workflow + ":"
 	if md.Workflow == IdeaWorkflow {
 		switch md.Status {

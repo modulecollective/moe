@@ -76,7 +76,6 @@ type DashSnapshot struct {
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
 // reached identically from the CLI and from `moe serve`.
 type DashFilter struct {
-	All            bool
 	ProjectFilter  string
 	WorkflowFilter string
 }
@@ -162,7 +161,6 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter, timer *ga
 
 	rows, err := dash.BuildRows(dash.Inputs{
 		Now:              now,
-		All:              filter.All,
 		ProjectFilter:    filter.ProjectFilter,
 		WorkflowFilter:   filter.WorkflowFilter,
 		Runs:             mds,
@@ -201,11 +199,6 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter, timer *ga
 // the run is filtered out (e.g. classified into BucketNone) or doesn't
 // exist on disk.
 //
-// All=true is wired unconditionally: opening a detail page is a
-// deliberate operator action, so dormancy-as-filter would be confusing.
-// The caller (serve's per-run page) wants the same Note / When the
-// dash just rendered — including for dormant runs.
-//
 // Implementation reuses GatherDashSnapshot with a ProjectFilter so the
 // classify logic stays in one place. One extra single-project scan per
 // detail-page hit, which is cheap on a single-operator localhost
@@ -216,7 +209,6 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter, timer *ga
 // page's bureaucracy-wide journal index shows up next to the dash's.
 func GatherRunRow(root string, projectID, slug string, now time.Time, logw io.Writer) (dash.Row, bool, error) {
 	snap, err := GatherDashSnapshot(root, now, DashFilter{
-		All:           true,
 		ProjectFilter: projectID,
 	}, newGatherTimer(logw, "run-row"))
 	if err != nil {

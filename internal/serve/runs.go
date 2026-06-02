@@ -181,9 +181,9 @@ type runVM struct {
 	Slug    string
 	// RowNote / RowWhen are the dash-row Note and (humanised) When for
 	// this run, computed the same way the dash computes them. Empty
-	// strings when the row gathered as "no row" (e.g. dormant outside
-	// All=true, or no GatherRunRow callback wired) — template falls
-	// back to the Started / Status line in that case.
+	// strings when the row gathered as "no row" (e.g. the run classified
+	// into BucketNone, or no GatherRunRow callback wired) — template
+	// falls back to the Started / Status line in that case.
 	RowNote string
 	RowWhen string
 	// NextStage is the run's bare next-stage name (row.Stage), or "" when

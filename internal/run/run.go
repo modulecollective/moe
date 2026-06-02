@@ -654,7 +654,7 @@ func Scan(root string) ([]*Metadata, error) {
 // carrying MoE-Run: <runID>, or the zero time if no such commit
 // exists (a run dir can exist without its opening commit being
 // reachable from HEAD, though that's unusual). Used by moe dash to sort
-// buckets and to distinguish dormant runs from live ones.
+// buckets and render each run's age ("60d ago").
 func LastActivity(root, runID string) (time.Time, error) {
 	out, err := git.Output(root,
 		"log", "-1",

@@ -27,7 +27,7 @@ func init() {
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "show everything (no dormancy filter, no completed-run cap)")
+	all := fs.Bool("all", false, "show every completed run, not just the newest 10")
 	project := fs.String("project", "", "show only rows whose run belongs to this project")
 	workflow := fs.String("workflow", "", "show only rows whose run uses this workflow")
 	fs.Usage = func() {
@@ -55,7 +55,6 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	now := time.Now().UTC()
 	// CLI dash stays an unlogged, fresh scan: no timer (nil = no-op).
 	snap, err := GatherDashSnapshot(root, now, DashFilter{
-		All:            *all,
 		ProjectFilter:  *project,
 		WorkflowFilter: *workflow,
 	}, nil)
