@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,10 +39,19 @@ const promotedFirstStage = "design"
 // and hyphens; must start with a letter or digit.
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// projectIDPattern matches the project IDs `project.List` returns.
-// Same character class as slugs (project ids are derived from repo
-// names, also kebab-case).
-var projectIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+// splitID parses the single `project/slug` field both new-* forms now
+// take into its two halves, mirroring the CLI's splitProjectRun
+// (internal/cli/args.go): cut on the first slash, reject either half
+// empty. Kept local rather than shared because internal/cli imports
+// internal/serve, so serve can't import the original back without a
+// cycle — the two are meant to stay in sync by eye.
+func splitID(id string) (project, slug string, err error) {
+	project, slug, ok := strings.Cut(id, "/")
+	if !ok || project == "" || slug == "" {
+		return "", "", errors.New("expected `project/slug`")
+	}
+	return project, slug, nil
+}
 
 // agentOptions is the hardcoded set offered in the new-run form's
 // agent dropdown. Two registered agents today; if a third ever
@@ -66,6 +76,14 @@ type newRunVM struct {
 	Workspaces  []workspaceOption // every named workspace this host has on disk, across all projects
 	Agents      []string          // includes "" for "use default"
 	ErrorBanner string            // populated on a POST validation failure (slice #4)
+	// ID, Workspace, Agent echo the operator's submitted values back into
+	// the form on an error re-render so a validation failure doesn't wipe
+	// what they typed. ID is the raw `project/slug` text (echoed verbatim,
+	// not re-joined, so a malformed entry shows exactly as typed);
+	// Workspace/Agent re-select the matching dropdown option.
+	ID        string
+	Workspace string
+	Agent     string
 }
 
 func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
@@ -92,22 +110,27 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	projectID := strings.TrimSpace(r.FormValue("project"))
-	slug := strings.TrimSpace(r.FormValue("slug"))
+	id := strings.TrimSpace(r.FormValue("id"))
 	wsName := strings.TrimSpace(r.FormValue("workspace"))
 	agentName := strings.TrimSpace(r.FormValue("agent"))
+	fail := func(msg string) { s.renderFormError(w, r, id, wsName, agentName, msg) }
 
-	if !projectIDPattern.MatchString(projectID) {
-		s.renderFormError(w, r, "project: invalid id")
+	projectID, slug, err := splitID(id)
+	if err != nil {
+		fail(err.Error())
 		return
 	}
 	if !slugPattern.MatchString(slug) {
-		s.renderFormError(w, r, "slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
+		fail("slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
+		return
+	}
+	if err := s.requireKnownProject(projectID); err != nil {
+		fail(err.Error())
 		return
 	}
 	if wsName != "" {
 		if err := workspace.ValidateName(wsName); err != nil {
-			s.renderFormError(w, r, "workspace: "+err.Error())
+			fail("workspace: " + err.Error())
 			return
 		}
 	}
@@ -121,26 +144,29 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		Agent:     agentName,
 	})
 	if err != nil {
-		s.renderFormError(w, r, "open: "+err.Error())
+		fail("open: " + err.Error())
 		return
 	}
 
-	id := md.Project + "/" + md.ID
-	args := []string{"sdlc", promotedFirstStage, id}
-	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		s.renderFormError(w, r, "spawn: "+err.Error())
+	runID := md.Project + "/" + md.ID
+	args := []string{"sdlc", promotedFirstStage, runID}
+	if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		fail("spawn: " + err.Error())
 		return
 	}
 	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, msg string) {
+func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsName, agentName, msg string) {
 	vm, err := s.gatherNewRunVM()
 	if err != nil {
 		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
 		return
 	}
 	vm.ErrorBanner = msg
+	vm.ID = id
+	vm.Workspace = wsName
+	vm.Agent = agentName
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, r, "new.html", vm)
 }
@@ -875,12 +901,35 @@ func (s *Server) listProjectIDs() ([]string, error) {
 	return projectIDs, nil
 }
 
+// requireKnownProject rejects a project id that isn't in the registered
+// set, mirroring the CLI's requireProject (internal/cli/idea.go) so the
+// web forms fail the same way the CLI does. The dropdown the forms used
+// to carry made an unknown project unreachable; a free-text field
+// doesn't, so the check moves server-side — catching it here yields a
+// clean "unknown project" banner instead of leaking a downstream
+// runopen.Open error.
+func (s *Server) requireKnownProject(projectID string) error {
+	ids, err := s.listProjectIDs()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(ids, projectID) {
+		return errors.New("unknown project: " + projectID)
+	}
+	return nil
+}
+
 // newIdeaVM backs the new-idea form. Projects are gathered from disk
 // at request time; there are no workspace / agent dropdowns because
 // idea runs don't host a PTY session and have no workspace binding.
 type newIdeaVM struct {
 	Projects    []string
 	ErrorBanner string
+	// ID, Body echo the operator's submitted values back on an error
+	// re-render so a validation failure doesn't wipe a typed-out idea.
+	// ID is the raw `project/slug` text, echoed verbatim.
+	ID   string
+	Body string
 }
 
 func (s *Server) handleNewIdeaForm(w http.ResponseWriter, r *http.Request) {
@@ -907,41 +956,51 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	projectID := strings.TrimSpace(r.FormValue("project"))
-	slug := strings.TrimSpace(r.FormValue("slug"))
+	id := strings.TrimSpace(r.FormValue("id"))
 	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
+	// Echo the raw typed id and body on every error path so the operator
+	// never loses a multi-line idea to a validation slip.
+	fail := func(msg string) { s.renderIdeaFormError(w, r, id, body, msg) }
 
-	if !projectIDPattern.MatchString(projectID) {
-		s.renderIdeaFormError(w, r, "project: invalid id")
+	projectID, slug, err := splitID(id)
+	if err != nil {
+		fail(err.Error())
 		return
 	}
 	if !slugPattern.MatchString(slug) {
-		s.renderIdeaFormError(w, r, "slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
+		fail("slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
 		return
 	}
-	if body == "" {
-		body = "# " + slug + "\n"
+	if err := s.requireKnownProject(projectID); err != nil {
+		fail(err.Error())
+		return
 	}
 
+	seed := body
+	if seed == "" {
+		seed = "# " + slug + "\n"
+	}
 	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
 		ID:       slug,
 		Workflow: dash.IdeaWorkflow,
-		SeedDocs: map[string]string{dash.IdeaDocID: body},
+		SeedDocs: map[string]string{dash.IdeaDocID: seed},
 	})
 	if err != nil {
-		s.renderIdeaFormError(w, r, "open: "+err.Error())
+		fail("open: " + err.Error())
 		return
 	}
 	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderIdeaFormError(w http.ResponseWriter, r *http.Request, msg string) {
+func (s *Server) renderIdeaFormError(w http.ResponseWriter, r *http.Request, id, body, msg string) {
 	vm, err := s.gatherNewIdeaVM()
 	if err != nil {
 		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
 		return
 	}
 	vm.ErrorBanner = msg
+	vm.ID = id
+	vm.Body = body
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, r, "new_idea.html", vm)
 }

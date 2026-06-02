@@ -31,18 +31,16 @@
   {{else}}
   <form method="post" action="/run/new" class="new-run">
     <label>
-      project
-      <select name="project" required>
-        {{range .Projects}}<option value="{{.}}">{{.}}</option>{{end}}
-      </select>
-    </label>
-
-    <label>
-      slug
-      <input type="text" name="slug" required autofocus
-             pattern="[a-z0-9][a-z0-9-]*"
+      project/slug
+      <input type="text" name="id" required autofocus
+             value="{{.ID}}"
+             list="known-projects"
+             pattern="[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9-]*"
              autocapitalize="none" autocorrect="off" spellcheck="false"
-             placeholder="kebab-case-slug">
+             placeholder="project/slug">
+      <datalist id="known-projects">
+        {{range .Projects}}<option value="{{.}}/"></option>{{end}}
+      </datalist>
     </label>
 
     {{if .Workspaces}}
@@ -50,7 +48,7 @@
       workspace <span class="hint">(optional; sdlc/hooks only)</span>
       <select name="workspace">
         <option value="">(none)</option>
-        {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}">{{.Label}}</option>{{end}}
+        {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}"{{if eq .Name $.Workspace}} selected{{end}}>{{.Label}}</option>{{end}}
       </select>
     </label>
     {{end}}
@@ -58,7 +56,7 @@
     <label>
       agent <span class="hint">(optional; resolves to default if blank)</span>
       <select name="agent">
-        {{range .Agents}}<option value="{{.}}">{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
+        {{range .Agents}}<option value="{{.}}"{{if eq . $.Agent}} selected{{end}}>{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
       </select>
     </label>
 

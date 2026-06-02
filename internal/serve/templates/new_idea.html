@@ -31,23 +31,21 @@
   {{else}}
   <form method="post" action="/idea/new" class="new-run">
     <label>
-      project
-      <select name="project" required>
-        {{range .Projects}}<option value="{{.}}">{{.}}</option>{{end}}
-      </select>
-    </label>
-
-    <label>
-      slug
-      <input type="text" name="slug" required autofocus
-             pattern="[a-z0-9][a-z0-9-]*"
+      project/slug
+      <input type="text" name="id" required autofocus
+             value="{{.ID}}"
+             list="known-projects"
+             pattern="[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9-]*"
              autocapitalize="none" autocorrect="off" spellcheck="false"
-             placeholder="kebab-case-slug">
+             placeholder="project/slug">
+      <datalist id="known-projects">
+        {{range .Projects}}<option value="{{.}}/"></option>{{end}}
+      </datalist>
     </label>
 
     <label>
       body <span class="hint">(markdown; blank stubs to <code># slug</code>)</span>
-      <textarea name="body" rows="12" class="idea-body"></textarea>
+      <textarea name="body" rows="12" class="idea-body">{{.Body}}</textarea>
     </label>
 
     <button type="submit">capture idea</button>
