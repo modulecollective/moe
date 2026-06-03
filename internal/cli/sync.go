@@ -90,7 +90,16 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// --no- explicitly so a user-side pull.recurseSubmodules / submodule.recurse
 	// config can't re-enable it.
 	if sync.HasUpstream(root) {
-		if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
+		// -c advice.skippedCherryPicks=false: when this pull rebases a
+		// local "sync: bump project pointers" commit over an identical
+		// bump that another machine already pushed, git deduplicates the
+		// patch and prints a "skipped previously applied commit" warning
+		// plus two hints to re-run with --reapply-cherry-picks. The dedup
+		// is correct and benign (the gitlink converges either way), but
+		// the hints are actively misleading here — reapplying would force
+		// an empty/conflicting duplicate bump back in. Suppress the advice;
+		// the bare warning stays as honest signal.
+		if err := git.Stream(root, stdout, stderr, "-c", "advice.skippedCherryPicks=false", "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
 			if sync.RebaseInProgress(root) {
 				return sync.RebaseRecoveryError(root)
 			}

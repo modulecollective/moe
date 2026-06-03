@@ -438,6 +438,78 @@ func TestDoSyncRebasesOverDivergedRemote(t *testing.T) {
 	}
 }
 
+// TestDoSyncDedupesDuplicateBumpQuietly is the regression guard for
+// bureaucracy-repo-sync-issue. When sync's rebasing pull drops a
+// duplicate "sync: bump project pointers" commit — machine A and machine
+// B independently recorded the same gitlink move, so the two bumps are
+// patch-identical — git prints a "skipped previously applied commit"
+// warning followed by two --reapply-cherry-picks hints. The hints are
+// actively misleading here: reapplying would force an empty/conflicting
+// duplicate bump back in. The -c advice.skippedCherryPicks=false on the
+// pull suppresses the advice while leaving the bare warning as honest
+// signal.
+//
+// The assertion is on the ABSENCE of the hint, not the presence of the
+// warning. The warning is git's and we keep it deliberately; if a future
+// git folds it under the same advice key and the output goes fully
+// silent, that's still acceptable and still passes.
+func TestDoSyncDedupesDuplicateBumpQuietly(t *testing.T) {
+	f := newSyncFixture(t)
+	f.addProjectSubmodule("proj", "main")
+	fromSHA := f.gitlink("projects/proj/src")
+	f.initBureaucracyOrigin()
+
+	// A real new submodule commit the bump moves the gitlink to.
+	// advanceOrigin pushes it to the submodule's origin, so the
+	// post-pull BumpProjectPointers fast-forwards the submodule to it and
+	// finds the gitlink already there — a clean no-op, leaving the
+	// rebase's converged state as the only thing under test.
+	toSHA := f.advanceOrigin("proj", "main", "dedup\n")
+
+	// Two patch-identical bump commits — same gitlink move
+	// fromSHA->toSHA — one on local main, one on origin/main. Identical
+	// diff, distinct author/committer dates so they're different commits;
+	// the rebase recognises local's as already applied upstream (as C2)
+	// and skips it. cacheinfo writes the gitlink without needing the
+	// submodule object present, which is all a pointer bump records.
+	body := "sync: bump project pointers\n\nproj: " + git.ShortSHA(fromSHA) + ".." + git.ShortSHA(toSHA) + "\n"
+	bumpCommit := func(dir, date string) {
+		gittest.Run(t, dir, "update-index", "--cacheinfo", "160000,"+toSHA+",projects/proj/src")
+		env := []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}
+		gittest.RunWithEnv(t, dir, env, "commit", "-m", body)
+	}
+
+	// origin's bump lands first, on a throwaway clone of the bureaucracy
+	// remote; then local's, with an earlier date so the two SHAs differ.
+	originWork := t.TempDir()
+	gittest.Run(t, "", "clone", "-b", "main", f.origin, originWork)
+	bumpCommit(originWork, "2026-06-02T11:00:00")
+	gittest.Run(t, originWork, "push", "origin", "main")
+
+	bumpCommit(f.root, "2026-06-01T10:00:00")
+
+	var stdout, stderr bytes.Buffer
+	if err := doSync(f.root, &stdout, &stderr); err != nil {
+		t.Fatalf("doSync: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	// The gitlink converged to the shared target — nothing lost.
+	if got := f.gitlink("projects/proj/src"); got != toSHA {
+		t.Fatalf("gitlink didn't converge: want %s, got %s", toSHA, got)
+	}
+
+	// The misleading cherry-pick advice is gone. Check both the hint text
+	// and the config key the hint names, so the test fails if someone
+	// drops the -c flag and git's default advice comes back.
+	out := stdout.String() + stderr.String()
+	if strings.Contains(out, "reapply-cherry-picks") {
+		t.Fatalf("cherry-pick hint leaked into sync output:\n%s", out)
+	}
+	if strings.Contains(out, "advice.skippedCherryPicks") {
+		t.Fatalf("advice config hint leaked into sync output:\n%s", out)
+	}
+}
+
 func TestDoSyncRebaseConflictHaltsWithRecovery(t *testing.T) {
 	f := newSyncFixture(t)
 	f.initBureaucracyOrigin()

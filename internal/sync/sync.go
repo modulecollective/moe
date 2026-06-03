@@ -483,7 +483,13 @@ func AutoPull(root string, stdout, stderr io.Writer) error {
 	if !HasUpstream(root) {
 		return nil
 	}
-	if err := git.Stream(root, stdout, stderr, "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
+	// -c advice.skippedCherryPicks=false: session-open auto-pull hits the
+	// same patch-id dedup as `moe sync` when machine B opens a session
+	// after machine A pushed a "sync: bump project pointers" commit — the
+	// rebase drops the duplicate bump and git would otherwise print two
+	// misleading --reapply-cherry-picks hints. Suppress the advice; keep
+	// the bare warning. See doSync for the full rationale.
+	if err := git.Stream(root, stdout, stderr, "-c", "advice.skippedCherryPicks=false", "pull", "--rebase", "--autostash", "--no-recurse-submodules"); err != nil {
 		if RebaseInProgress(root) {
 			return RebaseRecoveryError(root)
 		}
