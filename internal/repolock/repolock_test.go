@@ -139,7 +139,7 @@ func TestDeadPIDStaleness(t *testing.T) {
 	// Fresh heartbeat but owner is us-as-pid-1 (actually dead pid on this host).
 	// Pid 999999 is almost certainly not alive; host matches ours so the
 	// same-host + dead-pid check fires even though heartbeat is fresh.
-	localHost := hostHandle(moeDir)
+	localHost := hostHandle(moeDir, os.Hostname)
 	rec := Record{
 		Owner:       fmt.Sprintf("%s/%d", localHost, 999_999),
 		Purpose:     "crashed",
@@ -489,12 +489,10 @@ func TestInstanceIDConcurrentCreate(t *testing.T) {
 // failure path and asserts the recorded Owner is keyed off the cached
 // instance-id rather than the literal "unknown" string.
 func TestAcquireWithFailingHostnameUsesInstanceID(t *testing.T) {
-	prev := hostnameFunc
-	hostnameFunc = func() (string, error) { return "", errors.New("hostname unavailable") }
-	t.Cleanup(func() { hostnameFunc = prev })
-
 	root := t.TempDir()
-	l, err := Acquire(root, silentOpts("hostless"))
+	opts := silentOpts("hostless")
+	opts.Hostname = func() (string, error) { return "", errors.New("hostname unavailable") }
+	l, err := Acquire(root, opts)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}

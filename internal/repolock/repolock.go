@@ -36,10 +36,6 @@ import (
 	"time"
 )
 
-// hostnameFunc is os.Hostname indirected so tests can drive the
-// hostname-failure path without the kernel's cooperation.
-var hostnameFunc = os.Hostname
-
 // Default timing knobs. Short numbers on purpose: anything longer than
 // a few seconds is a bug we want to surface fast.
 const (
@@ -90,6 +86,10 @@ type Options struct {
 	Now func() time.Time
 	// Sleep is injected for deterministic tests. Defaults to time.Sleep.
 	Sleep func(time.Duration)
+	// Hostname is injected for tests: hostname-failure paths, and
+	// contention tests that model separate hosts within one process.
+	// Defaults to os.Hostname.
+	Hostname func() (string, error)
 	// BackoffCap limits the per-retry sleep. Defaults to 2s. Tests
 	// with short holds set this lower to avoid stranding waiters.
 	BackoffCap time.Duration
@@ -146,7 +146,7 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	}
 
 	lockPath := filepath.Join(moeDir, "lock")
-	localHost := hostHandle(moeDir)
+	localHost := hostHandle(moeDir, opts.Hostname)
 	deadline := opts.Now().Add(opts.Budget)
 	backoff := 50 * time.Millisecond
 
@@ -271,6 +271,9 @@ func applyDefaults(opts Options) Options {
 	}
 	if opts.Sleep == nil {
 		opts.Sleep = time.Sleep
+	}
+	if opts.Hostname == nil {
+		opts.Hostname = os.Hostname
 	}
 	if opts.Budget <= 0 {
 		opts.Budget = DefaultBudget
@@ -474,14 +477,15 @@ func ownerString(host string) string {
 }
 
 // hostHandle returns a stable identifier for the host running this
-// process. Prefers os.Hostname; on failure falls back to a per-checkout
-// random ID cached at <moeDir>/instance-id so two boxes with broken
-// hostname lookups don't both serialise to "unknown" and confuse the
-// same-host pid-alive shortcut in isStale. Final "unknown" is only
-// returned when the cache write also fails (e.g. read-only .moe/),
-// preserving the prior semantics for that genuinely-unidentifiable case.
-func hostHandle(moeDir string) string {
-	h, err := hostnameFunc()
+// process. Prefers the injected hostname lookup (os.Hostname outside
+// tests); on failure falls back to a per-checkout random ID cached at
+// <moeDir>/instance-id so two boxes with broken hostname lookups don't
+// both serialise to "unknown" and confuse the same-host pid-alive
+// shortcut in isStale. Final "unknown" is only returned when the cache
+// write also fails (e.g. read-only .moe/), preserving the prior
+// semantics for that genuinely-unidentifiable case.
+func hostHandle(moeDir string, hostname func() (string, error)) string {
+	h, err := hostname()
 	if err == nil && h != "" {
 		return h
 	}
