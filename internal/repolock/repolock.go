@@ -18,6 +18,11 @@
 // and serializing them is fine; stage sessions escape the single-writer
 // bottleneck by running on their own branch in a separate worktree —
 // see internal/session.
+//
+// Same-process contention is out of contract: when the live on-disk
+// record already names this process, Acquire fails immediately with a
+// NestedError instead of waiting — a nested (or intra-process
+// concurrent) acquisition can never succeed and is always a bug.
 package repolock
 
 import (
@@ -127,13 +132,30 @@ func (e *TimeoutError) Error() string {
 		e.Path, e.Holder.Owner, e.Holder.Purpose, age)
 }
 
+// NestedError is returned by Acquire when the live on-disk record names
+// this same process: a nested acquisition can never succeed (we would
+// wait on ourselves until stale-takeover or timeout), so it is reported
+// immediately as a bug in the caller.
+type NestedError struct {
+	Path    string
+	Holder  Record // the outer hold's record
+	Purpose string // what the nested caller wanted the lock for
+}
+
+func (e *NestedError) Error() string {
+	return fmt.Sprintf("repolock: %s already held by this process for %q (acquired %s ago) while acquiring for %q — nested Acquire is a bug",
+		e.Path, e.Holder.Purpose, time.Since(e.Holder.AcquiredAt).Round(time.Second), e.Purpose)
+}
+
 // Acquire obtains the repo-wide lock at <root>/.moe/lock.
 //
 // Retries with bounded backoff while someone else holds the lock,
 // gives up after opts.Budget with a TimeoutError, and takes over a
-// lock whose heartbeat has gone stale (see StaleThreshold). Ensures
-// <root>/.moe exists and drops a `*` gitignore inside so the lock
-// file never leaks into git history.
+// lock whose heartbeat has gone stale (see StaleThreshold). Fails
+// immediately with a NestedError when the live holder is this same
+// process (see the package doc). Ensures <root>/.moe exists and drops
+// a `*` gitignore inside so the lock file never leaks into git
+// history.
 func Acquire(root string, opts Options) (*Lock, error) {
 	opts = applyDefaults(opts)
 
@@ -179,6 +201,13 @@ func Acquire(root string, opts Options) (*Lock, error) {
 					return nil, fmt.Errorf("repolock: remove stale lock: %w", err)
 				}
 				continue
+			}
+			// Only a record that is both live-looking and ours proves
+			// a nested hold; a stale self-owned record (handled above)
+			// is a crashed predecessor that happened to get our pid,
+			// and takeover is the right move there.
+			if existing.Owner == rec.Owner {
+				return nil, &NestedError{Path: lockPath, Holder: existing, Purpose: opts.Purpose}
 			}
 		case errors.Is(readErr, os.ErrNotExist):
 			// File disappeared between ErrExist and read (holder released

@@ -24,6 +24,15 @@ func silentOpts(purpose string) Options {
 	}
 }
 
+// staticHost returns a Hostname injection yielding a fixed name.
+// Contention tests give each acquirer a distinct name to model the
+// only contention shape the lock still waits on — separate
+// invocations — since a same-process holder now fails fast with
+// NestedError.
+func staticHost(name string) func() (string, error) {
+	return func() (string, error) { return name, nil }
+}
+
 func TestAcquireReleaseRoundtrip(t *testing.T) {
 	root := t.TempDir()
 	l, err := Acquire(root, silentOpts("test"))
@@ -75,13 +84,16 @@ func TestAcquireWritesGitignore(t *testing.T) {
 
 func TestContendedAcquireTimesOut(t *testing.T) {
 	root := t.TempDir()
-	held, err := Acquire(root, silentOpts("holder"))
+	holderOpts := silentOpts("holder")
+	holderOpts.Hostname = staticHost("host-a")
+	held, err := Acquire(root, holderOpts)
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
 	defer held.Release()
 
 	opts := silentOpts("waiter")
+	opts.Hostname = staticHost("host-b")
 	opts.Budget = 80 * time.Millisecond
 	start := time.Now()
 	_, err = Acquire(root, opts)
@@ -204,6 +216,8 @@ func TestConcurrentAcquireExclusivity(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	for i := 0; i < goroutines; i++ {
+		opts := opts
+		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
 		go func() {
 			defer wg.Done()
 			l, err := Acquire(root, opts)
@@ -349,6 +363,8 @@ func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < 4; i++ {
+		opts := opts
+		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -517,13 +533,16 @@ func TestAcquireWithFailingHostnameUsesInstanceID(t *testing.T) {
 // and `.gitignore`.
 func TestTryCreateCleansUpTmpOnLoss(t *testing.T) {
 	root := t.TempDir()
-	held, err := Acquire(root, silentOpts("holder"))
+	holderOpts := silentOpts("holder")
+	holderOpts.Hostname = staticHost("host-a")
+	held, err := Acquire(root, holderOpts)
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
 	defer held.Release()
 
 	opts := silentOpts("waiter")
+	opts.Hostname = staticHost("host-b")
 	opts.Budget = 80 * time.Millisecond
 	opts.BackoffCap = 5 * time.Millisecond
 	if _, err := Acquire(root, opts); err == nil {
@@ -585,13 +604,16 @@ func TestWithPropagatesFnError(t *testing.T) {
 // acquire error and never calls fn.
 func TestWithShortCircuitsOnAcquireError(t *testing.T) {
 	root := t.TempDir()
-	held, err := Acquire(root, silentOpts("holder"))
+	holderOpts := silentOpts("holder")
+	holderOpts.Hostname = staticHost("host-a")
+	held, err := Acquire(root, holderOpts)
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
 	defer held.Release()
 
 	opts := silentOpts("with")
+	opts.Hostname = staticHost("host-b")
 	opts.Budget = 40 * time.Millisecond
 	opts.BackoffCap = 5 * time.Millisecond
 	ran := false
@@ -605,5 +627,109 @@ func TestWithShortCircuitsOnAcquireError(t *testing.T) {
 	var te *TimeoutError
 	if !errors.As(err, &te) {
 		t.Fatalf("With error = %v, want *TimeoutError", err)
+	}
+}
+
+// TestNestedAcquireFailsFast: a second Acquire by the process that
+// already holds the lock returns NestedError on the first iteration —
+// no sleeping, no takeover, no timeout.
+func TestNestedAcquireFailsFast(t *testing.T) {
+	root := t.TempDir()
+	outer, err := Acquire(root, silentOpts("outer"))
+	if err != nil {
+		t.Fatalf("outer Acquire: %v", err)
+	}
+	defer outer.Release()
+
+	opts := silentOpts("nested")
+	opts.Sleep = func(d time.Duration) {
+		t.Fatalf("nested Acquire slept %s; want immediate NestedError", d)
+	}
+	_, err = Acquire(root, opts)
+	var ne *NestedError
+	if !errors.As(err, &ne) {
+		t.Fatalf("error = %v, want *NestedError", err)
+	}
+	if ne.Holder.Purpose != "outer" {
+		t.Errorf("Holder.Purpose = %q, want %q", ne.Holder.Purpose, "outer")
+	}
+	if ne.Purpose != "nested" {
+		t.Errorf("Purpose = %q, want %q", ne.Purpose, "nested")
+	}
+	// The outer hold must be untouched on disk.
+	rec, err := readRecord(filepath.Join(root, ".moe", "lock"))
+	if err != nil {
+		t.Fatalf("readRecord: %v", err)
+	}
+	if rec.Purpose != "outer" {
+		t.Errorf("disk record Purpose = %q, want %q (nested attempt clobbered the hold?)", rec.Purpose, "outer")
+	}
+}
+
+// TestNestedWithFailsFast covers the historic chore-open shape: With
+// inside With. The inner fn must never run, both for a plain outer
+// hold and for a heartbeated one (which would otherwise keep the
+// record fresh and burn the nested caller's whole budget).
+func TestNestedWithFailsFast(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		heartbeat bool
+	}{
+		{"plain", false},
+		{"heartbeat", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			outerOpts := silentOpts("outer")
+			outerOpts.Heartbeat = tc.heartbeat
+			innerRan := false
+			err := With(root, outerOpts, func() error {
+				inner := silentOpts("nested")
+				inner.Sleep = func(d time.Duration) {
+					t.Fatalf("nested With slept %s; want immediate NestedError", d)
+				}
+				return With(root, inner, func() error {
+					innerRan = true
+					return nil
+				})
+			})
+			var ne *NestedError
+			if !errors.As(err, &ne) {
+				t.Fatalf("error = %v, want *NestedError", err)
+			}
+			if innerRan {
+				t.Error("inner fn ran despite nested acquisition")
+			}
+		})
+	}
+}
+
+// TestStaleSelfOwnedRecordTakenOver: a record naming our own host/pid
+// but with a stale heartbeat is a crashed predecessor whose pid we
+// happened to inherit, not a nested hold — stale takeover must still
+// win over the nesting guard.
+func TestStaleSelfOwnedRecordTakenOver(t *testing.T) {
+	root := t.TempDir()
+	moeDir := filepath.Join(root, ".moe")
+	if err := os.MkdirAll(moeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := Record{
+		Owner:       ownerString(hostHandle(moeDir, os.Hostname)),
+		Purpose:     "predecessor",
+		AcquiredAt:  time.Now().UTC().Add(-time.Hour),
+		HeartbeatAt: time.Now().UTC().Add(-time.Hour),
+	}
+	body, _ := json.MarshalIndent(rec, "", "  ")
+	if err := os.WriteFile(filepath.Join(moeDir, "lock"), append(body, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := Acquire(root, silentOpts("takeover"))
+	if err != nil {
+		t.Fatalf("Acquire over stale self-owned record: %v", err)
+	}
+	defer l.Release()
+	if l.record().Purpose != "takeover" {
+		t.Errorf("Purpose = %q, want %q", l.record().Purpose, "takeover")
 	}
 }

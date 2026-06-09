@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,10 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 				Purpose:    "run-new",
 				Budget:     30 * 1_000_000_000, // 30s in ns
 				BackoffCap: 10_000_000,         // 10ms
+				// Distinct hostname per goroutine: same-process
+				// contention now fails fast with NestedError, so model
+				// the real shape — N separate moe invocations.
+				Hostname: func() (string, error) { return fmt.Sprintf("host-%d", i), nil },
 			}, func() error {
 				// IDBase collisions get a dated/numbered suffix so
 				// every goroutine resolves to a distinct slug under
