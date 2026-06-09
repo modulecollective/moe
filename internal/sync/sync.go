@@ -29,6 +29,7 @@ import (
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
 )
 
 // GitmoduleEntry is the parsed shape of one [submodule "..."] stanza
@@ -516,6 +517,24 @@ func AutoPush(root string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	return nil
+}
+
+// WithJournalPush is the write-edge for verbs that commit directly to
+// the journal on root main: take the repo lock, run fn, and on success
+// race the commit to origin. Push failure never fails the verb
+// (AutoPush warns and returns nil). Heartbeat is forced on because the
+// lock now spans a network leg — without it, a slow push window would
+// look stale to a contending acquirer. fn returning an error (including
+// run.ErrNothingToCommit) skips the push and surfaces unchanged to
+// callers that special-case it.
+func WithJournalPush(root string, opts repolock.Options, stdout, stderr io.Writer, fn func() error) error {
+	opts.Heartbeat = true
+	return repolock.With(root, opts, func() error {
+		if err := fn(); err != nil {
+			return err
+		}
+		return AutoPush(root, stdout, stderr)
+	})
 }
 
 // DeleteRemoteBranch asks GitHub to drop refs/heads/<branch> from

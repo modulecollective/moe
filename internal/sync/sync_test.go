@@ -1,10 +1,87 @@
 package sync
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/repolock"
 )
+
+// journalPushFixture is a local repo with main tracking a bare origin —
+// the smallest shape on which WithJournalPush's push leg is observable.
+func journalPushFixture(t *testing.T) (root, origin string) {
+	t.Helper()
+	root = t.TempDir()
+	gittest.InitAt(t, root)
+	gittest.Run(t, root, "checkout", "-b", "main")
+	gittest.Commit(t, root, "seed")
+	origin = gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+	return root, origin
+}
+
+// TestWithJournalPushRacesCommitToOrigin: fn's commit reaches origin
+// before the verb returns — the whole point of the shared write-edge.
+func TestWithJournalPushRacesCommitToOrigin(t *testing.T) {
+	root, origin := journalPushFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	err := WithJournalPush(root, repolock.Options{Purpose: "test"}, &stdout, &stderr, func() error {
+		gittest.Commit(t, root, "journal: record something")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithJournalPush: %v\nstderr=%s", err, stderr.String())
+	}
+	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
+		t.Fatalf("origin main = %s, want local HEAD %s", remote, local)
+	}
+}
+
+// TestWithJournalPushSkipsPushOnFnError: a failing fn surfaces its
+// error unchanged and origin never sees a push.
+func TestWithJournalPushSkipsPushOnFnError(t *testing.T) {
+	root, origin := journalPushFixture(t)
+	originBefore := gittest.HeadSHA(t, origin)
+
+	sentinel := errors.New("verb failed")
+	var stdout, stderr bytes.Buffer
+	err := WithJournalPush(root, repolock.Options{Purpose: "test"}, &stdout, &stderr, func() error {
+		gittest.Commit(t, root, "journal: half-done")
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want sentinel", err)
+	}
+	if got := gittest.HeadSHA(t, origin); got != originBefore {
+		t.Fatalf("origin advanced on fn failure: %s -> %s", originBefore, got)
+	}
+}
+
+// TestWithJournalPushUnreachableOriginWarnsNotFails: the push leg is
+// best-effort — a dead origin costs one stderr line, never the verb.
+func TestWithJournalPushUnreachableOriginWarnsNotFails(t *testing.T) {
+	root, _ := journalPushFixture(t)
+	gittest.Run(t, root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+
+	var stdout, stderr bytes.Buffer
+	err := WithJournalPush(root, repolock.Options{Purpose: "test"}, &stdout, &stderr, func() error {
+		gittest.Commit(t, root, "journal: record something")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithJournalPush should warn, not fail: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "[auto-sync skipped]") {
+		t.Fatalf("missing warn line, stderr=%q", stderr.String())
+	}
+}
 
 func TestParseGitmodulesIncludesBranch(t *testing.T) {
 	dir := t.TempDir()
