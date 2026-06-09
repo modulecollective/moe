@@ -405,6 +405,19 @@ func EvalPath(projectID, id string) string {
 	return filepath.Join(Dir(projectID, id), "eval.md")
 }
 
+// ArtifactPath returns the file a (project, run, doc) session must
+// have changed for its close to count as work done. For every stage
+// doc that is the canvas (ContentPath); the synthetic "eval" doc's
+// artifact is the run's eval report instead — `moe eval` sessions
+// never touch a canvas. session.Close keys its did-the-work check on
+// this mapping.
+func ArtifactPath(projectID, id, docID string) string {
+	if docID == "eval" {
+		return EvalPath(projectID, id)
+	}
+	return ContentPath(projectID, id, docID)
+}
+
 // FeedbackDir returns the path (relative to the bureaucracy root) of a
 // run's feedback/ directory: sibling of run.json that holds free-form
 // notes workflow agents leave for downstream recipients (twin reflect,

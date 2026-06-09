@@ -231,7 +231,12 @@ func Close(s *Session) error {
 	// "this session never wrote to the canvas" predicate. The
 	// branch and worktree stay intact so the operator can reopen
 	// and write, or abandon explicitly.
-	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
+	//
+	// "Canvas" is doc-dependent: run.ArtifactPath maps the eval doc to
+	// the run's eval report, everything else to its content.md. An
+	// eval session that never landed a report refuses to close the
+	// same way a stage session that never wrote its canvas does.
+	canvasRel := run.ArtifactPath(s.Project, s.Run, s.Doc)
 	branchBlob, branchErr := git.RevParse(s.WorktreePath, s.Branch+":"+canvasRel)
 	mainBlob, mainErr := git.RevParse(s.Root, "main:"+canvasRel)
 	// branchErr means the canvas doesn't exist at the branch tip at
