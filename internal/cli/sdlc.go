@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -235,10 +236,10 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 			Workflow: md.Workflow,
 			Document: stage,
 		}.String()
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "switch-agent",
 		Run:     md.Project + "/" + md.ID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		return run.StageAndCommit(root, msg, runJSON)
 	})
 	if err != nil {

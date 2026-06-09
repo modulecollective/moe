@@ -459,3 +459,51 @@ func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 }
+
+// TestCloseRacesCommitToOrigin: run close is a representative
+// journal-writing verb — with an upstream configured, the close commit
+// must reach origin before the verb returns (the WithJournalPush
+// write-edge), without the operator running `moe sync`.
+func TestCloseRacesCommitToOrigin(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "push-me", "idea", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "push-me", "idea", "# idea\n")
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"idea", "close", "tele/push-me"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
+		t.Fatalf("origin main = %s, want close commit %s", remote, local)
+	}
+}
+
+// TestCloseUnreachableOriginWarnsAndSucceeds: the push leg is
+// best-effort. A dead origin costs one stderr line; the verb still
+// exits 0 with the commit on local main.
+func TestCloseUnreachableOriginWarnsAndSucceeds(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "offline", "idea", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "offline", "idea", "# idea\n")
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+	gittest.Run(t, root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	headBefore := gittest.HeadSHA(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"idea", "close", "tele/offline"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "[auto-sync skipped]") {
+		t.Fatalf("missing warn line, stderr=%q", errb.String())
+	}
+	if gittest.HeadSHA(t, root) == headBefore {
+		t.Fatal("close commit missing from local main")
+	}
+}

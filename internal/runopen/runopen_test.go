@@ -2,6 +2,7 @@ package runopen
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ import (
 func TestEditIdeaWritesCanvasAndCommits(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 
-	if err := EditIdea(root, "alpha", "my-idea", "# my idea\n\nrefined.\n"); err != nil {
+	if err := EditIdea(root, "alpha", "my-idea", "# my idea\n\nrefined.\n", io.Discard, io.Discard); err != nil {
 		t.Fatalf("EditIdea: %v", err)
 	}
 
@@ -51,7 +52,7 @@ func TestEditIdeaWritesCanvasAndCommits(t *testing.T) {
 func TestEditIdeaNothingToCommit(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# stays the same\n")
 
-	err := EditIdea(root, "alpha", "my-idea", "# stays the same\n")
+	err := EditIdea(root, "alpha", "my-idea", "# stays the same\n", io.Discard, io.Discard)
 	if !errors.Is(err, run.ErrNothingToCommit) {
 		t.Fatalf("want ErrNothingToCommit, got %v", err)
 	}
@@ -74,7 +75,7 @@ func TestEditIdeaRefusesPromotedIdea(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = EditIdea(root, "alpha", "my-idea", "# rewrite\n")
+	err = EditIdea(root, "alpha", "my-idea", "# rewrite\n", io.Discard, io.Discard)
 	if !errors.Is(err, ErrNotIdea) {
 		t.Fatalf("want ErrNotIdea, got %v", err)
 	}
@@ -95,7 +96,7 @@ func TestEditIdeaRefusesNonIdeaWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = EditIdea(root, "alpha", "my-run", "# rewrite\n")
+	err = EditIdea(root, "alpha", "my-run", "# rewrite\n", io.Discard, io.Discard)
 	if !errors.Is(err, ErrNotIdea) {
 		t.Fatalf("want ErrNotIdea, got %v", err)
 	}
@@ -108,7 +109,7 @@ func TestEditIdeaMissingRun(t *testing.T) {
 	gittest.InitAt(t, root)
 	gittest.Commit(t, root, "seed")
 
-	err := EditIdea(root, "ghost", "ghost", "# nope\n")
+	err := EditIdea(root, "ghost", "ghost", "# nope\n", io.Discard, io.Discard)
 	if !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("want ErrRunNotFound, got %v", err)
 	}
@@ -173,7 +174,7 @@ func contains(s, sub string) bool {
 func TestCloseIdeaBumpsStatusAndCommits(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 
-	if err := CloseIdea(root, "alpha", "my-idea"); err != nil {
+	if err := CloseIdea(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
 		t.Fatalf("CloseIdea: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -209,7 +210,7 @@ func TestCloseIdeaRefusesNonIdeaAndTerminalIdea(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 			setRunFields(t, root, "alpha", "my-idea", tc.workflow, tc.status)
-			if err := CloseIdea(root, "alpha", "my-idea"); !errors.Is(err, ErrNotIdea) {
+			if err := CloseIdea(root, "alpha", "my-idea", io.Discard, io.Discard); !errors.Is(err, ErrNotIdea) {
 				t.Fatalf("want ErrNotIdea, got %v", err)
 			}
 		})
@@ -221,7 +222,7 @@ func TestReopenIdeaReopensClosedIdea(t *testing.T) {
 	setRunFields(t, root, "alpha", "my-idea", dash.IdeaWorkflow, run.StatusClosed)
 	gittest.Commit(t, root, "close fixture")
 
-	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
+	if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
 		t.Fatalf("ReopenIdea: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -247,7 +248,7 @@ func TestReopenIdeaReopensClosedIdea(t *testing.T) {
 func TestReopenIdeaPreservesPromotedDestinationClosedPath(t *testing.T) {
 	root := promotedIdeaFixture(t, run.StatusClosed, "alpha/my-idea-dest")
 
-	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
+	if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
 		t.Fatalf("ReopenIdea: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -283,7 +284,7 @@ func TestReopenIdeaRefusesInvalidStates(t *testing.T) {
 				}
 				gittest.Commit(t, root, "promote fixture\n\nMoE-Run: my-idea\nMoE-Project: alpha\nMoE-Workflow: idea\nMoE-Promoted-To: "+tc.dest)
 			}
-			if err := ReopenIdea(root, "alpha", "my-idea"); !errors.Is(err, ErrNotReopenableIdea) {
+			if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); !errors.Is(err, ErrNotReopenableIdea) {
 				t.Fatalf("want ErrNotReopenableIdea, got %v", err)
 			}
 		})
@@ -331,10 +332,10 @@ func TestIdeaTransitionsReturnRunNotFoundForMissingRuns(t *testing.T) {
 	root := t.TempDir()
 	gittest.InitAt(t, root)
 	gittest.Commit(t, root, "seed")
-	if err := CloseIdea(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
+	if err := CloseIdea(root, "ghost", "ghost", io.Discard, io.Discard); !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("CloseIdea: want ErrRunNotFound, got %v", err)
 	}
-	if err := ReopenIdea(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
+	if err := ReopenIdea(root, "ghost", "ghost", io.Discard, io.Discard); !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("ReopenIdea: want ErrRunNotFound, got %v", err)
 	}
 }

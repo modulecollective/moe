@@ -17,6 +17,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -214,10 +215,10 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		SeedDocs: map[string]string{dash.IdeaDocID: string(body)},
 	}
 	var md *run.Metadata
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-new",
 		Run:     projectID + "/" + slug,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
@@ -347,10 +348,10 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 			Workflow: dash.IdeaWorkflow,
 			Document: dash.IdeaDocID,
 		}.String()
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
 	switch {
@@ -484,10 +485,10 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 			IdeaMovedFrom: fromProject + "/" + slug,
 		}.String()
 
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-move",
 		Run:     toProject + "/" + slug,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		// git mv refuses if the destination's parent dir doesn't exist,
 		// and a project that has never opened a run has no runs/ yet.
 		if err := os.MkdirAll(filepath.Join(root, "projects", toProject, "runs"), 0o755); err != nil {
@@ -549,7 +550,7 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := runopen.ReopenIdea(root, projectID, slug); err != nil {
+	if err := runopen.ReopenIdea(root, projectID, slug, stdout, stderr); err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
 			moePrintf(stderr, "idea %s/%s does not exist; run `moe idea list %s` to see open ideas\n", projectID, slug, projectID)
 		} else {

@@ -369,6 +369,16 @@ func (s *Server) logf(format string, a ...any) {
 	fmt.Fprintf(s.opts.Logger, format+"\n", a...)
 }
 
+// syncWriter is the io.Writer handed to runopen's journal write-edge
+// (auto-push progress and warnings). Same sink as logf; never nil
+// because the push helpers write unconditionally.
+func (s *Server) syncWriter() io.Writer {
+	if s.opts.Logger == nil {
+		return io.Discard
+	}
+	return s.opts.Logger
+}
+
 // resolveAddr returns "ip:port". When override is empty the listener
 // binds to loopback; the proxy in front is what enforces reach. When
 // override includes a port, that port wins.

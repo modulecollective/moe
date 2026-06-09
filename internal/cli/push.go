@@ -410,10 +410,10 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 				Document: "push",
 				PR:       url,
 			}.String()
-		err := repolock.With(root, repolock.Options{
+		err := sync.WithJournalPush(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
-		}, func() error {
+		}, stdout, stderr, func() error {
 			return run.StageAndCommit(root, msg, runJSON)
 		})
 		if err != nil {
@@ -446,10 +446,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// as-is so a headless ship has no hidden interactive surface.
 	priorStatus := md.Status
 	var paths []string
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		var ferr error
 		paths, ferr = enterTerminal(root, md, run.StatusMerged, skipTerminalEdit)
 		return ferr
@@ -495,10 +495,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			Merged:       tipSHA,
 			ChoreTouched: touched,
 		}.String()
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		if err := releaseRunWorkspace(root, md); err != nil {
 			moePrintf(stderr, "warning: release workspace: %v\n", err)
 		}

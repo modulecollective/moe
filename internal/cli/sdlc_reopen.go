@@ -12,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/workspace"
 )
@@ -179,10 +180,10 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var md *run.Metadata
-	err = repolock.With(root, repolock.Options{
+	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     projectID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err

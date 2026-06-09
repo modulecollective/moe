@@ -142,7 +142,7 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		Workflow:  promotedWorkflow,
 		Workspace: wsName,
 		Agent:     agentName,
-	})
+	}, s.syncWriter(), s.syncWriter())
 	if err != nil {
 		fail("open: " + err.Error())
 		return
@@ -275,7 +275,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) closeIdeaRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
-	if err := runopen.CloseIdea(s.opts.Root, projectID, slug); err != nil {
+	if err := runopen.CloseIdea(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -330,7 +330,7 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug); err != nil {
+	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -822,7 +822,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		FirstStage: promotedFirstStage,
 		Workspace:  wsName,
 		Agent:      agentName,
-	})
+	}, s.syncWriter(), s.syncWriter())
 	if err != nil {
 		s.renderPromoteError(w, r, projectID, slug, "promote: "+err.Error())
 		return
@@ -984,7 +984,7 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 		ID:       slug,
 		Workflow: dash.IdeaWorkflow,
 		SeedDocs: map[string]string{dash.IdeaDocID: seed},
-	})
+	}, s.syncWriter(), s.syncWriter())
 	if err != nil {
 		fail("open: " + err.Error())
 		return
@@ -1077,7 +1077,7 @@ func (s *Server) handleIdeaEditSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
 
-	err := runopen.EditIdea(s.opts.Root, projectID, slug, body)
+	err := runopen.EditIdea(s.opts.Root, projectID, slug, body, s.syncWriter(), s.syncWriter())
 	switch {
 	case errors.Is(err, run.ErrRunNotFound):
 		http.Error(w, "no such run: "+id, http.StatusNotFound)

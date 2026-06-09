@@ -10,6 +10,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -105,14 +106,14 @@ func offerChoreChain(root string, parentMD *run.Metadata, s chore.State, stdout,
 	if code != 0 {
 		return code
 	}
-	if err := spliceChoreChain(root, parentMD.Project+"/"+parentMD.ID, choreMD.Project+"/"+choreMD.ID); err != nil {
+	if err := spliceChoreChain(root, parentMD.Project+"/"+parentMD.ID, choreMD.Project+"/"+choreMD.ID, stdout, stderr); err != nil {
 		moePrintf(stderr, "chore chain: %v\n", err)
 		return 1
 	}
 	return promptNextStage(root, choreMD, "", stdout, stderr)
 }
 
-func spliceChoreChain(root, parentKey, choreKey string) error {
+func spliceChoreChain(root, parentKey, choreKey string, stdout, stderr io.Writer) error {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		return fmt.Errorf("build index: %w", err)
@@ -130,7 +131,7 @@ func spliceChoreChain(root, parentKey, choreKey string) error {
 		ChainedToRemoved: removes,
 	}
 	msg := fmt.Sprintf("chain: insert chore %s after %s\n\n", choreKey, parentKey) + block.String()
-	return repolock.With(root, repolock.Options{Purpose: "chore-chain", Run: parentKey}, func() error {
+	return sync.WithJournalPush(root, repolock.Options{Purpose: "chore-chain", Run: parentKey}, stdout, stderr, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 }

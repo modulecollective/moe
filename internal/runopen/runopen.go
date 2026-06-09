@@ -23,6 +23,7 @@ package runopen
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -83,20 +85,20 @@ type Promoted struct {
 	MarkErr error
 }
 
-// Open opens a fresh run under repolock. opts.Workflow must be set;
-// opts.ID names the slug (collisions fail loud) or opts.IDBase
-// supplies a base for date-suffixed collision handling. See
-// run.New for the full opts contract.
-func Open(root, projectID string, opts run.Options) (*run.Metadata, error) {
+// Open opens a fresh run under repolock and races the open commit to
+// origin. opts.Workflow must be set; opts.ID names the slug (collisions
+// fail loud) or opts.IDBase supplies a base for date-suffixed collision
+// handling. See run.New for the full opts contract.
+func Open(root, projectID string, opts run.Options, stdout, stderr io.Writer) (*run.Metadata, error) {
 	runRef := projectID
 	if opts.ID != "" {
 		runRef = projectID + "/" + opts.ID
 	}
 	var md *run.Metadata
-	err := repolock.With(root, repolock.Options{
+	err := sync.WithJournalPush(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     runRef,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
@@ -121,7 +123,7 @@ func Open(root, projectID string, opts run.Options) (*run.Metadata, error) {
 // destination's MoE-Idea trailer still records the source, so the
 // promotion stays greppable, and the operator can re-mark the idea
 // by hand if needed.
-func Promote(root, projectID, ideaSlug string, opts PromoteOptions) (Promoted, error) {
+func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stderr io.Writer) (Promoted, error) {
 	if opts.Workflow == "" {
 		return Promoted{}, errors.New("runopen: PromoteOptions.Workflow is required")
 	}
@@ -147,11 +149,11 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions) (Promoted, e
 		Trailers:    trailers.Block{Idea: ideaSlug},
 	}
 
-	md, err := Open(root, projectID, runOpts)
+	md, err := Open(root, projectID, runOpts, stdout, stderr)
 	if err != nil {
 		return Promoted{}, err
 	}
-	markErr := markIdeaPromoted(root, src, md)
+	markErr := markIdeaPromoted(root, src, md, stdout, stderr)
 	return Promoted{Run: md, MarkErr: markErr}, nil
 }
 
@@ -186,7 +188,7 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 // trailer pointing at the destination run. Separate commit from the
 // destination's open: two short commits keep git history honest (one
 // event per commit).
-func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
+func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata, stdout, stderr io.Writer) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
@@ -196,10 +198,10 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 			Workflow:   dash.IdeaWorkflow,
 			PromotedTo: dest.Project + "/" + dest.ID,
 		}.String()
-	return repolock.With(root, repolock.Options{
+	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-promote",
 		Run:     md.Project + "/" + md.ID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
@@ -209,7 +211,7 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata) error {
 
 // CloseIdea flips an in-progress idea run to closed and commits only
 // its run.json with the standard idea close trailer block.
-func CloseIdea(root, projectID, slug string) error {
+func CloseIdea(root, projectID, slug string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -225,10 +227,10 @@ func CloseIdea(root, projectID, slug string) error {
 			Project:  projectID,
 			Workflow: dash.IdeaWorkflow,
 		}.String()
-	return repolock.With(root, repolock.Options{
+	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-close",
 		Run:     projectID + "/" + slug,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		md.Status = run.StatusClosed
 		if err := run.Save(root, md); err != nil {
 			return err
@@ -247,7 +249,7 @@ func CloseIdea(root, projectID, slug string) error {
 // Workflow-derived subject ("Reopen idea …", "Reopen chat …"), trailer
 // block, and lock purpose keep each workflow's history greppable while
 // the flip itself lives in exactly one place.
-func Reopen(root string, md *run.Metadata) error {
+func Reopen(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Reopen %s %s/%s\n\n", md.Workflow, md.Project, md.ID) +
 		trailers.Block{
@@ -255,10 +257,10 @@ func Reopen(root string, md *run.Metadata) error {
 			Project:  md.Project,
 			Workflow: md.Workflow,
 		}.String()
-	return repolock.With(root, repolock.Options{
+	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: md.Workflow + "-reopen",
 		Run:     md.Project + "/" + md.ID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		md.Status = run.StatusInProgress
 		if err := run.Save(root, md); err != nil {
 			return err
@@ -272,7 +274,7 @@ func Reopen(root string, md *run.Metadata) error {
 // resolve through MoE-Promoted-To and be closed, otherwise reopening
 // would create two live owners of the same intent or resurrect shipped
 // work. The flip itself routes through Reopen.
-func ReopenIdea(root, projectID, slug string) error {
+func ReopenIdea(root, projectID, slug string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -290,7 +292,7 @@ func ReopenIdea(root, projectID, slug string) error {
 	default:
 		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
 	}
-	return Reopen(root, md)
+	return Reopen(root, md, stdout, stderr)
 }
 
 func verifyPromotedDestinationClosed(root, projectID, slug string) error {
@@ -352,7 +354,7 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 // chat flow writes the file in place via $EDITOR or runIdeaChat and a
 // body-in API doesn't fit cleanly. The trailer block is the same shape
 // (work: update idea, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
-func EditIdea(root, projectID, slug, body string) error {
+func EditIdea(root, projectID, slug, body string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -377,10 +379,10 @@ func EditIdea(root, projectID, slug, body string) error {
 			Workflow: dash.IdeaWorkflow,
 			Document: dash.IdeaDocID,
 		}.String()
-	return repolock.With(root, repolock.Options{
+	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
 }

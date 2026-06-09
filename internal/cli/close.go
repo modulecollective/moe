@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -203,10 +204,10 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			Project:  projectID,
 			Workflow: workflow,
 		}.String()
-	return repolock.With(root, repolock.Options{
+	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
-	}, func() error {
+	}, stdout, stderr, func() error {
 		if cleanup != nil {
 			if err := cleanup(root, md, stdout, stderr); err != nil {
 				return err

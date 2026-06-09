@@ -9,6 +9,7 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
@@ -56,7 +57,7 @@ func runProjectAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var md *project.Metadata
-	err = repolock.With(root, repolock.Options{Purpose: "project-add"}, func() error {
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "project-add"}, stdout, stderr, func() error {
 		m, err := project.Register(root, url, project.Options{})
 		if err != nil {
 			return err
@@ -149,7 +150,7 @@ func runProjectRemove(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "       remove each with `moe workspace remove %s <name>` first\n", id)
 		return 1
 	}
-	err = repolock.With(root, repolock.Options{Purpose: "project-remove"}, func() error {
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "project-remove"}, stdout, stderr, func() error {
 		return project.Unregister(root, id)
 	})
 	if err != nil {

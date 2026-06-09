@@ -209,7 +209,7 @@ func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
 	case run.StatusInProgress:
 		return 0
 	case run.StatusClosed:
-		if err := runopen.Reopen(root, md); err != nil {
+		if err := runopen.Reopen(root, md, stdout, stderr); err != nil {
 			moePrintf(stderr, "chat: reopen %s/%s: %v\n", projectID, runID, err)
 			return 1
 		}

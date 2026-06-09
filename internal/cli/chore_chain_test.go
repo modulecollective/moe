@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -80,7 +81,7 @@ func TestSpliceChoreChainInsertsBetweenParentAndExistingChild(t *testing.T) {
 		ChainedTo: []string{"tele/parent tele/old-child"},
 	}.String(), time.Time{})
 
-	if err := spliceChoreChain(root, "tele/parent", "tele/chore-run"); err != nil {
+	if err := spliceChoreChain(root, "tele/parent", "tele/chore-run", io.Discard, io.Discard); err != nil {
 		t.Fatalf("spliceChoreChain: %v", err)
 	}
 

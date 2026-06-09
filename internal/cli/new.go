@@ -171,7 +171,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			FirstStage: stages[0],
 			Workspace:  *workspaceName,
 			Agent:      *agentOverride,
-		})
+		}, stdout, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
@@ -190,7 +190,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			Workflow:  workflowName,
 			Workspace: *workspaceName,
 			Agent:     *agentOverride,
-		})
+		}, stdout, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1

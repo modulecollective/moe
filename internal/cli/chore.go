@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -164,7 +165,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 // "opened chore …" stdout line on success. serve takes the typed-error
 // path directly via OpenChore instead.
 func openDueChore(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*run.Metadata, int) {
-	res, err := openChoreInProcess(root, projectID, choreName, force)
+	res, err := openChoreInProcess(root, projectID, choreName, force, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, 1
@@ -218,7 +219,7 @@ type choreOpenResult struct {
 // (cooling down, not yet due) so the operator can open a chore's run
 // early. The open-run guard is never skipped — two runs both stamping
 // MoE-Chore for one chore is broken state, not an override.
-func openChoreInProcess(root, projectID, choreName string, force bool) (*choreOpenResult, error) {
+func openChoreInProcess(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*choreOpenResult, error) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		return nil, err
@@ -256,20 +257,18 @@ func openChoreInProcess(root, projectID, choreName string, force bool) (*choreOp
 	if strings.TrimSpace(prompt) == "" {
 		prompt = "# " + state.Definition.Name + "\n"
 	}
-	var md *run.Metadata
-	err = repolock.With(root, repolock.Options{Purpose: "chore-open", Run: state.Definition.Key()}, func() error {
-		m, err := runopen.Open(root, projectID, run.Options{
-			IDBase:   state.Definition.Name,
-			Workflow: state.Definition.Workflow,
-			SeedDocs: map[string]string{stages[0]: prompt},
-			Trailers: trailers.Block{Chore: state.Definition.Key()},
-		})
-		if err != nil {
-			return err
-		}
-		md = m
-		return nil
-	})
+	// runopen.Open takes the repo lock (and races the open commit to
+	// origin) itself — no outer lock here. The previous outer
+	// "chore-open" repolock.With nested a second same-pid acquisition
+	// inside it, which stalled every chore open ~20s until the
+	// stale-takeover kicked in; with the journal write-edge keeping a
+	// heartbeat it would time out outright.
+	md, err := runopen.Open(root, projectID, run.Options{
+		IDBase:   state.Definition.Name,
+		Workflow: state.Definition.Workflow,
+		SeedDocs: map[string]string{stages[0]: prompt},
+		Trailers: trailers.Block{Chore: state.Definition.Key()},
+	}, stdout, stderr)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +329,7 @@ func runChoreSkip(args []string, stdout, stderr io.Writer) int {
 	key := state.Definition.Key()
 	block := trailers.Block{ChoreSkipped: key}
 	msg := "chore: skip " + key + "\n\n" + block.String()
-	err = repolock.With(root, repolock.Options{Purpose: "chore-skip", Run: key}, func() error {
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "chore-skip", Run: key}, stdout, stderr, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 	if err != nil {
