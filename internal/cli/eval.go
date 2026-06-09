@@ -183,6 +183,15 @@ func runEval(args []string, stdout, stderr io.Writer) int {
 
 	moePrintf(stdout, "eval: judging %s/%s — %s, range %s..%s\n",
 		projectID, runID, d.Source, git.ShortSHA(d.Base), git.ShortSHA(d.Tip))
+	// The session worktree may carry a report at the target path — the
+	// committed one under --force, or an uncommitted leftover from a
+	// failed attempt being retried. Remove it so the judge writes fresh
+	// instead of anchoring on the prior verdict; git history keeps all
+	// committed triage.
+	if err := os.Remove(evalAbs); err != nil && !errors.Is(err, os.ErrNotExist) {
+		moePrintf(stderr, "eval: clear prior report: %v\n", err)
+		return evalBail(sess, evalRel, stderr)
+	}
 	if err := launchEvalJudge(sess.WorktreePath, systemPrompt, userPrompt, stdout, stderr); err != nil {
 		moePrintf(stderr, "eval: judge: %v\n", err)
 		return evalBail(sess, evalRel, stderr)
@@ -227,8 +236,9 @@ func runEval(args []string, stdout, stderr io.Writer) int {
 
 // evalBail cleans up after a failed eval run and always returns exit
 // code 1. A worktree holding a judge-written report is left intact for
-// inspection (re-running `moe eval` resumes the session and the judge
-// overwrites the report; add --force when a committed report exists);
+// inspection (re-running `moe eval` resumes the session, clears the
+// leftover, and the judge writes fresh; add --force when a committed
+// report exists);
 // a worktree with nothing worth keeping is abandoned so failed evals
 // don't accumulate session branches.
 func evalBail(sess *session.Session, evalRel string, stderr io.Writer) int {

@@ -33,12 +33,18 @@ func evalSession(t *testing.T, root, projectID, runID string) *session.Session {
 
 // stubEvalJudge swaps launchEvalJudge for a fake that records the
 // prompts and writes report to the run's eval.md. Restores on cleanup.
+// Every launch asserts the verb's independence invariant: the judge
+// never sees a report at the path it is asked to write — runEval must
+// have cleared the --force checkout or a failed-retry leftover first.
 func stubEvalJudge(t *testing.T, projectID, runID, report string) (gotSystem, gotUser *string) {
 	t.Helper()
 	var sys, user string
 	old := launchEvalJudge
 	launchEvalJudge = func(root, systemPrompt, userPrompt string, stdout, stderr io.Writer) error {
 		sys, user = systemPrompt, userPrompt
+		if _, err := os.Stat(filepath.Join(root, run.EvalPath(projectID, runID))); !os.IsNotExist(err) {
+			t.Errorf("judge launched with a report already at the target path (stat err = %v); prior verdicts must be cleared before the judge runs", err)
+		}
 		if report == "" {
 			return nil // judge "forgot" to write the report
 		}
@@ -237,7 +243,10 @@ func TestEvalRefusesExistingReportWithoutForce(t *testing.T) {
 		t.Fatalf("stderr should point at --force: %q", errb.String())
 	}
 
-	// With --force the same invocation re-judges.
+	// With --force the same invocation re-judges. The session worktree
+	// checks out the committed prior report at the target path; the
+	// stub asserts it was cleared before the judge launched, so the
+	// re-judge is independent of the prior verdict.
 	stubEvalJudge(t, "tele", "rejudge", wellFormedReport)
 	out.Reset()
 	errb.Reset()
@@ -249,8 +258,9 @@ func TestEvalRefusesExistingReportWithoutForce(t *testing.T) {
 // TestEvalRefusesToCommitUnparseableReport: a judge that ignored the
 // report format must not produce garbage trailers. The report stays in
 // the session worktree for inspection — never in the root checkout —
-// and the session is resumable: a re-run picks up the same worktree
-// and the judge overwrites the report.
+// and the session is resumable: a re-run picks up the same worktree,
+// clears the leftover, and the judge writes fresh (the stub asserts
+// the leftover is gone at launch time).
 func TestEvalRefusesToCommitUnparseableReport(t *testing.T) {
 	root, _ := seedEvalFixture(t, "tele", "garbled")
 	t.Setenv("MOE_HOME", root)
