@@ -20,6 +20,7 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -127,23 +128,47 @@ func runEval(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "eval: workflow %q has no eval rubric; only sdlc runs have a design ↔ diff consistency pair to judge\n", md.Workflow)
 		return 1
 	}
-	designPath := filepath.Join(root, run.ContentPath(projectID, runID, "design"))
-	design, err := os.ReadFile(designPath)
-	if err != nil || len(bytes.TrimSpace(design)) == 0 {
-		moePrintf(stderr, "eval: no design canvas at %s; nothing to judge against\n", designPath)
-		return 1
-	}
 	evalRel := run.EvalPath(projectID, runID)
-	evalAbs := filepath.Join(root, evalRel)
-	if _, err := os.Stat(evalAbs); err == nil && !*force {
+	// The exists/--force gate keys on committed state, not the working
+	// tree: a leftover report in a resumed session worktree (or
+	// root-tree litter from a failed pre-session-era run) must not
+	// trip it — that is exactly the state a failed judge run leaves
+	// behind for retry.
+	if git.Probe(root, "cat-file", "-e", "HEAD:"+evalRel) && !*force {
 		moePrintf(stderr, "eval: report already exists at %s; pass --force to re-judge (prior triage stays recoverable in git history)\n", evalRel)
 		return 1
 	}
 
-	d, err := resolveEvalDiff(root, md)
+	// The judge runs inside a session worktree, like every other
+	// read-judge-write flow: auto-pull at open, isolation while the
+	// judge writes, rebase + fast-forward + auto-push at close. A
+	// failed run never litters the live root checkout.
+	sess, closeSess, err := openWikiSession(root, wikiSessionInputs{
+		Project:     projectID,
+		RunSlug:     runID,
+		DocID:       "eval",
+		LockPurpose: "eval",
+	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "eval: %v\n", err)
 		return 1
+	}
+
+	designPath := filepath.Join(sess.WorktreePath, run.ContentPath(projectID, runID, "design"))
+	design, err := os.ReadFile(designPath)
+	if err != nil || len(bytes.TrimSpace(design)) == 0 {
+		moePrintf(stderr, "eval: no design canvas at %s; nothing to judge against\n", designPath)
+		return evalBail(sess, evalRel, stderr)
+	}
+
+	// Diff resolution stays root-based: merged-history reads hit the
+	// root's project submodule (session worktrees don't populate
+	// submodules) and live reads hit the run's sandbox clone. Both
+	// are read-only and lock-free.
+	d, err := resolveEvalDiff(root, md)
+	if err != nil {
+		moePrintf(stderr, "eval: %v\n", err)
+		return evalBail(sess, evalRel, stderr)
 	}
 
 	// MoE-Guidance is stamped on close commits from phase 2 onward;
@@ -153,24 +178,24 @@ func runEval(args []string, stdout, stderr io.Writer) int {
 	systemPrompt := rubric +
 		"\n\n---\n\n# The stage guidance the implementer worked under\n\n" +
 		moe.Stage(md.Workflow, "code")
+	evalAbs := filepath.Join(sess.WorktreePath, evalRel)
 	userPrompt := buildEvalUserPrompt(projectID+"/"+runID, evalAbs, string(design), d)
 
 	moePrintf(stdout, "eval: judging %s/%s — %s, range %s..%s\n",
 		projectID, runID, d.Source, git.ShortSHA(d.Base), git.ShortSHA(d.Tip))
-	if err := launchEvalJudge(root, systemPrompt, userPrompt, stdout, stderr); err != nil {
+	if err := launchEvalJudge(sess.WorktreePath, systemPrompt, userPrompt, stdout, stderr); err != nil {
 		moePrintf(stderr, "eval: judge: %v\n", err)
-		return 1
+		return evalBail(sess, evalRel, stderr)
 	}
 	body, err := os.ReadFile(evalAbs)
 	if err != nil {
 		moePrintf(stderr, "eval: judge exited without writing %s\n", evalRel)
-		return 1
+		return evalBail(sess, evalRel, stderr)
 	}
 	findings, pass, total, err := parseEvalReport(string(body))
 	if err != nil {
 		moePrintf(stderr, "eval: %v\n", err)
-		moePrintf(stderr, "eval: report left uncommitted at %s for inspection; re-run with --force\n", evalRel)
-		return 1
+		return evalBail(sess, evalRel, stderr)
 	}
 
 	block := trailers.Block{
@@ -182,19 +207,46 @@ func runEval(args []string, stdout, stderr io.Writer) int {
 		Guidance:     guidance,
 	}
 	msg := fmt.Sprintf("Eval %s/%s\n\n%s", projectID, runID, block.String())
-	err = repolock.With(root, repolock.Options{
-		Purpose: "eval",
-		Run:     projectID + "/" + runID,
-	}, func() error {
-		return run.StageAndCommit(root, msg, evalRel)
-	})
-	if err != nil {
+	// Single-writer session branch: no repolock around the commit (the
+	// open/close windows carry the locks, same as stage turns). A
+	// byte-identical --force re-judge yields ErrNothingToCommit here
+	// and CanvasUnchangedError at close — "nothing changed" is true,
+	// the worktree stays, and the operator abandons it.
+	if err := run.StageAndCommit(sess.WorktreePath, msg, evalRel); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 		moePrintf(stderr, "eval: commit: %v\n", err)
+		return evalBail(sess, evalRel, stderr)
+	}
+	if err := closeSess(true); err != nil {
+		moePrintf(stderr, "eval: session close: %v\n", err)
 		return 1
 	}
 	moePrintf(stdout, "eval: %d findings, %d/%d rubric pass — triage the report at %s\n",
 		findings, pass, total, evalRel)
 	return 0
+}
+
+// evalBail cleans up after a failed eval run and always returns exit
+// code 1. A worktree holding a judge-written report is left intact for
+// inspection (re-running `moe eval` resumes the session and the judge
+// overwrites the report; add --force when a committed report exists);
+// a worktree with nothing worth keeping is abandoned so failed evals
+// don't accumulate session branches.
+func evalBail(sess *session.Session, evalRel string, stderr io.Writer) int {
+	if _, err := os.Stat(filepath.Join(sess.WorktreePath, evalRel)); err == nil {
+		moePrintf(stderr, "eval: report left uncommitted at %s for inspection; re-run `moe eval` to retry, or drop the session: moe session abandon %s\n",
+			filepath.Join(sess.WorktreePath, evalRel), sess.Branch)
+		return 1
+	}
+	err := repolock.With(sess.Root, repolock.Options{
+		Purpose: "eval-abandon",
+		Run:     sess.Project + "/" + sess.Run,
+	}, func() error {
+		return session.Abandon(sess)
+	})
+	if err != nil {
+		moePrintf(stderr, "eval: abandon session: %v (clean up with: moe session abandon %s)\n", err, sess.Branch)
+	}
+	return 1
 }
 
 // evalDiff is the diff-shaped half of the judge's input: where the

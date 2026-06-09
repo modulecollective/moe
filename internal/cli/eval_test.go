@@ -12,8 +12,24 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
+
+// evalSession returns the run's eval session if one is open, or nil.
+func evalSession(t *testing.T, root, projectID, runID string) *session.Session {
+	t.Helper()
+	sessions, err := session.List(root)
+	if err != nil {
+		t.Fatalf("session.List: %v", err)
+	}
+	for _, s := range sessions {
+		if s.Project == projectID && s.Run == runID && s.Doc == "eval" {
+			return s
+		}
+	}
+	return nil
+}
 
 // stubEvalJudge swaps launchEvalJudge for a fake that records the
 // prompts and writes report to the run's eval.md. Restores on cleanup.
@@ -102,6 +118,9 @@ func seedEvalFixture(t *testing.T, projectID, runID string) (root, tip string) {
 // invisible to the journal's run index.
 func TestEvalMergedRunHappyPath(t *testing.T) {
 	root, _ := seedEvalFixture(t, "tele", "judged")
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	sys, user := stubEvalJudge(t, "tele", "judged", wellFormedReport)
@@ -151,6 +170,19 @@ func TestEvalMergedRunHappyPath(t *testing.T) {
 	if strings.Contains(head, "MoE-Run:") {
 		t.Fatalf("eval commit must not carry MoE-Run:\n%s", head)
 	}
+
+	// The report landed in the root checkout via the session close
+	// (rebase + ff), reached origin via the close auto-push, and the
+	// session worktree is gone.
+	if _, err := os.Stat(filepath.Join(root, run.EvalPath("tele", "judged"))); err != nil {
+		t.Fatalf("report missing from root checkout after close: %v", err)
+	}
+	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
+		t.Fatalf("origin main = %s, want eval commit %s", remote, local)
+	}
+	if s := evalSession(t, root, "tele", "judged"); s != nil {
+		t.Fatalf("session worktree left behind: %s", s.WorktreePath)
+	}
 }
 
 // TestEvalRefusesWorkflowWithoutRubric: only workflows that ship an
@@ -193,9 +225,9 @@ func TestEvalRefusesExistingReportWithoutForce(t *testing.T) {
 	root, _ := seedEvalFixture(t, "tele", "rejudge")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	if err := os.WriteFile(filepath.Join(root, run.EvalPath("tele", "rejudge")), []byte("prior"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// The gate keys on committed state — commit the prior report the
+	// way a successful eval run would have.
+	gittest.WriteAndCommit(t, root, run.EvalPath("tele", "rejudge"), "prior\n", "Eval tele/rejudge")
 
 	var out, errb bytes.Buffer
 	if code := Run([]string{"eval", "tele/rejudge"}, &out, &errb); code != 1 {
@@ -215,8 +247,10 @@ func TestEvalRefusesExistingReportWithoutForce(t *testing.T) {
 }
 
 // TestEvalRefusesToCommitUnparseableReport: a judge that ignored the
-// report format must not produce garbage trailers. The report stays on
-// disk uncommitted for inspection.
+// report format must not produce garbage trailers. The report stays in
+// the session worktree for inspection — never in the root checkout —
+// and the session is resumable: a re-run picks up the same worktree
+// and the judge overwrites the report.
 func TestEvalRefusesToCommitUnparseableReport(t *testing.T) {
 	root, _ := seedEvalFixture(t, "tele", "garbled")
 	t.Setenv("MOE_HOME", root)
@@ -231,8 +265,37 @@ func TestEvalRefusesToCommitUnparseableReport(t *testing.T) {
 	if got := gittest.HeadSHA(t, root); got != before {
 		t.Fatalf("unparseable report must not be committed: HEAD moved %s -> %s", before, got)
 	}
+	if _, err := os.Stat(filepath.Join(root, run.EvalPath("tele", "garbled"))); err == nil {
+		t.Fatal("unparseable report must not litter the root checkout")
+	}
+	sess := evalSession(t, root, "tele", "garbled")
+	if sess == nil {
+		t.Fatal("session worktree should remain for inspection")
+	}
+	wtReport := filepath.Join(sess.WorktreePath, run.EvalPath("tele", "garbled"))
+	if _, err := os.Stat(wtReport); err != nil {
+		t.Fatalf("report should stay in the session worktree: %v", err)
+	}
+	if !strings.Contains(errb.String(), sess.WorktreePath) {
+		t.Fatalf("stderr should name the worktree report path: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe session abandon") {
+		t.Fatalf("stderr should offer the abandon hint: %q", errb.String())
+	}
+
+	// Re-run resumes the same worktree; a now-parseable report lands
+	// on main through the session close.
+	stubEvalJudge(t, "tele", "garbled", wellFormedReport)
+	out.Reset()
+	errb.Reset()
+	if code := Run([]string{"eval", "tele/garbled"}, &out, &errb); code != 0 {
+		t.Fatalf("resumed re-judge exit=%d stderr=%q", code, errb.String())
+	}
+	if s := evalSession(t, root, "tele", "garbled"); s != nil {
+		t.Fatalf("session should be closed after successful re-judge: %s", s.WorktreePath)
+	}
 	if _, err := os.Stat(filepath.Join(root, run.EvalPath("tele", "garbled"))); err != nil {
-		t.Fatalf("report should stay on disk for inspection: %v", err)
+		t.Fatalf("report missing from root checkout after re-judge: %v", err)
 	}
 }
 
@@ -250,6 +313,9 @@ func TestEvalJudgeWroteNothing(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "without writing") {
 		t.Fatalf("stderr should say the judge wrote nothing: %q", errb.String())
+	}
+	if s := evalSession(t, root, "tele", "silent"); s != nil {
+		t.Fatalf("nothing-worth-keeping session should be abandoned: %s", s.WorktreePath)
 	}
 }
 
