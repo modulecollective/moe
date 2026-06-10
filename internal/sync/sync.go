@@ -519,9 +519,10 @@ func AutoPush(root string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// WithJournalPush is the write-edge for verbs that commit directly to
-// the journal on root main: take the repo lock, run fn, and on success
-// race the commit to origin. Push failure never fails the verb
+// WithJournalPush is the write-edge for verbs that land commits on
+// root main — direct journal commits and session-branch landings
+// (`moe session resolve`) alike: take the repo lock, run fn, and on
+// success race the commit to origin. Push failure never fails the verb
 // (AutoPush warns and returns nil). Heartbeat is forced on because the
 // lock now spans a network leg — without it, a slow push window would
 // look stale to a contending acquirer. fn returning an error (including

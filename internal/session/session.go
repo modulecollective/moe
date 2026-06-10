@@ -205,10 +205,10 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 //
 // Close itself stays network-free — the rebase and fast-forward
 // touch only local refs, and the repo lock is scoped to same-machine
-// concurrency. Pushing to origin is the caller's edge: closeSess
-// (internal/cli/stage.go) follows a successful Close with
-// sync.AutoPush in the same lock window, and journal-writing verbs
-// that never open a session wrap sync.WithJournalPush.
+// concurrency. Pushing to origin is the caller's edge: callers follow
+// a successful Close with a push in the same lock window (closeSess
+// in internal/cli/stage.go conditions it on okToPush; `moe session
+// resolve` wraps sync.WithJournalPush).
 //
 // On rebase failure, the rebase is aborted, the worktree and branch
 // are left intact, and the error names both so the operator can

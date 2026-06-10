@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/sync"
 )
 
 // `moe session` manages the throwaway branches and worktrees created
@@ -114,7 +115,7 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	err = repolock.With(root, repolock.Options{Purpose: "session-resolve"}, func() error {
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "session-resolve"}, stdout, stderr, func() error {
 		s, err := session.FindByBranch(root, branch)
 		if err != nil {
 			return err

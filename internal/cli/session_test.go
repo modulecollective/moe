@@ -104,6 +104,37 @@ func TestSessionListAndAbandon(t *testing.T) {
 	}
 }
 
+// TestSessionResolvePushesToOrigin: resolve lands the session branch
+// on local main and must race that commit to origin before the verb
+// returns — the same WithJournalPush write-edge every other verb that
+// lands commits on root main adopted.
+func TestSessionResolvePushesToOrigin(t *testing.T) {
+	root := newSessionTestRoot(t)
+	s, err := session.Open(root, "demo", "r1", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Close refuses a canvas unchanged from main, so the session needs
+	// a real canvas commit on its branch before resolve can land it.
+	gittest.WriteAndCommit(t, s.WorktreePath, run.ContentPath("demo", "r1", "design"), "# design\n", "canvas edit")
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+
+	var stdout, stderr bytes.Buffer
+	withCwd(t, root, func() {
+		if code := Run([]string{"session", "resolve", s.Branch}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+		}
+	})
+	if !strings.Contains(stdout.String(), "resolved") {
+		t.Errorf("stdout = %q, want to contain 'resolved'", stdout.String())
+	}
+	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
+		t.Fatalf("origin main = %s, want resolved commit %s", remote, local)
+	}
+}
+
 func TestSessionAbandonUnknownBranch(t *testing.T) {
 	root := newSessionTestRoot(t)
 	var stdout, stderr bytes.Buffer
