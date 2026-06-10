@@ -326,7 +326,7 @@ moe idea reopen <project>/<slug>
 ```
 
 By default, idea capture and editing use `$EDITOR`; pass `--chat` when you want
-an agent to help shape the note. Every workflow's `new` accepts
+an agent to help shape the note. Every other workflow's `new` accepts
 `--from-idea <project>/<slug>`, promoting the idea into a run and preserving
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
