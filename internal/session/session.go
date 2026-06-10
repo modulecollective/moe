@@ -203,10 +203,12 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 // Close lands the session branch on local main and cleans up the
 // worktree. Caller must hold the repo lock.
 //
-// Pushing to origin is intentionally NOT part of close — the lock is
-// scoped to same-machine concurrency, and `moe sync` is the explicit
-// origin-push point. Making every session exit block on the network
-// would add no correctness and a lot of latency.
+// Close itself stays network-free — the rebase and fast-forward
+// touch only local refs, and the repo lock is scoped to same-machine
+// concurrency. Pushing to origin is the caller's edge: closeSess
+// (internal/cli/stage.go) follows a successful Close with
+// sync.AutoPush in the same lock window, and journal-writing verbs
+// that never open a session wrap sync.WithJournalPush.
 //
 // On rebase failure, the rebase is aborted, the worktree and branch
 // are left intact, and the error names both so the operator can
