@@ -216,9 +216,9 @@ bureaucracy rather than erroring.
 
 ```sh
 moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
-moe sdlc design [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc code   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc test   [--agent <name> | --once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
@@ -233,8 +233,9 @@ prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
 and ships this run; `--chain` (= `!!!`) does the same and then rides the
-whole chain. They are mutually exclusive and cannot combine with `--agent`
-(cascade walks multiple stages on the run's persisted agent).
+whole chain. The four cascade flags are mutually exclusive; `--agent` combines
+with them by switching the run's persisted agent before the cascade walks the
+stages, so every cascaded stage runs on the switched agent.
 
 Chains are the batch version of that same forward motion for active SDLC runs.
 `moe chain edit` opens every active SDLC run across projects; reorder the lines
@@ -271,7 +272,7 @@ has no push stage.
 `moe chat` is a thinking-partner workflow, not a coding or shipping one:
 
 ```sh
-moe chat new [--workspace <name>] [--agent <name>] <project>/<slug>
+moe chat new [--workspace <name>] [--agent <name>] [--from-idea <project>/<slug>] <project>/<slug>
 moe chat chat [--agent <name>] <project>/<run>
 moe chat close [--no-edit] <project>/<run>
 ```
@@ -325,9 +326,10 @@ moe idea reopen <project>/<slug>
 ```
 
 By default, idea capture and editing use `$EDITOR`; pass `--chat` when you want
-an agent to help shape the note. Promoting an idea to SDLC preserves lineage in
-the journal. `idea reopen` is for a promoted idea whose destination run was
-abandoned and should become backlog again.
+an agent to help shape the note. Every workflow's `new` accepts
+`--from-idea <project>/<slug>`, promoting the idea into a run and preserving
+lineage in the journal. `idea reopen` is for a promoted idea whose destination
+run was abandoned and should become backlog again.
 
 ### Chores
 
@@ -364,7 +366,7 @@ Two command families, mirroring hooks:
 ```sh
 moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
 moe chore list [--project <p>]                # show what's due
-moe chore check [<project>/<chore>]           # dry-run validation and due-state
+moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
 moe chore open [--now] <project>/<chore>      # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
@@ -479,13 +481,14 @@ The catalog below is a map, not a replacement for `moe help`.
 - `moe chain edit` opens an editor over active SDLC runs; reorder lines to
   record a run chain in the bureaucracy journal.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
-- `moe <workflow> close [--no-edit] <project>/<run>` closes workflows that do
-  not ship through `sdlc push`.
+- `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any
+  workflow; for `sdlc` it abandons the run instead of shipping it through
+  `sdlc push`.
 
 ### Workflows
 
-- `moe sdlc new|design|code|test|push|shell|reopen|cat|log` drives designed
-  code work.
+- `moe sdlc new|design|code|test|push|close|shell|reopen|cat|log` drives
+  designed code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
 - `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
