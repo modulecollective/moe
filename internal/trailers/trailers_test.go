@@ -121,29 +121,6 @@ func TestBlockChoreSkippedTrailer(t *testing.T) {
 	}
 }
 
-func TestBlockEvalTrailers(t *testing.T) {
-	// `moe eval` commits the report with MoE-Eval-* — and deliberately
-	// no MoE-Run, so eval commits stay invisible to the journal index
-	// that keys LastActivity off MoE-Run.
-	got := (Block{
-		EvalOf:       "moe/eval-layer-2026-06-09",
-		EvalFindings: "4",
-		EvalPass:     "5/6",
-		EvalModel:    "claude-haiku-4-5-20251001",
-		EvalRubric:   "2e755c5f",
-		Guidance:     "b550e1f6",
-	}).String()
-	want := "MoE-Eval-Of: moe/eval-layer-2026-06-09\n" +
-		"MoE-Eval-Findings: 4\n" +
-		"MoE-Eval-Pass: 5/6\n" +
-		"MoE-Eval-Model: claude-haiku-4-5-20251001\n" +
-		"MoE-Eval-Rubric: 2e755c5f\n" +
-		"MoE-Guidance: b550e1f6\n"
-	if got != want {
-		t.Fatalf("trailers:\n%s\nwant:\n%s", got, want)
-	}
-}
-
 func TestBlockOrderIndependentOfFieldAssignment(t *testing.T) {
 	// Renders should not depend on which fields the caller populated
 	// first — the struct field order is what determines wire order.

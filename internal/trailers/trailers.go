@@ -39,24 +39,6 @@ type Block struct {
 	// chore is satisfied as of the skip, folding into the value the
 	// due reasons compare against exactly as a completed run would.
 	ChoreSkipped string
-	// EvalOf carries "<project>/<run>" on an eval-report commit.
-	// Deliberately not MoE-Run: BuildJournalIndex keys LastActivity
-	// off MoE-Run, which feeds dash ordering and @latest resolution —
-	// eval commits (including backfills over history) must stay
-	// invisible to the run index.
-	EvalOf string
-	// EvalFindings is the finding count the judge reported, as a
-	// decimal string. EvalPass is "<passed>/<total>" over the rubric's
-	// binary items. EvalModel is the pinned judge model id. EvalRubric
-	// is the vcs revision of the moe binary that judged (rubric and
-	// guidance are embedded, so one revision versions both).
-	EvalFindings string
-	EvalPass     string
-	EvalModel    string
-	EvalRubric   string
-	// Guidance is the vcs revision of the moe binary whose embedded
-	// guidance produced the run being recorded.
-	Guidance string
 	// ChoreTouched repeats once per chore whose trigger matched the
 	// target-repo change landed by this terminal transition. Values are
 	// "<project>/<chore>".
@@ -91,12 +73,6 @@ func (b Block) String() string {
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
 	write(&sb, "MoE-Chore", b.Chore)
 	write(&sb, "MoE-Chore-Skipped", b.ChoreSkipped)
-	write(&sb, "MoE-Eval-Of", b.EvalOf)
-	write(&sb, "MoE-Eval-Findings", b.EvalFindings)
-	write(&sb, "MoE-Eval-Pass", b.EvalPass)
-	write(&sb, "MoE-Eval-Model", b.EvalModel)
-	write(&sb, "MoE-Eval-Rubric", b.EvalRubric)
-	write(&sb, "MoE-Guidance", b.Guidance)
 	for _, v := range b.ChoreTouched {
 		write(&sb, "MoE-Chore-Touched", v)
 	}

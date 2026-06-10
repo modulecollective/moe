@@ -79,21 +79,6 @@ func MoeHowtoSkill() string {
 	return moeHowtoSkill
 }
 
-// EvalRubric returns the embedded workflows/<workflow>/eval.md fragment
-// — the judge instructions, binary item list, and report format that
-// `moe eval` feeds the consistency judge as its system prompt. Not a
-// stage: eval.md is deliberately absent from the workflow's stage
-// ladder, so Stage() callers and the fragment lints never see it. ""
-// when the workflow has no rubric, which the eval verb treats as
-// "this workflow is not judgeable".
-func EvalRubric(workflow string) string {
-	b, err := fs.ReadFile(workflowsFS, path.Join("workflows", workflow, "eval.md"))
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 // OneShot returns the embedded workflows/<workflow>/oneshot.md fragment
 // — the addendum buildSystemPrompt appends when a stage is being driven
 // headlessly with no operator on stdin. The fragment tells the agent it

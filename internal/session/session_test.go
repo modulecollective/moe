@@ -423,35 +423,3 @@ func TestFindByBranchOnOrphanReturnsSynthetic(t *testing.T) {
 		t.Error("branch still present after Abandon")
 	}
 }
-
-// TestSessionCloseEvalDocKeysOnEvalReport: the synthetic "eval" doc's
-// did-the-work artifact is the run's eval.md (run.ArtifactPath), not a
-// canvas content.md. A session that landed a report closes; one that
-// committed only scratch refuses with *CanvasUnchangedError.
-func TestSessionCloseEvalDocKeysOnEvalReport(t *testing.T) {
-	root := newTestRoot(t)
-
-	s, err := Open(root, "moe", "r1", "eval")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	commitInWorktree(t, s.WorktreePath, "projects/moe/runs/r1/eval.md",
-		"# Eval\n\n- R1 PASS: fine\n", "Eval moe/r1")
-	if err := Close(s); err != nil {
-		t.Fatalf("Close with a landed eval report should succeed: %v", err)
-	}
-
-	s2, err := Open(root, "moe", "r2", "eval")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	commitInWorktree(t, s2.WorktreePath, "scratch.txt", "scratch\n", "session: scratch")
-	err = Close(s2)
-	var cue *CanvasUnchangedError
-	if !errors.As(err, &cue) {
-		t.Fatalf("expected *CanvasUnchangedError, got %T: %v", err, err)
-	}
-	if cue.CanvasPath != "projects/moe/runs/r2/eval.md" {
-		t.Errorf("CanvasPath = %q, want the eval report path", cue.CanvasPath)
-	}
-}
