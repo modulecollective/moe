@@ -72,7 +72,18 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 			// callers (`moe twin reflect ... < /dev/null`) keep the
 			// print-only nudge — anti-silent-close, same rule the
 			// cascade's auto-close honours.
+			//
+			// pdlc's chunk stage replaces the close offer wholesale: a
+			// plan is a run that stays open across months of sittings,
+			// so close-on-reflex-Enter is exactly wrong there. Its
+			// natural follow-on is the per-sitting followups harvest —
+			// see promptPdlcHarvest for the offer (and its silent skip
+			// when nothing is pending). Close stays an explicit
+			// `moe pdlc close`, never a chain-prompt default.
 			if md.Status == run.StatusInProgress {
+				if md.Workflow == pdlcWorkflow && justFinished == pdlcChunkDoc {
+					return promptPdlcHarvest(root, md, stdout, stderr)
+				}
 				if g, err := LookupGroup(md.Workflow); err == nil {
 					if closeCmd := g.Lookup("close"); closeCmd != nil {
 						if !stdinIsTerminal() {

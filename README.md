@@ -203,6 +203,7 @@ bureaucracy rather than erroring.
 | `sdlc` | `design` -> `code` -> `test` -> `push` | designed code changes with a ship gate |
 | `audit` | `plan` -> `report` | fresh-eyes review that files feedback but does not push code |
 | `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
+| `pdlc` | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
 | `kb` | `research` -> `summarize` | project knowledge articles |
 | `idea` | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `glossary` -> `finalize` | recorded project intent |
@@ -284,6 +285,31 @@ canvas is a moe-written session log; the conversation transcript is the record,
 read back with `moe chat log`. Grooming the idea backlog (`moe idea
 new|edit|close|reopen`) is the one state change a chat session makes on your
 behalf.
+
+### PDLC
+
+`moe pdlc` is the product-planning workflow — a robo-PM that plans once and
+reconciles forever:
+
+```sh
+moe pdlc new [--from-idea <project>/<slug>] [--agent <name>] <project>/<slug>
+moe pdlc frame <project>/<run>
+moe pdlc prd   <project>/<run>
+moe pdlc chunk <project>/<run>
+moe pdlc close [--no-edit] <project>/<run>
+```
+
+A plan is a run that stays open for the life of a product goal. `frame` shapes
+the goal conversationally; `prd` compresses the framing into a durable PRD
+under a fixed heading set; `chunk` diffs the PRD against current reality —
+prior followups, the journal's harvested-idea lineage, and the project source —
+and emits followups for the work that remains. After a chunk sitting, the
+chain prompt offers to harvest those followups into ideas (the same editor
+gesture `close` uses), so the operator tailors what reaches the backlog. As
+harvested ideas run through `sdlc` and land, re-running `chunk` reconciles the
+plan against the new reality. Like `chat` and `audit`, the agent reads project
+source through a per-run sandbox clone but never edits it; `close` means the
+goal shipped or died, not that a sitting ended.
 
 ### Ideas
 
@@ -462,6 +488,7 @@ The catalog below is a map, not a replacement for `moe help`.
   code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
+- `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|claim|close|cat|log`
