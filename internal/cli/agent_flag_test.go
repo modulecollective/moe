@@ -44,6 +44,10 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
 		{"twin claim", []string{"twin", "claim", "--agent=gpt", "moe"}},
 		{"kb lint", []string{"kb", "lint", "--agent=gpt", "moe"}},
+		// idea --chat verbs — run-less sessions on the flag → $MOE_AGENT
+		// → claude ladder.
+		{"idea new", []string{"idea", "new", "--agent=gpt", "--chat", "moe/x"}},
+		{"idea edit", []string{"idea", "edit", "--agent=gpt", "--chat", "moe/x"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -874,6 +874,46 @@ func TestBuildIdeaChatPromptHasAllSections(t *testing.T) {
 	}
 }
 
+// TestIdeaChatRequestShape pins the run-less agent.Request idea chat
+// hands the agent seam: no run metadata (so no transcript mirroring),
+// a fresh session, the mode's kickoff as the auto-sent first message,
+// and an explicit AddDir only when the canvas sits outside the
+// bureaucracy root (the `new` flow tempfile). Mirrors the
+// executeArgs-style tests in internal/agent/claude — shape only, no
+// agent binary spawned.
+func TestIdeaChatRequestShape(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "content.md")
+
+	req := ideaChatRequest(root, outside, "capture", "sid-123")
+	if req.Metadata != nil {
+		t.Fatalf("Metadata = %v, want nil", req.Metadata)
+	}
+	if !req.NewSession || req.SessionID != "sid-123" {
+		t.Fatalf("NewSession=%v SessionID=%q, want true / sid-123", req.NewSession, req.SessionID)
+	}
+	if req.Root != root {
+		t.Fatalf("Root = %q, want %q", req.Root, root)
+	}
+	if !strings.Contains(req.InitialPrompt, "just captured a new idea") {
+		t.Fatalf("capture kickoff missing from InitialPrompt: %q", req.InitialPrompt)
+	}
+	if !strings.Contains(req.Prompt, outside) {
+		t.Fatalf("system prompt should name the canvas file: %q", req.Prompt)
+	}
+	if wantDir := filepath.Dir(outside); len(req.AddDirs) != 1 || req.AddDirs[0] != wantDir {
+		t.Fatalf("AddDirs = %v, want [%s]", req.AddDirs, wantDir)
+	}
+
+	refine := ideaChatRequest(root, filepath.Join(root, "content.md"), "refine", "sid-456")
+	if !strings.Contains(refine.InitialPrompt, "existing idea to refine") {
+		t.Fatalf("refine kickoff missing from InitialPrompt: %q", refine.InitialPrompt)
+	}
+	if len(refine.AddDirs) != 0 {
+		t.Fatalf("canvas directly under root should add no extra dirs, got %v", refine.AddDirs)
+	}
+}
+
 // --chat bypasses the $EDITOR gate. The fake claude writes to the path
 // passed in on its command line (the tempfile canvas, before run.New
 // moves the body into place).

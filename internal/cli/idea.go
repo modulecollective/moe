@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -26,7 +27,7 @@ import (
 // dedicated single-stage workflow (dash.IdeaWorkflow, dash.IdeaDocID) so
 // the slug namespace, dash bucketing, and trailer conventions are the
 // same as sdlc/kb. The distinguishing discipline: `moe idea` verbs
-// never launch Claude unless --chat is passed — capture stays cheap.
+// never launch an agent unless --chat is passed — capture stays cheap.
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
 // workflow's top-level form. The Workflow registration is a separate
@@ -38,12 +39,12 @@ func init() {
 	g := NewCommandGroup("idea", "idea workflow")
 	g.Register(&Command{
 		Name:    "new",
-		Summary: "capture a new idea (opens $EDITOR, or --chat for Claude Code)",
+		Summary: "capture a new idea (opens $EDITOR, or --chat for an agent session)",
 		Run:     runIdeaNew,
 	})
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "refine a captured idea ($EDITOR, or --chat for Claude Code)",
+		Summary: "refine a captured idea ($EDITOR, or --chat for an agent session)",
 		Run:     runIdeaEdit,
 		argKind: argIdea,
 	})
@@ -98,9 +99,10 @@ func init() {
 func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	chat := fs.Bool("chat", false, "open a Claude Code session on the new idea instead of $EDITOR")
+	chat := fs.Bool("chat", false, "open an agent session on the new idea instead of $EDITOR")
+	agentOverride := fs.String("agent", "", "override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea new [--chat] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea new [--chat] [--agent <name>] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -109,6 +111,12 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -169,7 +177,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	}
 	// Default-clean: cleanup happens unless a post-editor failure
 	// flips keepTmp. The editor/chat session is a multi-minute window
-	// (Claude --chat can run far longer), so anything that fails after
+	// (a --chat agent session can run far longer), so anything that fails after
 	// the operator may have written content keeps the tempfile and
 	// names its absolute path on stderr — the pre-flight above closes
 	// the common collision case, this is the safety net for whatever
@@ -188,7 +196,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *chat {
-		if code := runIdeaChat(root, tmpPath, "capture", stdout, stderr); code != 0 {
+		if code := runIdeaChat(root, tmpPath, "capture", *agentOverride, stdout, stderr); code != 0 {
 			keepTmp = true
 			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
 			return code
@@ -284,9 +292,10 @@ func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	chat := fs.Bool("chat", false, "open a Claude Code session on the idea instead of $EDITOR")
+	chat := fs.Bool("chat", false, "open an agent session on the idea instead of $EDITOR")
+	agentOverride := fs.String("agent", "", "override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit [--chat] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea edit [--chat] [--agent <name>] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -295,6 +304,12 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if *agentOverride != "" {
+		if _, err := agent.Get(*agentOverride); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 2
+		}
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -331,7 +346,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *chat {
-		if code := runIdeaChat(root, abs, "refine", stdout, stderr); code != 0 {
+		if code := runIdeaChat(root, abs, "refine", *agentOverride, stdout, stderr); code != 0 {
 			return code
 		}
 	} else {
@@ -633,21 +648,41 @@ func requireCleanTree(root string) error {
 	return nil
 }
 
-// runIdeaChat launches an interactive Claude Code session on the idea
+// runIdeaChat launches an interactive agent session on the idea
 // canvas. mode is "capture" (new idea) or "refine" (existing idea) and
-// selects which stages/idea fragment seeds the system prompt. Unlike
-// stage-session chats this one is one-shot: no --session-id, no
-// thread persistence, no per-turn commits. When the operator exits
-// claude, the caller stages & commits whatever landed on disk.
-func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
-	bin, err := exec.LookPath("claude")
+// selects which stages/idea fragment seeds the system prompt.
+// agentOverride is the raw --agent flag value; ideas carry no run.json,
+// so the backend ladder here is flag → $MOE_AGENT → claude. Unlike
+// stage-session chats this one is one-shot: Metadata nil skips
+// transcript mirroring, the minted session id is discarded, no
+// per-turn commits. When the operator exits the agent, the caller
+// stages & commits whatever landed on disk.
+func runIdeaChat(root, abs, mode, agentOverride string, stdout, stderr io.Writer) int {
+	a, err := agent.Get(resolveAgentName(agentOverride, ""))
 	if err != nil {
-		moePrintf(stderr, "idea: claude CLI not found on PATH: %v\n", err)
+		moePrintf(stderr, "idea: %v\n", err)
 		return 1
 	}
+	sessionID, err := run.NewSessionID()
+	if err != nil {
+		moePrintf(stderr, "idea: %v\n", err)
+		return 1
+	}
+	req := ideaChatRequest(root, abs, mode, sessionID)
+	req.Stdin = os.Stdin
+	req.Stdout = os.Stdout
+	req.Stderr = os.Stderr
+	if _, err := a.Execute(req); err != nil {
+		moePrintf(stderr, "idea: chat session: %v\n", err)
+		return 1
+	}
+	return 0
+}
 
-	prompt := buildIdeaChatPrompt(abs, mode)
-
+// ideaChatRequest assembles the run-less agent.Request for one idea
+// chat turn. Kept apart from runIdeaChat so the request shape can be
+// exercised in tests without shelling out to an agent binary.
+func ideaChatRequest(root, abs, mode, sessionID string) agent.Request {
 	var kickoff string
 	switch mode {
 	case "capture":
@@ -661,30 +696,21 @@ func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
 			"sharpen. Wait for their reply before editing."
 	}
 
-	args := []string{
-		"--add-dir", root,
-		"--append-system-prompt", prompt,
+	req := agent.Request{
+		Root:          root,
+		SessionID:     sessionID,
+		NewSession:    true,
+		Prompt:        buildIdeaChatPrompt(abs, mode),
+		InitialPrompt: kickoff,
 	}
 	// In `new` flow the canvas is a tempfile outside the repo; give
-	// claude explicit access to its parent so the edit permission
+	// the agent explicit access to its parent so the edit permission
 	// sandbox doesn't block the write. For `edit` flow the canvas
 	// lives under root and this is a harmless duplicate add.
 	if canvasDir := filepath.Dir(abs); canvasDir != "" && canvasDir != root {
-		args = append(args, "--add-dir", canvasDir)
+		req.AddDirs = []string{canvasDir}
 	}
-	if kickoff != "" {
-		args = append(args, kickoff)
-	}
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = root
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		moePrintf(stderr, "idea: chat session exited: %v\n", err)
-		return 1
-	}
-	return 0
+	return req
 }
 
 // buildIdeaChatPrompt assembles the --append-system-prompt payload for
@@ -692,7 +718,7 @@ func runIdeaChat(root, abs, mode string, stdout, stderr io.Writer) int {
 // operational core naming the canvas file. Deliberately narrower than
 // buildSystemPrompt (used by stage sessions), which is tied to
 // run.Metadata and per-document thread files that ideas don't carry
-// a live Claude session for.
+// a live agent session for.
 func buildIdeaChatPrompt(abs, mode string) string {
 	var sections []string
 	if soul := moe.Soul(); soul != "" {
