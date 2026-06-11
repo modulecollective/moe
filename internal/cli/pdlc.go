@@ -110,6 +110,14 @@ func init() {
 	w.RegisterStage(pdlcPrdDoc, pdlcFrameDoc)
 	w.RegisterStage(pdlcChunkDoc, pdlcPrdDoc)
 	RegisterWorkflow(w)
+
+	// Serve declaration: front pdlc in the new-run/promote forms and
+	// render one sitting chip per stage verb (frame/prd/chunk — all
+	// three, always: stage entry never gates for pdlc and re-entering
+	// prd/chunk forever is the workflow's whole point). No cascade —
+	// pdlc stage verbs have no --ship/--chain, sittings are
+	// operator-paced. No workspace, same as the CLI's runNew rule.
+	registerServeWorkflow(pdlcWorkflow, serveWorkflowDecl{newRun: true})
 }
 
 // pdlcStageVerb is the shared body behind the three pdlc stage verbs:

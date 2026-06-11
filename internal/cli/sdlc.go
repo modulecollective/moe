@@ -90,6 +90,17 @@ func init() {
 	// "What wasn't verified" both have substantive content.
 	w.RegisterStageGate("test", testStageGate)
 	RegisterWorkflow(w)
+
+	// Serve declaration: front sdlc in the new-run/promote forms and
+	// render the cascade trio (advance/ship/chain) on run pages. push
+	// is excluded from web spawning — terminal/CLI-only stays a
+	// recorded decision; the bang vocabulary collapses there.
+	registerServeWorkflow("sdlc", serveWorkflowDecl{
+		excludeStages: []string{"push"},
+		cascade:       true,
+		newRun:        true,
+		workspace:     true,
+	})
 }
 
 func runDesign(args []string, stdout, stderr io.Writer) int {

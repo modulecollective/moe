@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -88,13 +89,28 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the
-		// followups/lore files as they sit on disk. Mirrors `moe sdlc
-		// close`'s subject + workspace-release cleanup so the in-process
-		// path and the CLI verb stay one pipeline.
+		// followups/lore files as they sit on disk. Dispatch is by the
+		// run's own workflow through the close registry — the same
+		// (subject, cleanup) pair `moe <workflow> close` registered —
+		// so the in-process path and the CLI verb stay one pipeline.
 		CloseRun: func(project, runID string) error {
-			return closeRunInProcess(root, "sdlc", sdlcCloseSubject,
-				releaseWorkspaceCleanup, project, runID, true, io.Discard, io.Discard)
+			md, err := run.Load(root, project, runID)
+			if err != nil {
+				return err
+			}
+			reg, ok := lookupCloseRegistration(md.Workflow)
+			if !ok {
+				return &runopen.NotClosableError{Reason: fmt.Sprintf(
+					"workflow %s has no close pipeline", md.Workflow)}
+			}
+			return closeRunInProcess(root, md.Workflow, reg.subject,
+				reg.cleanup, project, runID, true, io.Discard, io.Discard)
 		},
+		// The workflow registries are init-time static, so the serve UI
+		// declarations cross the seam as a lookup plus a precomputed
+		// new-run list.
+		WorkflowUI:      lookupServeWorkflowUI,
+		NewRunWorkflows: serveNewRunWorkflows(),
 		// GatherChore picks the named chore out of the per-project state
 		// gather. Keeps the workflow registry on the cli side of the seam.
 		GatherChore: func(project, name string) (chore.State, bool, error) {

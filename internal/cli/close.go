@@ -22,6 +22,27 @@ import (
 // the close before run.json is modified.
 type closeCleanup func(root string, md *run.Metadata, stdout, stderr io.Writer) error
 
+// closeRegistration is the (subject, cleanup) pair a workflow handed
+// to closeCommand, recorded so other close entry points — today
+// `moe serve`'s CloseRun callback — can dispatch the same pipeline by
+// workflow name instead of baking one workflow's subject and cleanup
+// into their wiring.
+type closeRegistration struct {
+	subject string
+	cleanup closeCleanup
+}
+
+var closeRegistrations = map[string]closeRegistration{}
+
+// lookupCloseRegistration returns the (subject, cleanup) recorded when
+// workflow registered its close command. ok=false means the workflow
+// has no closeCommand-built close (idea is the case today — its close
+// is bespoke, runopen.CloseIdea).
+func lookupCloseRegistration(workflow string) (closeRegistration, bool) {
+	reg, ok := closeRegistrations[workflow]
+	return reg, ok
+}
+
 // closeCommand builds the `close` subcommand for a workflow. The
 // state-guard / status-flip / trailered-commit skeleton is shared; the
 // workflow-specific piece is the optional cleanup (e.g., sdlc removes
@@ -32,7 +53,16 @@ type closeCleanup func(root string, md *run.Metadata, stdout, stderr io.Writer) 
 // derived string so existing commit-history shapes stay stable: idea
 // close lands `Close idea <p>/<r>`, while sdlc/kb land `Close <wf> run
 // <p>/<r>` per the design doc.
+//
+// Building the command also records (subject, cleanup) into the close
+// registry — registration is the declaration, so a workflow can't be
+// closable from the CLI and un-closable from serve by drift. Panics on
+// duplicates, same contract as RegisterWorkflow.
 func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
+	if _, dup := closeRegistrations[workflow]; dup {
+		panic("cli: duplicate close registration for workflow " + workflow)
+	}
+	closeRegistrations[workflow] = closeRegistration{subject: subject, cleanup: cleanup}
 	return &Command{
 		Name:    "close",
 		Summary: "close an in-progress run without pushing",
