@@ -628,12 +628,16 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 	return nil
 }
 
-// checkSandboxBoundary refuses the design→code transition when the
-// project sandbox has moved past the snapshot taken at design open.
-// Two failure modes; either trips the gate:
+// checkSandboxBoundary refuses to close a stage that sets
+// EnforceSandboxBoundary (design, chat, audit plan/report, the pdlc
+// stages) when the project sandbox has moved past the snapshot taken
+// at stage open. stageDoc is the stage's doc name (e.g. "design",
+// "frame"), used to attribute the refusal. Two failure modes; either
+// trips the gate:
 //
 //  1. HEAD has advanced — the agent committed to the project repo
-//     during design. The spike-as-handoff path the design closed off.
+//     during the stage. The spike-as-handoff path the design closed
+//     off.
 //  2. `git status` shows any modified, added, or deleted tracked
 //     file — the agent left dirty work behind. Untracked files are
 //     deliberately allowed; the agent is free to scribble outside
@@ -648,15 +652,15 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 // in the project repo alone — they should write to MOE_DEV_TMPDIR /
 // MOE_HOME or other extern locations. A hook that mutates the work
 // tree would false-positive this check.
-func checkSandboxBoundary(clonePath, entryHEAD string) error {
+func checkSandboxBoundary(clonePath, entryHEAD, stageDoc string) error {
 	currentHEAD, err := git.HEAD(clonePath)
 	if err != nil {
 		return fmt.Errorf("sandbox boundary: read HEAD: %w", err)
 	}
 	if entryHEAD != "" && currentHEAD != entryHEAD {
 		return fmt.Errorf(
-			"sandbox HEAD advanced during design (was %s, now %s); design must not commit to the project repo — reset the sandbox and re-run",
-			git.ShortSHA(entryHEAD), git.ShortSHA(currentHEAD))
+			"sandbox HEAD advanced during %s (was %s, now %s); %s must not commit to the project repo — reset the sandbox and re-run",
+			stageDoc, git.ShortSHA(entryHEAD), git.ShortSHA(currentHEAD), stageDoc)
 	}
 	entries, err := git.Status(clonePath)
 	if err != nil {
@@ -665,8 +669,8 @@ func checkSandboxBoundary(clonePath, entryHEAD string) error {
 	var dirty []string
 	for _, e := range entries {
 		// Untracked entries carry XY=="??"; everything else is a
-		// tracked-file change that the design stage is contracted
-		// not to leave behind.
+		// tracked-file change that the stage is contracted not to
+		// leave behind.
 		if e.XY == "??" {
 			continue
 		}
@@ -674,8 +678,8 @@ func checkSandboxBoundary(clonePath, entryHEAD string) error {
 	}
 	if len(dirty) > 0 {
 		return fmt.Errorf(
-			"sandbox has uncommitted tracked-file changes (design must not modify the project repo):\n  %s\nreset the sandbox and re-run",
-			strings.Join(dirty, "\n  "))
+			"sandbox has uncommitted tracked-file changes (%s must not modify the project repo):\n  %s\nreset the sandbox and re-run",
+			stageDoc, strings.Join(dirty, "\n  "))
 	}
 	return nil
 }

@@ -212,7 +212,7 @@ func TestCheckSandboxBoundaryClean(t *testing.T) {
 		t.Fatalf("write scratch: %v", err)
 	}
 
-	if err := checkSandboxBoundary(repo, entry); err != nil {
+	if err := checkSandboxBoundary(repo, entry, "design"); err != nil {
 		t.Fatalf("expected clean sandbox to pass, got: %v", err)
 	}
 }
@@ -226,12 +226,15 @@ func TestCheckSandboxBoundaryHeadAdvancedFails(t *testing.T) {
 	entry := gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
 	gittest.WriteAndCommit(t, repo, "extra.txt", "spike\n", "spike commit during design")
 
-	err := checkSandboxBoundary(repo, entry)
+	err := checkSandboxBoundary(repo, entry, "frame")
 	if err == nil {
 		t.Fatalf("expected HEAD-advanced check to fail")
 	}
 	if !strings.Contains(err.Error(), "HEAD advanced") {
 		t.Fatalf("error should name the advance, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "frame") {
+		t.Fatalf("error should name the refusing stage, got: %v", err)
 	}
 }
 
@@ -246,12 +249,15 @@ func TestCheckSandboxBoundaryDirtyTrackedFails(t *testing.T) {
 		t.Fatalf("rewrite README: %v", err)
 	}
 
-	err := checkSandboxBoundary(repo, entry)
+	err := checkSandboxBoundary(repo, entry, "frame")
 	if err == nil {
 		t.Fatalf("expected dirty-tracked check to fail")
 	}
 	if !strings.Contains(err.Error(), "uncommitted tracked-file changes") {
 		t.Fatalf("error should name the dirty-tracked path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "frame") {
+		t.Fatalf("error should name the refusing stage, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "README.md") {
 		t.Fatalf("error should name the offending path, got: %v", err)
@@ -269,7 +275,7 @@ func TestCheckSandboxBoundaryDeletedTrackedFails(t *testing.T) {
 		t.Fatalf("delete README: %v", err)
 	}
 
-	err := checkSandboxBoundary(repo, entry)
+	err := checkSandboxBoundary(repo, entry, "design")
 	if err == nil {
 		t.Fatalf("expected deletion check to fail")
 	}

@@ -622,7 +622,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// against a dirty sandbox. The check is best-effort wrt recovery:
 	// the operator resets the sandbox clone and re-runs design.
 	if opts.EnforceSandboxBoundary && sandboxBoundaryClone != "" {
-		if err := checkSandboxBoundary(sandboxBoundaryClone, sandboxBoundaryEntryHEAD); err != nil {
+		if err := checkSandboxBoundary(sandboxBoundaryClone, sandboxBoundaryEntryHEAD, docID); err != nil {
 			moePrintf(stderr, "%s: %v\n", docID, err)
 			return 1
 		}
