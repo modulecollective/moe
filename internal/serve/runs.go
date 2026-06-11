@@ -20,19 +20,6 @@ import (
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
-// promotedWorkflow names the workflow both the new-run form and the
-// promote-from-idea form open into. Hardcoded to sdlc: the operator-
-// facing surface only fronts sdlc runs (the other workflows have
-// their own entry points elsewhere), and serve only knows how to
-// host one kind of agent session.
-const promotedWorkflow = "sdlc"
-
-// promotedFirstStage is the destination workflow's first-stage doc
-// id (where a promote seeds the source idea's canvas) and the verb
-// serve spawns to host the agent session. Sdlc's first stage is
-// design; if a second workflow ever fronts here, this would split.
-const promotedFirstStage = "design"
-
 // slugPattern is the kebab-case shape `moe sdlc new` accepts. Mirrors
 // the validation moe does itself so a bad slug fails at the form
 // rather than after the child has spawned. Lowercase letters, digits,
@@ -70,20 +57,41 @@ type workspaceOption struct {
 }
 
 // newRunVM backs the new-run form. Projects and workspaces are
-// gathered from disk at request time; the agent list is static.
+// gathered from disk at request time; the agent list is static and
+// the workflow list comes from Options.NewRunWorkflows.
 type newRunVM struct {
 	Projects    []string          // project IDs
 	Workspaces  []workspaceOption // every named workspace this host has on disk, across all projects
 	Agents      []string          // includes "" for "use default"
+	Workflows   []NewRunWorkflow  // selector entries; first is the default
 	ErrorBanner string            // populated on a POST validation failure (slice #4)
-	// ID, Workspace, Agent echo the operator's submitted values back into
-	// the form on an error re-render so a validation failure doesn't wipe
-	// what they typed. ID is the raw `project/slug` text (echoed verbatim,
-	// not re-joined, so a malformed entry shows exactly as typed);
-	// Workspace/Agent re-select the matching dropdown option.
+	// ID, Workspace, Agent, Workflow echo the operator's submitted values
+	// back into the form on an error re-render so a validation failure
+	// doesn't wipe what they typed. ID is the raw `project/slug` text
+	// (echoed verbatim, not re-joined, so a malformed entry shows exactly
+	// as typed); Workspace/Agent/Workflow re-select the matching dropdown
+	// option. On GET, Workflow is pre-selected from the ?workflow= query
+	// param (the dash's `new plan` button passes ?workflow=pdlc).
 	ID        string
 	Workspace string
 	Agent     string
+	Workflow  string
+}
+
+// newRunWorkflow resolves a submitted (or query-string) workflow name
+// against Options.NewRunWorkflows. An empty name falls back to the
+// first entry — the form default — so a stale page that POSTs without
+// the field keeps working.
+func (s *Server) newRunWorkflow(name string) (NewRunWorkflow, bool) {
+	if name == "" && len(s.opts.NewRunWorkflows) > 0 {
+		return s.opts.NewRunWorkflows[0], true
+	}
+	for _, wf := range s.opts.NewRunWorkflows {
+		if wf.Name == name {
+			return wf, true
+		}
+	}
+	return NewRunWorkflow{}, false
 }
 
 func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
@@ -93,15 +101,20 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "new-run form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Pre-select the workflow named in the query string (the dash's
+	// `new plan` button); unknown or absent falls back to the default.
+	if wf, ok := s.newRunWorkflow(r.URL.Query().Get("workflow")); ok {
+		vm.Workflow = wf.Name
+	}
 	s.render(w, r, "new.html", vm)
 }
 
 // handleNewRunSubmit validates the form, opens the run in-process,
-// then spawns `moe sdlc design <p>/<slug>` as a PTY-backed agent
-// session and redirects to the per-run page. Opening synchronously
-// means an open failure surfaces in the HTTP response (instead of
-// the prior spawn-succeeded-but-open-failed half-state), and the
-// child has no slug-discovery to do on its way to the agent.
+// then spawns `moe <workflow> <first-stage> <p>/<slug>` as a
+// PTY-backed agent session and redirects to the per-run page. Opening
+// synchronously means an open failure surfaces in the HTTP response
+// (instead of the prior spawn-succeeded-but-open-failed half-state),
+// and the child has no slug-discovery to do on its way to the agent.
 //
 // Validation failures re-render the form with an ErrorBanner so the
 // operator can correct without retyping.
@@ -113,8 +126,14 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.FormValue("id"))
 	wsName := strings.TrimSpace(r.FormValue("workspace"))
 	agentName := strings.TrimSpace(r.FormValue("agent"))
-	fail := func(msg string) { s.renderFormError(w, r, id, wsName, agentName, msg) }
+	wfName := strings.TrimSpace(r.FormValue("workflow"))
+	fail := func(msg string) { s.renderFormError(w, r, id, wsName, agentName, wfName, msg) }
 
+	wf, ok := s.newRunWorkflow(wfName)
+	if !ok {
+		fail("workflow: unknown workflow " + strconv.Quote(wfName))
+		return
+	}
 	projectID, slug, err := splitID(id)
 	if err != nil {
 		fail(err.Error())
@@ -133,13 +152,19 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 			fail("workspace: " + err.Error())
 			return
 		}
+		// Same refusal the CLI's runNew makes — the binding means
+		// nothing to the other workflows and would strand the claim.
+		if !wf.Workspace {
+			fail("workspace: only sdlc and hooks accept a workspace binding")
+			return
+		}
 	}
 	// Agent validity is checked by runopen.Open via run.New; we trust
 	// the hardcoded dropdown set here.
 
 	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
 		ID:        slug,
-		Workflow:  promotedWorkflow,
+		Workflow:  wf.Name,
 		Workspace: wsName,
 		Agent:     agentName,
 	}, s.syncWriter(), s.syncWriter())
@@ -149,7 +174,7 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := md.Project + "/" + md.ID
-	args := []string{"sdlc", promotedFirstStage, runID}
+	args := []string{wf.Name, wf.FirstStage, runID}
 	if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		fail("spawn: " + err.Error())
 		return
@@ -157,7 +182,7 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsName, agentName, msg string) {
+func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsName, agentName, wfName, msg string) {
 	vm, err := s.gatherNewRunVM()
 	if err != nil {
 		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
@@ -167,6 +192,7 @@ func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsN
 	vm.ID = id
 	vm.Workspace = wsName
 	vm.Agent = agentName
+	vm.Workflow = wfName
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, r, "new.html", vm)
 }
@@ -187,9 +213,9 @@ type runVM struct {
 	RowNote string
 	RowWhen string
 	// NextStage is the run's bare next-stage name (row.Stage), or "" when
-	// there's no next stage / no row. The advance + ship chips key off
-	// it: they render only for an in-progress sdlc run whose next stage
-	// is design/code/test (see advanceActions).
+	// there's no next stage / no row. The stage chips key off it: the
+	// cascade trio renders only when the next stage is spawnable, and
+	// the per-stage sitting chips mark it primary (see composeRunActions).
 	NextStage string
 	// Started / Status are the fallback meta line shown when the
 	// dash-row lookup didn't return a row. Started is empty on the
@@ -246,11 +272,11 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 
 // handleClose closes a run from the per-run page. It loads the run's
 // metadata and dispatches by workflow: idea runs flip closed in-process
-// via runopen.CloseIdea (no harvest, no sandbox); everything else (the
-// sdlc runs serve fronts) routes through the CloseRun callback, which
-// runs the full cli close pipeline with --no-edit semantics. One route,
-// one guard set, regardless of run kind — a stale or replayed POST hits
-// the same refusals.
+// via runopen.CloseIdea (no harvest, no sandbox); everything else
+// routes through the CloseRun callback, which dispatches the full cli
+// close pipeline by the run's own workflow with --no-edit semantics.
+// One route, one guard set, regardless of run kind — a stale or
+// replayed POST hits the same refusals.
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -271,7 +297,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		s.closeIdeaRun(w, r, projectID, slug, id)
 		return
 	}
-	s.closeSDLCRun(w, r, projectID, slug, id)
+	s.closeWorkflowRun(w, r, projectID, slug, id)
 }
 
 func (s *Server) closeIdeaRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
@@ -290,13 +316,15 @@ func (s *Server) closeIdeaRun(w http.ResponseWriter, r *http.Request, projectID,
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// closeSDLCRun closes an in-progress sdlc run through the CloseRun
-// callback. serve owns the PTY children it spawned, so the one guard it
-// applies itself is the live-child refusal: closing while the agent is
-// mid-turn would yank the sandbox clone out from under it. Every other
-// guard (pushed, terminal, canvas-empty) lives in the cli close core and
-// surfaces through the callback's error.
-func (s *Server) closeSDLCRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
+// closeWorkflowRun closes an in-progress non-idea run through the
+// CloseRun callback, which dispatches the registered close pipeline by
+// the run's workflow. serve owns the PTY children it spawned, so the
+// one guard it applies itself is the live-child refusal: closing while
+// the agent is mid-turn would yank the sandbox clone out from under
+// it. Every other guard (pushed, terminal, canvas-empty, no registered
+// close) lives on the cli side and surfaces through the callback's
+// error.
+func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
 	if s.opts.CloseRun == nil {
 		http.Error(w, "close not configured (Options.CloseRun is nil)", http.StatusInternalServerError)
 		return
@@ -384,10 +412,11 @@ func (m spawnMode) flag() string {
 	}
 }
 
-// handleAdvance spawns the run's next sdlc stage as a single headless
-// turn (no cascade flag): one stage runs under SkipNextStage and the
-// child exits at the chain prompt it never reaches. The "→ <stage>"
-// chip on the per-run page posts here.
+// handleAdvance spawns the run's next stage interactively with no
+// cascade flag: the child runs one stage under the MOE_SERVE_AGENT
+// handshake (the operator drives the session through Claude Code on
+// the web) and exits at the chain prompt it never reaches. The
+// "→ <stage>" chip on the per-run page posts here.
 func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnAdvance)
 }
@@ -413,10 +442,14 @@ func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 // spawnNextStage is the shared body behind /advance, /ship, and /chain.
 // It re-derives the next stage server-side (never trusting a possibly-
 // stale page) and applies the same guard set the close route uses,
-// then spawns `moe sdlc <stage> <id>` — appending the mode's cascade
-// flag (--ship / --chain, or none for advance). The server-side
-// re-derivation plus spawn's own dup-guard mean a double-click or a
-// stale button can't double-spawn or skip a stage.
+// then spawns `moe <workflow> <stage> <id>` — appending the mode's
+// cascade flag (--ship / --chain, or none for advance). Only workflows
+// whose declaration carries Cascade qualify (sdlc today — its stage
+// verbs are the ones that accept the flags), and the next stage must
+// be in the declared spawnable set (push stays terminal/CLI-only via
+// sdlc's exclusion). The server-side re-derivation plus spawn's own
+// dup-guard mean a double-click or a stale button can't double-spawn
+// or skip a stage.
 //
 // A direct spawn deliberately bypasses the design-stage cascade's
 // tracked-change refusal (EnforceSandboxBoundary): the explicit click
@@ -437,8 +470,13 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if md.Workflow != promotedWorkflow {
-		http.Error(w, "run "+id+" is not an sdlc run (workflow="+md.Workflow+")", http.StatusConflict)
+	if s.opts.WorkflowUI == nil {
+		http.Error(w, verb+" not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
+		return
+	}
+	ui, ok := s.opts.WorkflowUI(md.Workflow)
+	if !ok || !ui.Cascade {
+		http.Error(w, "workflow "+md.Workflow+" does not "+verb+" from serve", http.StatusConflict)
 		return
 	}
 	if md.Status != run.StatusInProgress {
@@ -446,7 +484,8 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 		return
 	}
 	// A live agent mid-turn owns the sandbox clone; spawning the next
-	// stage now would race it. Mirror closeSDLCRun's live-child refusal.
+	// stage now would race it. Mirror closeWorkflowRun's live-child
+	// refusal.
 	if c, ok := s.children.get(id); ok {
 		if exited, _, _ := c.snapshot(); !exited {
 			http.Error(w,
@@ -463,24 +502,82 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	switch stage {
-	case "design", "code", "test":
-		// advanceable
-	default:
-		// "" (no next stage) or "push" — push stays terminal/CLI-only.
+	if !slices.Contains(ui.Stages, stage) {
+		// "" (no next stage) or an excluded stage (sdlc's push) — push
+		// stays terminal/CLI-only.
 		http.Error(w,
 			"run "+id+" has no advanceable next stage (next="+strconv.Quote(stage)+")",
 			http.StatusConflict)
 		return
 	}
 
-	args := []string{"sdlc", stage, id}
+	args := []string{md.Workflow, stage, id}
 	if flag := mode.flag(); flag != "" {
 		args = append(args, flag)
 	}
 	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		s.logf("%s %s: spawn: %v", verb, id, err)
 		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
+// handleStageSpawn opens one declared stage verb of a non-cascade
+// workflow as an interactive sitting: POST /run/{p}/{s}/stage/{stage}
+// spawns `moe <workflow> <stage> <id>` under the serve handshake and
+// the operator picks the session up in Claude Code on the web, same as
+// a design session. The pdlc chips (frame / prd / chunk) post here.
+//
+// Guards mirror spawnNextStage: declared spawnable stage verb,
+// in-progress run, no live child. No satisfaction check — pdlc stage
+// entry never gates, and re-entering prd/chunk forever is the
+// workflow's whole point. Unlike /advance there is no server-side
+// stage re-derivation: the operator named the sitting explicitly.
+func (s *Server) handleStageSpawn(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	stage := r.PathValue("stage")
+	id := projectID + "/" + slug
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("stage %s %s: load: %v", stage, id, err)
+		http.Error(w, "stage: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.opts.WorkflowUI == nil {
+		http.Error(w, "stage spawn not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
+		return
+	}
+	ui, ok := s.opts.WorkflowUI(md.Workflow)
+	if !ok || !slices.Contains(ui.Stages, stage) {
+		http.Error(w,
+			"workflow "+md.Workflow+" has no spawnable stage "+strconv.Quote(stage),
+			http.StatusConflict)
+		return
+	}
+	if md.Status != run.StatusInProgress {
+		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
+		return
+	}
+	if c, ok := s.children.get(id); ok {
+		if exited, _, _ := c.snapshot(); !exited {
+			http.Error(w,
+				"run "+id+" has a live agent mid-turn — wait for it to finish first",
+				http.StatusConflict)
+			return
+		}
+	}
+
+	args := []string{md.Workflow, stage, id}
+	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		s.logf("stage %s %s: spawn: %v", stage, id, err)
+		http.Error(w, "stage: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
@@ -524,27 +621,36 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	// No live child on the read-only path (this serve isn't parenting the
-	// run), so advance/ship gate on live=false. fillRunRow ran first so
-	// vm.NextStage is populated.
-	vm.Actions = append(advanceActions(projectID, slug, vm.NextStage, md, false),
-		runActions(projectID, slug, md)...)
+	// run), so the spawn chips gate on live=false. fillRunRow ran first
+	// so vm.NextStage is populated.
+	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false)
 	return vm, nil
 }
 
-// runActions returns the peer-affordances list for the per-run page.
-// In-progress idea runs get edit, promote, and close; closed idea runs
-// get reopen; in-progress sdlc runs get a close-run chip; every other
-// run kind/status gets nil. The chip routes through the same /close POST
-// the route dispatches by workflow.
-func runActions(projectID, slug string, md *run.Metadata) []runAction {
+// composeRunActions returns the peer-affordances list for the per-run
+// page. Idea runs keep their bespoke chips (edit / promote / close /
+// reopen — idea has no stage verbs to derive). Every other workflow's
+// chips are composed from its registration-time serve declaration
+// (Options.WorkflowUI): cascade workflows (sdlc) get the "→ <stage>" /
+// "ship" / "chain" trio keyed off the re-derived next stage; the rest
+// (pdlc) get one sitting chip per declared stage verb, the next stage
+// styled primary; both get a close-run chip when a close pipeline is
+// registered. A workflow that declared nothing renders no chips —
+// today's read-only page.
+//
+// nextStage is the bare next-stage name re-derived from the dash row;
+// live is true when an agent is mid-turn. Spawn chips drop while live
+// (spawning past a stage whose agent is still running would race it
+// for the sandbox clone); the close chip stays, the close route's own
+// live-child refusal guards the click.
+func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	base := "/run/" + projectID + "/" + slug
-	switch md.Workflow {
-	case dash.IdeaWorkflow:
+	if md.Workflow == dash.IdeaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
 			return []runAction{
 				{Label: "edit idea", Href: base + "/edit"},
-				{Label: "promote to sdlc", Href: base + "/promote"},
+				{Label: "promote", Href: base + "/promote"},
 				{Label: "close idea", Href: base + "/close", Method: "POST"},
 			}
 		case run.StatusClosed:
@@ -552,44 +658,46 @@ func runActions(projectID, slug string, md *run.Metadata) []runAction {
 				{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
 			}
 		}
-	case promotedWorkflow:
-		if md.Status == run.StatusInProgress {
-			return []runAction{
-				{Label: "close run", Href: base + "/close", Method: "POST"},
+		return nil
+	}
+	if s.opts.WorkflowUI == nil {
+		return nil
+	}
+	ui, ok := s.opts.WorkflowUI(md.Workflow)
+	if !ok || md.Status != run.StatusInProgress {
+		return nil
+	}
+	var out []runAction
+	if !live {
+		if ui.Cascade {
+			// A "" or excluded next stage (sdlc's push) yields no trio:
+			// push stays terminal/CLI-only — the bang vocabulary
+			// collapses there — so a run parked right before push shows
+			// only the close chip.
+			if slices.Contains(ui.Stages, nextStage) {
+				out = append(out,
+					runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
+					runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
+					runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
+			}
+		} else {
+			// Sitting chips render for every declared stage verb
+			// regardless of satisfaction — stage entry never gates for
+			// these workflows. The re-derived next stage (if any) is the
+			// primary-styled suggestion, not a gate.
+			for _, stage := range ui.Stages {
+				a := runAction{Label: stage, Href: base + "/stage/" + stage, Method: "POST"}
+				if stage == nextStage {
+					a.Class = "primary"
+				}
+				out = append(out, a)
 			}
 		}
 	}
-	return nil
-}
-
-// advanceActions returns the stage-advancement chips — "→ <stage>"
-// (single headless step), "ship" (--ship cascade through push, ship
-// this run), and "chain" (--chain cascade, ship + ride the whole
-// chain) — prepended ahead of the base actions on an in-progress sdlc
-// run's page. nextStage is the bare next-stage name re-derived from the
-// dash row; live is true when an agent is mid-turn.
-//
-// Returns nil unless the run is an in-progress sdlc run, no agent is
-// live (advancing past a stage whose agent is still running would race
-// it for the sandbox clone), and the next stage is design/code/test. A
-// "" or "push" next stage yields no chips: push stays terminal/CLI-only
-// — the bang vocabulary collapses there — so a run parked right before
-// push shows none.
-func advanceActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
-	if md.Workflow != promotedWorkflow || md.Status != run.StatusInProgress || live {
-		return nil
+	if ui.Close {
+		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST"})
 	}
-	switch nextStage {
-	case "design", "code", "test":
-	default:
-		return nil
-	}
-	base := "/run/" + projectID + "/" + slug
-	return []runAction{
-		{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
-		{Label: "ship", Href: base + "/ship", Method: "POST"},
-		{Label: "chain", Href: base + "/chain", Method: "POST"},
-	}
+	return out
 }
 
 // fillRunRow populates RowNote / RowWhen from the dash-row lookup.
@@ -644,15 +752,14 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	// A live-parented run is usually sdlc, but opening a chore can spawn
 	// any configured workflow (e.g. a chore whose `workflow` is `twin`), so don't
 	// assume the workflow here — gate the action chips on the on-disk
-	// metadata (advanceActions / runActions are themselves sdlc-gated).
+	// metadata (composeRunActions keys off the workflow's declaration).
 	// A load failure just drops the chips.
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
-		// !exited == an agent mid-turn; advanceActions drops the chips in
-		// that case. fillRunRow above populated vm.NextStage.
-		vm.Actions = append(advanceActions(projectID, slug, vm.NextStage, md, !exited),
-			runActions(projectID, slug, md)...)
+		// !exited == an agent mid-turn; composeRunActions drops the spawn
+		// chips in that case. fillRunRow above populated vm.NextStage.
+		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited)
 	}
 	return vm
 }
@@ -705,14 +812,19 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 
 // promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).
 // Workspaces is every named workspace this host knows about (cross-
-// project, mirroring /run/new); Agents includes "" for "use default".
-// ErrorBanner is populated on POST validation failure so the re-render
-// keeps the operator's correction surface in one place.
+// project, mirroring /run/new); Agents includes "" for "use default";
+// Workflows mirrors the new-run form's destination selector (sdlc
+// default, pdlc the other entry today — `moe pdlc new --from-idea` is
+// the CLI face of the same move). ErrorBanner is populated on POST
+// validation failure so the re-render keeps the operator's correction
+// surface in one place.
 type promoteVM struct {
 	Project     string
 	Slug        string
 	Workspaces  []workspaceOption
 	Agents      []string
+	Workflows   []NewRunWorkflow
+	Workflow    string // selected entry, echoed on error re-render
 	ErrorBanner string
 }
 
@@ -731,12 +843,17 @@ func (s *Server) gatherPromoteVM(projectID, slug string) (promoteVM, error) {
 			Label:   info.Project + "/" + info.Name,
 		})
 	}
-	return promoteVM{
+	vm := promoteVM{
 		Project:    projectID,
 		Slug:       slug,
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
-	}, nil
+		Workflows:  s.opts.NewRunWorkflows,
+	}
+	if len(vm.Workflows) > 0 {
+		vm.Workflow = vm.Workflows[0].Name
+	}
+	return vm, nil
 }
 
 // handlePromoteForm renders the per-idea promote page (GET). 404 when
@@ -774,13 +891,14 @@ func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "promote.html", vm)
 }
 
-// handlePromote opens the destination sdlc run in-process by calling
-// runopen.Promote, then spawns `moe sdlc design <p>/<newslug>` as a
-// PTY-backed agent session and redirects to the new run's page.
-// Opening synchronously means the destination's slug is known before
-// the spawn — no placeholder id, no stdout regex, no rename race.
-// Validation failures re-render the promote page with an inline error
-// banner.
+// handlePromote opens the destination run in-process by calling
+// runopen.Promote with the chosen workflow (sdlc default; the web face
+// of `moe <workflow> new --from-idea`), then spawns
+// `moe <workflow> <first-stage> <p>/<newslug>` as a PTY-backed agent
+// session and redirects to the new run's page. Opening synchronously
+// means the destination's slug is known before the spawn — no
+// placeholder id, no stdout regex, no rename race. Validation failures
+// re-render the promote page with an inline error banner.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -792,6 +910,8 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	}
 	wsName := strings.TrimSpace(r.FormValue("workspace"))
 	agentName := strings.TrimSpace(r.FormValue("agent"))
+	wfName := strings.TrimSpace(r.FormValue("workflow"))
+	fail := func(msg string) { s.renderPromoteError(w, r, projectID, slug, wfName, msg) }
 
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
@@ -809,22 +929,31 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 			http.StatusConflict)
 		return
 	}
+	wf, ok := s.newRunWorkflow(wfName)
+	if !ok {
+		fail("workflow: unknown workflow " + strconv.Quote(wfName))
+		return
+	}
 	if wsName != "" {
 		if err := workspace.ValidateName(wsName); err != nil {
-			s.renderPromoteError(w, r, projectID, slug, "workspace: "+err.Error())
+			fail("workspace: " + err.Error())
+			return
+		}
+		if !wf.Workspace {
+			fail("workspace: only sdlc and hooks accept a workspace binding")
 			return
 		}
 	}
 	// Agent membership rides the hardcoded dropdown set.
 
 	promoted, err := runopen.Promote(s.opts.Root, projectID, slug, runopen.PromoteOptions{
-		Workflow:   promotedWorkflow,
-		FirstStage: promotedFirstStage,
+		Workflow:   wf.Name,
+		FirstStage: wf.FirstStage,
 		Workspace:  wsName,
 		Agent:      agentName,
 	}, s.syncWriter(), s.syncWriter())
 	if err != nil {
-		s.renderPromoteError(w, r, projectID, slug, "promote: "+err.Error())
+		fail("promote: " + err.Error())
 		return
 	}
 	if promoted.MarkErr != nil {
@@ -836,21 +965,24 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	destID := promoted.Run.Project + "/" + promoted.Run.ID
-	args := []string{"sdlc", promotedFirstStage, destID}
+	args := []string{wf.Name, wf.FirstStage, destID}
 	if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		s.renderPromoteError(w, r, projectID, slug, "spawn: "+err.Error())
+		fail("spawn: " + err.Error())
 		return
 	}
 	http.Redirect(w, r, "/run/"+promoted.Run.Project+"/"+promoted.Run.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, msg string) {
+func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, wfName, msg string) {
 	vm, err := s.gatherPromoteVM(projectID, slug)
 	if err != nil {
 		http.Error(w, msg+" (and promote form gather failed: "+err.Error()+")", http.StatusInternalServerError)
 		return
 	}
 	vm.ErrorBanner = msg
+	if wfName != "" {
+		vm.Workflow = wfName
+	}
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, r, "promote.html", vm)
 }
@@ -874,11 +1006,16 @@ func (s *Server) gatherNewRunVM() (newRunVM, error) {
 		})
 	}
 
-	return newRunVM{
+	vm := newRunVM{
 		Projects:   projectIDs,
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
-	}, nil
+		Workflows:  s.opts.NewRunWorkflows,
+	}
+	if len(vm.Workflows) > 0 {
+		vm.Workflow = vm.Workflows[0].Name
+	}
+	return vm, nil
 }
 
 // listProjectIDs returns the sorted set of registered project IDs.

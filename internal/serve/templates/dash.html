@@ -31,7 +31,10 @@
   <section class="dash-section">
     <h2>
       <span>active <span class="count">({{len .Active}})</span></span>
-      <a class="section-action" href="/run/new">new run</a>
+      <span class="section-actions">
+        <a class="section-action" href="/run/new">new run</a>
+        <a class="section-action" href="/run/new?workflow=pdlc">new plan</a>
+      </span>
     </h2>
     {{if .Active}}
     <ul class="rows">

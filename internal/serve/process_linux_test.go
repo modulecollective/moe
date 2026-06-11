@@ -585,6 +585,142 @@ func seedBureaucracy(t *testing.T, projectID string) string {
 	return root
 }
 
+// TestPOSTNewRunPdlcOpensAndSpawnsFrame: the workflow selector routes
+// the open and the spawn — a pdlc submission opens a pdlc run and
+// spawns `moe pdlc frame <id>`, the registry's first ladder stage, with
+// no sdlc anywhere in the args.
+func TestPOSTNewRunPdlcOpensAndSpawnsFrame(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	s := newTestServer(t, Options{
+		Addr:   "127.0.0.1:0",
+		Root:   root,
+		MoeBin: "/bin/echo",
+	})
+
+	form := url.Values{}
+	form.Set("id", "alpha/big-goal")
+	form.Set("workflow", "pdlc")
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	md, err := run.Load(root, "alpha", "big-goal")
+	if err != nil {
+		t.Fatalf("run.Load after POST: %v", err)
+	}
+	if md.Workflow != "pdlc" {
+		t.Errorf("workflow = %q, want pdlc", md.Workflow)
+	}
+	c, ok := s.children.get("alpha/big-goal")
+	if !ok {
+		t.Fatal("child not recorded in registry")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "pdlc frame alpha/big-goal" {
+		t.Errorf("spawn args = %q, want %q", got, "pdlc frame alpha/big-goal")
+	}
+}
+
+// TestPOSTNewRunPdlcRejectsWorkspace: a workspace selection with a
+// non-workspace workflow fails on-page — same refusal the CLI's runNew
+// makes — before anything is opened or spawned.
+func TestPOSTNewRunPdlcRejectsWorkspace(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	form := url.Values{}
+	form.Set("id", "alpha/big-goal")
+	form.Set("workflow", "pdlc")
+	form.Set("workspace", "main-tree")
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "only sdlc and hooks accept") {
+		t.Errorf("banner should carry the workspace refusal, got:\n%s", rr.Body.String())
+	}
+	if _, err := run.Load(root, "alpha", "big-goal"); err == nil {
+		t.Error("refused submission must not open a run")
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("refused submission must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestStageSpawnPOSTOpensSitting: the pdlc sitting chip POSTs
+// /stage/{stage} and serve spawns `moe pdlc <stage> <id>` interactive
+// — the operator-named sitting, no server-side stage re-derivation.
+func TestStageSpawnPOSTOpensSitting(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "big-goal", "pdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/big-goal/stage/prd", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/big-goal" {
+		t.Errorf("Location=%q, want /run/alpha/big-goal", got)
+	}
+	c, ok := s.children.get("alpha/big-goal")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "pdlc prd alpha/big-goal" {
+		t.Errorf("spawn args = %q, want %q", got, "pdlc prd alpha/big-goal")
+	}
+}
+
+// TestPromotePOSTPdlcSpawnsFrame: the promote form's workflow selector
+// routes the destination — promoting an idea into pdlc opens a pdlc
+// run and spawns its frame stage. The web face of
+// `moe pdlc new --from-idea`.
+func TestPromotePOSTPdlcSpawnsFrame(t *testing.T) {
+	root := seedBureaucracy(t, "alpha")
+	seedIdeaRun(t, root, "alpha", "my-idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	form := url.Values{}
+	form.Set("workflow", "pdlc")
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
+	destMD, err := run.Load(root, "alpha", dated)
+	if err != nil {
+		t.Fatalf("destination run.Load: %v", err)
+	}
+	if destMD.Workflow != "pdlc" {
+		t.Errorf("destination workflow = %q, want pdlc", destMD.Workflow)
+	}
+	c, ok := s.children.get("alpha/" + dated)
+	if !ok {
+		t.Fatal("expected child registered under destination slug")
+	}
+	<-c.done
+	want := "pdlc frame alpha/" + dated
+	if got := strings.Join(c.cmd.Args[1:], " "); got != want {
+		t.Errorf("spawn args = %q, want %q", got, want)
+	}
+}
+
 // seedIdeaRun lays down an in-progress idea run at <root>/projects/
 // <p>/runs/<slug>/ with a one-line canvas, then commits. Sufficient
 // fixture for runopen.Promote to load + seed + bump status.

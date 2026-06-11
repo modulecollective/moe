@@ -43,6 +43,15 @@
       </datalist>
     </label>
 
+    {{if .Workflows}}
+    <label>
+      workflow
+      <select name="workflow">
+        {{range .Workflows}}<option value="{{.Name}}"{{if eq .Name $.Workflow}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+
     {{if .Workspaces}}
     <label>
       workspace <span class="hint">(optional; sdlc/hooks only)</span>

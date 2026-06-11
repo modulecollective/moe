@@ -129,6 +129,54 @@ type Options struct {
 	// guard errors into those so serve needn't import the cli package.
 	// Absent means the open route returns 500.
 	OpenChore func(project, name string) (dest ChoreOpen, err error)
+
+	// WorkflowUI returns the serve declaration a workflow made at
+	// registration time — which stage verbs serve may spawn, whether
+	// the cascade trio (advance/ship/chain) applies, whether a close
+	// pipeline exists. ok=false means the workflow declared nothing:
+	// its runs render read-only (canvas links, no chips) and the
+	// stage/advance routes refuse. cli/serve.go wires this to the
+	// cli-side registry so serve carries no per-workflow UI policy of
+	// its own. Absent means the advance/ship/chain and stage-spawn
+	// routes return 500; idea chips (bespoke, not stage-derived) still
+	// render.
+	WorkflowUI func(workflow string) (ui WorkflowUI, ok bool)
+
+	// NewRunWorkflows lists the workflows the /run/new and promote
+	// forms offer, in display order; the first entry is the default
+	// selection. Computed once from the cli-side registry at serve
+	// start (the registry is init-time static). Empty hides the
+	// workflow selector and fails any new-run/promote POST.
+	NewRunWorkflows []NewRunWorkflow
+}
+
+// WorkflowUI is one workflow's declared web affordances, composed
+// cli-side from the workflow registries (see Options.WorkflowUI).
+type WorkflowUI struct {
+	// Stages are the stage verbs serve may spawn for this workflow, in
+	// ladder order. For cascade workflows the run's next stage must be
+	// in this set for the advance trio to render/spawn; for the rest,
+	// each entry renders as a sitting chip POSTing /stage/{stage}.
+	Stages []string
+	// Cascade reports that the workflow's stage verbs accept --ship /
+	// --chain — the advance/ship/chain routes and chips apply.
+	Cascade bool
+	// Close reports that the workflow registered the shared close
+	// pipeline, so the per-run page renders a close-run chip.
+	Close bool
+}
+
+// NewRunWorkflow is one entry in the new-run/promote forms' workflow
+// selector.
+type NewRunWorkflow struct {
+	Name string
+	// FirstStage is the stage verb serve spawns right after opening a
+	// run in this workflow (the registry's first ladder stage).
+	FirstStage string
+	// Workspace reports whether the workflow accepts a workspace
+	// binding (the CLI's "only sdlc and hooks accept --workspace"
+	// rule); the form rejects a workspace selection otherwise.
+	Workspace bool
 }
 
 // Server owns the HTTP listener and the registry of live PTY
@@ -246,13 +294,19 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
-	// Stage advancement for in-progress sdlc runs: /advance spawns the
-	// next stage as a single headless step; /ship spawns it under --ship
-	// (headless cascade through push, ship this run); /chain spawns it
-	// under --chain (ship this run, then ride the whole chain).
+	// Stage advancement for in-progress cascade-workflow (sdlc) runs:
+	// /advance spawns the next stage interactively under the serve
+	// handshake; /ship spawns it under --ship (headless cascade through
+	// push, ship this run); /chain spawns it under --chain (ship this
+	// run, then ride the whole chain).
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
+	// Sitting spawn for non-cascade workflows (pdlc): POST a declared
+	// stage verb to open `moe <workflow> <stage> <id>` interactively —
+	// the operator picks the session up in Claude Code on the web, same
+	// as a design session.
+	s.router.HandleFunc("POST /run/{project}/{slug}/stage/{stage}", s.handleStageSpawn)
 	// Chore detail page + open action. A chore isn't a run, so it has
 	// its own /chore namespace; "open" mints a fresh run of the chore's
 	// configured workflow (the analog of promoting an idea).

@@ -130,6 +130,13 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   white-space: nowrap;
 }
 .section-action { border-bottom: 1px solid var(--hairline); }
+/* Sibling header chips (new run · new plan) sit flush together on the
+   right edge of the section h2. */
+.section-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
 .theme-toggle {
   width: 2rem;
   height: 2rem;
@@ -238,6 +245,13 @@ section.actions {
 .action:hover, .action:focus {
   border-color: var(--muted);
   color: var(--fg);
+}
+/* The suggested next move among sibling chips — a pdlc plan's
+   re-derived next stage. Solid border in the foreground color so it
+   reads as "start here" without shouting. */
+.action.primary {
+  border-color: var(--fg);
+  font-weight: 600;
 }
 /* A blocked chore's open affordance: rendered inert (no link/button) with
    the reason inline, so it reads as "can't open yet, here's why" rather

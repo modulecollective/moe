@@ -19,7 +19,7 @@
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> · promote to sdlc</div>
+      <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> · promote</div>
     </div>
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
   </header>
@@ -27,6 +27,15 @@
   {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
 
   <form method="post" action="/run/{{.Project}}/{{.Slug}}/promote" class="new-run">
+    {{if .Workflows}}
+    <label>
+      workflow
+      <select name="workflow">
+        {{range .Workflows}}<option value="{{.Name}}"{{if eq .Name $.Workflow}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+
     {{if .Workspaces}}
     <label>
       workspace <span class="hint">(optional)</span>
