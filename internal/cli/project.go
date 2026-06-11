@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("project", "manage projects (subcommands: add, list, remove)")
+	g := NewCommandGroup("project", "manage projects")
 	g.Register(&Command{
 		Name:    "add",
 		Summary: "register a project from a remote git URL",

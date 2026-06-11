@@ -68,7 +68,7 @@ const pdlcPrdDoc = "prd"
 const pdlcChunkDoc = "chunk"
 
 func init() {
-	g := NewCommandGroup(pdlcWorkflow, "pdlc workflow: new, frame, prd, chunk, close")
+	g := NewCommandGroup(pdlcWorkflow, "pdlc workflow")
 	g.Register(newRunCommand(pdlcWorkflow))
 	g.Register(&Command{
 		Name:    pdlcFrameDoc,

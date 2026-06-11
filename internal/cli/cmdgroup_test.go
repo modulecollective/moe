@@ -129,6 +129,58 @@ func TestCommandGroupHidesHiddenFromUsage(t *testing.T) {
 	}
 }
 
+// The top-level one-liner is generated from the dispatch table —
+// prefix + registered names, registration order, hidden excluded. This
+// is the contract that keeps `moe help` from drifting when verbs are
+// added to a group.
+func TestCommandGroupComposedSummary(t *testing.T) {
+	g := NewCommandGroup("g", "test group")
+	g.Register(&Command{Name: "gamma", Summary: "C", Run: nopRun})
+	g.Register(&Command{Name: "alpha", Summary: "A", Run: nopRun})
+	g.Register(&Command{Name: "secret", Summary: "S", Run: nopRun, Hidden: true})
+	g.Register(&Command{Name: "beta", Summary: "B", Run: nopRun})
+
+	got := g.Command().Summary
+	want := "test group: gamma, alpha, beta"
+	if got != want {
+		t.Fatalf("composed summary = %q, want %q", got, want)
+	}
+}
+
+// printUsage lists subcommands in registration order, matching the
+// composed summary — not alphabetically.
+func TestCommandGroupUsagePreservesRegistrationOrder(t *testing.T) {
+	g := NewCommandGroup("g", "test group")
+	g.Register(&Command{Name: "gamma", Summary: "C", Run: nopRun})
+	g.Register(&Command{Name: "alpha", Summary: "A", Run: nopRun})
+
+	var out, errb bytes.Buffer
+	if code := g.Command().Run(nil, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if gi, ai := strings.Index(got, "gamma"), strings.Index(got, "alpha"); gi < 0 || ai < 0 || gi > ai {
+		t.Fatalf("expected gamma before alpha in usage: %q", got)
+	}
+}
+
+// A Register after RegisterGroup would dispatch fine but never show up
+// in the composed `moe help` one-liner — exactly the drift this
+// machinery exists to prevent — so it panics.
+func TestCommandGroupRegisterAfterRegisterGroupPanics(t *testing.T) {
+	g := NewCommandGroup("__testseal", "test group")
+	g.Register(&Command{Name: "alpha", Summary: "A", Run: nopRun})
+	RegisterGroup(g)
+	defer delete(groups, "__testseal")
+	defer delete(commands, "__testseal")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic on Register after RegisterGroup")
+		}
+	}()
+	g.Register(&Command{Name: "late", Summary: "L", Run: nopRun})
+}
+
 func TestCommandGroupLookup(t *testing.T) {
 	g := NewCommandGroup("g", "test group")
 	alpha := &Command{Name: "alpha", Summary: "A", Run: nopRun}

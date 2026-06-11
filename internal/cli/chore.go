@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("chore", "project chores: list, check, open, skip")
+	g := NewCommandGroup("chore", "project chores")
 	g.Register(&Command{Name: "list", Summary: "list due project chores", Run: runChoreList})
 	g.Register(&Command{Name: "check", Summary: "dry-run chore validation and due-state evaluation", Run: runChoreCheck})
 	g.Register(&Command{Name: "open", Summary: "open the workflow run for a due chore", Run: runChoreOpen})

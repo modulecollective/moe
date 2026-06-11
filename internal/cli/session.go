@@ -23,7 +23,7 @@ import (
 // behind — these subcommands make it discoverable and actionable.
 
 func init() {
-	g := NewCommandGroup("session", "list or clean up leftover stage-session worktrees and branches")
+	g := NewCommandGroup("session", "stage-session worktree admin")
 	g.Register(&Command{
 		Name:    "list",
 		Summary: "list open stage-session worktrees and branches",

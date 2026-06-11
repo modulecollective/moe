@@ -71,7 +71,7 @@ the chat agent does not edit this canvas.
 `
 
 func init() {
-	g := NewCommandGroup(chatWorkflow, "chat workflow: new, chat, close, cat, log")
+	g := NewCommandGroup(chatWorkflow, "chat workflow")
 	g.Register(newRunCommand(chatWorkflow))
 	g.Register(&Command{
 		Name:    chatDoc,

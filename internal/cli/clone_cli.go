@@ -34,7 +34,7 @@ import (
 // operator can copy.
 
 func init() {
-	g := NewCommandGroup("clone", "list or garbage-collect per-run sandbox clones under .moe/clones/")
+	g := NewCommandGroup("clone", "per-run sandbox clone admin (.moe/clones/)")
 	g.Register(&Command{
 		Name:    "list",
 		Summary: "list per-run sandbox clones under .moe/clones/ with their run status",

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // CommandGroup is a top-level verb that dispatches to nested
@@ -18,9 +19,19 @@ import (
 // CommandGroup. See projects/moe/runs/arch-2-workflow-overload-*
 // for the design that split these.
 type CommandGroup struct {
-	Name     string
+	Name string
+	// Summary is a short prefix ("sdlc workflow"); Command() appends
+	// the registered verb list, so the top-level one-liner can't
+	// drift from the dispatch table.
 	Summary  string
 	commands map[string]*Command
+	// order holds registration order — the source for both the
+	// composed summary and printUsage, so the two listings agree.
+	order []string
+	// sealed flips when RegisterGroup hands the group to the top-level
+	// table; a Register after that would silently miss the composed
+	// summary, so it panics instead.
+	sealed bool
 }
 
 // NewCommandGroup constructs an empty group. Callers add subcommands
@@ -34,12 +45,18 @@ func NewCommandGroup(name, summary string) *CommandGroup {
 }
 
 // Register adds a subcommand to the group's dispatch table. Panics on
-// duplicate names so conflicts surface at process start.
+// duplicate names, and on registration after RegisterGroup (the
+// composed top-level summary is built at that point — a late verb
+// would dispatch fine but never show up in `moe help`).
 func (g *CommandGroup) Register(c *Command) {
+	if g.sealed {
+		panic("cli: Register after RegisterGroup on group " + g.Name)
+	}
 	if _, dup := g.commands[c.Name]; dup {
 		panic("cli: duplicate subcommand " + g.Name + " " + c.Name)
 	}
 	g.commands[c.Name] = c
+	g.order = append(g.order, c.Name)
 }
 
 // Lookup returns the registered subcommand named sub, or nil if no
@@ -52,13 +69,28 @@ func (g *CommandGroup) Lookup(sub string) *Command {
 
 // Command returns the group as a top-level Command — same shape as any
 // other entry in the cli.commands table. The returned Command's Run
-// handler expects args positioned after `moe <Name>`.
+// handler expects args positioned after `moe <Name>`. Its Summary is
+// the group prefix plus the generated verb list.
 func (g *CommandGroup) Command() *Command {
 	return &Command{
 		Name:    g.Name,
-		Summary: g.Summary,
+		Summary: g.Summary + ": " + strings.Join(g.visibleNames(), ", "),
 		Run:     g.run,
 	}
+}
+
+// visibleNames returns non-hidden subcommand names in registration
+// order. Both the composed top-level summary and the expanded usage
+// listing read from here, so they can't disagree.
+func (g *CommandGroup) visibleNames() []string {
+	names := make([]string, 0, len(g.order))
+	for _, n := range g.order {
+		if g.commands[n].Hidden {
+			continue
+		}
+		names = append(names, n)
+	}
+	return names
 }
 
 func (g *CommandGroup) run(args []string, stdout, stderr io.Writer) int {
@@ -84,15 +116,7 @@ func (g *CommandGroup) printUsage(out io.Writer) {
 	moePrintf(out, "usage: moe %s <subcommand> [args...]\n", g.Name)
 	moePrintln(out, "")
 	moePrintln(out, "subcommands:")
-	names := make([]string, 0, len(g.commands))
-	for n, c := range g.commands {
-		if c.Hidden {
-			continue
-		}
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
+	for _, n := range g.visibleNames() {
 		moePrintf(out, "  %-14s  %s\n", n, g.commands[n].Summary)
 	}
 }
@@ -101,11 +125,13 @@ var groups = map[string]*CommandGroup{}
 
 // RegisterGroup adds g to the group registry and also adds g.Command()
 // to the top-level command table — one call covers both. Panics on
-// duplicate names. Symmetric with RegisterWorkflow.
+// duplicate names. Seals the group: the composed summary is built
+// here, so later Register calls panic. Symmetric with RegisterWorkflow.
 func RegisterGroup(g *CommandGroup) {
 	if _, dup := groups[g.Name]; dup {
 		panic("cli: duplicate group " + g.Name)
 	}
+	g.sealed = true
 	groups[g.Name] = g
 	Register(g.Command())
 }

@@ -14,7 +14,7 @@ const choresWorkflow = "chores"
 const choresCodeDoc = "code"
 
 func init() {
-	g := NewCommandGroup(choresWorkflow, "chores workflow: new, code, close")
+	g := NewCommandGroup(choresWorkflow, "chores workflow")
 	g.Register(newRunCommand(choresWorkflow))
 	g.Register(&Command{
 		Name:    choresCodeDoc,

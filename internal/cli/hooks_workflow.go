@@ -23,7 +23,7 @@ const hooksWorkflow = "hooks"
 const hooksCodeDoc = "code"
 
 func init() {
-	g := NewCommandGroup(hooksWorkflow, "hooks workflow: new, code, close")
+	g := NewCommandGroup(hooksWorkflow, "hooks workflow")
 	g.Register(newRunCommand(hooksWorkflow))
 	g.Register(&Command{
 		Name:    hooksCodeDoc,

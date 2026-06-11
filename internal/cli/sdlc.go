@@ -30,7 +30,7 @@ import (
 const sdlcCloseSubject = "Close sdlc run %s/%s"
 
 func init() {
-	g := NewCommandGroup("sdlc", "sdlc workflow: new, design, code, test, push")
+	g := NewCommandGroup("sdlc", "sdlc workflow")
 	g.Register(newRunCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "design",

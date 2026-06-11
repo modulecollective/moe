@@ -53,7 +53,7 @@ func kbWikiBuilder(root string, md *run.Metadata) (*wiki.Config, error) {
 }
 
 func init() {
-	g := NewCommandGroup("kb", "knowledge-base workflow: new, research, summarize")
+	g := NewCommandGroup("kb", "knowledge-base workflow")
 	g.Register(newRunCommand("kb"))
 	g.Register(&Command{
 		Name:    "research",

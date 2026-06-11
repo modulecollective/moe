@@ -24,10 +24,10 @@ import (
 // (hooks_workflow.go) when an edit should actually land in history.
 
 func init() {
-	g := NewCommandGroup("hook", "exercise one project hook event in a transient sandbox; pair with `moe hooks` for journaled edits")
+	g := NewCommandGroup("hook", "exercise one project hook event in a transient sandbox")
 	g.Register(&Command{
 		Name:    "fire",
-		Summary: "run projects/<project>/hooks/<event>.d/* once in a fresh transient sandbox",
+		Summary: "run projects/<project>/hooks/<event>.d/* once in a fresh transient sandbox; pair with `moe hooks` for journaled edits",
 		Run:     runHookFire,
 	})
 	RegisterGroup(g)

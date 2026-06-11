@@ -38,7 +38,7 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("chain", "manage run chains: edit, clear")
+	g := NewCommandGroup("chain", "manage run chains")
 	g.Register(&Command{
 		Name:    "edit",
 		Summary: "rebase-style editor over active sdlc runs; reorder to chain",

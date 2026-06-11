@@ -35,7 +35,7 @@ import (
 // registered here.
 
 func init() {
-	g := NewCommandGroup("idea", "idea workflow: new, edit, close, list, cat")
+	g := NewCommandGroup("idea", "idea workflow")
 	g.Register(&Command{
 		Name:    "new",
 		Summary: "capture a new idea (opens $EDITOR, or --chat for Claude Code)",

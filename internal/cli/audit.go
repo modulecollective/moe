@@ -40,7 +40,7 @@ const auditPlanDoc = "plan"
 const auditReportDoc = "report"
 
 func init() {
-	g := NewCommandGroup(auditWorkflow, "audit workflow: new, plan, report")
+	g := NewCommandGroup(auditWorkflow, "audit workflow")
 	g.Register(newRunCommand(auditWorkflow))
 	g.Register(&Command{
 		Name:    auditPlanDoc,

@@ -65,7 +65,7 @@ func writeAlignedRows(w io.Writer, rows [][]string) {
 // `workspace rebase` verb needed for the common case.
 
 func init() {
-	g := NewCommandGroup("workspace", "named-workspace administration: new, list, shell, remove, release, refresh")
+	g := NewCommandGroup("workspace", "named-workspace administration")
 	g.Register(&Command{
 		Name:    "new",
 		Summary: "create a named workspace for a project (idempotent)",

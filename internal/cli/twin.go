@@ -124,7 +124,7 @@ var twinStageOrder = []string{
 }
 
 func init() {
-	g := NewCommandGroup("twin", "digital-twin verbs: reflect, vision, architecture, patterns, operations, glossary, finalize, claim, close")
+	g := NewCommandGroup("twin", "digital-twin verbs")
 	// `moe twin reflect <project>` is the user-facing entry. It mints
 	// a fresh run and dispatches the first stage; the chain prompt
 	// drives the rest of the ladder.
