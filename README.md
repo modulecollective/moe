@@ -317,16 +317,16 @@ goal shipped or died, not that a sitting ended.
 `moe idea` is the cheap backlog surface:
 
 ```sh
-moe idea new [--chat] <project>/<slug>
-moe idea edit [--chat] <project>/<slug>
+moe idea new <project>/<slug>
+moe idea edit <project>/<slug>
 moe idea list <project>
 moe idea move <project>/<slug> <to-project>
 moe idea close <project>/<slug>
 moe idea reopen <project>/<slug>
 ```
 
-By default, idea capture and editing use `$EDITOR`; pass `--chat` when you want
-an agent to help shape the note. Every other workflow's `new` accepts
+Idea capture and editing use `$EDITOR`. Use `moe chat` when you want an agent
+to groom the backlog or help shape notes. Every other workflow's `new` accepts
 `--from-idea <project>/<slug>`, promoting the idea into a run and preserving
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.

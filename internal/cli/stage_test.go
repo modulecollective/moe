@@ -40,9 +40,8 @@ func newTestBureaucracy(t *testing.T) string {
 // build a system prompt, and are exempt by design.
 func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
 	// `push` is operational (no stage session). `idea` never enters a
-	// stage session either — `moe idea` verbs drive it directly and
-	// build their own prompt via buildIdeaChatPrompt, so no per-stage
-	// fragment is shipped for it.
+	// stage session either — `moe idea` verbs are editor-backed, so no
+	// per-stage fragment is shipped for it.
 	noFragmentStages := map[string]bool{"push": true, "idea": true}
 	for _, wfName := range WorkflowNames() {
 		// Other tests register throwaway workflows with a "test-"

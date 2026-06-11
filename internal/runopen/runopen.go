@@ -350,9 +350,9 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 // destination's design stage and must not be rewritten through this
 // path).
 //
-// The CLI's `moe idea edit` does not migrate to EditIdea: its editor /
-// chat flow writes the file in place via $EDITOR or runIdeaChat and a
-// body-in API doesn't fit cleanly. The trailer block is the same shape
+// The CLI's `moe idea edit` does not migrate to EditIdea: its editor
+// flow writes the file in place via $EDITOR and a body-in API doesn't
+// fit cleanly. The trailer block is the same shape
 // (work: update idea, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
 func EditIdea(root, projectID, slug, body string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)

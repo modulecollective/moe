@@ -1217,9 +1217,8 @@ func NextFreeID(root, projectID, base string) (string, error) {
 // turns into a fresh run's stage-satisfaction check.
 //
 // Exported so verbs that pop an editor before run.New (idea new's
-// --chat / $EDITOR session is a multi-minute window) can pre-flight
-// the slug and refuse before any operator effort goes into the
-// tempfile.
+// $EDITOR session is a multi-minute window) can pre-flight the slug
+// and refuse before any operator effort goes into the tempfile.
 func SlugTaken(root, projectID, slug string) (bool, error) {
 	if _, err := os.Stat(filepath.Join(root, Dir(projectID, slug))); err == nil {
 		return true, nil

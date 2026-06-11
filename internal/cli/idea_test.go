@@ -55,18 +55,6 @@ func TestIdeaRegistered(t *testing.T) {
 	}
 }
 
-// TestBuildIdeaChatPromptSectionsEndWithNewline pins the same
-// trailing-newline contract as TestBuildSystemPromptSectionsEndWithNewline,
-// but for buildIdeaChatPrompt's three-section join (soul, idea stage
-// fragment, inline operational core). The idea builder is the odd
-// one of the five — no *wiki.Config and an inline core literal — so
-// a regression in the literal would silently drop the trailing
-// newline; this test is the tripwire.
-func TestBuildIdeaChatPromptSectionsEndWithNewline(t *testing.T) {
-	got := buildIdeaChatPrompt("/tmp/canvas.md", "capture")
-	assertPromptSectionsEndWithNewline(t, got, 3)
-}
-
 func TestIdeaNewCreatesRunAndCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -325,6 +313,9 @@ func TestIdeaNewRequiresEditor(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "EDITOR") || !strings.Contains(errb.String(), "VISUAL") {
 		t.Fatalf("expected error naming $EDITOR/$VISUAL, got: %q", errb.String())
+	}
+	if strings.Contains(errb.String(), "--chat") {
+		t.Fatalf("editor error should not advertise removed --chat flag: %q", errb.String())
 	}
 	// No run dir should have been written.
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "needs-an-editor")); !os.IsNotExist(err) {
@@ -852,156 +843,6 @@ func TestIdeaCatUsageErrors(t *testing.T) {
 	code := Run([]string{"idea", "cat", "tele"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected exit=2 on missing slug, got %d; stderr=%q", code, errb.String())
-	}
-}
-
-// buildIdeaChatPrompt should include soul.md, the stages/idea/<mode>.md
-// fragment, and the operational core naming the canvas file.
-func TestBuildIdeaChatPromptHasAllSections(t *testing.T) {
-	got := buildIdeaChatPrompt("/tmp/ideas/foo.md", "capture")
-	for _, want := range []string{
-		"/tmp/ideas/foo.md",
-		"Stage: idea capture",
-		"pre-design shelf",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("capture prompt missing %q:\n%s", want, got)
-		}
-	}
-	got = buildIdeaChatPrompt("/tmp/ideas/bar.md", "refine")
-	if !strings.Contains(got, "Stage: idea refine") {
-		t.Fatalf("refine prompt missing refine fragment:\n%s", got)
-	}
-}
-
-// TestIdeaChatRequestShape pins the run-less agent.Request idea chat
-// hands the agent seam: no run metadata (so no transcript mirroring),
-// a fresh session, the mode's kickoff as the auto-sent first message,
-// and an explicit AddDir only when the canvas sits outside the
-// bureaucracy root (the `new` flow tempfile). Mirrors the
-// executeArgs-style tests in internal/agent/claude — shape only, no
-// agent binary spawned.
-func TestIdeaChatRequestShape(t *testing.T) {
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "content.md")
-
-	req := ideaChatRequest(root, outside, "capture", "sid-123")
-	if req.Metadata != nil {
-		t.Fatalf("Metadata = %v, want nil", req.Metadata)
-	}
-	if !req.NewSession || req.SessionID != "sid-123" {
-		t.Fatalf("NewSession=%v SessionID=%q, want true / sid-123", req.NewSession, req.SessionID)
-	}
-	if req.Root != root {
-		t.Fatalf("Root = %q, want %q", req.Root, root)
-	}
-	if !strings.Contains(req.InitialPrompt, "just captured a new idea") {
-		t.Fatalf("capture kickoff missing from InitialPrompt: %q", req.InitialPrompt)
-	}
-	if !strings.Contains(req.Prompt, outside) {
-		t.Fatalf("system prompt should name the canvas file: %q", req.Prompt)
-	}
-	if wantDir := filepath.Dir(outside); len(req.AddDirs) != 1 || req.AddDirs[0] != wantDir {
-		t.Fatalf("AddDirs = %v, want [%s]", req.AddDirs, wantDir)
-	}
-
-	refine := ideaChatRequest(root, filepath.Join(root, "content.md"), "refine", "sid-456")
-	if !strings.Contains(refine.InitialPrompt, "existing idea to refine") {
-		t.Fatalf("refine kickoff missing from InitialPrompt: %q", refine.InitialPrompt)
-	}
-	if len(refine.AddDirs) != 0 {
-		t.Fatalf("canvas directly under root should add no extra dirs, got %v", refine.AddDirs)
-	}
-}
-
-// --chat bypasses the $EDITOR gate. The fake claude writes to the path
-// passed in on its command line (the tempfile canvas, before run.New
-// moves the body into place).
-func TestIdeaNewChatSkipsEditorGate(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	noEditor(t)
-
-	// The kickoff passes the canvas path as the last arg. The fake
-	// pulls it out of --append-system-prompt instead: the prompt
-	// contains a line `  <abs path>` right under "Your canvas is the
-	// single file:". Extracting it this way keeps the fake independent
-	// of where os.MkdirTemp actually lands the tempfile.
-	fakeClaudeOnPath(t, `#!/bin/sh
-next_is_prompt=0
-prompt=
-for a in "$@"; do
-  if [ "$next_is_prompt" = "1" ]; then
-    prompt=$a
-    next_is_prompt=0
-  fi
-  case "$a" in
-    --append-system-prompt) next_is_prompt=1 ;;
-  esac
-done
-# Grab the line after "Your canvas is the single file:" and trim it.
-f=$(printf '%s' "$prompt" | awk '/Your canvas is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
-if [ -n "$f" ] && [ -f "$f" ]; then
-  printf 'written by fake claude\n' >> "$f"
-fi
-exit 0
-`)
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "new", "--chat", "tele/chat-capture"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "captured idea tele/chat-capture") {
-		t.Fatalf("missing capture confirmation: stdout=%q stderr=%q", out.String(), errb.String())
-	}
-	body, err := os.ReadFile(ideaCanvas(root, "tele", "chat-capture"))
-	if err != nil {
-		t.Fatalf("idea canvas missing: %v", err)
-	}
-	if !strings.Contains(string(body), "written by fake claude") {
-		t.Fatalf("expected fake-claude edit on disk: %q", body)
-	}
-}
-
-func TestIdeaEditChatSkipsEditorGate(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	stubEditor(t)
-	if code := Run([]string{"idea", "new", "tele/chat-refine"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-		t.Fatalf("setup capture failed")
-	}
-	noEditor(t)
-
-	// On edit the canvas is at its final path, so glob under runs/.
-	fakeClaudeOnPath(t, `#!/bin/sh
-for f in "$PWD"/projects/*/runs/*/documents/idea/content.md; do
-  [ -f "$f" ] && printf '\nrefined by fake claude\n' >> "$f"
-done
-exit 0
-`)
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "edit", "--chat", "tele/chat-refine"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "refined idea tele/chat-refine") {
-		t.Fatalf("missing refine confirmation: %q", out.String())
-	}
-	body, err := os.ReadFile(ideaCanvas(root, "tele", "chat-refine"))
-	if err != nil {
-		t.Fatalf("idea canvas missing: %v", err)
-	}
-	if !strings.Contains(string(body), "refined by fake claude") {
-		t.Fatalf("expected fake-claude edit on disk: %q", body)
 	}
 }
 

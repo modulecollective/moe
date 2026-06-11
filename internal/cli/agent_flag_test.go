@@ -44,10 +44,6 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
 		{"twin claim", []string{"twin", "claim", "--agent=gpt", "moe"}},
 		{"kb lint", []string{"kb", "lint", "--agent=gpt", "moe"}},
-		// idea --chat verbs — run-less sessions on the flag → $MOE_AGENT
-		// → claude ladder.
-		{"idea new", []string{"idea", "new", "--agent=gpt", "--chat", "moe/x"}},
-		{"idea edit", []string{"idea", "edit", "--agent=gpt", "--chat", "moe/x"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,6 +54,33 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 			}
 			if !strings.Contains(errb.String(), "unknown backend") {
 				t.Fatalf("%s: expected unknown-backend error, got: %q", tc.name, errb.String())
+			}
+		})
+	}
+}
+
+func TestIdeaVerbsRejectAgentFlagsAsUnknown(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"new agent", []string{"idea", "new", "--agent=gpt", "moe/x"}},
+		{"new chat", []string{"idea", "new", "--chat", "moe/x"}},
+		{"edit agent", []string{"idea", "edit", "--agent=gpt", "moe/x"}},
+		{"edit chat", []string{"idea", "edit", "--chat", "moe/x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := Run(tc.args, &out, &errb)
+			if code != 2 {
+				t.Fatalf("%s: exit=%d, want 2; stderr=%q", tc.name, code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "flag provided but not defined") {
+				t.Fatalf("%s: expected unknown-flag error, got: %q", tc.name, errb.String())
+			}
+			if strings.Contains(errb.String(), "unknown backend") {
+				t.Fatalf("%s: idea flags should fail in parsing, not backend lookup: %q", tc.name, errb.String())
 			}
 		})
 	}

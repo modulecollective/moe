@@ -35,24 +35,38 @@ it matters, and any constraints the conversation surfaced. Don't design
 the solution; that's the sdlc design stage's job if the idea ever gets
 promoted.
 
-`moe idea new` opens `$EDITOR` by default. In a chat session there's no
-editor to drop into, so pass `--chat` to draft the idea body in a short
-agent session instead:
+`moe idea new` opens `$EDITOR` and commits the resulting note. From an
+agent session, use a temporary editor script so the command stays
+non-interactive:
 
-```
-moe idea new --chat <project>/<slug>
+```sh
+tmp=$(mktemp)
+cat >"$tmp" <<'EOF'
+#!/bin/sh
+cat >"$1" <<'BODY'
+# <slug>
+
+- <what to remember>
+- <constraint or context>
+BODY
+EOF
+chmod +x "$tmp"
+EDITOR="$tmp" moe idea new <project>/<slug>
+rm -f "$tmp"
 ```
 
 ## Refine an existing idea
 
 ```
-moe idea edit <project>/<slug>          # opens $EDITOR
-moe idea edit --chat <project>/<slug>   # drafts in an agent session
+moe idea edit <project>/<slug>
 ```
 
 Use this to sharpen a captured idea the conversation revisited — tighten
 the problem statement, add a constraint, record a decision. Same rule:
 refine the *what*, leave the *how* to design.
+
+For non-interactive edits, use the same temporary-editor pattern. The
+script receives the canvas path as `$1`; modify that file and exit 0.
 
 ## Close / reopen
 

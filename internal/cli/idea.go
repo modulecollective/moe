@@ -9,10 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	moe "github.com/modulecollective/moe"
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -27,7 +24,7 @@ import (
 // dedicated single-stage workflow (dash.IdeaWorkflow, dash.IdeaDocID) so
 // the slug namespace, dash bucketing, and trailer conventions are the
 // same as sdlc/kb. The distinguishing discipline: `moe idea` verbs
-// never launch an agent unless --chat is passed — capture stays cheap.
+// never launch an agent — capture stays cheap.
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
 // workflow's top-level form. The Workflow registration is a separate
@@ -39,12 +36,12 @@ func init() {
 	g := NewCommandGroup("idea", "idea workflow")
 	g.Register(&Command{
 		Name:    "new",
-		Summary: "capture a new idea (opens $EDITOR, or --chat for an agent session)",
+		Summary: "capture a new idea in $EDITOR",
 		Run:     runIdeaNew,
 	})
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "refine a captured idea ($EDITOR, or --chat for an agent session)",
+		Summary: "refine a captured idea in $EDITOR",
 		Run:     runIdeaEdit,
 		argKind: argIdea,
 	})
@@ -99,10 +96,8 @@ func init() {
 func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	chat := fs.Bool("chat", false, "open an agent session on the new idea instead of $EDITOR")
-	agentOverride := fs.String("agent", "", "override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea new [--chat] [--agent <name>] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea new <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -111,12 +106,6 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -140,8 +129,8 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea new needs an editor")
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea new needs an editor")
 		return 1
 	}
 
@@ -167,7 +156,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Write the stub to a tempfile outside the bureaucracy tree so the
-	// editor/chat flow doesn't dirty it. We pass the edited body into
+	// editor flow doesn't dirty it. We pass the edited body into
 	// run.New as seed content — run.New writes the canvas at its
 	// canonical location and commits run.json + canvas atomically.
 	tmpDir, err := os.MkdirTemp("", "moe-idea-new-")
@@ -176,13 +165,12 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Default-clean: cleanup happens unless a post-editor failure
-	// flips keepTmp. The editor/chat session is a multi-minute window
-	// (a --chat agent session can run far longer), so anything that fails after
-	// the operator may have written content keeps the tempfile and
-	// names its absolute path on stderr — the pre-flight above closes
-	// the common collision case, this is the safety net for whatever
-	// races slip through (concurrent harvest, late-arriving error
-	// from run.New).
+	// flips keepTmp. The editor session is a multi-minute window, so
+	// anything that fails after the operator may have written content
+	// keeps the tempfile and names its absolute path on stderr — the
+	// pre-flight above closes the common collision case, this is the
+	// safety net for whatever races slip through (concurrent harvest,
+	// late-arriving error from run.New).
 	keepTmp := false
 	defer func() {
 		if !keepTmp {
@@ -195,18 +183,10 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *chat {
-		if code := runIdeaChat(root, tmpPath, "capture", *agentOverride, stdout, stderr); code != 0 {
-			keepTmp = true
-			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-			return code
-		}
-	} else {
-		if code := launchEditor(tmpPath, stdout, stderr); code != 0 {
-			keepTmp = true
-			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-			return code
-		}
+	if code := launchEditor(tmpPath, stdout, stderr); code != 0 {
+		keepTmp = true
+		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
+		return code
 	}
 
 	body, err := os.ReadFile(tmpPath)
@@ -292,10 +272,8 @@ func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	chat := fs.Bool("chat", false, "open an agent session on the idea instead of $EDITOR")
-	agentOverride := fs.String("agent", "", "override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit [--chat] [--agent <name>] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea edit <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -304,12 +282,6 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -334,8 +306,8 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	if !*chat && os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea edit needs an editor")
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea edit needs an editor")
 		return 1
 	}
 
@@ -345,14 +317,8 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *chat {
-		if code := runIdeaChat(root, abs, "refine", *agentOverride, stdout, stderr); code != 0 {
-			return code
-		}
-	} else {
-		if code := launchEditor(abs, stdout, stderr); code != 0 {
-			return code
-		}
+	if code := launchEditor(abs, stdout, stderr); code != 0 {
+		return code
 	}
 
 	docDir := run.DocDir(projectID, slug, dash.IdeaDocID)
@@ -646,100 +612,6 @@ func requireCleanTree(root string) error {
 		return fmt.Errorf("working tree has uncommitted changes; commit or stash first")
 	}
 	return nil
-}
-
-// runIdeaChat launches an interactive agent session on the idea
-// canvas. mode is "capture" (new idea) or "refine" (existing idea) and
-// selects which stages/idea fragment seeds the system prompt.
-// agentOverride is the raw --agent flag value; ideas carry no run.json,
-// so the backend ladder here is flag → $MOE_AGENT → claude. Unlike
-// stage-session chats this one is one-shot: Metadata nil skips
-// transcript mirroring, the minted session id is discarded, no
-// per-turn commits. When the operator exits the agent, the caller
-// stages & commits whatever landed on disk.
-func runIdeaChat(root, abs, mode, agentOverride string, stdout, stderr io.Writer) int {
-	a, err := agent.Get(resolveAgentName(agentOverride, ""))
-	if err != nil {
-		moePrintf(stderr, "idea: %v\n", err)
-		return 1
-	}
-	sessionID, err := run.NewSessionID()
-	if err != nil {
-		moePrintf(stderr, "idea: %v\n", err)
-		return 1
-	}
-	req := ideaChatRequest(root, abs, mode, sessionID)
-	req.Stdin = os.Stdin
-	req.Stdout = os.Stdout
-	req.Stderr = os.Stderr
-	if _, err := a.Execute(req); err != nil {
-		moePrintf(stderr, "idea: chat session: %v\n", err)
-		return 1
-	}
-	return 0
-}
-
-// ideaChatRequest assembles the run-less agent.Request for one idea
-// chat turn. Kept apart from runIdeaChat so the request shape can be
-// exercised in tests without shelling out to an agent binary.
-func ideaChatRequest(root, abs, mode, sessionID string) agent.Request {
-	var kickoff string
-	switch mode {
-	case "capture":
-		kickoff = "The operator just captured a new idea. Read the canvas " +
-			"file first. If the title is ambiguous, ask one clarifying " +
-			"question; otherwise write a terse body (one to ten bullets) " +
-			"directly to the file and stop."
-	case "refine":
-		kickoff = "The operator just opened an existing idea to refine. " +
-			"Read the canvas file first, then ask what they'd like to " +
-			"sharpen. Wait for their reply before editing."
-	}
-
-	req := agent.Request{
-		Root:          root,
-		SessionID:     sessionID,
-		NewSession:    true,
-		Prompt:        buildIdeaChatPrompt(abs, mode),
-		InitialPrompt: kickoff,
-	}
-	// In `new` flow the canvas is a tempfile outside the repo; give
-	// the agent explicit access to its parent so the edit permission
-	// sandbox doesn't block the write. For `edit` flow the canvas
-	// lives under root and this is a harmless duplicate add.
-	if canvasDir := filepath.Dir(abs); canvasDir != "" && canvasDir != root {
-		req.AddDirs = []string{canvasDir}
-	}
-	return req
-}
-
-// buildIdeaChatPrompt assembles the --append-system-prompt payload for
-// an idea chat session: soul → stages/idea/<mode>.md → a minimal
-// operational core naming the canvas file. Deliberately narrower than
-// buildSystemPrompt (used by stage sessions), which is tied to
-// run.Metadata and per-document thread files that ideas don't carry
-// a live agent session for.
-func buildIdeaChatPrompt(abs, mode string) string {
-	var sections []string
-	if soul := moe.Soul(); soul != "" {
-		sections = append(sections, soul)
-	}
-	if frag := moe.Stage(dash.IdeaWorkflow, mode); frag != "" {
-		sections = append(sections, frag)
-	}
-	sections = append(sections, fmt.Sprintf(
-		`You are helping the operator capture or refine an *idea* in a
-Ministry of Everything bureaucracy repo. Ideas are a pre-design shelf:
-terse, unstructured, meant to be cheap to record.
-
-Your canvas is the single file:
-  %s
-
-Edit the file directly — do not propose a diff. When the idea is
-captured (or the operator says they're done refining), stop. Do not
-design, plan, or open follow-ups.
-`, abs))
-	return strings.Join(sections, "\n---\n\n")
 }
 
 // launchEditor opens path in $VISUAL or $EDITOR with stdio wired to
