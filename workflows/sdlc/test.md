@@ -25,12 +25,14 @@ Two gaps that code stage can't reliably close on its own:
 
 ## What to do
 
-- **Read the code canvas's `## Test plan` as your baseline.** That
-  plan names what to exercise, what's outside automated coverage,
-  and what end-to-end paths the code stage thinks matter. Treat it
-  as the contract for what counts as "verified." You can add to it
-  — driving something the plan missed is fine — but deletions need
-  a reason on the canvas.
+- **Read the code canvas's `## Test plan` and the review canvas as
+  your baseline.** The plan names what to exercise, what's outside
+  automated coverage, and what end-to-end paths the code stage thinks
+  matter. The review canvas may name blocking issues or follow-up
+  concerns that shape what needs verification. Treat them together as
+  the contract for what counts as "verified." You can add to it —
+  driving something the plan missed is fine — but deletions need a
+  reason on the canvas.
 - **Run the deterministic checks the project provides.** Lint,
   unit tests, type checks — whatever the project ships. Cite the
   command and the result on the canvas. The hook chain will run
@@ -91,8 +93,19 @@ Two gaps that code stage can't reliably close on its own:
 Your canvas opens with this skeleton. Fill each section as you
 go; don't strip the headings.
 
-```
+````
 # Test
+
+## Gate
+
+```json
+{"status":"blocked"}
+```
+
+Allowed values: "ready" or "blocked". Use "blocked" for known
+failures or unresolved issues that should halt push; do not block
+merely because some surfaces are explicitly listed under `What
+wasn't verified`.
 
 ## What was verified
 (commands run, end-to-end paths driven, what passed — cite and
@@ -105,10 +118,11 @@ acceptable for pure-backend work.)
 
 ## Fixes applied during this stage
 (one row per in-place fix; empty if none)
-```
+````
 
-The first two sections are load-bearing. The stage refuses to
-advance with either left empty — silence on what wasn't verified
+The gate block and first two evidence sections are load-bearing.
+The stage refuses to advance unless the gate says `{"status":"ready"}`
+and both evidence sections are filled. Silence on what wasn't verified
 reads as "skipped," which is what test stage exists to prevent.
 
 ### Anti-theater rules

@@ -327,7 +327,7 @@ func renderPromptLegend(opts []promptOption) string {
 func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	// Surface the just-finished stage's canvas above the prompt so the
 	// operator reads it before authorising the next stage. The pairing
-	// is the workflow's prereq edge — design → code, code → test,
+	// is the workflow's prereq edge — design → code, code → review,
 	// vision → architecture, …, glossary → finalize. Same shape
 	// promptPushNextStage uses for test → push. Falls back to the
 	// hardcoded design/code mapping when the workflow registry isn't
@@ -849,6 +849,9 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		if code != 0 {
 			return res, code
 		}
+		if gateOK, gateCode := checkCascadeStageGate(wf, md, stage, stderr); gateCode != 0 || !gateOK {
+			return res, gateCode
+		}
 	}
 	// `!!` / `!!!` for a workflow without push (twin today) auto-closes the run
 	// after the last stage commits — same operator intent as the sdlc
@@ -881,6 +884,26 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		}
 	}
 	return res, 0
+}
+
+var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, stderr io.Writer) (bool, int) {
+	if !wf.HasStageGate(stage) {
+		return true, 0
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return false, 1
+	}
+	ok, err := wf.CheckStageGate(root, md, stage)
+	if err != nil {
+		moePrintf(stderr, "cascade: %s gate: %v\n", stage, err)
+		return false, 1
+	}
+	if !ok {
+		moePrintf(stderr, "cascade: %s gate not satisfied; parked at %s\n", stage, stage)
+		return false, 1
+	}
+	return true, 0
 }
 
 // cascadeShipStep runs the sdlc terminal ship for a `!!` / `!!!` cascade:

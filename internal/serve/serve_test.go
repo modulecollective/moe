@@ -71,7 +71,7 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 			return canvasPath, nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "test", "push"}, nil
+			return []string{"design", "code", "review", "test", "push"}, nil
 		},
 	})
 
@@ -637,7 +637,7 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 				"documents", stage, "content.md"), nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "test", "push"}, nil
+			return []string{"design", "code", "review", "test", "push"}, nil
 		},
 	})
 
@@ -724,7 +724,7 @@ func TestRunPageInProgressRunSurfacesWorktreeCanvas(t *testing.T) {
 				"documents", stage, "content.md"), nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "test", "push"}, nil
+			return []string{"design", "code", "review", "test", "push"}, nil
 		},
 	})
 
@@ -1579,7 +1579,7 @@ var testNewRunWorkflows = []NewRunWorkflow{
 func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	switch workflow {
 	case "sdlc":
-		return WorkflowUI{Stages: []string{"design", "code", "test"}, Cascade: true, Close: true}, true
+		return WorkflowUI{Stages: []string{"design", "code", "review", "test"}, Cascade: true, Close: true}, true
 	case "pdlc":
 		return WorkflowUI{Stages: []string{"frame", "prd", "chunk"}, Perpetual: true, Close: true}, true
 	}

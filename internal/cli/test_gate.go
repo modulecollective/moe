@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -11,12 +12,26 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+func reviewStageGate(root string, md *run.Metadata) (bool, error) {
+	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, "review"))
+	body, err := os.ReadFile(canvas)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	status, ok := stageGateStatus(string(body))
+	return ok && status == "ready", nil
+}
+
 // testStageGate is the satisfiability gate registered on sdlc's test
 // stage. It refuses to advance the run when the test canvas left the
-// two load-bearing sections (What was verified, What wasn't verified)
-// empty or sitting on their seeded placeholder paragraphs — the
-// anti-theater move the design twin records: committing the skeleton
-// without filling it should not count as "tested."
+// JSON gate blocked or left the two load-bearing sections (What was
+// verified, What wasn't verified) empty or sitting on their seeded
+// placeholder paragraphs — the anti-theater move the design twin
+// records: committing the skeleton without filling it should not count
+// as "tested."
 //
 // The "Fixes applied" section is intentionally exempt — it's
 // legitimately empty for clean runs.
@@ -34,7 +49,10 @@ func testStageGate(root string, md *run.Metadata) (bool, error) {
 		return false, err
 	}
 	sections := parseTestCanvasSections(string(body))
-	return testSectionFilled(sections["What was verified"]) &&
+	status, ok := stageGateStatus(string(body))
+	return ok &&
+		status == "ready" &&
+		testSectionFilled(sections["What was verified"]) &&
 		testSectionFilled(sections["What wasn't verified"]), nil
 }
 
@@ -84,6 +102,35 @@ func parseTestCanvasSections(body string) map[string]string {
 	}
 	flush()
 	return out
+}
+
+func stageGateStatus(body string) (string, bool) {
+	sections := parseTestCanvasSections(body)
+	gate := sections["Gate"]
+	lines := strings.Split(gate, "\n")
+	inJSONFence := false
+	var fenced strings.Builder
+	for _, ln := range lines {
+		s := strings.TrimSpace(ln)
+		if !inJSONFence {
+			if s == "```json" {
+				inJSONFence = true
+			}
+			continue
+		}
+		if s == "```" {
+			var payload struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal([]byte(fenced.String()), &payload); err != nil {
+				return "", false
+			}
+			return payload.Status, payload.Status != ""
+		}
+		fenced.WriteString(ln)
+		fenced.WriteByte('\n')
+	}
+	return "", false
 }
 
 // testSectionFilled returns true when section body has at least one

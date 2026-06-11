@@ -92,6 +92,19 @@ func (w *Workflow) RegisterStageGate(stage string, gate StageGate) {
 	w.stageGates[stage] = gate
 }
 
+func (w *Workflow) CheckStageGate(root string, md *run.Metadata, stage string) (bool, error) {
+	gate, ok := w.stageGates[stage]
+	if !ok {
+		return true, nil
+	}
+	return gate(root, md)
+}
+
+func (w *Workflow) HasStageGate(stage string) bool {
+	_, ok := w.stageGates[stage]
+	return ok
+}
+
 // RegisterStage adds a stage name to this workflow's ladder. Panics on
 // duplicate names — same contract the dispatcher uses. Optional prereq
 // stage names record that this stage's satisfaction depends on those

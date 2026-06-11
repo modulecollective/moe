@@ -69,7 +69,7 @@ func TestCompleteTopLevelVerbs(t *testing.T) {
 // the group's own dispatch table for the second word.
 func TestCompleteGroupSubcommands(t *testing.T) {
 	got := completeWords("", []string{"sdlc", ""})
-	for _, want := range []string{"design", "code", "test", "push"} {
+	for _, want := range []string{"design", "code", "review", "test", "push"} {
 		if !slices.Contains(got, want) {
 			t.Fatalf("sdlc subcommands missing %q: %v", want, got)
 		}

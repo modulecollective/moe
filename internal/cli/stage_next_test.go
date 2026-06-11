@@ -33,7 +33,7 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 		{name: "fresh gate", justFinished: "", want: nil},
 		{name: "post design", justFinished: "design", want: []string{"design"}},
 		{name: "post code", justFinished: "code", want: []string{"design", "code"}},
-		{name: "post test", justFinished: "test", want: []string{"design", "code", "test"}},
+		{name: "post test", justFinished: "test", want: []string{"design", "code", "review", "test"}},
 	}
 
 	for _, tc := range cases {
@@ -69,7 +69,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 		want     string
 	}{
 		{name: "override push", override: "push", want: "moe sdlc push tele/fix-it"},
-		{name: "no override uses successor", override: "", want: "moe sdlc test tele/fix-it"},
+		{name: "no override uses successor", override: "", want: "moe sdlc review tele/fix-it"},
 	}
 
 	devnull, err := os.Open(os.DevNull)

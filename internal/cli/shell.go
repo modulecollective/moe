@@ -58,9 +58,9 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 //
 // Sources the cached dev-env from <tree>/.moe/dev-env.env if it
 // exists so the operator's manual spot-check sees the same
-// `DATABASE_URL`, `MOE_HOME`, etc. the agent saw during code/test
+// `DATABASE_URL`, `MOE_HOME`, etc. the agent saw during code/review/test
 // stages. A missing cache means dev-env hooks never ran for this
-// tree (no code/test stage yet, or the project ships no dev-env.d/);
+// tree (no code/review/test stage yet, or the project ships no dev-env.d/);
 // in that case the shell inherits the operator's real env, same as
 // before.
 func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) int {

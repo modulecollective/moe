@@ -25,10 +25,11 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		name string
 		args []string
 	}{
-		// sdlc trio — backfilled validation (the design's "Plus: fix
-		// sdlc design/code/test to validate" subsection).
+		// sdlc stages — backfilled validation (the design's "Plus: fix
+		// sdlc design/code/review/test to validate" subsection).
 		{"sdlc design", []string{"sdlc", "design", "--agent=gpt", "moe/x"}},
 		{"sdlc code", []string{"sdlc", "code", "--agent=gpt", "moe/x"}},
+		{"sdlc review", []string{"sdlc", "review", "--agent=gpt", "moe/x"}},
 		{"sdlc test", []string{"sdlc", "test", "--agent=gpt", "moe/x"}},
 		// Group A — stage-entry verbs gaining --agent.
 		{"twin vision", []string{"twin", "vision", "--agent=gpt", "moe/x"}},

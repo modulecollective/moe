@@ -180,7 +180,7 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
 	}
 	// sdlc close routes through resolveSDLCRunSlug for the
-	// promoted-idea fallback, which emits the design/code/test "run
+	// promoted-idea fallback, which emits the design/code/review/test "run
 	// not found" shape rather than close's prior "does not exist"
 	// wording. Same exit-code contract, more consistent wording.
 	if !strings.Contains(errb.String(), "sdlc close: run not found: tele/ghost") {

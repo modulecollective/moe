@@ -263,10 +263,11 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	// Child's first pending stage is `design` (nothing committed
 	// against the child's docs yet). The chain ride opens the child
 	// there, then the child's own cascadeFromGate walks design → code
-	// → test via openSdlcStage and ships at push. That gives 4
-	// dispatches: parent (code, test), child (design, code, test).
+	// → review → test via openSdlcStage and ships at push. That gives
+	// seven dispatches: parent (code, review, test), child (design,
+	// code, review, test).
 	// push happens via pushFromCascade for both.
-	wantStages := []string{"code", "test", "design", "code", "test"}
+	wantStages := []string{"code", "review", "test", "design", "code", "review", "test"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -274,8 +275,8 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	if !reflect.DeepEqual(gotStages, wantStages) {
 		t.Fatalf("openSdlcStage stages = %v, want %v\nstdout=%q", gotStages, wantStages, stdout.String())
 	}
-	// The child's three dispatches must be against the child run.
-	childInvs := (*openCaptured)[2:]
+	// The child's four dispatches must be against the child run.
+	childInvs := (*openCaptured)[3:]
 	for _, inv := range childInvs {
 		if inv.projectID != "tele" || inv.runID != "child-run" {
 			t.Errorf("child dispatch routed to wrong run: %+v", inv)
@@ -325,11 +326,11 @@ func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
-	// Parent only: code, test, push. The child is never opened.
+	// Parent only: code, review, test, push. The child is never opened.
 	if got := len(*pushCaptured); got != 1 {
 		t.Fatalf("pushFromCascade dispatched %d times, want 1 (`!!` ships this run only)", got)
 	}
-	wantStages := []string{"code", "test"}
+	wantStages := []string{"code", "review", "test"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -408,7 +409,7 @@ func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
 		t.Fatalf("`!!!` at push gate must not dispatch through Command.Run")
 	}
 	// The child opens at design and walks to its own push.
-	wantStages := []string{"design", "code", "test"}
+	wantStages := []string{"design", "code", "review", "test"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -499,7 +500,7 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	t.Chdir(root)
 	// The child starts at design; interrupt it there. Parent starts at
 	// code, so design only ever fires for the child — the parent's own
-	// walk (code, test) is unaffected.
+	// walk (code, review, test) is unaffected.
 	openCaptured := stubOpenSdlcStage(t, map[string]int{"design": exitInterrupted})
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
@@ -511,9 +512,9 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent shipped before the ride; res.shipped must stay true: %+v", res)
 	}
-	// Parent: code, test, push (ship). Child: design only — interrupted
-	// there, so the child's code/test never dispatch.
-	wantStages := []string{"code", "test", "design"}
+	// Parent: code, review, test, push (ship). Child: design only —
+	// interrupted there, so the child's code/review/test never dispatch.
+	wantStages := []string{"code", "review", "test", "design"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -565,8 +566,8 @@ func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent cascade must still ship: %+v", res)
 	}
-	// Child interrupted-free failure: design dispatched, code/test did not.
-	wantStages := []string{"code", "test", "design"}
+	// Child interrupted-free failure: design dispatched, code/review/test did not.
+	wantStages := []string{"code", "review", "test", "design"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -623,7 +624,7 @@ func TestCascadeFromGateSkipsRideWhenChildTerminal(t *testing.T) {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
 	// Only parent's code+test dispatched. No child stages.
-	wantStages := []string{"code", "test"}
+	wantStages := []string{"code", "review", "test"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -671,7 +672,7 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
-	wantStages := []string{"code", "test"}
+	wantStages := []string{"code", "review", "test"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)

@@ -72,6 +72,7 @@ moe project add <repo-url>
 moe sdlc new my-project/add-batch-support
 moe sdlc design my-project/add-batch-support
 moe sdlc code my-project/add-batch-support
+moe sdlc review my-project/add-batch-support
 moe sdlc test my-project/add-batch-support
 moe sdlc push my-project/add-batch-support
 ```
@@ -79,9 +80,10 @@ moe sdlc push my-project/add-batch-support
 The `new` command opens the run and writes the first files into the
 bureaucracy. `design` shapes the request into a reviewable plan. `code` gives
 the agent write access inside an isolated clone of the target project and
-requires it to commit the implementation there. `test` verifies the behavior
-and records what was run. `push` fast-forwards the target project's default
-branch, or opens a PR with `--pr`.
+requires it to commit the implementation there. `review` gives the committed
+diff an independent code-review pass before verification. `test` verifies the
+behavior and records what was run. `push` fast-forwards the target project's
+default branch, or opens a PR with `--pr`.
 
 At the end of a stage, MoE prints a chain prompt. The shortcuts are:
 
@@ -105,10 +107,10 @@ moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
 
 Promoting the idea will offer to jump into the design stage right away. When
 the design stage ends, MoE prints the chain prompt. Type `!!` there to
-run `code`, `test`, and `push` headlessly. The five-command block above is the
+run `code`, `review`, `test`, and `push` headlessly. The five-command block above is the
 same path spelled out by hand.
 
-When several SDLC runs are already designed and ready for code/test, use
+When several SDLC runs are already designed and ready for code/review/test, use
 `moe chain edit` to order the active runs in `$EDITOR`. `!!!` is the chain
 lever: after it ships one run, MoE rides into the next live chained run at
 its first pending stage and keeps going. `!!` ships just the run in front of
@@ -190,7 +192,7 @@ moe completion fish | source
 ```
 
 Completion covers verbs and subcommands (`moe sd⇥` → `sdlc`, `moe sdlc ⇥` →
-`design code test …`) and the `<project>/<run>` slug for run-taking verbs
+`design code review test …`) and the `<project>/<run>` slug for run-taking verbs
 (`moe sdlc code ⇥`), plus idea slugs (including `--from-idea`) and named
 workspaces. The script itself never changes as commands are added — all the
 logic lives in `moe` and is best-effort, so completion stays silent outside a
@@ -200,7 +202,7 @@ bureaucracy rather than erroring.
 
 | Workflow | Stages | Use it for |
 | --- | --- | --- |
-| `sdlc` | `design` -> `code` -> `test` -> `push` | designed code changes with a ship gate |
+| `sdlc` | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
 | `audit` | `plan` -> `report` | fresh-eyes review that files feedback but does not push code |
 | `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
 | `pdlc` | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
@@ -218,6 +220,7 @@ bureaucracy rather than erroring.
 moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 moe sdlc shell  <project>/<run>
@@ -228,7 +231,7 @@ seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
 starts a new run seeded with a terminal prior run's design canvas, useful
 when a closed or merged topic still has more work behind it.
 
-The cascade mode flags on `design`/`code`/`test` mirror the post-stage chain
+The cascade mode flags on `design`/`code`/`review`/`test` mirror the post-stage chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
@@ -487,7 +490,7 @@ The catalog below is a map, not a replacement for `moe help`.
 
 ### Workflows
 
-- `moe sdlc new|design|code|test|push|close|shell|reopen|cat|log` drives
+- `moe sdlc new|design|code|review|test|push|close|shell|reopen|cat|log` drives
   designed code work.
 - `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.

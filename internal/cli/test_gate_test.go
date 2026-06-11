@@ -63,12 +63,97 @@ func TestTestSectionFilled(t *testing.T) {
 	}
 }
 
+func TestStageGateStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   string
+		status string
+		ok     bool
+	}{
+		{
+			name:   "ready",
+			body:   "# Review\n\n## Gate\n\n```json\n{\"status\":\"ready\"}\n```\n",
+			status: "ready",
+			ok:     true,
+		},
+		{
+			name:   "blocked",
+			body:   "# Review\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n",
+			status: "blocked",
+			ok:     true,
+		},
+		{
+			name: "missing",
+			body: "# Review\n\n## Findings\n\nnone\n",
+			ok:   false,
+		},
+		{
+			name: "malformed",
+			body: "# Review\n\n## Gate\n\n```json\n{\"status\":\n```\n",
+			ok:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, ok := stageGateStatus(tc.body)
+			if status != tc.status || ok != tc.ok {
+				t.Fatalf("stageGateStatus = (%q, %v), want (%q, %v)", status, ok, tc.status, tc.ok)
+			}
+		})
+	}
+}
+
+func TestReviewStageGateAcceptsReadyCanvas(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	writeStageCanvas(t, root, md, "review", `# Review
+
+## Gate
+
+`+"```json"+`
+{"status":"ready"}
+`+"```"+`
+`)
+	ok, err := reviewStageGate(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected review gate to pass on ready status")
+	}
+}
+
+func TestReviewStageGateRefusesBlockedAndMalformedCanvas(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	for _, body := range []string{
+		reviewCanvasSkeleton,
+		"# Review\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n",
+		"# Review\n\n## Gate\n\n```json\n{\"status\":\n```\n",
+	} {
+		writeStageCanvas(t, root, md, "review", body)
+		ok, err := reviewStageGate(root, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatalf("expected review gate to refuse canvas:\n%s", body)
+		}
+	}
+}
+
 // TestTestStageGateAcceptsFilledCanvas: a canvas with substantive
 // content in both required sections satisfies the gate.
 func TestTestStageGateAcceptsFilledCanvas(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 	writeTestCanvas(t, root, md, `# Test
+
+## Gate
+
+`+"```json"+`
+{"status":"ready"}
+`+"```"+`
 
 ## What was verified
 
@@ -114,6 +199,12 @@ func TestTestStageGateRefusesEmptySection(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 	writeTestCanvas(t, root, md, `# Test
 
+## Gate
+
+`+"```json"+`
+{"status":"ready"}
+`+"```"+`
+
 ## What was verified
 
 ran tests
@@ -128,6 +219,34 @@ ran tests
 	}
 	if ok {
 		t.Fatal("expected gate to refuse: unverified section still a placeholder")
+	}
+}
+
+func TestTestStageGateRequiresReadyStatus(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	writeTestCanvas(t, root, md, `# Test
+
+## Gate
+
+`+"```json"+`
+{"status":"blocked"}
+`+"```"+`
+
+## What was verified
+
+ran tests
+
+## What wasn't verified
+
+nothing
+`)
+	ok, err := testStageGate(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected gate to refuse: status is blocked")
 	}
 }
 
@@ -150,7 +269,12 @@ func TestTestStageGateMissingCanvasIsUnsatisfied(t *testing.T) {
 // writeTestCanvas seeds the test stage's canvas file under root.
 func writeTestCanvas(t *testing.T, root string, md *run.Metadata, body string) {
 	t.Helper()
-	path := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
+	writeStageCanvas(t, root, md, "test", body)
+}
+
+func writeStageCanvas(t *testing.T, root string, md *run.Metadata, stage, body string) {
+	t.Helper()
+	path := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}

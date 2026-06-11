@@ -15,7 +15,7 @@ func TestLookupServeWorkflowUISdlc(t *testing.T) {
 	if !ok {
 		t.Fatal("sdlc should carry a serve declaration")
 	}
-	if want := []string{"design", "code", "test"}; !slices.Equal(ui.Stages, want) {
+	if want := []string{"design", "code", "review", "test"}; !slices.Equal(ui.Stages, want) {
 		t.Errorf("sdlc spawnable stages = %v, want %v (push excluded)", ui.Stages, want)
 	}
 	if !ui.Cascade {

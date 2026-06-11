@@ -106,7 +106,7 @@ type stageSessionOpts struct {
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by the cascade driver, which composes
-	// its own chain (design → code → test → push) and never wants the
+	// its own chain (design → code → review → test → push) and never wants the
 	// interactive next-stage prompt to fire mid-chain. Headless turns
 	// skip the prompt regardless of this field (see Headless above); the
 	// field stays meaningful for the interactive-but-suppressed serve
@@ -269,7 +269,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 
 	// Materialize the project's submodule before anything else. Every
 	// stage either reads source directly (twin/kb wiki ingest), drives
-	// a sandbox clone (code/test), or kicks off an agent whose first
+	// a sandbox clone (code/review/test), or kicks off an agent whose first
 	// action is usually a project-side read. Cold projects hit one
 	// `git submodule update --init --recursive`; warm projects pay one
 	// os.ReadDir. Failures surface as *project.SubmoduleInitError with
@@ -390,7 +390,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err != nil {
 					return wikiTurnSpec{}, err
 				}
-				// Dev-env hooks fire on every code/test stage open
+				// Dev-env hooks fire on every code/review/test stage open
 				// against this working tree. First touch runs the
 				// project's dev-env.d/* setup scripts and caches the
 				// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;

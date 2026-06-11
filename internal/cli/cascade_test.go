@@ -188,6 +188,11 @@ func stubOpenSdlcStage(t *testing.T, perStageExit map[string]int) *[]openSdlcSta
 		return perStageExit[stage]
 	}
 	t.Cleanup(func() { openSdlcStage = prev })
+	prevGate := checkCascadeStageGate
+	checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, _ string, _ io.Writer) (bool, int) {
+		return true, 0
+	}
+	t.Cleanup(func() { checkCascadeStageGate = prevGate })
 	return &captured
 }
 
@@ -221,7 +226,7 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	if res.shipped {
 		t.Fatalf("!<stage> cascade must not ship: %+v", res)
 	}
-	wantSteps := []string{"code", "test"}
+	wantSteps := []string{"code", "review", "test"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
 	}
@@ -250,9 +255,40 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	}
 }
 
+func TestCascadeFromGateStopsWhenStageGateUnsatisfied(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeStageCanvas(t, root, md, "review", reviewCanvasSkeleton)
+
+	prev := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		if stage != "review" || projectID != "tele" || runID != "fix-it" || !headless {
+			t.Fatalf("openSdlcStage args = (%q, %q, %q, %v), want review tele fix-it true", stage, projectID, runID, headless)
+		}
+		return 0
+	}
+	t.Cleanup(func() { openSdlcStage = prev })
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("review", "test", false, false, md, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
+	}
+	if len(res.ran) != 1 || res.ran[0].stage != "review" || res.ran[0].code != 0 {
+		t.Fatalf("ran = %+v, want one successful review dispatch", res.ran)
+	}
+	if !strings.Contains(stderr.String(), "cascade: review gate not satisfied; parked at review") {
+		t.Fatalf("expected review gate stop, got stderr=%q", stderr.String())
+	}
+}
+
 // TestCascadeFromGateYoloShipsAtPush pins the cascade-ship shape (`!!`,
 // rideChain=false): the cascade walks every remaining stage headless
-// and ships at push. code/test go through openSdlcStage (headless=true),
+// and ships at push. code/review/test go through openSdlcStage (headless=true),
 // push goes through pushFromCascade (the typed entry that wraps
 // runPushTyped — merge path, no flags). There is no separate cascade
 // synthesis step: cascade push defaults to fast-forward merge and
@@ -271,7 +307,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("cascade-ship must ship: %+v", res)
 	}
-	wantSteps := []string{"code", "test", "push"}
+	wantSteps := []string{"code", "review", "test", "push"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
 	}
@@ -281,7 +317,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		}
 	}
 	// code and test go through openSdlcStage; push must NOT.
-	for _, stage := range []string{"code", "test"} {
+	for _, stage := range []string{"code", "review", "test"} {
 		if got := countInvocations(*openCaptured, stage); got != 1 {
 			t.Fatalf("stage %s openSdlcStage dispatched %d times, want 1", stage, got)
 		}
@@ -512,15 +548,15 @@ func TestCascadeFromGateStopsOnInterrupt(t *testing.T) {
 	if res.shipped {
 		t.Fatalf("an interrupted cascade must not mark shipped: %+v", res)
 	}
-	wantRan := []cascadeStepResult{{stage: "code", code: 0}, {stage: "test", code: exitInterrupted}}
-	if len(res.ran) != len(wantRan) || res.ran[1].code != exitInterrupted {
-		t.Fatalf("ran = %+v, want code ok then test interrupted", res.ran)
+	wantRan := []cascadeStepResult{{stage: "code", code: 0}, {stage: "review", code: 0}, {stage: "test", code: exitInterrupted}}
+	if len(res.ran) != len(wantRan) || res.ran[2].code != exitInterrupted {
+		t.Fatalf("ran = %+v, want code/review ok then test interrupted", res.ran)
 	}
 	// push never dispatched — the cascade stopped at the interrupted test.
 	if got := countInvocations(*captured, "push"); got != 0 {
 		t.Fatalf("push must not dispatch after an interrupt: got %d", got)
 	}
-	if got := renderCascadeSummary("tele/fix-it", res); got != "cascade tele/fix-it: code ok · test interrupted — stopped" {
+	if got := renderCascadeSummary("tele/fix-it", res); got != "cascade tele/fix-it: code ok · review ok · test interrupted — stopped" {
 		t.Fatalf("summary = %q, want interrupted shape", got)
 	}
 }
@@ -867,7 +903,7 @@ func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
 	if !strings.Contains(stderr.String(), "unknown stage") {
 		t.Fatalf("expected unknown-stage error, got stderr=%q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "design, code, test, push") {
+	if !strings.Contains(stderr.String(), "design, code, review, test, push") {
 		t.Fatalf("expected stage list in error, got stderr=%q", stderr.String())
 	}
 	if len(*captured) != 0 {
@@ -1093,7 +1129,7 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push dispatched %d times, want 1 (no retry after a non-zero recovery): %+v", len(*pushCaptured), *pushCaptured)
 	}
-	wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (pre-push hook) — stopped"
+	wantSummary := "cascade tele/fix-it: code ok · review ok · test ok · push deferred to recovery (pre-push hook) — stopped"
 	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
@@ -1127,8 +1163,8 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			if !res.shipped {
 				t.Fatalf("res.shipped = false after a clean recovery + retry that passed the gate: %+v", res)
 			}
-			// code, test, push (deferred), push (ok) — four steps.
-			wantStages := []string{"code", "test", "push", "push"}
+			// code, review, test, push (deferred), push (ok) — five steps.
+			wantStages := []string{"code", "review", "test", "push", "push"}
 			if len(res.ran) != len(wantStages) {
 				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
 			}
@@ -1137,10 +1173,10 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 				}
 			}
-			if got := res.ran[2].deferred; got != recovery {
+			if got := res.ran[3].deferred; got != recovery {
 				t.Fatalf("first push step deferred tag = %q, want %q", got, recovery)
 			}
-			if got := res.ran[3]; got.deferred != "" || got.code != 0 {
+			if got := res.ran[4]; got.deferred != "" || got.code != 0 {
 				t.Fatalf("second push step = %+v, want a clean ship (no deferred, code 0)", got)
 			}
 			// Push dispatched exactly twice: the deferral and the retry.
@@ -1154,7 +1190,7 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			}
 			// Summary shows the recover-then-ship as two steps and
 			// ends with the ship marker, not "— stopped".
-			wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (" +
+			wantSummary := "cascade tele/fix-it: code ok · review ok · test ok · push deferred to recovery (" +
 				deferredLabel(recovery) + ") · push ok — shipped"
 			if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 				t.Fatalf("summary = %q, want %q", got, wantSummary)
@@ -1197,7 +1233,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 	if len(*pushCaptured) != 2 {
 		t.Fatalf("push dispatched %d times, want 2 (one retry, then stop): %+v", len(*pushCaptured), *pushCaptured)
 	}
-	wantStages := []string{"code", "test", "push", "push"}
+	wantStages := []string{"code", "review", "test", "push", "push"}
 	if len(res.ran) != len(wantStages) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
 	}
@@ -1206,7 +1242,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 		}
 	}
-	wantSummary := "cascade tele/fix-it: code ok · test ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
+	wantSummary := "cascade tele/fix-it: code ok · review ok · test ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
 	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}

@@ -89,12 +89,12 @@ const pushCanvasSkeleton = `# Push
 `
 
 // pushSynthesisKickoff is the interactive synthesis session's first
-// user message — same shape as the design/code/test kickoffs. Tells
+// user message — same shape as the design/code/review/test kickoffs. Tells
 // the agent to read the prior canvases and acknowledge state before
 // drafting; without this, fresh sessions tend to dive into writing
 // without first checking what code stage's draft already said.
 const pushSynthesisKickoff = "The operator just opened this push synthesis session. " +
-	"Read the code canvas (and the test canvas, if present) before replying, so your acknowledgement reflects " +
+	"Read the code canvas, review canvas if present, and test canvas if present before replying, so your acknowledgement reflects " +
 	"what's actually been drafted and verified. In one or two sentences, acknowledge where synthesis " +
 	"stands (fresh start vs. resumed) and ask what they'd like to refine. Then wait for their reply."
 

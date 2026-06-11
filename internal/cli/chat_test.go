@@ -217,9 +217,9 @@ func TestChatGroomingHomeNilMap(t *testing.T) {
 }
 
 // TestChatGroomingHomeNonChatUntouched pins the no-op for every other
-// workflow. sdlc code/test must keep the project's own MOE_HOME (scratch
+// workflow. sdlc code/review/test must keep the project's own MOE_HOME (scratch
 // for moe-on-moe) — that redirect is exactly what protects the real
-// bureaucracy from the WIP `moe` binary during code/test.
+// bureaucracy from the WIP `moe` binary during code/review/test.
 func TestChatGroomingHomeNonChatUntouched(t *testing.T) {
 	root := t.TempDir()
 	const scratch = "/tmp/scratch-bureaucracy"

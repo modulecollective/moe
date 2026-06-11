@@ -1007,7 +1007,7 @@ func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
 // TestRunPushSynthesisSessionLeavesModelToAgentDefault asserts the
 // headless synthesis session no longer carries a push-specific cheap
 // model override. PR synthesis uses the same agent model policy as
-// normal code/test execution.
+// normal code/review/test execution.
 func TestRunPushSynthesisSessionLeavesModelToAgentDefault(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
 	t.Setenv("MOE_AGENT", "claude")

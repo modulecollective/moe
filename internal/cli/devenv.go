@@ -89,7 +89,7 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 
 // devEnvLoadCache returns the cached dev-env vars without re-running
 // setup. Used by `moe sdlc shell` and by the teardown path so a
-// session that never opened a code/test stage still gets the env back
+// session that never opened a code/review/test stage still gets the env back
 // if some upstream call already minted it.
 func devEnvLoadCache(workTree string) (map[string]string, bool, error) {
 	return readDevEnvCache(filepath.Join(workTree, devEnvCacheRel))
@@ -339,7 +339,7 @@ func devEnvBaseEnv(root, workTree string, md *run.Metadata) []string {
 
 // devEnvWritableDirKeys names the dev-env env vars whose values are
 // expected to be local directories the agent should be allowed to
-// write to during code/test stages. The list is intentionally small:
+// write to during code/review/test stages. The list is intentionally small:
 // each key has to earn its slot by being a real isolated-runtime
 // directory, not a URL, token, or command fragment. Both MOE_HOME and
 // MOE_DEV_TMPDIR are emitted by the moe project's own dev-env hooks —

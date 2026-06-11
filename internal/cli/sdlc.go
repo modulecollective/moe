@@ -45,8 +45,14 @@ func init() {
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
+		Name:    "review",
+		Summary: "open an agent session on the run's review document — review the code stage's work",
+		Run:     runReview,
+		argKind: argProjectRun,
+	})
+	g.Register(&Command{
 		Name:    "test",
-		Summary: "open an agent session on the run's test document — verify the code stage's work",
+		Summary: "open an agent session on the run's test document — verify the reviewed work",
 		Run:     runTest,
 		argKind: argProjectRun,
 	})
@@ -81,8 +87,10 @@ func init() {
 	w := NewWorkflow("sdlc")
 	w.RegisterStage("design")
 	w.RegisterStage("code", "design")
-	w.RegisterStage("test", "code")
+	w.RegisterStage("review", "code")
+	w.RegisterStage("test", "review")
 	w.RegisterStage("push", "test")
+	w.RegisterStageGate("review", reviewStageGate)
 	// Test stage's anti-theater check: the work-turn commit alone
 	// doesn't tell us whether the agent actually filled the canvas
 	// or just committed the placeholder skeleton. The gate reads the
@@ -128,13 +136,27 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 	}, args, stdout, stderr)
 }
 
+func runReview(args []string, stdout, stderr io.Writer) int {
+	return runSDLCStage(stageVerbCfg{
+		verb:  "sdlc review",
+		stage: "review",
+		usage: []string{
+			"Opens an interactive agent session on the review canvas. The agent",
+			"performs a senior-engineer review of the code stage's committed diff,",
+			"blocking only for correctness, scope, maintainability, or reviewability",
+			"issues that should send the run back to code.",
+		},
+		open: openSdlcReview,
+	}, args, stdout, stderr)
+}
+
 func runTest(args []string, stdout, stderr io.Writer) int {
 	return runSDLCStage(stageVerbCfg{
 		verb:  "sdlc test",
 		stage: "test",
 		usage: []string{
 			"Opens an interactive agent session on the test canvas. The agent",
-			"verifies the code stage's work — running the project's checks, driving",
+			"verifies the reviewed work — running the project's checks, driving",
 			"the change end-to-end, applying small in-place fixes, and narrating what",
 			"was and wasn't verified on the canvas. Pre-push hooks still gate ship.",
 		},
@@ -154,7 +176,7 @@ type stageVerbCfg struct {
 	open  func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int
 }
 
-// runSDLCStage is the shared body behind runDesign / runCode / runTest:
+// runSDLCStage is the shared body behind runDesign / runCode / runReview / runTest:
 // parse the per-stage flags, branch to interactive (no cascade flag)
 // or cascade (one of --once / --to / --ship / --chain), and surface
 // cascade-mode mutual exclusion at parse time.
@@ -431,18 +453,41 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 		stageSessionOpts{NeedsSandbox: true, Headless: headless, Agent: agentOverride}, stdout, stderr)
 }
 
-// openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
+// openSdlcReview is the Go-level seam behind `moe sdlc review`. Same
 // shape as openSdlcCode one stage downstream — requireCodeCanvas
 // stands in for requireDesignCanvas, and the canvas skeleton wires
 // in so the agent's first read sees the structural shape it has to
 // fill.
+func openSdlcReview(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	resolved, code := resolveSDLCRunSlug("sdlc review", projectID, runID, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+	runID = resolved
+	if err := requireCodeCanvas(projectID, runID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	return runStageSession(projectID, runID, "review",
+		stageSessionOpts{
+			NeedsSandbox:           true,
+			EnforceSandboxBoundary: true,
+			Headless:               headless,
+			CanvasSkeleton:         reviewCanvasSkeleton,
+			Agent:                  agentOverride,
+		}, stdout, stderr)
+}
+
+// openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
+// shape as openSdlcReview one stage downstream — requireReviewCanvas
+// ensures a review canvas exists before verification starts.
 func openSdlcTest(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	resolved, code := resolveSDLCRunSlug("sdlc test", projectID, runID, stdout, stderr)
 	if code != 0 {
 		return code
 	}
 	runID = resolved
-	if err := requireCodeCanvas(projectID, runID); err != nil {
+	if err := requireReviewCanvas(projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -458,7 +503,7 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 // openSdlcStage routes the chain prompt's cascade driver
 // (`!` / `!<stage>` / `!!` / `!!!`) and the cascade's pre-push iteration to
 // the right per-stage helper, headless. Knowing the stage names
-// statically (sdlc has three headlessable stages — push is not one
+// statically (sdlc has four headlessable stages — push is not one
 // of them) is what lets a
 // switch beat a registry: the alternative is a typed-CLI re-entry
 // via `cmd.Run` with a flag prepended, which is the pattern the run
@@ -491,6 +536,8 @@ func init() {
 			return openSdlcDesign(projectID, runID, headless, "", stdout, stderr)
 		case "code":
 			return openSdlcCode(projectID, runID, headless, "", stdout, stderr)
+		case "review":
+			return openSdlcReview(projectID, runID, headless, "", stdout, stderr)
 		case "test":
 			return openSdlcTest(projectID, runID, headless, "", stdout, stderr)
 		default:
@@ -503,19 +550,51 @@ func init() {
 	})
 }
 
+const reviewCanvasSkeleton = `# Review
+
+## Gate
+
+` + "```json" + `
+{"status":"blocked"}
+` + "```" + `
+
+Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking concerns and follow-ups can be recorded below while leaving status "ready".
+
+## Findings
+
+(agent fills: blocking correctness, scope, maintainability, or reviewability issues; empty only when status is "ready".)
+
+## Evidence Reviewed
+
+(agent fills: design/code canvases, diff ranges, commands or tests read/run)
+
+## Follow-up Notes
+
+(agent fills: non-blocking cleanup or future work; empty if none)
+`
+
 // testCanvasSkeleton is the fixed structural shape every test canvas
-// opens with. The Next.satisfied check (see workflow.go) enforces
-// non-empty "What was verified" and "What wasn't verified" sections;
-// the stage fragment instructs the agent on the anti-theater rules.
+// opens with. The Next.satisfied check (see workflow.go) enforces a
+// ready gate plus non-empty "What was verified" and "What wasn't
+// verified" sections; the stage fragment instructs the agent on the
+// anti-theater rules.
 const testCanvasSkeleton = `# Test
+
+## Gate
+
+` + "```json" + `
+{"status":"blocked"}
+` + "```" + `
+
+Allowed values: "ready" or "blocked". Use "blocked" for known failures or unresolved issues that should halt push; do not block merely because some surfaces are explicitly listed under "What wasn't verified".
 
 ## What was verified
 
-(agent fills: commands run, end-to-end paths driven, what passed — cite and quote)
+(agent fills: commands run, end-to-end paths driven, what passed - cite and quote)
 
 ## What wasn't verified
 
-(agent fills: skipped surfaces + why — needs human eye, needs prod-shaped data, out of scope. "Nothing — automated tests cover the change" is acceptable for pure-backend work.)
+(agent fills: skipped surfaces + why - needs human eye, needs prod-shaped data, out of scope. "Nothing - automated tests cover the change" is acceptable for pure-backend work.)
 
 ## Fixes applied during this stage
 
@@ -555,11 +634,15 @@ func requireDesignCanvas(projectID, runID string) error {
 	return requirePriorCanvas(projectID, runID, "design", "code")
 }
 
-// requireCodeCanvas is the analogue for test stage: refuse to open a
-// test session when there's no code canvas to verify. Same fail-loud
+// requireCodeCanvas is the analogue for review stage: refuse to open a
+// review session when there's no code canvas to review. Same fail-loud
 // invariant as requireDesignCanvas, one stage downstream.
 func requireCodeCanvas(projectID, runID string) error {
-	return requirePriorCanvas(projectID, runID, "code", "test")
+	return requirePriorCanvas(projectID, runID, "code", "review")
+}
+
+func requireReviewCanvas(projectID, runID string) error {
+	return requirePriorCanvas(projectID, runID, "review", "test")
 }
 
 // requirePriorCanvas is the shared shape behind requireDesignCanvas and
