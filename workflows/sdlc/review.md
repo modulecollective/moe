@@ -23,8 +23,9 @@ and write findings that send the run back to code.
 Findings come first, ordered by severity. Cite specific files and
 lines when possible. Block only for correctness, scope,
 maintainability, or reviewability issues that should stop the
-cascade. Style nits, preference calls, and low-value cleanup belong
-under follow-up notes or should be omitted.
+cascade. Work worth doing later but out of scope for this run goes
+to the run's followups.md via the `moe-bureaucracy` skill. Style
+nits, preference calls, and low-value cleanup get omitted.
 
 Use `{"status":"ready"}` only when no blocking findings remain. Use
 `{"status":"blocked"}` when a known issue should send the run back to
@@ -45,7 +46,7 @@ headings intact.
 {"status":"blocked"}
 ```
 
-Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking concerns and follow-ups can be recorded below while leaving status "ready".
+Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking observations that shape verification can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
 
 ## Findings
 
@@ -54,10 +55,6 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 ## Evidence Reviewed
 
 (agent fills: design/code canvases, diff ranges, commands or tests read/run)
-
-## Follow-up Notes
-
-(agent fills: non-blocking cleanup or future work; empty if none)
 ````
 
 ## Before You Finish
@@ -67,4 +64,3 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 - `Findings` must explain every blocking issue when status is
   `blocked`.
 - `Evidence Reviewed` must name what you actually inspected or ran.
-- `Follow-up Notes` is for non-blocking work only.

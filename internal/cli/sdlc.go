@@ -558,7 +558,7 @@ const reviewCanvasSkeleton = `# Review
 {"status":"blocked"}
 ` + "```" + `
 
-Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking concerns and follow-ups can be recorded below while leaving status "ready".
+Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking observations that shape verification can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
 
 ## Findings
 
@@ -567,10 +567,6 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 ## Evidence Reviewed
 
 (agent fills: design/code canvases, diff ranges, commands or tests read/run)
-
-## Follow-up Notes
-
-(agent fills: non-blocking cleanup or future work; empty if none)
 `
 
 // testCanvasSkeleton is the fixed structural shape every test canvas

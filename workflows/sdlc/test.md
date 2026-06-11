@@ -28,11 +28,11 @@ Two gaps that code stage can't reliably close on its own:
 - **Read the code canvas's `## Test plan` and the review canvas as
   your baseline.** The plan names what to exercise, what's outside
   automated coverage, and what end-to-end paths the code stage thinks
-  matter. The review canvas may name blocking issues or follow-up
-  concerns that shape what needs verification. Treat them together as
-  the contract for what counts as "verified." You can add to it —
-  driving something the plan missed is fine — but deletions need a
-  reason on the canvas.
+  matter. The review canvas may name blocking issues or non-blocking
+  observations that shape what needs verification. Treat them
+  together as the contract for what counts as "verified." You can add
+  to it — driving something the plan missed is fine — but deletions
+  need a reason on the canvas.
 - **Run the deterministic checks the project provides.** Lint,
   unit tests, type checks — whatever the project ships. Cite the
   command and the result on the canvas. The hook chain will run
