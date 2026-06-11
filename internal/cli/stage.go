@@ -627,18 +627,49 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
-	if opts.SkipNextStage || opts.Headless {
+	if skipPostTurnPrompt(opts) {
 		// Headless ⇒ skip is structural, not a caller convention: a
 		// headless turn has no stdin to answer the post-turn prompt, so
 		// it must never fire one. Every cascade dispatch is headless and
 		// no longer threads a separate suppress flag, so the
-		// `|| opts.Headless` term is what makes the cascade skip. The
+		// opts.Headless term is what makes the cascade skip. The
 		// SkipNextStage term stays for the interactive callers that skip
-		// without being headless — serve, chat, push. See the field doc
-		// comments above.
+		// without being headless — chat, push. Serve-spawned sessions
+		// skip through the env handshake read inside skipPostTurnPrompt,
+		// so every workflow's stage verb is serve-safe without each
+		// callsite threading the flag. See the field doc comments above.
 		return 0
 	}
 	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, stdout, stderr)
+}
+
+// skipPostTurnPrompt decides whether runStageSession's tail fires the
+// post-turn chain prompt. Three suppressors: the caller asked
+// (SkipNextStage — chat, push), the turn was headless (no stdin to
+// answer), or the process was spawned by `moe serve` (the
+// MOE_SERVE_AGENT handshake). Reading the handshake here — instead of
+// each stage opener passing SkipNextStage: serveAgentSuppress() — makes
+// every present and future workflow serve-safe by construction; the
+// per-callsite pattern was exactly what pdlc's openers had missed.
+func skipPostTurnPrompt(opts stageSessionOpts) bool {
+	return opts.SkipNextStage || opts.Headless || serveAgentSuppress()
+}
+
+// serveAgentSuppress reports whether the current process was spawned
+// by `moe serve` to host a single agent session. The serve↔CLI
+// handshake is invisible to shell-side operators: setting
+// MOE_SERVE_AGENT=1 in the spawn env tells runStageSession to skip the
+// post-turn `next: …` chain prompt (which has no input source under
+// serve — the child's stdin is a PTY nobody types into) so moe exits
+// cleanly after the agent returns. For pdlc's chunk stage this also
+// suppresses the per-sitting harvest offer, which would otherwise open
+// $EDITOR; unchecked followups wait for the next CLI sitting or for
+// close, which serve drives with --no-edit semantics.
+//
+// Read once per stage exit; same shape MOE_SERVE_NOTIFY_URL takes
+// (env-var handshake, not a documented operator flag).
+func serveAgentSuppress() bool {
+	return os.Getenv("MOE_SERVE_AGENT") == "1"
 }
 
 // wikiSessionInputs is everything runWikiSession needs to drive a

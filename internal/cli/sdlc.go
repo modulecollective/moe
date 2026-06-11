@@ -374,20 +374,6 @@ func resolveAndGuardForCascade(verb, projectID, runID string, stdout, stderr io.
 	return md, root, 0
 }
 
-// serveAgentSuppress reports whether the current process was spawned
-// by `moe serve` to host a single agent session. The serve↔CLI
-// handshake is invisible to shell-side operators: setting
-// MOE_SERVE_AGENT=1 in the spawn env tells the stage opener to set
-// SkipNextStage=true so moe exits cleanly after the agent returns,
-// instead of falling through to the post-turn `next: …` chain
-// prompt (which has no input source under serve).
-//
-// Read once per stage entry; same shape MOE_SERVE_NOTIFY_URL takes
-// (env-var handshake, not a documented operator flag).
-func serveAgentSuppress() bool {
-	return os.Getenv("MOE_SERVE_AGENT") == "1"
-}
-
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
 // typed `Command.Run` parses args and hands to this helper; the chain
 // prompt's cascade driver reaches it directly via openSdlcStage. The
@@ -409,7 +395,6 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
-			SkipNextStage:          serveAgentSuppress(),
 			Agent:                  agentOverride,
 		}, stdout, stderr)
 }
@@ -432,7 +417,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 		return 1
 	}
 	return runStageSession(projectID, runID, "code",
-		stageSessionOpts{NeedsSandbox: true, Headless: headless, SkipNextStage: serveAgentSuppress(), Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{NeedsSandbox: true, Headless: headless, Agent: agentOverride}, stdout, stderr)
 }
 
 // openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
@@ -454,7 +439,6 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 		stageSessionOpts{
 			NeedsSandbox:   true,
 			Headless:       headless,
-			SkipNextStage:  serveAgentSuppress(),
 			CanvasSkeleton: testCanvasSkeleton,
 			Agent:          agentOverride,
 		}, stdout, stderr)
