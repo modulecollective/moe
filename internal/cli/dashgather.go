@@ -128,9 +128,17 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter, timer *ga
 		if err != nil {
 			return DashSnapshot{}, err
 		}
-		dec := dash.NextDecision{Done: kind == NextKindDone}
+		dec := dash.NextDecision{
+			Done:      kind == NextKindDone,
+			Perpetual: wf.Perpetual(),
+		}
 		if next != "" {
 			dec.Stage = next
+		} else if dec.Done && dec.Perpetual {
+			stages := wf.Stages()
+			if len(stages) > 0 {
+				dec.Stage = stages[len(stages)-1]
+			}
 		}
 		nextByRun[md.ID] = dec
 	}

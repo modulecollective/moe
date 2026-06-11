@@ -1581,7 +1581,7 @@ func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	case "sdlc":
 		return WorkflowUI{Stages: []string{"design", "code", "test"}, Cascade: true, Close: true}, true
 	case "pdlc":
-		return WorkflowUI{Stages: []string{"frame", "prd", "chunk"}, Close: true}, true
+		return WorkflowUI{Stages: []string{"frame", "prd", "chunk"}, Perpetual: true, Close: true}, true
 	}
 	return WorkflowUI{}, false
 }
@@ -1761,8 +1761,9 @@ func newGitServeRoot(t *testing.T) string {
 // TestPdlcPageRendersSittingChips: an in-progress pdlc run renders one
 // sitting chip per declared stage verb — all three, regardless of
 // satisfaction — each POSTing the generic /stage/{stage} route, with
-// the re-derived next stage styled primary, plus the close-run chip.
-// None of the sdlc cascade chips leak in.
+// the re-derived next stage styled primary. The close route still
+// exists, but perpetual workflows do not render close as the routine
+// next chip. None of the sdlc cascade chips leak in.
 func TestPdlcPageRendersSittingChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "big-goal", "pdlc")
@@ -1771,7 +1772,7 @@ func TestPdlcPageRendersSittingChips(t *testing.T) {
 		Addr: "127.0.0.1:0",
 		Root: root,
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
-			return dash.Row{Project: p, Run: slug, Note: "pdlc:prd", Stage: "prd",
+			return dash.Row{Project: p, Run: slug, Note: "pdlc:chunk", Stage: "chunk",
 				Bucket: dash.BucketActiveRuns, When: now}, true, nil
 		},
 	})
@@ -1786,10 +1787,9 @@ func TestPdlcPageRendersSittingChips(t *testing.T) {
 		`action="/run/alpha/big-goal/stage/frame"`,
 		`class="action" type="submit">frame</button>`,
 		`action="/run/alpha/big-goal/stage/prd"`,
-		`class="action primary" type="submit">prd</button>`,
+		`class="action" type="submit">prd</button>`,
 		`action="/run/alpha/big-goal/stage/chunk"`,
-		`class="action" type="submit">chunk</button>`,
-		`action="/run/alpha/big-goal/close"`,
+		`class="action primary" type="submit">chunk</button>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
@@ -1799,9 +1799,10 @@ func TestPdlcPageRendersSittingChips(t *testing.T) {
 		`/run/alpha/big-goal/advance`,
 		`/run/alpha/big-goal/ship`,
 		`/run/alpha/big-goal/chain`,
+		`/run/alpha/big-goal/close`,
 	} {
 		if strings.Contains(body, banned) {
-			t.Errorf("pdlc page must not render cascade chip %q\n%s", banned, body)
+			t.Errorf("pdlc page must not render routine chip %q\n%s", banned, body)
 		}
 	}
 }

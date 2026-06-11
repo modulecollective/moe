@@ -73,9 +73,10 @@ func lookupServeWorkflowUI(workflow string) (serve.WorkflowUI, bool) {
 	}
 	_, hasClose := lookupCloseRegistration(workflow)
 	return serve.WorkflowUI{
-		Stages:  stages,
-		Cascade: decl.cascade,
-		Close:   hasClose,
+		Stages:    stages,
+		Cascade:   decl.cascade,
+		Perpetual: wf.Perpetual(),
+		Close:     hasClose,
 	}, true
 }
 

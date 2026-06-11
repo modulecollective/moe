@@ -161,8 +161,11 @@ type WorkflowUI struct {
 	// Cascade reports that the workflow's stage verbs accept --ship /
 	// --chain — the advance/ship/chain routes and chips apply.
 	Cascade bool
+	// Perpetual reports that satisfying every stage does not make close
+	// the routine next move; the run stays open for repeat sittings.
+	Perpetual bool
 	// Close reports that the workflow registered the shared close
-	// pipeline, so the per-run page renders a close-run chip.
+	// pipeline. Non-perpetual per-run pages render a close-run chip.
 	Close bool
 }
 

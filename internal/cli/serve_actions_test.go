@@ -37,6 +37,9 @@ func TestLookupServeWorkflowUIPdlc(t *testing.T) {
 	if ui.Cascade {
 		t.Error("pdlc must not declare cascade — its stage verbs have no --ship/--chain")
 	}
+	if !ui.Perpetual {
+		t.Error("pdlc should expose the workflow-level perpetual bit")
+	}
 	if !ui.Close {
 		t.Error("pdlc should report a registered close pipeline")
 	}

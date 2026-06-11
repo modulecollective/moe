@@ -25,6 +25,7 @@ type Workflow struct {
 	Name       string
 	stageOrder []string
 	prereqs    map[string][]string
+	perpetual  bool
 	// successors is the inverse of prereqs, computed at RegisterStage
 	// time. A stage's successor is any stage that names it as a prereq;
 	// stageSatisfied uses this to walk forward (a stage stays "parked"
@@ -57,6 +58,18 @@ func NewWorkflow(name string) *Workflow {
 		successors: map[string][]string{},
 		stageGates: map[string]StageGate{},
 	}
+}
+
+// SetPerpetual marks this workflow as intentionally long-lived. For
+// these workflows, satisfying every stage means the ladder has been
+// walked once; it does not mean dash should nag the operator to close.
+func (w *Workflow) SetPerpetual() {
+	w.perpetual = true
+}
+
+// Perpetual reports whether this workflow is intentionally long-lived.
+func (w *Workflow) Perpetual() bool {
+	return w.perpetual
 }
 
 // RegisterStageGate attaches an additional satisfiability check to

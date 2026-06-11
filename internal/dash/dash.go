@@ -88,11 +88,12 @@ type Row struct {
 
 // NextDecision is the per-run "what's next" decision the caller
 // pre-computes by asking its workflow registry. Stage is the bare
-// stage name (e.g. "code") when Done is false; both fields are zero
-// when the run has no next stage to run.
+// stage name (e.g. "code"); for a perpetual Done run, callers set it
+// to the repeatable stage dash should keep showing.
 type NextDecision struct {
-	Stage string
-	Done  bool
+	Stage     string
+	Done      bool
+	Perpetual bool
 }
 
 type ChoreInput struct {
@@ -307,20 +308,6 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	if md.Status != run.StatusInProgress {
 		return BucketNone, "", "", ""
 	}
-	// chat is a perpetually-resumable thinking thread with only two
-	// honest states — open (resumable) and closed (archived,
-	// re-enterable) — so it is never "done". Whether the operator has
-	// chatted yet (next stage "chat") or walked the single stage (the
-	// dec.Done case below), an in-progress chat is one thing: open,
-	// resumable. Special-cased before the dec.Done branch so it never
-	// renders the `done · close?` nag that's load-bearing for
-	// multi-stage workflows (sdlc/twin/kb). No next-stage decision is
-	// needed; the live open-session marker is preserved like any active
-	// row.
-	if md.Workflow == ChatWorkflow {
-		runningDoc := winningRunningDoc(openSessionDocs, ChatDocID)
-		return BucketActiveRuns, prefix + "open · resume?" + openSessionMarker(runningDoc, ChatDocID), ChatDocID, runningDoc
-	}
 	dec, ok := nextByRun[md.ID]
 	if !ok {
 		// Caller didn't compute a next-stage decision — treat as no
@@ -329,7 +316,19 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 		// rather than rendering a blank stage cell.
 		return BucketNone, "", "", ""
 	}
+	if dec.Perpetual && md.Workflow == ChatWorkflow {
+		// Chat is the single-stage perpetual workflow whose operator
+		// action is always "resume the open thread", not "run chat"
+		// or "close". The perpetual bit keeps this in the shared
+		// policy path; the wording stays chat-specific.
+		runningDoc := winningRunningDoc(openSessionDocs, ChatDocID)
+		return BucketActiveRuns, prefix + "open · resume?" + openSessionMarker(runningDoc, ChatDocID), ChatDocID, runningDoc
+	}
 	if dec.Done {
+		if dec.Perpetual && dec.Stage != "" {
+			runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
+			return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
+		}
 		// The run has walked every stage but isn't terminal yet — it
 		// still needs an operator action (`moe <wf> close`) to land in
 		// COMPLETED. Keep it in ACTIVE with a `· close?` action hint,

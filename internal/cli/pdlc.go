@@ -109,6 +109,7 @@ func init() {
 	w.RegisterStage(pdlcFrameDoc)
 	w.RegisterStage(pdlcPrdDoc, pdlcFrameDoc)
 	w.RegisterStage(pdlcChunkDoc, pdlcPrdDoc)
+	w.SetPerpetual()
 	RegisterWorkflow(w)
 
 	// Serve declaration: front pdlc in the new-run/promote forms and

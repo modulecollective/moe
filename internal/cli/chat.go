@@ -98,6 +98,7 @@ func init() {
 
 	w := NewWorkflow(chatWorkflow)
 	w.RegisterStage(chatDoc)
+	w.SetPerpetual()
 	RegisterWorkflow(w)
 }
 

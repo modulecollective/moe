@@ -245,8 +245,8 @@ func rowsByKey(t *testing.T, runs []*run.Metadata, next map[string]NextDecision,
 func TestChatInProgressRendersOpenResumeNeverDone(t *testing.T) {
 	md := &run.Metadata{ID: "ponder", Project: "moe", Workflow: ChatWorkflow, Status: run.StatusInProgress}
 	for name, dec := range map[string]NextDecision{
-		"never-chatted": {Stage: ChatDocID},
-		"chatted-done":  {Done: true},
+		"never-chatted": {Stage: ChatDocID, Perpetual: true},
+		"chatted-done":  {Stage: ChatDocID, Done: true, Perpetual: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, ok := rowsByKey(t, []*run.Metadata{md}, map[string]NextDecision{"ponder": dec}, nil)["moe/ponder"]
@@ -274,13 +274,32 @@ func TestChatInProgressRendersOpenResumeNeverDone(t *testing.T) {
 func TestChatInProgressPreservesRunningMarker(t *testing.T) {
 	md := &run.Metadata{ID: "ponder", Project: "moe", Workflow: ChatWorkflow, Status: run.StatusInProgress}
 	r := rowsByKey(t, []*run.Metadata{md},
-		map[string]NextDecision{"ponder": {Stage: ChatDocID}},
+		map[string]NextDecision{"ponder": {Stage: ChatDocID, Perpetual: true}},
 		map[string][]string{"ponder": {ChatDocID}})["moe/ponder"]
 	if r.Note != "chat:open · resume? [running]" {
 		t.Fatalf("note=%q want %q", r.Note, "chat:open · resume? [running]")
 	}
 	if r.RunningDoc != ChatDocID {
 		t.Fatalf("runningDoc=%q want %q", r.RunningDoc, ChatDocID)
+	}
+}
+
+func TestPerpetualDoneRendersRepeatableStageNotCloseNag(t *testing.T) {
+	md := &run.Metadata{ID: "big-goal", Project: "moe", Workflow: "pdlc", Status: run.StatusInProgress}
+	r := rowsByKey(t, []*run.Metadata{md},
+		map[string]NextDecision{"big-goal": {Stage: "chunk", Done: true, Perpetual: true}},
+		nil)["moe/big-goal"]
+	if r.Bucket != BucketActiveRuns {
+		t.Fatalf("bucket=%v want ACTIVE", r.Bucket)
+	}
+	if r.Note != "pdlc:chunk" {
+		t.Fatalf("note=%q want %q", r.Note, "pdlc:chunk")
+	}
+	if strings.Contains(r.Note, "done") || strings.Contains(r.Note, "close?") {
+		t.Fatalf("perpetual done note must not nag to close: %q", r.Note)
+	}
+	if r.Stage != "chunk" {
+		t.Fatalf("stage=%q want chunk", r.Stage)
 	}
 }
 

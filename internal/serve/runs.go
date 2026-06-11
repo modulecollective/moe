@@ -634,15 +634,15 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // (Options.WorkflowUI): cascade workflows (sdlc) get the "→ <stage>" /
 // "ship" / "chain" trio keyed off the re-derived next stage; the rest
 // (pdlc) get one sitting chip per declared stage verb, the next stage
-// styled primary; both get a close-run chip when a close pipeline is
-// registered. A workflow that declared nothing renders no chips —
-// today's read-only page.
+// styled primary. Non-perpetual workflows with a close pipeline also
+// get a close-run chip. A workflow that declared nothing renders no
+// chips — today's read-only page.
 //
 // nextStage is the bare next-stage name re-derived from the dash row;
 // live is true when an agent is mid-turn. Spawn chips drop while live
 // (spawning past a stage whose agent is still running would race it
-// for the sandbox clone); the close chip stays, the close route's own
-// live-child refusal guards the click.
+// for the sandbox clone); non-perpetual close chips stay, and the
+// close route's own live-child refusal guards the click.
 func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	base := "/run/" + projectID + "/" + slug
 	if md.Workflow == dash.IdeaWorkflow {
@@ -694,7 +694,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			}
 		}
 	}
-	if ui.Close {
+	if ui.Close && !ui.Perpetual {
 		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST"})
 	}
 	return out
