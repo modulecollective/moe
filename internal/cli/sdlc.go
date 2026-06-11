@@ -34,19 +34,19 @@ func init() {
 	g.Register(newRunCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "design",
-		Summary: "open a Claude Code session on the run's design document",
+		Summary: "open an agent session on the run's design document",
 		Run:     runDesign,
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "code",
-		Summary: "open a Claude Code session on the run's code document (in a sandbox clone)",
+		Summary: "open an agent session on the run's code document (in a sandbox clone)",
 		Run:     runCode,
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "test",
-		Summary: "open a Claude Code session on the run's test document — verify the code stage's work",
+		Summary: "open an agent session on the run's test document — verify the code stage's work",
 		Run:     runTest,
 		argKind: argProjectRun,
 	})

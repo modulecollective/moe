@@ -130,39 +130,39 @@ func init() {
 	// drives the rest of the ladder.
 	g.Register(reflectCommand("twin", twinWikiBuilder))
 	// Per-stage entry points (five doc stages plus finalize). Each opens
-	// an interactive Claude Code session against the named stage's
+	// an interactive agent session against the named stage's
 	// canvas; the dispatcher behind them (openTwinStage) routes the
 	// chain prompt's cascade driver (`!` / `!<stage>` / `!!` / `!!!`). Stage
 	// order here matches twinStageOrder so a reordering shows up in
 	// one place.
 	g.Register(&Command{
 		Name:    "vision",
-		Summary: "open a Claude Code session on the run's vision-stage canvas",
+		Summary: "open an agent session on the run's vision-stage canvas",
 		Run:     twinStageRun("vision"),
 	})
 	g.Register(&Command{
 		Name:    "architecture",
-		Summary: "open a Claude Code session on the run's architecture-stage canvas",
+		Summary: "open an agent session on the run's architecture-stage canvas",
 		Run:     twinStageRun("architecture"),
 	})
 	g.Register(&Command{
 		Name:    "patterns",
-		Summary: "open a Claude Code session on the run's patterns-stage canvas",
+		Summary: "open an agent session on the run's patterns-stage canvas",
 		Run:     twinStageRun("patterns"),
 	})
 	g.Register(&Command{
 		Name:    "operations",
-		Summary: "open a Claude Code session on the run's operations-stage canvas",
+		Summary: "open an agent session on the run's operations-stage canvas",
 		Run:     twinStageRun("operations"),
 	})
 	g.Register(&Command{
 		Name:    "glossary",
-		Summary: "open a Claude Code session on the run's glossary-stage canvas",
+		Summary: "open an agent session on the run's glossary-stage canvas",
 		Run:     twinStageRun("glossary"),
 	})
 	g.Register(&Command{
 		Name:    "finalize",
-		Summary: "open a Claude Code session on the run's finalize-stage canvas — clear hygiene findings, fold events, seal the pass",
+		Summary: "open an agent session on the run's finalize-stage canvas — clear hygiene findings, fold events, seal the pass",
 		Run:     twinStageRun("finalize"),
 	})
 	// Claim stays out-of-band: no run.json, no stage ladder, just the

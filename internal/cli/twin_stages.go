@@ -28,7 +28,7 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 		fs.Usage = func() {
 			moePrintf(stderr, "usage: moe twin %s [--agent <name>] <project>/<run>\n", stage)
 			moePrintln(stderr, "")
-			moePrintf(stderr, "Opens an interactive Claude Code session on the %s-stage canvas\n", stage)
+			moePrintf(stderr, "Opens an interactive agent session on the %s-stage canvas\n", stage)
 			moePrintln(stderr, "of a twin reflect run. First use on a run creates the document;")
 			moePrintln(stderr, "re-runs resume the session.")
 		}

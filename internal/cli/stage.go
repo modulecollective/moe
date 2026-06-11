@@ -228,9 +228,9 @@ func resolveAgentName(explicit, runDefault string) string {
 }
 
 // runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
-// resolve the run/document, hand the operator an interactive Claude Code
+// resolve the run/document, hand the operator an interactive agent
 // session keyed to that document's session-id, and commit whatever changed
-// when Claude exits.
+// when the agent exits.
 //
 // The session runs inside a throwaway git worktree on a branch named
 // session/<project>/<run>/<doc>. All per-turn commits (session-start,

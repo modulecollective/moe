@@ -27,7 +27,7 @@ func init() {
 	g.Register(newRunCommand(hooksWorkflow))
 	g.Register(&Command{
 		Name:    hooksCodeDoc,
-		Summary: "open a Claude Code session on the run's code canvas; edits land in projects/<p>/hooks/<event>.d/*",
+		Summary: "open an agent session on the run's code canvas; edits land in projects/<p>/hooks/<event>.d/*",
 		Run:     runHooksCode,
 	})
 	// Bureaucracy-side workflow: no sandbox, no workspace, no
@@ -58,7 +58,7 @@ func runHooksCode(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe hooks code [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the run's code canvas.")
+		moePrintln(stderr, "Opens an interactive agent session on the run's code canvas.")
 		moePrintln(stderr, "The agent edits scripts under projects/<project>/hooks/<event>.d/* and")
 		moePrintln(stderr, "iterates via `moe hook fire <project> <event>`. Edits commit alongside")
 		moePrintln(stderr, "the canvas on session close.")

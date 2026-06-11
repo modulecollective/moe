@@ -23,7 +23,7 @@ import (
 func lintCommand(workflow string, builder func(root, projectID string) (*wiki.Config, error)) *Command {
 	return &Command{
 		Name:    "lint",
-		Summary: "open a Claude Code lint session on the project's wiki",
+		Summary: "open an agent lint session on the project's wiki",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runLintSession(workflow, builder, args, stdout, stderr)
 		},
@@ -37,7 +37,7 @@ func runLintSession(workflow string, builder func(root, projectID string) (*wiki
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s lint [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code lint session on the project's wiki.")
+		moePrintln(stderr, "Opens an interactive agent lint session on the project's wiki.")
 		moePrintln(stderr, "Out-of-band relative to runs: no stage, no canvas, no run.json.")
 		moePrintln(stderr, "Findings (orphaned docs, broken cross-links, empty docs) are pre-scanned")
 		moePrintln(stderr, "and seeded into the kickoff prompt; the agent walks them with the operator")

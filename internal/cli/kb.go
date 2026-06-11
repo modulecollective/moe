@@ -57,12 +57,12 @@ func init() {
 	g.Register(newRunCommand("kb"))
 	g.Register(&Command{
 		Name:    "research",
-		Summary: "open a Claude Code session on the run's research bibliography",
+		Summary: "open an agent session on the run's research bibliography",
 		Run:     runResearch,
 	})
 	g.Register(&Command{
 		Name:    "summarize",
-		Summary: "open a Claude Code ingest session on the project's wiki",
+		Summary: "open an agent ingest session on the project's wiki",
 		Run:     runSummarize,
 	})
 	g.Register(closeCommand("kb", "Close kb run %s/%s", nil))
@@ -106,7 +106,7 @@ func runResearch(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe kb research [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the research bibliography.")
+		moePrintln(stderr, "Opens an interactive agent session on the research bibliography.")
 		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -157,7 +157,7 @@ func runSummarize(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe kb summarize [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code ingest session on the project's wiki.")
+		moePrintln(stderr, "Opens an interactive agent ingest session on the project's wiki.")
 		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")
 		moePrintln(stderr, "— editing existing topic docs, creating new ones, and maintaining index.md.")
 		moePrintln(stderr, "Per-run canvas is a scratchpad; the wiki diff is the artifact.")

@@ -44,12 +44,12 @@ func init() {
 	g.Register(newRunCommand(auditWorkflow))
 	g.Register(&Command{
 		Name:    auditPlanDoc,
-		Summary: "open a Claude Code session on the run's plan canvas — pick what this review pass should cover",
+		Summary: "open an agent session on the run's plan canvas — pick what this review pass should cover",
 		Run:     runAuditPlan,
 	})
 	g.Register(&Command{
 		Name:    auditReportDoc,
-		Summary: "open a Claude Code session on the run's report canvas — do the actual review and file feedback",
+		Summary: "open an agent session on the run's report canvas — do the actual review and file feedback",
 		Run:     runAuditReport,
 	})
 	// Audit has no workspace and no moe/<run> branch, so the shared
@@ -84,7 +84,7 @@ func runAuditPlan(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe audit plan [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the plan canvas.")
+		moePrintln(stderr, "Opens an interactive agent session on the plan canvas.")
 		moePrintln(stderr, "The agent asks the operator what this review pass should cover")
 		moePrintln(stderr, "(Scope / Themes / Out of scope) and writes the answer; headless")
 		moePrintln(stderr, "default falls through to 'Scope: everything'. The report stage")
@@ -135,7 +135,7 @@ func runAuditReport(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe audit report [--agent <name>] <project>/<run>")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive Claude Code session on the report canvas.")
+		moePrintln(stderr, "Opens an interactive agent session on the report canvas.")
 		moePrintln(stderr, "The agent reads the project — code, canvases, digital twin — under")
 		moePrintln(stderr, "the scope named in the plan canvas, files concerns to followups.md /")
 		moePrintln(stderr, "feedback/twin.md / feedback/lore.md, and writes a ranked summary on")
