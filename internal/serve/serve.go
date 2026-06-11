@@ -165,7 +165,8 @@ type WorkflowUI struct {
 	// the routine next move; the run stays open for repeat sittings.
 	Perpetual bool
 	// Close reports that the workflow registered the shared close
-	// pipeline. Non-perpetual per-run pages render a close-run chip.
+	// pipeline. Per-run pages use Perpetual to decide whether close is
+	// a routine idle-page chip or only a live-child lifecycle affordance.
 	Close bool
 }
 
