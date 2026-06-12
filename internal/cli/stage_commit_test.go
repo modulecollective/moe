@@ -11,26 +11,25 @@ import (
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
-// commitWikiTurn is the shared per-turn commit for the three wiki-
-// attached out-of-band sessions (claim, reflect, lint). The behaviour
+// commitWikiTurn is the shared per-turn commit for the two wiki-
+// attached out-of-band sessions (reflect, lint). The behaviour
 // it owns is: stage the wiki content dir; conditionally stage the
 // per-run canvas if the agent wrote one; commit both in a single
-// `work: <docID> pass <slug>` commit with the right trailers. Claim
-// and reflect write a canvas; lint doesn't, and the helper's
+// `work: <docID> pass <slug>` commit with the right trailers.
+// Reflect writes a canvas; lint doesn't, and the helper's
 // os.Stat-skip is what keeps that case wiki-only. One parameterised
-// test pins all three.
+// test pins both.
 func TestCommitWikiTurn(t *testing.T) {
 	cases := []struct {
 		docID       string
 		runSlug     string
 		writeCanvas bool
 	}{
-		// Claim and reflect instruct the agent (in their kickoffs) to
-		// drop a per-pass record at canvasRel; the helper must stage it
+		// Reflect instructs the agent (in its kickoff) to drop a
+		// per-pass record at canvasRel; the helper must stage it
 		// alongside the wiki edits so the session-close gate sees a
 		// non-empty canvas at the branch tip — without this, the gate
 		// refuses to fast-forward main (the original bug).
-		{docID: "claim", runSlug: "claim-2026-05-12-120000", writeCanvas: true},
 		{docID: "reflect", runSlug: "reflect-2026-05-11-120000", writeCanvas: true},
 		// Lint never writes a canvas; the os.Stat skip in commitWikiTurn
 		// is what keeps the commit wiki-only. Pin that branch here —

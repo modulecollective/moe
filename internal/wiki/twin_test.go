@@ -226,8 +226,8 @@ func TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime(t *testing.T) {
 // promise that a post-checkpoint commit reverted by a later commit
 // (so the doc's tree state at HEAD matches the checkpoint SHA) does
 // NOT trip the unrecorded-edits guardrail. Without this, every revert
-// of a managed-doc commit would force the operator through a claim
-// pass with nothing to actually record.
+// of a managed-doc commit would itself trip the guardrail, telling
+// the operator to revert what is already reverted.
 func TestDetectUnrecordedEditsIgnoresNetNoopRevert(t *testing.T) {
 	root := newGitRepo(t)
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")

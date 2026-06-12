@@ -691,8 +691,8 @@ type wikiSessionInputs struct {
 	// will dispatch to. Populated by runStageSession before
 	// runWikiSession runs so reportWikiSessionExit can attribute the
 	// "<agent> exited" line honestly. Empty falls back to "agent" in
-	// the reporter, which keeps lint / claim callers correct without
-	// forcing them to resolve up front.
+	// the reporter, which keeps the lint caller correct without
+	// forcing it to resolve up front.
 	Agent string
 	// LockPurpose is the repo-lock label prefix; the helper appends
 	// "-open" / "-close" for the two short-held windows.
@@ -927,7 +927,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	//
 	// Also reflect the resolved name back into `in` so
 	// reportWikiSessionExit attributes the "<agent> exited" line
-	// honestly even when the caller (lint, claim) didn't pre-populate
+	// honestly even when the caller (lint) didn't pre-populate
 	// in.Agent.
 	agentName := spec.Agent
 	if agentName == "" {

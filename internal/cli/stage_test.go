@@ -222,8 +222,8 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 // of every "\n---\n\n" section join across the cli package: every
 // non-empty section must end with "\n", or the separator collides
 // with the section's last byte and renders mid-line instead of as a
-// section break. Five builders share the same join idiom
-// (buildSystemPrompt + claim/reflect/idea/lint); this is the
+// section break. Four builders share the same join idiom
+// (buildSystemPrompt + reflect/idea/lint); this is the
 // shared assertion they all call into.
 //
 // minSections is the floor of expected chunks after splitting on the

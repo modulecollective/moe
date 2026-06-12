@@ -227,8 +227,9 @@ func findingsCount(f wiki.Findings) int {
 // unrecordedEditsRedirect formats the one-line redirect printed when
 // reflect refuses to run because managed docs have been edited
 // outside a reflect pass. Names the docs and tells the operator to
-// revert: a `git checkout` back to checkpoint state is a net no-op
-// (docUnchangedSinceSHA treats it as recorded) and clears the
+// revert: a committed revert back to checkpoint state is a net no-op
+// (docUnchangedSinceSHA diffs checkpoint..HEAD, so HEAD's tree must
+// match — an uncommitted checkout doesn't clear it) and lifts the
 // refusal; the change itself lands through a reflect pass.
 func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 	docs := strings.Join(det.UnrecordedDocs, ", ")
