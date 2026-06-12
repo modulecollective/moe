@@ -407,6 +407,33 @@ func stubGroupCloseCommand(t *testing.T, workflow string, exit int) *[]closeComm
 	return &captured
 }
 
+func isolateCascadeMoeHome(t *testing.T) string {
+	t.Helper()
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	return root
+}
+
+func writeSatisfiedTwinFinalizeCanvas(t *testing.T, root string, md *run.Metadata) {
+	t.Helper()
+	writeStageCanvas(t, root, md, "finalize", `# Finalize
+
+## What I fixed
+
+- verified the reflect pass left no inline cleanup.
+
+## What I left
+
+- nothing left.
+
+## History-summary delta
+
+- no history changes in this fixture.
+`)
+}
+
 // TestCascadeFromGateTwinYoloAutoCloses pins the twin `!!` shape: a
 // twin cascade walks every reflect stage and then auto-closes the run.
 // sdlc's push branch is the equivalent terminator; twin has no push, so
@@ -414,9 +441,11 @@ func stubGroupCloseCommand(t *testing.T, workflow string, exit int) *[]closeComm
 // workflows where `done → close` is the only path. --no-edit keeps
 // the close non-interactive (followups harvested as-is).
 func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
 	stageCaptured := stubOpenTwinStage(t, nil)
 	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+	writeSatisfiedTwinFinalizeCanvas(t, root, md)
 
 	var stdout, stderr bytes.Buffer
 	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
@@ -637,9 +666,11 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 // stage, where successor-name math would otherwise reinterpret one
 // as the other.
 func TestCascadeFromGateOneStepAtTerminalStage(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
 	stageCaptured := stubOpenTwinStage(t, nil)
 	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
 	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+	writeSatisfiedTwinFinalizeCanvas(t, root, md)
 
 	var stdout, stderr bytes.Buffer
 	res, code := cascadeFromGate("finalize", "", true, false, md, &stdout, &stderr)
