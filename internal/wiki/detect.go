@@ -25,7 +25,7 @@ type DetectionResult struct {
 }
 
 // DetectUnrecordedEdits flags managed docs whose latest commit wasn't
-// produced by a twin session (reflect / claim). Closed-schema only —
+// produced by a twin session (reflect). Closed-schema only —
 // open-schema's "decided edits" idea isn't load-bearing today, so the
 // open path returns an empty result.
 //
@@ -151,93 +151,4 @@ func managedDocRelToBureaucracy(cfg Config, filename string) string {
 		return filename
 	}
 	return dir + "/" + filename
-}
-
-// ClaimPromptSection is the wiki-specific block for a twin claim
-// session. Sibling of IngestPromptSection / LintPromptSection /
-// reflect: same preamble, different framing — record
-// what the operator changed and why, without editing managed docs.
-//
-// Closed-schema only.
-func ClaimPromptSection(cfg Config) (string, error) {
-	if cfg.Mode != Closed {
-		return "", fmt.Errorf("wiki: claim is closed-schema only (got %s)", cfg.Mode)
-	}
-	var b strings.Builder
-	b.WriteString(wikiPreamble(cfg))
-	b.WriteString(`Claim pass (closed-schema):
-
-The operator edited one or more managed docs outside a reflect pass.
-Walk through what changed with them and synthesise a log entry
-recording:
-
-- **What changed** — derived from the diff (the engine seeds a diff
-  block in your kickoff prompt).
-- **Why** — the operator's words, plus motivation pulled from any
-  recent run docs the engine seeded for context.
-- **Which run** — the bureaucracy run id whose context fed the
-  decision, if any. Render this as a ` + "`_For: <run-id>_`" + ` line below
-  the run-title line.
-
-Claim is bookkeeping. Do **not** edit managed docs in this session.
-The operator's edits already exist on disk; claim only records
-context. If reflect-style content fixes are also warranted, the
-operator can run ` + "`moe twin reflect`" + ` after claiming.
-
-Engine-managed files: the engine writes checkpoint.json on its own.
-For claim, ` + "`log.md`" + ` is the journal entry — append a new entry at
-the bottom in the shape:
-
-    ## YYYY-MM-DD — claim-<timestamp>
-    _<short title>_
-    _For: <run-id>_   (if a bureaucracy run drove this; omit otherwise)
-
-    <one-paragraph synthesis: what changed, why, naming the docs>
-
-The per-pass durable record lives at
-` + "`projects/<project>/runs/<run-slug>/documents/claim/content.md`" + ` —
-the engine threads the exact path into your kickoff. Treat it as a
-short PR description for the operator's edits: Trigger / Decision /
-Diff in prose. log.md is the journal line; the canvas is the long
-record. The session refuses to seal until the canvas is non-empty.
-
-The engine bumps the checkpoint at session close so the next reflect
-sees a clean state.
-
-Schema-evolution rules (closed-schema): the doc set is fixed.
-Do not create, rename, or delete managed docs.
-
-`)
-	if len(cfg.AllowedPrimitives) > 0 {
-		fmt.Fprintf(&b, "Allowed primitives: %s.\n", strings.Join(cfg.AllowedPrimitives, ", "))
-	} else {
-		b.WriteString("Allowed primitives: (none — content edits only).\n")
-	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
-}
-
-// UnrecordedDiff returns a `git diff` of the managed docs from
-// checkpoint.bureaucracy_sha to HEAD, scoped to ContentDir. Returns
-// "" when there's no checkpoint to diff from or no diff to surface.
-func UnrecordedDiff(cfg Config) (string, error) {
-	if cfg.Mode != Closed {
-		return "", nil
-	}
-	cp, ok, err := ReadCheckpoint(cfg.ContentDir)
-	if err != nil {
-		return "", err
-	}
-	if !ok || cp.BureaucracySHA == nil || *cp.BureaucracySHA == "" {
-		return "", nil
-	}
-	rel := managedDocRelToBureaucracy(cfg, "")
-	rel = strings.TrimSuffix(rel, "/")
-	if rel == "" {
-		return "", nil
-	}
-	out, err := git.Output(cfg.BureaucracyPath, "diff", *cp.BureaucracySHA+"..HEAD", "--", rel)
-	if err != nil {
-		return "", nil
-	}
-	return out, nil
 }
