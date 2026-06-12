@@ -203,7 +203,6 @@ bureaucracy rather than erroring.
 | Workflow | Stages | Use it for |
 | --- | --- | --- |
 | `sdlc` | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
-| `audit` | `plan` -> `report` | fresh-eyes review that files feedback but does not push code |
 | `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
 | `pdlc` | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
 | `kb` | `research` -> `summarize` | project knowledge articles |
@@ -254,22 +253,6 @@ promotion and reopen trailers where it can. In an interactive shell it can ask
 whether you meant the current descendant; in non-interactive use it prints a
 hint.
 
-### Audit
-
-`moe audit` is a review workflow, not a shipping workflow:
-
-```sh
-moe audit new <project>/<slug>
-moe audit plan <project>/<run>
-moe audit report <project>/<run>
-moe audit close <project>/<run>
-```
-
-The plan stage records what the review should cover. The report stage reads the
-project, prior canvases, and digital twin, then writes ranked findings and files
-followups, twin observations, or lore through the normal feedback channels. It
-has no push stage.
-
 ### Chat
 
 `moe chat` is a thinking-partner workflow, not a coding or shipping one:
@@ -311,7 +294,7 @@ and emits followups for the work that remains. After a chunk sitting, the
 chain prompt offers to harvest those followups into ideas (the same editor
 gesture `close` uses), so the operator tailors what reaches the backlog. As
 harvested ideas run through `sdlc` and land, re-running `chunk` reconciles the
-plan against the new reality. Like `chat` and `audit`, the agent reads project
+plan against the new reality. Like `chat`, the agent reads project
 source through a per-run sandbox clone but never edits it; `close` means the
 goal shipped or died, not that a sitting ended.
 
@@ -492,7 +475,6 @@ The catalog below is a map, not a replacement for `moe help`.
 
 - `moe sdlc new|design|code|review|test|push|close|shell|reopen|cat|log` drives
   designed code work.
-- `moe audit new|plan|report|close|cat|log` drives review passes.
 - `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
 - `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.

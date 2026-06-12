@@ -40,7 +40,7 @@ import (
 // the chat agent writes nothing to the canvas itself (see
 // chatCanvasOnOpen and stageSessionOpts.CanvasOnOpen).
 //
-// Read-only by contract, the same way audit is: NeedsSandbox gives the
+// Read-only by contract: NeedsSandbox gives the
 // agent a clone to read, and EnforceSandboxBoundary refuses the turn's
 // cascade if any tracked file in the clone changed — the hard gate
 // against source edits leaking out of a "just thinking" session.
@@ -80,7 +80,7 @@ func init() {
 	})
 	// chat has no workspace, no push, and no moe/<run> branch worth a
 	// bespoke teardown (its read-only clone is reaped by `moe clone gc`
-	// at terminal status, same as audit), so the shared close skeleton
+	// at terminal status), so the shared close skeleton
 	// rides the standard harvest / state-guard / status-flip path with a
 	// nil cleanup.
 	g.Register(closeCommand(chatWorkflow, "Close chat run %s/%s", nil))
@@ -137,9 +137,9 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	return openChat(projectID, runID, *agentOverride, stdout, stderr)
 }
 
-// openChat is the Go-level seam behind `moe chat chat`. Same shape as
-// openAuditPlan — NeedsSandbox + EnforceSandboxBoundary make it a
-// read-only sandbox session — with two chat-specific knobs:
+// openChat is the Go-level seam behind `moe chat chat`. NeedsSandbox +
+// EnforceSandboxBoundary make it a read-only sandbox session, with two
+// chat-specific knobs:
 //
 //   - CanvasOnOpen appends the per-session marker so the moe-owned
 //     canvas moves every turn (the agent never writes it).

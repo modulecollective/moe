@@ -44,7 +44,7 @@ import (
 // harvest, and must not close on a reflex Enter either. See
 // promptPdlcHarvest.
 //
-// All three stages get the read-only sandbox treatment (chat/audit
+// All three stages get the read-only sandbox treatment (chat
 // style): NeedsSandbox gives the agent a clone to read, and
 // EnforceSandboxBoundary refuses the turn's cascade if any tracked
 // file in the clone changed.
@@ -87,7 +87,7 @@ func init() {
 	})
 	// pdlc has no workspace, no push, and no moe/<run> branch — its
 	// read-only clone is reaped by `moe clone gc` at terminal status,
-	// same as chat/audit — so the shared close skeleton rides the
+	// same as chat — so the shared close skeleton rides the
 	// standard harvest / state-guard / status-flip path with a nil
 	// cleanup. Close means the product goal shipped or died, not that
 	// a sitting ended; it harvests stragglers exactly as every other
@@ -190,7 +190,7 @@ func runPdlcChunk(args []string, stdout, stderr io.Writer) int {
 
 // openPdlcFrame is the Go-level seam behind `moe pdlc frame`. The chain
 // prompt's cascade driver reaches it through openPdlcStage. Same
-// read-only sandbox shape as openAuditPlan: NeedsSandbox so the agent
+// read-only sandbox shape as openChat: NeedsSandbox so the agent
 // can read source while shaping, EnforceSandboxBoundary as the hard
 // gate against edits leaking out of a thinking stage.
 func openPdlcFrame(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {

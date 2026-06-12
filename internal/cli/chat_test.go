@@ -14,7 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
-// TestChatRegistered partners with TestAuditRegistered:
+// TestChatRegistered partners with TestSDLCRegistered:
 // a registration drift in init() ordering would silently drop the chat
 // workflow. Walking the typed CLI to print the group's usage is the
 // cheapest integration check that both the CommandGroup and the Workflow

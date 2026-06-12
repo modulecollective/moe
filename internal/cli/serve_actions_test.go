@@ -48,7 +48,7 @@ func TestLookupServeWorkflowUIPdlc(t *testing.T) {
 // Workflows that declared nothing stay read-only in serve, even when
 // they registered a CLI close (chat does).
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
-	for _, wf := range []string{"chat", "audit", "kb", "twin", "hooks", "idea", "nope"} {
+	for _, wf := range []string{"chat", "kb", "twin", "hooks", "idea", "nope"} {
 		if _, ok := lookupServeWorkflowUI(wf); ok {
 			t.Errorf("workflow %q should have no serve declaration", wf)
 		}
@@ -72,7 +72,7 @@ func TestServeNewRunWorkflows(t *testing.T) {
 // reachable through the registry serve's CloseRun callback dispatches
 // by; idea's bespoke close stays out.
 func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
-	for _, wf := range []string{"sdlc", "pdlc", "kb", "chat", "audit", "twin", "hooks", "chores"} {
+	for _, wf := range []string{"sdlc", "pdlc", "kb", "chat", "twin", "hooks", "chores"} {
 		if _, ok := lookupCloseRegistration(wf); !ok {
 			t.Errorf("workflow %q registered closeCommand but has no close registration", wf)
 		}

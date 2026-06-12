@@ -4,7 +4,7 @@ import "io"
 
 // openChatStage is the Go-level seam behind the chain prompt's cascade
 // driver (`!` / `!<stage>` / `!!` / `!!!`) for chat runs. Same shape as
-// openAuditStage / openSdlcStage: switch on the stage name, hand to the
+// openSdlcStage: switch on the stage name, hand to the
 // right helper, return its exit code; an unknown stage surfaces as a
 // stderr line rather than routing somewhere wrong.
 //
@@ -18,7 +18,7 @@ import "io"
 //
 // Declared as a var and assigned in init() so the static reference
 // chain stays clear of Go's package init-order cycle checker — same
-// shape openSdlcStage / openAuditStage use.
+// shape openSdlcStage uses.
 var openChatStage func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 func init() {
