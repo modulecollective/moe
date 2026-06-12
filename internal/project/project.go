@@ -1,10 +1,10 @@
 // Package project registers target repos as submodules of the bureaucracy.
 //
 // Registration is a single atomic operation: detect the remote's default
-// branch, add it as a submodule under projects/<id>/src/, write the
-// project.json schema described in README §"Project (Target Repo)", and
-// commit both on main. The command lives on main because the README
-// treats project registration as settled state, not a run.
+// branch, add it as a submodule under projects/<id>/src/, write
+// project.json beside it, and commit both on main (see docs/concepts.md
+// §"Bureaucracy Repo And Target Repos"). The command lives on main
+// because project registration is settled state, not a run.
 //
 // The submodule nests one level deep (projects/<id>/src/) so that
 // projects/<id>/ itself is a plain bureaucracy-tracked directory that

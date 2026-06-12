@@ -439,9 +439,9 @@ func commonArgs(clonePath, systemPrompt string) []string {
 	// config — the divergence is internal to codex). Selecting the
 	// `workspace-git` permissions profile re-grants `.git` writes
 	// inside project roots. The profile lives in the operator's
-	// `~/.codex/config.toml`; see README "Codex setup". `codex exec`
-	// doesn't need the override, but applying it uniformly keeps the
-	// operator-side config single-shape.
+	// `~/.codex/config.toml`; see docs/reference.md §"Codex Setup".
+	// `codex exec` doesn't need the override, but applying it
+	// uniformly keeps the operator-side config single-shape.
 	args = append(args, "-c", "default_permissions=workspace-git")
 	if clonePath != "" {
 		args = append(args, "--add-dir", clonePath)

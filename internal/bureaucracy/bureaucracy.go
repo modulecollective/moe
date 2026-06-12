@@ -3,8 +3,8 @@
 // A bureaucracy root is any directory containing a bureaucracy.conf file.
 // Discovery checks $MOE_HOME first, then walks up from the current working
 // directory. The CLI and the bureaucracy live in separate repos (see
-// README §"Two Repos: CLI and Bureaucracy"), so the binary has no compiled-in
-// pointer to any particular bureaucracy.
+// docs/concepts.md §"Bureaucracy Repo And Target Repos"), so the binary
+// has no compiled-in pointer to any particular bureaucracy.
 package bureaucracy
 
 import (

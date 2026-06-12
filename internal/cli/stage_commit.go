@@ -111,8 +111,8 @@ func commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel strin
 }
 
 // commitTurn stages the document dir and run.json, then commits with
-// a trailer block keyed to the document/session. See README §"one run
-// branch per run" for the trailer convention.
+// a trailer block keyed to the document/session. See docs/concepts.md
+// §"Runs, Stages, And Canvases" for the trailer convention.
 //
 // extraPaths lists additional path specs (relative to root) to stage
 // alongside the document dir. Used by ingest stages to ride the wiki
