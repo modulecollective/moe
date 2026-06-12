@@ -29,7 +29,7 @@ var firstReflectCommitCap = 500
 
 // reflectPromptSection is the wiki-specific block appended to the
 // system prompt for a closed-schema reflect session. Sibling of
-// IngestPromptSection / ClaimPromptSection: same preamble, different
+// IngestPromptSection: same preamble, different
 // framing — walk each managed doc against recent events and propose
 // updates, and clean up structural findings before sealing the pass.
 //
@@ -74,10 +74,10 @@ people, broken pointers, stale lists of "currently we use X")
 can be fixed in place when drift has ≥2 sightings in recent
 events and the edit *tightens* an existing statement rather
 than reversing one. **Intent drift** (stated bets, non-goals,
-problem statement, scope) stays surface-only — flag it; the
-operator runs ` + "`moe twin claim`" + ` if they agree. If you can't tell
-which register a drift belongs to, flag for the operator
-instead of editing.
+problem statement, scope) stays surface-only — flag it on the
+canvas; the operator confirms it in an interactive reflect
+session before it's edited. If you can't tell which register a
+drift belongs to, flag for the operator instead of editing.
 
 Glossary convention: glossary.md is a single alphabetical list of
 project-specific terms. Each entry is a ` + "`### Term`" + ` heading

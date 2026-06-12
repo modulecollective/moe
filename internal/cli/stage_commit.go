@@ -73,10 +73,10 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 
 // commitWikiTurn stages the wiki content dir alongside the per-run
 // canvas in a single `work: <docID> pass <runSlug>` commit. Shared by
-// the three wiki-attached out-of-band sessions (claim, reflect, lint)
-// — every wiki-touching workflow lands its turn through this helper.
+// the two wiki-attached out-of-band sessions (reflect, lint) — every
+// wiki-touching workflow lands its turn through this helper.
 //
-// The canvas branch is conditional: callers (claim, reflect) instruct
+// The canvas branch is conditional: reflect instructs
 // the agent to drop a per-pass record at `run.ContentPath(...)`, and
 // the helper stages it alongside the wiki edits so both land in the
 // same commit and the session-close empty-canvas gate sees a non-empty

@@ -28,13 +28,6 @@ type FinalizeContext struct {
 	// to the log entry header. Injected for deterministic tests.
 	// Defaults to time.Now if zero.
 	Now time.Time
-	// Claim signals a closed-schema claim session. The agent writes
-	// the log.md entry themselves (engine doesn't synthesise one
-	// from the diff), and the checkpoint advances even though the
-	// agent didn't touch any managed doc this session. The diff is
-	// already in bureaucracy commits — the operator made it before
-	// the session opened.
-	Claim bool
 }
 
 // FinalizeResult reports what FinalizeIngest did. Empty Changes plus
@@ -132,34 +125,6 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 	// truncated isn't a wiki edit), but a session that produced both
 	// content edits and tags lands them together in the log entry.
 	ops := readAndTruncateOpsStash(cfg.ContentDir)
-
-	// Claim sessions have a different rhythm: the agent appends to
-	// log.md themselves (the engine doesn't synthesise an entry from
-	// the diff) and the checkpoint advances even when the change set
-	// is empty — the bookkeeping is the artifact.
-	if fctx.Claim {
-		bureaucracySHA := capturedSHA(cfg.BureaucracyPath, false, stderr, "bureaucracy")
-		var projectSHA *string
-		if cfg.ProjectRepoPath != "" {
-			projectSHA = capturedSHA(cfg.ProjectRepoPath, true, stderr, "project repo")
-		}
-		cp := Checkpoint{
-			Version:        CheckpointVersion,
-			LastIngestAt:   now.Format(time.RFC3339),
-			LastIngestRun:  fctx.RunID,
-			BureaucracySHA: bureaucracySHA,
-			Project:        cfg.Project,
-			ProjectRepoSHA: projectSHA,
-		}
-		if err := WriteCheckpoint(cfg.ContentDir, cp); err != nil {
-			return FinalizeResult{}, err
-		}
-		return FinalizeResult{
-			Changes:           changes,
-			LogEntryWritten:   false,
-			CheckpointWritten: true,
-		}, nil
-	}
 
 	if len(changes) == 0 {
 		return FinalizeResult{Changes: nil}, nil

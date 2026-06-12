@@ -17,16 +17,14 @@ import (
 // hygiene cleanups, the history-summary fold, and the checkpoint bump.
 // The structural kinship with kb lives at the wiki layer (wiki.Config
 // + ingest loop), not the workflow layer.
-//
-// `moe twin claim <project>` is the out-of-band decided-edit recorder
-// — it has no stage ladder and isn't part of the twin workflow DAG.
 
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
 Five managed docs hold the durable layer: vision, architecture,
 patterns, operations, and glossary. The doc set is fixed;
 reflect updates the contents based on observed events and clears
 structural hygiene findings. Decided edits (vision pivots,
-architectural intent) are authored, recorded via claim, not derived.`
+architectural intent) are confirmed by the operator in an
+interactive reflect session, not derived.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
 // project's twin gets. Names, titles, purposes, and per-doc reflect
@@ -165,9 +163,6 @@ func init() {
 		Summary: "open an agent session on the run's finalize-stage canvas — clear hygiene findings, fold events, seal the pass",
 		Run:     twinStageRun("finalize"),
 	})
-	// Claim stays out-of-band: no run.json, no stage ladder, just the
-	// decided-edit recorder.
-	g.Register(claimCommand("twin", twinWikiBuilder))
 	// Close marks the in-progress twin run terminal once finalize has
 	// landed. Mirrors `moe sdlc close`: no cleanup hook, since twin
 	// runs have no sandbox.

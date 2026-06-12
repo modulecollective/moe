@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
@@ -74,7 +73,7 @@ func TestReflectPromptSectionRendersClosed(t *testing.T) {
 		"## Wiki: twin (closed-schema)",
 		"vision.md — Vision",
 		"Reflect pass (closed-schema)",
-		"`moe twin claim`",
+		"canvas; the operator confirms it in an interactive reflect",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
@@ -107,36 +106,6 @@ func TestReflectPromptSectionRendersGlossaryConvention(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
-		}
-	}
-}
-
-func TestClaimPromptSectionRefusesOpen(t *testing.T) {
-	if _, err := ClaimPromptSection(Config{Mode: Open}); err == nil {
-		t.Fatal("ClaimPromptSection should refuse open-schema")
-	}
-}
-
-func TestClaimPromptSectionRendersClosed(t *testing.T) {
-	got, err := ClaimPromptSection(Config{
-		Mode:       Closed,
-		Name:       "twin",
-		ContentDir: "/x/projects/p/digital-twin",
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", Purpose: "north star"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Claim pass (closed-schema)",
-		"_For:",
-		"log.md",
-		"do not edit",
-	} {
-		if !strings.Contains(strings.ToLower(got), strings.ToLower(want)) {
-			t.Errorf("claim prompt missing %q in:\n%s", want, got)
 		}
 	}
 }
@@ -330,51 +299,12 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"patterns.md",
 		"operations.md",
 		"glossary.md",
-		"`moe twin claim`",
+		"twin wins until a reflect pass updates it",
 		"`moe-bureaucracy`",
 		"`moe-context`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("twin reference missing %q in:\n%s", want, got)
 		}
-	}
-}
-
-func TestFinalizeClaimAdvancesCheckpoint(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-	// Pre-populate log.md with a header line — the agent's "synthesis"
-	// in the test harness is just any non-managed-doc edit.
-	writeFile(t, filepath.Join(twinDir, "log.md"), "# Changelog\n\n## 2026-04-29 — claim-...\n_handoff_\n\nbody\n")
-
-	cfg := Config{
-		Mode:            Closed,
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
-	res, err := FinalizeIngest(cfg, FinalizeContext{
-		RunID: "claim-test",
-		Now:   now,
-		Claim: true,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.CheckpointWritten {
-		t.Fatal("claim finalize should always advance checkpoint")
-	}
-	if res.LogEntryWritten {
-		t.Fatal("claim finalize should not append a log entry — agent did")
-	}
-	cp, ok, err := ReadCheckpoint(twinDir)
-	if err != nil || !ok {
-		t.Fatalf("expected checkpoint after claim, ok=%v err=%v", ok, err)
-	}
-	if cp.LastIngestRun != "claim-test" || !strings.HasPrefix(cp.LastIngestAt, "2026-04-29") {
-		t.Errorf("checkpoint not advanced: %+v", cp)
 	}
 }

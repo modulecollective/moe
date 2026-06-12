@@ -41,7 +41,6 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
-		{"twin claim", []string{"twin", "claim", "--agent=gpt", "moe"}},
 		{"kb lint", []string{"kb", "lint", "--agent=gpt", "moe"}},
 	}
 	for _, tc := range cases {

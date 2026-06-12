@@ -33,7 +33,8 @@ import (
 //
 // Refuses with a redirect when:
 //   - the operator has touched managed docs outside the changelog
-//     (run `moe twin claim` first to record the decided edit), or
+//     (revert the edit, then land the change through a reflect
+//     pass), or
 //   - an in-progress twin run already exists for this project (resume
 //     it via `moe twin <stage> <project> <run>` or close it before
 //     starting a new pass).
@@ -105,8 +106,8 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return 1
 	}
 
-	// Decided-edit guardrail: refuse with a redirect to claim if the
-	// operator has touched managed docs outside the changelog.
+	// Guardrail: refuse with a revert-first redirect if the operator
+	// has touched managed docs outside the changelog.
 	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
 		moePrintf(stderr, "%s\n", unrecordedEditsRedirect(workflow, det))
 		return 1
@@ -225,15 +226,17 @@ func findingsCount(f wiki.Findings) int {
 
 // unrecordedEditsRedirect formats the one-line redirect printed when
 // reflect refuses to run because managed docs have been edited
-// outside a reflect pass. Names the docs and points the operator at
-// claim.
+// outside a reflect pass. Names the docs and tells the operator to
+// revert: a `git checkout` back to checkpoint state is a net no-op
+// (docUnchangedSinceSHA treats it as recorded) and clears the
+// refusal; the change itself lands through a reflect pass.
 func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 	docs := strings.Join(det.UnrecordedDocs, ", ")
 	since := "the last log entry"
 	if !det.Since.IsZero() {
 		since = det.Since.Format("2006-01-02")
 	}
-	return fmt.Sprintf("unrecorded edits to %s since %s — run `moe %s claim <project>` first",
+	return fmt.Sprintf("unrecorded edits to %s since %s — revert them, then land the change through `moe %s reflect`",
 		docs, since, workflow)
 }
 

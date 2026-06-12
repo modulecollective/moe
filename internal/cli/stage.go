@@ -759,10 +759,6 @@ type wikiTurnSpec struct {
 	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
 	FinalizeRunID    string
 	FinalizeRunTitle string
-	// FinalizeClaim, when true, signals a closed-schema claim
-	// session. The agent appends to log.md themselves; finalize
-	// advances the checkpoint without writing a fresh entry.
-	FinalizeClaim bool
 	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
 	// close — the per-stage twin stages commit their managed-doc
 	// edits but leave checkpoint advancement and log.md to the
@@ -1059,7 +1055,6 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 				_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
 					RunID:    spec.FinalizeRunID,
 					RunTitle: spec.FinalizeRunTitle,
-					Claim:    spec.FinalizeClaim,
 				}, stderr)
 				if ferr != nil {
 					moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
