@@ -1,19 +1,24 @@
 # ▓▒░ MINISTRY OF EVERYTHING ░▒▓
 
 Ministry of Everything (MoE) is a CLI-first harness for one operator directing
-AI agents through durable markdown work.
+AI agents through durable markdown work. It runs
+[Claude Code](https://claude.com/claude-code) or
+[Codex](https://chatgpt.com/codex/) against living markdown documents.
 
-MoE runs [Claude Code](https://claude.com/claude-code) or
-[Codex](https://chatgpt.com/codex/) against living markdown documents. Each
-stage produces a canvas: a short artifact the next stage can read without
-replaying the whole chat. Every turn is committed to a personal Git journal, so
-the project keeps memory that can be resumed, reverted, audited, and reused.
+Running several agent threads usually means chat-history archaeology: the
+design lives in one scrollback, the test evidence in another, and the context
+dies with the session. MoE's answer is that every stage of work writes a short
+canvas — an artifact the next stage reads without replaying the whole chat —
+and every turn is committed to a personal Git journal, so the project keeps
+memory that can be resumed, reverted, audited, and reused.
 
-There is no background worker and no autonomous scheduler. Agents act when you
-invoke a command. The operator stays strategist, reviewer, and source of
-judgment; MoE removes the coordination tax around opening work, handing context
-forward, checking progress, and filing the lessons that should shape the next
-run.
+There is no daemon, no scheduler, and no swarm. Agents act when you invoke a
+command, and the operator stays strategist, reviewer, and source of judgment.
+The bet behind that stance: agents have made careful work cheap. When a
+designed, reviewed, tested change costs one conversation and two keystrokes,
+the discipline that used to be overhead becomes the default path. What MoE
+removes is the coordination tax — opening work, handing context forward,
+checking progress, filing the lessons that should shape the next run.
 
 Everything works from the CLI:
 
@@ -25,29 +30,28 @@ and read canvas files:
 
 ![MoE web dashboard - open runs and backlog with local web server](docs/dash-web.png)
 
+## The 60-Second Taste
 
-## What MoE Is
+The everyday path is two commands and one conversation:
 
-MoE has two repos in play:
+```sh
+moe idea new my-project/add-batch-support              # jot it when it occurs to you
+moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
+```
 
-- `moe/` is this Go CLI. It is a thin wrapper around `git` and the selected
-  agent backend.
-- `bureaucracy/` is your private operating journal: registered projects,
-  runs, stage documents, ideas, project twins, lore, hooks, and the markdown
-  fragments that steer agents. MoE finds it by walking up from `$PWD` to a
-  `bureaucracy.conf` marker, or by reading `$MOE_HOME`.
+Promoting the idea offers to jump straight into the design stage: one
+conversation that shapes the note into a reviewable plan. When the stage ends,
+MoE prints a chain prompt. Type `!!` there, and the run codes, reviews, tests,
+and ships itself headlessly — each stage reading the canvas the previous stage
+wrote, each turn committed to the journal.
 
-A workflow is a small ladder of stages. A run is one pass through that ladder.
-A stage has one canvas file at
-`projects/<project>/runs/<slug>/documents/<stage>/content.md`. The agent reads
-that file, talks with you, edits the file, and MoE commits the turn with
-trailers like `MoE-Run`, `MoE-Document`, `MoE-Session`, and `MoE-Workflow`.
+The bangs are the lever for how far a run travels without you: `!` runs just
+the next stage and parks at the gate, `!<stage>` runs up to a named gate, `!!`
+ships this run, and `!!!` ships it and rides on into the next queued run. The
+full vocabulary — every stage spelled out, chains, and the matching CLI flags
+— is in [docs/workflows.md](docs/workflows.md#sdlc).
 
-Git is the checkpoint. Rewinding a bad turn is `git reset --soft`; undoing a
-landed turn is `git revert`. There is no separate database that knows the real
-history better than the journal.
-
-You might want MoE if:
+## You Might Want MoE If
 
 - you run several agent threads and need to resume them without chat-history
   archaeology;
@@ -55,72 +59,10 @@ You might want MoE if:
   artifacts instead of one long prompt;
 - you want follow-up ideas, project intent, and cross-project lessons to feed
   future runs automatically;
-- you want recurring maintenance — dependency bumps, doc sync, changelog
-  updates — to surface as ready-to-open runs instead of living in your memory;
+- you want recurring maintenance to surface as ready-to-open runs instead of
+  living in your memory;
 - you prefer explicit CLI commands and Git history over a hosted coordination
   product.
-
-## The Core Loop
-
-A normal software-development pass looks like this:
-
-```sh
-mkdir my-bureaucracy && cd my-bureaucracy
-moe init
-moe project add <repo-url>
-
-moe sdlc new my-project/add-batch-support
-moe sdlc design my-project/add-batch-support
-moe sdlc code my-project/add-batch-support
-moe sdlc review my-project/add-batch-support
-moe sdlc test my-project/add-batch-support
-moe sdlc push my-project/add-batch-support
-```
-
-The `new` command opens the run and writes the first files into the
-bureaucracy. `design` shapes the request into a reviewable plan. `code` gives
-the agent write access inside an isolated clone of the target project and
-requires it to commit the implementation there. `review` gives the committed
-diff an independent code-review pass before verification. `test` verifies the
-behavior and records what was run. `push` fast-forwards the target project's
-default branch, or opens a PR with `--pr`.
-
-At the end of a stage, MoE prints a chain prompt. The shortcuts are:
-
-More bangs go further. Every cascade is headless — the axis is *how far*,
-not *how*:
-
-- `!` runs exactly the next stage headlessly and then parks at the next gate.
-- `!<stage>` runs headlessly up to that named gate, without shipping.
-- `!!` runs every remaining stage headlessly and ships **this run** (or
-  auto-closes, for workflows without a push gate), then stops.
-- `!!!` is the same as `!!`, but after this run ships it **rides the whole
-  chain** — cascading into the next live chained run.
-
-In practice the everyday path is lighter: jot an idea, shape the design in one
-conversation, then let the rest run:
-
-```sh
-moe idea new my-project/add-batch-support              # jot it when it occurs to you
-moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
-```
-
-Promoting the idea will offer to jump into the design stage right away. When
-the design stage ends, MoE prints the chain prompt. Type `!!` there to
-run `code`, `review`, `test`, and `push` headlessly. The five-command block above is the
-same path spelled out by hand.
-
-When several SDLC runs are already designed and ready for code/review/test, use
-`moe chain edit` to order the active runs in `$EDITOR`. `!!!` is the chain
-lever: after it ships one run, MoE rides into the next live chained run at
-its first pending stage and keeps going. `!!` ships just the run in front of
-you and stops — reach for it when you want to ship one thing without setting
-the whole queue in motion.
-
-`moe dash` is the terminal home screen for re-entry. `moe serve` starts a local
-web UI, bound to `127.0.0.1:4242` by default, that shows the dashboard, run
-detail pages and canvas links, can open and parent live SDLC runs, and can edit,
-close, promote, or reopen ideas.
 
 ## Install
 
@@ -132,7 +74,8 @@ Requires Go 1.26+ and at least one agent backend on your `PATH`:
 go install github.com/modulecollective/moe/cmd/moe@latest
 ```
 
-Then initialize a bureaucracy and register a project:
+Then initialize a bureaucracy — the private Git repo where all runs, canvases,
+and project registrations live — and register a project:
 
 ```sh
 mkdir my-bureaucracy && cd my-bureaucracy
@@ -140,449 +83,40 @@ moe init
 moe project add <repo-url>
 ```
 
-The default backend is `claude`. To prefer Codex for new runs, set:
+The default backend is `claude`. To prefer Codex for new runs, set
+`MOE_AGENT=codex` or pass `--agent codex` when opening a run or a stage;
+interactive Codex needs a one-time permissions profile described in
+[docs/reference.md](docs/reference.md#codex-setup). `moe dash` is the terminal
+home screen for re-entry, and `moe serve` is the same dashboard as a local web
+UI. `moe help` and per-command usage are the source of truth for the exact
+command surface.
 
-```sh
-export MOE_AGENT=codex
-```
+## The Workflows
 
-You can also pass `--agent claude` or `--agent codex` when opening a run or an
-individual stage. `moe help` and per-command usage are the source of truth for
-the exact command surface.
-
-### Codex Setup
-
-If you use the `codex` backend interactively, add this profile to
-`~/.codex/config.toml`:
-
-```toml
-[permissions.workspace-git.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-
-[permissions.workspace-git.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-```
-
-MoE selects it with `-c default_permissions=workspace-git`. Without the profile,
-interactive Codex sessions can fail when Git needs to write
-`<clone>/.git/index.lock`.
-
-Separately, MoE pins `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true` for every
-Codex turn (interactive and headless): Codex never has a TTY for an editor, so a
-Git operation that would open one — `git rebase --continue` finalizing a rebase,
-`git commit` with no `-m` — otherwise hangs on vim and can leave a clone wedged
-mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
-
-### Shell Completion
-
-`moe completion <shell>` prints a completion script for `bash`, `zsh`, or
-`fish`. Source it from your shell's startup file:
-
-```sh
-# bash — in ~/.bashrc
-eval "$(moe completion bash)"
-
-# zsh — in ~/.zshrc, after `autoload -U compinit && compinit`
-eval "$(moe completion zsh)"
-
-# fish — in ~/.config/fish/config.fish
-moe completion fish | source
-```
-
-Completion covers verbs and subcommands (`moe sd⇥` → `sdlc`, `moe sdlc ⇥` →
-`design code review test …`) and the `<project>/<run>` slug for run-taking verbs
-(`moe sdlc code ⇥`), plus idea slugs (including `--from-idea`) and named
-workspaces. The script itself never changes as commands are added — all the
-logic lives in `moe` and is best-effort, so completion stays silent outside a
-bureaucracy rather than erroring.
-
-## Ways To Use MoE
+Each workflow is a small ladder of stages; a run is one pass through the
+ladder. One line each here — [docs/workflows.md](docs/workflows.md) has the
+full treatment.
 
 | Workflow | Stages | Use it for |
 | --- | --- | --- |
-| `sdlc` | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
-| `chat` | one `chat` session, resumed across sittings | thinking-partner sessions to reason, decide, and groom the backlog, without writing code |
-| `pdlc` | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
-| `kb` | `research` -> `summarize` | project knowledge articles |
-| `idea` | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
-| `twin` | `vision` -> `architecture` -> `patterns` -> `operations` -> `glossary` -> `finalize` | recorded project intent |
-| `hooks` | `code` | project-specific hook scripts |
-| `chores` | `code` | edit project chore definitions: what maintenance is due, and the run each one opens |
-
-### SDLC
-
-`moe sdlc` is the main software-development workflow:
-
-```sh
-moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
-moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc push [--pr] <project>/<run>
-moe sdlc shell  <project>/<run>
-```
-
-`moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
-seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
-starts a new run seeded with a terminal prior run's design canvas, useful
-when a closed or merged topic still has more work behind it.
-
-The cascade mode flags on `design`/`code`/`review`/`test` mirror the post-stage chain
-prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
-headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
-headless to a named gate; `--ship` (= `!!`) cascades headless through push
-and ships this run; `--chain` (= `!!!`) does the same and then rides the
-whole chain. The four cascade flags are mutually exclusive; `--agent` combines
-with them by switching the run's persisted agent before the cascade walks the
-stages, so every cascaded stage runs on the switched agent.
-
-Chains are the batch version of that same forward motion for active SDLC runs.
-`moe chain edit` opens every active SDLC run across projects; reorder the lines
-to make a sequence, delete lines you want left unchained, and save. `moe dash`
-shows a `chained -> <project>/<run>` hint for active parents with a live child.
-When a `!!!` cascade reaches the end of a chained parent, MoE starts the child
-at its first pending stage: a fresh child starts at `design`, while a partly
-completed child resumes where it is parked. (`!!` ships the parent and stops —
-it does not ride into the child.)
-
-When you type an older idea or run slug into an SDLC command, MoE follows
-promotion and reopen trailers where it can. In an interactive shell it can ask
-whether you meant the current descendant; in non-interactive use it prints a
-hint.
-
-### Chat
-
-`moe chat` is a thinking-partner workflow, not a coding or shipping one:
-
-```sh
-moe chat new [--workspace <name>] [--agent <name>] [--from-idea <project>/<slug>] <project>/<slug>
-moe chat chat [--agent <name>] <project>/<run>
-moe chat close [--no-edit] <project>/<run>
-```
-
-`new` opens the run, `chat` opens or resumes the session, and `close` archives
-it. The agent reads project source through a per-run sandbox clone but never
-edits it and never drives coding: if the conversation lands on "this needs
-building", it captures an idea and you start the SDLC ladder yourself. The run
-stays open across sittings, so re-running `chat` continues the same thread. The
-canvas is a moe-written session log; the conversation transcript is the record,
-read back with `moe chat log`. Grooming the idea backlog (`moe idea
-new|edit|close|reopen`) is the one state change a chat session makes on your
-behalf.
-
-### PDLC
-
-`moe pdlc` is the product-planning workflow — a robo-PM that plans once and
-reconciles forever:
-
-```sh
-moe pdlc new [--from-idea <project>/<slug>] [--agent <name>] <project>/<slug>
-moe pdlc frame <project>/<run>
-moe pdlc prd   <project>/<run>
-moe pdlc chunk <project>/<run>
-moe pdlc close [--no-edit] <project>/<run>
-```
-
-A plan is a run that stays open for the life of a product goal. `frame` shapes
-the goal conversationally; `prd` compresses the framing into a durable PRD
-under a fixed heading set; `chunk` diffs the PRD against current reality —
-prior followups, the journal's harvested-idea lineage, and the project source —
-and emits followups for the work that remains. After a chunk sitting, the
-chain prompt offers to harvest those followups into ideas (the same editor
-gesture `close` uses), so the operator tailors what reaches the backlog. As
-harvested ideas run through `sdlc` and land, re-running `chunk` reconciles the
-plan against the new reality. Like `chat`, the agent reads project
-source through a per-run sandbox clone but never edits it; `close` means the
-goal shipped or died, not that a sitting ended.
-
-### Ideas
-
-`moe idea` is the cheap backlog surface:
-
-```sh
-moe idea new <project>/<slug>
-moe idea edit <project>/<slug>
-moe idea list <project>
-moe idea move <project>/<slug> <to-project>
-moe idea close <project>/<slug>
-moe idea reopen <project>/<slug>
-```
-
-Idea capture and editing use `$EDITOR`. Use `moe chat` when you want an agent
-to groom the backlog or help shape notes. Every other workflow's `new` accepts
-`--from-idea <project>/<slug>`, promoting the idea into a run and preserving
-lineage in the journal. `idea reopen` is for a promoted idea whose destination
-run was abandoned and should become backlog again.
-
-### Chores
-
-Chores turn recurring project maintenance into runs you open on demand. A chore
-definition says what maintenance is due, when it becomes due, and which workflow
-run to open for it. MoE evaluates chores against the journal and surfaces the due
-ones — but nothing fires on its own. A due chore is a seeded run waiting in
-`moe dash` until you choose to open it.
-
-A chore is a directory under `projects/<project>/chores/<name>/` holding a
-`chore.json` of scheduler scalars and a `prompt.md` seed:
-
-    projects/my-project/chores/bump-deps/
-      chore.json   # {"cadence":"720h","cooldown":"48h"}  -> due monthly, 48h cooldown
-      prompt.md                                           -> the seed prompt the opened run starts from
-
-    projects/my-project/chores/regen-docs/
-      chore.json   # {"trigger":"go.mod","workflow":"sdlc"} -> due when merged work touches go.mod
-      prompt.md                                            -> "Regenerate the dependency table; go.mod changed."
-
-`chore.json` keys are all optional: `trigger` (path glob, or `*` for any merged
-project change), `cadence` and `cooldown` (duration strings like `"720h"` or
-`"30d"`), and `workflow` (the run to open; defaults to `sdlc`). `prompt.md`
-stays a markdown sibling — the opened run reads it verbatim. A chore directory
-must contain a parseable `chore.json`.
-
-A chore needs a `trigger`, a `cadence`, or both. `trigger` is a path glob (or
-`*` for any merged project change); `cadence` makes it due on a clock. A chore
-goes due when its trigger matches new merged work, its cadence elapses, or its
-own definition changes — unless it is cooling down or already has an open run.
-
-Two command families, mirroring hooks:
-
-```sh
-moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
-moe chore list [--project <p>]                # show what's due
-moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
-moe chore open [--now] <project>/<chore>      # open the seeded run for a due chore
-moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
-```
-
-`moe chores …` edits definitions under `projects/<project>/chores/*` through a
-journaled run. `moe chore open` refuses if the chore isn't due, already has an
-open run, or is cooling down. Pass `--now` to open it anyway when it's cooling
-down or not yet due — it still refuses if a run is already open.
-
-### Knowledge, Twin, And Hooks
-
-`moe kb new`, `moe kb research`, and `moe kb summarize` maintain open-schema
-knowledge articles for a project. `moe kb lint <project>` checks wiki hygiene
-without opening a run.
-
-`moe twin reflect <project>` walks the fixed digital-twin documents and folds
-new observations into recorded intent.
-
-`moe hooks new`, `moe hooks code`, and `moe hooks close` are the journaled loop
-for project hook scripts. `moe hook fire <project> <event>` is the fast loop:
-it creates a transient sandbox, runs one event's scripts once, prints the
-sandbox path, and exits.
-
-Chores get their own section above; the editing/supervision split mirrors hooks.
-
-## Concepts
-
-### Runs, Stages, And Canvases
-
-Runs live under `projects/<project>/runs/<slug>/`. Each run has `run.json` plus
-one document directory per stage. The canvas is the public artifact for that
-stage; the raw transcript is stored beside it as agent-specific JSONL so
-`moe <workflow> log` can render the conversation later.
-
-`moe <workflow> cat <project>/<run> <stage>` prints a canvas. For one-stage
-workflows, the stage can usually be omitted. `moe <workflow> log` renders the
-transcript; `--agent claude|codex` disambiguates if both transcript files exist.
-
-### Bureaucracy Repo And Target Repos
-
-The bureaucracy is the journal. Target projects are registered as submodules
-under it. MoE materializes a project before commands touch its source, so cold
-projects pay one submodule checkout and warm projects are cheap.
-
-Code-writing stages do not edit the canonical submodule directly. They use a
-per-run sandbox clone under `.moe/clones/<project>/<run>/`, created from the
-target project and isolated from other runs.
-
-### Sandboxes And Workspaces
-
-Per-run sandbox clones are disposable and scoped to one run. Named workspaces
-are long-lived working trees for cases where setup cost matters:
-
-```sh
-moe workspace new <project>/<name>
-moe workspace list [<project>]
-moe workspace shell <project>/<name>
-moe workspace refresh <project>/<name>
-moe workspace release <project>/<name>
-moe workspace remove <project>/<name>
-```
-
-A named workspace can be claimed by one run at a time, but the directory
-survives run close. `refresh` rebuilds cached `dev-env.d/*` output in place;
-`release` clears a stuck claim.
-
-`moe sdlc shell <project>/<run>` drops you into the run's working tree (its
-sandbox clone or named workspace, whichever it was opened with); `moe workspace
-shell` does the same for a named workspace directly.
-
-### Feedback Channels
-
-MoE's memory improves through a few explicit channels:
-
-- Followups are out-of-scope work noticed during a run. Agents write them to
-  `followups.md`; close-time harvest promotes surviving entries to ideas.
-- The idea backlog holds work that is worth remembering but not ready for a
-  full run.
-- The digital twin records project intent in `vision`, `architecture`,
-  `patterns`, `operations`, and `glossary` documents. When code and
-  twin disagree, the twin wins until a deliberate edit updates it.
-- Lore stores portable facts that apply across projects. Agents see a compact
-  catalog and open entries only when the "applies when" hint matches.
-
-## Command Reference
-
-The catalog below is a map, not a replacement for `moe help`.
-
-### Re-Entry And Supervision
-
-- `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
-  dashboard, including a CHORES bucket for due project chores.
-- `moe serve [--addr <host[:port]>] [--port <n>]` runs the local web UI.
-- `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
-  definition, opens the run a due chore configures, or clears a due chore until
-  it is next triggered.
-- `moe where` prints the resolved bureaucracy path.
-- `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
-- `moe <workflow> log <project>/<run> [<stage>]` renders a past stage
-  transcript in workflow context.
-
-### Project And Run Management
-
-- `moe init [--remote <url>] [dir]` creates a bureaucracy.
-- `moe project add <repo-url>` registers a target project.
-- `moe project list` lists registered projects.
-- `moe project remove <id>` unregisters a project when no named workspaces
-  remain.
-- `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
-  project submodule pointers.
-- `moe chain edit` opens an editor over active SDLC runs; reorder lines to
-  record a run chain in the bureaucracy journal.
-- `moe chain clear [--yes]` drops every currently live run-chain edge.
-- `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any
-  workflow; for `sdlc` it abandons the run instead of shipping it through
-  `sdlc push`.
-
-### Workflows
-
-- `moe sdlc new|design|code|review|test|push|close|shell|reopen|cat|log` drives
-  designed code work.
-- `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
-- `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
-- `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
-- `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
-- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|cat|log`
-  maintains recorded intent.
-- `moe hooks new|code|close|cat|log` edits project hook scripts through a
-  journaled run.
-- `moe chores new|code|close|cat|log` edits project chore definitions through a
-  journaled run.
-
-### Hooks And Environments
-
-Project hooks live under `projects/<project>/hooks/<event>.d/*` in the
-bureaucracy:
-
-- `dev-env.d/*` emits `KEY=VALUE` lines that MoE caches and supplies to agent
-  sessions and workspace shells.
-- `dev-env-teardown.d/*` cleans up when a run or workspace closes.
-- `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
-  push path and opens a recovery code session.
-
-Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
-event in a transient sandbox without creating a run.
-
-#### Per-project dev secrets
-
-Dev and test runs often need secrets (API keys, DB URLs, tokens) that must never
-be committed and must not leak across projects. The `dev-env.d` hook is the seam,
-no new subsystem required. A script decrypts a per-project file and emits its
-`KEY=VALUE` lines; MoE caches them at the tree's gitignored `.moe/dev-env.env`
-and sources them into the agent session and `moe workspace shell`. Decryption
-runs operator-side at stage open, before the agent subprocess exists, so the
-agent receives only the decrypted vars for its own project and never reads the
-key. Per-project scoping is structural: only that project's `dev-env.d` runs for
-its trees.
-
-Store the ciphertext as a sibling of the hook dir,
-`projects/<project>/secrets.env.age`, encrypted with
-[age](https://github.com/FiloSottile/age):
-
-```sh
-age-keygen -o /<volume>/age/keys.txt                             # one-time: prints age1... pubkey
-age -r <pubkey> -o projects/<p>/secrets.env.age secrets.env  # encrypt, then git add the .age
-```
-
-```sh
-# projects/<p>/hooks/dev-env.d/50-secrets.sh
-age -d -i /<volume>/age/keys.txt \
-  "$MOE_BUREAUCRACY/projects/$MOE_PROJECT/secrets.env.age"
-# stdout: KEY=VALUE lines -> MoE caches and sources them
-```
-
-age decrypts with no passphrase, so the same hook survives the headless `!!!`
-cascade, which has no operator to answer a prompt. Keep the keyfile outside the
-bureaucracy (e.g. on a persistent volume, with the secret line backed up in a
-password manager); a leaked bureaucracy clone is then ciphertext only. Rotating a
-secret re-decrypts on the next run; a named workspace needs `moe workspace
-refresh` to pick up new values. If a framework insists on reading a `.env` off
-disk, redirect the same `age -d` output to `"$MOE_SANDBOX/.env"` instead — but
-only when the target repo already gitignores that file, since `pre-push` refuses
-to ship with any untracked file present.
-
-### Cleanup And Recovery
-
-- `moe session list|abandon|resolve|gc` inspects or cleans leftover stage
-  session worktrees and branches.
-- `moe clone list|gc` inspects or removes orphan per-run sandbox clones.
-- `moe workspace release` clears a stale named-workspace claim.
-
-Stage logic can recover orphaned Claude sessions from the Claude cache or from
-mirrored transcript files when the normal close path was interrupted.
-
-## How Agents Are Steered
-
-MoE assembles an instruction preamble fresh for every turn. The important
-inputs are plain markdown:
-
-- [`soul.md`](soul.md) defines the general operating philosophy and quality
-  bar.
-- `workflows/<workflow>/<stage>.md` defines the lens for the current stage.
-- The stage-location header says where the run is in the ladder and what the
-  chain prompt will offer next.
-- Project digital-twin documents point the agent at recorded intent.
-- Lore and followup pointers tell the agent where to look and where to leave
-  traces.
-- Project-specific guidance such as `AGENTS.md` or `CLAUDE.md` is named
-  explicitly because the agent's working directory may be the bureaucracy
-  rather than the target repo.
-
-The rule is simple: if the agent keeps making the same kind of mistake, prefer
-editing the markdown it reads over adding Go code.
-
-## Skills
-
-Claude Code and Codex both support skills: named markdown files the backend can
-load when their description matches the situation. MoE ships three:
-
-- `moe-bureaucracy` teaches agents how to leave traces for downstream runs:
-  followups, twin observations, and lore, without exceeding the current stage's
-  scope.
-- `moe-context` teaches agents how to read the bureaucracy as context: prior
-  runs' canvases, journal trailers for slicing by run/doc/workflow, past
-  transcripts, the twin, and lore.
-- `moe-howto` teaches agents how to capture and groom the idea backlog from a
-  chat session, the verb set chat uses on your behalf.
-
-MoE materializes the relevant skills into the session's backend-specific skill
-directory with paths already filled in for the current run.
+| [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
+| [`chat`](docs/workflows.md#chat) | one `chat` session, resumed across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
+| [`pdlc`](docs/workflows.md#pdlc) | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
+| [`kb`](docs/workflows.md#knowledge-base-kb) | `research` -> `summarize` | research a topic with an agent and keep the distilled article |
+| [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
+| [`twin`](docs/workflows.md#twin) | `vision` -> ... -> `glossary` -> `finalize` | recorded project intent |
+| [`hooks`](docs/workflows.md#hooks) | `code` | project-specific hook scripts |
+| [`chores`](docs/workflows.md#chores) | `code` | recurring maintenance that surfaces as ready-to-open runs |
+
+## Going Deeper
+
+- [docs/workflows.md](docs/workflows.md) — how to drive each workflow:
+  commands, stages, cascades, and chains.
+- [docs/concepts.md](docs/concepts.md) — the moving parts: runs and canvases,
+  the bureaucracy repo, sandboxes and workspaces, feedback channels, and how
+  agents are steered.
+- [docs/reference.md](docs/reference.md) — the command catalog, Codex setup,
+  shell completion, hooks/dev-env/secrets, and cleanup and recovery.
 
 ## Status
 
