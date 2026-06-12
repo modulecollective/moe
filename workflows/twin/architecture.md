@@ -29,7 +29,7 @@ the canvas. A quiet pass is a valid pass.
   yet doesn't belong in architecture.
 - **Don't rewrite decisions.** Updating a decision because the
   team *agrees* it changed is fine. Rewriting because *you* think
-  it's wrong is a claim, not a reflect.
+  it's wrong is a decided edit for the operator, not a reflect.
 - **Don't rename or retire files.** Closed-schema means the doc
   set is fixed.
 - **Don't restate what another doc owns.** Architecture owns

@@ -28,12 +28,13 @@ canvas captures your narrative for this pass.
     the patterns-promotion bar; the operator reviews at pass end
     along with every other reflect edit.
   - **Intent drift** — stated bets, non-goals, problem statement,
-    scope. Still surface-only. Flag for the operator; they run
-    `moe twin claim` if they agree.
+    scope. Still surface-only. Flag it on the canvas; the operator
+    confirms it in an interactive reflect session before it's
+    edited.
 - **When in doubt, flag.** If you can't tell cleanly which register
   a drift belongs to, treat it as intent drift and surface it. A
   half-considered reference edit is worse than one round-trip
-  through claim.
+  through the operator.
 
 If there is no drift this pass — vision still holds — say so on
 the canvas explicitly. "No drift this pass; vision still holds"
@@ -43,7 +44,7 @@ is a valid one-line canvas. Silence is not.
 
 - **Don't rewrite intent.** Bets, non-goals, the problem
   statement, and scope are decided edits. Flag them; the operator
-  runs claim later if they agree.
+  confirms them in an interactive reflect session if they agree.
 - **Don't fix reference drift on one sighting.** The bar is ≥2
   sightings plus a tightening (not reversing) edit. A single odd
   appearance is a hint, not a fix.
@@ -91,8 +92,8 @@ pass's events touches the stated bets")
   pointers per edit; the operator should be able to agree at a
   glance.
 - **Hand off intent calls.** When you flag intent drift, name the
-  next move — usually "operator claims a vision edit" or
-  "operator confirms no drift."
+  next move — usually "operator confirms a vision edit in an
+  interactive reflect session" or "operator confirms no drift."
 
 ## Committing
 

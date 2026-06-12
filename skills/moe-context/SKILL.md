@@ -86,7 +86,7 @@ canvas.
 Anything under `projects/<p>/runs/<other-slug>/` is somebody else's
 run — read for context, never edit. Same for
 `projects/<p>/digital-twin/` and `lore/<slug>.md`: those are decided
-state the operator updates through `moe twin claim` and lore
+state the operator updates through `moe twin reflect` and lore
 promotion, not through inline edits. If you find something in another
 run that ought to change, leave a trace via the `moe-bureaucracy`
 skill instead of editing the source.

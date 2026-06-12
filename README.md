@@ -369,8 +369,7 @@ knowledge articles for a project. `moe kb lint <project>` checks wiki hygiene
 without opening a run.
 
 `moe twin reflect <project>` walks the fixed digital-twin documents and folds
-new observations into recorded intent. `moe twin claim <project>` records a
-decided out-of-band twin edit without opening a laddered run.
+new observations into recorded intent.
 
 `moe hooks new`, `moe hooks code`, and `moe hooks close` are the journaled loop
 for project hook scripts. `moe hook fire <project> <event>` is the fast loop:
@@ -479,7 +478,7 @@ The catalog below is a map, not a replacement for `moe help`.
 - `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
 - `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
-- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|claim|close|cat|log`
+- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|cat|log`
   maintains recorded intent.
 - `moe hooks new|code|close|cat|log` edits project hook scripts through a
   journaled run.
