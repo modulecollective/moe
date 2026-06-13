@@ -15,6 +15,16 @@
 // the thing that enforces "tailnet peers only." There is no token, no
 // login form. Override with --addr to bind elsewhere (for example,
 // --addr <tailnet-ip> on a kernel-mode tailscale host).
+//
+// Because reach is the only gate, the spawn bucket is opt-in. Several
+// POST routes run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary
+// code), so by default — safe mode — they refuse with 403 and the UI
+// doesn't offer them: only idea capture, run close/edit/reopen, and the
+// read-only views work. Options.Insecure (the --insecure flag or a
+// non-empty MOE_SERVE_INSECURE) re-enables the whole spawn bucket,
+// trading the safe default for serve's phone-facing "launch a run"
+// feature. That's an acknowledged choice: anything that can reach the
+// listener can then execute code.
 package serve
 
 import (
@@ -96,6 +106,15 @@ type Options struct {
 	// Absent means the per-run page renders the fallback meta line on
 	// every hit — no row data is fatal, just less informative.
 	GatherRunRow func(project, run string) (row dash.Row, ok bool, err error)
+
+	// Insecure enables the spawn bucket — the POST routes that run
+	// `moe <wf> <stage>` agent subprocesses (new run, promote,
+	// advance/ship/chain, stage spawn, chore open). Off by default (safe
+	// mode): those routes refuse with 403 and their UI entry points
+	// don't render; the journal-write and read-only routes are
+	// unaffected. The cli wrapper sets this from the --insecure flag or
+	// a non-empty $MOE_SERVE_INSECURE.
+	Insecure bool
 
 	// NotifyURL is the webhook URL we POST a small JSON payload to
 	// when a serve-parented run exits. Empty disables notifications.
@@ -251,6 +270,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("serve: listen %s: %w", s.addr, err)
 	}
 	s.logf("listening on http://%s/", s.addr)
+	if s.opts.Insecure {
+		s.logf("INSECURE: run-spawning enabled; anything that can reach http://%s/ can execute code", s.addr)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -385,6 +407,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	// suspect can be ruled in or out from the same serve log.
 	vmStart := time.Now()
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
+	vm.Insecure = s.opts.Insecure
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path
@@ -418,6 +441,22 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		s.logf("template %s: %v", name, err)
 	}
 	s.logf("%s %s", r.Method, r.URL.Path)
+}
+
+// spawnAllowed gates the spawn bucket — the POST routes that run agent
+// subprocesses. In safe mode (the default) it writes a 403 and returns
+// false; with Insecure set it returns true and the handler proceeds.
+// The five spawn handlers call it first thing. The matching UI gating
+// (so safe mode never offers a route it would refuse) lives in the view
+// models, not here.
+func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
+	if s.opts.Insecure {
+		return true
+	}
+	http.Error(w,
+		"serve is in safe mode; restart with --insecure (or set MOE_SERVE_INSECURE) to enable run-spawning actions",
+		http.StatusForbidden)
+	return false
 }
 
 func (s *Server) logf(format string, a ...any) {

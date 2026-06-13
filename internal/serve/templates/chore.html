@@ -33,10 +33,12 @@
     </p>
 
     <section class="actions">
-      {{if .Openable}}
-      <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit">open</button></form>
-      {{else}}
-      <span class="action disabled" aria-disabled="true">open — {{.BlockReason}}</span>
+      {{if .Insecure}}
+        {{if .Openable}}
+        <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit">open</button></form>
+        {{else}}
+        <span class="action disabled" aria-disabled="true">open — {{.BlockReason}}</span>
+        {{end}}
       {{end}}
       {{if .OpenRun}}<a class="action" href="{{.OpenRunURL}}">open run: {{.OpenRun}}</a>{{end}}
     </section>

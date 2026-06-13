@@ -31,13 +31,20 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "", "listen address override (host or host:port); default 127.0.0.1:4242")
 	port := fs.Int("port", serve.DefaultPort, "listen port (ignored when --addr already includes one)")
+	insecure := fs.Bool("insecure", false, "enable run-spawning actions (new run, promote, advance/ship/chain, chore open); off by default")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>]")
+		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--insecure]")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the moe web UI as an HTTP server. Binds 127.0.0.1:4242 by")
 		moePrintln(stderr, "default; put a `tailscale serve` proxy (or similar) in front to expose")
 		moePrintln(stderr, "it to peers. Pass --addr 0.0.0.0 or --addr <tailnet-ip> to bind wider.")
 		moePrintln(stderr, "Ctrl-C to stop; live runs spawned by serve die with it (PTY teardown).")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Safe by default: idea capture, run close/edit/reopen, and all views")
+		moePrintln(stderr, "work; the run-spawning actions (which run agent subprocesses, i.e.")
+		moePrintln(stderr, "arbitrary code) refuse with 403. Pass --insecure, or set a non-empty")
+		moePrintln(stderr, "MOE_SERVE_INSECURE, to enable them — anything that can reach the")
+		moePrintln(stderr, "listener can then execute code.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -53,10 +60,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	srv, err := serve.New(serve.Options{
-		Addr:      *addr,
-		Port:      *port,
-		Root:      root,
-		Logger:    stderr,
+		Addr:   *addr,
+		Port:   *port,
+		Root:   root,
+		Logger: stderr,
+		// Flag or a non-empty env var enables the spawn bucket; the env
+		// var lets a daemonized cloud-box `moe serve` opt in without
+		// threading a flag through its unit/launcher. Non-empty enables,
+		// mirroring how MOE_SERVE_NOTIFY_URL is read just below.
+		Insecure:  *insecure || os.Getenv("MOE_SERVE_INSECURE") != "",
 		NotifyURL: os.Getenv("MOE_SERVE_NOTIFY_URL"),
 		GatherDash: func() ([]dash.Row, int, int, error) {
 			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{},

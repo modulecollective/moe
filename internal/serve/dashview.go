@@ -43,6 +43,10 @@ type dashVM struct {
 	ProjectCount   int
 	ActiveProjects int
 	ShowAll        bool
+	// Insecure mirrors Options.Insecure: the "new run" / "new plan"
+	// links spawn an agent, so they only render in insecure mode. The
+	// "new idea" link is journal-only and always renders.
+	Insecure bool
 	// FactoryArt is the same peripheral-vision rail the CLI dash draws
 	// under its banner — backlog feed, station glyphs for active runs,
 	// completed-output dots. One-line empty state, three lines populated.

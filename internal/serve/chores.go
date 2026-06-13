@@ -61,13 +61,19 @@ type choreVM struct {
 	Openable    bool
 	BlockReason string
 
+	// Insecure mirrors Options.Insecure: open spawns an agent, so the
+	// whole open affordance (live button and disabled-with-reason
+	// fallback) only renders in insecure mode. The read-only open-run
+	// link is unaffected.
+	Insecure bool
+
 	// ErrorBanner is populated on a 409 re-render after a raced/stale
 	// open POST, mirroring the promote page's inline banner.
 	ErrorBanner string
 }
 
 // newChoreVM projects a chore.State onto the detail-page view model.
-func newChoreVM(now time.Time, st chore.State) choreVM {
+func newChoreVM(now time.Time, st chore.State, insecure bool) choreVM {
 	d := st.Definition
 	vm := choreVM{
 		Project:       d.Project,
@@ -82,6 +88,7 @@ func newChoreVM(now time.Time, st chore.State) choreVM {
 		Reasons:       st.ReasonString(),
 		LastCompleted: dash.HumanAgo(now, st.LastCompleted),
 		Openable:      st.Due,
+		Insecure:      insecure,
 	}
 	if st.OpenRun != "" {
 		vm.OpenRun = st.OpenRun
@@ -146,7 +153,7 @@ func (s *Server) gatherChoreVM(project, name string) (choreVM, int, error) {
 	if !ok {
 		return choreVM{}, http.StatusNotFound, errors.New("no such chore: " + key)
 	}
-	return newChoreVM(time.Now(), st), http.StatusOK, nil
+	return newChoreVM(time.Now(), st, s.opts.Insecure), http.StatusOK, nil
 }
 
 // handleChoreOpen opens the chore's configured-workflow run in-process,
@@ -156,6 +163,9 @@ func (s *Server) gatherChoreVM(project, name string) (choreVM, int, error) {
 // or raced POST (a chore that gained an open run / went on cooldown
 // since the page rendered) maps to 404/409 here too.
 func (s *Server) handleChoreOpen(w http.ResponseWriter, r *http.Request) {
+	if !s.spawnAllowed(w) {
+		return
+	}
 	project := r.PathValue("project")
 	name := r.PathValue("name")
 	key := project + "/" + name

@@ -119,6 +119,9 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 // Validation failures re-render the form with an ErrorBanner so the
 // operator can correct without retyping.
 func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.spawnAllowed(w) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
@@ -455,6 +458,9 @@ func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 // tracked-change refusal (EnforceSandboxBoundary): the explicit click
 // is the consent that guard asks for at the chain prompt.
 func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spawnMode) {
+	if !s.spawnAllowed(w) {
+		return
+	}
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
@@ -535,6 +541,9 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 // workflow's whole point. Unlike /advance there is no server-side
 // stage re-derivation: the operator named the sitting explicitly.
 func (s *Server) handleStageSpawn(w http.ResponseWriter, r *http.Request) {
+	if !s.spawnAllowed(w) {
+		return
+	}
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	stage := r.PathValue("stage")
@@ -652,11 +661,13 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	if md.Workflow == dash.IdeaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return []runAction{
-				{Label: "edit idea", Href: base + "/edit"},
-				{Label: "promote", Href: base + "/promote"},
-				{Label: "close idea", Href: base + "/close", Method: "POST"},
+			// edit / close are journal-only; promote spawns the
+			// destination run's agent, so it's gated to insecure mode.
+			out := []runAction{{Label: "edit idea", Href: base + "/edit"}}
+			if s.opts.Insecure {
+				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
 			}
+			return append(out, runAction{Label: "close idea", Href: base + "/close", Method: "POST"})
 		case run.StatusClosed:
 			return []runAction{
 				{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
@@ -672,7 +683,11 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		return nil
 	}
 	var out []runAction
-	if !live {
+	// The stage chips (cascade trio, sitting verbs) all spawn an agent,
+	// so they render only in insecure mode. The close-run chip below is
+	// journal-only (CloseRun runs in-process, no spawn) and stays in safe
+	// mode.
+	if !live && s.opts.Insecure {
 		if ui.Cascade {
 			// A "" or excluded next stage (sdlc's push) yields no trio:
 			// push stays terminal/CLI-only — the bang vocabulary
@@ -904,6 +919,9 @@ func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
 // placeholder id, no stdout regex, no rename race. Validation failures
 // re-render the promote page with an inline error banner.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
+	if !s.spawnAllowed(w) {
+		return
+	}
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
