@@ -10,10 +10,13 @@ source of truth for the exact command surface; this page is a map.
 
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
   dashboard, including a CHORES bucket for due project chores.
-- `moe serve [--addr <host[:port]>] [--port <n>]` runs the local web UI,
-  bound to `127.0.0.1:4242` by default. It shows the dashboard, run detail
-  pages, and canvas links, can open and parent live SDLC runs, and can edit,
-  close, promote, or reopen ideas.
+- `moe serve [--addr <host[:port]>] [--port <n>] [--insecure]` runs the local
+  web UI, bound to `127.0.0.1:4242` by default. **Safe by default:** all views,
+  idea capture/edit/close/reopen, and run close/edit/reopen work, but the
+  run-spawning actions — opening new runs and plans, advancing a stage, and
+  opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
+  non-empty `MOE_SERVE_INSECURE`) to enable them; anything that can reach the
+  listener can then execute code.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
