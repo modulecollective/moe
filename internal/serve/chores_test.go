@@ -255,7 +255,7 @@ func TestNewChoreVMBlockReasonPrecedence(t *testing.T) {
 			st := dueChoreState()
 			st.Due = false
 			tc.mut(&st)
-			vm := newChoreVM(now, st)
+			vm := newChoreVM(now, st, false)
 			if vm.Openable {
 				t.Fatalf("not-due chore must not be openable")
 			}
