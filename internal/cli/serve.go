@@ -71,8 +71,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		Insecure:  *insecure || os.Getenv("MOE_SERVE_INSECURE") != "",
 		NotifyURL: os.Getenv("MOE_SERVE_NOTIFY_URL"),
 		GatherDash: func() ([]dash.Row, int, int, error) {
-			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{},
-				newGatherTimer(stderr, "dash"))
+			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{})
 			if err != nil {
 				return nil, 0, 0, err
 			}
@@ -97,7 +96,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			return wf.Stages(), nil
 		},
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
-			return GatherRunRow(root, project, runID, time.Now().UTC(), stderr)
+			return GatherRunRow(root, project, runID, time.Now().UTC())
 		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the

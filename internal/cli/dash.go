@@ -53,11 +53,10 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 
 	now := time.Now().UTC()
-	// CLI dash stays an unlogged, fresh scan: no timer (nil = no-op).
 	snap, err := GatherDashSnapshot(root, now, DashFilter{
 		ProjectFilter:  *project,
 		WorkflowFilter: *workflow,
-	}, nil)
+	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
