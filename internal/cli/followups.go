@@ -51,7 +51,15 @@ This header is auto-injected on editor pop; remove it freely.
 // specific "title is empty" error). The em-dash separator (U+2014) is
 // the design's required form; a hyphen or `--` would be ambiguous with
 // the leading list marker.
-var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`([a-z0-9][a-z0-9-]*)`\\s+—\\s*(.*?)\\s*$")
+//
+// The slug group permits an optional `<project>/` prefix
+// (`claudia/inherit-nginx`): one extra `/`-separated segment, each
+// segment matching run.idPattern's shape exactly so a slug that parses
+// here can't later be rejected by run.New. A bare slug (no `/`) keeps
+// today's behaviour — the idea lands in the current project. This regex
+// is SHARED with lore via parseChecklist; lore re-narrows it by
+// rejecting any `/` (see parseLore) rather than forking a parser.
+var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`\\s+—\\s*(.*?)\\s*$")
 
 // followupCheckboxRE detects any list item that looks like a checkbox,
 // open or done. Used to flag malformed unchecked entries that don't
@@ -75,7 +83,9 @@ var followupUncheckedShapeRE = regexp.MustCompile(`^\s*-\s+\[\s\]`)
 // parsedFollowup is one harvest candidate plucked from followups.md.
 type parsedFollowup struct {
 	lineIdx int    // zero-based index into the raw line slice
-	slug    string // operator-supplied base slug (pre-disambiguation)
+	rawSlug string // exactly as on the line ("claudia/foo" or "foo") — markLine + dedup key
+	project string // resolved target project: explicit prefix, else current project
+	slug    string // bare base slug handed to createIdea ("foo", pre-disambiguation)
 	title   string // title to embed in the new idea's H1
 	body    string // optional dedented body markdown; "" means no body
 }
@@ -93,15 +103,29 @@ type parsedFollowup struct {
 // joined with '\n'. Bodies under checked (`[x]`) items are recognised
 // (so they don't attach to a prior open item) but discarded — the
 // idea has already been created on a past run.
-func parseFollowups(body []byte) (lines []string, todo []parsedFollowup, err error) {
+//
+// Slug routing: a slug may carry an optional `<project>/` prefix. The
+// prefix names the target project the harvested idea lands in; a bare
+// slug routes to currentProject (the run being closed). The raw slug
+// (prefix and all) is kept verbatim for the audit-line rewrite and the
+// dedup key, so `claudia/foo` and `westworld/foo` are distinct entries.
+// Target-project existence is validated by the harvest caller, which
+// has root in scope — see harvestFollowups.
+func parseFollowups(body []byte, currentProject string) (lines []string, todo []parsedFollowup, err error) {
 	lines, entries, err := parseChecklist(body, "follow-up", "follow-up")
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, e := range entries {
+		project, slug := currentProject, e.slug
+		if i := strings.IndexByte(e.slug, '/'); i >= 0 {
+			project, slug = e.slug[:i], e.slug[i+1:]
+		}
 		todo = append(todo, parsedFollowup{
 			lineIdx: e.lineIdx,
-			slug:    e.slug,
+			rawSlug: e.slug,
+			project: project,
+			slug:    slug,
 			title:   e.title,
 			body:    e.body,
 		})
@@ -186,13 +210,31 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 		markLine:        markHarvested,
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedFollowup], error) {
-			lines, todo, err := parseFollowups(body)
+			lines, todo, err := parseFollowups(body, projectID)
 			if err != nil {
 				return nil, nil, err
 			}
+			// Validation is upfront and total (the harvest's contract):
+			// reject an unknown target project before any idea is
+			// created, so a typo'd prefix (`claduia/…`) costs the
+			// operator one edit, not a half-finished batch. Each distinct
+			// project is checked once, in line order, so the error names
+			// the first offending line.
+			checked := map[string]bool{}
+			for _, fu := range todo {
+				if checked[fu.project] {
+					continue
+				}
+				if err := requireProject(root, fu.project); err != nil {
+					return nil, nil, fmt.Errorf("line %d: %w", fu.lineIdx+1, err)
+				}
+				checked[fu.project] = true
+			}
 			items := make([]scratchItem[parsedFollowup], 0, len(todo))
 			for _, fu := range todo {
-				items = append(items, scratchItem[parsedFollowup]{lineIdx: fu.lineIdx, slug: fu.slug, entry: fu})
+				// slug carries the raw (prefixed) form so markLine finds
+				// the literal `- [ ] ` + "`claudia/foo`" line to rewrite.
+				items = append(items, scratchItem[parsedFollowup]{lineIdx: fu.lineIdx, slug: fu.rawSlug, entry: fu})
 			}
 			return lines, items, nil
 		},
@@ -204,9 +246,19 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 			if fu.body != "" {
 				canvasBody = fmt.Sprintf("# %s\n\n%s\n", fu.title, fu.body)
 			}
-			md, err := createIdea(root, projectID, fu.slug, canvasBody, openTrailers)
+			// Route to the entry's target project (its prefix, else the
+			// current project). openTrailers' MoE-From-Run stays pointed
+			// at the source run — that's where the followup was captured.
+			md, err := createIdea(root, fu.project, fu.slug, canvasBody, openTrailers)
 			if err != nil {
 				return "", err
+			}
+			// Preserve the prefix shape in the audit line so it records
+			// where the idea actually landed (post-disambiguation): a
+			// prefixed entry rewrites to `project/resolved-id`, a bare
+			// one to just the resolved id.
+			if strings.Contains(fu.rawSlug, "/") {
+				return md.Project + "/" + md.ID, nil
 			}
 			return md.ID, nil
 		},

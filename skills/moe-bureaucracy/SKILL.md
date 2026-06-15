@@ -113,6 +113,18 @@ operator reviews and prunes these at termination; unchecked
 entries become idea runs with the body carried into the seed
 canvas.
 
+To file a followup against a *different* project, prefix the slug
+with `<project>/`. A bare slug (the default) files against the
+current project; a prefixed slug routes the idea to the named
+project, which must already be registered:
+
+  - [ ] `claudia/inherit-nginx-identity` — Claudia should inherit the nginx identity injection
+
+The line stays in *this* run's `followups.md` and is harvested at
+close like any other; only the destination changes. Provenance
+still records the source run, so the destination project sees where
+the note came from.
+
 If acting on this entry would edit a digital-twin doc, it belongs
 in `feedback/twin.md` above instead. If it's a portable fact that
 would apply to other projects, it belongs in `feedback/lore.md`.

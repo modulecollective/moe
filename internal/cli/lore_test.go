@@ -176,6 +176,21 @@ func TestParseLoreRejectsMalformed(t *testing.T) {
 	}
 }
 
+// TestParseLoreRejectsSlugWithSlash pins the lore-side re-narrowing of
+// the shared checklist regex: followups permits a `<project>/` prefix
+// for routing, but a lore slug is a bare filename, so a `/` is rejected
+// with a 1-based line number rather than silently writing into a subdir.
+func TestParseLoreRejectsSlugWithSlash(t *testing.T) {
+	body := "- [ ] `claudia/some-fact` — Lore must not carry a project prefix\n"
+	_, _, err := parseLore([]byte(body))
+	if err == nil {
+		t.Fatal("expected error for slug containing '/'")
+	}
+	if !strings.Contains(err.Error(), "must not contain '/'") || !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("expected line-numbered slash-rejection error, got %q", err.Error())
+	}
+}
+
 func TestParseLoreRejectsDuplicateSlug(t *testing.T) {
 	body := strings.Join([]string{
 		"- [ ] `dup` — First",

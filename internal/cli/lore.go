@@ -67,6 +67,13 @@ func parseLore(body []byte) (lines []string, todo []parsedLore, err error) {
 		return nil, nil, err
 	}
 	for _, e := range entries {
+		// parseChecklist's shared regex permits a `<project>/` prefix for
+		// followups routing; a lore slug is a bare filename
+		// (lore/<slug>.md), so a `/` would write into a subdir. Reject it
+		// here rather than fork a lore-specific parser.
+		if strings.Contains(e.slug, "/") {
+			return nil, nil, fmt.Errorf("line %d: lore slug must not contain '/' (lore is global; no project to route to)", e.lineIdx+1)
+		}
 		appliesWhen, prose := splitAppliesWhen(e.body)
 		todo = append(todo, parsedLore{
 			lineIdx:     e.lineIdx,

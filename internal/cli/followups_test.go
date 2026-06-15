@@ -47,7 +47,7 @@ func TestParseFollowupsRoundtrip(t *testing.T) {
 		"- [ ] `chase-it` — Chase it down",
 		"",
 	}, "\n"))
-	lines, todo, err := parseFollowups(body)
+	lines, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestParseFollowupsCapturesBody(t *testing.T) {
 		"- [ ] `chase-zlib` — Chase the zlib upgrade",
 		"",
 	}, "\n"))
-	_, todo, err := parseFollowups(body)
+	_, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestParseFollowupsCapturesMultiParagraphBody(t *testing.T) {
 		"  Second paragraph with a `code-ish` token and an em-dash —.",
 		"",
 	}, "\n"))
-	_, todo, err := parseFollowups(body)
+	_, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestParseFollowupsBodyDedentsExactlyTwoSpaces(t *testing.T) {
 		"    inner-indented line",
 		"",
 	}, "\n"))
-	_, todo, err := parseFollowups(body)
+	_, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestParseFollowupsClosedItemAbsorbsItsOwnBody(t *testing.T) {
 		"",
 		"- [ ] `another` — Another live entry",
 	}, "\n"))
-	_, todo, err := parseFollowups(body)
+	_, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestParseFollowupsHeaderClosesItem(t *testing.T) {
 		"",
 		"- [ ] `second` — Second",
 	}, "\n"))
-	_, todo, err := parseFollowups(body)
+	_, todo, err := parseFollowups(body, "tele")
 	if err != nil {
 		t.Fatalf("parseFollowups: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestParseFollowupsRejectsMalformed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := parseFollowups([]byte(tc.body))
+			_, _, err := parseFollowups([]byte(tc.body), "tele")
 			if err == nil {
 				t.Fatalf("expected error for %q, got nil", tc.body)
 			}
@@ -224,12 +224,189 @@ func TestParseFollowupsRejectsDuplicateSlug(t *testing.T) {
 		"- [ ] `dup` — First",
 		"- [ ] `dup` — Second",
 	}, "\n")
-	_, _, err := parseFollowups([]byte(body))
+	_, _, err := parseFollowups([]byte(body), "tele")
 	if err == nil {
 		t.Fatal("expected duplicate slug error")
 	}
 	if !strings.Contains(err.Error(), "duplicates line") {
 		t.Fatalf("expected duplicates-line error, got %q", err.Error())
+	}
+}
+
+// TestParseFollowupsSplitsProjectPrefix pins the routing split: a
+// `<project>/slug` entry resolves project from the prefix and slug from
+// the tail, while a bare slug routes to the current project. The raw
+// slug is preserved verbatim either way (it's the audit-line + dedup
+// key).
+func TestParseFollowupsSplitsProjectPrefix(t *testing.T) {
+	body := strings.Join([]string{
+		"- [ ] `claudia/inherit-nginx` — Claudia inherits nginx identity",
+		"- [ ] `local-cleanup` — Stays in the current project",
+	}, "\n")
+	_, todo, err := parseFollowups([]byte(body), "tele")
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(todo))
+	}
+	prefixed := todo[0]
+	if prefixed.project != "claudia" || prefixed.slug != "inherit-nginx" || prefixed.rawSlug != "claudia/inherit-nginx" {
+		t.Errorf("prefixed entry split wrong: %+v", prefixed)
+	}
+	bare := todo[1]
+	if bare.project != "tele" || bare.slug != "local-cleanup" || bare.rawSlug != "local-cleanup" {
+		t.Errorf("bare entry should route to current project: %+v", bare)
+	}
+}
+
+// TestParseFollowupsCrossProjectSlugsAreDistinct guards the dedup key:
+// the same bare slug under two different projects is two distinct
+// entries (no collision), while two identical prefixed slugs still
+// collide. The dedup keys off the raw line text, so this falls out of
+// parseChecklist's existing `seen` map for free.
+func TestParseFollowupsCrossProjectSlugsAreDistinct(t *testing.T) {
+	body := strings.Join([]string{
+		"- [ ] `claudia/foo` — Foo for claudia",
+		"- [ ] `westworld/foo` — Foo for westworld",
+	}, "\n")
+	_, todo, err := parseFollowups([]byte(body), "tele")
+	if err != nil {
+		t.Fatalf("cross-project same-slug should not collide: %v", err)
+	}
+	if len(todo) != 2 {
+		t.Fatalf("expected 2 distinct entries, got %d", len(todo))
+	}
+
+	dup := strings.Join([]string{
+		"- [ ] `claudia/foo` — First",
+		"- [ ] `claudia/foo` — Second",
+	}, "\n")
+	if _, _, err := parseFollowups([]byte(dup), "tele"); err == nil || !strings.Contains(err.Error(), "duplicates line") {
+		t.Fatalf("identical prefixed slugs should still collide, got %v", err)
+	}
+}
+
+// TestSDLCCloseRoutesPrefixedFollowupToTargetProject is the end-to-end
+// routing case: a `claudia/…` entry lands an idea under claudia (not the
+// closing run's tele), a bare entry stays in tele, the audit lines keep
+// each entry's original shape, and the cross-project idea's open commit
+// still records its provenance as the tele source run.
+func TestSDLCCloseRoutesPrefixedFollowupToTargetProject(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedProject(t, root, "claudia")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `claudia/inherit-nginx` — Claudia inherits nginx identity",
+		"- [ ] `local-cleanup` — Stays local",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	// Routed idea landed under claudia, bare idea under tele.
+	if _, err := os.Stat(filepath.Join(root, "projects", "claudia", "runs", "inherit-nginx", "run.json")); err != nil {
+		t.Fatalf("expected idea routed to claudia: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "local-cleanup", "run.json")); err != nil {
+		t.Fatalf("expected bare idea under tele: %v", err)
+	}
+	// And NOT a stray inherit-nginx under tele.
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "inherit-nginx", "run.json")); !os.IsNotExist(err) {
+		t.Fatalf("prefixed idea should not also land in the current project: %v", err)
+	}
+
+	// Audit lines: prefix preserved for the routed entry, bare for the local one.
+	got := readFollowups(t, root, "tele", "ship-it")
+	for _, want := range []string{
+		"- [x] `claudia/inherit-nginx` — Claudia inherits nginx identity",
+		"- [x] `local-cleanup` — Stays local",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in followups.md after harvest:\n%s", want, got)
+		}
+	}
+
+	// Provenance points at the source run, not the destination project.
+	logOut := gitLog(t, root, "--all", "--format=%s%n%b%n----")
+	if !strings.Contains(logOut, "MoE-From-Run: tele/ship-it") {
+		t.Fatalf("expected MoE-From-Run trailer pointing at the source run:\n%s", logOut)
+	}
+}
+
+// TestSDLCCloseHarvestPreservesPrefixThroughDisambiguation pins the
+// audit-line shape when a routed slug collides at its destination: the
+// idea bumps to `-2`, and the rewritten line carries the prefix plus the
+// resolved id (`claudia/taken-2`), so the trail records where it landed.
+func TestSDLCCloseHarvestPreservesPrefixThroughDisambiguation(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedProject(t, root, "claudia")
+	// Pre-existing idea at claudia/taken forces the harvester to bump.
+	trailerstest.SeedRun(t, root, "claudia", "taken", "idea", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", "- [ ] `claudia/taken` — Routed but colliding\n")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "projects", "claudia", "runs", "taken-2", "run.json")); err != nil {
+		t.Fatalf("expected disambiguated idea claudia/taken-2: %v", err)
+	}
+	got := readFollowups(t, root, "tele", "ship-it")
+	if !strings.Contains(got, "- [x] `claudia/taken-2` — Routed but colliding") {
+		t.Fatalf("expected prefix-preserving resolved slug in followups.md:\n%s", got)
+	}
+}
+
+// TestSDLCCloseRejectsUnknownTargetProject pins the upfront-and-total
+// validation contract: a prefix naming an unregistered project fails the
+// whole harvest with a 1-based line number, before any idea is created —
+// including the valid bare entry that follows it.
+func TestSDLCCloseRejectsUnknownTargetProject(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `nope/thing` — Targets a project that isn't registered",
+		"- [ ] `would-be-fine` — A valid bare entry that must not be harvested",
+		"",
+	}, "\n"))
+
+	beforeHead := gitLog(t, root, "-1", "--format=%H")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on unknown target project, stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not registered") || !strings.Contains(errb.String(), "line 1") {
+		t.Fatalf("expected line-numbered unknown-project error, got: %q", errb.String())
+	}
+
+	// Total: neither the bad entry nor the valid one created an idea.
+	for _, p := range []struct{ project, slug string }{
+		{"nope", "thing"},
+		{"tele", "would-be-fine"},
+	} {
+		if _, err := os.Stat(filepath.Join(root, "projects", p.project, "runs", p.slug, "run.json")); !os.IsNotExist(err) {
+			t.Fatalf("no idea should exist after an aborted batch (%s/%s): %v", p.project, p.slug, err)
+		}
+	}
+	// And the close did not advance HEAD.
+	if afterHead := gitLog(t, root, "-1", "--format=%H"); beforeHead != afterHead {
+		t.Fatalf("aborted close created a commit:\nbefore=%safter=%s", beforeHead, afterHead)
 	}
 }
 
