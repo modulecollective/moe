@@ -14,12 +14,16 @@
 <link rel="stylesheet" href="/static/style.css">
 {{end}}
 
-{{define "nav"}}
-<nav class="nav">
-  <a href="/">dashboard</a>
-  <a href="/lore">lore</a>
-  <a href="/projects">projects</a>
-</nav>
+{{define "headeractions"}}
+<details class="menu">
+  <summary class="menu-button" aria-label="menu" title="menu">☰</summary>
+  <div class="menu-panel">
+    <a href="/">dashboard</a>
+    <a href="/lore">lore</a>
+    <a href="/projects">projects</a>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </div>
+</details>
 {{end}}
 
 {{define "themejs"}}

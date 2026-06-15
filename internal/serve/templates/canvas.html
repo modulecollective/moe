@@ -19,9 +19,9 @@
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub"><a href="/run/{{.Project}}/{{.Slug}}">{{.Project}}/{{.Slug}}</a> → {{.Stage}}</div>
+      <div class="banner-sub"><a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → <a href="/run/{{.Project}}/{{.Slug}}">{{.Slug}}</a> → {{.Stage}}</div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
 
   {{if .Missing}}

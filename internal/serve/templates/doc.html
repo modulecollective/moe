@@ -13,9 +13,8 @@
         {{range $i, $c := .Crumbs}}{{if $i}} → {{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}{{$c.Label}}{{end}}{{end}}
       </div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
-  {{template "nav" .}}
 
   {{if .AppliesWhen}}<p class="meta applies-when">applies when: {{.AppliesWhen}}</p>{{end}}
   <p class="meta">

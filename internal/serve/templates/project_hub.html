@@ -11,9 +11,8 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/projects">projects</a> → {{.Project}}</div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
-  {{template "nav" .}}
 
   <section class="dash-section">
     <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>

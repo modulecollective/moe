@@ -23,9 +23,8 @@
       <div class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</div>
       <div class="banner-sub">dashboard</div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
-  {{template "nav" .}}
   <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
   <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>

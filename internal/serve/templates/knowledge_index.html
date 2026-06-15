@@ -11,9 +11,8 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → knowledge</div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
-  {{template "nav" .}}
 
   {{if .HasIndex}}<article class="doc">{{.Index}}</article>{{end}}
 

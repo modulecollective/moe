@@ -151,6 +151,37 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   border-color: var(--muted);
 }
 
+/* Header menu: a native <details> disclosure (dashboard/lore/projects + the
+   theme toggle), anchored to a ☰ summary that reuses the toggle's chrome. */
+.menu { position: relative; flex: 0 0 auto; }
+.menu > summary {
+  list-style: none;
+  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--muted);
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary, .menu > summary:hover { color: var(--fg); border-color: var(--muted); }
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: 2.4rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  min-width: 8rem;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+}
+
 /* Section headers */
 section { margin-top: 1.5rem; }
 section h2 {
@@ -357,19 +388,6 @@ form.new-run button:hover, form.new-run button:focus {
 }
 .canvases li:last-child { border-bottom: none; }
 .canvases li .slug { color: var(--fg); }
-
-/* Top-level browse nav (dashboard / lore / projects) */
-.nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.25rem;
-  margin: 0 0 1.5rem;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--hairline);
-  font-size: 0.9rem;
-}
-.nav a { border-bottom: none; }
-.nav a:hover, .nav a:focus { border-bottom: 1px dotted currentColor; }
 
 .meta.applies-when { color: var(--muted); }
 .lore-row .note { color: var(--muted); }

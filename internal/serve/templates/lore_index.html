@@ -11,9 +11,8 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub">lore</div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+    {{template "headeractions" .}}
   </header>
-  {{template "nav" .}}
 
   <section class="dash-section">
     <h2><span>lore <span class="count">({{len .Entries}})</span></span></h2>
