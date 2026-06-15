@@ -226,6 +226,14 @@ func renderInline(s string, resolve func(string) string) string {
 						href = h
 					}
 				}
+				if !safeHref(href) {
+					// Disallowed scheme (javascript:, data:, …): drop the
+					// anchor, keep the visible label as inert inline text —
+					// the renderer's usual "degrade to text" behaviour.
+					b.WriteString(renderInline(text, resolve))
+					i += n
+					continue
+				}
 				b.WriteString(`<a href="`)
 				b.WriteString(html.EscapeString(href))
 				b.WriteString(`">`)
@@ -353,6 +361,50 @@ func isRelativeLink(url string) bool {
 		return false
 	}
 	return !strings.Contains(url, "://")
+}
+
+// safeHref reports whether href is safe to emit as an <a href>. Targets
+// with no scheme (relative, root-relative, or #anchor) pass; scheme
+// targets pass only for http/https/mailto. This drops javascript:,
+// data:, vbscript:, file:, etc.
+func safeHref(href string) bool {
+	switch schemeOf(href) {
+	case "", "http", "https", "mailto":
+		return true
+	default:
+		return false
+	}
+}
+
+// schemeOf returns the lowercased URL scheme of href (without the ':'),
+// or "" if href is relative. A scheme is an ASCII letter followed by
+// letters/digits/'+'/'-'/'.' up to a ':'. ASCII control chars and spaces
+// are skipped while scanning so a browser-stripped `java\tscript:` or a
+// leading-space ` javascript:` can't smuggle a scheme past the check.
+func schemeOf(href string) string {
+	var sb strings.Builder
+	for i := 0; i < len(href); i++ {
+		c := href[i]
+		if c <= ' ' { // C0 controls + space: browsers strip/trim these
+			continue
+		}
+		if c == ':' {
+			if sb.Len() == 0 {
+				return ""
+			}
+			return strings.ToLower(sb.String())
+		}
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isCont := isLetter || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'
+		if sb.Len() == 0 && !isLetter {
+			return "" // first scheme char must be a letter; else relative
+		}
+		if !isCont {
+			return "" // hit '/', '?', '#', or a path char before ':'
+		}
+		sb.WriteByte(c)
+	}
+	return ""
 }
 
 func hasURLPrefix(s string) bool {

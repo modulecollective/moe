@@ -86,6 +86,42 @@ func TestRenderInline(t *testing.T) {
 			want: []string{`<a href="https://example.com/x">docs</a>`},
 		},
 		{
+			name: "mailto link passes through",
+			in:   "mail [me](mailto:a@b.com)",
+			want: []string{`<a href="mailto:a@b.com">me</a>`},
+		},
+		{
+			name: "root-relative and anchor links pass through",
+			in:   "[home](/projects/moe) and [top](#section)",
+			want: []string{`<a href="/projects/moe">home</a>`, `<a href="#section">top</a>`},
+		},
+		{
+			name: "javascript scheme dropped to inert label",
+			in:   "[click](javascript:alert(1))",
+			want: []string{"click"},
+			deny: []string{`href="javascript`, "<a "},
+		},
+		{
+			name: "javascript scheme case-insensitive",
+			in:   "[x](JavaScript:alert(1))",
+			deny: []string{`href="JavaScript`, `href="javascript`, "<a "},
+		},
+		{
+			name: "data scheme dropped",
+			in:   "[x](data:text/html,<script>alert(1)</script>)",
+			deny: []string{`href="data:`, "<a "},
+		},
+		{
+			name: "leading-space javascript scheme dropped",
+			in:   "[x]( javascript:alert(1))",
+			deny: []string{"javascript", "<a "},
+		},
+		{
+			name: "tab-obfuscated javascript scheme dropped",
+			in:   "[x](java\tscript:alert(1))",
+			deny: []string{"javascript", "<a "},
+		},
+		{
 			name: "bare url autolink trims trailing punct",
 			in:   "go to https://example.com/page.",
 			want: []string{`<a href="https://example.com/page">https://example.com/page</a>`},
