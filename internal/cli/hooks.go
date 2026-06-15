@@ -187,17 +187,42 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 	} else {
 		moePrintf(stderr, "       opening a fresh code session for %s; the chain prompt will offer push next\n", recovery)
 	}
-	code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
-		NeedsSandbox:      true,
-		Headless:          headless,
-		InitialPrompt:     kickoff,
-		NextStageOverride: "push",
-	}, stdout, stderr)
+	code := openRecoveryStageSession(md, "code", "push", headless, kickoff, stdout, stderr)
 	return code, &PushDeferredError{
 		Recovery: recovery,
 		Project:  md.Project,
 		Run:      md.ID,
 	}
+}
+
+// openRecoveryStageSession is the bare recovery-turn seam both the
+// push-gate recovery and the review/test-gate kickback share: open the
+// named document with the sandbox on and the kickoff as its initial
+// prompt, and set NextStageOverride so the post-turn chain prompt
+// re-offers the stage being retried rather than the document's ordinary
+// successor.
+//
+//   - document is the stage to open — "code" for both push recovery and
+//     a review/test kickback that lands in code, "design" for a kickback
+//     the operator routes to design instead.
+//   - override is the stage to re-offer once the document commits —
+//     "push" for push recovery, or the blocked stage ("review"/"test")
+//     for a kickback, so the chain re-runs the gate that blocked.
+//   - headless runs it as a one-shot (the push cascade's recovery loop);
+//     interactive keeps the post-turn chain prompt.
+//
+// Push recovery wraps this with its *PushDeferredError contract; the
+// kickback path (interactive only) just returns the exit code. Keeping
+// the deferred-error bookkeeping in openCodeRecoverySession rather than
+// here is deliberate: a kickback is not a push deferral, so it should
+// not manufacture one.
+func openRecoveryStageSession(md *run.Metadata, document, override string, headless bool, kickoff string, stdout, stderr io.Writer) int {
+	return runStageSession(md.Project, md.ID, document, stageSessionOpts{
+		NeedsSandbox:      true,
+		Headless:          headless,
+		InitialPrompt:     kickoff,
+		NextStageOverride: override,
+	}, stdout, stderr)
 }
 
 // buildHookFailureKickoff is the agent-facing kickoff for a generic
@@ -220,5 +245,28 @@ func buildHookFailureKickoff(workflow string, f *hookFailure) string {
 	b.WriteString("This needs to be fixed before we can continue. Investigate the failure, ")
 	b.WriteString("apply the fix in the sandbox, commit, and exit the session. The post-turn ")
 	fmt.Fprintf(&b, "chain prompt will offer `moe %s push` next.\n", workflow)
+	return b.String()
+}
+
+// buildKickbackKickoff is the agent-facing kickoff for a review/test
+// gate that closed `blocked`. It names the stage that blocked, inlines
+// the blocking canvas verbatim (the findings the reviewer/tester wrote),
+// and tells the agent what "done" looks like — fix, commit, exit; the
+// post-turn chain prompt re-offers the blocked stage so the gate gets
+// another look. Inlining the whole canvas mirrors the hook/rebase
+// kickoffs (raw signal in the prompt, no tool round-trip): the canvas is
+// terse, and keeping the gate note alongside the findings is strictly
+// more context than slicing out a single section would give.
+func buildKickbackKickoff(workflow, blockedStage, canvas string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "`moe %s %s` closed with a blocked gate — the %s stage found a problem that should be fixed before the run advances.\n\n", workflow, blockedStage, blockedStage)
+	fmt.Fprintf(&b, "Here is the %s canvas, verbatim:\n\n", blockedStage)
+	b.WriteString(canvas)
+	if !strings.HasSuffix(canvas, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString("Read the findings, apply the fix in the sandbox, commit, and exit the session. ")
+	fmt.Fprintf(&b, "The post-turn chain prompt will re-offer `moe %s %s` so the gate that blocked gets another look.\n", workflow, blockedStage)
 	return b.String()
 }

@@ -131,6 +131,28 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	// (none today, but the prompt should stay honest) simply don't see
 	// the option.
 	scuttle := g.Lookup("close")
+	// sdlc review/test closed `blocked` → kick back, don't walk forward.
+	// The gate said the run isn't ready to advance, so offering its
+	// successor on a reflex Enter would step past the objection. Reshape
+	// into a kickback offer (interactive) or a back-pointing nudge
+	// (non-TTY). Gated to override == "" so the kickback's own recovery
+	// turn — which re-enters here with override set to the blocked stage —
+	// re-offers that gate instead of recursing into another kickback.
+	if override == "" && md.Workflow == "sdlc" &&
+		(justFinished == "review" || justFinished == "test") {
+		if canvas := readPrintableCanvas(root, md, justFinished); canvas != "" {
+			if status, ok := stageGateStatus(canvas); ok && status == "blocked" {
+				if !stdinIsTerminal() {
+					// No operator to choose; point the nudge back at code
+					// (where the fix lives), not the forward stage.
+					moePrintf(stdout, "next: moe %s code %s/%s (%s blocked — kick back to fix)\n",
+						wf.Name, md.Project, md.ID, justFinished)
+					return 0
+				}
+				return promptKickback(g, scuttle, md, justFinished, canvas, stdout, stderr)
+			}
+		}
+	}
 	hint := fmt.Sprintf("moe %s %s %s/%s", wf.Name, next.Name, md.Project, md.ID)
 	if !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
@@ -470,6 +492,94 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		return 0
 	}
 	return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+}
+
+// promptKickback is the chain prompt shown after an interactive sdlc
+// review or test session closes `blocked`. Instead of the forward
+// [Y/n/…] offer (which would walk past the objection on a reflex
+// Enter), it offers `[Y/n/d/x]`: Y kicks back to code with the findings
+// as the re-opened stage's kickoff, d kicks back to design instead, n
+// parks the run, x scuttles it. The default Y makes the common path —
+// "the reviewer/tester is right, go fix the code" — a single Enter.
+//
+// The blocked canvas is printed above the menu so the operator reads
+// the findings before choosing — same shape promptStageNextStage /
+// promptPushNextStage print the prior canvas above their prompts. The
+// re-opened stage carries NextStageOverride set to the blocked stage,
+// so the post-fix chain prompt re-offers review/test (the gate that
+// blocked), not its successor.
+//
+// Caller responsibility: gate on stdinIsTerminal() before invoking
+// (promptNextStageOverride does, falling back to a back-pointing nudge
+// for non-TTY callers) — same contract as promptCloseNextStage.
+func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blockedStage, canvas string, stdout, stderr io.Writer) int {
+	fmt.Fprint(stdout, canvas)
+	if !strings.HasSuffix(canvas, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	hasDesign := g.Lookup("design") != nil
+	opts := []promptOption{
+		{key: 'Y', hint: "kick back to code"},
+		{key: 'n', hint: "decline (park)"},
+	}
+	if hasDesign {
+		opts = append(opts, promptOption{key: 'd', hint: "kick back to design"})
+	}
+	if scuttle != nil {
+		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
+	}
+	label := renderPromptLabel(opts)
+	moePrintf(stdout, "%s blocked — kick back to fix? %s\n", blockedStage, label)
+	moePrintln(stdout, renderPromptLegend(opts))
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	if interrupted {
+		moePrintln(stdout, "^C")
+		return 0
+	}
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	switch {
+	case scuttle != nil && answer == "x":
+		return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+	case hasDesign && answer == "d":
+		return openKickbackSession(md, "design", blockedStage, canvas, stdout, stderr)
+	case answer == "n":
+		return 0
+	case answer == "" || strings.HasPrefix(answer, "y"):
+		return openKickbackSession(md, "code", blockedStage, canvas, stdout, stderr)
+	}
+	// Anything else — a typo — declines, same as the other chain prompts.
+	return 0
+}
+
+// openKickbackSession opens the chosen back-target document ("code" or
+// "design") as a recovery turn carrying the blocking findings, with the
+// chain set to re-offer the stage that blocked. Interactive only — a
+// kickback is a human-gated decision (see the design doc), so it never
+// runs headless.
+//
+// Wired to runKickbackSession in init() rather than referenced directly
+// for the same reason pushFromCascade is: the var's initializer would
+// otherwise trace openRecoveryStageSession → runStageSession (var) →
+// promptNextStageOverride → promptKickback → openKickbackSession and the
+// var-init dependency analyser would flag the chain as a cycle. Tests
+// override this var to stub the dispatch.
+var openKickbackSession func(md *run.Metadata, document, blockedStage, canvas string, stdout, stderr io.Writer) int
+
+func init() {
+	openKickbackSession = runKickbackSession
+}
+
+func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string, stdout, stderr io.Writer) int {
+	moePrintf(stderr, "       kicking back to %s for %s-blocked; the chain prompt will re-offer %s after the fix lands\n",
+		document, blockedStage, blockedStage)
+	kickoff := buildKickbackKickoff(md.Workflow, blockedStage, canvas)
+	return openRecoveryStageSession(md, document, blockedStage, false, kickoff, stdout, stderr)
 }
 
 // promptCloseNextStage is the terminal-stage analogue of
