@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>{{.Title}} — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub">
+        {{range $i, $c := .Crumbs}}{{if $i}} → {{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}{{$c.Label}}{{end}}{{end}}
+      </div>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </header>
+  {{template "nav" .}}
+
+  {{if .AppliesWhen}}<p class="meta applies-when">applies when: {{.AppliesWhen}}</p>{{end}}
+  <p class="meta">
+    {{if .Meta.Created}}created {{.Meta.Created}}{{end}}
+    {{if .Meta.Updated}}· updated {{.Meta.Updated}}{{end}}
+    {{if .Meta.RunLink}}· <a href="{{.Meta.RunLink}}">{{.Meta.Run}}</a>{{end}}
+  </p>
+  <article class="doc">{{.Body}}</article>
+</main>
+{{template "themejs" .}}
+</body>
+</html>

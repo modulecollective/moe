@@ -339,6 +339,18 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /chore/{project}/{name}", s.handleChorePage)
 	s.router.HandleFunc("POST /chore/{project}/{name}/open", s.handleChoreOpen)
 
+	// Read-only browsing of the bureaucracy's durable content: lore,
+	// projects, per-project knowledge and digital-twin docs. All render
+	// from os.ReadFile + the internal/md renderer; none touch the spawn
+	// bucket, so they work in safe mode exactly like the dash and canvas.
+	s.router.HandleFunc("GET /lore", s.handleLoreIndex)
+	s.router.HandleFunc("GET /lore/{name}", s.handleLoreEntry)
+	s.router.HandleFunc("GET /projects", s.handleProjectsIndex)
+	s.router.HandleFunc("GET /projects/{project}", s.handleProjectHub)
+	s.router.HandleFunc("GET /projects/{project}/knowledge", s.handleKnowledge)
+	s.router.HandleFunc("GET /projects/{project}/knowledge/{topic}", s.handleKnowledgeTopic)
+	s.router.HandleFunc("GET /projects/{project}/twin/{doc}", s.handleTwinDoc)
+
 	// Static assets are embedded under static/; strip the URL prefix
 	// so /static/style.css maps to embedded static/style.css.
 	staticFS, err := fs.Sub(assets, "static")

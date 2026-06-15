@@ -1,0 +1,163 @@
+package serve
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/modulecollective/moe/internal/dash"
+)
+
+// writeFile creates parent dirs and writes a browse-corpus file under
+// the bureaucracy root.
+func writeFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func get(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+	return rr
+}
+
+func mustContain(t *testing.T, rr *httptest.ResponseRecorder, wants ...string) {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	out := rr.Body.String()
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("body missing %q\n%s", w, out)
+		}
+	}
+}
+
+func TestLoreIndexAndEntry(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "lore/widget-thing.md",
+		"---\ntitle: Widgets jam on Tuesdays\napplies-when: a widget is involved\n---\n\n# Widgets\n\nThe **body** of the lore.\n")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	idx := get(t, s, "/lore")
+	mustContain(t, idx, "Widgets jam on Tuesdays", "a widget is involved", `href="/lore/widget-thing"`)
+
+	entry := get(t, s, "/lore/widget-thing")
+	mustContain(t, entry, "<h1>Widgets</h1>", "<strong>body</strong>", "applies when: a widget is involved")
+	// Frontmatter must not leak into the rendered body.
+	if strings.Contains(entry.Body.String(), "applies-when:") {
+		t.Errorf("frontmatter leaked into body:\n%s", entry.Body.String())
+	}
+}
+
+func TestLoreEntryRejectsBadName(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	for _, bad := range []string{"/lore/bad.name", "/lore/..%2fetc"} {
+		if rr := get(t, s, bad); rr.Code != http.StatusNotFound {
+			t.Errorf("GET %s: want 404, got %d", bad, rr.Code)
+		}
+	}
+}
+
+func TestProjectsIndexAndHub(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	seedProject(t, root, "beta")
+	writeFile(t, root, "projects/alpha/digital-twin/architecture.md", "# Architecture\n\nshape.\n")
+	writeFile(t, root, "projects/alpha/knowledge/index.md", "# alpha kb\n")
+	writeFile(t, root, "projects/alpha/knowledge/topics/foo.md", "# Foo\n")
+
+	gather := func() ([]dash.Row, int, int, error) {
+		return []dash.Row{
+			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
+			{Project: "alpha", Run: "tidy", Bucket: dash.BucketChores, When: time.Now()},
+			{Project: "beta", Run: "old", Bucket: dash.BucketCompletedRuns, When: time.Now()},
+		}, 2, 1, nil
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, GatherDash: gather})
+
+	idx := get(t, s, "/projects")
+	mustContain(t, idx, `href="/projects/alpha"`, `href="/projects/beta"`, "1 topic", "1 twin doc")
+
+	hub := get(t, s, "/projects/alpha")
+	mustContain(t, hub,
+		`href="/run/alpha/fix-1"`,
+		`href="/chore/alpha/tidy"`,
+		`href="/projects/alpha/knowledge"`,
+		`href="/projects/alpha/twin/architecture"`,
+	)
+
+	// A project with no knowledge/twin reads as empty-state, not broken.
+	betaHub := get(t, s, "/projects/beta")
+	mustContain(t, betaHub, "no knowledge base yet", "no twin yet")
+}
+
+func TestProjectHubUnknownProject404(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	if rr := get(t, s, "/projects/ghost"); rr.Code != http.StatusNotFound {
+		t.Errorf("want 404, got %d", rr.Code)
+	}
+}
+
+func TestKnowledgeIndexRewritesTopicLinks(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	writeFile(t, root, "projects/alpha/knowledge/index.md",
+		"# alpha kb\n\n- [Claude Code](topics/claude-code.md) — the CLI\n")
+	writeFile(t, root, "projects/alpha/knowledge/topics/claude-code.md", "# Claude Code\n\nbody.\n")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	idx := get(t, s, "/projects/alpha/knowledge")
+	mustContain(t, idx,
+		`<a href="/projects/alpha/knowledge/claude-code">Claude Code</a>`,
+		`href="/projects/alpha/knowledge/claude-code"`,
+	)
+
+	topic := get(t, s, "/projects/alpha/knowledge/claude-code")
+	mustContain(t, topic, "<h1>Claude Code</h1>", "<p>body.</p>")
+}
+
+func TestTwinDocRenders(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	writeFile(t, root, "projects/alpha/digital-twin/patterns.md", "# Patterns\n\nnamed patterns.\n")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	rr := get(t, s, "/projects/alpha/twin/patterns")
+	mustContain(t, rr, "<h1>Patterns</h1>", "<p>named patterns.</p>")
+}
+
+func TestBrowseMissingDocIs404(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	if rr := get(t, s, "/projects/alpha/twin/nonesuch"); rr.Code != http.StatusNotFound {
+		t.Errorf("want 404, got %d", rr.Code)
+	}
+}
+
+// TestBrowseWorksInSafeMode: read-only views must not touch the spawn
+// bucket — they render identically with Insecure off.
+func TestBrowseWorksInSafeMode(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "lore/x.md", "# X\n\nbody.\n")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	mustContain(t, get(t, s, "/lore"), "lore")
+	mustContain(t, get(t, s, "/lore/x"), "<h1>X</h1>")
+}

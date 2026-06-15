@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>{{.Project}} knowledge — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → knowledge</div>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </header>
+  {{template "nav" .}}
+
+  {{if .HasIndex}}<article class="doc">{{.Index}}</article>{{end}}
+
+  <section class="dash-section">
+    <h2><span>all topics <span class="count">({{len .Topics}})</span></span></h2>
+    {{if .Topics}}
+    <ul class="rows">
+      {{range .Topics}}
+      <li class="row">
+        <a class="slug" href="/projects/{{$.Project}}/knowledge/{{.Name}}">{{.Name}}</a>
+        <span class="note">{{if .Meta.Updated}}updated {{.Meta.Updated}}{{end}}{{if .Meta.RunLink}} · <a href="{{.Meta.RunLink}}">{{.Meta.Run}}</a>{{end}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">no topics yet</p>{{end}}
+  </section>
+</main>
+{{template "themejs" .}}
+</body>
+</html>

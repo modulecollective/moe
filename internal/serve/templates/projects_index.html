@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>projects — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub">projects</div>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
+  </header>
+  {{template "nav" .}}
+
+  <section class="dash-section">
+    <h2><span>projects <span class="count">({{len .Projects}})</span></span></h2>
+    {{if .Projects}}
+    <ul class="rows">
+      {{range .Projects}}
+      <li class="row">
+        <a class="slug" href="/projects/{{.ID}}">{{.ID}}</a>
+        <span class="note">{{.Runs}} run{{if ne .Runs 1}}s{{end}} · {{.Chores}} chore{{if ne .Chores 1}}s{{end}} · {{.Topics}} topic{{if ne .Topics 1}}s{{end}} · {{.TwinDocs}} twin doc{{if ne .TwinDocs 1}}s{{end}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">no projects registered</p>{{end}}
+  </section>
+</main>
+{{template "themejs" .}}
+</body>
+</html>

@@ -357,3 +357,60 @@ form.new-run button:hover, form.new-run button:focus {
 }
 .canvases li:last-child { border-bottom: none; }
 .canvases li .slug { color: var(--fg); }
+
+/* Top-level browse nav (dashboard / lore / projects) */
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0 0 1.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 0.9rem;
+}
+.nav a { border-bottom: none; }
+.nav a:hover, .nav a:focus { border-bottom: 1px dotted currentColor; }
+
+.meta.applies-when { color: var(--muted); }
+.lore-row .note { color: var(--muted); }
+
+/* Rendered markdown (canvas, lore, knowledge, twin) */
+.doc {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+.doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
+  line-height: 1.25;
+  margin: 1.4rem 0 0.6rem;
+}
+.doc h1 { font-size: 1.3rem; }
+.doc h2 { font-size: 1.1rem; }
+.doc h3 { font-size: 1rem; }
+.doc p { margin: 0.6rem 0; }
+.doc ul, .doc ol { margin: 0.6rem 0; padding-left: 1.4rem; }
+.doc li { margin: 0.2rem 0; }
+.doc code {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.85em;
+}
+.doc pre {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.doc pre code { background: none; padding: 0; font-size: inherit; }
+.doc hr { border: none; border-top: 1px solid var(--hairline); margin: 1.2rem 0; }
+
+/* Unresolved wikilink — legible, distinct from a real link (resolution
+   to a target route is a follow-up). */
+.wikilink {
+  color: var(--muted);
+  border-bottom: 1px dashed var(--hairline);
+}
