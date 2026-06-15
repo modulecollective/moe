@@ -21,13 +21,14 @@
   <header class="page-header">
     <div class="banner">
       <div class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</div>
-      <pre class="banner-art">{{range .FactoryArt}}{{.}}
-{{end}}</pre>
-      <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>
+      <div class="banner-sub">dashboard</div>
     </div>
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>
   </header>
   {{template "nav" .}}
+  <pre class="banner-art">{{range .FactoryArt}}{{.}}
+{{end}}</pre>
+  <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>
 
   <section class="dash-section">
     <h2>

@@ -16,6 +16,32 @@
   {{template "nav" .}}
 
   <section class="dash-section">
+    <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>
+    {{if .Twin}}
+    <ul class="rows">
+      {{range .Twin}}
+      <li class="row">
+        <a class="slug" href="/projects/{{$.Project}}/twin/{{.Name}}">{{.Name}}</a>
+        <span class="note">{{if .Meta.Updated}}updated {{.Meta.Updated}}{{end}}{{if .Meta.RunLink}} · <a href="{{.Meta.RunLink}}">{{.Meta.Run}}</a>{{end}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">no twin yet</p>{{end}}
+  </section>
+
+  <section class="dash-section">
+    <h2><span>knowledge</span></h2>
+    {{if .HasKnowledge}}
+    <ul class="rows">
+      <li class="row">
+        <a class="slug" href="/projects/{{.Project}}/knowledge">knowledge base</a>
+        <span class="note">{{.TopicCount}} topic{{if ne .TopicCount 1}}s{{end}}</span>
+      </li>
+    </ul>
+    {{else}}<p class="empty">no knowledge base yet</p>{{end}}
+  </section>
+
+  <section class="dash-section">
     <h2><span>active <span class="count">({{len .Active}})</span></span></h2>
     {{if .Active}}
     <ul class="rows">
@@ -73,32 +99,6 @@
       {{end}}
     </ul>
     {{else}}<p class="empty">(none)</p>{{end}}
-  </section>
-
-  <section class="dash-section">
-    <h2><span>knowledge</span></h2>
-    {{if .HasKnowledge}}
-    <ul class="rows">
-      <li class="row">
-        <a class="slug" href="/projects/{{.Project}}/knowledge">knowledge base</a>
-        <span class="note">{{.TopicCount}} topic{{if ne .TopicCount 1}}s{{end}}</span>
-      </li>
-    </ul>
-    {{else}}<p class="empty">no knowledge base yet</p>{{end}}
-  </section>
-
-  <section class="dash-section">
-    <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>
-    {{if .Twin}}
-    <ul class="rows">
-      {{range .Twin}}
-      <li class="row">
-        <a class="slug" href="/projects/{{$.Project}}/twin/{{.Name}}">{{.Name}}</a>
-        <span class="note">{{if .Meta.Updated}}updated {{.Meta.Updated}}{{end}}{{if .Meta.RunLink}} · <a href="{{.Meta.RunLink}}">{{.Meta.Run}}</a>{{end}}</span>
-      </li>
-      {{end}}
-    </ul>
-    {{else}}<p class="empty">no twin yet</p>{{end}}
   </section>
 </main>
 {{template "themejs" .}}
