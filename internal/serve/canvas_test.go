@@ -15,7 +15,8 @@ import (
 )
 
 // TestCanvasRouteRendersBody: the happy path — a baked canvas file
-// on disk renders inside <pre> with the body and an mtime line.
+// on disk renders as HTML (markdown → headings/paragraphs) with an
+// mtime line.
 func TestCanvasRouteRendersBody(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -38,9 +39,9 @@ func TestCanvasRouteRendersBody(t *testing.T) {
 	}
 	out := rr.Body.String()
 	for _, want := range []string{
-		`<pre class="canvas-body">`,
-		"# Design body",
-		"first paragraph.",
+		`<article class="doc">`,
+		"<h1>Design body</h1>",
+		"<p>first paragraph.</p>",
 		`href="/run/alpha/fix-it"`,
 		"alpha/fix-it",
 		"design",

@@ -2,12 +2,14 @@ package serve
 
 import (
 	"errors"
+	"html/template"
 	"io/fs"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/md"
 )
 
 // canvasVM backs the canvas read-only page.
@@ -15,10 +17,10 @@ type canvasVM struct {
 	Project string
 	Slug    string
 	Stage   string
-	Body    string // file contents (empty when the canvas file doesn't exist)
-	ModTime string // human "Xm ago", empty when no file
-	Missing bool   // true when the canvas file isn't on disk yet
-	Path    string // absolute path; surfaced in the empty-state message
+	Body    template.HTML // rendered markdown (empty when no file)
+	ModTime string        // human "Xm ago", empty when no file
+	Missing bool          // true when the canvas file isn't on disk yet
+	Path    string        // absolute path; surfaced in the empty-state message
 }
 
 // handleCanvas renders a single stage canvas at
@@ -59,7 +61,10 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "canvas read: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	vm.Body = string(body)
+	// A canvas is a run document, not part of the wiki/twin link graph,
+	// so it has no relative-link routes to resolve (nil resolver: any
+	// relative link renders with its source target untouched).
+	vm.Body = template.HTML(md.Render(string(body), nil))
 	if st, err := os.Stat(path); err == nil {
 		vm.ModTime = dash.HumanAgo(time.Now(), st.ModTime())
 	}
