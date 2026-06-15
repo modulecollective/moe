@@ -354,6 +354,30 @@ func TestFilteredEnvPinsNoEditor(t *testing.T) {
 	}
 }
 
+// TestFilteredEnvScrubsExtra is the dev-env-injection regression: a
+// project whose dev-env hook emits OPENAI_API_KEY feeds it in as
+// ExtraEnv, otherwise appended last so dev-env vars win. The scrub must
+// span extra too, or the key reaches codex and re-bills the turn to the
+// API — the codex-symmetric form of the westworld billing hole. EXTRA=1
+// still passes through; the no-editor pins are untouched.
+func TestFilteredEnvScrubsExtra(t *testing.T) {
+	got := filteredEnv([]string{
+		"OPENAI_API_KEY=sk-injected-by-dev-env",
+		"EXTRA=1",
+	})
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "OPENAI_API_KEY=") {
+			t.Errorf("OPENAI_API_KEY in ExtraEnv leaked into env: %q", kv)
+		}
+	}
+	if !slices.Contains(got, "EXTRA=1") {
+		t.Errorf("non-scrubbed ExtraEnv var should still pass through: %v", got)
+	}
+	if !slices.Contains(got, "GIT_EDITOR=true") {
+		t.Errorf("no-editor pins must survive the extra scrub: %v", got)
+	}
+}
+
 // TestFilteredEnvEmptyExtra: filter still runs with nil ExtraEnv, so
 // an inherited OPENAI_API_KEY is scrubbed on a no-extras spawn (the
 // case the old `if len(ExtraEnv) > 0` gate missed).

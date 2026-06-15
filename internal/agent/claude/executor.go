@@ -38,25 +38,37 @@ func pickCwd(sessionCwd, root string) string {
 }
 
 // scrubbedKeys names the env vars stripped from every claude
-// subprocess's inherited environment. Both override Anthropic's OAuth
-// path silently: ANTHROPIC_API_KEY is documented to take precedence
-// over an active Claude subscription, and ANTHROPIC_AUTH_TOKEN is sent
-// as the Authorization bearer header with the same precedence. An
-// operator who set either for some other tool would otherwise have MoE
-// billing per-token API rates without warning.
+// subprocess's environment — both the inherited os.Environ() and the
+// dev-env-injected extra. Both override Anthropic's OAuth path
+// silently: ANTHROPIC_API_KEY is documented to take precedence over an
+// active Claude subscription, and ANTHROPIC_AUTH_TOKEN is sent as the
+// Authorization bearer header with the same precedence. An operator who
+// set either for some other tool — or a project whose dev-env emits one
+// — would otherwise have MoE billing per-token API rates without
+// warning.
 var scrubbedKeys = []string{
 	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_AUTH_TOKEN",
 }
 
 // filteredEnv returns os.Environ() with scrubbedKeys removed, then
-// appends extra. Filtering (not setting to "") matters: an empty value
-// can read as "set but blank" to some clients and yield a 401 instead
-// of the OAuth fallback we want.
+// appends extra — also scrubbed. extra is the dev-env hooks' output,
+// normally appended last so project dev-env vars win; the scrub is the
+// one exception, because a project's dev-env must never be able to flip
+// the agent's billing from the operator's subscription to metered API.
+// Filtering (not setting to "") matters: an empty value can read as
+// "set but blank" to some clients and yield a 401 instead of the OAuth
+// fallback we want.
 func filteredEnv(extra []string) []string {
-	src := os.Environ()
-	out := make([]string, 0, len(src)+len(extra))
-	for _, kv := range src {
+	out := dropScrubbed(os.Environ())
+	return append(out, dropScrubbed(extra)...)
+}
+
+// dropScrubbed returns in with any entry whose key is in scrubbedKeys
+// removed, preserving order.
+func dropScrubbed(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, kv := range in {
 		drop := false
 		for _, k := range scrubbedKeys {
 			if strings.HasPrefix(kv, k+"=") {
@@ -69,7 +81,7 @@ func filteredEnv(extra []string) []string {
 		}
 		out = append(out, kv)
 	}
-	return append(out, extra...)
+	return out
 }
 
 // sandboxSettingsJSON is the `--settings` payload that pins the

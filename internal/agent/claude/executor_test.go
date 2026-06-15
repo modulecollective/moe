@@ -145,6 +145,31 @@ func TestFilteredEnvDropsAPIKeys(t *testing.T) {
 	}
 }
 
+// TestFilteredEnvScrubsExtra is the dev-env-injection regression: a
+// project whose dev-env hook emits a scrubbed key feeds it in as
+// ExtraEnv, which is otherwise appended last so dev-env vars win. The
+// scrub must span extra too, or that key reaches the claude subprocess
+// and re-bills the turn to the API — the exact hole that billed
+// westworld stages to API credits instead of the Max subscription.
+func TestFilteredEnvScrubsExtra(t *testing.T) {
+	got := filteredEnv([]string{
+		"ANTHROPIC_API_KEY=sk-injected-by-dev-env",
+		"ANTHROPIC_AUTH_TOKEN=bearer-injected-by-dev-env",
+		"EXTRA=1",
+	})
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
+			t.Errorf("ANTHROPIC_API_KEY in ExtraEnv leaked into env: %q", kv)
+		}
+		if strings.HasPrefix(kv, "ANTHROPIC_AUTH_TOKEN=") {
+			t.Errorf("ANTHROPIC_AUTH_TOKEN in ExtraEnv leaked into env: %q", kv)
+		}
+	}
+	if !slices.Contains(got, "EXTRA=1") {
+		t.Errorf("non-scrubbed ExtraEnv var should still pass through: %v", got)
+	}
+}
+
 // TestFilteredEnvEmptyExtra: even with no ExtraEnv, the filter still
 // runs so an inherited ANTHROPIC_API_KEY is scrubbed. This is the
 // case the old `if len(ExtraEnv) > 0` gate missed.

@@ -58,10 +58,12 @@ func init() {
 }
 
 // scrubbedKeys names the env vars stripped from every codex
-// subprocess's inherited environment. OPENAI_API_KEY is auto-read by
-// codex at startup and overrides the ChatGPT-plan OAuth token an
-// operator signed in with, silently switching the agent to per-token
-// API billing.
+// subprocess's environment — both the inherited os.Environ() and the
+// dev-env-injected extra. OPENAI_API_KEY is auto-read by codex at
+// startup and overrides the ChatGPT-plan OAuth token an operator signed
+// in with, silently switching the agent to per-token API billing. A
+// project whose dev-env emits the key must not be able to flip billing
+// either, so the scrub spans extra as well as inheritance.
 var scrubbedKeys = []string{
 	"OPENAI_API_KEY",
 }
@@ -83,15 +85,24 @@ var noEditorEnv = []string{
 }
 
 // filteredEnv returns os.Environ() with scrubbedKeys removed, then
-// appends the no-editor pins and extra. Same shape as the claude
-// backend's helper; kept per-package so the drop list lives next to
-// the backend that owns it. noEditorEnv is appended after the
-// inherited environment so it overrides any inherited GIT_EDITOR;
-// extra (the caller's ExtraEnv) stays last so dev-env vars win.
+// appends the no-editor pins and extra — extra also scrubbed. Same
+// shape as the claude backend's helper; kept per-package so the drop
+// list lives next to the backend that owns it. noEditorEnv is appended
+// after the inherited environment so it overrides any inherited
+// GIT_EDITOR. extra (the caller's ExtraEnv) stays last so dev-env vars
+// win — except the scrubbed keys, which a project's dev-env must not be
+// able to re-introduce to flip the agent's billing to metered API.
 func filteredEnv(extra []string) []string {
-	src := os.Environ()
-	out := make([]string, 0, len(src)+len(noEditorEnv)+len(extra))
-	for _, kv := range src {
+	out := dropScrubbed(os.Environ())
+	out = append(out, noEditorEnv...)
+	return append(out, dropScrubbed(extra)...)
+}
+
+// dropScrubbed returns in with any entry whose key is in scrubbedKeys
+// removed, preserving order.
+func dropScrubbed(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, kv := range in {
 		drop := false
 		for _, k := range scrubbedKeys {
 			if strings.HasPrefix(kv, k+"=") {
@@ -104,8 +115,7 @@ func filteredEnv(extra []string) []string {
 		}
 		out = append(out, kv)
 	}
-	out = append(out, noEditorEnv...)
-	return append(out, extra...)
+	return out
 }
 
 // Agent is the codex implementation of agent.Agent. Stateless — same
