@@ -117,7 +117,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
 }
 .page-footer p { margin: 0.3rem 0; }
 
-.section-action, .theme-toggle {
+.section-action {
   background: transparent;
   border: 1px solid var(--hairline);
   color: var(--muted);
@@ -128,8 +128,8 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  border-bottom: 1px solid var(--hairline);
 }
-.section-action { border-bottom: 1px solid var(--hairline); }
 /* Sibling header chips (new run · new plan) sit flush together on the
    right edge of the section h2. */
 .section-actions {
@@ -137,22 +137,31 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   gap: 0.5rem;
   flex: 0 0 auto;
 }
-.theme-toggle {
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-}
-.section-action:hover, .section-action:focus,
-.theme-toggle:hover, .theme-toggle:focus {
+.section-action:hover, .section-action:focus {
   color: var(--fg);
   border-color: var(--muted);
 }
+/* The theme toggle is a text control inside the menu panel; it reads like
+   the link items beside it. Its label names the mode it switches *to*,
+   driven off html[data-theme] (set pre-paint, so the right word shows with
+   no flash and no extra JS). */
+.theme-toggle {
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted currentColor;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+.theme-toggle:hover, .theme-toggle:focus { border-bottom-style: solid; }
+html[data-theme="light"] .theme-label-light { display: none; }
+html[data-theme="dark"] .theme-label-dark { display: none; }
 
 /* Header menu: a native <details> disclosure (dashboard/lore/projects + the
-   theme toggle), anchored to a ☰ summary that reuses the toggle's chrome. */
+   theme toggle), anchored to a ☰ summary styled as a small bordered box. */
 .menu { position: relative; flex: 0 0 auto; }
 .menu > summary {
   list-style: none;

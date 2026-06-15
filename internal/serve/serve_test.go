@@ -97,9 +97,9 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 
 func assertThemeToggleInHeader(t *testing.T, body string) {
 	t.Helper()
-	button := `<button id="theme-toggle" class="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">◐</button>`
+	button := `<button id="theme-toggle" class="theme-toggle" type="button"><span class="theme-label-dark">dark mode</span><span class="theme-label-light">light mode</span></button>`
 	if got := strings.Count(body, button); got != 1 {
-		t.Fatalf("want one icon theme toggle, got %d\n%s", got, body)
+		t.Fatalf("want one text theme toggle, got %d\n%s", got, body)
 	}
 	headerEnd := strings.Index(body, "</header>")
 	buttonIdx := strings.Index(body, button)
