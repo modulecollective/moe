@@ -259,3 +259,48 @@ func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
 		})
 	}
 }
+
+// TestPromptNextStageOverrideRecoveryReoffersGate pins the no-double-
+// kickback contract directly. A kickback opens code/design with
+// NextStageOverride set to the blocked stage; when that recovery turn
+// closes, the chain re-enters promptNextStageOverride with
+// justFinished="code" and override="review". Even with the blocked
+// review canvas still on disk, the prompt must re-offer the review gate
+// (`next: moe sdlc review …`) — NOT reshape into another kickback. This
+// guards the override-set / justFinished-not-review-test path that stops
+// the post-fix loop from recursing into a second kickback offer.
+func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+	oldStdin := os.Stdin
+	os.Stdin = devnull
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	root := t.TempDir()
+	// The blocked review canvas is still on disk from the gate that
+	// kicked back — if the guard regressed, the prompt would re-read it
+	// and re-offer a kickback instead of the gate.
+	canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "review"))
+	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canvas, []byte(blockedReviewCanvas), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	var stdout, stderr bytes.Buffer
+	// Recovery turn: justFinished="code", override="review".
+	if code := promptNextStageOverride(root, md, "code", "review", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	if want := "next: moe sdlc review tele/fix-it"; !strings.Contains(got, want) {
+		t.Fatalf("recovery turn must re-offer the review gate; want %q, got: %q", want, got)
+	}
+	if strings.Contains(got, "kick back to fix") {
+		t.Fatalf("recovery turn must not reshape into a kickback, got: %q", got)
+	}
+}
