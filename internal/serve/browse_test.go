@@ -133,6 +133,25 @@ func TestKnowledgeIndexRewritesTopicLinks(t *testing.T) {
 	mustContain(t, topic, "<h1>Claude Code</h1>", "<p>body.</p>")
 }
 
+// The "all topics" listing is the source of truth for navigation: a topic
+// absent from the curated index.md must still be reachable. The listing is
+// built from os.ReadDir, not from index.md, and carries no per-topic git
+// provenance (that badge lives on the topic detail page).
+func TestKnowledgeIndexListsUnlinkedTopics(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	writeFile(t, root, "projects/alpha/knowledge/index.md", "# alpha kb\n\nno links here.\n")
+	writeFile(t, root, "projects/alpha/knowledge/topics/orphan.md", "# Orphan\n\nbody.\n")
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	idx := get(t, s, "/projects/alpha/knowledge")
+	mustContain(t, idx, `<a class="slug" href="/projects/alpha/knowledge/orphan">orphan</a>`)
+	if strings.Contains(idx.Body.String(), "updated ") {
+		t.Errorf("index page should carry no per-topic git provenance, got:\n%s", idx.Body.String())
+	}
+}
+
 func TestTwinDocRenders(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")

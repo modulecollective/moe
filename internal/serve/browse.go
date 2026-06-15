@@ -250,7 +250,6 @@ type knowledgeVM struct {
 
 type topicItemVM struct {
 	Name string
-	Meta fileMeta
 }
 
 // handleKnowledge renders the curated index.md as a header and lists
@@ -268,7 +267,6 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
 	vm := knowledgeVM{Project: projectID}
 
 	// Curated index.md (optional): rewrite its topics/*.md links to the
@@ -285,10 +283,12 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 		vm.HasIndex = true
 	}
 
+	// Names + links only: no per-topic git provenance. gatherFileMeta is an
+	// N+1 of git subprocesses that does not belong on an index page; the
+	// "updated · run" badge lives on each topic's detail page instead.
 	for _, name := range listMarkdown(s.knowledgeTopicsDir(projectID), nil) {
 		slug := strings.TrimSuffix(name, ".md")
-		rel := relTo(s.opts.Root, filepath.Join(s.knowledgeTopicsDir(projectID), name))
-		vm.Topics = append(vm.Topics, topicItemVM{Name: slug, Meta: s.gatherFileMeta(now, rel)})
+		vm.Topics = append(vm.Topics, topicItemVM{Name: slug})
 	}
 	s.render(w, r, "knowledge_index.html", vm)
 }
