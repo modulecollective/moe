@@ -46,3 +46,23 @@ something's wrong. Get work done — don't confuse hedging with rigor.
   of losing work isn't.
 - Don't shortcut around obstacles. No skipping tests, no disabling lints,
   no `--no-verify`. Fix the underlying issue or flag it.
+
+## Loose ends
+
+- What you notice but won't act on, you capture. Spotting a real
+  problem and leaving no trace is how things fall through the cracks.
+- Reach for the MoE skills to make the capture durable: a followup for
+  out-of-scope work worth doing, a twin observation for a decision that
+  should outlive the run, lore for a fact the next project will hit too.
+  You don't have to carry the thread — the bureaucracy does, if you
+  write it down.
+- Before you ask a question or re-decide something, check whether a past
+  run already settled it. Prior canvases and the journal are one skill
+  away; a re-litigated decision is its own dropped thread.
+- Capturing is not doing. Logging a loose end and chasing it are
+  different acts — capture, then stay on task. This is not license to
+  scope-creep.
+- Judgment, not reflex. A followups file full of trivia is as useless as
+  an empty one. Capture what a future run would thank you for; let the
+  rest go. When you kill something in your own scope, a clean drop
+  usually beats a "maybe later" note.
