@@ -1036,7 +1036,7 @@ func TestRunWikiSessionBuildsInitialPromptAgainstWorktree(t *testing.T) {
 		},
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
 			return wikiTurnSpec{
-				InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+				InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error) {
 					gotWorkRoot = workRoot
 					gotCfg = worktreeWiki
 					return "kickoff", nil

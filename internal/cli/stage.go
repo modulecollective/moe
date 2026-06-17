@@ -79,14 +79,16 @@ type stageSessionOpts struct {
 	// InitialPromptBuilder, when non-nil, supersedes InitialPrompt:
 	// runStageSession invokes it after the session worktree is open and
 	// the wiki cfg has been rewritten to worktree paths, handing it the
-	// worktree root and the rewritten cfg. Callers that bake absolute
-	// bureaucracy paths into the kickoff must use this instead of
-	// InitialPrompt so those paths resolve inside the worktree — twin
-	// reflect assembling its kickoff against the canonical root *before*
-	// the worktree existed is what walked a reflect pass into the
-	// operator's live checkout. Mirrors PreFinalizeGate's
+	// worktree root, the rewritten cfg, and the seed signal (stubbed is
+	// true when EnsureManagedDocs created at least one managed-doc stub
+	// this turn — a fresh-wiki pass the builder can frame as a seed).
+	// Callers that bake absolute bureaucracy paths into the kickoff must
+	// use this instead of InitialPrompt so those paths resolve inside the
+	// worktree — twin reflect assembling its kickoff against the canonical
+	// root *before* the worktree existed is what walked a reflect pass
+	// into the operator's live checkout. Mirrors PreFinalizeGate's
 	// (workRoot, worktreeWiki) shape and runs at the same lifecycle point.
-	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config) (string, error)
+	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
 	// Headless drives the stage as a one-turn `claude -p` call instead
 	// of an interactive REPL. Output streams to the operator's
 	// terminal (no stdin), the workflow's oneshot.md fragment is
@@ -743,9 +745,10 @@ type wikiTurnSpec struct {
 	// is rewritten to worktree paths and supersedes InitialPrompt with
 	// its result. Lets a caller defer kickoff assembly until the
 	// worktree root and the rewritten cfg are known, so any absolute
-	// bureaucracy paths it renders resolve inside the worktree. See
+	// bureaucracy paths it renders resolve inside the worktree. The
+	// stubbed argument carries the EnsureManagedDocs seed signal. See
 	// stageSessionOpts.InitialPromptBuilder for the why.
-	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config) (string, error)
+	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
 	// Headless flips runWikiSession from the interactive REPL path
 	// (executor.Execute) to the one-shot streaming path
 	// (executor.ExecuteOneShot): no stdin, no transcript mirror, exits
@@ -856,6 +859,12 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// rewritten to live inside the session worktree so prompt paths
 	// and engine git-status calls reference the active worktree.
 	var wikiCfg *wiki.Config
+	// docsStubbed is the EnsureManagedDocs seed signal, handed to the
+	// kickoff builder below. False for non-wiki stages and for a reflect
+	// against an already-seeded twin; true on the first reflect, where
+	// every managed doc is freshly stubbed and the builder frames the
+	// pass as a seed-and-author rather than a walk-against-events.
+	var docsStubbed bool
 	if in.WikiBuilder != nil {
 		canonical, err := in.WikiBuilder(root)
 		if err != nil {
@@ -877,11 +886,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			// config errors — bail before the executor runs so the
 			// operator sees the root cause instead of a downstream
 			// invariant breach at finalize.
-			if _, err := wiki.EnsureManagedDocs(*wikiCfg); err != nil {
+			stubbed, err := wiki.EnsureManagedDocs(*wikiCfg)
+			if err != nil {
 				moePrintf(stderr, "wiki: %v\n", err)
 				closeBootstrapFailedSession(closeSess, stderr)
 				return 1
 			}
+			docsStubbed = stubbed
 			// Seed the .wiki-ops stash so the agent has a fresh
 			// scratchpad. Failure is non-fatal — the log entry
 			// degrades to content-edit-only if the stash never
@@ -901,7 +912,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// the same post-rewrite point as BuildPrompt and supersedes any
 	// static spec.InitialPrompt.
 	if spec.InitialPromptBuilder != nil {
-		ip, err := spec.InitialPromptBuilder(workRoot, wikiCfg)
+		ip, err := spec.InitialPromptBuilder(workRoot, wikiCfg, docsStubbed)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			closeBootstrapFailedSession(closeSess, stderr)

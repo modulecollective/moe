@@ -117,8 +117,8 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, agentOve
 		// checkout. Building it eagerly here — before the worktree
 		// existed — handed the agent absolute canonical paths and let a
 		// reflect pass edit the operator's live tree.
-		InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-			return buildTwinStageKickoff(projectID, workRoot, worktreeWiki)
+		InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error) {
+			return buildTwinStageKickoff(projectID, workRoot, worktreeWiki, stubbed)
 		},
 		WikiBuilder: func(root string, md *run.Metadata) (*wiki.Config, error) {
 			return twinWikiBuilder(root, projectID)
@@ -157,8 +157,8 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, agentOve
 // against the canonical root before the worktree existed is what let a
 // reflect pass write `glossary.md` / `history-summary.md` into the
 // operator's live checkout.
-func buildTwinStageKickoff(projectID, workRoot string, worktreeWiki *wiki.Config) (string, error) {
-	return reflectKickoffContext(workRoot, projectID, *worktreeWiki)
+func buildTwinStageKickoff(projectID, workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error) {
+	return reflectKickoffContext(workRoot, projectID, *worktreeWiki, stubbed)
 }
 
 // finalizeCanvasSkeleton seeds the finalize canvas with the three
@@ -292,10 +292,17 @@ func finalizeStageGate(root string, md *run.Metadata) (bool, error) {
 // block below). The whole block carries pass-scoped context every stage
 // needs to see; the per-stage framing lives in the stage fragment.
 //
+// stubbed carries the EnsureManagedDocs seed signal: when true the
+// managed docs were freshly created this turn, and the block opens with
+// a seed framing that tells the agent to author the stubs rather than
+// walk them against events. Without it a headless seed pass reads its
+// own stub docs and the "don't rewrite intent" caution as "do nothing"
+// — the dropped-thread this run was opened against.
+//
 // Returns the rendered markdown block plus any error from the
 // underlying wiki / git reads. An empty block is valid (a fresh
 // project with no events, no feedback, and a clean scan).
-func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, error) {
+func reflectKickoffContext(root, projectID string, cfg wiki.Config, stubbed bool) (string, error) {
 	events, err := wiki.EventsSinceCheckpoint(cfg)
 	if err != nil {
 		return "", fmt.Errorf("wiki: events: %w", err)
@@ -319,6 +326,17 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config) (string, err
 		"twin reflect pass. Read them once at vision and lean on them at " +
 		"each successor stage — the events list, the hygiene findings, and " +
 		"the workflow feedback all carry pass-scoped context.\n\n")
+
+	if stubbed {
+		b.WriteString("### Seeding a fresh twin\n\n")
+		b.WriteString("These managed docs are stubs — this is the twin's " +
+			"first reflect pass and the docs are empty beyond a heading. " +
+			"Author them from the events and project context below; a stub " +
+			"is the strongest signal that a doc needs you to write it, not a " +
+			"flag to defer. The committed pass is what the operator reviews, " +
+			"so write your best evidence-backed draft rather than leaving the " +
+			"docs blank for a confirmation that never comes.\n\n")
+	}
 
 	if !findings.IsEmpty() {
 		b.WriteString("### Hygiene findings\n\n")

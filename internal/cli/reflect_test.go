@@ -50,7 +50,7 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	got, err := reflectKickoffContext(root, "tele", cfg)
+	got, err := reflectKickoffContext(root, "tele", cfg, false)
 	if err != nil {
 		t.Fatalf("reflectKickoffContext: %v", err)
 	}
@@ -78,6 +78,53 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 	// consumer. Pin its absence so a future re-add is a deliberate edit.
 	if strings.Contains(got, "### Idea backlog") {
 		t.Errorf("kickoff still renders the dropped idea-backlog section:\n%s", got)
+	}
+}
+
+// TestReflectKickoffContextSeedFraming pins the seed signal: when the
+// managed docs were freshly stubbed (stubbed=true) the kickoff opens
+// with a seed framing that tells the agent to author the stubs, and
+// that framing is absent on an ordinary reflect (stubbed=false). This
+// is the fix this run was opened against — a headless seed pass that
+// reads its own stub docs and the "don't rewrite intent" caution as
+// "do nothing", drafting a vision it never commits.
+func TestReflectKickoffContextSeedFraming(t *testing.T) {
+	root := newTestBureaucracy(t)
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWikiDoc(t, twinDir, "vision.md", "# Vision\n\n"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := wiki.Config{
+		Mode:            wiki.Closed,
+		Name:            "twin",
+		ContentDir:      twinDir,
+		Project:         "tele",
+		BureaucracyPath: root,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+		},
+	}
+
+	seeded, err := reflectKickoffContext(root, "tele", cfg, true)
+	if err != nil {
+		t.Fatalf("reflectKickoffContext(stubbed=true): %v", err)
+	}
+	if !strings.Contains(seeded, "### Seeding a fresh twin") {
+		t.Errorf("seed kickoff missing the seed framing in:\n%s", seeded)
+	}
+	if !strings.Contains(seeded, "Author them from the events") {
+		t.Errorf("seed kickoff missing the author imperative in:\n%s", seeded)
+	}
+
+	plain, err := reflectKickoffContext(root, "tele", cfg, false)
+	if err != nil {
+		t.Fatalf("reflectKickoffContext(stubbed=false): %v", err)
+	}
+	if strings.Contains(plain, "### Seeding a fresh twin") {
+		t.Errorf("ordinary reflect kickoff should not carry the seed framing:\n%s", plain)
 	}
 }
 
@@ -112,7 +159,7 @@ func TestReflectKickoffContextReferencesHistorySummaryByPath(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	got, err := reflectKickoffContext(root, "tele", cfg)
+	got, err := reflectKickoffContext(root, "tele", cfg, false)
 	if err != nil {
 		t.Fatalf("reflectKickoffContext: %v", err)
 	}
@@ -151,7 +198,7 @@ func TestBuildTwinStageKickoffRendersHandedConfig(t *testing.T) {
 		BureaucracyPath: workRoot,
 	}
 
-	got, err := buildTwinStageKickoff("tele", workRoot, &worktreeCfg)
+	got, err := buildTwinStageKickoff("tele", workRoot, &worktreeCfg, false)
 	if err != nil {
 		t.Fatalf("buildTwinStageKickoff: %v", err)
 	}
@@ -185,7 +232,7 @@ func TestReflectKickoffContextRendersHygieneFindings(t *testing.T) {
 			{Filename: "architecture.md", Title: "Architecture"},
 		},
 	}
-	got, err := reflectKickoffContext(root, "tele", cfg)
+	got, err := reflectKickoffContext(root, "tele", cfg, false)
 	if err != nil {
 		t.Fatalf("reflectKickoffContext: %v", err)
 	}
@@ -223,7 +270,7 @@ func TestReflectKickoffContextOmitsEmptyHygieneSection(t *testing.T) {
 			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
-	got, err := reflectKickoffContext(root, "tele", cfg)
+	got, err := reflectKickoffContext(root, "tele", cfg, false)
 	if err != nil {
 		t.Fatalf("reflectKickoffContext: %v", err)
 	}
