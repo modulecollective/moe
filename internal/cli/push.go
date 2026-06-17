@@ -533,21 +533,35 @@ func writeMechanicalPushNote(root string, md *run.Metadata) (string, error) {
 		return "", fmt.Errorf("push: create push canvas dir: %w", err)
 	}
 
-	codeRel := run.ContentPath(md.Project, md.ID, "code")
-	testRel := run.ContentPath(md.Project, md.ID, "test")
-	testLine := fmt.Sprintf("- No test-stage canvas was present at `%s`.\n", testRel)
-	if _, err := os.Stat(filepath.Join(root, testRel)); err == nil {
-		testLine = fmt.Sprintf("- Test-stage record: `%s`.\n", testRel)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("push: stat test canvas: %w", err)
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return "", fmt.Errorf("push: look up workflow %q: %w", md.Workflow, err)
 	}
 
 	var b strings.Builder
 	b.WriteString("# Push\n\n")
 	b.WriteString("Shipped by fast-forward merge. No push synthesis was run for this path.\n\n")
 	b.WriteString("Authoritative records:\n")
-	fmt.Fprintf(&b, "- Code-stage record: `%s`.\n", codeRel)
-	b.WriteString(testLine)
+	// Enumerate the workflow's own stages so this note tracks the ladder
+	// automatically — adding a stage in RegisterStage is enough. Each
+	// stage's present/absent line is sourced from a stat, uniformly: the
+	// gated stages render as "record" lines, test stays the optional one,
+	// and an unexpectedly-missing canvas reads honestly rather than as a
+	// dangling link.
+	for _, stage := range wf.Stages() {
+		if stage == "push" {
+			continue
+		}
+		rel := run.ContentPath(md.Project, md.ID, stage)
+		label := strings.ToUpper(stage[:1]) + stage[1:]
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			fmt.Fprintf(&b, "- %s-stage record: `%s`.\n", label, rel)
+		} else if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(&b, "- No %s-stage canvas was present at `%s`.\n", stage, rel)
+		} else {
+			return "", fmt.Errorf("push: stat %s canvas: %w", stage, err)
+		}
+	}
 	b.WriteString("- Target git history and the terminal commit trailers on this push record.\n")
 
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {

@@ -189,7 +189,9 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	gotCanvas := string(canvas)
 	for _, want := range []string{
 		"Shipped by fast-forward merge. No push synthesis was run for this path.",
+		"No design-stage canvas was present at `projects/tele/runs/fix-it/documents/design/content.md`.",
 		"Code-stage record: `projects/tele/runs/fix-it/documents/code/content.md`.",
+		"No review-stage canvas was present at `projects/tele/runs/fix-it/documents/review/content.md`.",
 		"No test-stage canvas was present at `projects/tele/runs/fix-it/documents/test/content.md`.",
 	} {
 		if !strings.Contains(gotCanvas, want) {
@@ -975,7 +977,7 @@ func TestWritePRBodyFileMissingSection(t *testing.T) {
 
 func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
 	root := t.TempDir()
-	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: "sdlc"}
 	testPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
 	if err := os.MkdirAll(filepath.Dir(testPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -1001,6 +1003,49 @@ func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
 	}
 	if strings.Contains(got, "No test-stage canvas") {
 		t.Fatalf("push note should not claim test canvas is absent, got:\n%s", got)
+	}
+}
+
+// TestWriteMechanicalPushNoteEnumeratesWorkflowStages is the regression
+// this run closes: the records block is sourced from the workflow's own
+// stages, so the design and review canvases get named instead of being
+// silently omitted. Present stages render as "record" lines; the push
+// doc itself is skipped.
+func TestWriteMechanicalPushNoteEnumeratesWorkflowStages(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: "sdlc"}
+	for _, stage := range []string{"design", "code", "review"} {
+		p := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("# "+stage+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rel, err := writeMechanicalPushNote(root, md)
+	if err != nil {
+		t.Fatalf("writeMechanicalPushNote: %v", err)
+	}
+	canvas, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("read push note: %v", err)
+	}
+	got := string(canvas)
+	for _, want := range []string{
+		"Design-stage record: `projects/tele/runs/fix-it/documents/design/content.md`.",
+		"Code-stage record: `projects/tele/runs/fix-it/documents/code/content.md`.",
+		"Review-stage record: `projects/tele/runs/fix-it/documents/review/content.md`.",
+		"No test-stage canvas was present at `projects/tele/runs/fix-it/documents/test/content.md`.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("push note missing %q:\n%s", want, got)
+		}
+	}
+	// The push doc itself is never listed as one of its own records.
+	if strings.Contains(got, "Push-stage record") {
+		t.Fatalf("push note should not list the push stage as a record, got:\n%s", got)
 	}
 }
 
