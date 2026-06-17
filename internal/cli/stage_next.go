@@ -547,11 +547,11 @@ func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blocked
 	case scuttle != nil && answer == "x":
 		return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	case hasDesign && answer == "d":
-		return openKickbackSession(md, "design", blockedStage, canvas, stdout, stderr)
+		return openKickbackSession(md, "design", blockedStage, canvas, false, stdout, stderr)
 	case answer == "n":
 		return 0
 	case answer == "" || strings.HasPrefix(answer, "y"):
-		return openKickbackSession(md, "code", blockedStage, canvas, stdout, stderr)
+		return openKickbackSession(md, "code", blockedStage, canvas, false, stdout, stderr)
 	}
 	// Anything else — a typo — declines, same as the other chain prompts.
 	return 0
@@ -559,9 +559,11 @@ func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blocked
 
 // openKickbackSession opens the chosen back-target document ("code" or
 // "design") as a recovery turn carrying the blocking findings, with the
-// chain set to re-offer the stage that blocked. Interactive only — a
-// kickback is a human-gated decision (see the design doc), so it never
-// runs headless.
+// chain set to re-offer the stage that blocked. headless distinguishes
+// the two callers: the interactive kickback (promptKickback) passes
+// false and keeps the post-turn chain prompt; the headless ship cascade
+// (cascadeStageGate) passes true for a bounded one-shot recovery whose
+// gate the cascade re-checks itself.
 //
 // Wired to runKickbackSession in init() rather than referenced directly
 // for the same reason pushFromCascade is: the var's initializer would
@@ -569,17 +571,22 @@ func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blocked
 // promptNextStageOverride → promptKickback → openKickbackSession and the
 // var-init dependency analyser would flag the chain as a cycle. Tests
 // override this var to stub the dispatch.
-var openKickbackSession func(md *run.Metadata, document, blockedStage, canvas string, stdout, stderr io.Writer) int
+var openKickbackSession func(md *run.Metadata, document, blockedStage, canvas string, headless bool, stdout, stderr io.Writer) int
 
 func init() {
 	openKickbackSession = runKickbackSession
 }
 
-func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string, stdout, stderr io.Writer) int {
-	moePrintf(stderr, "       kicking back to %s for %s-blocked; the chain prompt will re-offer %s after the fix lands\n",
-		document, blockedStage, blockedStage)
+func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string, headless bool, stdout, stderr io.Writer) int {
+	if headless {
+		moePrintf(stderr, "       kicking back to %s for %s-blocked (headless); the cascade re-checks %s after the fix lands\n",
+			document, blockedStage, blockedStage)
+	} else {
+		moePrintf(stderr, "       kicking back to %s for %s-blocked; the chain prompt will re-offer %s after the fix lands\n",
+			document, blockedStage, blockedStage)
+	}
 	kickoff := buildKickbackKickoff(md.Workflow, blockedStage, canvas)
-	return openRecoveryStageSession(md, document, blockedStage, false, kickoff, stdout, stderr)
+	return openRecoveryStageSession(md, document, blockedStage, headless, kickoff, stdout, stderr)
 }
 
 // promptCloseNextStage is the terminal-stage analogue of
@@ -959,7 +966,9 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		if code != 0 {
 			return res, code
 		}
-		if gateOK, gateCode := checkCascadeStageGate(wf, md, stage, stderr); gateCode != 0 || !gateOK {
+		steps, gateCode := cascadeStageGate(wf, dispatcher, md, stage, yolo, stdout, stderr)
+		res.ran = append(res.ran, steps...)
+		if gateCode != 0 {
 			return res, gateCode
 		}
 	}
@@ -1014,6 +1023,83 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 		return false, 1
 	}
 	return true, 0
+}
+
+// cascadeStageGate evaluates a just-dispatched stage's gate and, on a
+// headless ship cascade (`!!` / `!!!`) that hit a *blocked* sdlc
+// review/test gate, makes one bounded headless kickback to code before
+// re-dispatching the stage and re-checking once. It is the judgement-
+// recovery analogue of cascadeShipStep's mechanical push retry: a real
+// review finding no longer dies silently in a headless chain, but the
+// loop stays bounded at a single attempt — if the fix doesn't stick the
+// run parks exactly as before. retries mirrors cascadeShipStep's
+// `retries >= 1` shape: one try per gate, then stop.
+//
+// Recovery is gated to the ship cascade (yolo). The `!` / `!<stage>`
+// forms re-enter the interactive chain prompt at the resulting gate,
+// where the operator is present to act on the block — the same "offer
+// when a human is present, launch when headless" line the design draws.
+//
+// The blocked check reads the canvas's gate status directly (mirroring
+// the interactive headless nudge in promptNextStageOverride) rather than
+// leaning on checkCascadeStageGate's pass/fail alone: only a literal
+// "blocked" status earns a kickback. A test gate that fails on an
+// unfilled skeleton (status "ready", empty sections) is not a finding a
+// code turn can resolve, so it parks without burning a recovery turn —
+// and reading the status first keeps checkCascadeStageGate's "parked"
+// line from printing on a recovery that ultimately succeeds.
+//
+// Returns the recovery/re-dispatch steps to append (empty when no
+// recovery ran) and the exit code to propagate (0 = gate satisfied,
+// proceed; non-zero = park).
+func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metadata, stage string, yolo bool, stdout, stderr io.Writer) (steps []cascadeStepResult, code int) {
+	retries := 0
+	for {
+		if yolo && retries < 1 && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
+			if canvas, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
+				retries++
+				// One headless kickback to code, carrying the blocking
+				// canvas as kickoff — the same seam the interactive
+				// kickback uses, run headless and re-checked by the loop.
+				recCode := openKickbackSession(md, "code", stage, canvas, true, stdout, stderr)
+				steps = append(steps, cascadeStepResult{stage: "code", code: recCode})
+				if recCode != 0 {
+					return steps, recCode
+				}
+				// Re-dispatch the blocked stage; the loop re-checks its gate.
+				moePrintf(stdout, "cascade: %s (headless)\n", stage)
+				dCode := dispatcher(stage, md.Project, md.ID, true, stdout, stderr)
+				steps = append(steps, cascadeStepResult{stage: stage, code: dCode})
+				if dCode != 0 {
+					return steps, dCode
+				}
+				continue
+			}
+		}
+		gateOK, gateCode := checkCascadeStageGate(wf, md, stage, stderr)
+		if gateOK && gateCode == 0 {
+			return steps, 0
+		}
+		return steps, gateCode
+	}
+}
+
+// cascadeStageBlocked reports whether stage's canvas closed with a
+// literal `blocked` gate, returning the canvas body so the caller can
+// inline it into the kickback kickoff without a second read. A missing
+// root, missing/empty canvas, or unparseable gate all read as
+// not-blocked — the caller falls through to the canonical gate check.
+func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canvas string, blocked bool) {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return "", false
+	}
+	canvas = readPrintableCanvas(root, md, stage)
+	if canvas == "" {
+		return "", false
+	}
+	status, ok := stageGateStatus(canvas)
+	return canvas, ok && status == "blocked"
 }
 
 // cascadeShipStep runs the sdlc terminal ship for a `!!` / `!!!` cascade:

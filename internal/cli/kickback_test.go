@@ -36,7 +36,7 @@ func stubKickback(t *testing.T) (ran *bool, doc *string) {
 	var fired bool
 	var gotDoc string
 	old := openKickbackSession
-	openKickbackSession = func(_ *run.Metadata, document, _, _ string, _, _ io.Writer) int {
+	openKickbackSession = func(_ *run.Metadata, document, _, _ string, _ bool, _, _ io.Writer) int {
 		fired = true
 		gotDoc = document
 		return 0
