@@ -97,8 +97,9 @@ be slow-moving — a quiet pass is the common case.
 - **Show the sightings.** When you promote, name the 2+ docs the
   term appears in.
 - **Walk normalizations carefully.** Renaming a term across home
-  docs is a structural edit — surface what you're changing
-  before applying.
+  docs is a structural edit — name what you're changing on the
+  canvas as you apply it, so the committed pass shows the operator
+  exactly which docs moved.
 
 ## Committing
 

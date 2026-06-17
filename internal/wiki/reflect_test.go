@@ -238,8 +238,8 @@ func TestReflectPromptSectionCarriesConventionsAndHygiene(t *testing.T) {
 		"don't manufacture work",
 		"Primer-plus-reference",
 		"Single-home discipline",
-		"Reference drift",
-		"Intent drift",
+		"highest bar",
+		"not a veto",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)

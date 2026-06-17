@@ -45,10 +45,12 @@ func reflectPromptSection(cfg Config) (string, error) {
 	b.WriteString(`Reflect pass (closed-schema):
 
 Walk each managed doc against the events block. For each, decide:
-did anything happen that should change this doc? Propose updates
-with the operator before writing them. Apply fixes inline once
-agreed. Skim docs that look untouched and don't manufacture work —
-a quiet section is fine.
+did anything happen that should change this doc? Act on your best
+evidence-backed judgment and record the case on the canvas — the
+committed pass is the proposal the operator reviews, interactive or
+headless alike. "Reviewed" means the operator's read at landing, not
+a mid-pass handshake. Skim docs that look untouched and
+don't manufacture work — a quiet section is fine.
 
 Twin docs are written for a reader who doesn't already know the
 project. Primer-plus-reference, not changelog. Durable rules,
@@ -68,16 +70,18 @@ recurring or refused shapes; operations owns rituals and tools.
 A line that could plausibly live in two docs lives in one — pick
 by which doc the reader would search first.
 
-Vision is asymmetric — but split into two registers.
-**Reference drift** (terminology, examples, names of tools or
-people, broken pointers, stale lists of "currently we use X")
-can be fixed in place when drift has ≥2 sightings in recent
-events and the edit *tightens* an existing statement rather
-than reversing one. **Intent drift** (stated bets, non-goals,
-problem statement, scope) stays surface-only — flag it on the
-canvas; the operator confirms it in an interactive reflect
-session before it's edited. If you can't tell which register a
-drift belongs to, flag for the operator instead of editing.
+Vision carries the highest bar of any doc — but a high bar is
+not a veto. You may write, extend, and tighten vision in place;
+cite the events that justify the edit. **Seed or fill a gap** (a
+stub doc, or vision silent on something the project clearly bets
+on): write it. **Tighten** (sharper wording, corrected name,
+stale "currently we use X"): fix in place when the drift has ≥2
+sightings and the edit tightens rather than reverses. **Reverse
+a stated bet, non-goal, or problem statement**: the highest bar —
+make the reversal only on strong, multiple-sighting evidence that
+the project has moved, and make it loud (name what flipped, why,
+which events forced it). Thin evidence or a genuinely contested
+call gets flagged, not flipped.
 
 Glossary convention: glossary.md is a single alphabetical list of
 project-specific terms. Each entry is a ` + "`### Term`" + ` heading

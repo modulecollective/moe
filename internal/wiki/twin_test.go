@@ -73,7 +73,7 @@ func TestReflectPromptSectionRendersClosed(t *testing.T) {
 		"## Wiki: twin (closed-schema)",
 		"vision.md — Vision",
 		"Reflect pass (closed-schema)",
-		"canvas; the operator confirms it in an interactive reflect",
+		"not a veto",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("reflect prompt missing %q in:\n%s", want, got)

@@ -14,9 +14,11 @@ edit when reality has moved.
 - **Walk events against shape.** Did recent work introduce,
   remove, or reshape a component or boundary? Did a recorded
   decision get revisited, contradicted, or quietly retired?
-- **Edit in place once agreed.** Architecture is a working doc.
-  Apply structural updates the events justify; the closed-schema
-  filenames don't move, but the content does.
+- **Edit in place on the evidence.** Architecture is a working
+  doc. Apply the structural updates the events justify and record
+  the case on the canvas; the closed-schema filenames don't move,
+  but the content does. The committed pass is what the operator
+  reviews — interactive or headless alike — not a mid-pass handshake.
 - **Cross-reference the prior stage.** Drift the vision stage
   flagged may have an architectural shape here — name it if so.
 
@@ -27,9 +29,10 @@ the canvas. A quiet pass is a valid pass.
 
 - **Don't speculate.** A future component that nobody is building
   yet doesn't belong in architecture.
-- **Don't rewrite decisions.** Updating a decision because the
-  team *agrees* it changed is fine. Rewriting because *you* think
-  it's wrong is a decided edit for the operator, not a reflect.
+- **Don't rewrite decisions on a hunch.** Updating a decision the
+  events show has *actually* changed is fine — cite them. Rewriting
+  because *you* think the original was wrong, with no event behind
+  it, is a flag for the operator, not a reflect edit.
 - **Don't rename or retire files.** Closed-schema means the doc
   set is fixed.
 - **Don't restate what another doc owns.** Architecture owns
@@ -48,8 +51,8 @@ the canvas. A quiet pass is a valid pass.
 section headings and one-line "why")
 
 ## What I flagged for the operator
-(bullets — drift I didn't act on alone; needs operator agreement
-before editing)
+(bullets — drift I didn't act on alone, with the reason: thin
+evidence, or a call I couldn't settle from the events)
 
 ## No-change notes
 (optional one line if architecture still holds)

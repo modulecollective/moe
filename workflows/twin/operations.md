@@ -15,8 +15,11 @@ actually *do*.
   get replaced? Did an escalation path get rerouted? Operations
   goes stale faster than vision or architecture — recent work is
   the canonical source.
-- **Edit in place once agreed.** Operations is a working doc;
-  update the runbook to match how the project actually runs.
+- **Edit in place on the evidence.** Operations is a working doc;
+  update the runbook to match how the project actually runs, and
+  record the trigger on the canvas. The committed pass is what the
+  operator reviews — interactive or headless alike — not a mid-pass
+  handshake.
 - **Capture new rituals.** A practice that's emerged in recent
   work and stuck is a candidate to document — even short-form
   ("Operators run X before Y on Z days").
