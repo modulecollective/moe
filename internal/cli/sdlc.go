@@ -64,6 +64,7 @@ func init() {
 		argKind: argProjectRun,
 	})
 	g.Register(closeCommand("sdlc", sdlcCloseSubject, releaseWorkspaceCleanup))
+	g.Register(harvestCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (sdlc cat <project>/<run> <stage>)",

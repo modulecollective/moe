@@ -93,6 +93,7 @@ func init() {
 	// a sitting ended; it harvests stragglers exactly as every other
 	// workflow does.
 	g.Register(closeCommand(pdlcWorkflow, "Close pdlc run %s/%s", nil))
+	g.Register(harvestCommand(pdlcWorkflow))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (pdlc cat <project>/<run> <stage>)",

@@ -84,6 +84,7 @@ func init() {
 	// rides the standard harvest / state-guard / status-flip path with a
 	// nil cleanup.
 	g.Register(closeCommand(chatWorkflow, "Close chat run %s/%s", nil))
+	g.Register(harvestCommand(chatWorkflow))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump the chat canvas (moe-written session log) to stdout",

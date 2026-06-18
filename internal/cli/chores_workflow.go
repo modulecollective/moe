@@ -22,6 +22,7 @@ func init() {
 		Run:     runChoresCode,
 	})
 	g.Register(closeCommand(choresWorkflow, "Close chores run %s/%s", nil))
+	g.Register(harvestCommand(choresWorkflow))
 	g.Register(&Command{Name: "cat", Summary: "dump the run's code canvas to stdout", Run: runCat(choresWorkflow, choresCodeDoc)})
 	g.Register(&Command{Name: "log", Summary: "render the run's code-stage agent transcript", Run: runLog(choresWorkflow, choresCodeDoc)})
 	RegisterGroup(g)

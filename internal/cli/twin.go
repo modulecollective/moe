@@ -167,6 +167,7 @@ func init() {
 	// landed. Mirrors `moe sdlc close`: no cleanup hook, since twin
 	// runs have no sandbox.
 	g.Register(closeCommand("twin", "Close twin reflect pass %s/%s", nil))
+	g.Register(harvestCommand("twin"))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (twin cat <project>/<run> <stage>)",

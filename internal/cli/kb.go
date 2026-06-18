@@ -66,6 +66,7 @@ func init() {
 		Run:     runSummarize,
 	})
 	g.Register(closeCommand("kb", "Close kb run %s/%s", nil))
+	g.Register(harvestCommand("kb"))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (kb cat <project>/<run> <stage>)",
