@@ -219,6 +219,126 @@ func TestParseFollowupsRejectsMalformed(t *testing.T) {
 	}
 }
 
+// TestParseFollowupsRejectsStrayContent pins Change 2's backstop: a
+// file with substantive content but no `- [ ]` checkbox fails loud
+// instead of silently no-opping. This is the population that loses
+// ideas today — an agent that wrote prose or plain bullets instead of
+// the checklist grammar.
+func TestParseFollowupsRejectsStrayContent(t *testing.T) {
+	cases := []struct {
+		name, body string
+	}{
+		{"plain bullets", "- clean up the foo helper\n- chase the zlib upgrade\n"},
+		{"prose", "We should clean up the foo helper and chase zlib.\n"},
+		{"prose under a heading", "# Follow-ups\n\nClean up the foo helper.\n"},
+		{"plain bullets after the editor-pop header", "<!--\nfollowups.md — captured this run.\nDelete a line to skip.\n-->\n\n- clean up foo\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, todo, err := parseFollowups([]byte(tc.body), "tele")
+			if err == nil {
+				t.Fatalf("expected stray-content error, got nil (todo=%+v)", todo)
+			}
+			if !strings.Contains(err.Error(), "has content but no") || !strings.Contains(err.Error(), "wrong format") {
+				t.Fatalf("error %q missing the stray-content phrasing", err.Error())
+			}
+		})
+	}
+}
+
+// TestParseFollowupsCleanNoOps pins the negative side of the backstop:
+// the legitimate "nothing to harvest" shapes must NOT trip the guard.
+// An empty / header-only / heading-only file, and a fully-harvested
+// file (all `- [x]`, including ones carrying indented audit bodies),
+// each parse to zero entries with no error.
+func TestParseFollowupsCleanNoOps(t *testing.T) {
+	cases := []struct {
+		name, body string
+	}{
+		{"empty", ""},
+		{"blank lines only", "\n\n\n"},
+		{"heading only", "# Follow-ups\n\n"},
+		{"editor-pop header only", "<!--\nfollowups.md — captured this run.\nDelete a line to skip.\n-->\n"},
+		{"all checked", "- [x] `did-this` — Done\n- [x] `did-that` — Also done\n"},
+		{
+			"all checked with indented bodies",
+			strings.Join([]string{
+				"# Follow-ups",
+				"",
+				"- [x] `did-this` — Done",
+				"",
+				"  Why: the body that rode into the idea on a prior harvest.",
+				"",
+				"- [x] `did-that` — Also done",
+				"",
+			}, "\n"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, todo, err := parseFollowups([]byte(tc.body), "tele")
+			if err != nil {
+				t.Fatalf("expected clean no-op, got error: %v", err)
+			}
+			if len(todo) != 0 {
+				t.Fatalf("expected zero entries, got %d: %+v", len(todo), todo)
+			}
+		})
+	}
+}
+
+// TestParseFollowupsStrayGuardYieldsToValidEntries pins the guard's
+// precondition: it fires only when the parse yielded *zero* open
+// entries. Stray prose alongside a valid `- [ ]` entry is tolerated —
+// the entry harvests and the loose line rides along untouched.
+func TestParseFollowupsStrayGuardYieldsToValidEntries(t *testing.T) {
+	body := strings.Join([]string{
+		"# Follow-ups",
+		"",
+		"some loose prose the agent left above the list",
+		"",
+		"- [ ] `cleanup-foo` — Clean up foo helper",
+		"",
+	}, "\n")
+	_, todo, err := parseFollowups([]byte(body), "tele")
+	if err != nil {
+		t.Fatalf("stray line alongside a valid entry should not error: %v", err)
+	}
+	if len(todo) != 1 || todo[0].slug != "cleanup-foo" {
+		t.Fatalf("expected the one valid entry, got %+v", todo)
+	}
+}
+
+// TestParseFollowupsIndentedOrphanIsNotStray names a code-stage choice
+// the design left open (design "Indented orphan lines"): a purely
+// indented line with no preceding checkbox is NOT counted as stray.
+// Treating it as stray would false-positive on the indented audit
+// bodies of all-`[x]` files (those reach the same openIdx<0 indented
+// branch), so the guard targets only non-indented substantive lines.
+func TestParseFollowupsIndentedOrphanIsNotStray(t *testing.T) {
+	body := "  an indented line attached to nothing\n"
+	_, todo, err := parseFollowups([]byte(body), "tele")
+	if err != nil {
+		t.Fatalf("indented orphan should be a clean no-op, got: %v", err)
+	}
+	if len(todo) != 0 {
+		t.Fatalf("expected zero entries, got %+v", todo)
+	}
+}
+
+// TestParseLoreInheritsStrayGuard pins the intended shared-parser
+// consequence: parseChecklist is shared, so lore prose-without-
+// checkboxes fails loud the same way, with lore's noun in the message.
+func TestParseLoreInheritsStrayGuard(t *testing.T) {
+	_, _, err := parseLore([]byte("just some lore prose with no checkbox\n"))
+	if err == nil {
+		t.Fatal("expected stray-content error from the shared parser")
+	}
+	if !strings.Contains(err.Error(), "has content but no") || !strings.Contains(err.Error(), "lore entry") {
+		t.Fatalf("lore error should carry the lore noun, got: %q", err.Error())
+	}
+}
+
 func TestParseFollowupsRejectsDuplicateSlug(t *testing.T) {
 	body := strings.Join([]string{
 		"- [ ] `dup` — First",
