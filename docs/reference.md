@@ -21,6 +21,7 @@ source of truth for the exact command surface; this page is a map.
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
 - `moe where` prints the resolved bureaucracy path.
+- `moe version` prints the moe version.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
 - `moe <workflow> log <project>/<run> [<stage>]` renders a past stage
   transcript in workflow context.
@@ -43,18 +44,23 @@ source of truth for the exact command surface; this page is a map.
 
 ### Workflows
 
-- `moe sdlc new|design|code|review|test|push|close|shell|reopen|cat|log` drives
-  designed code work.
-- `moe chat new|chat|close|cat|log` drives thinking-partner sessions.
-- `moe pdlc new|frame|prd|chunk|close|cat|log` drives product plans.
-- `moe kb new|research|summarize|close|cat|log|lint` drives project knowledge.
+- `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
+  drives designed code work.
+- `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
+- `moe pdlc new|frame|prd|chunk|close|harvest|cat|log` drives product plans.
+- `moe kb new|research|summarize|close|harvest|cat|log|lint` drives project
+  knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
-- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|cat|log`
+- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
   maintains recorded intent.
-- `moe hooks new|code|close|cat|log` edits project hook scripts through a
+- `moe hooks new|code|close|harvest|cat|log` edits project hook scripts through a
   journaled run.
-- `moe chores new|code|close|cat|log` edits project chore definitions through a
-  journaled run.
+- `moe chores new|code|close|harvest|cat|log` edits project chore definitions
+  through a journaled run.
+
+`moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
+`followups.md` harvest into ideas without closing it — the way to pick up
+follow-ups a re-run regenerated after the run was already closed.
 
 ## Codex Setup
 

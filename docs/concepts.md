@@ -74,7 +74,8 @@ shell` does the same for a named workspace directly.
 MoE's memory improves through a few explicit channels:
 
 - Followups are out-of-scope work noticed during a run. Agents write them to
-  `followups.md`; close-time harvest promotes surviving entries to ideas.
+  `followups.md`; close-time harvest promotes surviving entries to ideas, and
+  `moe <workflow> harvest` re-runs that promotion without closing the run.
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,
