@@ -165,6 +165,11 @@ func TestFollowupsReferenceSection(t *testing.T) {
 		"`moe-bureaucracy`",
 		"`moe-context`",
 		wantPath,
+		// The one-line grammar is inlined so an agent that never opens
+		// the skill still writes a parseable shape, plus the loud-at-close
+		// note so a wrong shape reads as recoverable, not silent.
+		"`- [ ] `slug` — Title`",
+		"rejected at close",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("followups reference missing %q in:\n%s", want, got)

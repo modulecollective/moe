@@ -67,10 +67,13 @@ or run), and stable (still true in 12 months). Project-specific
 facts go in the twin bucket above instead; operator preferences go
 in user memory.
 
-Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,
-terse title), followed by an indented body (two-space indent) whose
-first paragraph is the `applies-when:` heuristic and whose
-remaining paragraphs are the lore entry prose:
+Format: - [ ] `slug` — Title. The same three load-bearing tokens as
+followups below, parsed by the same grammar: the `- [ ]` checkbox,
+the backtick-quoted `slug` (lowercase, hyphenated), and the em-dash
+`—` before a terse title. Any other shape is **rejected at close**,
+not silently dropped. Follow with an indented body (two-space
+indent) whose first paragraph is the `applies-when:` heuristic and
+whose remaining paragraphs are the lore entry prose:
 
   - [ ] `compose-tailscale-binds` — Reaching compose ports from the laptop
 
@@ -97,14 +100,21 @@ append an entry to:
 
   {{.Followups}}
 
-Format: - [ ] `slug` — Title (lowercase hyphenated slug, em-dash,
-terse title), optionally followed by an indented body of one or
-more paragraphs (two-space indent, blank lines between paragraphs):
+Format: - [ ] `slug` — Title. Three tokens are load-bearing and
+parsed exactly: the `- [ ]` checkbox, the backtick-quoted `slug`
+(lowercase, hyphenated), and the em-dash `—` between slug and a
+terse title. Optionally follow with an indented body of one or more
+paragraphs (two-space indent, blank lines between paragraphs):
 
   - [ ] `cleanup-foo` — Clean up foo helper
 
     Why: bar/baz both reach into foo's internals; foo.go:42 is
     the load-bearing assumption. Fix sketch: <one sentence>.
+
+Content written in any other shape — plain bullets, prose, or a
+hyphen where the em-dash belongs — is **rejected at close**, not
+silently dropped: the harvest fails loud so you (or the operator)
+can fix the shape and re-run, rather than losing the idea.
 
 Use the body only when context would save a future agent real
 work — the *why*, file:line refs, or a one-sentence approach

@@ -268,6 +268,12 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 	b.WriteString("If you spot work worth doing but out of scope for this canvas,\n")
 	b.WriteString("leave it via the `moe-bureaucracy` skill at:\n")
 	fmt.Fprintf(&b, "  %s\n", path)
+	// Inline the one-line grammar so an agent that never opens the skill
+	// still writes the shape the close-time harvest can parse. A wrong
+	// shape is now rejected loud at close, not silently dropped.
+	b.WriteString("Each entry is one line — `- [ ] `slug` — Title` (backticked\n")
+	b.WriteString("lowercase slug, em-dash separator); the skill has the full format.\n")
+	b.WriteString("A wrong shape is rejected at close, not silently dropped.\n")
 	b.WriteString("To check what prior runs have already filed for this project (so\n")
 	b.WriteString("you don't duplicate a followup or re-decide a settled question),\n")
 	b.WriteString("use `moe-context`.\n")
