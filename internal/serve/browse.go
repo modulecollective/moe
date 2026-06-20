@@ -170,6 +170,9 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 type hubVM struct {
+	// bannerArtVM carries the project-scoped histogram + factory art the
+	// "bannerart" partial draws under the header, same as the home dash.
+	bannerArtVM
 	Project      string
 	Active       []dashRowVM
 	Backlog      []dashRowVM
@@ -202,15 +205,16 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	vm := hubVM{Project: projectID}
 	if s.opts.GatherDash != nil {
-		rows, _, _, _, err := s.opts.GatherDash()
+		rows, _, _, histogram, err := s.opts.GatherDash(projectID)
 		if err != nil {
 			http.Error(w, "hub gather: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// The snapshot is already scoped to projectID, so every row
+		// belongs here — no re-filter — and the factory art + histogram
+		// reflect this project alone.
+		vm.bannerArtVM = newBannerArt(now, rows, histogram)
 		for _, row := range rows {
-			if row.Project != projectID {
-				continue
-			}
 			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: row.Note, When: dash.HumanAgo(now, row.When)}
 			switch row.Bucket {
 			case dash.BucketActiveRuns:
@@ -396,7 +400,7 @@ func (s *Server) runChoreCounts() (runs, chores map[string]int) {
 	if s.opts.GatherDash == nil {
 		return runs, chores
 	}
-	rows, _, _, _, err := s.opts.GatherDash()
+	rows, _, _, _, err := s.opts.GatherDash("")
 	if err != nil {
 		return runs, chores
 	}

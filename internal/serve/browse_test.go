@@ -81,7 +81,7 @@ func TestProjectsIndexAndHub(t *testing.T) {
 	writeFile(t, root, "projects/alpha/knowledge/index.md", "# alpha kb\n")
 	writeFile(t, root, "projects/alpha/knowledge/topics/foo.md", "# Foo\n")
 
-	gather := func() ([]dash.Row, int, int, []int, error) {
+	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
 			{Project: "alpha", Run: "tidy", Bucket: dash.BucketChores, When: time.Now()},
@@ -104,6 +104,38 @@ func TestProjectsIndexAndHub(t *testing.T) {
 	// A project with no knowledge/twin reads as empty-state, not broken.
 	betaHub := get(t, s, "/projects/beta")
 	mustContain(t, betaHub, "no knowledge base yet", "no twin yet")
+}
+
+// TestProjectHubRendersBannerArt pins requirement 2: the project hub
+// gathers scoped to its own project (the projectID reaches GatherDash)
+// and draws the factory art + project-scoped histogram under the header —
+// both banner-art <pre> blocks, with the factory rail carrying the
+// #factory-art hook the cross-fade JS targets.
+func TestProjectHubRendersBannerArt(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+
+	counts := make([]int, dash.HistDays)
+	counts[dash.HistDays-1] = 7
+	var gotProject string
+	gather := func(projectID string) ([]dash.Row, int, int, []int, error) {
+		gotProject = projectID
+		return []dash.Row{
+			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
+		}, 1, 1, counts, nil
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, GatherDash: gather})
+
+	hub := get(t, s, "/projects/alpha")
+	mustContain(t, hub,
+		`class="banner-art"`,                  // histogram <pre>
+		`class="banner-art" id="factory-art"`, // factory rail with the JS hook
+		"activity · last 60 days",             // the histogram caption
+		"peak 7 runs/day",                     // scaled to the project's window
+	)
+	if gotProject != "alpha" {
+		t.Errorf("GatherDash got projectID %q, want \"alpha\"", gotProject)
+	}
 }
 
 func TestProjectHubUnknownProject404(t *testing.T) {

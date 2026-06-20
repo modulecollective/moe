@@ -69,16 +69,19 @@ type Options struct {
 	// nil discards.
 	Logger io.Writer
 
-	// GatherDash returns the dash data the home route renders. It always
-	// gathers every run; the ?all= query flag is a render-time concern
-	// (it lifts the COMPLETED cap in newDashVM), not a gather input. The
-	// cli/serve.go entry point wires this to cli.GatherDashSnapshot so
-	// serve itself doesn't depend on the workflow registry.
+	// GatherDash returns the dash data a route renders, scoped to a
+	// project: an empty projectID gathers every run (the home dash); a
+	// non-empty one scopes the rows, factory art, and histogram to that
+	// project (the project hub). The ?all= query flag is a render-time
+	// concern (it lifts the COMPLETED cap in newDashVM), not a gather
+	// input. The cli/serve.go entry point wires this to
+	// cli.GatherDashSnapshot so serve itself doesn't depend on the
+	// workflow registry.
 	//
 	// Required by the dash route; absent means GET / returns 500.
 	// histogram is the trailing-HistDays daily run-activity window
 	// (oldest→newest) the dash charts above the factory art.
-	GatherDash func() (rows []dash.Row, projectCount, activeProjects int, histogram []int, err error)
+	GatherDash func(projectID string) (rows []dash.Row, projectCount, activeProjects int, histogram []int, err error)
 
 	// ResolveCanvas returns the absolute filesystem path serve should
 	// open for (project, run, stage). The cli wrapper closes over the
@@ -406,7 +409,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	showAll := r.URL.Query().Get("all") != ""
-	rows, projectCount, activeProjects, histogram, err := s.opts.GatherDash()
+	rows, projectCount, activeProjects, histogram, err := s.opts.GatherDash("")
 	if err != nil {
 		s.logf("dash gather: %v", err)
 		http.Error(w, "dash error: "+err.Error(), http.StatusInternalServerError)

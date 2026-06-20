@@ -31,26 +31,16 @@ type dashRowVM struct {
 	Member bool
 }
 
-// dashVM is the data the dash template renders against. Same three
-// buckets as the CLI dash; COMPLETED is pre-capped by CompletedCap
-// unless showAll is set so the template doesn't need slice math.
-type dashVM struct {
-	Active         []dashRowVM
-	Chores         []dashRowVM
-	Backlog        []dashRowVM
-	Completed      []dashRowVM
-	CompletedTotal int // pre-cap count; lets the header show "N of M"
-	ProjectCount   int
-	ActiveProjects int
-	ShowAll        bool
-	// Insecure mirrors Options.Insecure: the "new run" / "new plan"
-	// links spawn an agent, so they only render in insecure mode. The
-	// "new idea" link is journal-only and always renders.
-	Insecure bool
-	// FactoryArt is the same peripheral-vision rail the CLI dash draws
+// bannerArtVM is the shared banner-art block both the home dash and a
+// project hub draw between the banner and the run sections: the daily
+// activity histogram over the factory-art rail, plus the frames the
+// client cross-fades through. Embedded in dashVM and hubVM so the
+// {{define "bannerart"}} partial renders the same way on both pages.
+type bannerArtVM struct {
+	// FactoryArt is the peripheral-vision rail the CLI dash also draws
 	// under its banner — backlog feed, station glyphs for active runs,
 	// completed-output dots. One-line empty state, three lines populated.
-	// It is frame[0] of FactoryFrames: the server-rendered, no-JS fallback.
+	// It is frame[0] of the frames below: the server-rendered, no-JS fallback.
 	FactoryArt []string
 	// Histogram is the daily run-activity chart drawn between the banner
 	// and the factory art — a caption over HistRows bar rows, or a single
@@ -66,18 +56,47 @@ type dashVM struct {
 	FactoryFramesJSON template.JS
 }
 
-func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {
+// newBannerArt builds the banner-art block from the (already
+// project-scoped, if filtering) dash rows and the trailing-HistDays
+// activity counts. The factory art reflects exactly the rows passed in,
+// so a project hub gets its own rail and histogram.
+func newBannerArt(now time.Time, rows []dash.Row, histogram []int) bannerArtVM {
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(now.UnixNano()))
 	frames := dash.BuildFactoryFrames(state, dash.ArtWidth, factoryFrameCount, r)
 	framesJSON, _ := json.Marshal(frames) // [][]string never fails to marshal
-	vm := dashVM{
-		ProjectCount:      projectCount,
-		ActiveProjects:    activeProjects,
-		ShowAll:           showAll,
-		Histogram:         dash.BuildActivityHistogram(histogram),
+	return bannerArtVM{
 		FactoryArt:        frames[0],
+		Histogram:         dash.BuildActivityHistogram(histogram),
 		FactoryFramesJSON: template.JS(framesJSON),
+	}
+}
+
+// dashVM is the data the dash template renders against. Same three
+// buckets as the CLI dash; COMPLETED is pre-capped by CompletedCap
+// unless showAll is set so the template doesn't need slice math.
+type dashVM struct {
+	bannerArtVM
+	Active         []dashRowVM
+	Chores         []dashRowVM
+	Backlog        []dashRowVM
+	Completed      []dashRowVM
+	CompletedTotal int // pre-cap count; lets the header show "N of M"
+	ProjectCount   int
+	ActiveProjects int
+	ShowAll        bool
+	// Insecure mirrors Options.Insecure: the "new run" / "new plan"
+	// links spawn an agent, so they only render in insecure mode. The
+	// "new idea" link is journal-only and always renders.
+	Insecure bool
+}
+
+func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {
+	vm := dashVM{
+		bannerArtVM:    newBannerArt(now, rows, histogram),
+		ProjectCount:   projectCount,
+		ActiveProjects: activeProjects,
+		ShowAll:        showAll,
 	}
 	for _, r := range rows {
 		row := dashRowVM{

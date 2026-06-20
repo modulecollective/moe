@@ -101,7 +101,7 @@ func TestSafeModeAllowsIdeaClose(t *testing.T) {
 // plan" links (both spawn an agent) but keeps "new idea" — safe mode
 // never offers a link the server would refuse.
 func TestSafeModeDashHidesSpawnLinks(t *testing.T) {
-	gather := func() ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
+	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
 	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 
 	rr := httptest.NewRecorder()
