@@ -428,6 +428,52 @@ func TestJournalIndexDailyRunCount(t *testing.T) {
 	}
 }
 
+// TestJournalIndexDailyRunCountByProject pins the per-(project,day)
+// slice and the cross-project collision fix: two different runs that
+// happen to share a slug, active the same day in different projects,
+// count as two distinct runs globally and one in each project — keying
+// on bare slug would have collapsed them to one.
+func TestJournalIndexDailyRunCountByProject(t *testing.T) {
+	root := newTestRoot(t)
+	commitOn := func(project, slug string, when time.Time) {
+		t.Helper()
+		stamp := when.Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{
+			"GIT_AUTHOR_DATE=" + stamp,
+			"GIT_COMMITTER_DATE=" + stamp,
+		}, "commit", "--allow-empty", "-m",
+			"work\n\nMoE-Project: "+project+"\nMoE-Run: "+slug+"\n")
+	}
+
+	day := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+	// Same slug "shared" in two projects on the same day, plus an extra
+	// run in alpha — global is the count of distinct (project, slug) pairs.
+	commitOn("alpha", "shared", day)
+	commitOn("beta", "shared", day)
+	commitOn("alpha", "solo", day)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	// Global: alpha/shared, beta/shared, alpha/solo → 3 distinct pairs.
+	// A bare-slug key would have collapsed the two "shared" runs to 2.
+	if got := idx.DailyRunCount["2026-06-18"]; got != 3 {
+		t.Errorf("global count = %d, want 3 (alpha/shared, beta/shared, alpha/solo)", got)
+	}
+	if got := idx.DailyRunCountByProject["alpha"]["2026-06-18"]; got != 2 {
+		t.Errorf("alpha count = %d, want 2 (shared+solo)", got)
+	}
+	if got := idx.DailyRunCountByProject["beta"]["2026-06-18"]; got != 1 {
+		t.Errorf("beta count = %d, want 1 (shared)", got)
+	}
+	// An unknown project's slice is nil — reads as all-zero, which the
+	// gather collapses to the (quiet) state.
+	if got := idx.DailyRunCountByProject["ghost"]["2026-06-18"]; got != 0 {
+		t.Errorf("unknown project count = %d, want 0", got)
+	}
+}
+
 // TestJournalIndexCapturesPromotedToAndPRURL pins the multi-trailer
 // extraction: PromotedTo/PRURL on a run-scoped commit must surface in
 // the index without a second git log walk. Replaces N trailerValue

@@ -753,12 +753,23 @@ type JournalIndex struct {
 	// due reasons compare against, as if a run had completed then.
 	ChoreSkipped map[string]time.Time
 	// DailyRunCount maps a UTC date ("2006-01-02") to the number of
-	// distinct run slugs that had at least one MoE-Run commit that day —
-	// the "runs active per day" tempo the dash histogram charts. Built by
-	// counting distinct slugs per day during the same walk (a run that
-	// commits five times in a day counts once); only days with activity
-	// are present, so a missing key reads as zero.
+	// distinct runs that had at least one MoE-Run commit that day — the
+	// "runs active per day" tempo the dash histogram charts. A run is
+	// counted by its full (project, slug) identity, not bare slug: slugs
+	// are only per-project unique, so two projects can carry the same
+	// slug and a bare-slug key would collapse them into one tally. Built
+	// by counting distinct (project, slug) pairs per day during the same
+	// walk (a run that commits five times in a day counts once); only days
+	// with activity are present, so a missing key reads as zero.
 	DailyRunCount map[string]int
+	// DailyRunCountByProject maps a project id to that project's own
+	// DailyRunCount (UTC date → distinct run slugs active that day). The
+	// per-project slice the dash filters to under `moe dash --project`.
+	// Commits with no MoE-Project trailer bucket under "" — nobody reads
+	// that key by name (the empty filter takes the global DailyRunCount
+	// path), but it keeps the global total whole. Summing every project's
+	// per-day count reproduces DailyRunCount.
+	DailyRunCountByProject map[string]map[string]int
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -926,11 +937,14 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		ChoreTouched: make(map[string]time.Time),
 		ChoreSkipped: make(map[string]time.Time),
 	}
-	// dailySlugs accumulates the distinct slug set active on each UTC day.
-	// Kept as sets during the walk (so repeat commits from one run on one
-	// day collapse to a single tally) and folded to DailyRunCount counts
-	// at the end — storing the counts, not the sets, keeps the index small.
-	dailySlugs := make(map[string]map[string]struct{})
+	// dailyProjSlugs accumulates, per project, the distinct slug set active
+	// on each UTC day (project → day → set<slug>). Nesting by project
+	// encodes the qualified (project, slug) identity a run is counted by —
+	// within one project a bare slug is unique. Kept as sets during the
+	// walk (so repeat commits from one run on one day collapse to a single
+	// tally) and folded to the two DailyRunCount maps at the end — storing
+	// the counts, not the sets, keeps the index small.
+	dailyProjSlugs := make(map[string]map[string]map[string]struct{})
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
@@ -1077,14 +1091,20 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		if slug == "" {
 			continue
 		}
-		// Tally the slug under its commit's UTC day for the activity
-		// histogram. Unlike LastActivity (first-commit-wins), every commit
-		// contributes — the set membership dedups within a day.
+		// Tally the slug under its commit's project and UTC day for the
+		// activity histogram. Unlike LastActivity (first-commit-wins),
+		// every commit contributes — the set membership dedups within a
+		// day. A commit with no MoE-Project trailer buckets under "".
 		day := time.Unix(epoch, 0).UTC().Format("2006-01-02")
-		set := dailySlugs[day]
+		byDay := dailyProjSlugs[projectID]
+		if byDay == nil {
+			byDay = make(map[string]map[string]struct{})
+			dailyProjSlugs[projectID] = byDay
+		}
+		set := byDay[day]
 		if set == nil {
 			set = make(map[string]struct{})
-			dailySlugs[day] = set
+			byDay[day] = set
 		}
 		set[slug] = struct{}{}
 		if _, ok := idx.LastActivity[slug]; !ok {
@@ -1130,10 +1150,19 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			}
 		}
 	}
-	// Collapse the per-day slug sets to distinct-run counts.
-	idx.DailyRunCount = make(map[string]int, len(dailySlugs))
-	for day, set := range dailySlugs {
-		idx.DailyRunCount[day] = len(set)
+	// Collapse the per-(project,day) slug sets to distinct-run counts:
+	// the per-project map keeps each project's own window, and the global
+	// map sums them — so two projects sharing a slug on one day count as
+	// two distinct runs globally, one in each project.
+	idx.DailyRunCount = make(map[string]int)
+	idx.DailyRunCountByProject = make(map[string]map[string]int, len(dailyProjSlugs))
+	for proj, byDay := range dailyProjSlugs {
+		perProject := make(map[string]int, len(byDay))
+		for day, set := range byDay {
+			perProject[day] = len(set)
+			idx.DailyRunCount[day] += len(set)
+		}
+		idx.DailyRunCountByProject[proj] = perProject
 	}
 	return idx, nil
 }
