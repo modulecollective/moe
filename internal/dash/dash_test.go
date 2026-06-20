@@ -1,6 +1,7 @@
 package dash
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,24 @@ func assertOrder(t *testing.T, active []Row, want ...string) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("active order = %v, want %v", got, want)
+	}
+}
+
+// TestRenderPrintsHistogramAboveFactoryArt guards the CLI integration
+// seam: Render emits the pre-built histogram lines before the factory
+// art, which in turn precedes the section headers.
+func TestRenderPrintsHistogramAboveFactoryArt(t *testing.T) {
+	var buf strings.Builder
+	hist := []string{"  activity · last 60 days        peak 3 runs/day", "  ▂▄█"}
+	Render(&buf, time.Now().UTC(), hist, nil, 0, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	out := buf.String()
+	capIdx := strings.Index(out, "activity · last 60 days")
+	activeIdx := strings.Index(out, "ACTIVE")
+	if capIdx < 0 {
+		t.Fatalf("histogram caption missing from render:\n%s", out)
+	}
+	if activeIdx < 0 || capIdx > activeIdx {
+		t.Fatalf("histogram must precede the ACTIVE header:\n%s", out)
 	}
 }
 

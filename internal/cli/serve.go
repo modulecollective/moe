@@ -70,12 +70,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		// mirroring how MOE_SERVE_NOTIFY_URL is read just below.
 		Insecure:  *insecure || os.Getenv("MOE_SERVE_INSECURE") != "",
 		NotifyURL: os.Getenv("MOE_SERVE_NOTIFY_URL"),
-		GatherDash: func() ([]dash.Row, int, int, error) {
+		GatherDash: func() ([]dash.Row, int, int, []int, error) {
 			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{})
 			if err != nil {
-				return nil, 0, 0, err
+				return nil, 0, 0, nil, err
 			}
-			return snap.Rows, snap.ProjectCount, snap.ActiveProjects, nil
+			return snap.Rows, snap.ProjectCount, snap.ActiveProjects, snap.Histogram, nil
 		},
 		ResolveCanvas: func(project, runID, stage string) (string, error) {
 			md, err := run.Load(root, project, runID)

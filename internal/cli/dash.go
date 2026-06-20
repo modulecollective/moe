@@ -70,6 +70,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	// are frequent, so we keep it to one line instead of a multi-line
 	// block.
 	banner.Dash(stdout, now)
-	dash.Render(stdout, now, snap.Rows, snap.ProjectCount, snap.ActiveProjects, *all, state, r)
+	histogram := dash.BuildActivityHistogram(snap.Histogram)
+	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, *all, state, r)
 	return 0
 }

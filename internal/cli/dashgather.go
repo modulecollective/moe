@@ -16,6 +16,11 @@ type DashSnapshot struct {
 	Rows           []dash.Row
 	ProjectCount   int
 	ActiveProjects int
+	// Histogram is the trailing-HistDays daily run-activity window,
+	// oldest→newest, projected from the journal index relative to now.
+	// Both surfaces render it through dash.BuildActivityHistogram so they
+	// chart the same slice.
+	Histogram []int
 }
 
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
@@ -135,7 +140,21 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		Rows:           rows,
 		ProjectCount:   projectCount,
 		ActiveProjects: len(activeProjects),
+		Histogram:      dailyRunCounts(idx, now),
 	}, nil
+}
+
+// dailyRunCounts projects idx.DailyRunCount onto the trailing HistDays
+// window ending at now (UTC), oldest→newest, so dash.BuildActivityHistogram
+// can chart it as a fixed-width strip. Days with no activity read as zero.
+func dailyRunCounts(idx *run.JournalIndex, now time.Time) []int {
+	counts := make([]int, dash.HistDays)
+	end := now.UTC()
+	for i := range counts {
+		day := end.AddDate(0, 0, -(dash.HistDays - 1 - i)).Format("2006-01-02")
+		counts[i] = idx.DailyRunCount[day]
+	}
+	return counts
 }
 
 // GatherRunRow returns the dash.Row for a single run, computed the same

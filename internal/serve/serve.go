@@ -76,7 +76,9 @@ type Options struct {
 	// serve itself doesn't depend on the workflow registry.
 	//
 	// Required by the dash route; absent means GET / returns 500.
-	GatherDash func() (rows []dash.Row, projectCount, activeProjects int, err error)
+	// histogram is the trailing-HistDays daily run-activity window
+	// (oldest→newest) the dash charts above the factory art.
+	GatherDash func() (rows []dash.Row, projectCount, activeProjects int, histogram []int, err error)
 
 	// ResolveCanvas returns the absolute filesystem path serve should
 	// open for (project, run, stage). The cli wrapper closes over the
@@ -404,13 +406,13 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	showAll := r.URL.Query().Get("all") != ""
-	rows, projectCount, activeProjects, err := s.opts.GatherDash()
+	rows, projectCount, activeProjects, histogram, err := s.opts.GatherDash()
 	if err != nil {
 		s.logf("dash gather: %v", err)
 		http.Error(w, "dash error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, showAll)
+	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, histogram, showAll)
 	vm.Insecure = s.opts.Insecure
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:

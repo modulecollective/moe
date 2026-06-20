@@ -502,7 +502,16 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 // run — not the count of active rows. The footer reads "N project(s)
 // registered · M with active runs", so both numbers count projects.
 // The ACTIVE section header already exposes the row count.
-func Render(w io.Writer, now time.Time, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
+//
+// histogram is the pre-rendered activity chart (dash.BuildActivityHistogram
+// output); Render prints it between the upstream banner and the factory
+// art, keeping the package pure over its inputs.
+func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
+	fmt.Fprintln(w)
+	for _, line := range histogram {
+		fmt.Fprintln(w, line)
+	}
+	fmt.Fprintln(w)
 	for _, line := range BuildFactoryArt(state, ArtWidth, r) {
 		fmt.Fprintln(w, line)
 	}

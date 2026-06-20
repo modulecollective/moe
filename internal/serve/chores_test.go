@@ -270,10 +270,10 @@ func TestNewChoreVMBlockReasonPrecedence(t *testing.T) {
 // in an <a> pointing at the chore detail page (the dead-text fix).
 func TestDashChoreRowsLinkToChorePage(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "alpha", Run: "readme-refresh", Note: "chore", Bucket: dash.BucketChores, When: now},
-		}, 1, 1, nil
+		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 	rr := httptest.NewRecorder()

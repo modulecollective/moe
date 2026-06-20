@@ -202,7 +202,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	vm := hubVM{Project: projectID}
 	if s.opts.GatherDash != nil {
-		rows, _, _, err := s.opts.GatherDash()
+		rows, _, _, _, err := s.opts.GatherDash()
 		if err != nil {
 			http.Error(w, "hub gather: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -396,7 +396,7 @@ func (s *Server) runChoreCounts() (runs, chores map[string]int) {
 	if s.opts.GatherDash == nil {
 		return runs, chores
 	}
-	rows, _, _, err := s.opts.GatherDash()
+	rows, _, _, _, err := s.opts.GatherDash()
 	if err != nil {
 		return runs, chores
 	}

@@ -81,12 +81,12 @@ func TestProjectsIndexAndHub(t *testing.T) {
 	writeFile(t, root, "projects/alpha/knowledge/index.md", "# alpha kb\n")
 	writeFile(t, root, "projects/alpha/knowledge/topics/foo.md", "# Foo\n")
 
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
 			{Project: "alpha", Run: "tidy", Bucket: dash.BucketChores, When: time.Now()},
 			{Project: "beta", Run: "old", Bucket: dash.BucketCompletedRuns, When: time.Now()},
-		}, 2, 1, nil
+		}, 2, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, GatherDash: gather})
 

@@ -52,6 +52,11 @@ type dashVM struct {
 	// completed-output dots. One-line empty state, three lines populated.
 	// It is frame[0] of FactoryFrames: the server-rendered, no-JS fallback.
 	FactoryArt []string
+	// Histogram is the daily run-activity chart drawn between the banner
+	// and the factory art — a caption over HistRows bar rows, or a single
+	// "(quiet)" line in the cold state. Static text (a per-render
+	// snapshot), so unlike the factory frames it carries no JS animation.
+	Histogram []string
 	// FactoryFramesJSON is json.Marshal of all factory-art frames, embedded
 	// in the page so the client can cross-fade through them without an XHR.
 	// It is template.JS, not string: html/template treats <script> content
@@ -61,7 +66,7 @@ type dashVM struct {
 	FactoryFramesJSON template.JS
 }
 
-func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, showAll bool) dashVM {
+func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(now.UnixNano()))
 	frames := dash.BuildFactoryFrames(state, dash.ArtWidth, factoryFrameCount, r)
@@ -70,6 +75,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		ProjectCount:      projectCount,
 		ActiveProjects:    activeProjects,
 		ShowAll:           showAll,
+		Histogram:         dash.BuildActivityHistogram(histogram),
 		FactoryArt:        frames[0],
 		FactoryFramesJSON: template.JS(framesJSON),
 	}

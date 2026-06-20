@@ -23,12 +23,12 @@ import (
 
 func TestDashRouteRendersBuckets(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p1", Run: "r1", Note: "sdlc:design", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p2", Run: "r2", Note: "idea:capture", Bucket: dash.BucketBacklog, When: now.Add(-2 * time.Hour)},
 			{Project: "p1", Run: "r0", Note: "sdlc:merged", Bucket: dash.BucketCompletedRuns, When: now.Add(-24 * time.Hour)},
-		}, 3, 1, nil
+		}, 3, 1, nil, nil
 	}
 	s := newTestServer(t, Options{
 		Addr:       "127.0.0.1:0",
@@ -64,8 +64,8 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: root,
-		GatherDash: func() ([]dash.Row, int, int, error) {
-			return []dash.Row{{Project: "alpha", Run: "fix-it", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
+		GatherDash: func() ([]dash.Row, int, int, []int, error) {
+			return []dash.Row{{Project: "alpha", Run: "fix-it", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil, nil
 		},
 		ResolveCanvas: func(_, _, _ string) (string, error) {
 			return canvasPath, nil
@@ -135,8 +135,8 @@ func TestDashShowAllStripsCap(t *testing.T) {
 			When:    now,
 		})
 	}
-	gather := func() ([]dash.Row, int, int, error) {
-		return rows, 1, 0, nil
+	gather := func() ([]dash.Row, int, int, []int, error) {
+		return rows, 1, 0, nil, nil
 	}
 	s := newTestServer(t, Options{
 		Addr:       "127.0.0.1:0",
@@ -170,7 +170,7 @@ func TestNewDashVMCarriesChainMember(t *testing.T) {
 		{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
 		{Project: "p", Run: "solo", Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
 	}
-	vm := newDashVM(now, rows, 1, 1, false)
+	vm := newDashVM(now, rows, 1, 1, nil, false)
 	if len(vm.Active) != 3 {
 		t.Fatalf("active len = %d, want 3", len(vm.Active))
 	}
@@ -193,7 +193,7 @@ func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 		{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now},
 		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
 	}
-	vm := newDashVM(now, rows, 1, 1, false)
+	vm := newDashVM(now, rows, 1, 1, nil, false)
 	var frames [][]string
 	if err := json.Unmarshal([]byte(vm.FactoryFramesJSON), &frames); err != nil {
 		t.Fatalf("FactoryFramesJSON is not valid JSON: %v", err)
@@ -212,8 +212,8 @@ func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 // decoding the script element's textContent before JSON.parse.
 func TestDashRendersFactoryFramesScript(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
-		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil
+	gather := func() ([]dash.Row, int, int, []int, error) {
+		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 	rr := httptest.NewRecorder()
@@ -242,13 +242,56 @@ func TestDashRendersFactoryFramesScript(t *testing.T) {
 	}
 }
 
+// TestNewDashVMCarriesHistogram: the VM renders the activity counts to
+// chart lines through dash.BuildActivityHistogram, and an all-zero
+// window collapses to the single "(quiet)" line.
+func TestNewDashVMCarriesHistogram(t *testing.T) {
+	now := time.Now().UTC()
+	counts := make([]int, dash.HistDays)
+	counts[dash.HistDays-1] = 9
+
+	vm := newDashVM(now, nil, 1, 1, counts, false)
+	if len(vm.Histogram) != dash.HistRows+1 {
+		t.Fatalf("histogram line count = %d, want %d", len(vm.Histogram), dash.HistRows+1)
+	}
+	if !strings.Contains(vm.Histogram[0], "peak 9 runs/day") {
+		t.Errorf("histogram caption missing peak: %q", vm.Histogram[0])
+	}
+
+	quiet := newDashVM(now, nil, 1, 1, make([]int, dash.HistDays), false)
+	if len(quiet.Histogram) != 1 || !strings.Contains(quiet.Histogram[0], "(quiet)") {
+		t.Errorf("cold histogram = %q, want single (quiet) line", quiet.Histogram)
+	}
+}
+
+// TestDashRendersHistogram: the handler emits the histogram in its own
+// banner-art <pre>, so the caption reaches the page above the factory
+// rail.
+func TestDashRendersHistogram(t *testing.T) {
+	now := time.Now().UTC()
+	counts := make([]int, dash.HistDays)
+	counts[0] = 4
+	gather := func() ([]dash.Row, int, int, []int, error) {
+		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, counts, nil
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "activity · last 60 days") {
+		t.Fatalf("dash body missing histogram caption\n%s", rr.Body.String())
+	}
+}
+
 func TestDashRendersChainedClass(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
 			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
-		}, 1, 1, nil
+		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 	rr := httptest.NewRecorder()
@@ -267,11 +310,11 @@ func TestDashRendersChainedClass(t *testing.T) {
 // the state, since natural exit leaves the *child behind.
 func TestDashLiveBadgeReflectsExitState(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "running", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p", Run: "exited", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
-		}, 1, 1, nil
+		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{
 		Addr:       "127.0.0.1:0",
@@ -1494,12 +1537,12 @@ func TestPromoteRefusesMissingRun(t *testing.T) {
 // the row needing a separate "view" affordance.
 func TestDashRowsRenderAnchors(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func() ([]dash.Row, int, int, error) {
+	gather := func() ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "live-run", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 			{Project: "p", Run: "done", Note: "sdlc:merged", Bucket: dash.BucketCompletedRuns, When: now.Add(-24 * time.Hour)},
 			{Project: "p", Run: "later", Note: "idea:capture", Bucket: dash.BucketBacklog, When: now.Add(-1 * time.Hour)},
-		}, 1, 1, nil
+		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{
 		Addr:       "127.0.0.1:0",
@@ -1994,8 +2037,8 @@ func TestDashRendersNewPlanLink(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: t.TempDir(),
-		GatherDash: func() ([]dash.Row, int, int, error) {
-			return nil, 0, 0, nil
+		GatherDash: func() ([]dash.Row, int, int, []int, error) {
+			return nil, 0, 0, nil, nil
 		},
 	})
 	rr := httptest.NewRecorder()

@@ -25,6 +25,8 @@
     </div>
     {{template "headeractions" .}}
   </header>
+  <pre class="banner-art">{{range .Histogram}}{{.}}
+{{end}}</pre>
   <pre class="banner-art">{{range .FactoryArt}}{{.}}
 {{end}}</pre>
   <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>
