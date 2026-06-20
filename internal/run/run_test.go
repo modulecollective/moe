@@ -388,6 +388,46 @@ func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 	}
 }
 
+// TestJournalIndexDailyRunCount pins the histogram metric: a day's
+// count is the number of *distinct* run slugs that committed that UTC
+// day, so a run committing twice in a day counts once and two runs the
+// same day count two.
+func TestJournalIndexDailyRunCount(t *testing.T) {
+	root := newTestRoot(t)
+	commitOn := func(slug string, when time.Time) {
+		t.Helper()
+		stamp := when.Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{
+			"GIT_AUTHOR_DATE=" + stamp,
+			"GIT_COMMITTER_DATE=" + stamp,
+		}, "commit", "--allow-empty", "-m", "work\n\nMoE-Run: "+slug+"\n")
+	}
+
+	day1 := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
+	// day1: alpha commits twice (counts once), beta once → 2 distinct.
+	commitOn("alpha", day1)
+	commitOn("alpha", day1.Add(3*time.Hour))
+	commitOn("beta", day1)
+	// day2: only alpha → 1 distinct.
+	commitOn("alpha", day2)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.DailyRunCount["2026-06-18"]; got != 2 {
+		t.Errorf("day1 count = %d, want 2 (alpha+beta, alpha deduped)", got)
+	}
+	if got := idx.DailyRunCount["2026-06-19"]; got != 1 {
+		t.Errorf("day2 count = %d, want 1", got)
+	}
+	// A day with no activity is absent (zero on lookup).
+	if got, ok := idx.DailyRunCount["2026-06-20"]; ok {
+		t.Errorf("quiet day present with %d, want absent", got)
+	}
+}
+
 // TestJournalIndexCapturesPromotedToAndPRURL pins the multi-trailer
 // extraction: PromotedTo/PRURL on a run-scoped commit must surface in
 // the index without a second git log walk. Replaces N trailerValue

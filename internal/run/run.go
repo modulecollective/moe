@@ -752,6 +752,13 @@ type JournalIndex struct {
 	// written by `moe chore skip`. Evaluate folds it into the value the
 	// due reasons compare against, as if a run had completed then.
 	ChoreSkipped map[string]time.Time
+	// DailyRunCount maps a UTC date ("2006-01-02") to the number of
+	// distinct run slugs that had at least one MoE-Run commit that day —
+	// the "runs active per day" tempo the dash histogram charts. Built by
+	// counting distinct slugs per day during the same walk (a run that
+	// commits five times in a day counts once); only days with activity
+	// are present, so a missing key reads as zero.
+	DailyRunCount map[string]int
 }
 
 // WorkTurnKey scopes a work-turn lookup to (project, run, doc). The
@@ -919,6 +926,11 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		ChoreTouched: make(map[string]time.Time),
 		ChoreSkipped: make(map[string]time.Time),
 	}
+	// dailySlugs accumulates the distinct slug set active on each UTC day.
+	// Kept as sets during the walk (so repeat commits from one run on one
+	// day collapse to a single tally) and folded to DailyRunCount counts
+	// at the end — storing the counts, not the sets, keeps the index small.
+	dailySlugs := make(map[string]map[string]struct{})
 	for _, record := range strings.Split(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
@@ -1065,6 +1077,16 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		if slug == "" {
 			continue
 		}
+		// Tally the slug under its commit's UTC day for the activity
+		// histogram. Unlike LastActivity (first-commit-wins), every commit
+		// contributes — the set membership dedups within a day.
+		day := time.Unix(epoch, 0).UTC().Format("2006-01-02")
+		set := dailySlugs[day]
+		if set == nil {
+			set = make(map[string]struct{})
+			dailySlugs[day] = set
+		}
+		set[slug] = struct{}{}
 		if _, ok := idx.LastActivity[slug]; !ok {
 			idx.LastActivity[slug] = time.Unix(epoch, 0).UTC()
 		}
@@ -1107,6 +1129,11 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 				idx.AdvanceTime[k] = time.Unix(epoch, 0).UTC()
 			}
 		}
+	}
+	// Collapse the per-day slug sets to distinct-run counts.
+	idx.DailyRunCount = make(map[string]int, len(dailySlugs))
+	for day, set := range dailySlugs {
+		idx.DailyRunCount[day] = len(set)
 	}
 	return idx, nil
 }
