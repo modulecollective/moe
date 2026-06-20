@@ -140,19 +140,27 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		Rows:           rows,
 		ProjectCount:   projectCount,
 		ActiveProjects: len(activeProjects),
-		Histogram:      dailyRunCounts(idx, now),
+		Histogram:      dailyRunCounts(idx, now, filter.ProjectFilter),
 	}, nil
 }
 
-// dailyRunCounts projects idx.DailyRunCount onto the trailing HistDays
-// window ending at now (UTC), oldest→newest, so dash.BuildActivityHistogram
-// can chart it as a fixed-width strip. Days with no activity read as zero.
-func dailyRunCounts(idx *run.JournalIndex, now time.Time) []int {
+// dailyRunCounts projects the journal index's daily run-activity onto the
+// trailing HistDays window ending at now (UTC), oldest→newest, so
+// dash.BuildActivityHistogram can chart it as a fixed-width strip. An
+// empty projectFilter reads the global idx.DailyRunCount; otherwise it
+// reads that project's slice — a project with no recent activity (nil
+// inner map) reads as all-zero, which collapses to the (quiet) state.
+// Days with no activity read as zero.
+func dailyRunCounts(idx *run.JournalIndex, now time.Time, projectFilter string) []int {
+	daily := idx.DailyRunCount
+	if projectFilter != "" {
+		daily = idx.DailyRunCountByProject[projectFilter]
+	}
 	counts := make([]int, dash.HistDays)
 	end := now.UTC()
 	for i := range counts {
 		day := end.AddDate(0, 0, -(dash.HistDays - 1 - i)).Format("2006-01-02")
-		counts[i] = idx.DailyRunCount[day]
+		counts[i] = daily[day]
 	}
 	return counts
 }
