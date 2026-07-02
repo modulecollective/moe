@@ -163,6 +163,12 @@ type Request struct {
 	// of the turn so the operator doesn't have to type anything to kick
 	// the session off.
 	InitialPrompt string
+	// Model, if non-empty, names the model to pass to the backend's
+	// `--model` flag for this interactive turn. Empty defers to the
+	// vendor CLI's configured default. Populated from the model
+	// stylesheet by stage.go; mirrors OneShotRequest.Model for the
+	// headless path.
+	Model string
 	// Stdin / Stdout / Stderr wire the interactive agent to the
 	// operator's terminal or capture output in tests.
 	Stdin  io.Reader

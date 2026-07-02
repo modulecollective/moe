@@ -131,6 +131,12 @@ func executeArgs(r agent.Request) []string {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
+	// --model sits after the variadic --add-dir block (so it can't be
+	// swallowed as a directory) and before --append-system-prompt. Empty
+	// leaves the flag off, deferring to claude's configured default.
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
 	args = append(args,
 		"--settings", sandboxSettingsJSON,
 		"--append-system-prompt", r.Prompt,

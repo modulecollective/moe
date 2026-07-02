@@ -383,6 +383,12 @@ func executeArgs(r agent.Request) []string {
 	for _, d := range r.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
+	// --model mirrors the one-shot path; empty leaves the flag off so
+	// codex uses its configured default. Rides the base args, so a resume
+	// turn becomes `codex resume <sid> ... --model <m>`.
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
 	// Interactive mode uses the same approval posture as the one-shot
 	// path. The sandbox and add-dir set remain the write boundary;
 	// failures return to the model/operator instead of asking for

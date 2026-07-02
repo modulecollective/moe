@@ -212,6 +212,40 @@ func TestExecuteArgsResumePrependsSid(t *testing.T) {
 	}
 }
 
+// TestExecuteArgsModel pins interactive `--model`: set → a `--model
+// <m>` pair rides the flag set (surviving the `resume <sid>` prepend on
+// a returning turn); unset → no flag at all.
+func TestExecuteArgsModel(t *testing.T) {
+	args := executeArgs(agent.Request{
+		Root:       "/bureaucracy",
+		NewSession: true,
+		Model:      "gpt-5-codex",
+		Prompt:     "system",
+	})
+	if !containsPair(args, "--model", "gpt-5-codex") {
+		t.Errorf("args missing `--model gpt-5-codex` pair: %v", args)
+	}
+
+	// Resume turn: --model still present alongside the `resume <sid>`
+	// prefix.
+	resume := executeArgs(agent.Request{
+		Root:       "/bureaucracy",
+		NewSession: false,
+		SessionID:  "sid-1",
+		Model:      "gpt-5-codex",
+		Prompt:     "system",
+	})
+	if resume[0] != "resume" || !containsPair(resume, "--model", "gpt-5-codex") {
+		t.Errorf("resume turn should keep `--model`: %v", resume)
+	}
+
+	// Unset Model → no --model flag.
+	bare := executeArgs(agent.Request{Root: "/b", NewSession: true, Prompt: "p"})
+	if indexOf(bare, "--model") >= 0 {
+		t.Errorf("empty Model should omit --model: %v", bare)
+	}
+}
+
 // TestExecuteOneShotArgsAppendsAddDirsBeforeUserPrompt: every AddDirs
 // entry becomes a `--add-dir <dir>` pair sitting after commonArgs and
 // before the trailing positional UserPrompt.

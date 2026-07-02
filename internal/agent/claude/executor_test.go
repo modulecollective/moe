@@ -87,6 +87,34 @@ func TestExecuteArgsResumeWhenNotNewSession(t *testing.T) {
 	assertArgsEqual(t, args, want)
 }
 
+// TestExecuteArgsModel pins the interactive `--model` placement: after
+// the variadic --add-dir block (so it can't be eaten as a directory)
+// and before --settings / --append-system-prompt. An empty Model omits
+// the flag entirely (deferring to claude's configured default).
+func TestExecuteArgsModel(t *testing.T) {
+	args := executeArgs(agent.Request{
+		SessionID:  "sid-1",
+		NewSession: true,
+		Root:       "/bureaucracy",
+		Model:      "fable",
+		Prompt:     "system",
+	})
+	want := []string{
+		"--session-id", "sid-1",
+		"--add-dir", "/bureaucracy",
+		"--model", "fable",
+		"--settings", `{"sandbox":{"enabled":true}}`,
+		"--append-system-prompt", "system",
+	}
+	assertArgsEqual(t, args, want)
+
+	// Empty Model → no --model flag.
+	bare := executeArgs(agent.Request{SessionID: "s", NewSession: true, Root: "/b", Prompt: "p"})
+	if slices.Contains(bare, "--model") {
+		t.Fatalf("empty Model should omit --model: %v", bare)
+	}
+}
+
 // TestExecuteOneShotArgsIncludesAddDirsBeforeSettings: the -p path
 // must place AddDirs entries before --settings / --append-system-prompt
 // and the positional UserPrompt — same variadic-flag rule as the
