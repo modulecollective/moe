@@ -33,6 +33,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/transcript"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -123,12 +124,12 @@ type stageSessionOpts struct {
 	// lookup unchanged — the case for every stage but recovery. Ignored
 	// when SkipNextStage is set (no prompt fires at all).
 	NextStageOverride string
-	// Model, if non-empty, is the `--model` value for the headless
-	// claude invocation. Empty string defers to the operator's
-	// configured default — the right answer for stage turns where the
-	// agent's work isn't bounded. Bounded curation stages (push
-	// synthesis) can set this when a caller needs a model override.
-	// Ignored when Headless is false.
+	// Model, if non-empty, is the `--model` value for this turn's agent
+	// invocation — both the interactive and headless paths. Empty defers
+	// to the vendor CLI's configured default. runStageSession populates it
+	// from the model stylesheet when a caller leaves it empty; a bounded
+	// curation caller (push synthesis) that sets it explicitly keeps its
+	// value (explicit-beats-stylesheet).
 	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
@@ -177,34 +178,47 @@ type stageSessionOpts struct {
 	Agent string
 	// CanvasOnOpen, when non-nil, runs on every session open (fresh and
 	// resume) after the rest of BuildSpec has succeeded. It receives the
-	// session worktree root and the run metadata and may read or write
-	// the canvas. chat is the only caller: its canvas is a moe-owned
-	// session log the agent never writes, so chat appends a per-session
-	// marker here to make the canvas differ from main every turn — which
-	// is what satisfies session.Close's canvas-unchanged guard without an
-	// opt-out flag (the canvas genuinely moved). Distinct from
-	// CanvasSkeleton, which seeds once on first open only; CanvasOnOpen
-	// fires every open, which is what the per-resume marker needs.
-	CanvasOnOpen func(workRoot string, md *run.Metadata) error
+	// session worktree root, the run metadata, and the resolved agent
+	// name for this turn, and may read or write the canvas. chat is the
+	// only caller: its canvas is a moe-owned session log the agent never
+	// writes, so chat appends a per-session marker (naming the backend
+	// that ran) here to make the canvas differ from main every turn —
+	// which is what satisfies session.Close's canvas-unchanged guard
+	// without an opt-out flag (the canvas genuinely moved). The agent name
+	// is threaded in rather than re-resolved by the caller so the marker
+	// matches the backend runStageSession actually dispatched — including
+	// any model-stylesheet steering. Distinct from CanvasSkeleton, which
+	// seeds once on first open only; CanvasOnOpen fires every open, which
+	// is what the per-resume marker needs.
+	CanvasOnOpen func(workRoot string, md *run.Metadata, agentName string) error
 }
 
 // stageAgentName resolves the agent backend for a stage turn. It is
 // the contract layer between the per-stage call sites in
 // runStageSession and the precedence ladder in resolveAgentName.
-func stageAgentName(opts stageSessionOpts, md *run.Metadata) string {
+// sheetAgent is the model stylesheet's `agent:` value for this
+// (workflow, stage), or "" when no rule sets one.
+func stageAgentName(opts stageSessionOpts, md *run.Metadata, sheetAgent string) string {
 	runDefault := ""
 	if md != nil {
 		runDefault = md.Agent
 	}
-	return resolveAgentName(opts.Agent, runDefault)
+	return resolveAgentName(opts.Agent, runDefault, sheetAgent)
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
 // $MOE_FORCE_AGENT (global override) → explicit per-call override
 // (--agent flag on this verb) → run-level persisted default
-// (run.json.Agent) → $MOE_AGENT → "claude". Keep this helper as the
-// single source for the operator-facing ladder; stage call sites
-// should go through stageAgentName.
+// (run.json.Agent) → model stylesheet → $MOE_AGENT → "claude". Keep
+// this helper as the single source for the operator-facing ladder;
+// stage call sites should go through stageAgentName.
+//
+// The stylesheet rung sits below the operator's explicit bindings
+// (--agent, run.json.Agent) and above the $MOE_AGENT scalar default:
+// this is the moe analog of fabro's "direct node attributes beat the
+// stylesheet". Everything above the stylesheet is operator-explicit for
+// this run; everything below is a background default the per-(workflow,
+// stage) sheet should override.
 //
 // $MOE_FORCE_AGENT is the high-precedence inverse of the low-precedence
 // $MOE_AGENT default: it wins over everything, including an explicit
@@ -213,7 +227,7 @@ func stageAgentName(opts stageSessionOpts, md *run.Metadata) string {
 // persisted to run.json); unsetting it reverts each run to its own
 // configured agent. A bad value flows through and fails legibly at
 // dispatch via agent.Get, same as any other unknown backend name.
-func resolveAgentName(explicit, runDefault string) string {
+func resolveAgentName(explicit, runDefault, stylesheet string) string {
 	if v := os.Getenv("MOE_FORCE_AGENT"); v != "" {
 		return v
 	}
@@ -222,6 +236,9 @@ func resolveAgentName(explicit, runDefault string) string {
 	}
 	if runDefault != "" {
 		return runDefault
+	}
+	if stylesheet != "" {
+		return stylesheet
 	}
 	if v := os.Getenv("MOE_AGENT"); v != "" {
 		return v
@@ -292,7 +309,30 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	agentName := stageAgentName(opts, md)
+	// Model stylesheet: resolve the (workflow, stage) → (agent, model)
+	// bindings from the checked-in <root>/model-stylesheet.css. Read from
+	// the canonical root here — the same freshness as md, loaded above —
+	// before the session worktree opens; the resolution inputs
+	// (md.Workflow, docID) are both already in scope. A missing file is a
+	// no-op empty sheet (today's behaviour); a malformed file refuses the
+	// turn loudly rather than silently ignoring the operator's rules.
+	// Living here means every caller of runStageSession — interactive
+	// verbs, cascade headless, serve children — gets stylesheet steering
+	// by construction.
+	sheet, err := stylesheet.Load(root)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
+	// The stylesheet is the sole source of a stage turn's model (there is
+	// no --model flag or $MOE_MODEL in v1), but an explicit opts.Model
+	// from a bounded curation caller still wins — same shape as the agent
+	// ladder's explicit-beats-stylesheet rule.
+	if opts.Model == "" {
+		opts.Model = sheetModel
+	}
+	agentName := stageAgentName(opts, md, sheetAgent)
 	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
 	// committed flips true when CommitStager returns a clean nil —
 	// the same branch reportWikiSessionExit treats as "committed turn".
@@ -526,7 +566,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// canvas write behind. chat uses it to append its per-session
 			// marker; see the field doc on stageSessionOpts.
 			if opts.CanvasOnOpen != nil {
-				if err := opts.CanvasOnOpen(workRoot, md); err != nil {
+				if err := opts.CanvasOnOpen(workRoot, md, agentName); err != nil {
 					return wikiTurnSpec{}, err
 				}
 			}
@@ -755,9 +795,10 @@ type wikiTurnSpec struct {
 	// after one turn. The rest of the lifecycle — open session
 	// worktree, prompt assembly, commitTurn, close — is unchanged.
 	Headless bool
-	// Model, if non-empty, is passed to ExecuteOneShot as the `--model`
-	// value. Routes stageSessionOpts.Model through to the executor;
-	// see that field for usage notes.
+	// Model, if non-empty, is passed to the executor as the `--model`
+	// value on both the interactive (Execute) and headless
+	// (ExecuteOneShot) paths. Routes stageSessionOpts.Model through to the
+	// executor; see that field for usage notes.
 	Model string
 	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
 	FinalizeRunID    string
@@ -942,7 +983,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// in.Agent.
 	agentName := spec.Agent
 	if agentName == "" {
-		agentName = resolveAgentName("", "")
+		agentName = resolveAgentName("", "", "")
 	}
 	if in.Agent == "" {
 		in.Agent = agentName
@@ -1008,6 +1049,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			ClonePath:     spec.ClonePath,
 			SessionCwd:    spec.SessionCwd,
 			InitialPrompt: spec.InitialPrompt,
+			Model:         spec.Model,
 			Stdin:         os.Stdin,
 			Stdout:        os.Stdout,
 			Stderr:        stderr,

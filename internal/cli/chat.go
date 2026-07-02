@@ -177,8 +177,8 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 			InitialPrompt:          kickoff,
 			SkipNextStage:          true,
 			Agent:                  agentOverride,
-			CanvasOnOpen: func(workRoot string, md *run.Metadata) error {
-				return chatCanvasOnOpen(workRoot, md, resolveAgentName(agentOverride, md.Agent))
+			CanvasOnOpen: func(workRoot string, md *run.Metadata, agentName string) error {
+				return chatCanvasOnOpen(workRoot, md, agentName)
 			},
 		}, stdout, stderr)
 }

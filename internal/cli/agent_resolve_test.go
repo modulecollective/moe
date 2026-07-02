@@ -7,13 +7,15 @@ import (
 )
 
 // TestResolveAgentNamePrecedence pins the ladder design.md describes:
-// $MOE_FORCE_AGENT → explicit → run.json.Agent → $MOE_AGENT → "claude".
+// $MOE_FORCE_AGENT → explicit → run.json.Agent → stylesheet →
+// $MOE_AGENT → "claude".
 func TestResolveAgentNamePrecedence(t *testing.T) {
 	cases := []struct {
 		name       string
 		force      string
 		explicit   string
 		runDefault string
+		stylesheet string
 		env        string
 		want       string
 	}{
@@ -44,13 +46,20 @@ func TestResolveAgentNamePrecedence(t *testing.T) {
 			want:     "codex",
 		},
 		{
-			name:       "runDefault wins over env",
+			name:       "runDefault wins over stylesheet",
 			runDefault: "codex",
+			stylesheet: "claude",
 			env:        "claude",
 			want:       "codex",
 		},
 		{
-			name: "env used when nothing else set",
+			name:       "stylesheet wins over env",
+			stylesheet: "codex",
+			env:        "claude",
+			want:       "codex",
+		},
+		{
+			name: "env used when nothing above set",
 			env:  "codex",
 			want: "codex",
 		},
@@ -68,9 +77,9 @@ func TestResolveAgentNamePrecedence(t *testing.T) {
 			// export from silently overriding the legacy ladder.
 			t.Setenv("MOE_FORCE_AGENT", c.force)
 			t.Setenv("MOE_AGENT", c.env)
-			if got := resolveAgentName(c.explicit, c.runDefault); got != c.want {
-				t.Fatalf("resolveAgentName(%q, %q) = %q, want %q",
-					c.explicit, c.runDefault, got, c.want)
+			if got := resolveAgentName(c.explicit, c.runDefault, c.stylesheet); got != c.want {
+				t.Fatalf("resolveAgentName(%q, %q, %q) = %q, want %q",
+					c.explicit, c.runDefault, c.stylesheet, got, c.want)
 			}
 		})
 	}
@@ -82,7 +91,7 @@ func TestResolveAgentNamePrecedence(t *testing.T) {
 // simply skipped.
 func TestStageAgentNameNilMetadata(t *testing.T) {
 	t.Setenv("MOE_AGENT", "codex")
-	if got := stageAgentName(stageSessionOpts{}, nil); got != "codex" {
+	if got := stageAgentName(stageSessionOpts{}, nil, ""); got != "codex" {
 		t.Fatalf("nil md: got %q, want codex", got)
 	}
 }
@@ -93,7 +102,22 @@ func TestStageAgentNameNilMetadata(t *testing.T) {
 func TestStageAgentNameRunDefault(t *testing.T) {
 	t.Setenv("MOE_AGENT", "claude")
 	md := &run.Metadata{Agent: "codex"}
-	if got := stageAgentName(stageSessionOpts{}, md); got != "codex" {
+	if got := stageAgentName(stageSessionOpts{}, md, ""); got != "codex" {
 		t.Fatalf("run default: got %q, want codex", got)
+	}
+}
+
+// TestStageAgentNameStylesheet pins that the stylesheet agent feeds the
+// ladder below the run default (which is unset here) and above
+// $MOE_AGENT.
+func TestStageAgentNameStylesheet(t *testing.T) {
+	t.Setenv("MOE_FORCE_AGENT", "")
+	t.Setenv("MOE_AGENT", "claude")
+	if got := stageAgentName(stageSessionOpts{}, nil, "codex"); got != "codex" {
+		t.Fatalf("stylesheet: got %q, want codex", got)
+	}
+	// An explicit --agent override still beats the stylesheet.
+	if got := stageAgentName(stageSessionOpts{Agent: "claude"}, nil, "codex"); got != "claude" {
+		t.Fatalf("explicit over stylesheet: got %q, want claude", got)
 	}
 }
