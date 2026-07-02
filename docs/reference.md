@@ -9,9 +9,15 @@ source of truth for the exact command surface; this page is a map.
 ### Re-Entry And Supervision
 
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
-  dashboard, including a CHORES bucket for due project chores.
+  dashboard, including a CHORES bucket for due project chores and a
+  daily-activity histogram of recent run activity (`--project` scopes the chart
+  to one project).
 - `moe serve [--addr <host[:port]>] [--port <n>] [--insecure]` runs the local
-  web UI, bound to `127.0.0.1:4242` by default. **Safe by default:** all views,
+  web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
+  read-only surface browses lore, a projects index with per-project hubs,
+  project knowledge topics, twin documents, and a dashboard with the same
+  daily-activity chart (and a project-scoped one on each project page). **Safe
+  by default:** all views,
   idea capture/edit/close/reopen, and run close/edit/reopen work, but the
   run-spawning actions — opening new runs and plans, advancing a stage, and
   opening a due chore's run — refuse with 403. Pass `--insecure` (or set a

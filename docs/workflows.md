@@ -64,6 +64,16 @@ whole chain. The four cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
 
+**Blocked gates.** When a `review` or `test` session closes blocked, the gate
+kicks the run back rather than parking. Interactively the chain prompt becomes a
+kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
+blocking canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the
+run; after the fix, MoE re-offers the gate that blocked instead of walking
+forward. Headless ship cascades (`!!` / `!!!`, and serve's ship) take one
+bounded `code` kickback carrying the blocking canvas, then re-dispatch the
+blocked stage and re-check its gate once — if the fix doesn't stick, it parks as
+before. `!` and `!<stage>` park on a blocked gate without recovery.
+
 ### Chains
 
 Chains are the batch version of that same forward motion for active SDLC runs.

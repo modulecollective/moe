@@ -26,7 +26,7 @@ Everything works from the CLI:
 
 And there's also a small web server available which is useful for quick checks
 from a phone (via something like Tailscale) or for use locally to browse runs
-and read canvas files:
+and canvas files, lore, per-project hubs, project knowledge, and twin docs:
 
 ![MoE web dashboard - open runs and backlog with local web server](docs/dash-web.png)
 
