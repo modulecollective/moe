@@ -87,6 +87,68 @@ Git operation that would open one — `git rebase --continue` finalizing a rebas
 `git commit` with no `-m` — otherwise hangs on vim and can leave a clone wedged
 mid-rebase. Claude is unaffected: its commit flow is already non-interactive.
 
+## Model Stylesheet
+
+By default every stage turn runs whatever model the backend CLI defaults to.
+A **model stylesheet** — one checked-in file at the bureaucracy root,
+`model-stylesheet.css` — lets you bind a model (and, optionally, a backend) to
+each `(workflow, stage)` declaratively, so "design and review get the strongest
+model, everything else stays cheap" is a two-line rule instead of a per-command
+flag.
+
+```css
+/* Stages not matched here keep the vendor CLI's own default model.
+   `fable` is claude's floating latest-in-family alias. */
+
+sdlc.design { model: fable; }
+sdlc.review { model: fable; }
+```
+
+The file is checked into the bureaucracy and rides the same auto-sync as the
+rest of it, so every entry point sees the same rules. A missing file means no
+rules — today's behaviour. A file that fails to parse **refuses the stage turn
+loudly** with the parse error rather than silently ignoring your rules.
+
+**Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
+comments. Two properties in v1:
+
+- `model` — handed verbatim to the backend's `--model`. MoE keeps no model
+  catalog and does no validation: a bad id fails at turn start as the backend
+  CLI's own error. Family aliases (`fable`/`opus`/`sonnet` on claude) and
+  un-dated ids (`gpt-5-codex` on codex) float with releases; full ids
+  (`claude-fable-5`) pin.
+- `agent` — the backend name (`claude` | `codex`), resolved through the same
+  registry `--agent` uses.
+
+**Selectors** have two axes — workflow and stage. Because a bare stage name is
+ambiguous across workflows (`code` is a stage of both `sdlc` and `chores`),
+stage-only selectors take a leading dot:
+
+| Selector      | Matches                     | Specificity |
+| ------------- | --------------------------- | ----------- |
+| `*`           | every stage turn            | 0           |
+| `sdlc`        | every stage of one workflow | 1           |
+| `.review`     | that stage in any workflow  | 1           |
+| `sdlc.review` | exactly one workflow stage  | 2           |
+
+Highest specificity wins per property; equal specificity breaks to the
+last rule in the file. The two properties cascade independently — a
+`sdlc.design { model: … }` does not clear an `agent:` inherited from a
+`sdlc { … }` rule.
+
+**Precedence.** The stylesheet sits below your explicit per-run bindings and
+above the background defaults, mirroring "explicit beats the stylesheet":
+
+- Agent: `$MOE_FORCE_AGENT` → `--agent` flag → `run.json` agent → **stylesheet**
+  → `$MOE_AGENT` → `claude`.
+- Model: **stylesheet** → backend CLI default. (There is no `--model` flag or
+  `$MOE_MODEL` in v1 — editing the checked-in file is the one knob.)
+
+A `model` value is applied to whatever backend the agent ladder resolves for the
+turn, so a backend-specific value on a mismatched run (e.g. `model: fable` on a
+codex turn) fails loudly at turn start. Pair an `agent:` in the same rule when it
+matters.
+
 ## Shell Completion
 
 `moe completion <shell>` prints a completion script for `bash`, `zsh`, or
