@@ -262,43 +262,90 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		Bureaucracy:  root,
 		TargetBranch: pj.DefaultBranch,
 	}
-	if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
-		var conflict *push.RebaseConflictError
-		if errors.As(err, &conflict) {
-			moePrintf(stderr, "%v\n", conflict)
-			return openCodeSessionForRebaseConflict(md, conflict, opts.HeadlessRecovery, stdout, stderr)
+
+	// The pre-push hooks (rebase-onto-default builtin, then the project's
+	// lint/build/test scripts) vet the exact tree about to be ff-pushed.
+	// That vetting takes minutes, and origin's default can advance inside
+	// the window — a concurrent cascade's merge — leaving the ff-push
+	// rejected server-side. When that happens the fix is purely
+	// mechanical: rebase onto the new origin, re-vet, push again. Re-enter
+	// at the hooks (not the ff-push) so the rebase builtin re-fetches and
+	// the scripts re-vet the newly rebased tree; a conflict on a retry's
+	// rebase flows into the same chain-back recovery as the first pass.
+	// Bounded so a persistent rejection the probe misjudges can't spin
+	// forever; the DefaultAdvanced probe gates each retry to the one cause
+	// a retry can fix.
+	for attempt := 1; ; attempt++ {
+		if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
+			var conflict *push.RebaseConflictError
+			if errors.As(err, &conflict) {
+				moePrintf(stderr, "%v\n", conflict)
+				return openCodeSessionForRebaseConflict(md, conflict, opts.HeadlessRecovery, stdout, stderr)
+			}
+			var fail *hookFailure
+			if errors.As(err, &fail) {
+				moePrintf(stderr, "%v\n", fail)
+				return openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
+			}
+			moePrintf(stderr, "%v\n", err)
+			return 1, nil
 		}
-		var fail *hookFailure
-		if errors.As(err, &fail) {
-			moePrintf(stderr, "%v\n", fail)
-			return openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
+
+		// When origin already has moe/<run> (a prior `--pr` cycle, a
+		// re-run after an agent-side rebase resolved a conflict, or an
+		// earlier retry attempt in this same loop), the upcoming push may
+		// not be a fast-forward — the local branch's history could differ
+		// from origin's. Force-with-lease is harmless when the two match
+		// and refuses to overwrite a concurrent update when they don't.
+		// Skip when origin has no copy of the branch: the first push is a
+		// plain push with -u to establish tracking.
+		force := push.OriginHasBranch(clonePath, branch)
+
+		if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1, nil
 		}
-		moePrintf(stderr, "%v\n", err)
-		return 1, nil
-	}
 
-	// When origin already has moe/<run> (a prior `--pr` cycle, or a
-	// re-run after an agent-side rebase resolved a conflict), the
-	// upcoming push may not be a fast-forward — the local branch's
-	// history could differ from origin's. Force-with-lease is harmless
-	// when the two match and refuses to overwrite a concurrent update
-	// when they don't. Skip when origin has no copy of the branch:
-	// the first push is a plain push with -u to establish tracking.
-	force := push.OriginHasBranch(clonePath, branch)
+		if *prFlag {
+			// --pr never ff-pushes, so there's no advance race and no
+			// retry — this returns out of the loop on the first pass.
+			if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
+				return code, nil
+			}
+			return openPRPath(root, md, pj, branch, stdout, stderr), nil
+		}
 
-	if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1, nil
-	}
-
-	if *prFlag {
-		if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
+		// Retries harvest as-is (skipEdit=true): the operator reviewed
+		// followups on attempt 1, so attempts 2+ don't re-pop $EDITOR.
+		skipEdit := opts.SkipTerminalEdit || attempt > 1
+		code, err := mergePath(root, md, pj, clonePath, branch, skipEdit, stdout, stderr)
+		if errors.Is(err, errFFRetryable) {
+			if attempt < maxPushAttempts {
+				moePrintf(stdout, "origin/%s advanced during checks — rebasing and retrying (attempt %d/%d)\n",
+					pj.DefaultBranch, attempt+1, maxPushAttempts)
+				continue
+			}
+			moePrintf(stderr, "       origin/%s advanced during checks on all %d attempts — re-run `moe %s push %s/%s`\n",
+				pj.DefaultBranch, maxPushAttempts, md.Workflow, md.Project, md.ID)
 			return code, nil
 		}
-		return openPRPath(root, md, pj, branch, stdout, stderr), nil
+		return code, nil
 	}
-	return mergePath(root, md, pj, clonePath, branch, opts.SkipTerminalEdit, stdout, stderr), nil
 }
+
+// maxPushAttempts bounds the rebase→checks→ff-push retry loop. Origin's
+// default advancing mid-push is a concurrent merge landing; three total
+// attempts absorb the realistic contention while capping the work a
+// misjudged persistent rejection could spin into.
+const maxPushAttempts = 3
+
+// errFFRetryable is the sentinel mergePath returns alongside a non-zero
+// exit when an ff-push was rejected *because origin's default branch
+// advanced* during the pre-push checks — the one ff failure a retry can
+// fix. runPushTypedWithOptions's loop reads it to decide whether to loop
+// back through the hooks. Any other mergePath failure returns a nil
+// error, so the loop falls straight through to today's behavior.
+var errFFRetryable = errors.New("ff-push rejected: origin default advanced during checks")
 
 // init registers the rebase-onto-default check as the first pre-push
 // built-in. Built-ins run before project scripts (in pre-push.d/) so
@@ -429,11 +476,14 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 // the sandbox, and mark the run merged. Sandbox and branch deletion
 // happen after the merge-push succeeds so a failure mid-flight leaves
 // both intact for retry.
-func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) int {
+// The int is the shell exit code; the error is errFFRetryable only when
+// the ff-push was rejected because origin's default advanced during the
+// checks (the caller's loop retries on it) and nil otherwise.
+func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) (int, error) {
 	tipSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
 	if err != nil {
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
-		return 1
+		return 1, nil
 	}
 	touched := touchedChoresForBranch(root, md.Project, clonePath, pj.DefaultBranch, branch)
 
@@ -456,7 +506,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	})
 	if err != nil {
 		moePrintf(stderr, "push: harvest: %v\n", err)
-		return 1
+		return 1, nil
 	}
 
 	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
@@ -469,9 +519,22 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
 		}
 		moePrintf(stderr, "%v\n", err)
+		// Probe why the ff-push was rejected. If origin's default
+		// advanced past the branch, this is the mechanical race the
+		// caller's loop retries — signal it and print nothing more; the
+		// loop owns the retry / exhaustion message. Any other cause
+		// (auth, protected branch, or a probe that itself failed) gets
+		// today's re-run hint and stops here.
+		advanced, probeErr := push.DefaultAdvanced(clonePath, branch, pj.DefaultBranch)
+		if probeErr != nil {
+			moePrintf(stderr, "       (could not determine whether origin/%s advanced: %v)\n", pj.DefaultBranch, probeErr)
+		}
+		if advanced {
+			return 1, errFFRetryable
+		}
 		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe %s push %s/%s`\n",
 			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
-		return 1
+		return 1, nil
 	}
 
 	if err := push.DeleteRemoteBranch(clonePath, branch, stdout, stderr); err != nil {
@@ -482,7 +545,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	pushCanvasPath, err := writeMechanicalPushNote(root, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, nil
 	}
 	paths = append(paths, pushCanvasPath)
 
@@ -516,10 +579,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	})
 	if err != nil {
 		moePrintf(stderr, "commit merge record: %v\n", err)
-		return 1
+		return 1, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
-	return 0
+	return 0, nil
 }
 
 // writeMechanicalPushNote leaves an explicit push canvas for the

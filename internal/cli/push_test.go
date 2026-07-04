@@ -254,6 +254,159 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	}
 }
 
+// TestPushRetriesWhenOriginAdvancesDuringChecks: origin/main advances
+// after the pre-push hooks ran but before the ff-push (a concurrent
+// cascade's merge landing in the checks window), so the ff-push is
+// rejected. The retry loop rebases onto the new origin, re-vets, and
+// ff-pushes again — the second attempt merges. A pre-push.d script
+// fires the advance exactly once (a marker gates it) so attempt 2's
+// hook is a no-op and the push can finally fast-forward. The script
+// sorts after the rebase built-in, so the advance lands post-rebase —
+// the exact race the retry closes.
+func TestPushRetriesWhenOriginAdvancesDuringChecks(t *testing.T) {
+	f := newPushFixture(t)
+
+	// Prepare a divergent commit but don't push it yet — the hook pushes
+	// it on its first (and only) run, advancing origin/main out from
+	// under the just-rebased branch. `other.txt` doesn't overlap
+	// `feature.txt`, so attempt 2's rebase is clean.
+	advanceRepo := t.TempDir()
+	gittest.Run(t, "", "clone", "-b", "main", f.origin, advanceRepo)
+	writeFile(t, filepath.Join(advanceRepo, "other.txt"), "other\n")
+	gittest.Run(t, advanceRepo, "add", "other.txt")
+	gittest.Run(t, advanceRepo, "commit", "-m", "divergent")
+	divergentSHA := gittest.HeadSHA(t, advanceRepo)
+
+	marker := filepath.Join(t.TempDir(), "advanced")
+	writeHookScript(t, f.root, f.projectID, "pre-push", "50-advance.sh", fmt.Sprintf(`#!/bin/sh
+if [ ! -f %q ]; then
+  git -C %q push origin main
+  touch %q
+fi
+`, marker, advanceRepo, marker))
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "rebasing and retrying (attempt 2/3)") {
+		t.Fatalf("expected retry line in stdout, got:\n%s", stdout)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusMerged {
+		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
+	}
+	if f.originHasRef("refs/heads/" + f.branch) {
+		t.Fatalf("expected %s deleted on origin after the retry merged", f.branch)
+	}
+	if sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("expected sandbox removed after the retry merged")
+	}
+	// origin/main carries both the divergent commit and the rebased run
+	// commit on top of it.
+	if !git.Probe(f.origin, "merge-base", "--is-ancestor", divergentSHA, "main") {
+		t.Fatalf("origin/main should contain the divergent commit %s after the retry", divergentSHA)
+	}
+	if got := f.originHead(); got == divergentSHA {
+		t.Fatalf("origin/main should have advanced past the divergent commit, still at %s", got)
+	}
+}
+
+// TestPushDoesNotRetryWhenFFFailsWithoutAdvance: an ff-push that's
+// rejected for a reason other than origin advancing (here a bare-origin
+// pre-receive hook that locks refs/heads/main) must not retry — a retry
+// can't fix auth, protected-branch, or network rejections, and looping
+// on them would spin forever. The DefaultAdvanced probe sees origin/main
+// unmoved and the push fails once with today's re-run hint.
+func TestPushDoesNotRetryWhenFFFailsWithoutAdvance(t *testing.T) {
+	f := newPushFixture(t)
+
+	// Lock main on the bare origin: the moe/<run> branch push still
+	// lands (only main is rejected), so the failure surfaces on the
+	// ff-push, with origin/main unmoved.
+	hookPath := filepath.Join(f.origin, "hooks", "pre-receive")
+	writeFile(t, hookPath, `#!/bin/sh
+while read old new ref; do
+  if [ "$ref" = "refs/heads/main" ]; then
+    echo "pre-receive: main is locked" >&2
+    exit 1
+  fi
+done
+exit 0
+`)
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainBefore := f.originHead()
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "rebasing and retrying") {
+		t.Fatalf("must not retry on a non-advance ff failure, got:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "may have advanced between the pre-push rebase and ff-push — re-run") {
+		t.Fatalf("expected today's re-run hint on stderr, got:\n%s", stderr)
+	}
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin/main must not advance on a locked-main failure: want %s, got %s", mainBefore, got)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status: want %s (reverted), got %s", run.StatusInProgress, md.Status)
+	}
+}
+
+// TestPushExhaustsRetriesWhenOriginAdvancesEveryAttempt: origin/main
+// advances on every pre-push pass, so no attempt can ever fast-forward.
+// The loop tries three times, then gives up with the exhaustion message
+// and leaves the run un-merged. The hook records its invocation count so
+// the test can pin "exactly three attempts."
+func TestPushExhaustsRetriesWhenOriginAdvancesEveryAttempt(t *testing.T) {
+	f := newPushFixture(t)
+
+	counter := filepath.Join(t.TempDir(), "n")
+	scratch := t.TempDir()
+	// Each hook run clones origin fresh, adds a uniquely-named file, and
+	// ff-pushes it to main — so origin advances every attempt and the
+	// per-attempt rebase stays conflict-free.
+	writeHookScript(t, f.root, f.projectID, "pre-push", "50-advance.sh", fmt.Sprintf(`#!/bin/sh
+n=$(cat %q 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > %q
+d=%q/adv-$n
+git clone -q -b main %q "$d"
+echo "advance $n" > "$d/advance-$n.txt"
+git -C "$d" add .
+git -C "$d" commit -q -m "advance $n"
+git -C "$d" push -q origin main
+`, counter, counter, scratch, f.origin))
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "rebasing and retrying (attempt 2/3)") ||
+		!strings.Contains(stdout, "rebasing and retrying (attempt 3/3)") {
+		t.Fatalf("expected retry lines for attempts 2 and 3, got:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "advanced during checks on all 3 attempts") {
+		t.Fatalf("expected exhaustion message on stderr, got:\n%s", stderr)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status: want %s (reverted), got %s", run.StatusInProgress, md.Status)
+	}
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("expected sandbox kept after exhaustion (nothing merged)")
+	}
+	got, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatalf("read hook counter: %v", err)
+	}
+	if strings.TrimSpace(string(got)) != "3" {
+		t.Fatalf("hook should have run exactly 3 times, counter=%q", got)
+	}
+}
+
 // TestPushRebaseConflictOpensCodeSession: when the pre-push rebase
 // hits real conflicts (origin's divergent commit touches the same
 // file), push aborts the rebase, hands control to the chain-back
