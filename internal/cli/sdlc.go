@@ -473,6 +473,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
+			BoundaryAllowsCommits:  true,
 			Headless:               headless,
 			CanvasSkeleton:         reviewCanvasSkeleton,
 			Agent:                  agentOverride,
@@ -568,6 +569,10 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 ## Evidence Reviewed
 
 (agent fills: design/code canvases, diff ranges, commands or tests read/run)
+
+## Fixes applied
+
+(agent fills: one row per in-place fix, naming what/why plus the check re-run; empty if none)
 `
 
 // testCanvasSkeleton is the fixed structural shape every test canvas
@@ -712,11 +717,16 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 //
 //  1. HEAD has advanced — the agent committed to the project repo
 //     during the stage. The spike-as-handoff path the design closed
-//     off.
+//     off. Skipped when entryHEAD is empty: a commits-allowed stage
+//     (review, via BoundaryAllowsCommits) leaves no snapshot, so the
+//     agent may land in-place fixes on the run branch.
 //  2. `git status` shows any modified, added, or deleted tracked
 //     file — the agent left dirty work behind. Untracked files are
 //     deliberately allowed; the agent is free to scribble outside
-//     the tracked set.
+//     the tracked set. This leg runs in both modes — a commits-allowed
+//     stage that half-fixes and leaves the tree dirty still refuses,
+//     with commit-or-discard advice instead of the strict don't-touch
+//     wording.
 //
 // Caller writes the canvas commit first and then runs this; a failure
 // here returns a non-zero exit (suppressing the cascade) but the
@@ -752,6 +762,14 @@ func checkSandboxBoundary(clonePath, entryHEAD, stageDoc string) error {
 		dirty = append(dirty, e.XY+" "+e.Path)
 	}
 	if len(dirty) > 0 {
+		if entryHEAD == "" {
+			// Commits-allowed mode (review): the stage may land
+			// in-place fixes, so the advice is commit-or-discard, not
+			// don't-touch.
+			return fmt.Errorf(
+				"sandbox has uncommitted tracked-file changes (%s must commit each in-place fix or discard it before exit):\n  %s\ncommit or reset the sandbox and re-run",
+				stageDoc, strings.Join(dirty, "\n  "))
+		}
 		return fmt.Errorf(
 			"sandbox has uncommitted tracked-file changes (%s must not modify the project repo):\n  %s\nreset the sandbox and re-run",
 			stageDoc, strings.Join(dirty, "\n  "))

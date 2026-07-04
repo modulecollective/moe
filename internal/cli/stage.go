@@ -69,8 +69,20 @@ type stageSessionOpts struct {
 	// canvas commit still lands — only the cascade to the next stage
 	// is suppressed. Used by design to keep code changes from leaking
 	// in as a spike-as-handoff artifact. Requires NeedsSandbox: true;
-	// no-op otherwise.
+	// no-op otherwise. BoundaryAllowsCommits relaxes the HEAD leg for
+	// stages that may legitimately commit (review's in-place fixes).
 	EnforceSandboxBoundary bool
+	// BoundaryAllowsCommits, paired with EnforceSandboxBoundary, drops
+	// the entry-HEAD snapshot so the boundary check tolerates commits
+	// the stage lands on the run branch while still refusing an
+	// uncommitted (dirty tracked) tree. Review sets it: a trivial
+	// finding may be fixed in place and committed, but a half-fix left
+	// uncommitted still refuses the cascade — attributed to review, the
+	// stage that made the mess. Only the HEAD-advanced leg relaxes; the
+	// dirty-tracked leg keeps running (checkSandboxBoundary reads an
+	// empty entryHEAD as "skip the HEAD comparison"). No-op without
+	// EnforceSandboxBoundary.
+	BoundaryAllowsCommits bool
 	// InitialPrompt is auto-sent as the session's first user message
 	// — typically a "greet the operator and ask what they want"
 	// kickoff. Empty drops the auto-send and lands the operator in a
@@ -445,17 +457,24 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 				devEnv = env
 				if opts.EnforceSandboxBoundary {
+					sandboxBoundaryClone = clonePath
 					// Snapshot post-dev-env so the boundary check
 					// tolerates dev-env hooks that may legitimately touch
 					// the worktree (e.g. cache writes outside tracked
 					// files). Hooks are contracted to leave tracked files
 					// alone — see workflows/hooks/code.md.
-					head, err := git.HEAD(clonePath)
-					if err != nil {
-						return wikiTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
+					//
+					// BoundaryAllowsCommits skips the snapshot: a stage
+					// that may commit (review) leaves entryHEAD empty, and
+					// checkSandboxBoundary reads that as "don't compare
+					// HEAD" — only the dirty-tracked leg runs.
+					if !opts.BoundaryAllowsCommits {
+						head, err := git.HEAD(clonePath)
+						if err != nil {
+							return wikiTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
+						}
+						sandboxBoundaryEntryHEAD = head
 					}
-					sandboxBoundaryClone = clonePath
-					sandboxBoundaryEntryHEAD = head
 				}
 			}
 

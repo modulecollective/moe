@@ -284,6 +284,49 @@ func TestCheckSandboxBoundaryDeletedTrackedFails(t *testing.T) {
 	}
 }
 
+// TestCheckSandboxBoundaryCommitsAllowedHeadAdvances: the
+// commits-allowed mode (review, via BoundaryAllowsCommits) passes an
+// empty entryHEAD, which skips the HEAD comparison. An agent that
+// committed an in-place fix during review must NOT trip the gate.
+func TestCheckSandboxBoundaryCommitsAllowedHeadAdvances(t *testing.T) {
+	repo := gittest.Init(t)
+	gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+	gittest.WriteAndCommit(t, repo, "server.go", "fix\n", "review: add ReadHeaderTimeout")
+
+	// Empty entryHEAD is how a BoundaryAllowsCommits stage records its
+	// snapshot — no HEAD to compare against.
+	if err := checkSandboxBoundary(repo, "", "review"); err != nil {
+		t.Fatalf("expected committed in-place fix to pass in commits-allowed mode, got: %v", err)
+	}
+}
+
+// TestCheckSandboxBoundaryCommitsAllowedDirtyFails: relaxing the HEAD
+// leg does not relax the dirty-tracked leg. A half-fix left
+// uncommitted still refuses, and the error carries the
+// commit-or-discard wording rather than the strict don't-touch advice.
+func TestCheckSandboxBoundaryCommitsAllowedDirtyFails(t *testing.T) {
+	repo := gittest.Init(t)
+	gittest.WriteAndCommit(t, repo, "README.md", "seed\n", "seed")
+
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("half-applied fix\n"), 0o644); err != nil {
+		t.Fatalf("rewrite README: %v", err)
+	}
+
+	err := checkSandboxBoundary(repo, "", "review")
+	if err == nil {
+		t.Fatalf("expected dirty-tracked check to fail even in commits-allowed mode")
+	}
+	if !strings.Contains(err.Error(), "commit each in-place fix or discard") {
+		t.Fatalf("error should carry commit-or-discard wording, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "review") {
+		t.Fatalf("error should name the refusing stage, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "README.md") {
+		t.Fatalf("error should name the offending path, got: %v", err)
+	}
+}
+
 // TestSDLCDesignSandboxBoundaryRefusesCommit: end-to-end coverage for
 // the design exit check. A fake claude that commits inside the
 // sandbox during design must (a) keep the bureaucracy-side canvas
