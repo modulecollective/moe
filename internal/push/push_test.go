@@ -141,6 +141,48 @@ func TestRebaseInProgress(t *testing.T) {
 	})
 }
 
+// TestDefaultAdvanced pins the ff-retry probe against a fixture pair of
+// repos: a bare origin and a clone carrying a run branch one commit
+// ahead of main. When origin/main moves past the branch tip (a
+// concurrent merge landing during the checks window) the probe reports
+// true — retryable; when origin/main is still an ancestor of the branch
+// (at or behind its tip) it reports false — the ff-push rejection had
+// another cause and a retry can't fix it.
+func TestDefaultAdvanced(t *testing.T) {
+	gittest.SetupEnv(t)
+
+	origin := gittest.InitBare(t)
+	seed := t.TempDir()
+	gittest.InitAt(t, seed)
+	gittest.WriteAndCommit(t, seed, "README.md", "seed\n", "seed")
+	gittest.Run(t, seed, "remote", "add", "origin", origin)
+	gittest.Run(t, seed, "push", "origin", "main")
+
+	// Clone and put the run branch one commit ahead of main.
+	clone := t.TempDir()
+	gittest.Run(t, "", "clone", "-b", "main", origin, clone)
+	branch := "moe/run"
+	gittest.Run(t, clone, "checkout", "-b", branch)
+	gittest.WriteAndCommit(t, clone, "feature.txt", "hello\n", "add feature")
+
+	// origin/main is still the seed (an ancestor of the branch) → not
+	// advanced.
+	if advanced, err := DefaultAdvanced(clone, branch, "main"); err != nil || advanced {
+		t.Fatalf("DefaultAdvanced with origin at seed: got (%v, %v), want (false, nil)", advanced, err)
+	}
+
+	// A concurrent worker advances origin/main past the branch's base.
+	work := t.TempDir()
+	gittest.Run(t, "", "clone", "-b", "main", origin, work)
+	gittest.WriteAndCommit(t, work, "other.txt", "other\n", "divergent")
+	gittest.Run(t, work, "push", "origin", "main")
+
+	// Now origin/main carries a commit the branch doesn't → advanced.
+	if advanced, err := DefaultAdvanced(clone, branch, "main"); err != nil || !advanced {
+		t.Fatalf("DefaultAdvanced after origin advanced: got (%v, %v), want (true, nil)", advanced, err)
+	}
+}
+
 // TestFilterSandboxBindMountsKeepsRegularFiles: the steady-state case.
 // Every entry is a normal file; the filter returns the slice unchanged
 // so a real uncommitted edit still gates the push.

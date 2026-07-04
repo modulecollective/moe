@@ -96,6 +96,43 @@ func EnsureRebasedOntoDefault(clonePath, branch, defaultBranch string, stdout, s
 	return nil
 }
 
+// DefaultAdvanced reports whether origin's default branch has moved
+// past the local run branch — the one cause of a rejected ff-push that
+// a retry can fix. It fetches origin/<defaultBranch>, then checks
+// whether origin/<defaultBranch> is an ancestor of <branch>:
+//
+//   - not an ancestor → origin advanced past the branch tip → true.
+//   - is an ancestor  → the branch still contains origin's tip, so the
+//     ff-push rejection had another cause (auth, protected branch,
+//     network) → false.
+//
+// This is the same fetch + is-ancestor probe EnsureRebasedOntoDefault
+// opens with, run after a rejected ff-push to decide whether looping
+// back through the pre-push hooks — which re-fetch and re-rebase — could
+// turn the push into a fast-forward. Gating retry on it also stops an
+// infinite loop on a persistent non-advance rejection: those return
+// false and give up on the first attempt.
+func DefaultAdvanced(clonePath, branch, defaultBranch string) (bool, error) {
+	if out, err := git.Combined(clonePath, "fetch", "origin", defaultBranch); err != nil {
+		return false, fmt.Errorf("push: fetch origin/%s: %w (%s)", defaultBranch, err, out)
+	}
+	originRef := "refs/remotes/origin/" + defaultBranch
+	originSHA, err := git.RevParse(clonePath, originRef)
+	if err != nil {
+		return false, fmt.Errorf("push: resolve %s: %w", originRef, err)
+	}
+	branchSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
+	if err != nil {
+		return false, fmt.Errorf("push: resolve %s: %w", branch, err)
+	}
+	// origin/<default> already an ancestor of the branch → the branch
+	// contains origin's tip → origin did not advance past it.
+	if _, err := git.Combined(clonePath, "merge-base", "--is-ancestor", originSHA, branchSHA); err == nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 // PushBranch pushes `branch` to `remote` with -u so a fresh branch
 // gets tracking set. Streams stdout/stderr so credential prompts and
 // progress stay visible. force=true switches to --force-with-lease
