@@ -22,7 +22,7 @@ func TestBuildActivityHistogramPopulated(t *testing.T) {
 		t.Fatalf("line count = %d, want %d", len(lines), HistRows+1)
 	}
 
-	caption := lines[0]
+	caption := lines[HistRows]
 	if !strings.Contains(caption, "activity · last 60 days") {
 		t.Errorf("caption missing label: %q", caption)
 	}
@@ -39,7 +39,7 @@ func TestBuildActivityHistogramPopulated(t *testing.T) {
 
 	// The peak day is the last column; on the top row it must be a full
 	// block, since it's the window max scaled to HistRows*8 eighths.
-	top := []rune(lines[1])
+	top := []rune(lines[0])
 	if got := top[len(top)-1]; got != '█' {
 		t.Errorf("peak day top cell = %q, want █", got)
 	}
@@ -71,7 +71,7 @@ func TestBuildActivityHistogramSingleSpike(t *testing.T) {
 		t.Fatalf("line count = %d, want %d", len(lines), HistRows+1)
 	}
 
-	for r := 1; r <= HistRows; r++ {
+	for r := 0; r < HistRows; r++ {
 		cells := []rune(lines[r])
 		// Drop the gutter to index by day.
 		cells = cells[utf8.RuneCountInString(histGutter):]

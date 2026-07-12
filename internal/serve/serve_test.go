@@ -254,8 +254,8 @@ func TestNewDashVMCarriesHistogram(t *testing.T) {
 	if len(vm.Histogram) != dash.HistRows+1 {
 		t.Fatalf("histogram line count = %d, want %d", len(vm.Histogram), dash.HistRows+1)
 	}
-	if !strings.Contains(vm.Histogram[0], "peak 9 runs/day") {
-		t.Errorf("histogram caption missing peak: %q", vm.Histogram[0])
+	if !strings.Contains(vm.Histogram[dash.HistRows], "peak 9 runs/day") {
+		t.Errorf("histogram caption missing peak: %q", vm.Histogram[dash.HistRows])
 	}
 
 	quiet := newDashVM(now, nil, 1, 1, make([]int, dash.HistDays), false)
