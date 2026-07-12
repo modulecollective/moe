@@ -43,9 +43,10 @@ type bannerArtVM struct {
 	// It is frame[0] of the frames below: the server-rendered, no-JS fallback.
 	FactoryArt []string
 	// Histogram is the daily run-activity chart drawn between the banner
-	// and the factory art — HistRows bar rows under a caption, or a single
-	// "(quiet)" line in the cold state. Static text (a per-render
-	// snapshot), so unlike the factory frames it carries no JS animation.
+	// and the factory art — HistRows bar rows, a blank spacer, then a
+	// caption, or a single "(quiet)" line in the cold state. Static text (a
+	// per-render snapshot), so unlike the factory frames it carries no JS
+	// animation.
 	Histogram []string
 	// FactoryFramesJSON is json.Marshal of all factory-art frames, embedded
 	// in the page so the client can cross-fade through them without an XHR.

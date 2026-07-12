@@ -34,9 +34,11 @@ var barRunes = []rune(" ▁▂▃▄▅▆▇█")
 // BuildActivityHistogram renders the daily run-activity chart. counts is
 // HistDays values, oldest→newest; each is the number of distinct runs
 // active that day (see run.JournalIndex.DailyRunCount). The result is
-// HistRows bar rows under a caption line — HistRows+1 lines, each
-// histGutter-indented and len(counts) columns wide so the block stacks
-// flush with the factory rail below it.
+// HistRows bar rows, a blank spacer line, then a caption line —
+// HistRows+2 lines. The bar rows and caption are histGutter-indented and
+// len(counts) columns wide so the block stacks flush with the factory
+// rail below it; the spacer is a truly empty line, neither indented nor
+// field-width.
 //
 // Cold state — every count zero (a fresh bureaucracy, or no activity in
 // the window) — collapses to a single "(quiet)" line, mirroring how the
@@ -53,7 +55,7 @@ func BuildActivityHistogram(counts []int) []string {
 		return []string{fmt.Sprintf("%sactivity · last %d days  ·  (quiet)", histGutter, HistDays)}
 	}
 
-	lines := make([]string, 0, HistRows+1)
+	lines := make([]string, 0, HistRows+2)
 
 	full := HistRows * 8
 	for row := 0; row < HistRows; row++ {
@@ -69,6 +71,7 @@ func BuildActivityHistogram(counts []int) []string {
 		}
 		lines = append(lines, b.String())
 	}
+	lines = append(lines, "")
 	lines = append(lines, histCaption(len(counts), max))
 	return lines
 }

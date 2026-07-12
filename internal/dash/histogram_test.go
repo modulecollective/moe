@@ -7,9 +7,10 @@ import (
 )
 
 // TestBuildActivityHistogramPopulated pins the shape of a non-empty
-// chart: HistRows+1 lines, every line the same column width (gutter +
-// bar field) so the block stacks flush with the factory rail, and a
-// caption that names the window and the window's peak.
+// chart: HistRows+2 lines — bar rows, a blank spacer, then a caption.
+// Every line but the spacer is the same column width (gutter + bar
+// field) so the block stacks flush with the factory rail; the caption
+// names the window and the window's peak.
 func TestBuildActivityHistogramPopulated(t *testing.T) {
 	counts := make([]int, HistDays)
 	for i := range counts {
@@ -18,11 +19,15 @@ func TestBuildActivityHistogramPopulated(t *testing.T) {
 	counts[HistDays-1] = 12 // a clear single peak
 
 	lines := BuildActivityHistogram(counts)
-	if len(lines) != HistRows+1 {
-		t.Fatalf("line count = %d, want %d", len(lines), HistRows+1)
+	if len(lines) != HistRows+2 {
+		t.Fatalf("line count = %d, want %d", len(lines), HistRows+2)
 	}
 
-	caption := lines[HistRows]
+	if lines[HistRows] != "" {
+		t.Errorf("spacer line = %q, want empty", lines[HistRows])
+	}
+
+	caption := lines[HistRows+1]
 	if !strings.Contains(caption, "activity · last 60 days") {
 		t.Errorf("caption missing label: %q", caption)
 	}
@@ -32,6 +37,9 @@ func TestBuildActivityHistogramPopulated(t *testing.T) {
 
 	wantWidth := len(histGutter) + HistDays // 2 + 60
 	for i, l := range lines {
+		if i == HistRows {
+			continue // the blank spacer is intentionally not field-width
+		}
 		if w := utf8.RuneCountInString(l); w != wantWidth {
 			t.Errorf("line %d width = %d, want %d: %q", i, w, wantWidth, l)
 		}
@@ -67,8 +75,8 @@ func TestBuildActivityHistogramSingleSpike(t *testing.T) {
 	counts[spike] = 3
 
 	lines := BuildActivityHistogram(counts)
-	if len(lines) != HistRows+1 {
-		t.Fatalf("line count = %d, want %d", len(lines), HistRows+1)
+	if len(lines) != HistRows+2 {
+		t.Fatalf("line count = %d, want %d", len(lines), HistRows+2)
 	}
 
 	for r := 0; r < HistRows; r++ {
