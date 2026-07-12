@@ -34,8 +34,10 @@ The `new` command opens the run and writes the first files into the
 bureaucracy. `design` shapes the request into a reviewable plan. `code` gives
 the agent write access inside an isolated clone of the target project and
 requires it to commit the implementation there. `review` gives the committed
-diff an independent code-review pass before verification. `test` verifies the
-behavior and records what was run. `push` fast-forwards the target project's
+diff an independent code-review pass before verification — trivial zero-risk
+findings (a typo, comment drift) it fixes and commits in place; anything bigger
+blocks the gate and kicks the run back. `test` verifies the behavior and records
+what was run. `push` fast-forwards the target project's
 default branch, or opens a PR with `--pr`.
 
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
