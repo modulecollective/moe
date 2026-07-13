@@ -53,7 +53,6 @@ source of truth for the exact command surface; this page is a map.
 - `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
-- `moe pdlc new|frame|prd|chunk|close|harvest|cat|log` drives product plans.
 - `moe kb new|research|summarize|close|harvest|cat|log|lint` drives project
   knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.

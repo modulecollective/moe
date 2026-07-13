@@ -101,7 +101,6 @@ full treatment.
 | --- | --- | --- |
 | [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
 | [`chat`](docs/workflows.md#chat) | one `chat` session, resumed across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
-| [`pdlc`](docs/workflows.md#pdlc) | `frame` -> `prd` -> `chunk`, re-entered across sittings | product plans: a PRD reconciled against reality until the goal ships or dies |
 | [`kb`](docs/workflows.md#knowledge-base-kb) | `research` -> `summarize` | research a topic with an agent and keep the distilled article |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`twin`](docs/workflows.md#twin) | `vision` -> ... -> `glossary` -> `finalize` | recorded project intent |
