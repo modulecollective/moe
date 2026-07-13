@@ -38,6 +38,47 @@ func readFollowups(t *testing.T, root, projectID, runID string) string {
 	return string(body)
 }
 
+// TestMarkHarvested is the regression test for the reported bug: a line
+// the parser accepts with non-canonical box spacing must still be marked
+// `- [x]`. markHarvested rewrites via the same regex parseChecklist used
+// to accept the line, so every shape followupOpenRE tolerates is marked
+// by construction; the box comes out canonical, indent and title tail
+// survive verbatim. A non-matching or wrong-slug line returns ok=false.
+func TestMarkHarvested(t *testing.T) {
+	const base, resolved = "slug", "slug-2"
+	cases := []struct {
+		name string
+		line string
+		base string
+		want string
+		ok   bool
+	}{
+		{"canonical", "- [ ] `slug` — Title", base, "- [x] `slug-2` — Title", true},
+		{"two spaces after dash", "-  [ ] `slug` — Title", base, "- [x] `slug-2` — Title", true},
+		{"two spaces before backtick", "- [ ]  `slug` — Title", base, "- [x] `slug-2` — Title", true},
+		{"tab in box", "- [\t] `slug` — Title", base, "- [x] `slug-2` — Title", true},
+		{"indented", "  - [ ] `slug` — Title", base, "  - [x] `slug-2` — Title", true},
+		{"prefixed slug", "- [ ] `claudia/foo` — Title", "claudia/foo", "- [x] `claudia/foo-2` — Title", true},
+		{"non-matching line", "not a checkbox at all", base, "", false},
+		{"wrong slug", "- [ ] `other` — Title", base, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := resolved
+			if tc.base == "claudia/foo" {
+				res = "claudia/foo-2"
+			}
+			got, ok := markHarvested(tc.line, tc.base, res)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.ok, got)
+			}
+			if got != tc.want {
+				t.Fatalf("markHarvested(%q) = %q, want %q", tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseFollowupsRoundtrip(t *testing.T) {
 	body := []byte(strings.Join([]string{
 		"# Follow-ups",
@@ -644,6 +685,48 @@ func TestSDLCCloseHarvestsFollowups(t *testing.T) {
 	headPaths := gitLog(t, root, "-1", "--name-only", "--format=")
 	if !strings.Contains(headPaths, "followups.md") {
 		t.Fatalf("close commit didn't include followups.md:\n%s", headPaths)
+	}
+}
+
+// TestSDLCCloseHarvestsNonCanonicalFollowup is the end-to-end regression
+// for the reported bug: a followups entry the parser accepts with
+// non-canonical box spacing (`-  [ ]`, double space) must be created
+// *and* marked `- [x]` on disk — not silently left unchecked, which a
+// later harvest would re-promote as a duplicate. The re-harvest asserts
+// idempotency on the rewritten line.
+func TestSDLCCloseHarvestsNonCanonicalFollowup(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", "-  [ ] `cleanup-foo` — Clean up foo helper\n")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("close: exit=%d stderr=%q", code, errb.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "cleanup-foo", "run.json")); err != nil {
+		t.Fatalf("expected idea harvested from non-canonical entry: %v", err)
+	}
+	got := readFollowups(t, root, "tele", "ship-it")
+	if !strings.Contains(got, "- [x] `cleanup-foo` — Clean up foo helper") {
+		t.Fatalf("non-canonical entry was not marked harvested:\n%s", got)
+	}
+
+	// A second harvest over the now-`[x]` line is a clean no-op: no new
+	// idea, no new commit. This is what the silent-skip bug broke.
+	afterClose := gitLog(t, root, "-1", "--format=%H")
+	out.Reset()
+	errb.Reset()
+	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("re-harvest: exit=%d stderr=%q", code, errb.String())
+	}
+	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterClose {
+		t.Fatalf("re-harvest of non-canonical entry created a commit:\nclose=%s second=%s", afterClose, afterSecond)
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "cleanup-foo-2", "run.json")); !os.IsNotExist(err) {
+		t.Fatalf("re-harvest minted a duplicate idea cleanup-foo-2 (err=%v)", err)
 	}
 }
 

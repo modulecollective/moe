@@ -336,6 +336,37 @@ func TestSDLCCloseHarvestsFollowupsAndLoreTogether(t *testing.T) {
 	}
 }
 
+// TestSDLCCloseHarvestsNonCanonicalLore mirrors the followups regression
+// on the lore path: an entry the parser accepts with non-canonical box
+// spacing (`-  [ ]`) must be promoted *and* marked `- [x]` on disk. Cheap
+// insurance that the shared markHarvested rewrite covers both callers.
+func TestSDLCCloseHarvestsNonCanonicalLore(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
+		"-  [ ] `fact-next` — Fact next",
+		"",
+		"  applies-when: now",
+		"",
+		"  Lore body.",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("close: exit=%d stderr=%q", code, errb.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, "fact-next.md")); err != nil {
+		t.Fatalf("expected lore promoted from non-canonical entry: %v", err)
+	}
+	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `fact-next` — Fact next") {
+		t.Fatalf("non-canonical lore entry was not marked harvested:\n%s", got)
+	}
+}
+
 // TestSDLCCloseAutoDisambiguatesLoreCollision pins the -2, -3 collision
 // policy: an entry whose slug already exists in lore/ lands as
 // <slug>-2, and the resolved slug appears in the rewritten checklist.
