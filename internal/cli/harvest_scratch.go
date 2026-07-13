@@ -129,7 +129,6 @@ type scratchHarvestSpec[T any] struct {
 	write           func(T) (string, error)
 	progressSubject string
 	progressPaths   []string
-	markLine        func(line, baseSlug, resolvedSlug string) string
 	writeErrPrefix  string
 }
 
@@ -171,7 +170,24 @@ func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdi
 			}
 			return fmt.Errorf("%s %s (after harvesting %d): %w", spec.writeErrPrefix, item.slug, hi, werr)
 		}
-		lines[item.lineIdx] = spec.markLine(lines[item.lineIdx], item.slug, resolved)
+		marked, ok := markHarvested(lines[item.lineIdx], item.slug, resolved)
+		if !ok {
+			// Unreachable in normal operation: markHarvested rewrites via
+			// the same regex that parsed this line moments ago, and only
+			// *other* indices are mutated in between. This is an invariant
+			// guard, not a recovery path — the idea/lore file already
+			// exists, so fail loud (naming the file + 1-based line) rather
+			// than leave a silent `- [ ]` a later harvest would re-promote.
+			// Commit the lines marked so far through the same partial-failure
+			// machinery a write error uses.
+			if hi > 0 {
+				if perr := commitScratchProgress(root, projectID, runID, workflow, spec, lines); perr != nil {
+					return fmt.Errorf("%s: harvested %q but could not mark line %d %q (then progress commit failed: %v)", spec.relPath, item.slug, item.lineIdx+1, lines[item.lineIdx], perr)
+				}
+			}
+			return fmt.Errorf("%s: harvested %q but could not mark line %d %q", spec.relPath, item.slug, item.lineIdx+1, lines[item.lineIdx])
+		}
+		lines[item.lineIdx] = marked
 	}
 
 	if err := os.WriteFile(absPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {

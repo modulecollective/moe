@@ -216,7 +216,6 @@ func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
 		header:          loreHeader,
 		progressSubject: fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
 		progressPaths:   []string{wiki.LoreDirRel},
-		markLine:        markHarvested,
 		writeErrPrefix:  "promote lore",
 		parse: func(body []byte) ([]string, []scratchItem[parsedLore], error) {
 			lines, todo, err := parseLore(body)

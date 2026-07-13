@@ -83,7 +83,7 @@ var followupUncheckedShapeRE = regexp.MustCompile(`^\s*-\s+\[\s\]`)
 // parsedFollowup is one harvest candidate plucked from followups.md.
 type parsedFollowup struct {
 	lineIdx int    // zero-based index into the raw line slice
-	rawSlug string // exactly as on the line ("claudia/foo" or "foo") — markLine + dedup key
+	rawSlug string // exactly as on the line ("claudia/foo" or "foo") — mark-rewrite + dedup key
 	project string // resolved target project: explicit prefix, else current project
 	slug    string // bare base slug handed to createIdea ("foo", pre-disambiguation)
 	title   string // title to embed in the new idea's H1
@@ -170,13 +170,36 @@ func trimAndDedentBody(body []string) string {
 	return strings.Join(out, "\n")
 }
 
-// markHarvested rewrites a `- [ ] `slug“ prefix into `- [x] `resolved“
-// in place. Preserves indentation and the rest of the line so the title
-// survives unchanged.
-func markHarvested(line, baseSlug, resolvedSlug string) string {
-	old := "- [ ] `" + baseSlug + "`"
-	new := "- [x] `" + resolvedSlug + "`"
-	return strings.Replace(line, old, new, 1)
+// markHarvested rewrites the `- [ ] `slug“ prefix of a harvested line
+// into `- [x] `resolvedSlug“, canonicalising the box to the single-space
+// form. It re-runs followupOpenRE — the same regex parseChecklist used
+// to accept the line — and splices, so any spacing the parser tolerated
+// (extra spaces around the dash or box, a tab inside the box) is marked
+// by construction rather than left visibly unchecked. Parse and mark
+// share one grammar. The leading indent and everything after the slug's
+// closing backtick (the ` — Title` tail) survive verbatim.
+//
+// ok is false when the line doesn't match, or matches a *different* slug
+// than baseSlug (an index-mapping guard). With this shared-regex rewrite
+// in place, !ok is unreachable in normal operation — the identical line
+// parsed moments earlier and only *other* indices get mutated in
+// between — so the caller treats it as a loud invariant failure, not a
+// recovery path.
+func markHarvested(line, baseSlug, resolvedSlug string) (string, bool) {
+	loc := followupOpenRE.FindStringSubmatchIndex(line)
+	if loc == nil {
+		return "", false
+	}
+	if line[loc[4]:loc[5]] != baseSlug {
+		return "", false
+	}
+	indentEnd := 0
+	for indentEnd < len(line) && (line[indentEnd] == ' ' || line[indentEnd] == '\t') {
+		indentEnd++
+	}
+	indent := line[:indentEnd]
+	tail := line[loc[5]+1:] // everything after the slug's closing backtick
+	return indent + "- [x] `" + resolvedSlug + "`" + tail, true
 }
 
 // harvestFollowups runs the harvest loop for one run, called from
@@ -207,7 +230,6 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 		relPath:         relPath,
 		header:          followupsHeader,
 		progressSubject: fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID),
-		markLine:        markHarvested,
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedFollowup], error) {
 			lines, todo, err := parseFollowups(body, projectID)
@@ -232,8 +254,8 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 			}
 			items := make([]scratchItem[parsedFollowup], 0, len(todo))
 			for _, fu := range todo {
-				// slug carries the raw (prefixed) form so markLine finds
-				// the literal `- [ ] ` + "`claudia/foo`" line to rewrite.
+				// slug carries the raw (prefixed) form so markHarvested
+				// matches the `- [ ] ` + "`claudia/foo`" line to rewrite.
 				items = append(items, scratchItem[parsedFollowup]{lineIdx: fu.lineIdx, slug: fu.rawSlug, entry: fu})
 			}
 			return lines, items, nil
