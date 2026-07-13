@@ -365,7 +365,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		case "code":
 			priorCanvas = "design"
 		case "test":
-			priorCanvas = "code"
+			priorCanvas = "review"
 		}
 	}
 	if priorCanvas != "" {
@@ -388,9 +388,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	// run at the just-finished stage and the next pickup re-opens and
 	// re-runs its agent (Workflow.Next reports the parked stage). The
 	// advance marker satisfies that stage so the next pickup starts at the
-	// successor instead. Gated to sdlc's design→code and code→test gates,
-	// where priorCanvas names the stage to mark; other gates (the twin
-	// ladder, idea) keep the plain decline.
+	// successor instead. Gated to sdlc's gates (design→code, code→review,
+	// review→test), where priorCanvas names the stage to mark; other gates
+	// (the twin ladder, idea) keep the plain decline.
 	offerAdvance := md.Workflow == "sdlc" && priorCanvas != ""
 	if offerAdvance {
 		opts = append(opts, promptOption{key: 'a', hint: "decline, advance to " + next.Name})

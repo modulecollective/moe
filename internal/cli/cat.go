@@ -15,9 +15,9 @@ import (
 
 // `moe <workflow> cat` is the canvas-dump verb shared across every
 // run-bearing workflow. The per-workflow wrappers (in idea/sdlc/kb/
-// hooks_workflow/twin) parse positional args and delegate
-// here; this file owns the resolver (worktree-vs-checkout, @latest,
-// stage validation, error shapes) and the io.Copy to stdout.
+// hooks_workflow/twin/chat/pdlc/chores) parse positional args and
+// delegate here; this file owns the resolver (worktree-vs-checkout,
+// @latest, stage validation, error shapes) and the io.Copy to stdout.
 //
 // The surface lives at the workflow group, not as a top-level `moe
 // cat`, so each verb is namespaced like every other workflow verb

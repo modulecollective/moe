@@ -15,6 +15,7 @@ package agent
 import (
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -279,5 +280,6 @@ func names() []string {
 	for k := range registry {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }

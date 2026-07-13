@@ -270,11 +270,12 @@ func resolveAgentName(explicit, runDefault, stylesheet string) string {
 // cleaned up. The repo-wide lock is held only during open (short) and
 // close (seconds), not across the Claude session itself.
 //
-// needsSandbox controls the code sandbox: design=false never gets one,
-// code=true always requires one (with a clear error if the project isn't
-// registered as a submodule). The sandbox lives under the canonical
-// bureaucracy root (not the session worktree) so it persists across
-// turns.
+// needsSandbox controls the per-run sandbox clone: document-only
+// stages leave it false, code stages require a writable one (with a
+// clear error if the project isn't registered as a submodule), and
+// design opts in read-only (see stageSessionOpts.NeedsSandbox). The
+// sandbox lives under the canonical bureaucracy root (not the session
+// worktree) so it persists across turns.
 //
 // opts.InitialPrompt, if non-empty, is auto-sent as the first user
 // message of the turn — it's how stages spare the operator from
@@ -428,12 +429,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 
 			// Code workspace — still keyed off the canonical bureaucracy
 			// root so per-run sandbox persistence works across turns.
-			// design=false never sees a clone; code=true insists on one
-			// and pre-positions it on the moe/<run-id> branch so the
+			// Document-only stages see no clone; code stages insist on one
+			// and pre-position it on the moe/<run-id> branch so the
 			// agent's commits (and any later `moe sdlc push`) land on a
-			// branch we own. attachRunWorkspace routes per-run sandbox
-			// vs named workspace based on md.Workspace; the callers
-			// here don't need to know which.
+			// branch we own; design opts in read-only. attachRunWorkspace
+			// routes per-run sandbox vs named workspace based on
+			// md.Workspace; the callers here don't need to know which.
 			clonePath := ""
 			var devEnv map[string]string
 			if opts.NeedsSandbox {

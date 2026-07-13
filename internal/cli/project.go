@@ -147,7 +147,7 @@ func runProjectRemove(args []string, stdout, stderr io.Writer) int {
 		}
 		moePrintf(stderr, "project %s has %d named workspace(s): %s\n",
 			id, len(infos), strings.Join(names, ", "))
-		moePrintf(stderr, "       remove each with `moe workspace remove %s <name>` first\n", id)
+		moePrintf(stderr, "       remove each with `moe workspace remove %s/<name>` first\n", id)
 		return 1
 	}
 	err = sync.WithJournalPush(root, repolock.Options{Purpose: "project-remove"}, stdout, stderr, func() error {

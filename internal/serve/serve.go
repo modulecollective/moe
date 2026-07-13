@@ -87,10 +87,10 @@ type Options struct {
 	// open for (project, run, stage). The cli wrapper closes over the
 	// bureaucracy root and looks up the run's workflow internally so
 	// serve stays workflow-registry-free. Required by the canvas
-	// route; absent means GET .../canvas/... returns 500. Errors
-	// satisfying errors.Is(err, fs.ErrNotExist) signal a missing
-	// canvas file (handler renders empty-state); other errors map to
-	// 404.
+	// route; absent means GET .../canvas/... returns 500. Any error it
+	// returns maps to 404 — resolution is a path computation, not a
+	// file stat. A missing canvas file is detected later by the
+	// handler's ReadFile (ErrNotExist renders the 200 empty-state).
 	ResolveCanvas func(project, run, stage string) (path string, err error)
 
 	// RunStages returns the workflow ladder order for an on-disk run.
@@ -425,7 +425,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	for i := range vm.Active {
 		id := vm.Active[i].Project + "/" + vm.Active[i].Run
 		if c, ok := s.children.get(id); ok {
-			if exited, _, _ := c.snapshot(); !exited {
+			if exited, _ := c.snapshot(); !exited {
 				vm.Active[i].Live = true
 			}
 		}

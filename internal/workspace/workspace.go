@@ -9,19 +9,18 @@
 //
 //   - Lazily created on first use, by either `moe sdlc new
 //     --workspace <name>` or `moe workspace shell <project> <name>`.
-//     The working tree reuses sandbox.EnsureAt — a `git worktree`
-//     linked off the canonical submodule, with the auto-init
-//     pre-flight for fresh checkouts.
+//     The working tree reuses sandbox.EnsureAt — an object-shared
+//     `git clone --local --shared` of the canonical submodule, with
+//     the auto-init pre-flight for fresh checkouts.
 //   - Claimed by the run that's currently using it. The claim file
 //     (.moe/claim.json inside the workspace dir) names the holding
 //     run; a second run that names the same workspace while it's
 //     claimed is refused at sdlc-new time with a pointer to the
 //     holder.
-//   - Branch handoff is "switch via the project's default branch":
-//     when a new run's branch is created, Attach checks out the
-//     base branch first so the new branch isn't anchored to the
-//     previous run's tip. Refuses if the working tree is dirty,
-//     same fail-loud invariant as the rest of the engine.
+//   - Branch handoff creates the new run's branch off the project's
+//     default-branch tip, so it isn't anchored to the previous run's
+//     tip. Refuses if the working tree is dirty, same fail-loud
+//     invariant as the rest of the engine.
 //   - Released at terminal status (close / merge / sync-finalize).
 //     The directory stays — the next run reuses it.
 package workspace
@@ -372,9 +371,9 @@ func Release(root, projectID, name string) error {
 }
 
 // Ensure makes sure the workspace directory exists and returns its
-// absolute path. First call registers the project's submodule as a
-// worktree via sandbox.EnsureAt; subsequent calls are a no-op. Used by
-// Acquire and directly by the standalone `moe workspace shell` path.
+// absolute path. First call clones the project's submodule via
+// sandbox.EnsureAt; subsequent calls are a no-op. Used by Acquire and
+// directly by the standalone `moe workspace shell` path.
 func Ensure(root, projectID, name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
@@ -392,11 +391,10 @@ func Ensure(root, projectID, name string) (string, error) {
 //     branch switch.
 //   - If branch already exists, checks it out (no-op if already on it).
 //   - If branch doesn't exist and baseBranch is non-empty, creates
-//     branch off baseBranch's tip in one step. We don't check out
-//     baseBranch first because the workspace is a `git worktree` of
-//     the canonical submodule, which already has baseBranch checked
-//     out — and a branch can only be checked out in one worktree at
-//     a time.
+//     branch off baseBranch's tip in one step, without a separate
+//     baseBranch checkout. The workspace is an object-shared clone
+//     with its own ref-db, so there's no one-checkout-per-branch
+//     constraint to work around.
 //   - If branch doesn't exist and baseBranch is empty, creates branch
 //     off whatever HEAD currently is. Useful for callers that have
 //     already positioned the workspace.

@@ -15,8 +15,8 @@ import (
 // `moe <workflow> log` renders a past stage's agent transcript
 // (thread-claude.jsonl / thread-codex.jsonl) as plain text using the
 // same renderer the post-headless auto-tail uses (internal/transcript),
-// no `--tail` cap. Seven per-workflow registrations (in idea/sdlc/kb/
-// hooks_workflow/twin/chat/chores) parse positional args
+// no `--tail` cap. Eight per-workflow registrations (in idea/sdlc/kb/
+// hooks_workflow/twin/chat/pdlc/chores) parse positional args
 // and delegate here; this file owns the resolver (project / @latest /
 // workflow / run / stage validation, agent disambiguation) and the
 // render to stdout. Most register a Command struct with Run: runLog(…);

@@ -18,7 +18,7 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// The SDLC workflow owns the design→code→push lifecycle. Stages are
+// The SDLC workflow owns the design→code→review→test→push lifecycle. Stages are
 // nested under `moe sdlc` so kb (and future workflows) can pick their
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
