@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -202,6 +203,89 @@ func TestTwoTurnInteractiveResumePreflightsSameCwd(t *testing.T) {
 	}
 	if len(fake.restores) != 0 {
 		t.Errorf("transcript was found; RestoreTranscript should not have been called: %+v", fake.restores)
+	}
+}
+
+// TestStageTurnPreservesPulledRunState is the regression for the
+// reload-after-auto-pull fix. runStageSession loads run.json from the
+// canonical root at entry — before openWikiSession takes the repolock
+// and runs sync.AutoPull. A pull that brings newer run state from
+// another machine used to be silently clobbered: BuildSpec rode the
+// pre-pull struct and the turn commit wrote it back over the pulled
+// fields.
+//
+// The setup models two machines sharing an origin. Machine A commits
+// run state the turn under test never touches — a resumable design
+// session id (S_A) and a marker code session (S_C) — and pushes it.
+// Machine B then drives one design turn: its entry load misses both
+// (they aren't on B's main yet), AutoPull brings them in, and the fix
+// reloads the pulled struct at the top of BuildSpec. The turn must
+// resume S_A rather than re-mint, and the committed run.json must still
+// carry both S_A and S_C afterwards.
+//
+// Without the fix both assertions fail: EnsureDocument on the stale
+// (empty-Documents) entry struct mints a third session id and the turn
+// commit drops A's entries. Document entries, not md.Agent, carry the
+// preservation signal deliberately — a pulled agent switch would
+// redirect dispatch to an unregistered backend; the whole-struct reload
+// preserves Agent by the same mechanism the code marker proves.
+func TestStageTurnPreservesPulledRunState(t *testing.T) {
+	const (
+		sessionA = "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa" // resumable design session minted on machine A
+		sessionC = "cccccccc-3333-4ccc-8ccc-cccccccccccc" // marker on a doc the turn never touches
+	)
+
+	root, fake := setupResumeFixture(t, "fake-pulled-run-state")
+
+	// Give B's root main an origin and push the seeded state, so
+	// AutoPull has an upstream to rebase onto (it no-ops without one).
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+
+	// Machine A: a second clone that advances run.json with state B
+	// hasn't seen, then pushes it to origin.
+	machineA := filepath.Join(t.TempDir(), "machineA")
+	gittest.Run(t, t.TempDir(), "clone", origin, machineA)
+	mdA, err := run.Load(machineA, "tele", "fix-it")
+	if err != nil {
+		t.Fatalf("machine A load run: %v", err)
+	}
+	mdA.Documents["design"] = &run.Document{Session: sessionA}
+	mdA.Documents["code"] = &run.Document{Session: sessionC}
+	if err := run.Save(machineA, mdA); err != nil {
+		t.Fatalf("machine A save run: %v", err)
+	}
+	gittest.Commit(t, machineA, "work: machine A advances run state")
+	gittest.Run(t, machineA, "push", "origin", "main")
+
+	// Machine B: one design turn. Interactive (Execute) so the dispatch
+	// records the session id it resumed; the resume-vs-mint decision is
+	// mode-independent.
+	driveDesignTurn(t, "fake-pulled-run-state", false)
+
+	if len(fake.execCalls) != 1 {
+		t.Fatalf("want 1 executor dispatch, got %d: %+v", len(fake.execCalls), fake.execCalls)
+	}
+	call := fake.execCalls[0]
+	if call.newSession {
+		t.Errorf("turn re-minted (NewSession=true); it should have resumed the pulled session %s", sessionA)
+	}
+	if call.sessionID != sessionA {
+		t.Errorf("dispatch resumed session %q, want the pulled id %q", call.sessionID, sessionA)
+	}
+
+	// The committed run.json on B's main must retain both pulled
+	// entries — the reloaded struct is what the turn commit wrote back.
+	md, err := run.Load(root, "tele", "fix-it")
+	if err != nil {
+		t.Fatalf("reload run after turn: %v", err)
+	}
+	if got := md.Documents["design"]; got == nil || got.Session != sessionA {
+		t.Errorf("design session after turn = %+v, want %q (pulled id preserved)", got, sessionA)
+	}
+	if got := md.Documents["code"]; got == nil || got.Session != sessionC {
+		t.Errorf("code marker after turn = %+v, want %q (untouched pulled entry preserved)", got, sessionC)
 	}
 }
 

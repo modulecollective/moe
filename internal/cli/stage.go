@@ -312,11 +312,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 
 	// Run-scoped state captured by closure. md is pre-loaded from the
-	// canonical root so the entry banner can name md.Workflow before
-	// the session worktree opens; BuildSpec uses the same pointer and
-	// promptNextStage reads it after the executor returns. Loading
-	// from `root` rather than the worktree is safe — run.json doesn't
-	// drift on `git worktree add`.
+	// canonical root only to feed the pre-session, pre-pull surface:
+	// the entry banner (md.Workflow), stylesheet resolution, and the
+	// agent ladder, all of which run before openWikiSession takes the
+	// repolock and pulls. This entry copy is deliberately not trusted
+	// past that point — BuildSpec reloads run.json from the session
+	// worktree (post-pull) into this same pointer, so every downstream
+	// closure carries the fresh state. Loading from `root` here rather
+	// than the worktree is safe for the banner's purposes — run.json
+	// doesn't drift on `git worktree add`, and md.Workflow is immutable
+	// per run.
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -373,11 +378,24 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			}
 			return opts.WikiBuilder(canonicalRoot, md)
 		},
-		// md is pre-loaded at runStageSession entry; BuildSpec rides on
-		// the same pointer rather than re-reading run.json from the
-		// worktree, which is identical content. Run-scoped extras
-		// (sandbox, prompt, transcript probe) still resolve here.
+		// md is pre-loaded at runStageSession entry from the canonical
+		// root, *before* openWikiSession pulled origin/main under the
+		// repolock. Reload it here from the session worktree — which
+		// session.Open created from post-pull main — so this turn's
+		// write-backs ride the pulled run state, not the stale entry
+		// copy. Overwrite in place (*md = *fresh): every downstream
+		// closure captured this pointer, so the reload routes all of
+		// them through fresh state with no signature changes. workRoot,
+		// not root: on a resumed crashed-turn branch the worktree's
+		// run.json can be ahead of main, and it's what this turn commits
+		// against. If the pull deleted the run on the other machine the
+		// load fails and the turn refuses, rather than resurrecting it.
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+			fresh, err := run.Load(workRoot, md.Project, md.ID)
+			if err != nil {
+				return wikiTurnSpec{}, err
+			}
+			*md = *fresh
 			doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
 			if err != nil {
 				return wikiTurnSpec{}, err
