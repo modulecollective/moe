@@ -55,7 +55,7 @@ itself is the artifact.
 
 You're interactive, so the operator sees every command before it runs.
 Grooming verbs from `moe-howto` (`moe idea new`, …) and read-only verbs
-(`moe dash`, `moe idea list`, `git log`) are fair game. Grooming lands
+(`moe dash`, `moe idea list <project>`, `git log`) are fair game. Grooming lands
 on the operator's live backlog — `moe idea new` commits to the real
 bureaucracy on this box, visible in any other window at once. If a
 command that mutates the bureaucracy fails — a lock held by another moe

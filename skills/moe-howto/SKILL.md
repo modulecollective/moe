@@ -86,7 +86,7 @@ Look before you capture, so you don't open a duplicate or re-decide a
 settled question:
 
 - `moe dash` — the board: every run and idea with status at a glance.
-- `moe idea list` — the idea backlog specifically.
+- `moe idea list <project>` — the idea backlog specifically.
 - `moe idea cat <project>/<slug>` — dump one idea's canvas.
 - `moe idea log <project>/<slug>` — render an idea's capture transcript.
 

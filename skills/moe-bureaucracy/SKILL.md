@@ -9,7 +9,7 @@ You are inside a Ministry of Everything (MoE) bureaucracy session. While doing
 your stage's work, you may notice things *out of scope* for this turn but
 worth recording for future runs. MoE keeps three places for this:
 
-- **The digital twin** (`digital-twin/<project>/`) records what a project *is*
+- **The digital twin** (`projects/<project>/digital-twin/`) records what a project *is*
   and *how it works* — vision, architecture, named patterns, operations,
   glossary. Code is the implementation; the twin is the intent. When
   the two disagree, the twin wins until someone updates it. Notes that would
@@ -30,7 +30,7 @@ the first matching channel.
 ## Twin observations
 
 If you notice something about the project that belongs in the digital
-twin — would acting on this note edit `digital-twin/<project>/`
+twin — would acting on this note edit `projects/<project>/digital-twin/`
 (architecture.md, vision.md, patterns.md, operations.md, glossary.md)? —
 append a note to:
 

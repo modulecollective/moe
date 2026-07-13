@@ -99,7 +99,7 @@ reads project source through a per-run sandbox clone, never edits it, and
 grooms the idea backlog on your behalf.
 
 ```sh
-moe chat new [--workspace <name>] [--agent <name>] [--from-idea <project>/<slug>] <project>/<slug>
+moe chat new [--agent <name>] [--from-idea <project>/<slug>] <project>/<slug>
 moe chat chat [--agent <name>] <project>/<run>
 moe chat close [--no-edit] <project>/<run>
 ```

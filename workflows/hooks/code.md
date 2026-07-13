@@ -126,8 +126,8 @@ The code stage is ready to hand back when:
    the canvas names what you fired.
 3. The canvas reads as a per-pass record a future agent could pick
    up cold.
-4. The operator has what they need to run `moe hooks close <project>
-   <run>` — or to say "not yet, because X."
+4. The operator has what they need to run `moe hooks close
+   <project>/<run>` — or to say "not yet, because X."
 
 If you're polishing canvas prose past the point of clarity, you're
 done. Stop and hand it over.
