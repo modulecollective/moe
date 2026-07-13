@@ -26,25 +26,6 @@ func TestLookupServeWorkflowUISdlc(t *testing.T) {
 	}
 }
 
-func TestLookupServeWorkflowUIPdlc(t *testing.T) {
-	ui, ok := lookupServeWorkflowUI(pdlcWorkflow)
-	if !ok {
-		t.Fatal("pdlc should carry a serve declaration")
-	}
-	if want := []string{pdlcFrameDoc, pdlcPrdDoc, pdlcChunkDoc}; !slices.Equal(ui.Stages, want) {
-		t.Errorf("pdlc spawnable stages = %v, want %v", ui.Stages, want)
-	}
-	if ui.Cascade {
-		t.Error("pdlc must not declare cascade — its stage verbs have no --ship/--chain")
-	}
-	if !ui.Perpetual {
-		t.Error("pdlc should expose the workflow-level perpetual bit")
-	}
-	if !ui.Close {
-		t.Error("pdlc should report a registered close pipeline")
-	}
-}
-
 // Workflows that declared nothing stay read-only in serve, even when
 // they registered a CLI close (chat does).
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
@@ -57,14 +38,11 @@ func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
 
 func TestServeNewRunWorkflows(t *testing.T) {
 	got := serveNewRunWorkflows()
-	if len(got) != 2 {
-		t.Fatalf("new-run workflows = %+v, want exactly sdlc and pdlc", got)
+	if len(got) != 1 {
+		t.Fatalf("new-run workflows = %+v, want exactly sdlc", got)
 	}
 	if got[0].Name != "sdlc" || got[0].FirstStage != "design" || !got[0].Workspace {
 		t.Errorf("first entry = %+v, want sdlc/design with workspace", got[0])
-	}
-	if got[1].Name != pdlcWorkflow || got[1].FirstStage != pdlcFrameDoc || got[1].Workspace {
-		t.Errorf("second entry = %+v, want pdlc/frame without workspace", got[1])
 	}
 }
 
@@ -72,7 +50,7 @@ func TestServeNewRunWorkflows(t *testing.T) {
 // reachable through the registry serve's CloseRun callback dispatches
 // by; idea's bespoke close stays out.
 func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
-	for _, wf := range []string{"sdlc", "pdlc", "kb", "chat", "twin", "hooks", "chores"} {
+	for _, wf := range []string{"sdlc", "kb", "chat", "twin", "hooks", "chores"} {
 		if _, ok := lookupCloseRegistration(wf); !ok {
 			t.Errorf("workflow %q registered closeCommand but has no close registration", wf)
 		}
@@ -91,17 +69,17 @@ func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
 
 // skipPostTurnPrompt is the gate runStageSession's tail runs before
 // firing the chain prompt. The MOE_SERVE_AGENT handshake must suppress
-// the prompt for every workflow's interactive stage — pdlc's openers
-// pass neither SkipNextStage nor Headless, and a serve-spawned chunk
-// sitting that fell through to promptPdlcHarvest would wedge on the
-// PTY stdin nobody types into.
+// the prompt for every workflow's interactive stage — a sandbox-boundary
+// stage (design, chat) passes neither SkipNextStage nor Headless, so a
+// serve-spawned sitting that fell through to the chain prompt would
+// wedge on the PTY stdin nobody types into.
 func TestSkipPostTurnPromptServeHandshake(t *testing.T) {
-	pdlcShaped := stageSessionOpts{NeedsSandbox: true, EnforceSandboxBoundary: true}
-	if skipPostTurnPrompt(pdlcShaped) {
+	sandboxShaped := stageSessionOpts{NeedsSandbox: true, EnforceSandboxBoundary: true}
+	if skipPostTurnPrompt(sandboxShaped) {
 		t.Fatal("without the handshake an interactive sitting should reach the prompt")
 	}
 	t.Setenv("MOE_SERVE_AGENT", "1")
-	if !skipPostTurnPrompt(pdlcShaped) {
+	if !skipPostTurnPrompt(sandboxShaped) {
 		t.Error("MOE_SERVE_AGENT=1 must suppress the post-turn prompt with no per-callsite flag")
 	}
 	t.Setenv("MOE_SERVE_AGENT", "")

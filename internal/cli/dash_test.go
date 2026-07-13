@@ -277,35 +277,6 @@ func TestDashKBRunAfterSummarizeShowsDoneNeedsClose(t *testing.T) {
 	}
 }
 
-func TestDashPdlcRunAfterChunkShowsChunkNotCloseNag(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "plan", "pdlc", run.StatusInProgress)
-	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "plan", "pdlc", "frame", t0)
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "plan", "pdlc", "prd", t0.Add(time.Hour))
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "plan", "pdlc", "chunk", t0.Add(2*time.Hour))
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected fully walked PDLC run to stay ACTIVE, got:\n%s", got)
-	}
-	if !strings.Contains(got, "pdlc:chunk") {
-		t.Fatalf("expected PDLC run to render repeatable chunk state, got:\n%s", got)
-	}
-	if strings.Contains(got, "pdlc:done · close?") {
-		t.Fatalf("PDLC dash row must not nag to close after chunk, got:\n%s", got)
-	}
-}
-
 // TestDashKBRunAfterResearchShowsResearchParked is the mirror-image
 // check: research is written but summarize isn't yet. Under the
 // forward-walking rule research has no successor turn after it, so

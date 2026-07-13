@@ -730,7 +730,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 // MOE_SERVE_AGENT handshake). Reading the handshake here — instead of
 // each stage opener passing SkipNextStage: serveAgentSuppress() — makes
 // every present and future workflow serve-safe by construction; the
-// per-callsite pattern was exactly what pdlc's openers had missed.
+// per-callsite pattern is exactly the kind of thing a new workflow's
+// openers can miss.
 func skipPostTurnPrompt(opts stageSessionOpts) bool {
 	return opts.SkipNextStage || opts.Headless || serveAgentSuppress()
 }
@@ -741,10 +742,7 @@ func skipPostTurnPrompt(opts stageSessionOpts) bool {
 // MOE_SERVE_AGENT=1 in the spawn env tells runStageSession to skip the
 // post-turn `next: …` chain prompt (which has no input source under
 // serve — the child's stdin is a PTY nobody types into) so moe exits
-// cleanly after the agent returns. For pdlc's chunk stage this also
-// suppresses the per-sitting harvest offer, which would otherwise open
-// $EDITOR; unchecked followups wait for the next CLI sitting or for
-// close, which serve drives with --no-edit semantics.
+// cleanly after the agent returns.
 //
 // Read once per stage exit; same shape MOE_SERVE_NOTIFY_URL takes
 // (env-var handshake, not a documented operator flag).

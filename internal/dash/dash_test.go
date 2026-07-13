@@ -323,22 +323,29 @@ func TestChatInProgressPreservesRunningMarker(t *testing.T) {
 	}
 }
 
+// TestPerpetualDoneRendersRepeatableStageNotCloseNag exercises the
+// generic perpetual-done branch: a non-chat perpetual workflow whose
+// stages are all walked renders its repeatable stage (`wf:stage`), not
+// the `· close?` nag. No such workflow ships today (chat, the one
+// perpetual workflow, is caught by the earlier chat-specific branch),
+// so the input is synthetic — the branch stays for any future
+// multi-stage perpetual workflow.
 func TestPerpetualDoneRendersRepeatableStageNotCloseNag(t *testing.T) {
-	md := &run.Metadata{ID: "big-goal", Project: "moe", Workflow: "pdlc", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "big-goal", Project: "moe", Workflow: "planner", Status: run.StatusInProgress}
 	r := rowsByKey(t, []*run.Metadata{md},
-		map[string]NextDecision{"big-goal": {Stage: "chunk", Done: true, Perpetual: true}},
+		map[string]NextDecision{"big-goal": {Stage: "reconcile", Done: true, Perpetual: true}},
 		nil)["moe/big-goal"]
 	if r.Bucket != BucketActiveRuns {
 		t.Fatalf("bucket=%v want ACTIVE", r.Bucket)
 	}
-	if r.Note != "pdlc:chunk" {
-		t.Fatalf("note=%q want %q", r.Note, "pdlc:chunk")
+	if r.Note != "planner:reconcile" {
+		t.Fatalf("note=%q want %q", r.Note, "planner:reconcile")
 	}
 	if strings.Contains(r.Note, "done") || strings.Contains(r.Note, "close?") {
 		t.Fatalf("perpetual done note must not nag to close: %q", r.Note)
 	}
-	if r.Stage != "chunk" {
-		t.Fatalf("stage=%q want chunk", r.Stage)
+	if r.Stage != "reconcile" {
+		t.Fatalf("stage=%q want reconcile", r.Stage)
 	}
 }
 

@@ -36,7 +36,7 @@ sdlc.design { model: claude-fable-5; }
 		// A workflow that matches only `*`: opus model, no agent rule.
 		{"chores", "code", "", "opus"},
 		// .review in a different workflow still matches the stage rule.
-		{"pdlc", "review", "codex", "gpt-5-codex"},
+		{"kb", "review", "codex", "gpt-5-codex"},
 	}
 	for _, c := range cases {
 		gotAgent, gotMod := s.Resolve(c.workflow, c.stage)

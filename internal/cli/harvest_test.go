@@ -25,7 +25,7 @@ func runStatus(t *testing.T, root, projectID, runID string) string {
 // non-idea workflow group and stayed off the idea group (idea runs have
 // no follow-ups dance).
 func TestHarvestCommandRegistered(t *testing.T) {
-	for _, wf := range []string{"sdlc", "kb", "hooks", "chores", "chat", "pdlc", "twin"} {
+	for _, wf := range []string{"sdlc", "kb", "hooks", "chores", "chat", "twin"} {
 		g, ok := groups[wf]
 		if !ok {
 			t.Fatalf("group %q not registered", wf)

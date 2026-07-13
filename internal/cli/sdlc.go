@@ -716,8 +716,8 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 }
 
 // checkSandboxBoundary refuses to close a stage that sets
-// EnforceSandboxBoundary (design, chat, the pdlc
-// stages) when the project sandbox has moved past the snapshot taken
+// EnforceSandboxBoundary (design, chat) when the project sandbox has
+// moved past the snapshot taken
 // at stage open. stageDoc is the stage's doc name (e.g. "design",
 // "frame"), used to attribute the refusal. Two failure modes; either
 // trips the gate:
