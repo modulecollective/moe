@@ -323,6 +323,7 @@ func (s *Server) handleKnowledgeTopic(w http.ResponseWriter, r *http.Request) {
 	vm := docVM{
 		Title: topic,
 		Crumbs: []crumb{
+			{Label: "dashboard", Href: "/"},
 			{Label: "projects", Href: "/projects"},
 			{Label: projectID, Href: "/projects/" + projectID},
 			{Label: "knowledge", Href: "/projects/" + projectID + "/knowledge"},
@@ -357,6 +358,7 @@ func (s *Server) handleTwinDoc(w http.ResponseWriter, r *http.Request) {
 	vm := docVM{
 		Title: doc,
 		Crumbs: []crumb{
+			{Label: "dashboard", Href: "/"},
 			{Label: "projects", Href: "/projects"},
 			{Label: projectID, Href: "/projects/" + projectID},
 			{Label: doc},

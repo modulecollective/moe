@@ -112,6 +112,40 @@ func assertThemeToggleInHeader(t *testing.T, body string) {
 	}
 }
 
+// TestBannerSubCarriesDashboardCrumb pins the two ends of the trail rule:
+// the dashboard carries a reverse crumb pointing down into projects, and a
+// deep page roots its trail at a linked dashboard.
+func TestBannerSubCarriesDashboardCrumb(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
+			return nil, 0, 0, nil, nil
+		},
+		RunStages: func(_, _ string) ([]string, error) {
+			return []string{"design", "code"}, nil
+		},
+	})
+
+	rr := get(t, s, "/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dash status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if want := `dashboard → <a href="/projects">projects</a> · <a href="/lore">lore</a>`; !strings.Contains(rr.Body.String(), want) {
+		t.Errorf("dashboard banner-sub missing reverse crumb %q\n%s", want, rr.Body.String())
+	}
+
+	rr = get(t, s, "/run/alpha/fix-it")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("run status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if want := `<a href="/">dashboard</a> → `; !strings.Contains(rr.Body.String(), want) {
+		t.Errorf("run page banner-sub missing dashboard root %q\n%s", want, rr.Body.String())
+	}
+}
+
 func TestDashRouteWithoutGatherReturns500(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
