@@ -21,7 +21,7 @@ type serveWorkflowDecl struct {
 	excludeStages []string
 	// cascade declares that the workflow's stage verbs accept --ship /
 	// --chain, so serve renders the advance/ship/chain trio (keyed off
-	// the run's next stage) instead of one sitting chip per stage verb.
+	// the run's next stage).
 	cascade bool
 	// newRun fronts the workflow in serve's /run/new and promote forms.
 	newRun bool

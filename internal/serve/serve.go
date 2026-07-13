@@ -114,7 +114,7 @@ type Options struct {
 
 	// Insecure enables the spawn bucket — the POST routes that run
 	// `moe <wf> <stage>` agent subprocesses (new run, promote,
-	// advance/ship/chain, stage spawn, chore open). Off by default (safe
+	// advance/ship/chain, chore open). Off by default (safe
 	// mode): those routes refuse with 403 and their UI entry points
 	// don't render; the journal-write and read-only routes are
 	// unaffected. The cli wrapper sets this from the --insecure flag or

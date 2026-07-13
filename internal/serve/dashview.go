@@ -86,9 +86,9 @@ type dashVM struct {
 	ProjectCount   int
 	ActiveProjects int
 	ShowAll        bool
-	// Insecure mirrors Options.Insecure: the "new run" / "new plan"
-	// links spawn an agent, so they only render in insecure mode. The
-	// "new idea" link is journal-only and always renders.
+	// Insecure mirrors Options.Insecure: the "new run" link spawns an
+	// agent, so it only renders in insecure mode. The "new idea" link
+	// is journal-only and always renders.
 	Insecure bool
 }
 
