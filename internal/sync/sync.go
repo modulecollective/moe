@@ -197,8 +197,9 @@ func GitlinkSHA(root, subPath string) (string, error) {
 // AdvanceSubmodule fetches origin, fast-forwards the tracking branch,
 // and returns a Bump if the submodule's HEAD now differs from the
 // gitlink bureaucracy has recorded. Returns (nil, nil) when already
-// caught up. Refuses to touch a submodule with uncommitted changes
-// or with local commits diverged from origin.
+// caught up. Refuses to touch a submodule with uncommitted changes,
+// with local commits diverged from origin, or with a detached HEAD
+// carrying commits that the tracking-branch checkout would orphan.
 func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (*Bump, error) {
 	subAbs := filepath.Join(root, e.Path)
 	// Cold submodule: materialize it before fetching. Without this,
@@ -242,6 +243,34 @@ func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (
 
 	if out, err := git.Combined(subAbs, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err != nil {
 		return nil, fmt.Errorf("moe sync: %s has no origin/%s (%s)", e.Path, branch, strings.TrimSpace(out))
+	}
+
+	// A detached HEAD carrying local commits not reachable from the
+	// branch strands them: git's checkout exits 0 with only a "leaving N
+	// commits behind" warning, which success discards, so sync would
+	// report a clean bump while orphaning the commit. Refuse before the
+	// checkout — the guard runs after fetch, so the origin ref is fresh.
+	// Attached HEAD needs no guard: the checkout is a no-op or a plain
+	// branch switch with nothing to leave behind.
+	if !git.Probe(subAbs, "symbolic-ref", "--quiet", "HEAD") {
+		headSHA, err := HeadSHA(subAbs)
+		if err != nil {
+			return nil, fmt.Errorf("moe sync: head of %s: %w", e.Path, err)
+		}
+		// Allow the re-attach when HEAD is already reachable from the
+		// ref we're about to move onto: origin/<branch> covers the
+		// normal gitlink detach point (and a stale local branch); local
+		// <branch> covers the mirror case where origin regressed, which
+		// the diverged guard below then handles. If local <branch>
+		// doesn't exist the second probe just fails — harmless.
+		onOrigin := git.Probe(subAbs, "merge-base", "--is-ancestor", headSHA, "refs/remotes/origin/"+branch)
+		onLocal := git.Probe(subAbs, "merge-base", "--is-ancestor", headSHA, branch)
+		if !onOrigin && !onLocal {
+			return nil, fmt.Errorf(
+				"moe sync: %s HEAD is detached at %s with commits not on %s — refusing to sync.\n\nRecovery:\n  git -C %s log %s..HEAD      # see the stranded commits\n  git -C %s branch <name> HEAD      # keep them on a branch\n  # merge/cherry-pick onto %s or push, then retry moe sync",
+				e.Path, git.ShortSHA(headSHA), branch, e.Path, branch, e.Path, branch,
+			)
+		}
 	}
 
 	// Leave detached HEAD — common after `git submodule update` —
