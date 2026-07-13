@@ -296,6 +296,35 @@ func TestSDLCStageUnknownDestinationStage(t *testing.T) {
 	}
 }
 
+// TestSDLCStageRejectsBangDestination: --to=! and --to=!! must not slip
+// past validation into a headless ship. cascadeAnswerFromFlags composes
+// --to=<v> as "!"+v, so --to=! composes to the same "!!" string --ship
+// produces and --to=!! to "!!!"; keying validation on the raw flag
+// rejects both as unknown stages (exit 2) before any dispatch, instead
+// of escalating a malformed destination into a ship.
+func TestSDLCStageRejectsBangDestination(t *testing.T) {
+	for _, bang := range []string{"!", "!!"} {
+		for _, sv := range sdlcStageVerbs {
+			t.Run(bang+"/"+sv.name, func(t *testing.T) {
+				stages := stubOpenSdlcStage(t, nil)
+				pushes := stubPushFromCascade(t, 0, nil)
+
+				var out, errb bytes.Buffer
+				code := sv.run([]string{"--to=" + bang, "tele/ghost"}, &out, &errb)
+				if code != 2 {
+					t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+				}
+				if !strings.Contains(errb.String(), "--to="+bang+" is not an sdlc stage") {
+					t.Fatalf("expected unknown-stage error for --to=%s, got: %q", bang, errb.String())
+				}
+				if len(*stages) != 0 || len(*pushes) != 0 {
+					t.Fatalf("malformed destination must not dispatch: stages=%+v pushes=%+v", *stages, *pushes)
+				}
+			})
+		}
+	}
+}
+
 // TestSDLCStageRejectsToAtOrBehindStart: --to=<this-stage> and
 // --to=<earlier-stage> both exit 2 with a clear "at or behind"
 // message. The chain-prompt equivalent silently no-ops; the CLI
@@ -579,7 +608,7 @@ func TestSDLCStageRejectsToWhenNothingFollows(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := dispatchCascadeForStage("sdlc push", "push", "tele", "ghost", "!push", &out, &errb)
+	code := dispatchCascadeForStage("sdlc push", "push", "tele", "ghost", "!push", "push", &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}

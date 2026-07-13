@@ -237,7 +237,7 @@ func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	if answer == "" {
 		return cfg.open(projectID, runID, false, *agentOverride, stdout, stderr)
 	}
-	return dispatchCascadeForStage(cfg.verb, cfg.stage, projectID, runID, answer, stdout, stderr)
+	return dispatchCascadeForStage(cfg.verb, cfg.stage, projectID, runID, answer, *to, stdout, stderr)
 }
 
 func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
@@ -336,9 +336,16 @@ func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer stri
 // prompt does. verb is the "sdlc <stage>" preamble used in stderr
 // so unknown-destination errors surface under the command the
 // operator just typed.
-func dispatchCascadeForStage(verb, stage, projectID, runID, answer string, stdout, stderr io.Writer) int {
-	if strings.HasPrefix(answer, "!") && answer != "!" && answer != "!!" && answer != "!!!" {
-		dest := strings.TrimPrefix(answer, "!")
+//
+// Validation keys on the raw `to` flag, not the composed answer:
+// cascadeAnswerFromFlags maps `--to=<stage>` to `"!"+<stage>`, so
+// `--to=!` composes to the same `!!` string `--ship` legitimately
+// produces. Sniffing the answer would let `--to=!` / `--to=!!` slip
+// past as valid ship/chain forms; the ladder check below runs against
+// the operator's actual `--to` value instead.
+func dispatchCascadeForStage(verb, stage, projectID, runID, answer, to string, stdout, stderr io.Writer) int {
+	if to != "" {
+		dest := to
 		wf, err := LookupWorkflow("sdlc")
 		if err != nil {
 			moePrintf(stderr, "%s: %v\n", verb, err)
