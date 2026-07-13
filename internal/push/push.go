@@ -272,9 +272,11 @@ func CheckBranchHasCommits(clonePath, branch, base, workflow string) error {
 	if !git.HasRef(clonePath, "refs/heads/"+branch) {
 		return fmt.Errorf("push: branch %q does not exist in sandbox clone; run `moe %s code` and have the agent commit", branch, workflow)
 	}
-	// AheadOf swallows rev-list failures (returns 0, nil) so an unknown
-	// base ref just skips this check — the push itself surfaces a real
-	// error in that case.
+	// If AheadOf can't compute a count — an unknown base ref (a sandbox
+	// clone of a detached submodule has no local `main`), or any other
+	// rev-list failure — deliberately skip this guard. Blocking a push
+	// on a count we couldn't compute is the wrong-refusal bug; the push
+	// itself surfaces any real error a moment later.
 	n, err := git.AheadOf(clonePath, base, branch)
 	if err != nil {
 		return nil

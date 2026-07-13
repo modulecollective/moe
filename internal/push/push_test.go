@@ -240,3 +240,54 @@ func TestFilterSandboxBindMountsKeepsRegularFiles(t *testing.T) {
 		t.Fatalf("filterSandboxBindMounts dropped a regular file: %v", got)
 	}
 }
+
+// TestCheckBranchHasCommits exercises the guard's four outcomes. The
+// load-bearing one is unresolvable-base: AheadOf returns an error, the
+// guard steps aside (nil), and the push proceeds — the fix for the
+// wrong "no commits ahead" refusal in detached-submodule sandboxes.
+func TestCheckBranchHasCommits(t *testing.T) {
+	t.Run("missing branch is an error", func(t *testing.T) {
+		dir := gittest.Init(t)
+		gittest.Commit(t, dir, "base")
+
+		if err := CheckBranchHasCommits(dir, "feat", "main", "sdlc"); err == nil {
+			t.Fatal("got nil, want error for a branch that doesn't exist")
+		}
+	})
+
+	t.Run("zero commits ahead of a resolvable base is an error", func(t *testing.T) {
+		dir := gittest.Init(t)
+		gittest.Commit(t, dir, "base")
+		gittest.Run(t, dir, "checkout", "-b", "feat")
+		// feat points at the same commit as main: nothing ahead.
+
+		if err := CheckBranchHasCommits(dir, "feat", "main", "sdlc"); err == nil {
+			t.Fatal("got nil, want error for zero commits ahead")
+		}
+	})
+
+	t.Run("commits ahead of a resolvable base is allowed", func(t *testing.T) {
+		dir := gittest.Init(t)
+		gittest.Commit(t, dir, "base")
+		gittest.Run(t, dir, "checkout", "-b", "feat")
+		gittest.Commit(t, dir, "work")
+
+		if err := CheckBranchHasCommits(dir, "feat", "main", "sdlc"); err != nil {
+			t.Fatalf("got %v, want nil for a branch with commits ahead", err)
+		}
+	})
+
+	t.Run("unresolvable base skips the guard", func(t *testing.T) {
+		dir := gittest.Init(t)
+		gittest.Commit(t, dir, "base")
+		gittest.Run(t, dir, "checkout", "-b", "feat")
+		gittest.Commit(t, dir, "work")
+
+		// The branch exists and has real commits, but the base ref
+		// doesn't resolve (the detached-submodule sandbox has no local
+		// `main`). AheadOf errors, so the guard must step aside.
+		if err := CheckBranchHasCommits(dir, "feat", "does-not-exist", "sdlc"); err != nil {
+			t.Fatalf("got %v, want nil skip when base is unresolvable", err)
+		}
+	})
+}

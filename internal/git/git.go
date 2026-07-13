@@ -238,16 +238,17 @@ func Upstream(dir string) (string, error) {
 }
 
 // AheadOf returns the commit count of base..head — i.e. how many
-// commits head has that base doesn't. Returns (0, nil) on any rev-list
-// failure: the only current caller wants to skip the check when base
-// is an unknown ref, and the eventual push will surface a real error
-// itself. Wraps `rev-list --count <base>..<head>`.
+// commits head has that base doesn't. Returns a wrapped error (with
+// stderr) when rev-list fails, e.g. because base doesn't resolve; the
+// caller decides what an uncomputable count means. Wraps
+// `rev-list --count <base>..<head>`.
 func AheadOf(dir, base, head string) (int, error) {
-	stdout, _, err := execGit(dir,
+	stdout, stderr, err := execGit(dir,
 		[]string{"rev-list", "--count", base + ".." + head},
 		false, readRetryCap)
 	if err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("git rev-list --count %s..%s: %w (%s)",
+			base, head, err, strings.TrimSpace(string(stderr)))
 	}
 	n, parseErr := strconv.Atoi(strings.TrimSpace(string(stdout)))
 	if parseErr != nil {

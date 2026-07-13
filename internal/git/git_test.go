@@ -256,10 +256,9 @@ func TestAheadOf_Counts(t *testing.T) {
 	gittest.Commit(t, dir, "b")
 
 	// gittest pins init.defaultBranch=main, so `main` is the trunk
-	// regardless of host git version. AheadOf swallows missing-ref
-	// errors (TestAheadOf_UnknownBase pins that), so the test can't
-	// fall through to a default-branch detection — it has to name the
-	// branch it knows exists.
+	// regardless of host git version. AheadOf errors on a missing base
+	// ref (TestAheadOf_UnknownBase pins that), so the test names the
+	// branch it knows exists rather than relying on default detection.
 	n, err := AheadOf(dir, "main", "feat")
 	if err != nil {
 		t.Fatalf("AheadOf: %v", err)
@@ -269,18 +268,20 @@ func TestAheadOf_Counts(t *testing.T) {
 	}
 }
 
-// TestAheadOf_UnknownBase confirms AheadOf swallows rev-list failures
-// and returns (0, nil) — the contract CheckBranchHasCommits depends on.
+// TestAheadOf_UnknownBase confirms AheadOf returns a wrapped error when
+// the base ref doesn't resolve, rather than swallowing it into (0, nil).
+// CheckBranchHasCommits reads that error as "count uncomputable, skip
+// the guard".
 func TestAheadOf_UnknownBase(t *testing.T) {
 	dir := gittest.Init(t)
 	gittest.Commit(t, dir, "init")
 
-	n, err := AheadOf(dir, "refs/heads/does-not-exist", "HEAD")
-	if err != nil {
-		t.Fatalf("AheadOf with unknown base: %v", err)
+	_, err := AheadOf(dir, "refs/heads/does-not-exist", "HEAD")
+	if err == nil {
+		t.Fatal("AheadOf with unknown base: got nil error, want error")
 	}
-	if n != 0 {
-		t.Fatalf("AheadOf with unknown base = %d, want 0", n)
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Fatalf("AheadOf error = %q, want it to mention the unresolved ref", err)
 	}
 }
 
