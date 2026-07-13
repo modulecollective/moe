@@ -40,6 +40,59 @@ func TestRenderBlocks(t *testing.T) {
 			deny: []string{"<p>extensions"},
 		},
 		{
+			name: "hard-wrapped number does not interrupt paragraph",
+			in:   "released in\n2024. The model shipped.",
+			want: []string{"<p>released in\n2024. The model shipped.</p>"},
+			deny: []string{"<ol>", "<li>"},
+		},
+		{
+			name: "1. still interrupts a paragraph (author intent)",
+			in:   "steps\n1. install",
+			want: []string{"<ol>", "<li>install</li>"},
+		},
+		{
+			name: "bullet still interrupts a paragraph",
+			in:   "steps\n- install",
+			want: []string{"<ul>", "<li>install</li>"},
+		},
+		{
+			name: "wrapped ordered continuation folds into li keeping number",
+			in:   "- model released in\n  2024. Shipped.\n- next",
+			want: []string{"<li>", "released in\n2024. Shipped.</li>", "<li>next</li>"},
+			deny: []string{"<ol>"},
+		},
+		{
+			name: "nested bullet continuation still collapses to sibling",
+			in:   "- item\n  - sub\n- next",
+			want: []string{"<li>item</li>", "<li>sub</li>", "<li>next</li>"},
+		},
+		{
+			name: "ordered list beginning past 1 gets start",
+			in:   "3. c\n4. d",
+			want: []string{`<ol start="3">`, "<li>c</li>", "<li>d</li>"},
+		},
+		{
+			name: "plain ordered list emits no start",
+			in:   "1. a\n2. b",
+			want: []string{"<ol>", "<li>a</li>"},
+			deny: []string{"start="},
+		},
+		{
+			name: "atx heading keeps glued trailing hash",
+			in:   "# What is F#",
+			want: []string{"<h1>What is F#</h1>"},
+		},
+		{
+			name: "atx heading strips spaced closing sequence",
+			in:   "# Title ##",
+			want: []string{"<h1>Title</h1>"},
+		},
+		{
+			name: "atx heading of only hashes is empty",
+			in:   "# #",
+			want: []string{"<h1></h1>"},
+		},
+		{
 			name: "fenced code preserves content verbatim",
 			in:   "```\n  col1   col2\n  a      b\n```",
 			want: []string{"<pre><code>  col1   col2\n  a      b</code></pre>"},
@@ -126,6 +179,18 @@ func TestRenderInline(t *testing.T) {
 			in:   "go to https://example.com/page.",
 			want: []string{`<a href="https://example.com/page">https://example.com/page</a>`},
 			deny: []string{"page.</a>"},
+		},
+		{
+			name: "url in link text does not nest an anchor",
+			in:   "[see https://a.com](https://b.com)",
+			want: []string{`<a href="https://b.com">see https://a.com</a>`},
+			deny: []string{`href="https://a.com"`},
+		},
+		{
+			name: "unsafe-scheme degrade still autolinks a url in the label",
+			in:   "[go https://a.com now](javascript:alert(1))",
+			want: []string{`<a href="https://a.com">https://a.com</a>`},
+			deny: []string{`href="javascript`},
 		},
 		{
 			name: "html is escaped",

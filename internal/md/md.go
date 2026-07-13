@@ -74,7 +74,7 @@ func Render(src string, resolve func(target string) string) string {
 		// ATX heading.
 		if m := headingRe.FindStringSubmatch(line); m != nil {
 			level := len(m[1])
-			text := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(m[2]), "#"))
+			text := stripATXClosing(strings.TrimSpace(m[2]))
 			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", level, renderInline(text, resolve), level)
 			i++
 			continue
@@ -95,7 +95,15 @@ func Render(src string, resolve func(target string) string) string {
 			if isOrderedMarker(m[1]) {
 				tag = "ol"
 			}
-			fmt.Fprintf(&b, "<%s>\n", tag)
+			// An ordered list that begins past 1 (e.g. a blank-line-
+			// preceded "3. …" line) gets an explicit start so the first
+			// number survives; later items' markers are discarded either
+			// way, one-level lists being the documented degrade.
+			if start := strings.TrimSuffix(m[1], "."); tag == "ol" && start != "1" {
+				fmt.Fprintf(&b, "<ol start=%q>\n", start)
+			} else {
+				fmt.Fprintf(&b, "<%s>\n", tag)
+			}
 			for i < len(lines) {
 				im := listItemRe.FindStringSubmatch(lines[i])
 				if im == nil {
@@ -104,13 +112,16 @@ func Render(src string, resolve func(target string) string) string {
 				content := im[2]
 				i++
 				// Lazy continuation: an indented, non-blank line that
-				// isn't itself a list item belongs to this item (wrapped
-				// prose, common in the corpus). A nested "- sub" line
-				// matches listItemRe and so falls through to the outer
-				// loop as a sibling — the documented one-level collapse.
+				// can't itself interrupt a paragraph belongs to this item
+				// (wrapped prose, common in the corpus). A nested "- sub"
+				// or "1. sub" line can interrupt, so it falls through to
+				// the outer loop as a sibling — the documented one-level
+				// collapse. A wrapped line starting "2024. " can't
+				// interrupt (non-1 ordered marker), so it folds in and
+				// keeps its number rather than being torn off.
 				for i < len(lines) {
 					cl := lines[i]
-					if strings.TrimSpace(cl) == "" || listItemRe.MatchString(cl) {
+					if strings.TrimSpace(cl) == "" || canInterruptParagraph(cl) {
 						break
 					}
 					if !strings.HasPrefix(cl, " ") && !strings.HasPrefix(cl, "\t") {
@@ -159,10 +170,50 @@ func isBlockStart(line string) bool {
 	if isHR(trimmed) {
 		return true
 	}
-	if listItemRe.MatchString(line) {
+	if canInterruptParagraph(line) {
 		return true
 	}
 	return false
+}
+
+// canInterruptParagraph reports whether line starts a list item that may
+// interrupt a paragraph: it must have non-empty content, and an ordered
+// marker's number must be exactly 1. This is CommonMark's rule, and it
+// exists precisely so hard-wrapped prose ending "…released in\n2024. It
+// shipped." isn't torn into a paragraph plus a bogus one-item <ol> with
+// the number dropped. Bullets always qualify — in this corpus a wrapped
+// line starting "- " is essentially always an intended list.
+func canInterruptParagraph(line string) bool {
+	m := listItemRe.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	if strings.TrimSpace(m[2]) == "" {
+		return false
+	}
+	if isOrderedMarker(m[1]) {
+		return m[1] == "1."
+	}
+	return true
+}
+
+// stripATXClosing removes an ATX heading's optional closing '#' sequence.
+// CommonMark treats a trailing run of '#' as a closer only when it's
+// preceded by a space or tab, or is the whole text — so "# What is F#"
+// keeps its trailing '#' while "# Title ##" strips and "# #" empties.
+// The argument is expected already space-trimmed on both ends.
+func stripATXClosing(text string) string {
+	end := len(text)
+	for end > 0 && text[end-1] == '#' {
+		end--
+	}
+	if end == len(text) {
+		return text // no trailing '#' run
+	}
+	if end == 0 || text[end-1] == ' ' || text[end-1] == '\t' {
+		return strings.TrimRight(text[:end], " \t")
+	}
+	return text // '#' run is glued to a word (e.g. "F#"): keep it
 }
 
 // isHR reports whether a trimmed line is a horizontal rule: three or
@@ -191,6 +242,14 @@ func isOrderedMarker(marker string) bool {
 // returns escaped HTML. It scans left to right, handling the highest-
 // priority construct at each position and escaping anything else.
 func renderInline(s string, resolve func(string) string) string {
+	return renderInlineOpts(s, resolve, false)
+}
+
+// renderInlineOpts is renderInline with a noAutolink flag: when set,
+// bare-URL autolinking is suppressed and matched URLs fall through to
+// plain escaped text. It is set only inside anchor link text, where a
+// nested <a> would be invalid HTML.
+func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) string {
 	var b strings.Builder
 	i := 0
 	for i < len(s) {
@@ -230,14 +289,17 @@ func renderInline(s string, resolve func(string) string) string {
 					// Disallowed scheme (javascript:, data:, …): drop the
 					// anchor, keep the visible label as inert inline text —
 					// the renderer's usual "degrade to text" behaviour.
-					b.WriteString(renderInline(text, resolve))
+					// No enclosing <a> here, so autolinks stay live.
+					b.WriteString(renderInlineOpts(text, resolve, noAutolink))
 					i += n
 					continue
 				}
 				b.WriteString(`<a href="`)
 				b.WriteString(html.EscapeString(href))
 				b.WriteString(`">`)
-				b.WriteString(renderInline(text, resolve))
+				// Suppress autolinks in the label: a bare URL here would
+				// otherwise emit an <a> nested inside this one.
+				b.WriteString(renderInlineOpts(text, resolve, true))
 				b.WriteString("</a>")
 				i += n
 				continue
@@ -248,7 +310,7 @@ func renderInline(s string, resolve func(string) string) string {
 		if strings.HasPrefix(s[i:], "**") {
 			if inner, n, ok := matchDelim(s[i:], "**"); ok {
 				b.WriteString("<strong>")
-				b.WriteString(renderInline(inner, resolve))
+				b.WriteString(renderInlineOpts(inner, resolve, noAutolink))
 				b.WriteString("</strong>")
 				i += n
 				continue
@@ -259,15 +321,15 @@ func renderInline(s string, resolve func(string) string) string {
 		if s[i] == '*' {
 			if inner, n, ok := matchDelim(s[i:], "*"); ok {
 				b.WriteString("<em>")
-				b.WriteString(renderInline(inner, resolve))
+				b.WriteString(renderInlineOpts(inner, resolve, noAutolink))
 				b.WriteString("</em>")
 				i += n
 				continue
 			}
 		}
 
-		// Bare-URL autolink.
-		if hasURLPrefix(s[i:]) {
+		// Bare-URL autolink (suppressed inside anchor link text).
+		if !noAutolink && hasURLPrefix(s[i:]) {
 			url, n := scanURL(s[i:])
 			b.WriteString(`<a href="`)
 			b.WriteString(html.EscapeString(url))
