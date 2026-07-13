@@ -442,7 +442,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 // spawnAllowed gates the spawn bucket — the POST routes that run agent
 // subprocesses. In safe mode (the default) it writes a 403 and returns
 // false; with Insecure set it returns true and the handler proceeds.
-// The five spawn handlers call it first thing. The matching UI gating
+// The four spawn handlers call it first thing. The matching UI gating
 // (so safe mode never offers a route it would refuse) lives in the view
 // models, not here.
 func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
