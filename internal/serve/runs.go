@@ -71,7 +71,7 @@ type newRunVM struct {
 	// (echoed verbatim, not re-joined, so a malformed entry shows exactly
 	// as typed); Workspace/Agent/Workflow re-select the matching dropdown
 	// option. On GET, Workflow is pre-selected from the ?workflow= query
-	// param (the dash's `new plan` button passes ?workflow=pdlc).
+	// param when present; unknown or absent falls back to the default.
 	ID        string
 	Workspace string
 	Agent     string
@@ -101,8 +101,8 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "new-run form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Pre-select the workflow named in the query string (the dash's
-	// `new plan` button); unknown or absent falls back to the default.
+	// Pre-select the workflow named in the ?workflow= query string;
+	// unknown or absent falls back to the default.
 	if wf, ok := s.newRunWorkflow(r.URL.Query().Get("workflow")); ok {
 		vm.Workflow = wf.Name
 	}
@@ -216,9 +216,9 @@ type runVM struct {
 	RowNote string
 	RowWhen string
 	// NextStage is the run's bare next-stage name (row.Stage), or "" when
-	// there's no next stage / no row. The stage chips key off it: the
-	// cascade trio renders only when the next stage is spawnable, and
-	// the per-stage sitting chips mark it primary (see composeRunActions).
+	// there's no next stage / no row. The cascade trio keys off it,
+	// rendering only when the next stage is spawnable (see
+	// composeRunActions).
 	NextStage string
 	// Started / Status are the fallback meta line shown when the
 	// dash-row lookup didn't return a row. Started is empty on the
@@ -240,9 +240,6 @@ type runAction struct {
 	Label  string
 	Href   string
 	Method string
-	// Class is an extra CSS class on the rendered button (POST actions
-	// only); "" renders the plain "action" chip.
-	Class string
 }
 
 type canvasLink struct {
@@ -529,69 +526,6 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// handleStageSpawn opens one declared stage verb of a non-cascade
-// workflow as an interactive sitting: POST /run/{p}/{s}/stage/{stage}
-// spawns `moe <workflow> <stage> <id>` under the serve handshake and
-// the operator picks the session up in Claude Code on the web, same as
-// a design session. The pdlc chips (frame / prd / chunk) post here.
-//
-// Guards mirror spawnNextStage: declared spawnable stage verb,
-// in-progress run, no live child. No satisfaction check — pdlc stage
-// entry never gates, and re-entering prd/chunk forever is the
-// workflow's whole point. Unlike /advance there is no server-side
-// stage re-derivation: the operator named the sitting explicitly.
-func (s *Server) handleStageSpawn(w http.ResponseWriter, r *http.Request) {
-	if !s.spawnAllowed(w) {
-		return
-	}
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	stage := r.PathValue("stage")
-	id := projectID + "/" + slug
-
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("stage %s %s: load: %v", stage, id, err)
-		http.Error(w, "stage: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if s.opts.WorkflowUI == nil {
-		http.Error(w, "stage spawn not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
-		return
-	}
-	ui, ok := s.opts.WorkflowUI(md.Workflow)
-	if !ok || !slices.Contains(ui.Stages, stage) {
-		http.Error(w,
-			"workflow "+md.Workflow+" has no spawnable stage "+strconv.Quote(stage),
-			http.StatusConflict)
-		return
-	}
-	if md.Status != run.StatusInProgress {
-		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
-		return
-	}
-	if c, ok := s.children.get(id); ok {
-		if exited, _ := c.snapshot(); !exited {
-			http.Error(w,
-				"run "+id+" has a live agent mid-turn — wait for it to finish first",
-				http.StatusConflict)
-			return
-		}
-	}
-
-	args := []string{md.Workflow, stage, id}
-	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		s.logf("stage %s %s: spawn: %v", stage, id, err)
-		http.Error(w, "stage: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
-}
-
 // nextStage re-derives a run's bare next-stage name through the
 // GatherRunRow callback (the same lookup fillRunRow uses for the
 // dash-row meta). Returns "" when no callback is wired or the row
@@ -641,21 +575,19 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // reopen — idea has no stage verbs to derive). Every other workflow's
 // chips are composed from its registration-time serve declaration
 // (Options.WorkflowUI): cascade workflows (sdlc) get the "→ <stage>" /
-// "ship" / "chain" trio keyed off the re-derived next stage; the rest
-// (pdlc) get one sitting chip per declared stage verb, the next stage
-// styled primary. Workflows with a close pipeline get a close-run chip
-// when close is the routine idle-page next move; perpetual workflows
-// keep close off the idle page but still expose it while a child is
-// live. A workflow that declared nothing renders no chips — today's
-// read-only page.
+// "ship" / "chain" trio keyed off the re-derived next stage. Workflows
+// with a close pipeline get a close-run chip when close is the routine
+// idle-page next move; perpetual workflows keep close off the idle page
+// but still expose it while a child is live. A workflow that declared
+// nothing — or declared without cascade — renders no spawn chips: the
+// read-only page plus, where applicable, the close chip.
 //
 // nextStage is the bare next-stage name re-derived from the dash row;
 // live is true when an agent is mid-turn. Spawn chips drop while live
 // (spawning past a stage whose agent is still running would race it
 // for the sandbox clone). Close chips stay for non-perpetual
-// workflows, and for live perpetual pages where sitting chips are
-// suppressed; the close route's own live-child refusal guards the
-// click.
+// workflows, and for live perpetual pages; the close route's own
+// live-child refusal guards the click.
 func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	base := "/run/" + projectID + "/" + slug
 	if md.Workflow == dash.IdeaWorkflow {
@@ -683,34 +615,19 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		return nil
 	}
 	var out []runAction
-	// The stage chips (cascade trio, sitting verbs) all spawn an agent,
-	// so they render only in insecure mode. The close-run chip below is
-	// journal-only (CloseRun runs in-process, no spawn) and stays in safe
-	// mode.
-	if !live && s.opts.Insecure {
-		if ui.Cascade {
-			// A "" or excluded next stage (sdlc's push) yields no trio:
-			// push stays terminal/CLI-only — the bang vocabulary
-			// collapses there — so a run parked right before push shows
-			// only the close chip.
-			if slices.Contains(ui.Stages, nextStage) {
-				out = append(out,
-					runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
-					runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
-					runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
-			}
-		} else {
-			// Sitting chips render for every declared stage verb
-			// regardless of satisfaction — stage entry never gates for
-			// these workflows. The re-derived next stage (if any) is the
-			// primary-styled suggestion, not a gate.
-			for _, stage := range ui.Stages {
-				a := runAction{Label: stage, Href: base + "/stage/" + stage, Method: "POST"}
-				if stage == nextStage {
-					a.Class = "primary"
-				}
-				out = append(out, a)
-			}
+	// The cascade trio chips spawn an agent, so they render only in
+	// insecure mode. The close-run chip below is journal-only (CloseRun
+	// runs in-process, no spawn) and stays in safe mode.
+	if !live && s.opts.Insecure && ui.Cascade {
+		// A "" or excluded next stage (sdlc's push) yields no trio:
+		// push stays terminal/CLI-only — the bang vocabulary
+		// collapses there — so a run parked right before push shows
+		// only the close chip.
+		if slices.Contains(ui.Stages, nextStage) {
+			out = append(out,
+				runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
+				runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
+				runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
 		}
 	}
 	if ui.Close && (!ui.Perpetual || live) {
@@ -832,11 +749,11 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 // promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).
 // Workspaces is every named workspace this host knows about (cross-
 // project, mirroring /run/new); Agents includes "" for "use default";
-// Workflows mirrors the new-run form's destination selector (sdlc
-// default, pdlc the other entry today — `moe pdlc new --from-idea` is
-// the CLI face of the same move). ErrorBanner is populated on POST
-// validation failure so the re-render keeps the operator's correction
-// surface in one place.
+// Workflows mirrors the new-run form's destination selector (sdlc is
+// the only entry today; `moe sdlc new --from-idea` is the CLI face of
+// the same move). ErrorBanner is populated on POST validation failure
+// so the re-render keeps the operator's correction surface in one
+// place.
 type promoteVM struct {
 	Project     string
 	Slug        string

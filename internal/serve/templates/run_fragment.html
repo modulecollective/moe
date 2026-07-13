@@ -13,7 +13,7 @@
   <section class="actions">
     {{range .Actions}}
       {{if eq .Method "POST"}}
-      <form method="post" action="{{.Href}}" class="action-form"><button class="action{{if .Class}} {{.Class}}{{end}}" type="submit">{{.Label}}</button></form>
+      <form method="post" action="{{.Href}}" class="action-form"><button class="action" type="submit">{{.Label}}</button></form>
       {{else}}
       <a class="action" href="{{.Href}}">{{.Label}}</a>
       {{end}}

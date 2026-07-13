@@ -179,8 +179,7 @@ type Options struct {
 type WorkflowUI struct {
 	// Stages are the stage verbs serve may spawn for this workflow, in
 	// ladder order. For cascade workflows the run's next stage must be
-	// in this set for the advance trio to render/spawn; for the rest,
-	// each entry renders as a sitting chip POSTing /stage/{stage}.
+	// in this set for the advance trio to render/spawn.
 	Stages []string
 	// Cascade reports that the workflow's stage verbs accept --ship /
 	// --chain — the advance/ship/chain routes and chips apply.
@@ -333,11 +332,6 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
-	// Sitting spawn for non-cascade workflows (pdlc): POST a declared
-	// stage verb to open `moe <workflow> <stage> <id>` interactively —
-	// the operator picks the session up in Claude Code on the web, same
-	// as a design session.
-	s.router.HandleFunc("POST /run/{project}/{slug}/stage/{stage}", s.handleStageSpawn)
 	// Chore detail page + open action. A chore isn't a run, so it has
 	// its own /chore namespace; "open" mints a fresh run of the chore's
 	// configured workflow (the analog of promoting an idea).

@@ -1629,22 +1629,19 @@ func newServerWithDefaults(t *testing.T, opts Options) *Server {
 }
 
 // testNewRunWorkflows mirrors the production new-run list cli/serve.go
-// wires: sdlc first (the form default), pdlc the other entry.
+// wires: sdlc, the one workflow fronted in the form.
 var testNewRunWorkflows = []NewRunWorkflow{
 	{Name: "sdlc", FirstStage: "design", Workspace: true},
-	{Name: "pdlc", FirstStage: "frame"},
 }
 
 // testWorkflowUI mirrors the production declarations cli/serve.go wires
 // (the cli registry is unreachable from here — internal/cli imports
-// internal/serve): sdlc cascades with push excluded, pdlc fronts its
-// three sitting verbs, everything else is undeclared.
+// internal/serve): sdlc cascades with push excluded, everything else is
+// undeclared.
 func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	switch workflow {
 	case "sdlc":
 		return WorkflowUI{Stages: []string{"design", "code", "review", "test"}, Cascade: true, Close: true}, true
-	case "pdlc":
-		return WorkflowUI{Stages: []string{"frame", "prd", "chunk"}, Perpetual: true, Close: true}, true
 	}
 	return WorkflowUI{}, false
 }
@@ -1821,86 +1818,6 @@ func newGitServeRoot(t *testing.T) string {
 	return root
 }
 
-// TestPdlcPageRendersSittingChips: an in-progress pdlc run renders one
-// sitting chip per declared stage verb — all three, regardless of
-// satisfaction — each POSTing the generic /stage/{stage} route, with
-// the re-derived next stage styled primary. The close route still
-// exists, but perpetual workflows do not render close as the routine
-// next chip. None of the sdlc cascade chips leak in.
-func TestPdlcPageRendersSittingChips(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "big-goal", "pdlc")
-	now := time.Now().UTC()
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: root,
-		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
-			return dash.Row{Project: p, Run: slug, Note: "pdlc:chunk", Stage: "chunk",
-				Bucket: dash.BucketActiveRuns, When: now}, true, nil
-		},
-	})
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/big-goal", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`action="/run/alpha/big-goal/stage/frame"`,
-		`class="action" type="submit">frame</button>`,
-		`action="/run/alpha/big-goal/stage/prd"`,
-		`class="action" type="submit">prd</button>`,
-		`action="/run/alpha/big-goal/stage/chunk"`,
-		`class="action primary" type="submit">chunk</button>`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-	for _, banned := range []string{
-		`/run/alpha/big-goal/advance`,
-		`/run/alpha/big-goal/ship`,
-		`/run/alpha/big-goal/chain`,
-		`/run/alpha/big-goal/close`,
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("pdlc page must not render routine chip %q\n%s", banned, body)
-		}
-	}
-}
-
-// TestPdlcPageHidesSittingChipsForLiveChild: while an agent is
-// mid-turn the sitting chips drop — spawning a second sitting would
-// race the live one — but the close chip stays (the close route's own
-// live-child refusal guards the click), mirroring the sdlc page.
-func TestPdlcPageHidesSittingChipsForLiveChild(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "big-goal", "pdlc")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	live := &child{id: "alpha/big-goal", started: time.Now(), done: make(chan struct{})} // done open → live
-	s.children.all["alpha/big-goal"] = live
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/big-goal", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, banned := range []string{
-		`/run/alpha/big-goal/stage/frame`,
-		`/run/alpha/big-goal/stage/prd`,
-		`/run/alpha/big-goal/stage/chunk`,
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("live-child page must not render sitting chip %q\n%s", banned, body)
-		}
-	}
-	if !strings.Contains(body, `/run/alpha/big-goal/close`) {
-		t.Errorf("live-child page should still show the close chip\n%s", body)
-	}
-}
-
 // TestUndeclaredWorkflowPageRendersNoChips: a workflow with no serve
 // declaration (chat here) keeps today's read-only page — no spawn
 // chips, no close chip — even though the workflow has a CLI close.
@@ -1919,62 +1836,8 @@ func TestUndeclaredWorkflowPageRendersNoChips(t *testing.T) {
 	}
 }
 
-// TestStageSpawnRouteGuards: the /stage/{stage} route refuses an
-// undeclared stage verb (sdlc's push, or any verb on an undeclared
-// workflow), a non-in-progress run, and a live child — each without
-// spawning. A missing run 404s.
-func TestStageSpawnRouteGuards(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "big-goal", "pdlc")
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	seedRun(t, root, "alpha", "talk", "chat")
-	closedMD, err := run.Load(root, "alpha", "big-goal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	closedMD.ID = "done-goal"
-	closedMD.Status = run.StatusClosed
-	if err := run.Save(root, closedMD); err != nil {
-		t.Fatal(err)
-	}
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	for _, tc := range []struct {
-		path string
-		want int
-	}{
-		{"/run/ghost/ghost/stage/frame", http.StatusNotFound},
-		{"/run/alpha/fix-it/stage/push", http.StatusConflict},     // excluded stage verb
-		{"/run/alpha/talk/stage/chat", http.StatusConflict},       // undeclared workflow
-		{"/run/alpha/big-goal/stage/bogus", http.StatusConflict},  // unknown stage
-		{"/run/alpha/done-goal/stage/frame", http.StatusConflict}, // terminal run
-	} {
-		rr := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", tc.path, strings.NewReader("")))
-		if rr.Code != tc.want {
-			t.Errorf("%s: want %d, got %d body=%s", tc.path, tc.want, rr.Code, rr.Body.String())
-		}
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("guarded posts must not spawn; registry has %d", len(s.children.all))
-	}
-
-	// Live child: same 409, no second spawn.
-	live := &child{id: "alpha/big-goal", started: time.Now(), done: make(chan struct{})}
-	s.children.all["alpha/big-goal"] = live
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/big-goal/stage/prd", strings.NewReader("")))
-	if rr.Code != http.StatusConflict {
-		t.Errorf("live child: want 409, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if len(s.children.all) != 1 {
-		t.Errorf("live-child post must not spawn a second child; registry has %d", len(s.children.all))
-	}
-}
-
 // TestNewRunFormRendersWorkflowSelect: the form carries the workflow
-// selector with sdlc selected by default, and ?workflow=pdlc (the
-// dash's `new plan` button) flips the pre-selection.
+// selector with sdlc — the one fronted workflow — selected.
 func TestNewRunFormRendersWorkflowSelect(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
@@ -1989,25 +1852,15 @@ func TestNewRunFormRendersWorkflowSelect(t *testing.T) {
 	for _, want := range []string{
 		`<select name="workflow">`,
 		`<option value="sdlc" selected>sdlc</option>`,
-		`<option value="pdlc">pdlc</option>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-
-	rr = httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new?workflow=pdlc", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), `<option value="pdlc" selected>pdlc</option>`) {
-		t.Errorf("?workflow=pdlc should pre-select pdlc:\n%s", rr.Body.String())
-	}
 }
 
 // TestPromoteFormRendersWorkflowSelect: the promote page carries the
-// same destination selector, sdlc default.
+// same destination selector, sdlc selected.
 func TestPromoteFormRendersWorkflowSelect(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
@@ -2022,34 +1875,6 @@ func TestPromoteFormRendersWorkflowSelect(t *testing.T) {
 	for _, want := range []string{
 		`<select name="workflow">`,
 		`<option value="sdlc" selected>sdlc</option>`,
-		`<option value="pdlc">pdlc</option>`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-}
-
-// TestDashRendersNewPlanLink: the active-section header carries the
-// `new plan` chip next to `new run`, linking into the pre-selected
-// pdlc form.
-func TestDashRendersNewPlanLink(t *testing.T) {
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: t.TempDir(),
-		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
-			return nil, 0, 0, nil, nil
-		},
-	})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`<a class="section-action" href="/run/new">new run</a>`,
-		`<a class="section-action" href="/run/new?workflow=pdlc">new plan</a>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)

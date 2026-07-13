@@ -24,7 +24,6 @@ func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 		"/run/alpha/x/advance",
 		"/run/alpha/x/ship",
 		"/run/alpha/x/chain",
-		"/run/alpha/x/stage/code",
 		"/chore/alpha/x/open",
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -110,7 +109,7 @@ func TestSafeModeDashHidesSpawnLinks(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, banned := range []string{`href="/run/new"`, `href="/run/new?workflow=pdlc"`} {
+	for _, banned := range []string{`href="/run/new"`} {
 		if strings.Contains(body, banned) {
 			t.Errorf("safe-mode dash must not render %q\n%s", banned, body)
 		}
