@@ -180,7 +180,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// run is archived. Mirror today's "existing PR" idempotency.
 	switch md.Status {
 	case run.StatusMerged:
-		if sha := push.MergedSHA(root, md.ID); sha != "" {
+		if sha := push.MergedSHA(root, md.Project, md.ID); sha != "" {
 			moePrintf(stdout, "already merged at %s\n", git.ShortSHA(sha))
 		} else {
 			moePrintln(stdout, "already merged")

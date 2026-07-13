@@ -300,7 +300,7 @@ func verifyPromotedDestinationClosed(root, projectID, slug string) error {
 	if err != nil {
 		return fmt.Errorf("idea reopen: %w", err)
 	}
-	destValue := idx.PromotedTo[slug]
+	destValue := idx.PromotedTo[projectID+"/"+slug]
 	if destValue == "" {
 		return fmt.Errorf("%w: idea %s/%s is promoted but has no MoE-Promoted-To trailer on record; cannot resolve destination", ErrNotReopenableIdea, projectID, slug)
 	}

@@ -50,10 +50,14 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 
 	// Open-session liveness is best-effort: a session.List failure
 	// silently yields no markers, same as the CLI dash handler.
+	// Keyed by "<project>/<slug>" like the dash's other run maps —
+	// session records carry the project, and a bare-slug key would paint
+	// a live marker onto a same-slug run in another project.
 	sessionDocsByRun := make(map[string][]string)
 	if ss, err := session.List(root); err == nil {
 		for _, s := range ss {
-			sessionDocsByRun[s.Run] = append(sessionDocsByRun[s.Run], s.Doc)
+			key := s.Project + "/" + s.Run
+			sessionDocsByRun[key] = append(sessionDocsByRun[key], s.Doc)
 		}
 	}
 
@@ -85,7 +89,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 				dec.Stage = stages[len(stages)-1]
 			}
 		}
-		nextByRun[md.ID] = dec
+		nextByRun[md.Project+"/"+md.ID] = dec
 	}
 	var choreInputs []dash.ChoreInput
 	if filter.WorkflowFilter == "" {

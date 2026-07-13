@@ -282,7 +282,7 @@ func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[
 		key := md.Project + "/" + md.ID
 		itemByKey[key] = chainItem{
 			Key:  key,
-			When: idx.LastActivity[md.ID],
+			When: idx.LastActivity[key],
 			Anno: chainAnnotation(key, idx.ChainedChild, chainedFrom, byKey),
 		}
 	}

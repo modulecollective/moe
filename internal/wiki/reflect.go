@@ -304,7 +304,7 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 		default:
 			continue
 		}
-		when := idx.LastActivity[md.ID]
+		when := idx.LastActivity[md.Project+"/"+md.ID]
 		if when.IsZero() {
 			continue
 		}

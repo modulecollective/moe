@@ -700,12 +700,12 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 		mk("p", "x"), // orphan (11:00)
 	}
 	when := map[string]time.Time{
-		"a": base.Add(-6 * time.Hour),
-		"b": base.Add(-5 * time.Hour),
-		"c": base,
-		"d": base.Add(-7 * time.Hour),
-		"e": base.Add(-4 * time.Hour),
-		"x": base.Add(-3 * time.Hour),
+		"p/a": base.Add(-6 * time.Hour),
+		"p/b": base.Add(-5 * time.Hour),
+		"p/c": base,
+		"p/d": base.Add(-7 * time.Hour),
+		"p/e": base.Add(-4 * time.Hour),
+		"p/x": base.Add(-3 * time.Hour),
 	}
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c", "p/d": "p/e"}
 	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}
@@ -740,7 +740,7 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 	// The same inputs through the dash must yield the same ACTIVE order.
 	next := map[string]dash.NextDecision{}
 	for _, md := range mds {
-		next[md.ID] = dash.NextDecision{Stage: "code"}
+		next[md.Project+"/"+md.ID] = dash.NextDecision{Stage: "code"}
 	}
 	rows, err := dash.BuildRows(dash.Inputs{
 		Now:       base.Add(time.Hour),
@@ -782,12 +782,12 @@ func TestChainEditRoundTripIsNoOp(t *testing.T) {
 		mk("p", "x"), // orphan
 	}
 	when := map[string]time.Time{
-		"a": base.Add(-6 * time.Hour),
-		"b": base.Add(-5 * time.Hour),
-		"c": base,
-		"d": base.Add(-7 * time.Hour),
-		"e": base.Add(-4 * time.Hour),
-		"x": base.Add(-3 * time.Hour),
+		"p/a": base.Add(-6 * time.Hour),
+		"p/b": base.Add(-5 * time.Hour),
+		"p/c": base,
+		"p/d": base.Add(-7 * time.Hour),
+		"p/e": base.Add(-4 * time.Hour),
+		"p/x": base.Add(-3 * time.Hour),
 	}
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c", "p/d": "p/e"}
 	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}

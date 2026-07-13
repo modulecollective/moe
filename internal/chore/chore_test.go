@@ -110,7 +110,7 @@ func TestEvaluateDueFromTouchedAfterCompletion(t *testing.T) {
 	}}
 	idx := &run.JournalIndex{
 		LastActivity: map[string]time.Time{
-			"readme-refresh-2026-05-20": now.Add(-48 * time.Hour),
+			"moe/readme-refresh-2026-05-20": now.Add(-48 * time.Hour),
 		},
 		ChoreByRun: map[string]string{
 			"moe/readme-refresh-2026-05-20": "moe/readme-refresh",
@@ -140,7 +140,7 @@ func TestEvaluateCooldownBlocksDue(t *testing.T) {
 	}
 	mds := []*run.Metadata{{Project: "moe", ID: "readme-refresh-2026-05-28", Status: run.StatusMerged}}
 	idx := &run.JournalIndex{
-		LastActivity: map[string]time.Time{"readme-refresh-2026-05-28": now.Add(-time.Hour)},
+		LastActivity: map[string]time.Time{"moe/readme-refresh-2026-05-28": now.Add(-time.Hour)},
 		ChoreByRun:   map[string]string{"moe/readme-refresh-2026-05-28": "moe/readme-refresh"},
 		ChoreTouched: map[string]time.Time{"moe/readme-refresh": now},
 	}

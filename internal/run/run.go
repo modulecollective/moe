@@ -542,9 +542,9 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 		"log", "-1",
 		"--all-match",
 		"--grep", fmt.Sprintf("^work: update %s$", regexp.QuoteMeta(docID)),
-		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
-		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
-		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--grep", trailers.GrepPattern("MoE-Document", docID),
 		"--format=%H %ct",
 	)
 	if err != nil {
@@ -578,9 +578,9 @@ func LatestAdvanceSHA(root, projectID, runID, docID string) (sha string, when ti
 		"log", "-1",
 		"--all-match",
 		"--grep", fmt.Sprintf("^advance: %s$", regexp.QuoteMeta(docID)),
-		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
-		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
-		"--grep", fmt.Sprintf("MoE-Document: %s", docID),
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--grep", trailers.GrepPattern("MoE-Document", docID),
 		"--format=%H %ct",
 	)
 	if err != nil {
@@ -651,14 +651,24 @@ func Scan(root string) ([]*Metadata, error) {
 }
 
 // LastActivity returns the committer time of the most recent commit
-// carrying MoE-Run: <runID>, or the zero time if no such commit
-// exists (a run dir can exist without its opening commit being
-// reachable from HEAD, though that's unusual). Used by moe dash to sort
-// buckets and render each run's age ("60d ago").
-func LastActivity(root, runID string) (time.Time, error) {
+// carrying both MoE-Project: <projectID> and MoE-Run: <runID>, or the
+// zero time if no such commit exists (a run dir can exist without its
+// opening commit being reachable from HEAD, though that's unusual).
+// Slugs are only per-project unique, so the project leg is required to
+// keep two same-slug runs in different projects from reading each
+// other's age; the greps are anchored so a prefix-extending sibling
+// (`auth` vs `auth-2`) can't match either.
+//
+// No production caller today — the JournalIndex.LastActivity map serves
+// dash's sort/age path. This survives as the oracle
+// TestJournalIndexLastActivityMatchesLastActivity checks the index
+// against, so it has to key runs the same way the index now does.
+func LastActivity(root, projectID, runID string) (time.Time, error) {
 	out, err := git.Output(root,
 		"log", "-1",
-		"--grep", fmt.Sprintf("MoE-Run: %s", runID),
+		"--all-match",
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
 		"--format=%ct",
 	)
 	if err != nil {
@@ -681,26 +691,27 @@ func LastActivity(root, runID string) (time.Time, error) {
 // lookups instead of forking git per run, dropping dash's hot-path
 // invocation count from ~99 to ~3.
 //
-// LastActivity / PromotedTo / PRURL are keyed by run slug (MoE-Run
-// trailer value) and follow the same "first commit encountered wins"
-// rule LastActivity uses — HEAD-side topo order, not strictly newest
-// committer date. Missing slugs read as the zero value (zero time,
-// "") so callers don't need to branch on presence. WorkTurnTime is
-// keyed by (project, run, doc) — every consumer (Workflow.NextWithIndex,
-// stage-satisfaction walks) already knows the project, and the seam
-// has to be cross-project safe because slugs are per-project unique,
-// not per-bureaucracy.
+// LastActivity / PromotedTo / PRURL are keyed by "<project>/<slug>"
+// (slugs are only per-project unique, so a bare-slug key would collapse
+// two same-named runs in different projects) and follow the same "first
+// commit encountered wins" rule LastActivity uses — HEAD-side topo
+// order, not strictly newest committer date. Missing keys read as the
+// zero value (zero time, "") so callers don't need to branch on
+// presence. WorkTurnTime is keyed by (project, run, doc) — every
+// consumer (Workflow.NextWithIndex, stage-satisfaction walks) already
+// knows the project, and the seam has to be cross-project safe because
+// slugs are per-project unique, not per-bureaucracy.
 type JournalIndex struct {
-	// LastActivity maps run slug → committer time of the latest
-	// reachable commit carrying MoE-Run: <slug>. Same contract as
-	// LastActivity for any single slug.
+	// LastActivity maps "<project>/<slug>" → committer time of the
+	// latest reachable commit carrying MoE-Run: <slug> for that
+	// project. Same contract as the LastActivity func for any single run.
 	LastActivity map[string]time.Time
-	// PromotedTo maps run slug → MoE-Promoted-To trailer value
-	// (`<project>/<runID>`) recorded on the most recent commit
-	// scoped to the slug. Replaces a per-row trailerValue fork.
+	// PromotedTo maps "<project>/<slug>" → MoE-Promoted-To trailer
+	// value (`<project>/<runID>`) recorded on the most recent commit
+	// scoped to the run. Replaces a per-row trailerValue fork.
 	PromotedTo map[string]string
-	// PRURL maps run slug → MoE-PR trailer value recorded on the
-	// most recent commit scoped to the slug. Replaces a per-row
+	// PRURL maps "<project>/<slug>" → MoE-PR trailer value recorded on
+	// the most recent commit scoped to the run. Replaces a per-row
 	// trailerValue fork.
 	PRURL map[string]string
 	// WorkTurnTime maps (project, run, doc) → committer time of the
@@ -714,15 +725,17 @@ type JournalIndex struct {
 	// scan and read by stageSatisfied's advance check, so dash's
 	// index path agrees with the per-call LatestAdvanceSHA fork.
 	AdvanceTime map[WorkTurnKey]time.Time
-	// ReopenedFrom maps new run slug → prior run slug, populated from
-	// the MoE-Reopen-Of trailer carried on a reopened run's open
-	// commit. Parallel in shape to PromotedTo, but read in the
-	// opposite direction: PromotedTo is keyed by the source run
-	// (whose commit carries the trailer at status-bump time);
-	// ReopenedFrom is keyed by the destination run (whose open
-	// commit carries the trailer). Dash uses the value set to
-	// recognise prior runs that have *not* been reopened yet — those
-	// are the candidates the closed bucket marks.
+	// ReopenedFrom maps "<project>/<new-slug>" → prior run slug (bare),
+	// populated from the MoE-Reopen-Of trailer carried on a reopened
+	// run's open commit. The key is qualified like PromotedTo; the value
+	// stays a bare slug because reopens are same-project by construction
+	// and every consumer walk carries the project to re-qualify it.
+	// Parallel in shape to PromotedTo, but read in the opposite
+	// direction: PromotedTo is keyed by the source run (whose commit
+	// carries the trailer at status-bump time); ReopenedFrom is keyed by
+	// the destination run (whose open commit carries the trailer). Dash
+	// uses the value set to recognise prior runs that have *not* been
+	// reopened yet — those are the candidates the closed bucket marks.
 	ReopenedFrom map[string]string
 	// ChainedChild maps "<project>/<slug>" of a parent run to
 	// "<project>/<slug>" of its currently-live chained child, or
@@ -1107,22 +1120,33 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			byDay[day] = set
 		}
 		set[slug] = struct{}{}
-		if _, ok := idx.LastActivity[slug]; !ok {
-			idx.LastActivity[slug] = time.Unix(epoch, 0).UTC()
+		// Slugs are only per-project unique, so these run-scoped maps key
+		// by "<project>/<slug>" — the same qualified key dash looks runs up
+		// by. A commit missing its MoE-Project trailer (a since-fixed
+		// late-May writer bug left a handful) keys under "/<slug>" and is
+		// invisible to consumers, which always query with a real project;
+		// worst case is a slightly stale age on those runs. No bare-slug
+		// fallback — that would reintroduce the cross-project ambiguity.
+		runKey := projectID + "/" + slug
+		if _, ok := idx.LastActivity[runKey]; !ok {
+			idx.LastActivity[runKey] = time.Unix(epoch, 0).UTC()
 		}
 		if promotedTo != "" {
-			if _, ok := idx.PromotedTo[slug]; !ok {
-				idx.PromotedTo[slug] = promotedTo
+			if _, ok := idx.PromotedTo[runKey]; !ok {
+				idx.PromotedTo[runKey] = promotedTo
 			}
 		}
 		if prURL != "" {
-			if _, ok := idx.PRURL[slug]; !ok {
-				idx.PRURL[slug] = prURL
+			if _, ok := idx.PRURL[runKey]; !ok {
+				idx.PRURL[runKey] = prURL
 			}
 		}
 		if reopenOf != "" {
-			if _, ok := idx.ReopenedFrom[slug]; !ok {
-				idx.ReopenedFrom[slug] = reopenOf
+			// Key qualified like the rest; the value stays a bare slug —
+			// reopens are same-project by construction, and every consumer
+			// walk carries the project to re-qualify it.
+			if _, ok := idx.ReopenedFrom[runKey]; !ok {
+				idx.ReopenedFrom[runKey] = reopenOf
 			}
 		}
 		if chore != "" && projectID != "" {
@@ -1284,8 +1308,8 @@ func SlugTaken(root, projectID, slug string) (bool, error) {
 	out, err := git.Output(root,
 		"log", "-1",
 		"--all-match",
-		"--grep", fmt.Sprintf("MoE-Project: %s", projectID),
-		"--grep", fmt.Sprintf("MoE-Run: %s", slug),
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", slug),
 		"--format=%H",
 	)
 	if err != nil {

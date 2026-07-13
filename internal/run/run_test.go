@@ -362,11 +362,13 @@ func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 	}
 	// Two slugs, multiple commits each, including a backdated commit on
 	// HEAD — that's the case `git log -1 --grep` resolves topologically
-	// rather than by committer date, and the index has to agree.
-	commitWith("Open run x/alpha", "MoE-Run: alpha\n", time.Time{})
-	commitWith("Open run x/beta", "MoE-Run: beta\n", time.Time{})
-	commitWith("work on alpha", "MoE-Run: alpha\n", time.Now().Add(-2*time.Hour))
-	commitWith("work on beta backdated", "MoE-Run: beta\n",
+	// rather than by committer date, and the index has to agree. Both
+	// carry MoE-Project so the index and the oracle key runs the same
+	// qualified way.
+	commitWith("Open run x/alpha", "MoE-Project: x\nMoE-Run: alpha\n", time.Time{})
+	commitWith("Open run x/beta", "MoE-Project: x\nMoE-Run: beta\n", time.Time{})
+	commitWith("work on alpha", "MoE-Project: x\nMoE-Run: alpha\n", time.Now().Add(-2*time.Hour))
+	commitWith("work on beta backdated", "MoE-Project: x\nMoE-Run: beta\n",
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 
 	idx, err := BuildJournalIndex(root)
@@ -374,17 +376,18 @@ func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
 	for _, slug := range []string{"alpha", "beta"} {
-		want, err := LastActivity(root, slug)
+		want, err := LastActivity(root, "x", slug)
 		if err != nil {
 			t.Fatalf("LastActivity %q: %v", slug, err)
 		}
-		if !idx.LastActivity[slug].Equal(want) {
-			t.Errorf("slug %q: index=%v LastActivity=%v", slug, idx.LastActivity[slug], want)
+		key := "x/" + slug
+		if !idx.LastActivity[key].Equal(want) {
+			t.Errorf("slug %q: index=%v LastActivity=%v", slug, idx.LastActivity[key], want)
 		}
 	}
-	// Slugs not present in any commit are absent (zero time on lookup).
-	if v, ok := idx.LastActivity["never"]; ok {
-		t.Errorf("expected unknown slug to be absent, got %v", v)
+	// Runs not present in any commit are absent (zero time on lookup).
+	if v, ok := idx.LastActivity["x/never"]; ok {
+		t.Errorf("expected unknown run to be absent, got %v", v)
 	}
 }
 
@@ -489,22 +492,22 @@ func TestJournalIndexCapturesPromotedToAndPRURL(t *testing.T) {
 		"MoE-Run: idea-x\nMoE-Project: p\nMoE-Workflow: idea\nMoE-Promoted-To: p/run-y\n")
 	// run pushed; the push commit carries MoE-PR alongside MoE-Run.
 	commitWith("push: shipped",
-		"MoE-Run: run-y\nMoE-PR: https://example.com/pr/42\n")
+		"MoE-Run: run-y\nMoE-Project: p\nMoE-PR: https://example.com/pr/42\n")
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
-	if got := idx.PromotedTo["idea-x"]; got != "p/run-y" {
-		t.Errorf("PromotedTo[idea-x] = %q, want %q", got, "p/run-y")
+	if got := idx.PromotedTo["p/idea-x"]; got != "p/run-y" {
+		t.Errorf("PromotedTo[p/idea-x] = %q, want %q", got, "p/run-y")
 	}
-	if got := idx.PRURL["run-y"]; got != "https://example.com/pr/42" {
-		t.Errorf("PRURL[run-y] = %q, want %q", got, "https://example.com/pr/42")
+	if got := idx.PRURL["p/run-y"]; got != "https://example.com/pr/42" {
+		t.Errorf("PRURL[p/run-y] = %q, want %q", got, "https://example.com/pr/42")
 	}
-	// Unrelated slugs read as the zero value, so callers don't need
+	// Unrelated runs read as the zero value, so callers don't need
 	// presence checks.
-	if got := idx.PromotedTo["never"]; got != "" {
-		t.Errorf("PromotedTo[never] = %q, want \"\"", got)
+	if got := idx.PromotedTo["p/never"]; got != "" {
+		t.Errorf("PromotedTo[p/never] = %q, want \"\"", got)
 	}
 }
 
@@ -662,15 +665,15 @@ func TestJournalIndexPicksMostRecentTrailerValue(t *testing.T) {
 		t.Helper()
 		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
-	commitWith("push: first attempt", "MoE-Run: r\nMoE-PR: https://example.com/pr/1\n")
-	commitWith("push: re-pushed after close", "MoE-Run: r\nMoE-PR: https://example.com/pr/2\n")
+	commitWith("push: first attempt", "MoE-Run: r\nMoE-Project: p\nMoE-PR: https://example.com/pr/1\n")
+	commitWith("push: re-pushed after close", "MoE-Run: r\nMoE-Project: p\nMoE-PR: https://example.com/pr/2\n")
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
-	if got := idx.PRURL["r"]; got != "https://example.com/pr/2" {
-		t.Errorf("PRURL[r] = %q, want %q (most recent wins)", got, "https://example.com/pr/2")
+	if got := idx.PRURL["p/r"]; got != "https://example.com/pr/2" {
+		t.Errorf("PRURL[p/r] = %q, want %q (most recent wins)", got, "https://example.com/pr/2")
 	}
 }
 
@@ -697,11 +700,102 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
-	if got := idx.ReopenedFrom["run-new"]; got != "run-old" {
-		t.Errorf("ReopenedFrom[run-new] = %q, want %q", got, "run-old")
+	// Key is qualified "<project>/<new-slug>"; the value stays a bare slug.
+	if got := idx.ReopenedFrom["p/run-new"]; got != "run-old" {
+		t.Errorf("ReopenedFrom[p/run-new] = %q, want %q", got, "run-old")
 	}
-	if _, ok := idx.ReopenedFrom["loose"]; ok {
-		t.Errorf("ReopenedFrom[loose] should be absent for a run without the trailer")
+	if _, ok := idx.ReopenedFrom["p/loose"]; ok {
+		t.Errorf("ReopenedFrom[p/loose] should be absent for a run without the trailer")
+	}
+}
+
+// TestSlugTakenIgnoresPrefixAndCrossProjectSiblings: the anchored,
+// project-scoped grep means `auth` is free when only `auth-2` (same
+// project) or `auth` in another project carries history — no run dir,
+// no exact same-project trailer. The old unanchored grep reported `auth`
+// taken off `auth-2`'s history, walking NextFreeID further than needed
+// and refusing valid slugs.
+func TestSlugTakenIgnoresPrefixAndCrossProjectSiblings(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(body string) {
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", "open\n\n"+body)
+	}
+	// Prefix-extending sibling in the same project, and the same slug in
+	// another project — neither should make alpha/auth "taken".
+	commit("MoE-Project: alpha\nMoE-Run: auth-2\n")
+	commit("MoE-Project: beta\nMoE-Run: auth\n")
+
+	taken, err := SlugTaken(root, "alpha", "auth")
+	if err != nil {
+		t.Fatalf("SlugTaken: %v", err)
+	}
+	if taken {
+		t.Error("SlugTaken(alpha, auth) = true; want false (only auth-2 and beta/auth have history)")
+	}
+	// The exact same-project run is still reported taken.
+	if taken, err := SlugTaken(root, "alpha", "auth-2"); err != nil || !taken {
+		t.Errorf("SlugTaken(alpha, auth-2) = (%v, %v); want (true, nil)", taken, err)
+	}
+}
+
+// TestLatestWorkTurnSHAIgnoresPrefixSibling: a work turn on `auth-2`
+// must not satisfy `auth`'s stage lookup — the anchored MoE-Run grep
+// keeps the prefix sibling out, so a run with no work turn reads zero.
+func TestLatestWorkTurnSHAIgnoresPrefixSibling(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"work: update design\n\nMoE-Project: alpha\nMoE-Run: auth-2\nMoE-Workflow: sdlc\nMoE-Document: design\n")
+
+	sha, when, err := LatestWorkTurnSHA(root, "alpha", "auth", "design")
+	if err != nil {
+		t.Fatalf("LatestWorkTurnSHA: %v", err)
+	}
+	if sha != "" || !when.IsZero() {
+		t.Errorf("LatestWorkTurnSHA(alpha, auth, design) = (%q, %v); want empty (auth-2's turn must not leak)", sha, when)
+	}
+}
+
+// TestJournalIndexCrossProjectSameSlugDistinct: two runs sharing a slug
+// in different projects get their own qualified index entries — a
+// bare-slug key would have collapsed them, letting one project's PR /
+// promotion / age read for the other's run.
+func TestJournalIndexCrossProjectSameSlugDistinct(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string, when time.Time) {
+		stamp := when.Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{
+			"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp,
+		}, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	tA := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	tB := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	// alpha/shared: a promoted idea with a PR. beta/shared: a plain run,
+	// active a month later.
+	commit("push: alpha shared",
+		"MoE-Project: alpha\nMoE-Run: shared\nMoE-PR: https://example.com/pr/alpha\nMoE-Promoted-To: alpha/impl\n", tA)
+	commit("work: update code",
+		"MoE-Project: beta\nMoE-Run: shared\nMoE-Workflow: sdlc\nMoE-Document: code\n", tB)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.LastActivity["alpha/shared"]; !got.Equal(tA) {
+		t.Errorf("LastActivity[alpha/shared] = %v, want %v", got, tA)
+	}
+	if got := idx.LastActivity["beta/shared"]; !got.Equal(tB) {
+		t.Errorf("LastActivity[beta/shared] = %v, want %v", got, tB)
+	}
+	if got := idx.PromotedTo["alpha/shared"]; got != "alpha/impl" {
+		t.Errorf("PromotedTo[alpha/shared] = %q, want alpha/impl", got)
+	}
+	// beta/shared carries no promotion — its entry must stay empty, not
+	// borrow alpha's.
+	if got := idx.PromotedTo["beta/shared"]; got != "" {
+		t.Errorf("PromotedTo[beta/shared] = %q, want empty", got)
+	}
+	if got := idx.PRURL["beta/shared"]; got != "" {
+		t.Errorf("PRURL[beta/shared] = %q, want empty (alpha's PR must not leak)", got)
 	}
 }
 

@@ -251,9 +251,18 @@ func TestSDLCReopenRefusesNonSDLC(t *testing.T) {
 // `-YYYY-MM-DD` suffix lands the new run on `<base>-<today>` rather
 // than stacking dates. Mirrors the design's "Slug naturally lands as
 // <base>-YYYY-MM-DD" clause.
+//
+// The base run `search` is seeded alongside the dated one on purpose: a
+// `search-2025-12-01` slug is only ever minted when base `search` was
+// already taken, and runs aren't deleted, so the base dir persists. With
+// it present, run.New's dated-collision path fires off the stripped base
+// (`os.Stat` on the dir reports taken) — the same real-lifecycle state
+// the old unanchored SlugTaken used to fake via a prefix match on the
+// dated slug's own history.
 func TestSDLCReopenStripsDatedSuffix(t *testing.T) {
 	const design = "# Original\n"
-	_ = seedClosedSDLCRun(t, "tele", "search-2025-12-01", design)
+	root := seedClosedSDLCRun(t, "tele", "search-2025-12-01", design)
+	trailerstest.SeedRun(t, root, "tele", "search", "sdlc", run.StatusClosed)
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer

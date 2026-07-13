@@ -28,6 +28,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // RebaseConflictError carries the failed rebase's diagnostic context
@@ -390,18 +391,29 @@ func CreatePR(repo, head, base, title, bodyFile string, stderr io.Writer) (strin
 }
 
 // MergedSHA returns the merge SHA recorded in the most recent
-// MoE-Merged trailer for runID, or "" if none has been recorded.
-func MergedSHA(root, runID string) string {
-	return TrailerValue(root, runID, "MoE-Merged")
+// MoE-Merged trailer for the run, or "" if none has been recorded.
+func MergedSHA(root, projectID, runID string) string {
+	return TrailerValue(root, projectID, runID, "MoE-Merged")
 }
 
 // TrailerValue pulls the value from the most recent `<trailer>:` line
-// in any commit that also carries `MoE-Run: <runID>`. Returns "" when
-// no such commit exists.
-func TrailerValue(root, runID, trailer string) string {
+// in any commit scoped to the run identified by (projectID, runID).
+// Returns "" when no such commit exists.
+//
+// This is the branch-deleting path — reconcileOnePushedRun reads MoE-PR
+// then MoE-Merged through here, and a wrong read can flip a still-open
+// run to merged and delete its remote branch. So it is doubly guarded:
+// the greps are anchored and project-scoped (a prefix-extending sibling
+// like `auth-2`, or the same slug in another project, can't match), and
+// because the bodies are already in hand each record is re-parsed and
+// its exact MoE-Run / MoE-Project trailers checked before the requested
+// value is extracted — the same belt choreTouchedByPush wears, which
+// also rejects a commit that merely quotes another run's trailer line.
+func TrailerValue(root, projectID, runID, trailer string) string {
 	out, err := git.Output(root, "log",
 		"--all-match",
-		"--grep", "MoE-Run: "+runID,
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailer+":",
 		"--format=%B", "-z",
 	)
@@ -410,11 +422,28 @@ func TrailerValue(root, runID, trailer string) string {
 	}
 	prefix := trailer + ":"
 	for _, body := range strings.Split(out, "\x00") {
+		// Re-verify identity from the body before trusting the record —
+		// grep anchoring narrows the candidate set, this makes the match
+		// exact.
+		var gotRun, gotProject, value string
+		haveValue := false
 		for _, line := range strings.Split(body, "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, prefix) {
-				return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok && gotRun == "" {
+				gotRun = strings.TrimSpace(v)
+				continue
 			}
+			if v, ok := strings.CutPrefix(line, "MoE-Project:"); ok && gotProject == "" {
+				gotProject = strings.TrimSpace(v)
+				continue
+			}
+			if !haveValue && strings.HasPrefix(line, prefix) {
+				value = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+				haveValue = true
+			}
+		}
+		if gotRun == runID && gotProject == projectID && haveValue {
+			return value
 		}
 	}
 	return ""

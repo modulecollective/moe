@@ -183,6 +183,44 @@ func TestDefaultAdvanced(t *testing.T) {
 	}
 }
 
+// TestTrailerValueAnchorsAndScopesRun is the branch-deleting site's
+// regression: TrailerValue must return only the value scoped to the
+// exact (project, run) asked for, never a prefix-extending sibling's
+// (`auth` vs `auth-2`), a same-slug run in another project's, or one a
+// commit merely quotes in its body. reconcileOnePushedRun reads MoE-PR
+// and MoE-Merged through here; a wrong read flips a still-open run to
+// merged and deletes its remote branch.
+func TestTrailerValueAnchorsAndScopesRun(t *testing.T) {
+	gittest.SetupEnv(t)
+	root := gittest.Init(t)
+	commit := func(subject, body string) {
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	// Prefix-extending sibling in the same project: auth vs auth-2.
+	commit("push: auth", "MoE-Run: auth\nMoE-Project: alpha\nMoE-PR: https://example.com/pr/auth")
+	commit("push: auth-2", "MoE-Run: auth-2\nMoE-Project: alpha\nMoE-PR: https://example.com/pr/auth-2")
+	// Same slug in a different project.
+	commit("push: auth (beta)", "MoE-Run: auth\nMoE-Project: beta\nMoE-PR: https://example.com/pr/beta-auth")
+	// A commit for another run that merely quotes auth's trailer at line
+	// start further down its body — the grep matches, the exact re-check
+	// rejects it (first MoE-Run is `noise`, not `auth`).
+	commit("push: noise quotes auth", "MoE-Run: noise\nMoE-Project: alpha\nMoE-PR: https://example.com/pr/noise\nMoE-Run: auth")
+
+	cases := []struct {
+		project, run, want string
+	}{
+		{"alpha", "auth", "https://example.com/pr/auth"},
+		{"alpha", "auth-2", "https://example.com/pr/auth-2"},
+		{"beta", "auth", "https://example.com/pr/beta-auth"},
+		{"alpha", "ghost", ""}, // no such run
+	}
+	for _, tc := range cases {
+		if got := TrailerValue(root, tc.project, tc.run, "MoE-PR"); got != tc.want {
+			t.Errorf("TrailerValue(%s, %s) = %q, want %q", tc.project, tc.run, got, tc.want)
+		}
+	}
+}
+
 // TestFilterSandboxBindMountsKeepsRegularFiles: the steady-state case.
 // Every entry is a normal file; the filter returns the slice unchanged
 // so a real uncommitted edit still gates the push.

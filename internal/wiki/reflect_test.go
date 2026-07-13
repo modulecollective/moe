@@ -327,13 +327,14 @@ func TestEventsSinceCheckpointClosedRunsKeyOnGitHistory(t *testing.T) {
 	}
 }
 
-// commitWithRunTrailer creates an empty bureaucracy commit carrying a
-// MoE-Run trailer for runID, dated when (RFC3339). The trailer is what
-// run.LastActivityMap keys on, so reflect tests use this to give a run
-// a real activity time without writing files.
+// commitWithRunTrailer creates an empty bureaucracy commit carrying
+// MoE-Project and MoE-Run trailers for a run in project "p", dated when
+// (RFC3339). The qualified "<project>/<slug>" identity is what the
+// journal index keys LastActivity on, so both trailers are needed for a
+// run to get a real activity time without writing files.
 func commitWithRunTrailer(t *testing.T, root, subject, runID, when string) {
 	t.Helper()
-	msg := subject + "\n\nMoE-Run: " + runID + "\n"
+	msg := subject + "\n\nMoE-Project: p\nMoE-Run: " + runID + "\n"
 	gittest.RunWithEnv(t, root, []string{
 		"GIT_AUTHOR_DATE=" + when,
 		"GIT_COMMITTER_DATE=" + when,

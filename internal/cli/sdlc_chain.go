@@ -34,19 +34,20 @@ type chainedDescendant struct {
 // (sdlc → sdlc) trailers. Returns descendants sorted by last journal
 // activity, most-recent first.
 //
-// Walk is breadth-first over two index maps:
+// Walk is breadth-first over two index maps, both now keyed by the
+// qualified "<project>/<slug>" run identity:
 //
-//   - PromotedTo[X] = "<dest-project>/<dest-slug>" — set on an idea's
-//     promote commit. Idea promotion stays in the same project, so
-//     the dest-project field is informational; we still parse it and
-//     drop entries whose project doesn't match projectID, in case a
-//     future promote variant crosses projects.
-//   - ReopenedFrom[K] = priorSlug — set on a reopen's open commit.
-//     Reopens stay in the same project; the index doesn't carry K's
-//     project, so cross-project slug collisions could in principle
-//     leak through. resolveSDLCRunSlug verifies each candidate via
-//     run.Load(projectID, slug) before offering it, so a phantom
-//     descendant gets dropped by the existence check downstream.
+//   - PromotedTo["<project>/<slug>"] = "<dest-project>/<dest-slug>" —
+//     set on an idea's promote commit. Idea promotion stays in the same
+//     project, so the dest-project field is informational; we still
+//     parse it and drop entries whose project doesn't match projectID,
+//     in case a future promote variant crosses projects.
+//   - ReopenedFrom["<project>/<new-slug>"] = priorSlug — set on a
+//     reopen's open commit. The qualified key lets us drop any entry
+//     whose project doesn't match projectID here, so a cross-project
+//     slug collision can no longer surface a phantom descendant.
+//     (resolveSDLCRunSlug still run.Loads each candidate before offering
+//     it — the belt behind this suspenders.)
 //
 // Cycles in PromotedTo+ReopenedFrom would be a journal-shape bug
 // (promote and reopen are linear, descendant-only operations), but
@@ -55,6 +56,7 @@ func findChainedDescendants(idx *run.JournalIndex, projectID, typedSlug string) 
 	if idx == nil {
 		return nil
 	}
+	// cur ranges over bare slugs within projectID; qualify at each lookup.
 	seen := map[string]bool{typedSlug: true}
 	queue := []string{typedSlug}
 	var out []chainedDescendant
@@ -62,19 +64,20 @@ func findChainedDescendants(idx *run.JournalIndex, projectID, typedSlug string) 
 		cur := queue[0]
 		queue = queue[1:]
 
-		if pt, ok := idx.PromotedTo[cur]; ok {
+		if pt, ok := idx.PromotedTo[projectID+"/"+cur]; ok {
 			if proj, slug, parsed := splitPromotedTo(pt); parsed && proj == projectID && !seen[slug] {
 				seen[slug] = true
-				out = append(out, chainedDescendant{slug: slug, lastActivity: idx.LastActivity[slug]})
+				out = append(out, chainedDescendant{slug: slug, lastActivity: idx.LastActivity[projectID+"/"+slug]})
 				queue = append(queue, slug)
 			}
 		}
-		for child, prior := range idx.ReopenedFrom {
-			if prior != cur || seen[child] {
+		for childKey, prior := range idx.ReopenedFrom {
+			proj, child, ok := splitPromotedTo(childKey)
+			if !ok || proj != projectID || prior != cur || seen[child] {
 				continue
 			}
 			seen[child] = true
-			out = append(out, chainedDescendant{slug: child, lastActivity: idx.LastActivity[child]})
+			out = append(out, chainedDescendant{slug: child, lastActivity: idx.LastActivity[childKey]})
 			queue = append(queue, child)
 		}
 	}
@@ -84,10 +87,11 @@ func findChainedDescendants(idx *run.JournalIndex, projectID, typedSlug string) 
 	return out
 }
 
-// splitPromotedTo parses a MoE-Promoted-To trailer value (the wire
-// shape is `<project>/<run-id>`). Returns parsed=false for any value
-// that does not contain exactly one `/`, since today's writer
-// (markIdeaPromoted) emits that shape and a malformed value isn't
+// splitPromotedTo parses a `<project>/<run-id>` pair into its halves.
+// It fits both a MoE-Promoted-To trailer value (what markIdeaPromoted
+// emits) and a qualified JournalIndex run key (how ReopenedFrom is
+// keyed), which share that wire shape. Returns parsed=false for any
+// value that does not contain exactly one `/` — a malformed value isn't
 // worth guessing at.
 func splitPromotedTo(v string) (project, slug string, parsed bool) {
 	i := strings.IndexByte(v, '/')

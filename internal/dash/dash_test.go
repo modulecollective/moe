@@ -10,17 +10,24 @@ import (
 )
 
 // buildActive runs BuildRows over the given runs and returns the ACTIVE
-// rows in their final (grouped) order. when is keyed by run slug;
+// rows in their final (grouped) order. when is keyed by bare run slug
+// (callers here are all in one project) and re-qualified to
+// "<project>/<slug>" internally, matching the keys BuildRows now uses;
 // chained is the ChainedChild edge map keyed by "<project>/<slug>".
 func buildActive(t *testing.T, runs []*run.Metadata, when map[string]time.Time, chained map[string]string) []Row {
 	t.Helper()
 	next := make(map[string]NextDecision)
+	qWhen := make(map[string]time.Time, len(when))
 	for _, md := range runs {
+		key := md.Project + "/" + md.ID
 		if md.Status == run.StatusInProgress && md.Workflow != IdeaWorkflow {
-			next[md.ID] = NextDecision{Stage: "code"}
+			next[key] = NextDecision{Stage: "code"}
+		}
+		if w, ok := when[md.ID]; ok {
+			qWhen[key] = w
 		}
 	}
-	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}
+	idx := &run.JournalIndex{LastActivity: qWhen, ChainedChild: chained}
 	rows, err := BuildRows(Inputs{Now: time.Now().UTC(), Runs: runs, Index: idx, NextByRun: next})
 	if err != nil {
 		t.Fatalf("BuildRows: %v", err)
@@ -237,14 +244,27 @@ func TestChainHintChildMissingFromDisk(t *testing.T) {
 // rowsByKey runs BuildRows and returns the rows keyed by
 // "<project>/<run>" so a test can assert one run's bucket and note
 // without depending on section order.
+// next and sessionDocs are keyed by bare slug for callsite brevity and
+// re-qualified to "<project>/<slug>" here to match BuildRows' keys.
 func rowsByKey(t *testing.T, runs []*run.Metadata, next map[string]NextDecision, sessionDocs map[string][]string) map[string]Row {
 	t.Helper()
+	qNext := make(map[string]NextDecision, len(next))
+	qSession := make(map[string][]string, len(sessionDocs))
+	for _, md := range runs {
+		key := md.Project + "/" + md.ID
+		if dec, ok := next[md.ID]; ok {
+			qNext[key] = dec
+		}
+		if docs, ok := sessionDocs[md.ID]; ok {
+			qSession[key] = docs
+		}
+	}
 	rows, err := BuildRows(Inputs{
 		Now:              time.Now().UTC(),
 		Runs:             runs,
 		Index:            &run.JournalIndex{},
-		NextByRun:        next,
-		SessionDocsByRun: sessionDocs,
+		NextByRun:        qNext,
+		SessionDocsByRun: qSession,
 	})
 	if err != nil {
 		t.Fatalf("BuildRows: %v", err)
@@ -319,6 +339,51 @@ func TestPerpetualDoneRendersRepeatableStageNotCloseNag(t *testing.T) {
 	}
 	if r.Stage != "chunk" {
 		t.Fatalf("stage=%q want chunk", r.Stage)
+	}
+}
+
+// TestCrossProjectSameSlugRowsDontBleed: two in-progress runs sharing a
+// slug in different projects must each render their own next-stage note,
+// live marker, and age — the qualified "<project>/<slug>" keying is what
+// keeps one row from painting the other's state. A bare-slug key would
+// collapse the NextByRun / SessionDocsByRun / LastActivity lookups.
+func TestCrossProjectSameSlugRowsDontBleed(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	runs := []*run.Metadata{
+		{ID: "shared", Project: "alpha", Workflow: "sdlc", Status: run.StatusInProgress},
+		{ID: "shared", Project: "beta", Workflow: "sdlc", Status: run.StatusInProgress},
+	}
+	idx := &run.JournalIndex{LastActivity: map[string]time.Time{
+		"alpha/shared": base,
+		"beta/shared":  base.Add(-72 * time.Hour),
+	}}
+	rows, err := BuildRows(Inputs{
+		Now:   base,
+		Runs:  runs,
+		Index: idx,
+		NextByRun: map[string]NextDecision{
+			"alpha/shared": {Stage: "code"},
+			"beta/shared":  {Stage: "design"},
+		},
+		SessionDocsByRun: map[string][]string{
+			"alpha/shared": {"code"}, // alpha has a live session; beta does not.
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildRows: %v", err)
+	}
+	byKey := make(map[string]Row, len(rows))
+	for _, r := range rows {
+		byKey[r.Project+"/"+r.Run] = r
+	}
+	if got := byKey["alpha/shared"].Note; got != "sdlc:code [running]" {
+		t.Errorf("alpha/shared note = %q, want %q", got, "sdlc:code [running]")
+	}
+	if got := byKey["beta/shared"].Note; got != "sdlc:design" {
+		t.Errorf("beta/shared note = %q, want %q (must not borrow alpha's stage or marker)", got, "sdlc:design")
+	}
+	if !byKey["alpha/shared"].When.Equal(base) || !byKey["beta/shared"].When.Equal(base.Add(-72*time.Hour)) {
+		t.Errorf("ages crossed: alpha=%v beta=%v", byKey["alpha/shared"].When, byKey["beta/shared"].When)
 	}
 }
 

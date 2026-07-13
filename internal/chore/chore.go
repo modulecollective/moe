@@ -174,7 +174,7 @@ func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time
 			continue
 		}
 		if isTerminal(md.Status) {
-			when := idx.LastActivity[md.ID]
+			when := idx.LastActivity[md.Project+"/"+md.ID]
 			if when.After(s.LastCompleted) {
 				s.LastCompleted = when
 			}

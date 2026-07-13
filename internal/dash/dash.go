@@ -113,8 +113,8 @@ type Inputs struct {
 	WorkflowFilter   string
 	Runs             []*run.Metadata
 	Index            *run.JournalIndex
-	SessionDocsByRun map[string][]string
-	NextByRun        map[string]NextDecision // populated only for in-progress, non-idea runs.
+	SessionDocsByRun map[string][]string     // keyed "<project>/<slug>"
+	NextByRun        map[string]NextDecision // keyed "<project>/<slug>"; populated only for in-progress, non-idea runs.
 	Chores           []ChoreInput
 }
 
@@ -138,8 +138,9 @@ func BuildRows(in Inputs) ([]Row, error) {
 		if in.WorkflowFilter != "" && md.Workflow != in.WorkflowFilter {
 			continue
 		}
-		last := in.Index.LastActivity[md.ID]
-		b, note, stage, runningDoc := classify(md, byRunKey, in.Index, in.SessionDocsByRun[md.ID], in.NextByRun)
+		runKey := md.Project + "/" + md.ID
+		last := in.Index.LastActivity[runKey]
+		b, note, stage, runningDoc := classify(md, byRunKey, in.Index, in.SessionDocsByRun[runKey], in.NextByRun)
 		if b == BucketNone {
 			continue
 		}
@@ -258,6 +259,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // glyph, and the doc with an open session that "wins" the liveness
 // slot. Pure over its inputs — no disk I/O.
 func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string, nextByRun map[string]NextDecision) (Bucket, string, string, string) {
+	runKey := md.Project + "/" + md.ID
 	prefix := md.Workflow + ":"
 	if md.Workflow == IdeaWorkflow {
 		switch md.Status {
@@ -265,7 +267,7 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 			return BucketBacklog, prefix + "capture", "", ""
 		case run.StatusPromoted:
 			note := prefix + "promoted"
-			if slug, ok := promotedToRun(idx, md.ID, byRunKey); ok {
+			if slug, ok := promotedToRun(idx, runKey, byRunKey); ok {
 				note += " → " + slug
 			}
 			return BucketCompletedRuns, note, "", ""
@@ -277,7 +279,7 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	switch md.Status {
 	case run.StatusPushed:
 		note := "awaiting merge"
-		if n, ok := prNumberForRun(idx, md.ID); ok {
+		if n, ok := prNumberForRun(idx, runKey); ok {
 			note = fmt.Sprintf("awaiting merge: #%s", n)
 		}
 		runningDoc := winningRunningDoc(openSessionDocs, "")
@@ -292,7 +294,7 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 		// Closed runs whose MoE-Reopen-Of chain is unextended are the
 		// candidates the operator might still want to carry forward —
 		// reduxes that previously needed a fresh `*-redux` slug.
-		case md.Workflow == "sdlc" && !hasBeenReopened(idx, md.ID):
+		case md.Workflow == "sdlc" && !hasBeenReopened(idx, md.Project, md.ID):
 			note += " · reopen?"
 		// chat close is a soft archive: re-entering a closed chat
 		// reopens-and-continues the same thread (see classify's
@@ -308,7 +310,7 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	if md.Status != run.StatusInProgress {
 		return BucketNone, "", "", ""
 	}
-	dec, ok := nextByRun[md.ID]
+	dec, ok := nextByRun[runKey]
 	if !ok {
 		// Caller didn't compute a next-stage decision — treat as no
 		// next stage. Shouldn't happen for in-progress non-idea runs
@@ -384,9 +386,11 @@ func openSessionMarker(runningDoc, parkedDoc string) string {
 }
 
 // promotedToRun returns project/slug of the successor run recorded on
-// a promoted idea's MoE-Promoted-To trailer.
-func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run.Metadata) (string, bool) {
-	v := idx.PromotedTo[runID]
+// a promoted idea's MoE-Promoted-To trailer. runKey is the idea's
+// qualified "<project>/<slug>" identity — the key PromotedTo is indexed
+// by.
+func promotedToRun(idx *run.JournalIndex, runKey string, byRunKey map[string]*run.Metadata) (string, bool) {
+	v := idx.PromotedTo[runKey]
 	if v == "" {
 		return "", false
 	}
@@ -397,30 +401,37 @@ func promotedToRun(idx *run.JournalIndex, runID string, byRunKey map[string]*run
 	return dest.Project + "/" + dest.ID, true
 }
 
-// hasBeenReopened reports whether any run in the journal claims slug
-// as its MoE-Reopen-Of prior. Scans ReopenedFrom's values rather than
+// hasBeenReopened reports whether any run in projectID claims slug as
+// its MoE-Reopen-Of prior. Scans ReopenedFrom's values rather than
 // keying off them so the lookup matches the question dash actually
 // asks ("is this prior the source of a reopen?"), and so a single
-// reopen index serves both directions without a second map. O(n)
-// scan; n is bounded by the number of reopens across the bureaucracy
-// (small).
-func hasBeenReopened(idx *run.JournalIndex, slug string) bool {
+// reopen index serves both directions without a second map. The
+// project leg keeps a same-slug prior in another project from
+// suppressing this run's reopen hint — reopens are same-project, so a
+// matching value only counts when its (qualified) key sits in the same
+// project. O(n) scan; n is bounded by the number of reopens across the
+// bureaucracy (small).
+func hasBeenReopened(idx *run.JournalIndex, projectID, slug string) bool {
 	if idx == nil {
 		return false
 	}
-	for _, prior := range idx.ReopenedFrom {
-		if prior == slug {
+	for key, prior := range idx.ReopenedFrom {
+		if prior != slug {
+			continue
+		}
+		if proj, _, ok := strings.Cut(key, "/"); ok && proj == projectID {
 			return true
 		}
 	}
 	return false
 }
 
-// prNumberForRun finds the PR number recorded for runID by pulling
-// the MoE-PR URL from the journal index and reading the number off
-// the end. Returns ("", false) when no MoE-PR trailer is on record.
-func prNumberForRun(idx *run.JournalIndex, runID string) (string, bool) {
-	url := idx.PRURL[runID]
+// prNumberForRun finds the PR number recorded for the run keyed by
+// runKey ("<project>/<slug>") by pulling the MoE-PR URL from the
+// journal index and reading the number off the end. Returns ("", false)
+// when no MoE-PR trailer is on record.
+func prNumberForRun(idx *run.JournalIndex, runKey string) (string, bool) {
+	url := idx.PRURL[runKey]
 	if url == "" {
 		return "", false
 	}

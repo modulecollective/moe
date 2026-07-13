@@ -188,7 +188,7 @@ func pickLatestRun(root, workflow, projectID string) (string, error) {
 		if md.Workflow != workflow || md.Project != projectID {
 			continue
 		}
-		when := idx.LastActivity[md.ID]
+		when := idx.LastActivity[md.Project+"/"+md.ID]
 		if bestID == "" || when.After(bestWhen) {
 			bestID = md.ID
 			bestWhen = when

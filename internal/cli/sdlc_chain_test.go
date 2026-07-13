@@ -38,15 +38,16 @@ func TestFindChainedDescendantsPromoteThenReopen(t *testing.T) {
 	now := time.Now().UTC()
 	idx := &run.JournalIndex{
 		LastActivity: map[string]time.Time{
-			"foo":              now.Add(-72 * time.Hour),
-			"foo-2026-05-14":   now.Add(-24 * time.Hour),
-			"foo-2026-05-14-2": now.Add(-1 * time.Hour),
+			"tele/foo":              now.Add(-72 * time.Hour),
+			"tele/foo-2026-05-14":   now.Add(-24 * time.Hour),
+			"tele/foo-2026-05-14-2": now.Add(-1 * time.Hour),
 		},
 		PromotedTo: map[string]string{
-			"foo": "tele/foo-2026-05-14",
+			"tele/foo": "tele/foo-2026-05-14",
 		},
+		// Key qualified "<project>/<new-slug>"; value stays a bare slug.
 		ReopenedFrom: map[string]string{
-			"foo-2026-05-14-2": "foo-2026-05-14",
+			"tele/foo-2026-05-14-2": "foo-2026-05-14",
 		},
 	}
 	got := findChainedDescendants(idx, "tele", "foo")
@@ -68,12 +69,33 @@ func TestFindChainedDescendantsDropsCrossProjectPromote(t *testing.T) {
 	idx := &run.JournalIndex{
 		LastActivity: map[string]time.Time{},
 		PromotedTo: map[string]string{
-			"foo": "other-project/foo-2026-05-14",
+			"tele/foo": "other-project/foo-2026-05-14",
 		},
 	}
 	got := findChainedDescendants(idx, "tele", "foo")
 	if len(got) != 0 {
 		t.Fatalf("expected no descendants from cross-project promote, got %+v", got)
+	}
+}
+
+// TestFindChainedDescendantsDropsCrossProjectReopen: a reopen in
+// another project that happens to name our typed slug as its prior must
+// not surface as a descendant. The qualified ReopenedFrom key carries
+// the reopening run's project, so the walk drops it — the documented
+// cross-project leak is closed at this layer, not just by the downstream
+// run.Load filter.
+func TestFindChainedDescendantsDropsCrossProjectReopen(t *testing.T) {
+	idx := &run.JournalIndex{
+		LastActivity: map[string]time.Time{},
+		// other-project reopened *its own* run named "foo-2026-05-14"
+		// from a prior bare slug "foo" — same bare slug we typed in tele.
+		ReopenedFrom: map[string]string{
+			"other-project/foo-2026-05-14": "foo",
+		},
+	}
+	got := findChainedDescendants(idx, "tele", "foo")
+	if len(got) != 0 {
+		t.Fatalf("expected no descendants from cross-project reopen, got %+v", got)
 	}
 }
 

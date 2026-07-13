@@ -137,7 +137,7 @@ func spliceChoreChain(root, parentKey, choreKey string, stdout, stderr io.Writer
 }
 
 func choreTouchedByPush(root string, md *run.Metadata) ([]string, error) {
-	out, err := git.Output(root, "log", "--fixed-strings", "--grep", "MoE-Run: "+md.ID, "--format=%B%x1e")
+	out, err := git.Output(root, "log", "--grep", trailers.GrepPattern("MoE-Run", md.ID), "--format=%B%x1e")
 	if err != nil {
 		return nil, err
 	}

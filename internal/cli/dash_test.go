@@ -170,7 +170,7 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
 	trailerstest.CommitTrailer(t, root, "push: fix-it",
-		"MoE-Run: fix-it\nMoE-PR: https://example.com/pr/42",
+		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-PR: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -200,7 +200,7 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusMerged)
 	trailerstest.CommitTrailer(t, root, "push: fix-it merged",
-		"MoE-Run: fix-it\nMoE-Merged: abc1234567890",
+		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -229,7 +229,7 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusClosed)
 	trailerstest.CommitTrailer(t, root, "push: fix-it closed",
-		"MoE-Run: fix-it\nMoE-Closed: https://example.com/pr/42",
+		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-Closed: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -345,7 +345,7 @@ func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "old-one", "sdlc", run.StatusInProgress)
 	trailerstest.CommitTrailer(t, root, "work: update spec",
-		"MoE-Run: old-one\nMoE-Document: spec",
+		"MoE-Run: old-one\nMoE-Project: tele\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -380,7 +380,7 @@ func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "long-merged", "sdlc", run.StatusMerged)
 	trailerstest.CommitTrailer(t, root, "push: long-merged merged",
-		"MoE-Run: long-merged\nMoE-Merged: abc1234567890",
+		"MoE-Run: long-merged\nMoE-Project: tele\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -405,12 +405,12 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
 	trailerstest.CommitTrailer(t, root, "work: update spec",
-		"MoE-Run: older\nMoE-Document: spec",
+		"MoE-Run: older\nMoE-Project: tele\nMoE-Document: spec",
 		time.Now().UTC().Add(-3*24*time.Hour))
 
 	trailerstest.SeedRun(t, root, "tele", "newer", "sdlc", run.StatusInProgress)
 	trailerstest.CommitTrailer(t, root, "work: update spec",
-		"MoE-Run: newer\nMoE-Document: spec",
+		"MoE-Run: newer\nMoE-Project: tele\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -568,7 +568,7 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		slug := fmt.Sprintf("done-%02d", i)
 		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
 		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
-			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
+			"MoE-Run: "+slug+"\nMoE-Project: tele\nMoE-Merged: deadbeef"+slug,
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
 
@@ -809,7 +809,7 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 		slug := fmt.Sprintf("done-%02d", i)
 		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
 		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
-			"MoE-Run: "+slug+"\nMoE-Merged: deadbeef"+slug,
+			"MoE-Run: "+slug+"\nMoE-Project: tele\nMoE-Merged: deadbeef"+slug,
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
 

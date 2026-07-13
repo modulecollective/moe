@@ -167,7 +167,7 @@ func reconcilePushedRuns(root string, stdout, stderr io.Writer) error {
 }
 
 func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) error {
-	prURL := push.TrailerValue(root, md.ID, "MoE-PR")
+	prURL := push.TrailerValue(root, md.Project, md.ID, "MoE-PR")
 	if prURL == "" {
 		// No MoE-PR trailer on record despite StatusPushed. Flag and
 		// skip rather than guess — the operator can untangle by hand.

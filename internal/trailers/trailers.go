@@ -12,7 +12,27 @@
 // leave the rest zero. Empty fields elide.
 package trailers
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+// GrepPattern returns an anchored `git log --grep` pattern matching
+// exactly `<key>: <value>` as a full commit-message line — `^`/`$`
+// bracket the line so a run slug can't match as a prefix of a longer
+// slug (run `auth` no longer satisfies run `auth-2`) or as a substring
+// of another trailer.
+//
+// Caveat, load-bearing: `git log --grep` is POSIX basic regular
+// expressions (BRE); regexp.QuoteMeta escapes for Go's RE2. For today's
+// `[a-z0-9-]` slugs and IDs the two agree (nothing in that class is a
+// BRE metacharacter, so QuoteMeta is a no-op), but QuoteMeta is *not* a
+// correct BRE escaper for arbitrary values — e.g. GNU BRE reads `\+` as
+// one-or-more. Slug/ID validation upstream remains the real guard; the
+// escape here is belt-and-suspenders against a future looser validator.
+func GrepPattern(key, value string) string {
+	return "^" + key + ": " + regexp.QuoteMeta(value) + "$"
+}
 
 // Block is the typed shape of the MoE-* trailer block. Each field
 // maps to one trailer; zero-value fields elide. String() renders the
