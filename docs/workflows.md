@@ -74,7 +74,9 @@ run; after the fix, MoE re-offers the gate that blocked instead of walking
 forward. Headless ship cascades (`!!` / `!!!`, and serve's ship) take one
 bounded `code` kickback carrying the blocking canvas, then re-dispatch the
 blocked stage and re-check its gate once — if the fix doesn't stick, it parks as
-before. `!` and `!<stage>` park on a blocked gate without recovery.
+before. `!` and `!<stage>` take no recovery turn of their own: they stop at the
+blocked gate and fall through to that same chain prompt (headless, a
+back-pointing `kick back to fix` nudge prints instead).
 
 ### Chains
 
