@@ -88,34 +88,18 @@ const pushCanvasSkeleton = `# Push
 (agent fills: disagreements between code's draft and test's findings; empty if the two agree)
 `
 
-// pushSynthesisKickoff is the interactive synthesis session's first
-// user message — same shape as the design/code/review/test kickoffs. Tells
-// the agent to read the prior canvases and acknowledge state before
-// drafting; without this, fresh sessions tend to dive into writing
-// without first checking what code stage's draft already said.
-const pushSynthesisKickoff = "The operator just opened this push synthesis session. " +
-	"Read the code canvas, review canvas if present, and test canvas if present before replying, so your acknowledgement reflects " +
-	"what's actually been drafted and verified. In one or two sentences, acknowledge where synthesis " +
-	"stands (fresh start vs. resumed) and ask what they'd like to refine. Then wait for their reply."
-
 // runPushSynthesisSession opens the push stage session that curates
 // code's draft and test's findings into push/content.md. The PR path
 // invokes the headless variant because PR creation needs body text
 // synchronously; the fast-forward merge path writes a mechanical note
-// instead. The interactive variant (headless=false) lives on for a
-// future `moe sdlc <whatever>` verb that lets the operator iterate on
-// the canvas by hand; no caller wires it today. SkipNextStage suppresses
-// the post-session chain prompt — synthesis sits inside the push action,
-// which owns its own routing.
+// instead. SkipNextStage suppresses the post-session chain prompt —
+// synthesis sits inside the push action, which owns its own routing.
 func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 	opts := stageSessionOpts{
 		NeedsSandbox:   true,
 		Headless:       headless,
 		SkipNextStage:  true,
 		CanvasSkeleton: pushCanvasSkeleton,
-	}
-	if !headless {
-		opts.InitialPrompt = pushSynthesisKickoff
 	}
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
 }

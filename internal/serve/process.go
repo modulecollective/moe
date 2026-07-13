@@ -45,9 +45,8 @@ type child struct {
 	pty     *pty.Pty
 	started time.Time
 
-	done     chan struct{}
-	exitErr  error
-	exitedAt time.Time // set before close(done); only read after <-done
+	done    chan struct{}
+	exitErr error
 }
 
 // children is the live PTY-child registry, keyed by id.
@@ -261,7 +260,6 @@ func (c *child) read(logger io.Writer, notify func(string, error)) {
 		}
 	}
 	c.exitErr = c.cmd.Wait()
-	c.exitedAt = time.Now()
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
@@ -283,14 +281,12 @@ func (c *child) writeRaw(b []byte) error {
 }
 
 // snapshot reports the child's exit state. Safe to call from request
-// handlers without blocking the reader. exitedAt is the zero value
-// until exited == true.
-func (c *child) snapshot() (exited bool, exitErr error, exitedAt time.Time) {
+// handlers without blocking the reader.
+func (c *child) snapshot() (exited bool, exitErr error) {
 	select {
 	case <-c.done:
 		exited = true
 		exitErr = c.exitErr
-		exitedAt = c.exitedAt
 	default:
 	}
 	return

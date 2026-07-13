@@ -65,7 +65,7 @@ func TestSpawnAndReap(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("child never exited")
 	}
-	exited, exitErr, _ := c.snapshot()
+	exited, exitErr := c.snapshot()
 	if !exited {
 		t.Fatal("expected child to report exited")
 	}

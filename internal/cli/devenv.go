@@ -95,12 +95,6 @@ func devEnvLoadCache(workTree string) (map[string]string, bool, error) {
 	return readDevEnvCache(filepath.Join(workTree, devEnvCacheRel))
 }
 
-// devEnvCachePath exports the cache location for callers that need to
-// refer to it by path (refresh, teardown, tests).
-func devEnvCachePath(workTree string) string {
-	return filepath.Join(workTree, devEnvCacheRel)
-}
-
 // devEnvRunTeardown invokes projects/<p>/hooks/dev-env-teardown.d/* in
 // lex order with the cached env sourced into each script's
 // environment. The teardown scripts address resources by the same

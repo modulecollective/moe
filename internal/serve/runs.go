@@ -333,7 +333,7 @@ func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	if c, ok := s.children.get(id); ok {
-		if exited, _, _ := c.snapshot(); !exited {
+		if exited, _ := c.snapshot(); !exited {
 			http.Error(w,
 				"run "+id+" has a live agent mid-turn — wait for it to finish, then close",
 				http.StatusConflict)
@@ -493,7 +493,7 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 	// stage now would race it. Mirror closeWorkflowRun's live-child
 	// refusal.
 	if c, ok := s.children.get(id); ok {
-		if exited, _, _ := c.snapshot(); !exited {
+		if exited, _ := c.snapshot(); !exited {
 			http.Error(w,
 				"run "+id+" has a live agent mid-turn — wait for it to finish, then "+verb,
 				http.StatusConflict)
@@ -575,7 +575,7 @@ func (s *Server) handleStageSpawn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if c, ok := s.children.get(id); ok {
-		if exited, _, _ := c.snapshot(); !exited {
+		if exited, _ := c.snapshot(); !exited {
 			http.Error(w,
 				"run "+id+" has a live agent mid-turn — wait for it to finish first",
 				http.StatusConflict)
@@ -749,7 +749,7 @@ func isPromotableIdea(md *run.Metadata) bool {
 // buildRunVM assembles the per-run page from the live child's state
 // and the on-disk canvas listing.
 func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
-	exited, exitErr, _ := c.snapshot()
+	exited, exitErr := c.snapshot()
 	now := time.Now()
 	vm := runVM{
 		ID:      id,

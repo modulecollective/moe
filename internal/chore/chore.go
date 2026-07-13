@@ -169,7 +169,6 @@ func EvaluateAll(defs []Definition, mds []*run.Metadata, idx *run.JournalIndex, 
 
 func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time.Time) State {
 	s := State{Definition: d}
-	var lastCompletedSlug string
 	for _, md := range mds {
 		if idx.ChoreByRun[md.Project+"/"+md.ID] != d.Key() {
 			continue
@@ -178,7 +177,6 @@ func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time
 			when := idx.LastActivity[md.ID]
 			if when.After(s.LastCompleted) {
 				s.LastCompleted = when
-				lastCompletedSlug = md.ID
 			}
 			continue
 		}
@@ -186,7 +184,6 @@ func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time
 			s.OpenRun = md.ID
 		}
 	}
-	_ = lastCompletedSlug
 	// A `moe chore skip` marker counts as a completion as of its commit
 	// time: fold it into LastCompleted so every downstream gate (cooldown
 	// and all three reasons) treats the chore as satisfied then.

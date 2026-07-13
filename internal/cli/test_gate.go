@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -54,22 +53,6 @@ func testStageGate(root string, md *run.Metadata) (bool, error) {
 		status == "ready" &&
 		testSectionFilled(sections["What was verified"]) &&
 		testSectionFilled(sections["What wasn't verified"]), nil
-}
-
-// testStageGateFromCwd is the cwd-rooted convenience wrapper test code
-// and dash callers can use without resolving the bureaucracy root by
-// hand. Production code threads `root` through the Workflow.Next path,
-// so it calls testStageGate directly; this helper is mainly for tests.
-func testStageGateFromCwd(md *run.Metadata) (bool, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return false, err
-	}
-	root, err := bureaucracy.Find(cwd, os.Getenv)
-	if err != nil {
-		return false, err
-	}
-	return testStageGate(root, md)
 }
 
 // parseTestCanvasSections splits a markdown canvas keyed by `## ` H2
