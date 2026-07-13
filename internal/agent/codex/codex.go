@@ -238,10 +238,19 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		cmd.Stderr = os.Stderr
 	}
 
+	// StdoutPipe + Start/Wait (not Run): Wait must not run until the
+	// progress goroutine below has drained the pipe — Wait closes the
+	// read end on reap, so waiting first drops buffered events.
+	// DrainThenWait enforces that order.
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("codex: exec stdout pipe: %w", err)
 	}
+	// Isolate the child in its own process group so the deadline kill
+	// takes tool children too, not just the codex leader — a zombie tool
+	// process can't outlive the turn holding this pipe open or writing
+	// into the sandbox clone.
+	agent.SetProcessGroup(cmd)
 	// agent.StartCommand wraps cmd.Start so an operator Ctrl-C during
 	// the headless turn surfaces as a non-nil waitErr (ErrInterrupted)
 	// instead of a clean exit. Context timeout-kills still win on
@@ -257,8 +266,10 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 		defer close(done)
 		pipeExecProgress(pipe, stdout, r.Root, sidCh)
 	}()
-	waitErr := ac.Wait()
-	<-done
+	// Drain the pipe fully before reaping (ac.Wait closes the read end):
+	// otherwise a fast-failing turn can lose the thread.started event and
+	// with it the sid, killing the transcript mirror and auto-tail.
+	waitErr := agent.DrainThenWait(ctx, done, pipe, ac)
 	close(sidCh)
 	// Shared post-Wait tail: drain the sid, mirror the transcript, map
 	// the exit to a timeout or the raw waitErr. Routed through the agent
