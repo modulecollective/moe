@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -136,7 +137,7 @@ func TestCascadeStageGateRecoversBlockedReview(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			steps, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, stage, true, &stdout, &stderr)
+			steps, _, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, stage, true, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("gate code=%d, want 0 (recovered); stderr=%q", code, stderr.String())
 			}
@@ -177,7 +178,7 @@ func TestCascadeStageGateRecoveryExhausted(t *testing.T) {
 
 	wf, _ := LookupWorkflow("sdlc")
 	var stdout, stderr bytes.Buffer
-	steps, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
+	steps, _, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("gate code=%d, want 1 (parked); stderr=%q", code, stderr.String())
 	}
@@ -213,7 +214,7 @@ func TestCascadeStageGateKickbackTurnFails(t *testing.T) {
 
 	wf, _ := LookupWorkflow("sdlc")
 	var stdout, stderr bytes.Buffer
-	steps, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
+	steps, _, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("gate code=%d, want 2 (recovery turn exit); stderr=%q", code, stderr.String())
 	}
@@ -225,10 +226,12 @@ func TestCascadeStageGateKickbackTurnFails(t *testing.T) {
 	}
 }
 
-// TestCascadeStageGateNoRecoveryWhenNotYolo: the `!` / `!<stage>` forms
-// (yolo=false) re-enter the interactive prompt where a human is present,
-// so a blocked gate parks without an auto-kickback.
-func TestCascadeStageGateNoRecoveryWhenNotYolo(t *testing.T) {
+// TestCascadeStageGateParksWhenNotYolo: the `!` / `!<stage>` forms
+// (yolo=false) don't dead-end on a blocked gate. cascadeStageGate signals
+// parked=true (code 0, no steps, no auto-kickback) so cascadeFromGate can
+// fall through to the chain prompt, where the kickback offer / nudge
+// lives.
+func TestCascadeStageGateParksWhenNotYolo(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
@@ -237,15 +240,21 @@ func TestCascadeStageGateNoRecoveryWhenNotYolo(t *testing.T) {
 
 	wf, _ := LookupWorkflow("sdlc")
 	var stdout, stderr bytes.Buffer
-	steps, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", false, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("gate code=%d, want 1 (parked, no recovery); stderr=%q", code, stderr.String())
+	steps, parked, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", false, &stdout, &stderr)
+	if !parked {
+		t.Fatalf("parked=false, want true (blocked gate parks to prompt); stderr=%q", stderr.String())
+	}
+	if code != 0 {
+		t.Fatalf("gate code=%d, want 0 (park at gate, not failure); stderr=%q", code, stderr.String())
 	}
 	if len(*kicks) != 0 {
 		t.Fatalf("non-yolo cascade must not auto-kickback: %+v", *kicks)
 	}
 	if len(steps) != 0 {
 		t.Fatalf("steps = %+v, want none", steps)
+	}
+	if !strings.Contains(stderr.String(), "cascade: review closed blocked; parking at its gate") {
+		t.Fatalf("expected park-at-gate line, got stderr=%q", stderr.String())
 	}
 }
 
@@ -260,7 +269,7 @@ func TestCascadeStageGateNoRecoveryWhenReady(t *testing.T) {
 
 	wf, _ := LookupWorkflow("sdlc")
 	var stdout, stderr bytes.Buffer
-	steps, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
+	steps, _, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("gate code=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -321,6 +330,108 @@ func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	}
 	if summary := renderCascadeSummary("tele/fix-it", res); !strings.Contains(summary, "— shipped") {
 		t.Fatalf("summary = %q, want a shipped cascade", summary)
+	}
+}
+
+// TestDispatchCascadeBlockedReviewParksToPrompt is the non-yolo
+// end-to-end: `!` and `!<stage>` walking into a blocked review gate no
+// longer dead-end. The cascade dispatches review, parks at its gate, and
+// falls through to the chain prompt — which, headless, prints the
+// back-pointing nudge and exits 0. No auto-kickback fires (that's the
+// yolo path); a present operator acts on the block from the prompt.
+func TestDispatchCascadeBlockedReviewParksToPrompt(t *testing.T) {
+	// Non-TTY stdin so promptNextStageOverride takes the headless nudge
+	// branch rather than the interactive kickback offer.
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+	oldStdin := os.Stdin
+	os.Stdin = devnull
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	for _, answer := range []string{"!", "!test"} {
+		t.Run(answer, func(t *testing.T) {
+			root := isolateCascadeMoeHome(t)
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+			writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
+
+			reviewDispatches := 0
+			prev := openSdlcStage
+			openSdlcStage = func(stage, _, _ string, _ bool, _, _ io.Writer) int {
+				if stage == "review" {
+					reviewDispatches++
+				}
+				return 0
+			}
+			t.Cleanup(func() { openSdlcStage = prev })
+
+			kicks := stubHeadlessKickback(t, 0, nil)
+
+			var stdout, stderr bytes.Buffer
+			code := dispatchCascade(answer, "review", root, md, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("dispatchCascade(%q) exit=%d, want 0; stderr=%q", answer, code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "next: moe sdlc code tele/fix-it (review blocked — kick back to fix)") {
+				t.Fatalf("expected back-pointing nudge, got stdout=%q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "cascade: review closed blocked; parking at its gate") {
+				t.Fatalf("expected park-at-gate line, got stderr=%q", stderr.String())
+			}
+			if len(*kicks) != 0 {
+				t.Fatalf("non-yolo park must not auto-kickback: %+v", *kicks)
+			}
+			if reviewDispatches != 1 {
+				t.Fatalf("review dispatched %d times, want 1", reviewDispatches)
+			}
+		})
+	}
+}
+
+// TestCascadeStageGateNonBlockedFailureParksHard: a non-yolo cascade that
+// hits a gate failure which is *not* a `blocked` finding — here a test
+// canvas with status "ready" but placeholder skeleton sections — keeps
+// the hard park (exit 1, "gate not satisfied"), not the park-to-prompt
+// affordance. Only a literal `blocked` earns the kickback route; a stage
+// refusal a code turn can't act on stops the chain.
+func TestCascadeStageGateNonBlockedFailureParksHard(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeStageCanvas(t, root, md, "test", `# Test
+
+## Gate
+
+`+"```json"+`
+{"status":"ready"}
+`+"```"+`
+
+## What was verified
+
+(agent fills: what you exercised)
+
+## What wasn't verified
+
+(agent fills: skipped surfaces)
+`)
+
+	kicks := stubHeadlessKickback(t, 0, nil)
+
+	wf, _ := LookupWorkflow("sdlc")
+	var stdout, stderr bytes.Buffer
+	steps, parked, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "test", false, &stdout, &stderr)
+	if parked {
+		t.Fatalf("parked=true, want false (unfilled skeleton is not a blocked finding)")
+	}
+	if code != 1 {
+		t.Fatalf("gate code=%d, want 1 (hard park); stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cascade: test gate not satisfied; parked at test") {
+		t.Fatalf("expected gate-not-satisfied line, got stderr=%q", stderr.String())
+	}
+	if len(*kicks) != 0 || len(steps) != 0 {
+		t.Fatalf("no recovery expected: kicks=%+v steps=%+v", *kicks, steps)
 	}
 }
 

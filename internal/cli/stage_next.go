@@ -966,8 +966,15 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		if code != 0 {
 			return res, code
 		}
-		steps, gateCode := cascadeStageGate(wf, dispatcher, md, stage, yolo, stdout, stderr)
+		steps, parked, gateCode := cascadeStageGate(wf, dispatcher, md, stage, yolo, stdout, stderr)
 		res.ran = append(res.ran, steps...)
+		if parked {
+			// Blocked review/test gate on a non-yolo cascade: stop the walk
+			// and let dispatchCascade's tail anchor promptNextStage at this
+			// stage (the last res.ran entry), where the kickback offer / nudge
+			// fires. Exit 0 — a park at a gate, not a failure.
+			return res, 0
+		}
 		if gateCode != 0 {
 			return res, gateCode
 		}
@@ -1035,24 +1042,41 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 // run parks exactly as before. retries mirrors cascadeShipStep's
 // `retries >= 1` shape: one try per gate, then stop.
 //
-// Recovery is gated to the ship cascade (yolo). The `!` / `!<stage>`
-// forms re-enter the interactive chain prompt at the resulting gate,
-// where the operator is present to act on the block — the same "offer
+// Recovery is gated to the ship cascade (yolo). A non-yolo cascade
+// (`!` / `!<stage>` / `--once` / `--to=`) that hits a *blocked* sdlc
+// review/test gate does not dead-end: it returns parked=true (code 0,
+// no steps), and cascadeFromGate stops the walk so dispatchCascade's
+// tail re-enters the chain prompt at the blocked stage. There the
+// kickback offer fires on a TTY, or the `moe sdlc code <run> (review
+// blocked — kick back to fix)` nudge prints when headless — the "offer
 // when a human is present, launch when headless" line the design draws.
+// Any other non-yolo gate failure (test gate refusing an unfilled
+// skeleton, gate read errors) keeps the hard "parked at <stage>" +
+// exit 1 below: a stage refusal stops the chain, and there is no
+// kickback affordance to offer for it.
 //
 // The blocked check reads the canvas's gate status directly (mirroring
 // the interactive headless nudge in promptNextStageOverride) rather than
 // leaning on checkCascadeStageGate's pass/fail alone: only a literal
-// "blocked" status earns a kickback. A test gate that fails on an
-// unfilled skeleton (status "ready", empty sections) is not a finding a
-// code turn can resolve, so it parks without burning a recovery turn —
-// and reading the status first keeps checkCascadeStageGate's "parked"
-// line from printing on a recovery that ultimately succeeds.
+// "blocked" status earns a kickback (yolo) or a park-to-prompt
+// (non-yolo). A test gate that fails on an unfilled skeleton (status
+// "ready", empty sections) is not a finding a code turn can resolve, so
+// it parks without burning a recovery turn — and reading the status
+// first keeps checkCascadeStageGate's "parked" line from printing on a
+// recovery that ultimately succeeds.
 //
 // Returns the recovery/re-dispatch steps to append (empty when no
-// recovery ran) and the exit code to propagate (0 = gate satisfied,
-// proceed; non-zero = park).
-func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metadata, stage string, yolo bool, stdout, stderr io.Writer) (steps []cascadeStepResult, code int) {
+// recovery ran), a parked flag (set only for a non-yolo blocked
+// review/test gate that should fall through to the chain prompt), and
+// the exit code to propagate (0 = gate satisfied, proceed; non-zero =
+// park).
+func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metadata, stage string, yolo bool, stdout, stderr io.Writer) (steps []cascadeStepResult, parked bool, code int) {
+	if !yolo && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
+		if _, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
+			moePrintf(stderr, "cascade: %s closed blocked; parking at its gate\n", stage)
+			return nil, true, 0
+		}
+	}
 	retries := 0
 	for {
 		if yolo && retries < 1 && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
@@ -1064,23 +1088,23 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 				recCode := openKickbackSession(md, "code", stage, canvas, true, stdout, stderr)
 				steps = append(steps, cascadeStepResult{stage: "code", code: recCode})
 				if recCode != 0 {
-					return steps, recCode
+					return steps, false, recCode
 				}
 				// Re-dispatch the blocked stage; the loop re-checks its gate.
 				moePrintf(stdout, "cascade: %s (headless)\n", stage)
 				dCode := dispatcher(stage, md.Project, md.ID, true, stdout, stderr)
 				steps = append(steps, cascadeStepResult{stage: stage, code: dCode})
 				if dCode != 0 {
-					return steps, dCode
+					return steps, false, dCode
 				}
 				continue
 			}
 		}
 		gateOK, gateCode := checkCascadeStageGate(wf, md, stage, stderr)
 		if gateOK && gateCode == 0 {
-			return steps, 0
+			return steps, false, 0
 		}
-		return steps, gateCode
+		return steps, false, gateCode
 	}
 }
 

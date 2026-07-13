@@ -255,6 +255,12 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	}
 }
 
+// TestCascadeFromGateStopsWhenStageGateUnsatisfied: a non-yolo cascade
+// that hits a gate failure which is *not* a literal `blocked` finding
+// stops the walk hard — exit 1, "gate not satisfied". A malformed review
+// canvas (unparseable gate) is the vehicle: it fails reviewStageGate but
+// reads as not-blocked, so it takes the hard-park path rather than the
+// blocked→chain-prompt affordance that `blocked` now earns.
 func TestCascadeFromGateStopsWhenStageGateUnsatisfied(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -262,7 +268,7 @@ func TestCascadeFromGateStopsWhenStageGateUnsatisfied(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, md, "review", reviewCanvasSkeleton)
+	writeStageCanvas(t, root, md, "review", "# Review\n\n## Gate\n\n```json\n{\"status\":\n```\n")
 
 	prev := openSdlcStage
 	openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
