@@ -203,7 +203,8 @@ down or not yet due — it still refuses if a run is already open.
 
 `moe twin reflect <project>` walks the fixed digital-twin documents —
 `vision`, `architecture`, `patterns`, `operations`, `glossary` — and folds
-new observations into recorded intent. See
+new observations into recorded intent, then a closing `finalize` stage seals
+the pass (clearing hygiene findings and folding events). See
 [concepts.md §Feedback Channels](concepts.md#feedback-channels) for how the
 twin steers future runs.
 

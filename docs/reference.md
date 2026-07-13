@@ -19,7 +19,7 @@ source of truth for the exact command surface; this page is a map.
   daily-activity chart (and a project-scoped one on each project page). **Safe
   by default:** all views,
   idea capture/edit/close/reopen, and run close/edit/reopen work, but the
-  run-spawning actions — opening new runs and plans, advancing a stage, and
+  run-spawning actions — opening new runs, advancing a stage, and
   opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
   non-empty `MOE_SERVE_INSECURE`) to enable them; anything that can reach the
   listener can then execute code.
