@@ -1,6 +1,7 @@
 package repolock
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,237 @@ import (
 	"testing"
 	"time"
 )
+
+// writeRecord plants a lock record on disk, marshalled the same way the
+// package writes it.
+func writeRecord(t *testing.T, path string, rec Record) {
+	t.Helper()
+	body, err := marshalRecord(rec)
+	if err != nil {
+		t.Fatalf("marshalRecord: %v", err)
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+}
+
+// TestTakeoverRejudgesUnderGuard is the regression test for the seeded
+// bug. It uses the guard as a deterministic sync point: the test holds the
+// guard (standing in for a takeover winner mid-write), so an acquirer that
+// judged the record stale is frozen at the guard. The test then swaps a
+// live record into place before releasing the guard — exactly the winner's
+// remove+recreate — and asserts the frozen acquirer re-judges and declines
+// to clobber the live record instead of taking over.
+func TestTakeoverRejudgesUnderGuard(t *testing.T) {
+	root := t.TempDir()
+	moeDir := filepath.Join(root, ".moe")
+	if err := os.MkdirAll(moeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(moeDir, "lock")
+	writeRecord(t, lockPath, Record{
+		Owner:       "dead-host/99999999",
+		Purpose:     "abandoned",
+		AcquiredAt:  time.Now().UTC().Add(-time.Hour),
+		HeartbeatAt: time.Now().UTC().Add(-time.Hour),
+	})
+
+	// Freeze any takeover: hold the guard the acquirer needs.
+	release, ok, err := acquireGuard(moeDir)
+	if err != nil || !ok {
+		t.Fatalf("acquireGuard: ok=%v err=%v", ok, err)
+	}
+
+	opts := silentOpts("racer")
+	opts.Hostname = staticHost("racer-host")
+	opts.Budget = 2 * time.Second
+	opts.BackoffCap = 5 * time.Millisecond
+	type result struct {
+		l   *Lock
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		l, err := Acquire(root, opts)
+		done <- result{l, err}
+	}()
+
+	// Let the acquirer spin on the busy guard, then stand in for a
+	// takeover winner: write a fresh live record and release the guard.
+	time.Sleep(60 * time.Millisecond)
+	live := Record{
+		Owner:       "winner-host/1",
+		Purpose:     "winner",
+		AcquiredAt:  time.Now().UTC(),
+		HeartbeatAt: time.Now().UTC(),
+	}
+	writeRecord(t, lockPath, live)
+	release()
+
+	got := <-done
+	if got.err == nil {
+		got.l.Release()
+		t.Fatal("acquirer took the lock; it should have re-judged the live record and waited")
+	}
+	var to *TimeoutError
+	if !errors.As(got.err, &to) {
+		t.Fatalf("err = %v, want *TimeoutError", got.err)
+	}
+	rec, err := readRecord(lockPath)
+	if err != nil {
+		t.Fatalf("readRecord: %v", err)
+	}
+	if rec.Owner != live.Owner {
+		t.Errorf("disk owner = %q, want %q (acquirer clobbered the live record)", rec.Owner, live.Owner)
+	}
+}
+
+// TestConcurrentTakeoverExclusivity races N acquirers over a pre-seeded
+// stale record. Every one must eventually acquire, and no two may hold at
+// once — the property the guarded takeover exists to preserve.
+func TestConcurrentTakeoverExclusivity(t *testing.T) {
+	root := t.TempDir()
+	moeDir := filepath.Join(root, ".moe")
+	if err := os.MkdirAll(moeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, filepath.Join(moeDir, "lock"), Record{
+		Owner:       "dead-host/99999999",
+		Purpose:     "abandoned",
+		AcquiredAt:  time.Now().UTC().Add(-time.Hour),
+		HeartbeatAt: time.Now().UTC().Add(-time.Hour),
+	})
+
+	const goroutines = 16
+	const holdFor = 3 * time.Millisecond
+	opts := silentOpts("takeover")
+	opts.Budget = 30 * time.Second
+	opts.BackoffCap = 5 * time.Millisecond
+
+	var active, maxActive, successes int32
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		opts := opts
+		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
+		go func() {
+			defer wg.Done()
+			l, err := Acquire(root, opts)
+			if err != nil {
+				t.Errorf("Acquire: %v", err)
+				return
+			}
+			a := atomic.AddInt32(&active, 1)
+			for {
+				m := atomic.LoadInt32(&maxActive)
+				if a <= m || atomic.CompareAndSwapInt32(&maxActive, m, a) {
+					break
+				}
+			}
+			time.Sleep(holdFor)
+			atomic.AddInt32(&active, -1)
+			atomic.AddInt32(&successes, 1)
+			if err := l.Release(); err != nil {
+				t.Errorf("Release: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if successes != goroutines {
+		t.Errorf("successes = %d, want %d", successes, goroutines)
+	}
+	if maxActive > 1 {
+		t.Errorf("maxActive = %d, want 1 (takeover did not exclude)", maxActive)
+	}
+}
+
+// TestReleaseAfterTakeoverLeavesFile: a holder whose hold went stale and
+// was taken over must not delete the new holder's lock on Release. It
+// leaves the file intact and logs the overlap.
+func TestReleaseAfterTakeoverLeavesFile(t *testing.T) {
+	root := t.TempDir()
+
+	// Acquire lock1 with a clock frozen an hour in the past so its record
+	// is born stale (no heartbeat to refresh it).
+	past := time.Now().UTC().Add(-time.Hour)
+	var logBuf bytes.Buffer
+	opts1 := silentOpts("stale-holder")
+	opts1.Hostname = staticHost("host-a")
+	opts1.Now = func() time.Time { return past }
+	opts1.Logger = &logBuf
+	lock1, err := Acquire(root, opts1)
+	if err != nil {
+		t.Fatalf("Acquire lock1: %v", err)
+	}
+
+	// A second acquirer sees lock1 as stale and takes over.
+	opts2 := silentOpts("takeover-holder")
+	opts2.Hostname = staticHost("host-b")
+	lock2, err := Acquire(root, opts2)
+	if err != nil {
+		t.Fatalf("Acquire lock2 (takeover): %v", err)
+	}
+	defer lock2.Release()
+
+	lockPath := filepath.Join(root, ".moe", "lock")
+	before, err := readRecord(lockPath)
+	if err != nil {
+		t.Fatalf("readRecord after takeover: %v", err)
+	}
+	if before.Purpose != "takeover-holder" {
+		t.Fatalf("record after takeover = %q, want takeover-holder", before.Purpose)
+	}
+
+	// lock1 releases — it must not delete lock2's record.
+	if err := lock1.Release(); err != nil {
+		t.Fatalf("lock1.Release: %v", err)
+	}
+	after, err := readRecord(lockPath)
+	if err != nil {
+		t.Fatalf("readRecord after lock1 release: %v", err)
+	}
+	if after.Owner != before.Owner || after.Purpose != "takeover-holder" {
+		t.Errorf("lock2's record was clobbered: owner=%q purpose=%q", after.Owner, after.Purpose)
+	}
+	if !strings.Contains(logBuf.String(), "released after takeover") {
+		t.Errorf("expected 'released after takeover' log, got: %q", logBuf.String())
+	}
+}
+
+// TestBeatSkipsOnBusyGuard: when the guard is held, a heartbeat tick skips
+// (returns true, keeping the lock) rather than blocking or rewriting.
+func TestBeatSkipsOnBusyGuard(t *testing.T) {
+	root := t.TempDir()
+	opts := silentOpts("holder")
+	l, err := Acquire(root, opts)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer l.Release()
+
+	lockPath := filepath.Join(root, ".moe", "lock")
+	before, err := readRecord(lockPath)
+	if err != nil {
+		t.Fatalf("readRecord: %v", err)
+	}
+
+	release, ok, err := acquireGuard(filepath.Join(root, ".moe"))
+	if err != nil || !ok {
+		t.Fatalf("acquireGuard: ok=%v err=%v", ok, err)
+	}
+	if beatOK := l.beat(); !beatOK {
+		t.Error("beat returned false on busy guard; should skip and keep the lock")
+	}
+	release()
+
+	after, err := readRecord(lockPath)
+	if err != nil {
+		t.Fatalf("readRecord after beat: %v", err)
+	}
+	if !after.HeartbeatAt.Equal(before.HeartbeatAt) {
+		t.Errorf("heartbeat rewritten despite busy guard: before=%s after=%s", before.HeartbeatAt, after.HeartbeatAt)
+	}
+}
 
 // silentOpts returns an Options suitable for tests: no retries beyond
 // the fake clock, discarded logs, deterministic now.

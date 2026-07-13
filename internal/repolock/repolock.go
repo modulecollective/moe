@@ -188,25 +188,28 @@ func Acquire(root string, opts Options) (*Lock, error) {
 		}
 
 		// Someone else holds it (or the file is stale/corrupt). Read the
-		// record to decide between waiting and taking over.
+		// record to decide between waiting and taking over. A stale or
+		// unparseable record is only *removed* under the guard after a
+		// fresh re-read still warrants it (see takeoverUnderGuard) — the
+		// read here just routes; it never clobbers.
 		existing, readErr := readRecord(lockPath)
 		switch {
 		case readErr == nil:
 			if isStale(existing, now, localHost) {
-				fmt.Fprintf(opts.Logger,
-					"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
-					lockPath, existing.Owner, existing.Purpose,
-					now.Sub(existing.HeartbeatAt).Round(time.Second))
-				if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return nil, fmt.Errorf("repolock: remove stale lock: %w", err)
+				took, err := takeoverUnderGuard(moeDir, lockPath, localHost, opts)
+				if err != nil {
+					return nil, err
 				}
-				continue
-			}
-			// Only a record that is both live-looking and ours proves
-			// a nested hold; a stale self-owned record (handled above)
-			// is a crashed predecessor that happened to get our pid,
-			// and takeover is the right move there.
-			if existing.Owner == rec.Owner {
+				if took {
+					continue
+				}
+				// Guard busy or the record went live under the guard —
+				// degrade toward waiting rather than toward two holders.
+			} else if existing.Owner == rec.Owner {
+				// Only a record that is both live-looking and ours proves
+				// a nested hold; a stale self-owned record (handled above)
+				// is a crashed predecessor that happened to get our pid,
+				// and takeover is the right move there.
 				return nil, &NestedError{Path: lockPath, Holder: existing, Purpose: opts.Purpose}
 			}
 		case errors.Is(readErr, os.ErrNotExist):
@@ -216,15 +219,15 @@ func Acquire(root string, opts Options) (*Lock, error) {
 		default:
 			// Unparseable record. tryCreate writes atomically (tmp+link),
 			// so a partial mid-write file is impossible — anything we
-			// can't parse is real garbage and the right move is to take
-			// over immediately.
-			fmt.Fprintf(opts.Logger,
-				"repolock: taking over unparseable lock at %s (parse error: %v)\n",
-				lockPath, readErr)
-			if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("repolock: remove corrupt lock: %w", err)
+			// can't parse is real garbage. Take it over, but only after
+			// re-reading under the guard confirms it's still garbage.
+			took, err := takeoverUnderGuard(moeDir, lockPath, localHost, opts)
+			if err != nil {
+				return nil, err
 			}
-			continue
+			if took {
+				continue
+			}
 		}
 
 		// Live holder. Wait or give up.
@@ -279,11 +282,73 @@ func (l *Lock) Release() error {
 		close(stopHB)
 		<-doneHB
 	}
-	err := os.Remove(l.path)
-	if errors.Is(err, os.ErrNotExist) {
+	return l.removeIfOwned()
+}
+
+// removeIfOwned removes the lock file under the guard, but only after
+// confirming the on-disk record is still ours. If our hold went stale and
+// was taken over while we ran, a blind remove would delete the new
+// holder's lock and let the next acquirer become a second live holder —
+// so a record that names someone else is left intact and the overlap is
+// logged loudly (it is evidence an overlap already happened).
+func (l *Lock) removeIfOwned() error {
+	release, ok, err := acquireGuardRetry(filepath.Dir(l.path), l.opts)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// Couldn't serialise the removal. Leaving the file is safe: it
+		// goes stale in StaleThreshold and the next acquirer takes over.
+		return fmt.Errorf("repolock: release could not acquire guard for %s; leaving lock (self-heals in %s)", l.path, StaleThreshold)
+	}
+	defer release()
+
+	existing, err := readRecord(l.path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		// Unparseable. Only we write this file while we hold it, and
+		// writes are atomic, so garbage means the world is already broken
+		// — removing it leaves takeover-bait, the safe state.
+		return removeLock(l.path)
+	}
+	l.mu.Lock()
+	ours := existing.Owner == l.rec.Owner && existing.AcquiredAt.Equal(l.rec.AcquiredAt)
+	ownerWas := l.rec.Owner
+	l.mu.Unlock()
+	if !ours {
+		fmt.Fprintf(l.opts.Logger,
+			"repolock: released after takeover — %s now held by %q (ours was %q); leaving new holder's record intact\n",
+			l.path, existing.Owner, ownerWas)
 		return nil
 	}
-	return err
+	return removeLock(l.path)
+}
+
+// acquireGuardRetry takes the guard for Release, retrying a busy guard a
+// few times before giving up. Release must not block unboundedly, but an
+// ownership-conditioned removal must not race a concurrent takeover
+// either, so it retries briefly and then degrades to leaving the file.
+func acquireGuardRetry(moeDir string, opts Options) (release func(), ok bool, err error) {
+	backoff := 5 * time.Millisecond
+	for range 5 {
+		release, ok, err := acquireGuard(moeDir)
+		if err != nil || ok {
+			return release, ok, err
+		}
+		opts.Sleep(backoff)
+		backoff *= 2
+	}
+	return nil, false, nil
+}
+
+// removeLock unlinks the lock file, tolerating a concurrent removal.
+func removeLock(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // record returns a copy of the on-disk record for this lock. Useful
@@ -354,6 +419,86 @@ func tryCreate(path string, rec Record, opts Options) (*Lock, error) {
 	return l, nil
 }
 
+// acquireGuard opens (creating on first use) <moeDir>/lock.guard and takes
+// an exclusive nonblocking flock on a fresh fd. The guard serialises every
+// write to .moe/lock that is conditioned on the file's current content —
+// takeover, heartbeat rename-over, ownership-checked release — so a
+// content judgement and the write it authorises can no longer interleave
+// across contenders.
+//
+// Returns ok=false (with nil error) when the guard is already held: that is
+// ordinary contention, and the caller degrades toward waiting. A non-nil
+// error is a real filesystem failure. The returned release func unlocks and
+// closes the fd; the guard file itself is never removed.
+//
+// flock, not fcntl, is load-bearing: BSD flocks attach to the open file
+// description, so two goroutines opening the guard on separate fds conflict
+// in-process — which the in-process contention tests require. POSIX fcntl
+// locks are per-process and would silently no-op the guard under test.
+func acquireGuard(moeDir string) (release func(), ok bool, err error) {
+	p := filepath.Join(moeDir, "lock.guard")
+	f, err := os.OpenFile(p, os.O_RDONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, false, fmt.Errorf("repolock: open guard %s: %w", p, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("repolock: flock guard %s: %w", p, err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, true, nil
+}
+
+// takeoverUnderGuard re-reads the lock record while holding the guard and
+// removes it only if the fresh read still warrants takeover — stale, or
+// unparseable garbage. Returns took=true when the file was removed (or was
+// already gone) and the caller should loop back to tryCreate; took=false
+// when the guard was busy or the record now looks live and the caller
+// should fall into the wait/backoff path.
+//
+// The re-read under the guard is the actual race fix: a concurrent takeover
+// winner's remove+recreate and this loser's re-judge can no longer
+// interleave, so the loser sees the winner's fresh record and declines to
+// clobber it.
+func takeoverUnderGuard(moeDir, lockPath, localHost string, opts Options) (took bool, err error) {
+	release, ok, err := acquireGuard(moeDir)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil // guard busy — ordinary contention
+	}
+	defer release()
+
+	now := opts.Now().UTC()
+	fresh, readErr := readRecord(lockPath)
+	switch {
+	case errors.Is(readErr, os.ErrNotExist):
+		// Winner already removed it and hasn't recreated yet. Retry.
+		return true, nil
+	case readErr != nil:
+		fmt.Fprintf(opts.Logger,
+			"repolock: taking over unparseable lock at %s (parse error: %v)\n",
+			lockPath, readErr)
+	case isStale(fresh, now, localHost):
+		fmt.Fprintf(opts.Logger,
+			"repolock: taking over stale lock at %s (prev owner %q, purpose %q, heartbeat age %s)\n",
+			lockPath, fresh.Owner, fresh.Purpose, now.Sub(fresh.HeartbeatAt).Round(time.Second))
+	default:
+		// Live record (or a takeover winner's fresh one) — leave it.
+		return false, nil
+	}
+	if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("repolock: remove lock during takeover: %w", err)
+	}
+	return true, nil
+}
+
 func (l *Lock) startHeartbeat() {
 	l.stopHB = make(chan struct{})
 	l.doneHB = make(chan struct{})
@@ -379,9 +524,26 @@ func (l *Lock) heartbeatLoop() {
 // beat rewrites heartbeat_at. Before writing it re-reads the on-disk
 // record and verifies the owner matches — if another process took over
 // our lock (crash recovery, manual tampering), we stop rather than
-// clobber their record. Returns false when the caller should exit the
-// heartbeat loop.
+// clobber their record. The read-verify-rename runs under the guard so a
+// takeover can't land between the owner check and the rename and get
+// resurrected. Returns false when the caller should exit the heartbeat
+// loop.
 func (l *Lock) beat() bool {
+	release, ok, err := acquireGuard(filepath.Dir(l.path))
+	if err != nil {
+		// A guard error is a filesystem problem, not a lost lock — keep
+		// the hold and try again next tick.
+		fmt.Fprintf(l.opts.Logger, "repolock: heartbeat guard: %v\n", err)
+		return true
+	}
+	if !ok {
+		// Guard busy: skip this tick. One skipped beat costs nothing
+		// against StaleThreshold, and a blocking beat could wedge the
+		// heartbeat goroutine.
+		return true
+	}
+	defer release()
+
 	existing, err := readRecord(l.path)
 	if err != nil {
 		fmt.Fprintf(l.opts.Logger, "repolock: heartbeat lost (cannot read %s: %v)\n", l.path, err)
