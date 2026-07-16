@@ -196,6 +196,55 @@ func TestShellRunWorkspaceLandsInClonePath(t *testing.T) {
 	}
 }
 
+func TestShellRunWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stub uses POSIX shell semantics")
+	}
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	if code := runNew("sdlc", []string{"tele/fix-it"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("seed run failed")
+	}
+	mdPath := filepath.Join(root, "projects", "tele", "runs", "fix-it", "run.json")
+	body, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var md run.Metadata
+	if err := json.Unmarshal(body, &md); err != nil {
+		t.Fatal(err)
+	}
+	wp, err := attachRunWorkspace(root, &md, "moe/fix-it")
+	if err != nil {
+		t.Fatalf("attach sandbox: %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "vanished")
+	if err := writeDevEnvCache(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_HOME": missing}); err != nil {
+		t.Fatal(err)
+	}
+
+	cwdLog, stubShell := writeShellStub(t)
+	t.Setenv("SHELL", stubShell)
+	var out, errb bytes.Buffer
+	if code := runShell([]string{"tele/fix-it"}, &out, &errb); code == 0 {
+		t.Fatalf("stale shell cache should fail, stdout=%q", out.String())
+	}
+	for _, want := range []string{"MOE_HOME", missing, "reopen a sandbox-backed stage"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("error missing %q: %q", want, errb.String())
+		}
+	}
+	if _, err := os.Stat(cwdLog); !os.IsNotExist(err) {
+		t.Fatalf("shell stub was invoked: %v", err)
+	}
+}
+
 // TestShellNamedWorkspaceCreatesLazily covers the standalone form.
 // Without any run involved, `moe workspace shell tele dev` materialises
 // the workspace dir on first call and lands the shell in it. Promoted
@@ -233,6 +282,41 @@ func TestShellNamedWorkspaceCreatesLazily(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "unclaimed") {
 		t.Fatalf("expected unclaimed marker in stdout, got: %q", out.String())
+	}
+}
+
+func TestShellNamedWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stub uses POSIX shell semantics")
+	}
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	wp, err := workspace.Ensure(root, "tele", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "vanished")
+	if err := writeDevEnvCache(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_DEV_TMPDIR": missing}); err != nil {
+		t.Fatal(err)
+	}
+	cwdLog, stubShell := writeShellStub(t)
+	t.Setenv("SHELL", stubShell)
+
+	var out, errb bytes.Buffer
+	if code := runWorkspaceShell([]string{"tele/dev"}, &out, &errb); code == 0 {
+		t.Fatalf("stale workspace cache should fail, stdout=%q", out.String())
+	}
+	for _, want := range []string{"MOE_DEV_TMPDIR", missing, "moe workspace refresh tele/dev"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("error missing %q: %q", want, errb.String())
+		}
+	}
+	if _, err := os.Stat(cwdLog); !os.IsNotExist(err) {
+		t.Fatalf("shell stub was invoked: %v", err)
 	}
 }
 

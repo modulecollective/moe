@@ -493,9 +493,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				// against this working tree. First touch runs the
 				// project's dev-env.d/* setup scripts and caches the
 				// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
-				// later turns re-source the cache. Projects with no
-				// dev-env.d/ directory get an empty env (the
-				// single-driver default) — no warning, no refusal.
+				// later turns re-source the cache while its allowlisted
+				// directories remain valid, or tear it down and rebuild it
+				// when one has vanished. Projects with no dev-env.d/
+				// directory get an empty env (the single-driver default) —
+				// no warning, no refusal.
 				env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
 				if err != nil {
 					return wikiTurnSpec{}, fmt.Errorf("dev-env: %w", err)

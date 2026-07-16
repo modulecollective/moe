@@ -56,13 +56,13 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 // a stale shell call against a closed run doesn't silently land on
 // a directory that's about to be removed.
 //
-// Sources the cached dev-env from <tree>/.moe/dev-env.env if it
-// exists so the operator's manual spot-check sees the same
-// `DATABASE_URL`, `MOE_HOME`, etc. the agent saw during code/review/test
-// stages. A missing cache means dev-env hooks never ran for this
-// tree (no code/review/test stage yet, or the project ships no dev-env.d/);
-// in that case the shell inherits the operator's real env, same as
-// before.
+// Sources a valid cached dev-env from <tree>/.moe/dev-env.env so the
+// operator's manual spot-check sees the same `DATABASE_URL`, `MOE_HOME`,
+// etc. the agent saw during code/review/test stages. A stale cache is
+// refused with stage-open recovery guidance. A missing cache means
+// dev-env hooks never ran for this tree (no code/review/test stage yet,
+// or the project ships no dev-env.d/); in that case the shell inherits
+// the operator's real env, same as before.
 func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) int {
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -83,6 +83,15 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	stale, err := staleDevEnvWritableDir(extraEnv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if stale != nil {
+		moePrintf(stderr, "dev-env: cached %s directory %q is stale; reopen a sandbox-backed stage to rebuild it\n", stale.key, stale.path)
+		return 1
+	}
 	moePrintf(stdout, "shell in %s (run %s/%s)\n", wp, md.Project, md.ID)
 	return execShell(wp, mapToEnv(extraEnv), stderr)
 }
@@ -93,11 +102,12 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 // workspace is just a directory at this point, and a run that later
 // attaches with `--workspace <name>` is what flips it to "owned."
 //
-// Sources the workspace's cached dev-env if it exists. The unclaimed
-// shell-only path doesn't run setup itself (there's no run to bind
-// to and no design intent for the workspace to imply env), so the
-// env shows up only after some run has already attached to this
-// workspace and produced a cache.
+// Sources the workspace's cached dev-env when it is valid. A stale
+// cache is refused with workspace-refresh guidance. The unclaimed
+// shell-only path doesn't run setup itself (there's no run to bind to
+// and no design intent for the workspace to imply env), so the env
+// shows up only after some run has already attached to this workspace
+// and produced a cache.
 func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer) int {
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -120,6 +130,15 @@ func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer)
 	extraEnv, _, err := devEnvLoadCache(wp)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	stale, err := staleDevEnvWritableDir(extraEnv)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if stale != nil {
+		moePrintf(stderr, "dev-env: cached %s directory %q is stale; run `moe workspace refresh %s/%s`\n", stale.key, stale.path, projectID, name)
 		return 1
 	}
 	switch {

@@ -190,6 +190,94 @@ func TestDevEnvWritableDirsEmptyMap(t *testing.T) {
 	}
 }
 
+func TestStaleDevEnvWritableDirFollowsSymlinks(t *testing.T) {
+	realDir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "linked-dir")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	stale, err := staleDevEnvWritableDir(map[string]string{"MOE_HOME": link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale != nil {
+		t.Fatalf("valid symlink reported stale: %+v", stale)
+	}
+}
+
+func TestStaleDevEnvWritableDirClassifiesInvalidPaths(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	brokenLink := filepath.Join(t.TempDir(), "broken")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone"), brokenLink); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for _, path := range []string{missing, file, brokenLink} {
+		stale, err := staleDevEnvWritableDir(map[string]string{"MOE_DEV_TMPDIR": path})
+		if err != nil {
+			t.Fatalf("path %q: %v", path, err)
+		}
+		if stale == nil || stale.key != "MOE_DEV_TMPDIR" || stale.path != path {
+			t.Errorf("path %q: stale = %+v", path, stale)
+		}
+	}
+}
+
+func TestStaleDevEnvWritableDirIgnoresNonContractValues(t *testing.T) {
+	stale, err := staleDevEnvWritableDir(map[string]string{
+		"MOE_HOME":     "relative/path",
+		"DATABASE_URL": filepath.Join(t.TempDir(), "missing"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale != nil {
+		t.Fatalf("non-contract value reported stale: %+v", stale)
+	}
+}
+
+func TestStaleDevEnvWritableDirReturnsUnexpectedStatError(t *testing.T) {
+	loop := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	stale, err := staleDevEnvWritableDir(map[string]string{"MOE_HOME": loop})
+	if err == nil {
+		t.Fatalf("expected symlink-loop stat error, got stale=%+v", stale)
+	}
+	if stale != nil {
+		t.Fatalf("unexpected stat error must not be classified stale: %+v", stale)
+	}
+	if !strings.Contains(err.Error(), "stat cached MOE_HOME") {
+		t.Fatalf("error does not name the cached key: %v", err)
+	}
+}
+
+func TestStaleDevEnvWritableDirStatErrorOutranksStalePath(t *testing.T) {
+	loop := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	env := map[string]string{
+		"MOE_HOME":       filepath.Join(t.TempDir(), "missing"),
+		"MOE_DEV_TMPDIR": loop,
+	}
+
+	stale, err := staleDevEnvWritableDir(env)
+	if err == nil {
+		t.Fatalf("expected stat error to prevent rebuild, got stale=%+v", stale)
+	}
+	if stale != nil {
+		t.Fatalf("stat error must outrank an earlier stale path: %+v", stale)
+	}
+}
+
 // TestDevEnvSetupEnvCachesScriptOutput: a project with a single
 // dev-env.d/* script runs it on first call, caches the parsed output,
 // and re-sources the cache on subsequent calls without re-running.
@@ -247,6 +335,177 @@ echo "DATABASE_URL=postgres://localhost/devenv-${MOE_RUN}"
 	}
 	if env2["DEV_RUN"] != "1" {
 		t.Fatalf("DEV_RUN = %q on second call; cache wasn't used", env2["DEV_RUN"])
+	}
+}
+
+func TestDevEnvSetupEnvValidWritableDirCacheHit(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "10-must-not-run.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workTree := t.TempDir()
+	writableDir := t.TempDir()
+	cache := filepath.Join(workTree, devEnvCacheRel)
+	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": writableDir}); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
+
+	var stdout bytes.Buffer
+	env, fresh, err := devEnvSetupEnv(root, workTree, md, &stdout, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh {
+		t.Fatal("valid cache should remain a cache hit")
+	}
+	if env["MOE_HOME"] != writableDir {
+		t.Fatalf("MOE_HOME = %q, want %q", env["MOE_HOME"], writableDir)
+	}
+	if !strings.Contains(stdout.String(), "dev-env cached") {
+		t.Fatalf("missing cache-hit banner: %q", stdout.String())
+	}
+}
+
+func TestDevEnvSetupEnvRebuildsStaleWritableDirCache(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	setupDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
+	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
+	if err := os.MkdirAll(setupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(teardownDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	counter := filepath.Join(t.TempDir(), "counter")
+	oldDir := filepath.Join(t.TempDir(), "old-home")
+	newDir := filepath.Join(t.TempDir(), "new-home")
+	teardown := "#!/bin/sh\nprintf 'teardown:%s\\n' \"$MOE_HOME\" >> " + receipt + "\n"
+	if err := os.WriteFile(filepath.Join(teardownDir, "10-cleanup.sh"), []byte(teardown), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setup := "#!/bin/sh\n" +
+		"if [ -e \"$MOE_SANDBOX/.moe/dev-env.env\" ]; then exit 1; fi\n" +
+		"n=0\n" +
+		"if [ -f " + counter + " ]; then n=$(cat " + counter + "); fi\n" +
+		"n=$((n+1))\n" +
+		"echo $n > " + counter + "\n" +
+		"dir=" + newDir + "\n" +
+		"if [ $n -eq 1 ]; then dir=" + oldDir + "; fi\n" +
+		"mkdir -p \"$dir\"\n" +
+		"printf 'setup:%s\\n' \"$dir\" >> " + receipt + "\n" +
+		"echo MOE_HOME=$dir\n"
+	if err := os.WriteFile(filepath.Join(setupDir, "10-create.sh"), []byte(setup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workTree := t.TempDir()
+	cache := filepath.Join(workTree, devEnvCacheRel)
+	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
+
+	firstEnv, firstFresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+	if err != nil || !firstFresh {
+		t.Fatalf("initial setup: fresh=%v err=%v", firstFresh, err)
+	}
+	if firstEnv["MOE_HOME"] != oldDir {
+		t.Fatalf("initial MOE_HOME = %q, want %q", firstEnv["MOE_HOME"], oldDir)
+	}
+	if err := os.RemoveAll(oldDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("rebuild stale cache: %v (stderr=%s)", err, stderr.String())
+	}
+	if !fresh {
+		t.Fatal("stale cache rebuild should be reported as freshly minted")
+	}
+	if env["MOE_HOME"] != newDir {
+		t.Fatalf("returned MOE_HOME = %q, want %q", env["MOE_HOME"], newDir)
+	}
+	body, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), "setup:"+oldDir+"\nteardown:"+oldDir+"\nsetup:"+newDir+"\n"; got != want {
+		t.Fatalf("lifecycle order = %q, want %q", got, want)
+	}
+	cached, ok, err := readDevEnvCache(cache)
+	if err != nil || !ok {
+		t.Fatalf("read rebuilt cache: ok=%v err=%v", ok, err)
+	}
+	if cached["MOE_HOME"] != newDir {
+		t.Fatalf("cached MOE_HOME = %q, want %q", cached["MOE_HOME"], newDir)
+	}
+	for _, want := range []string{"MOE_HOME", oldDir, "stale; rebuilding"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stale diagnostic missing %q: %q", want, stderr.String())
+		}
+	}
+}
+
+func TestDevEnvSetupEnvStaleCacheTeardownFailurePreservesCache(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
+	if err := os.MkdirAll(teardownDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(teardownDir, "10-fail.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workTree := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "vanished")
+	cache := filepath.Join(workTree, devEnvCacheRel)
+	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": missing}); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
+
+	if _, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil {
+		t.Fatal("expected teardown failure")
+	}
+	cached, ok, err := readDevEnvCache(cache)
+	if err != nil || !ok {
+		t.Fatalf("old cache should remain: ok=%v err=%v", ok, err)
+	}
+	if cached["MOE_HOME"] != missing {
+		t.Fatalf("cached MOE_HOME = %q, want %q", cached["MOE_HOME"], missing)
+	}
+}
+
+func TestDevEnvSetupEnvStaleCacheSetupFailureLeavesNoCache(t *testing.T) {
+	root := t.TempDir()
+	projID := "tele"
+	setupDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
+	if err := os.MkdirAll(setupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(setupDir, "10-fail.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workTree := t.TempDir()
+	cache := filepath.Join(workTree, devEnvCacheRel)
+	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": filepath.Join(t.TempDir(), "vanished")}); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
+
+	if _, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil {
+		t.Fatal("expected setup failure")
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatalf("cache should be absent after setup failure: %v", err)
 	}
 }
 
@@ -387,10 +646,11 @@ echo "tearing down DATABASE_URL=$DATABASE_URL MOE_HOME=$MOE_HOME" > ` + receipt 
 	}
 
 	workTree := t.TempDir()
+	vanishedHome := filepath.Join(t.TempDir(), "vanished")
 	// Pre-seed the cache as if dev-env.d had already produced it.
 	if err := writeDevEnvCache(filepath.Join(workTree, devEnvCacheRel), map[string]string{
 		"DATABASE_URL": "postgres://localhost/x",
-		"MOE_HOME":     "/tmp/bureaucracy",
+		"MOE_HOME":     vanishedHome,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +663,7 @@ echo "tearing down DATABASE_URL=$DATABASE_URL MOE_HOME=$MOE_HOME" > ` + receipt 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "tearing down DATABASE_URL=postgres://localhost/x MOE_HOME=/tmp/bureaucracy\n"
+	want := "tearing down DATABASE_URL=postgres://localhost/x MOE_HOME=" + vanishedHome + "\n"
 	if string(body) != want {
 		t.Fatalf("receipt = %q\nwant      %q", body, want)
 	}

@@ -21,9 +21,9 @@ import (
 // sandbox or named workspace) into an isolated runtime for code- and
 // test-stage agent activity. Setup scripts under
 // projects/<p>/hooks/dev-env.d/* emit KEY=VALUE lines on stdout; the
-// merged result is cached at <tree>/.moe/dev-env.env, sourced into the
-// claude subprocess env on every subsequent stage open against the
-// same tree, and re-sourced by `moe sdlc shell` so the operator's
+// merged result is cached at <tree>/.moe/dev-env.env. Valid caches are
+// sourced into the claude subprocess env on subsequent stage opens
+// against the same tree and by `moe sdlc shell` so the operator's
 // manual spot-check sees the same world the agent did.
 //
 // Teardown scripts under projects/<p>/hooks/dev-env-teardown.d/* run
@@ -57,8 +57,9 @@ const (
 // in lex order, executes each executable script with cwd = workTree
 // and the standard MOE_* exported (plus MOE_WORKSPACE when md.Workspace
 // is set), parses stdout as `KEY=VALUE` lines, and writes the merged
-// result to <workTree>/.moe/dev-env.env. Subsequent calls re-source
-// the cache without re-running setup.
+// result to <workTree>/.moe/dev-env.env. Subsequent calls re-source a
+// cache whose allowlisted local directories still exist. A stale cache
+// runs teardown against the old env, clears the cache, and rebuilds it.
 //
 // Returns the parsed map and true if the cache was minted on this
 // call (so callers can log "running dev-env setup..." on first touch
@@ -69,13 +70,27 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 	if env, ok, err := readDevEnvCache(cachePath); err != nil {
 		return nil, false, err
 	} else if ok {
-		// Cache hit short-circuits the setup walker — print one line
-		// so the operator can tell a fast stage open (sourced cache)
-		// apart from one that re-ran the scripts. Without this line
-		// the cached path is silent and the operator can't tell why
-		// a "running …" notice they expected didn't appear.
-		banner.HookCacheHit(stdout, "dev-env", devEnvCacheRel)
-		return env, false, nil
+		stale, err := staleDevEnvWritableDir(env)
+		if err != nil {
+			return nil, false, err
+		}
+		if stale != nil {
+			moePrintf(stderr, "dev-env: cached %s directory %q is stale; rebuilding\n", stale.key, stale.path)
+			if err := devEnvRunTeardown(root, workTree, md, stdout, stderr); err != nil {
+				return nil, false, err
+			}
+			if err := devEnvClearCache(workTree); err != nil {
+				return nil, false, err
+			}
+		} else {
+			// Cache hit short-circuits the setup walker — print one line
+			// so the operator can tell a fast stage open (sourced cache)
+			// apart from one that re-ran the scripts. Without this line
+			// the cached path is silent and the operator can't tell why
+			// a "running …" notice they expected didn't appear.
+			banner.HookCacheHit(stdout, "dev-env", devEnvCacheRel)
+			return env, false, nil
+		}
 	}
 	env, err := runDevEnvSetup(root, workTree, md, stdout, stderr)
 	if err != nil {
@@ -342,6 +357,43 @@ func devEnvBaseEnv(root, workTree string, md *run.Metadata) []string {
 // (`$MOE_DEV_TMPDIR/widget.git`) that `moe project add file://...`
 // test-stage commands target with file-protocol git ops.
 var devEnvWritableDirKeys = []string{"MOE_HOME", "MOE_DEV_TMPDIR"}
+
+type staleDevEnvDir struct {
+	key  string
+	path string
+}
+
+// staleDevEnvWritableDir checks the allowlisted absolute directory
+// exports whose lifetime MoE owns. os.Stat follows symlinks: missing
+// paths, broken links, and non-directories make the cache stale, while
+// other stat failures are returned so callers do not rebuild through an
+// ambiguous filesystem error. Empty and relative values retain their
+// existing non-directory-contract behavior.
+func staleDevEnvWritableDir(env map[string]string) (*staleDevEnvDir, error) {
+	var stale *staleDevEnvDir
+	for _, key := range devEnvWritableDirKeys {
+		path := env[key]
+		if path == "" || !filepath.IsAbs(path) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			if stale == nil {
+				stale = &staleDevEnvDir{key: key, path: path}
+			}
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("dev-env: stat cached %s directory %q: %w", key, path, err)
+		}
+		if !info.IsDir() {
+			if stale == nil {
+				stale = &staleDevEnvDir{key: key, path: path}
+			}
+		}
+	}
+	return stale, nil
+}
 
 // devEnvWritableDirs filters env down to the values of
 // devEnvWritableDirKeys that look like absolute local directories,
