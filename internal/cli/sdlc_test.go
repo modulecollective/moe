@@ -382,6 +382,9 @@ exit 0
 	if !strings.Contains(errb.String(), "HEAD advanced") {
 		t.Errorf("expected stderr to name the boundary violation, got: %q", errb.String())
 	}
+	if strings.Contains(out.String(), "design complete") {
+		t.Errorf("boundary refusal must not print a completion footer: %q", out.String())
+	}
 
 	// The bureaucracy-side canvas commit must still have landed —
 	// losing the agent's design work on top of the spike would be a

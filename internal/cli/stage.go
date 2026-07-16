@@ -723,7 +723,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		// locate where things went wrong.
 		return code
 	}
-	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
 	// Boundary check runs AFTER the bureaucracy commit (canvas + run
 	// state ride along regardless) but BEFORE the cascade prompt, so a
 	// barfing design stage doesn't drag downstream stages forward
@@ -735,6 +734,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
+	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
 	if skipPostTurnPrompt(opts) {
 		// Headless ⇒ skip is structural, not a caller convention: a
 		// headless turn has no stdin to answer the post-turn prompt, so
