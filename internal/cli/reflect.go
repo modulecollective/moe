@@ -61,6 +61,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintln(stderr, "own per-stage canvas; finalize seals the pass — inline hygiene cleanup,")
 		moePrintln(stderr, "history-summary fold, checkpoint bump. The engine refuses to seal with")
 		moePrintln(stderr, "leftover findings; per-stage commits don't bump the checkpoint.")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
