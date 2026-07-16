@@ -53,7 +53,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	workspaceName := fs.String("workspace", "", "bind the new run to the named workspace at .moe/named/<project>/<name>/ (claim taken at first stage attach — sdlc design). When omitted, the prior run's workspace is inherited.")
 	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
-	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual $MOE_AGENT → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
+	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual stylesheet → $MOE_AGENT → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] <project>/<slug>")
 		moePrintln(stderr, "")

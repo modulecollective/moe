@@ -64,7 +64,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// workflow's shared `new` facade and we reject it for the other
 	// workflows below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT, then claude")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] <project>/<slug>\n", workflowName)
 		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] --from-idea <project>/<slug>\n", workflowName)

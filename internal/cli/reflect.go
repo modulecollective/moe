@@ -51,7 +51,7 @@ func reflectCommand(workflow string, builder func(root, projectID string) (*wiki
 func runReflectSession(workflow string, builder func(root, projectID string) (*wiki.Config, error), args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" reflect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via $MOE_AGENT, then claude")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] <project>\n", workflow)
 		moePrintln(stderr, "")

@@ -117,11 +117,12 @@ loudly** with the parse error rather than silently ignoring your rules.
 **Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
 comments. Two properties in v1:
 
-- `model` — handed verbatim to the backend's `--model`. MoE keeps no model
-  catalog and does no validation: a bad id fails at turn start as the backend
-  CLI's own error. Family aliases (`fable`/`opus`/`sonnet` on claude) and
-  un-dated ids (`gpt-5-codex` on codex) float with releases; full ids
-  (`claude-fable-5`) pin.
+- `model` — handed verbatim to the backend's `--model` (unless a paired
+  `agent:` scopes it to a backend the turn isn't running — see Precedence
+  below). MoE keeps no model catalog and does no validation: a bad id fails at
+  turn start as the backend CLI's own error. Family aliases
+  (`fable`/`opus`/`sonnet` on claude) and un-dated ids (`gpt-5-codex` on codex)
+  float with releases; full ids (`claude-fable-5`) pin.
 - `agent` — the backend name (`claude` | `codex`), resolved through the same
   registry `--agent` uses.
 
@@ -149,10 +150,22 @@ above the background defaults, mirroring "explicit beats the stylesheet":
 - Model: **stylesheet** → backend CLI default. (There is no `--model` flag or
   `$MOE_MODEL` in v1 — editing the checked-in file is the one knob.)
 
-A `model` value is applied to whatever backend the agent ladder resolves for the
-turn, so a backend-specific value on a mismatched run (e.g. `model: fable` on a
-codex turn) fails loudly at turn start. Pair an `agent:` in the same rule when it
-matters.
+Note the consequence: a stylesheet `agent:` shadows `$MOE_AGENT`. If your rules
+pair `agent:` (as recommended), `$MOE_AGENT` does nothing for those stages —
+steer a single turn with `--agent`, or the whole process with
+`$MOE_FORCE_AGENT`.
+
+A `model:` paired with an `agent:` is scoped to that backend: it rides only when
+the turn's resolved backend matches the stylesheet's own resolved `agent` for
+that (workflow, stage) — the winning `agent` property after the cascade, not
+literally the same rule. If the ladder resolves a different backend — via
+`$MOE_FORCE_AGENT`, `--agent`, or the `run.json` agent — the stylesheet model is
+dropped (the backend's own default applies) and a one-line stderr notice says so
+at turn start. An unpaired `model:` (no `agent` resolves for the stage) is
+handed verbatim to whatever backend runs; a name that backend can't serve fails
+at turn start as **the backend CLI's own error** — MoE keeps no model catalog
+and never validates the value itself. Pair an `agent:` when it matters: pairing
+is what scopes the model to its backend.
 
 ## Shell Completion
 
