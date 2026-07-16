@@ -36,6 +36,56 @@ func TestStageExitCompleteAndNoOp(t *testing.T) {
 	}
 }
 
+func TestTitleSeq(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  string
+		stage   string
+		project string
+		run     string
+		want    string
+	}{
+		{
+			name:    "running",
+			stage:   "design",
+			project: "moe",
+			run:     "nice-banners",
+			want:    "\x1b]2;moe design · moe/nice-banners\x07",
+		},
+		{
+			name:    "complete",
+			status:  "✓",
+			stage:   "design",
+			project: "moe",
+			run:     "nice-banners",
+			want:    "\x1b]2;moe design ✓ · moe/nice-banners\x07",
+		},
+		{
+			name:    "no-op",
+			status:  "∅",
+			stage:   "design",
+			project: "moe",
+			run:     "nice-banners",
+			want:    "\x1b]2;moe design ∅ · moe/nice-banners\x07",
+		},
+		{
+			name:    "control characters stripped",
+			stage:   "de\x1b\x07sign",
+			project: "moe\n",
+			run:     "nice\x9b-banners",
+			want:    "\x1b]2;moe design · moe/nice-banners\x07",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := titleSeq(tt.status, tt.stage, tt.project, tt.run); got != tt.want {
+				t.Fatalf("titleSeq() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDashGolden(t *testing.T) {
 	var buf bytes.Buffer
 	now := time.Date(2026, 5, 14, 0, 13, 0, 0, time.UTC)

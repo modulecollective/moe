@@ -17,7 +17,9 @@ package banner
 import (
 	"bytes"
 	"io"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/modulecollective/moe/internal/cliout"
 )
@@ -35,6 +37,9 @@ const (
 // workflow · stage, project + run. Fired once at the start of every
 // stage session — the one place every stage-using verb funnels through.
 func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
+	if cliout.IsTTY(w) {
+		io.WriteString(w, titleSeq("", stage, project, run))
+	}
 	cliout.Printf(w, "%s  [%s] %s · %s  ·  %s/%s\n", bar, agent, workflow, stage, project, run)
 }
 
@@ -46,10 +51,32 @@ func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
 // asymmetry.
 func StageExit(w io.Writer, workflow, stage, project, runID string, committed bool) {
 	status := "complete"
+	titleStatus := "✓"
 	if !committed {
 		status = "no-op"
+		titleStatus = "∅"
+	}
+	if cliout.IsTTY(w) {
+		io.WriteString(w, titleSeq(titleStatus, stage, project, runID))
 	}
 	cliout.Printf(w, "%s %s %s  ·  %s/%s %s\n", barOpen, stage, status, project, runID, barClose)
+}
+
+func titleSeq(status, stage, project, run string) string {
+	title := "moe " + stage
+	if status != "" {
+		title += " " + status
+	}
+	title += " · " + project + "/" + run
+	// OSC payloads are a terminal-control boundary: drop malformed input
+	// and controls that could terminate or replace the title sequence.
+	title = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(title, ""))
+	return "\x1b]2;" + title + "\x07"
 }
 
 // Dash prints the dash-render mark, with the render timestamp appended
