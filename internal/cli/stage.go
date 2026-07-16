@@ -139,9 +139,11 @@ type stageSessionOpts struct {
 	// Model, if non-empty, is the `--model` value for this turn's agent
 	// invocation — both the interactive and headless paths. Empty defers
 	// to the vendor CLI's configured default. runStageSession populates it
-	// from the model stylesheet when a caller leaves it empty; a bounded
-	// curation caller (push synthesis) that sets it explicitly keeps its
-	// value (explicit-beats-stylesheet).
+	// via stageModel when a caller leaves it empty — the stylesheet value,
+	// unless a paired `agent:` scopes it to a backend the turn isn't
+	// running (then it's dropped with a notice); a bounded curation caller
+	// (push synthesis) that sets it explicitly keeps its value
+	// (explicit-beats-stylesheet).
 	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
@@ -185,8 +187,9 @@ type stageSessionOpts struct {
 	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
 	// Agent names the backend (claude / codex) that should drive this
 	// turn. Empty falls through resolveAgentName's precedence ladder:
-	// $MOE_AGENT, else "claude". Stage callers populate this from the
-	// run.json field when present, or from a --agent flag override.
+	// the model stylesheet, then $MOE_AGENT, else "claude". Stage
+	// callers populate this from the run.json field when present, or
+	// from a --agent flag override.
 	Agent string
 	// CanvasOnOpen, when non-nil, runs on every session open (fresh and
 	// resume) after the rest of BuildSpec has succeeded. It receives the
@@ -216,6 +219,35 @@ func stageAgentName(opts stageSessionOpts, md *run.Metadata, sheetAgent string) 
 		runDefault = md.Agent
 	}
 	return resolveAgentName(opts.Agent, runDefault, sheetAgent)
+}
+
+// stageModel decides the `--model` value for a stage turn. An explicit
+// value from a bounded curation caller (opts.Model) always wins — same
+// shape as the agent ladder's explicit-beats-stylesheet rule. Otherwise
+// the stylesheet's model rides only when the turn's resolved backend
+// matches the stylesheet's own resolved `agent:` for this (workflow,
+// stage) — the winning `agent` property after the cascade, not
+// literally same-rule pairing. A paired model is scoped to its backend:
+// when a rung above the stylesheet ($MOE_FORCE_AGENT, --agent,
+// run.json.Agent) forces the turn onto a different backend, the model
+// was never meant for it, so it is dropped — with a one-line stderr
+// notice, never silently — and the backend's own default applies. An
+// unpaired model (no resolved `agent:`) keeps the verbatim behaviour:
+// handed to whatever backend runs, where a foreign name fails as the
+// backend CLI's own error (moe keeps no model catalog by design).
+func stageModel(explicit, sheetAgent, sheetModel, agentName string, stderr io.Writer) string {
+	if explicit != "" {
+		return explicit
+	}
+	if sheetModel == "" {
+		return ""
+	}
+	if sheetAgent != "" && sheetAgent != agentName {
+		moePrintf(stderr, "model-stylesheet: dropping model %q (rule pairs agent %s; turn runs %s)\n",
+			sheetModel, sheetAgent, agentName)
+		return ""
+	}
+	return sheetModel
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
@@ -343,14 +375,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
-	// The stylesheet is the sole source of a stage turn's model (there is
-	// no --model flag or $MOE_MODEL in v1), but an explicit opts.Model
-	// from a bounded curation caller still wins — same shape as the agent
-	// ladder's explicit-beats-stylesheet rule.
-	if opts.Model == "" {
-		opts.Model = sheetModel
-	}
 	agentName := stageAgentName(opts, md, sheetAgent)
+	opts.Model = stageModel(opts.Model, sheetAgent, sheetModel, agentName, stderr)
 	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
 	// committed flips true when CommitStager returns a clean nil —
 	// the same branch reportWikiSessionExit treats as "committed turn".
@@ -849,7 +875,7 @@ type wikiTurnSpec struct {
 	// non-empty in production paths (runStageSession resolves it via
 	// stageAgentName before populating this struct); test callers
 	// that build wikiTurnSpec directly leave it empty and runWikiSession
-	// falls back to resolveAgentName("", "") at dispatch time.
+	// falls back to resolveAgentName("", "", "") at dispatch time.
 	Agent string
 	// BuildPrompt assembles the --append-system-prompt payload.
 	// Receives the worktree root and the worktree-rewritten wiki cfg

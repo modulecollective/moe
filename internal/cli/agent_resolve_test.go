@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -80,6 +81,100 @@ func TestResolveAgentNamePrecedence(t *testing.T) {
 			if got := resolveAgentName(c.explicit, c.runDefault, c.stylesheet); got != c.want {
 				t.Fatalf("resolveAgentName(%q, %q, %q) = %q, want %q",
 					c.explicit, c.runDefault, c.stylesheet, got, c.want)
+			}
+		})
+	}
+}
+
+// TestStageModel pins the paired-model drop rule: a stylesheet model
+// rides only when the turn's resolved backend matches the stylesheet's
+// own resolved agent. Each mismatch case routes the agent through a
+// different rung above the stylesheet (force env, --agent, run.json)
+// via stageAgentName, mirroring the production composition in
+// runStageSession.
+func TestStageModel(t *testing.T) {
+	cases := []struct {
+		name       string
+		explicit   string // opts.Model from a bounded curation caller
+		force      string // $MOE_FORCE_AGENT
+		agentFlag  string // opts.Agent (--agent)
+		runDefault string // run.json.Agent
+		sheetAgent string
+		sheetModel string
+		wantModel  string
+		wantNotice bool
+	}{
+		{
+			name:       "paired match keeps model",
+			sheetAgent: "claude",
+			sheetModel: "fable",
+			wantModel:  "fable",
+		},
+		{
+			name:       "paired mismatch via force env drops model",
+			force:      "codex",
+			sheetAgent: "claude",
+			sheetModel: "fable",
+			wantModel:  "",
+			wantNotice: true,
+		},
+		{
+			name:       "paired mismatch via --agent drops model",
+			agentFlag:  "codex",
+			sheetAgent: "claude",
+			sheetModel: "fable",
+			wantModel:  "",
+			wantNotice: true,
+		},
+		{
+			name:       "paired mismatch via run.json agent drops model",
+			runDefault: "codex",
+			sheetAgent: "claude",
+			sheetModel: "fable",
+			wantModel:  "",
+			wantNotice: true,
+		},
+		{
+			name:       "unpaired model rides any backend",
+			runDefault: "codex",
+			sheetModel: "fable",
+			wantModel:  "fable",
+		},
+		{
+			name:       "explicit model never dropped",
+			explicit:   "claude-fable-5",
+			force:      "codex",
+			sheetAgent: "claude",
+			sheetModel: "fable",
+			wantModel:  "claude-fable-5",
+		},
+		{
+			name:       "no stylesheet model resolves empty",
+			sheetAgent: "claude",
+			wantModel:  "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("MOE_FORCE_AGENT", c.force)
+			t.Setenv("MOE_AGENT", "")
+			var md *run.Metadata
+			if c.runDefault != "" {
+				md = &run.Metadata{Agent: c.runDefault}
+			}
+			agentName := stageAgentName(stageSessionOpts{Agent: c.agentFlag}, md, c.sheetAgent)
+			var stderr strings.Builder
+			got := stageModel(c.explicit, c.sheetAgent, c.sheetModel, agentName, &stderr)
+			if got != c.wantModel {
+				t.Fatalf("stageModel = %q, want %q", got, c.wantModel)
+			}
+			if c.wantNotice {
+				want := `model-stylesheet: dropping model "fable" (rule pairs agent claude; turn runs codex)`
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+				}
+			} else if stderr.Len() != 0 {
+				t.Fatalf("unexpected stderr: %q", stderr.String())
 			}
 		})
 	}
