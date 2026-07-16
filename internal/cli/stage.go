@@ -378,12 +378,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	agentName := stageAgentName(opts, md, sheetAgent)
 	opts.Model = stageModel(opts.Model, sheetAgent, sheetModel, agentName, stderr)
 	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
-	// committed flips true when CommitStager returns a clean nil —
-	// the same branch reportWikiSessionExit treats as "committed turn".
-	// A ErrNothingToCommit return leaves it false so the exit footer
-	// reads `no-op`. Other commit errors short-circuit before the
-	// footer fires (non-zero exit code below).
-	var committed bool
 
 	// Sandbox-boundary snapshot, populated by BuildSpec when
 	// opts.EnforceSandboxBoundary is set. checkSandboxBoundary
@@ -704,11 +698,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						}
 						extras = append(extras, more...)
 					}
-					err := commitTurn(workRoot, md, docID, extras...)
-					if err == nil {
-						committed = true
-					}
-					return err
+					return commitTurn(workRoot, md, docID, extras...)
 				},
 				PreFinalizeGate: opts.PreFinalizeGate,
 			}, nil
@@ -734,7 +724,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
-	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID, committed)
+	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID)
 	if skipPostTurnPrompt(opts) {
 		// Headless ⇒ skip is structural, not a caller convention: a
 		// headless turn has no stdin to answer the post-turn prompt, so

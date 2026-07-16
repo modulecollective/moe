@@ -44,22 +44,16 @@ func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
 }
 
 // StageExit prints the stage-bottom footer. Flipped gradient blocks
-// bookend a short status (`complete` when a commit landed, `no-op` for
-// the "no document changes; nothing committed" return) plus the same
-// project + run anchor as the entry. Skipped on error exits — pairing
-// every error with a "complete" footer would be worse than the
-// asymmetry.
-func StageExit(w io.Writer, workflow, stage, project, runID string, committed bool) {
-	status := "complete"
-	titleStatus := "✓"
-	if !committed {
-		status = "no-op"
-		titleStatus = "∅"
-	}
+// bookend a `complete` status plus the same project + run anchor as
+// the entry. Skipped on error exits — pairing every error with a
+// "complete" footer would be worse than the asymmetry. A turn that
+// committed nothing is narrated by the "no document changes; nothing
+// committed" stdout line the caller prints just above.
+func StageExit(w io.Writer, workflow, stage, project, runID string) {
 	if cliout.IsTTY(w) {
-		io.WriteString(w, titleSeq(titleStatus, stage, project, runID))
+		io.WriteString(w, titleSeq("✓", stage, project, runID))
 	}
-	cliout.Printf(w, "%s %s %s  ·  %s/%s %s\n", barOpen, stage, status, project, runID, barClose)
+	cliout.Printf(w, "%s %s complete  ·  %s/%s %s\n", barOpen, stage, project, runID, barClose)
 }
 
 func titleSeq(status, stage, project, run string) string {

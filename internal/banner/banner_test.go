@@ -20,19 +20,13 @@ func TestStageEntryGolden(t *testing.T) {
 	}
 }
 
-// TestStageExitCompleteAndNoOp covers both branches of the committed
-// flag — a clean commit lands `complete`; the "no document changes"
-// no-op lands `no-op`. Flipped gradient marks frame the line.
-func TestStageExitCompleteAndNoOp(t *testing.T) {
+// TestStageExit pins the footer shape — `complete` status, flipped
+// gradient marks framing the line.
+func TestStageExit(t *testing.T) {
 	var buf bytes.Buffer
-	StageExit(&buf, "sdlc", "design", "moe", "nice-banners", true)
+	StageExit(&buf, "sdlc", "design", "moe", "nice-banners")
 	if got, want := buf.String(), "░▒▓ design complete  ·  moe/nice-banners ▓▒░\n"; got != want {
-		t.Fatalf("StageExit(committed=true) =\n%q\nwant\n%q", got, want)
-	}
-	buf.Reset()
-	StageExit(&buf, "sdlc", "design", "moe", "nice-banners", false)
-	if got, want := buf.String(), "░▒▓ design no-op  ·  moe/nice-banners ▓▒░\n"; got != want {
-		t.Fatalf("StageExit(committed=false) =\n%q\nwant\n%q", got, want)
+		t.Fatalf("StageExit =\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -59,14 +53,6 @@ func TestTitleSeq(t *testing.T) {
 			project: "moe",
 			run:     "nice-banners",
 			want:    "\x1b]2;moe design ✓ · moe/nice-banners\x07",
-		},
-		{
-			name:    "no-op",
-			status:  "∅",
-			stage:   "design",
-			project: "moe",
-			run:     "nice-banners",
-			want:    "\x1b]2;moe design ∅ · moe/nice-banners\x07",
 		},
 		{
 			name:    "control characters stripped",
