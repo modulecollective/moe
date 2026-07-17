@@ -451,6 +451,14 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 			moePrintf(stderr, "commit push record: %v\n", err)
 			return 1
 		}
+		// PR opened and the transition is durable — tail a pulse. Only
+		// the genuine first push reaches here (re-pushes to an existing
+		// PR skip the status flip), so a sweep fires once per opened PR.
+		// Outside the WithJournalPush closure above: firePulse takes the
+		// repolock itself.
+		if pulseFiresForWorkflow(md.Workflow) {
+			firePulse(root, md.Project, stdout, stderr)
+		}
 	}
 	return 0
 }
@@ -566,6 +574,12 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
+	// The ff-merge landed and the record is committed — tail a pulse.
+	// Outside the WithJournalPush closures above: firePulse takes the
+	// repolock itself.
+	if pulseFiresForWorkflow(md.Workflow) {
+		firePulse(root, md.Project, stdout, stderr)
+	}
 	return 0, nil
 }
 

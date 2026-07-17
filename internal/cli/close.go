@@ -234,7 +234,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			Project:  projectID,
 			Workflow: workflow,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	if err := sync.WithJournalPush(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 	}, stdout, stderr, func() error {
@@ -248,7 +248,21 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			return err
 		}
 		return run.StageAndCommit(root, msg, paths...)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// The close is durable and the repolock released. Tail a pulse for
+	// run-traffic closes — sdlc and twin, including the cascades'
+	// auto-close, which routes through this same path. Deliberately not
+	// wired into enterTerminal: sync's reconcile shares that helper and
+	// must never pulse. firePulse opens and commits its own runs, so it
+	// must run outside the WithJournalPush closure above — repolock is
+	// not reentrant.
+	if pulseFiresForWorkflow(workflow) {
+		firePulse(root, projectID, stdout, stderr)
+	}
+	return nil
 }
 
 // releaseWorkspaceCleanup releases the run's hold on its workspace.
