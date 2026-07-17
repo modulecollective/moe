@@ -66,7 +66,7 @@ func TestHelpOneLinersListRegisteredVerbs(t *testing.T) {
 // top-level `moe <name>` Command via RegisterGroup. A regression here
 // would break the only way operators invoke these workflows.
 func TestStageWorkflowsRegisteredAsTopLevel(t *testing.T) {
-	for _, name := range []string{"sdlc", "kb", "twin"} {
+	for _, name := range []string{"sdlc", "kb", "twin", "pulse"} {
 		if _, ok := commands[name]; !ok {
 			t.Fatalf("expected top-level command %q to be registered", name)
 		}

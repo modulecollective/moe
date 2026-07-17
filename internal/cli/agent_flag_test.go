@@ -39,6 +39,7 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"kb summarize", []string{"kb", "summarize", "--agent=gpt", "moe/x"}},
 		{"hooks code", []string{"hooks", "code", "--agent=gpt", "moe/x"}},
 		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
+		{"pulse pulse", []string{"pulse", "pulse", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
 		{"kb lint", []string{"kb", "lint", "--agent=gpt", "moe"}},
