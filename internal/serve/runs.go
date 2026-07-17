@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"html/template"
 	"io/fs"
 	"net/http"
 	"os"
@@ -213,7 +214,7 @@ type runVM struct {
 	// strings when the row gathered as "no row" (e.g. the run classified
 	// into BucketNone, or no GatherRunRow callback wired) — template
 	// falls back to the Started / Status line in that case.
-	RowNote string
+	RowNote template.HTML
 	RowWhen string
 	// NextStage is the run's bare next-stage name (row.Stage), or "" when
 	// there's no next stage / no row. The cascade trio keys off it,
@@ -652,7 +653,7 @@ func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 	if !ok {
 		return
 	}
-	vm.RowNote = row.Note
+	vm.RowNote = noteHTML(row.Project, row.Note)
 	vm.RowWhen = dash.HumanAgo(now, row.When)
 	vm.NextStage = row.Stage
 }

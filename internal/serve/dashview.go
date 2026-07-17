@@ -4,10 +4,41 @@ import (
 	"encoding/json"
 	"html/template"
 	"math/rand"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 )
+
+// noteHintRE matches a machine lineage hint's verb and target inside an
+// already-HTML-escaped note: "chained → X", "spawned → X", "promoted →
+// X". The target is a slug token ([a-z0-9][a-z0-9-]*) optionally
+// carrying one "project/" segment. Those chars survive HTML escaping
+// unchanged, so matching after escape is safe: note content can't forge
+// or break the anchor we inject.
+var noteHintRE = regexp.MustCompile(`(chained|spawned|promoted) → ([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
+
+// noteHTML escapes note for HTML and wraps the target of each machine
+// lineage hint in a link to its run page. A bare target (spawned's
+// same-project slug) is qualified with the row's own project; a target
+// that already carries a "project/" segment links as-is. Every producer
+// pre-checks that the target is on the board, so the /run/ link
+// resolves; a since-pruned target 404s like any stale run URL. Notes
+// without the verb-arrow pattern pass through escaped-only.
+func noteHTML(project, note string) template.HTML {
+	escaped := template.HTMLEscapeString(note)
+	linked := noteHintRE.ReplaceAllStringFunc(escaped, func(m string) string {
+		sub := noteHintRE.FindStringSubmatch(m)
+		verb, target := sub[1], sub[2]
+		href := "/run/" + target
+		if !strings.Contains(target, "/") {
+			href = "/run/" + template.HTMLEscapeString(project) + "/" + target
+		}
+		return verb + " → <a href=\"" + href + "\">" + target + "</a>"
+	})
+	return template.HTML(linked)
+}
 
 // factoryFrameCount is how many factory-art frames the dash bakes into
 // the page for the client cross-fade. Lives in code, not config —
@@ -20,8 +51,8 @@ const factoryFrameCount = 10
 type dashRowVM struct {
 	Project string
 	Run     string
-	Note    string
-	When    string // dash.HumanAgo output
+	Note    template.HTML // escaped note with lineage targets linkified (noteHTML)
+	When    string        // dash.HumanAgo output
 	// Live is true when the row's run is currently parented by this
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
@@ -104,7 +135,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		row := dashRowVM{
 			Project: r.Project,
 			Run:     r.Run,
-			Note:    r.Note,
+			Note:    noteHTML(r.Project, r.Note),
 			When:    dash.HumanAgo(now, r.When),
 			Member:  r.Member,
 		}
