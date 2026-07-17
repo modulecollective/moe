@@ -10,7 +10,7 @@ environment reference, see [reference.md](reference.md).
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park] <project>/<slug>
+moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
@@ -47,14 +47,18 @@ when a closed or merged topic still has more work behind it; reopen inherits
 the prior run's agent and workspace, with `--workspace`/`--no-workspace` and
 `--agent`/`--no-agent` to override or clear either.
 
-Two more flags shape how `new` opens the run. `--seed` pops `$EDITOR` on a
+A few tail flags shape how `new` opens the run. `--seed` pops `$EDITOR` on a
 stub and opens the run with your edited body as the first-stage seed (mutually
 exclusive with `--from-idea`, which already claims that seed). `--park` opens
 the run and stops, printing the next-stage hint instead of prompting to run
-the first stage — handy for minting a run to pick up later. `--park` composes
-with either seed: `--seed --park` mints from a typed seed and walks away,
-`--from-idea --park` promotes an idea and walks away. All three ride the shared
-`new` facade, so every workflow's `new` that takes `--from-idea` takes these too.
+the first stage — handy for minting a run to pick up later. `--ship` is the
+opposite tail (= `!!` at the chain prompt): it opens the run and cascades every
+stage headless through push, then ships — fire-and-forget. `--park` and
+`--ship` are mutually exclusive. Both compose with either seed: `--seed --park`
+mints from a typed seed and walks away, `--from-idea --ship` promotes an idea
+and rides it to the ship. All ride the shared `new` facade, so every workflow's
+`new` that takes `--from-idea` takes these too (`--ship` needs the workflow to
+have a cascade dispatcher, which it refuses to mint a run without).
 
 ### Cascades: the bang vocabulary
 
