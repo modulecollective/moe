@@ -68,18 +68,21 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// workflows below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
-	// --park and --seed are workflow-generic (they live on the shared new
-	// facade, so sdlc/kb/hooks all get them). --park opens the run and
-	// prints the next-stage hint instead of prompting to ride the chain;
-	// --seed pops $EDITOR and opens the run with the edited body as its
-	// first-stage seed. They compose (`--seed --park` = mint and walk
-	// away); --seed and --from-idea are mutually exclusive (both claim
-	// the first-stage seed).
+	// --park, --seed, and --ship are workflow-generic (they live on the
+	// shared new facade, so sdlc/kb/hooks all get them). --park opens the
+	// run and prints the next-stage hint instead of prompting to ride the
+	// chain; --seed pops $EDITOR and opens the run with the edited body as
+	// its first-stage seed; --ship opens the run and cascades every stage
+	// headless to the ship, the flag twin of typing `!!` at the chain
+	// prompt. --seed composes with either tail; --park and --ship are
+	// opposite tails (mutually exclusive); --seed and --from-idea are
+	// mutually exclusive (both claim the first-stage seed).
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	seed := fs.Bool("seed", false, "pop $EDITOR on a stub and open the run with the edited body as its first-stage seed (mutually exclusive with --from-idea)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park] <project>/<slug>\n", workflowName)
-		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park] --from-idea <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship] --from-idea <project>/<slug>\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -87,6 +90,19 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	}
 	if *seed && *fromIdea != "" {
 		moePrintf(stderr, "%s new: --seed and --from-idea are mutually exclusive (both seed the first stage)\n", workflowName)
+		return 2
+	}
+	if *ship && *park {
+		moePrintf(stderr, "%s new: --ship and --park are opposite tails (one cascades to the ship, the other stops) — pick one\n", workflowName)
+		return 2
+	}
+	// Preflight the cascade dispatcher before the open commit: --ship
+	// hands off to the same cascade path the `!!` chain answer takes, and
+	// a workflow with no registered dispatcher can't cascade. Every
+	// workflow ships one today, but the `new` facade is generic — refuse
+	// at flag-parse time rather than minting a run we then can't ship.
+	if *ship && lookupCascadeDispatcher(workflowName) == nil {
+		moePrintf(stderr, "%s new: --ship: workflow %q has no cascade — open without --ship and drive the stages yourself\n", workflowName, workflowName)
 		return 2
 	}
 	if *fromIdea != "" {
@@ -245,13 +261,36 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return promptNextStageParked(root, md, stdout, stderr)
 	}
 
+	// --ship: open the run and cascade to the ship without a stop at the
+	// chain prompt. Resolve the first incomplete stage the same way
+	// promptNextStage's default branch does (Next() on a fresh run reports
+	// the workflow's first stage), then hand off to the existing cascade
+	// with the literal `!!` answer — ship this run, stop. No new cascade
+	// code: the summary line, failure exit codes, and blocked-gate
+	// behaviour come along for free, exactly as if the operator had typed
+	// `!!` at the prompt. `!!` not `!!!`: a freshly minted run has no
+	// chained children, so the ride variant is a no-op here.
+	if *ship {
+		stage, kind, err := wf.Next(root, md)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		if kind != NextKindStage || stage == "" {
+			// A fresh run always has a first incomplete stage; this guard
+			// mirrors promptNextStage's default branch for the impossible
+			// case rather than feeding an empty start to the cascade.
+			return 0
+		}
+		return dispatchCascade("!!", stage, root, md, stdout, stderr)
+	}
+
 	// Fresh run — no stage has just finished, so promptNextStage falls
-	// back to Next() and offers the workflow's first incomplete stage.
-	// Headless cascade is no longer a `new` flag: the operator picks
-	// `!<stage>`, `!!` (ship this run), or `!!!` (ship + ride the chain)
-	// at the chain prompt after seeing the seeded canvas. Scripted
-	// automation that wants fire-and-forget can pipe the answer in
-	// (`echo '!!!' | moe sdlc new ...`).
+	// back to Next() and offers the workflow's first incomplete stage. The
+	// operator picks `!<stage>`, `!!` (ship this run), or `!!!` (ship +
+	// ride the chain) at the chain prompt after seeing the seeded canvas;
+	// --ship above is the decided-up-front twin of `!!` for the tee-up
+	// flow that doesn't want to sit at the prompt.
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

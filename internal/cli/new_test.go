@@ -542,6 +542,179 @@ func TestRunNewSeedSlugPreflightFiresBeforeEditor(t *testing.T) {
 	}
 }
 
+// --ship opens the run and cascades every stage headless to the ship —
+// the flag twin of typing `!!` at the chain prompt. Stub the stage
+// dispatcher and the cascade push so the test asserts on what the
+// cascade machinery received without standing up real sessions.
+func TestRunNewShipCascadesToShip(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	stages := stubOpenSdlcStage(t, nil)
+	pushes := stubPushFromCascade(t, 0, nil)
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--ship", "tele/ship-me"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "opened run tele/ship-me") {
+		t.Fatalf("missing open confirmation: %q", out.String())
+	}
+	want := []string{"design", "code", "review", "test"}
+	if len(*stages) != len(want) {
+		t.Fatalf("openSdlcStage invocations: got %d, want %d (%+v)", len(*stages), len(want), *stages)
+	}
+	for i, w := range want {
+		inv := (*stages)[i]
+		if inv.stage != w || inv.projectID != "tele" || inv.runID != "ship-me" || !inv.headless {
+			t.Fatalf("openSdlcStage[%d] = %+v, want stage=%q tele/ship-me headless", i, inv, w)
+		}
+	}
+	if len(*pushes) != 1 {
+		t.Fatalf("pushFromCascade invocations = %d, want 1 (%+v)", len(*pushes), *pushes)
+	}
+	if !strings.Contains(out.String(), "— shipped") {
+		t.Fatalf("cascade summary missing ship marker: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--ship must not print the chain prompt: %q", out.String())
+	}
+}
+
+// --ship and --park are opposite tails — reject the combination at the
+// verb boundary, before any open commit.
+func TestRunNewShipParkMutuallyExclusive(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--ship", "--park", "tele/both"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "opposite tails") {
+		t.Fatalf("expected opposite-tails error, got: %q", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "both")); !os.IsNotExist(err) {
+		t.Fatalf("usage error must mint nothing; run dir exists (err=%v)", err)
+	}
+}
+
+// A workflow with no registered cascade dispatcher can't cascade —
+// --ship refuses at flag-parse time, before minting a run it couldn't
+// ship. Every workflow ships with a dispatcher today, so simulate the
+// gap by pulling kb's out of the registry for the duration of the test;
+// the `new` facade is generic, so the preflight is what keeps a future
+// dispatcher-less workflow from minting a run it can't walk.
+func TestRunNewShipRefusedWithoutDispatcher(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	prev := cascadeDispatchers["kb"]
+	delete(cascadeDispatchers, "kb")
+	t.Cleanup(func() { cascadeDispatchers["kb"] = prev })
+
+	var out, errb bytes.Buffer
+	code := runNew("kb", []string{"--ship", "tele/no-cascade"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no cascade") {
+		t.Fatalf("expected no-cascade refusal, got: %q", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "no-cascade")); !os.IsNotExist(err) {
+		t.Fatalf("refused --ship must mint nothing; run dir exists (err=%v)", err)
+	}
+}
+
+// --seed --ship composes: capture the editor seed, then cascade to the
+// ship. The seed lands on the first-stage canvas and the cascade walks
+// every stage headless.
+func TestRunNewSeedShipComposition(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	writingEditor(t, "ship this seed")
+
+	stages := stubOpenSdlcStage(t, nil)
+	pushes := stubPushFromCascade(t, 0, nil)
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "--ship", "tele/seed-ship"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "seed-ship", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("seeded design doc missing: %v", err)
+	}
+	if !strings.Contains(string(body), "ship this seed") {
+		t.Fatalf("edited seed body not on the first-stage canvas: %q", body)
+	}
+	if len(*stages) != 4 {
+		t.Fatalf("openSdlcStage invocations: got %d, want 4 (%+v)", len(*stages), *stages)
+	}
+	if len(*pushes) != 1 {
+		t.Fatalf("pushFromCascade invocations = %d, want 1 (%+v)", len(*pushes), *pushes)
+	}
+	if !strings.Contains(out.String(), "— shipped") {
+		t.Fatalf("cascade summary missing ship marker: %q", out.String())
+	}
+}
+
+// --ship --from-idea is the motivating case: promote an idea and ride
+// it all the way to the ship, hands-off. The cascade drives the newly
+// minted (date-suffixed) run.
+func TestRunNewShipFromIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	captureIdea(t, "tele", "ship-idea")
+
+	stages := stubOpenSdlcStage(t, nil)
+	pushes := stubPushFromCascade(t, 0, nil)
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--from-idea=tele/ship-idea", "--ship"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	dated := "ship-idea-" + todayDateSuffix()
+	if !strings.Contains(out.String(), "opened run tele/"+dated) {
+		t.Fatalf("missing open confirmation for promoted run: %q", out.String())
+	}
+	if len(*stages) != 4 {
+		t.Fatalf("openSdlcStage invocations: got %d, want 4 (%+v)", len(*stages), *stages)
+	}
+	for _, inv := range *stages {
+		if inv.runID != dated {
+			t.Fatalf("cascade dispatched run %q, want %q", inv.runID, dated)
+		}
+	}
+	if len(*pushes) != 1 {
+		t.Fatalf("pushFromCascade invocations = %d, want 1 (%+v)", len(*pushes), *pushes)
+	}
+	if !strings.Contains(out.String(), "— shipped") {
+		t.Fatalf("cascade summary missing ship marker: %q", out.String())
+	}
+}
+
 func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"--help"}, &out, &errb)
