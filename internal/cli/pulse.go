@@ -8,6 +8,7 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // The pulse workflow is the level-3 "gather" primitive: a headless,
@@ -133,8 +134,10 @@ func pulseFiresForWorkflow(workflow string) bool {
 }
 
 // firePulse runs the pulse for a project at the tail of a run-traffic
-// verb. It is a var so the close/push wiring can be observed in tests
-// without running the survey's agent turn.
+// verb. spawner is the triggering run's slug, threaded onto the survey
+// run's MoE-Spawned-By edge so the dash can nest the pulse under it. It
+// is a var so the close/push wiring can be observed in tests without
+// running the survey's agent turn.
 //
 // Warn-only by construction: the transition that triggered the pulse
 // has already committed and pushed by the time this runs, so a pulse
@@ -142,18 +145,19 @@ func pulseFiresForWorkflow(workflow string) bool {
 // closeWithAutoResolve's posture, not the abort-on-fail push
 // synthesis). runPulse prints its own warnings; the exit code is
 // dropped here.
-var firePulse = func(root, projectID string, stdout, stderr io.Writer) {
-	runPulse(root, projectID, false /*manual*/, stdout, stderr)
+var firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) {
+	runPulse(root, projectID, spawner, false /*manual*/, stdout, stderr)
 }
 
 // runPulse is the whole pulse: the deterministic chore auto-open (which
 // always runs and needs no rate limit — it opens runs but executes
-// none), then the rate-limited survey. manual makes the survey's
-// single-flight refusal loud and non-zero (`moe pulse new`); the hook
-// path skips quietly.
-func runPulse(root, projectID string, manual bool, stdout, stderr io.Writer) int {
+// none), then the rate-limited survey. spawner is the triggering run's
+// slug ("" for a manual `moe pulse new`, which threads no parent edge).
+// manual makes the survey's single-flight refusal loud and non-zero
+// (`moe pulse new`); the hook path skips quietly.
+func runPulse(root, projectID, spawner string, manual bool, stdout, stderr io.Writer) int {
 	autoOpenDueChores(root, projectID, stdout, stderr)
-	return runPulseSurvey(root, projectID, manual, stdout, stderr)
+	return runPulseSurvey(root, projectID, spawner, manual, stdout, stderr)
 }
 
 // autoOpenDueChores opens every due chore's run for the project via the
@@ -202,13 +206,13 @@ func autoOpenDueChores(root, projectID string, stdout, stderr io.Writer) {
 // firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
 // introduces (auto-close → closeRunInProcess → firePulse) — the same
 // init-order dodge openPulseStage uses.
-var runPulseSurvey func(root, projectID string, manual bool, stdout, stderr io.Writer) int
+var runPulseSurvey func(root, projectID, spawner string, manual bool, stdout, stderr io.Writer) int
 
 func init() {
 	runPulseSurvey = pulseSurvey
 }
 
-func pulseSurvey(root, projectID string, manual bool, stdout, stderr io.Writer) int {
+func pulseSurvey(root, projectID, spawner string, manual bool, stdout, stderr io.Writer) int {
 	open, err := findInProgressPulseRun(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: scan runs for %s: %v\n", projectID, err)
@@ -222,10 +226,16 @@ func pulseSurvey(root, projectID string, manual bool, stdout, stderr io.Writer) 
 		return 0
 	}
 
+	// spawner threads the triggering run onto the survey's MoE-Spawned-By
+	// edge (empty on a manual `moe pulse new`, so it renders un-nested).
+	// Both the metadata field and the trailer are set, mirroring how
+	// `moe sdlc reopen` pairs Options.ReopenOf with Trailers.ReopenOf.
 	md, err := runopen.Open(root, projectID, run.Options{
-		IDBase:   pulseWorkflow,
-		Workflow: pulseWorkflow,
-		SeedDocs: map[string]string{pulseDoc: pulseCanvasSkeleton},
+		IDBase:    pulseWorkflow,
+		Workflow:  pulseWorkflow,
+		SeedDocs:  map[string]string{pulseDoc: pulseCanvasSkeleton},
+		SpawnedBy: spawner,
+		Trailers:  trailers.Block{SpawnedBy: spawner},
 	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
@@ -322,7 +332,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "pulse new: %v\n", err)
 		return 1
 	}
-	return runPulse(root, projectID, true /*manual*/, stdout, stderr)
+	return runPulse(root, projectID, "" /*spawner*/, true /*manual*/, stdout, stderr)
 }
 
 func runPulseStage(args []string, stdout, stderr io.Writer) int {

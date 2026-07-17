@@ -271,7 +271,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// must run outside the WithJournalPush closure above — repolock is
 	// not reentrant.
 	if tailPulse && pulseFiresForWorkflow(workflow) {
-		firePulse(root, projectID, stdout, stderr)
+		firePulse(root, projectID, runID /*spawner*/, stdout, stderr)
 	}
 	return nil
 }

@@ -91,7 +91,16 @@ type Metadata struct {
 	// Set at open time by `moe sdlc reopen` (via Options.ReopenOf);
 	// empty on every other path. omitempty keeps pre-existing run.json
 	// bodies unchanged.
-	ReopenOf  string               `json:"reopen_of,omitempty"`
+	ReopenOf string `json:"reopen_of,omitempty"`
+	// SpawnedBy, when non-empty, names the run slug that machine-opened
+	// this run as a consequence of a terminal transition (the pulse a
+	// close/push tails, a future pulse-spawns-reflect, …). The general
+	// run-lineage edge, not a pulse-specific field — mirrors the
+	// MoE-Spawned-By trailer on the open commit, same shape as ReopenOf.
+	// Value is a bare slug: every spawn today is same-project. Empty on
+	// operator-opened and standalone runs (`moe pulse new` passes none),
+	// which is what makes them render un-nested on the dash.
+	SpawnedBy string               `json:"spawned_by,omitempty"`
 	Documents map[string]*Document `json:"documents"`
 }
 
@@ -174,6 +183,14 @@ type Options struct {
 	// signal for dash / journal index, the metadata field is the
 	// cheap read path. Empty on every other path.
 	ReopenOf string
+
+	// SpawnedBy, when non-empty, names the run slug that machine-opened
+	// this run. Persisted to Metadata.SpawnedBy. The caller also sets
+	// Trailers.SpawnedBy so the MoE-Spawned-By trailer rides the open
+	// commit (the canonical signal the journal index reads), exactly as
+	// `moe sdlc reopen` pairs Options.ReopenOf with Trailers.ReopenOf.
+	// Empty on operator-opened and standalone runs.
+	SpawnedBy string
 
 	// AllowDirty bypasses the working-tree-clean precondition. The
 	// guardrail is there so a stray edit doesn't ride along on the
@@ -302,6 +319,7 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		Created:   now().Local().Format("2006-01-02"),
 		Workspace: opts.Workspace,
 		ReopenOf:  opts.ReopenOf,
+		SpawnedBy: opts.SpawnedBy,
 		Documents: map[string]*Document{},
 	}
 
@@ -738,6 +756,16 @@ type JournalIndex struct {
 	// uses the value set to recognise prior runs that have *not* been
 	// reopened yet — those are the candidates the closed bucket marks.
 	ReopenedFrom map[string]string
+	// SpawnedBy maps "<project>/<slug>" of a machine-opened run → the bare
+	// slug of the run that spawned it, populated from the MoE-Spawned-By
+	// trailer on the spawned run's open commit. Same shape and same keying
+	// direction as ReopenedFrom (keyed by the destination run whose open
+	// commit carries the trailer); the value stays a bare slug because
+	// spawns are same-project by construction. Dash reads it forward
+	// (child → parent) to nest a spawned run under its spawner and keep it
+	// off the completed-history cap. The pulse a close/push tails is its
+	// first consumer.
+	SpawnedBy map[string]string
 	// ChainedChild maps "<project>/<slug>" of a parent run to
 	// "<project>/<slug>" of its currently-live chained child, or
 	// to "" if the most recent chain-related commit cleared the
@@ -946,6 +974,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		WorkTurnTime: make(map[WorkTurnKey]time.Time),
 		AdvanceTime:  make(map[WorkTurnKey]time.Time),
 		ReopenedFrom: make(map[string]string),
+		SpawnedBy:    make(map[string]string),
 		ChainedChild: make(map[string]string),
 		ChoreByRun:   make(map[string]string),
 		ChoreTouched: make(map[string]time.Time),
@@ -978,7 +1007,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			subject = body[:nl]
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf, chore, choreSkipped string
+		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped string
 		var choreTouched []string
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
@@ -1023,6 +1052,12 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			if v, ok := strings.CutPrefix(line, "MoE-Reopen-Of:"); ok {
 				if reopenOf == "" {
 					reopenOf = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Spawned-By:"); ok {
+				if spawnedBy == "" {
+					spawnedBy = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -1148,6 +1183,13 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			// walk carries the project to re-qualify it.
 			if _, ok := idx.ReopenedFrom[runKey]; !ok {
 				idx.ReopenedFrom[runKey] = reopenOf
+			}
+		}
+		if spawnedBy != "" {
+			// Keyed by the spawned run like ReopenedFrom; value stays a bare
+			// slug (spawns are same-project). First (newest) commit wins.
+			if _, ok := idx.SpawnedBy[runKey]; !ok {
+				idx.SpawnedBy[runKey] = spawnedBy
 			}
 		}
 		if chore != "" && projectID != "" {

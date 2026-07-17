@@ -16,6 +16,6 @@ import (
 // overrides this no-op and restores it on cleanup. Same isolation the
 // per-test runStageSession stub gives the agent turn itself.
 func TestMain(m *testing.M) {
-	firePulse = func(root, projectID string, stdout, stderr io.Writer) {}
+	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) {}
 	os.Exit(m.Run())
 }

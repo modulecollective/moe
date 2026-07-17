@@ -53,7 +53,12 @@ type Block struct {
 	Idea          string
 	IdeaMovedFrom string
 	ReopenOf      string
-	Chore         string
+	// SpawnedBy carries the bare slug of the run that machine-opened this
+	// run (the pulse a close/push tails is the first writer). The general
+	// run-lineage edge, mirrored into Metadata.SpawnedBy / the journal
+	// index's SpawnedBy map.
+	SpawnedBy string
+	Chore     string
 	// ChoreSkipped carries "<project>/<chore>" on the empty commit
 	// written by `moe chore skip`. Its commit time records that the
 	// chore is satisfied as of the skip, folding into the value the
@@ -91,6 +96,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Idea", b.Idea)
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
+	write(&sb, "MoE-Spawned-By", b.SpawnedBy)
 	write(&sb, "MoE-Chore", b.Chore)
 	write(&sb, "MoE-Chore-Skipped", b.ChoreSkipped)
 	for _, v := range b.ChoreTouched {

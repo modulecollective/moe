@@ -95,13 +95,15 @@ func TestPulseCascadeDispatcherRegistered(t *testing.T) {
 }
 
 // stubFirePulse replaces the fire hook with a recorder for the duration
-// of a test, returning the accumulator.
+// of a test, returning the accumulator. Each entry is "<project> <spawner>"
+// so a test can assert both that the pulse fired and which run it threads
+// as the spawner (a trailing space when no spawner is passed).
 func stubFirePulse(t *testing.T) *[]string {
 	t.Helper()
 	var fired []string
 	orig := firePulse
-	firePulse = func(root, projectID string, stdout, stderr io.Writer) {
-		fired = append(fired, projectID)
+	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) {
+		fired = append(fired, projectID+" "+spawner)
 	}
 	t.Cleanup(func() { firePulse = orig })
 	return &fired
@@ -124,8 +126,8 @@ func TestPulseFiresFromSDLCClose(t *testing.T) {
 	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if len(*fired) != 1 || (*fired)[0] != "tele" {
-		t.Fatalf("firePulse fired %v, want one fire for tele", *fired)
+	if len(*fired) != 1 || (*fired)[0] != "tele ship-it" {
+		t.Fatalf("firePulse fired %v, want one fire for tele spawned by ship-it", *fired)
 	}
 }
 
@@ -202,14 +204,14 @@ func TestPulseSurveySingleFlight(t *testing.T) {
 	root := seedCloseFixture(t, "moe", "pulse-open", pulseWorkflow, run.StatusInProgress)
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", true /*manual*/, io.Discard, &errb); code != 1 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, true /*manual*/, io.Discard, &errb); code != 1 {
 		t.Fatalf("manual survey exit=%d, want 1 (refusal); stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(errb.String(), "already has an open pulse run") {
 		t.Fatalf("manual refusal should name the open run, got %q", errb.String())
 	}
 
-	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("hook survey exit=%d, want 0 (quiet skip)", code)
 	}
 }
@@ -241,7 +243,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
@@ -281,6 +283,50 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	}
 }
 
+// TestPulseSurveyRecordsSpawner: a survey fired with a spawner slug
+// threads it onto the pulse run's MoE-Spawned-By edge — both the run.json
+// metadata field and the greppable journal index, the two the dash reads
+// to nest the pulse under its parent.
+func TestPulseSurveyRecordsSpawner(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("survey exit=%d, want 0", code)
+	}
+
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pulseID string
+	for _, md := range mds {
+		if md.Workflow == pulseWorkflow && md.Project == "moe" {
+			pulseID = md.ID
+			if md.SpawnedBy != "ship-it" {
+				t.Fatalf("pulse run SpawnedBy = %q, want ship-it", md.SpawnedBy)
+			}
+		}
+	}
+	if pulseID == "" {
+		t.Fatal("no pulse run opened")
+	}
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.SpawnedBy["moe/"+pulseID]; got != "ship-it" {
+		t.Fatalf("index SpawnedBy[moe/%s] = %q, want ship-it (MoE-Spawned-By trailer missing?)", pulseID, got)
+	}
+}
+
 // TestPulseSurveyFailureLeavesRunOpenForEscalation: a non-zero survey
 // (agent failure or SIGINT) is not propagated but does not auto-close —
 // the run stays open, and single-flight then blocks the next auto-fire
@@ -299,7 +345,7 @@ func TestPulseSurveyFailureLeavesRunOpenForEscalation(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	// Failure is not a verb failure…
-	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (failure not propagated)", code)
 	}
 	// …but the run stays open for a manual look.
@@ -313,7 +359,7 @@ func TestPulseSurveyFailureLeavesRunOpenForEscalation(t *testing.T) {
 
 	// Single-flight as escalation: the next auto-fire skips before the
 	// agent turn — no second run, no retry.
-	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("second survey exit=%d, want 0 (single-flight skip)", code)
 	}
 	if calls != 1 {

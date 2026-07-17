@@ -457,7 +457,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		// Outside the WithJournalPush closure above: firePulse takes the
 		// repolock itself.
 		if pulseFiresForWorkflow(md.Workflow) {
-			firePulse(root, md.Project, stdout, stderr)
+			firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
 		}
 	}
 	return 0
@@ -578,7 +578,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// Outside the WithJournalPush closures above: firePulse takes the
 	// repolock itself.
 	if pulseFiresForWorkflow(md.Workflow) {
-		firePulse(root, md.Project, stdout, stderr)
+		firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
 	}
 	return 0, nil
 }

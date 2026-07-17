@@ -709,6 +709,36 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 	}
 }
 
+// TestJournalIndexCapturesSpawnedBy: a spawned run's open commit
+// carries MoE-Spawned-By pointing at its spawner; the index keys it by
+// the spawned run's slug → the spawner slug, the same shape and
+// direction as ReopenedFrom.
+func TestJournalIndexCapturesSpawnedBy(t *testing.T) {
+	root := newTestRoot(t)
+	commitWith := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	// A tailed pulse opens carrying MoE-Spawned-By naming the run that
+	// triggered it.
+	commitWith("Open run p/pulse-2026-07-17",
+		"MoE-Run: pulse-2026-07-17\nMoE-Project: p\nMoE-Spawned-By: ship-it\n")
+	// A run opened by hand carries no edge and must not pollute the map.
+	commitWith("Open run p/loose",
+		"MoE-Run: loose\nMoE-Project: p\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.SpawnedBy["p/pulse-2026-07-17"]; got != "ship-it" {
+		t.Errorf("SpawnedBy[p/pulse-2026-07-17] = %q, want %q", got, "ship-it")
+	}
+	if _, ok := idx.SpawnedBy["p/loose"]; ok {
+		t.Errorf("SpawnedBy[p/loose] should be absent for a run without the trailer")
+	}
+}
+
 // TestSlugTakenIgnoresPrefixAndCrossProjectSiblings: the anchored,
 // project-scoped grep means `auth` is free when only `auth-2` (same
 // project) or `auth` in another project carries history — no run dir,
