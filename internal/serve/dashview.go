@@ -26,8 +26,9 @@ type dashRowVM struct {
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
 	Live bool
-	// Member is true for an active row that follows its chain parent in
-	// the grouped order — the template indents it and draws a connector.
+	// Member is true for a row that renders nested under a parent — a
+	// chained active row, or a completed spawned run (a tailed pulse) —
+	// the template indents it and draws a connector.
 	Member bool
 }
 

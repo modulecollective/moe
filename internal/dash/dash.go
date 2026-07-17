@@ -109,9 +109,11 @@ type Row struct {
 	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
-	// Member is true for an active row that follows its chain parent in
-	// the grouped ACTIVE order — the renderer draws a connector for it.
-	// Heads and singletons (and every backlog/completed row) are false.
+	// Member is true for a row that renders nested under a parent — an
+	// active row that follows its chain parent in the grouped ACTIVE
+	// order, or a completed spawned run (a tailed pulse) re-attached
+	// under its spawner. The renderer draws a connector for it. Heads,
+	// singletons, and backlog rows are false.
 	Member bool
 }
 
