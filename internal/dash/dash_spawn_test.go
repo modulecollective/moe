@@ -161,6 +161,38 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 	}
 }
 
+// TestSpawnOpenChildStaysTopLevelActive: a spawned pulse that is still
+// open — the broken-sweep case, where a failed survey leaves the run
+// open by design so a human escalates to it — must not fold under its
+// (completed) parent. It stays a top-level ACTIVE row and the parent
+// gets no spawned arrow, so the single-flight failure surface survives.
+func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "ship-it", "sdlc"),
+		{ID: "pulse-1", Project: "p", Workflow: "pulse", Status: run.StatusInProgress},
+	}
+	when := map[string]time.Time{
+		"p/ship-it": base.Add(-2 * time.Hour),
+		"p/pulse-1": base.Add(-1 * time.Hour),
+	}
+	byKey, _ := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "ship-it"})
+
+	child, ok := byKey["p/pulse-1"]
+	if !ok {
+		t.Fatal("open pulse child must render its own row, not fold under the parent")
+	}
+	if child.Bucket != BucketActiveRuns {
+		t.Fatalf("open pulse child bucket = %v, want BucketActiveRuns", child.Bucket)
+	}
+	if child.Member {
+		t.Fatal("open pulse child must be a top-level row, not a Member")
+	}
+	if got := byKey["p/ship-it"].Note; strings.Contains(got, "spawned →") {
+		t.Fatalf("parent must not carry a spawned arrow for an open child: %q", got)
+	}
+}
+
 // TestCompletedCutoffCountsTopLevelOnly pins the cap semantics directly:
 // member children never count against CompletedCap, so a shown parent
 // drags all its children in and the cutoff falls on the (cap+1)th

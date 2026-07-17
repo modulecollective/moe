@@ -304,7 +304,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	}
 }
 
-// nestSpawnedRuns threads every machine-spawned run (one whose
+// nestSpawnedRuns threads every completed machine-spawned run (one whose
 // SpawnedBy resolves to another dashboard row) under its spawner, so a
 // tailed pulse renders as lineage on the run that triggered it rather
 // than as a standalone completed row that eats a history slot. General
@@ -319,10 +319,16 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 //     so a still-active parent and its already-closed pulse render in one
 //     section.
 //
-// A child whose SpawnedBy names a run that isn't on the board (spawner
-// pruned, or a standalone `moe pulse new` with no spawner) is left as a
-// normal top-level row. Children never count against CompletedCap — the
-// cap is applied over top-level rows in Render / the serve view.
+// Only completed children nest. A spawned run that is still open — a
+// broken sweep left open by design so a human escalates to it, the
+// single-flight failure surface the design preserves — classifies into
+// BucketActiveRuns and stays a top-level ACTIVE row; folding it under a
+// (completed or pushed) parent would hide the very thing the operator is
+// meant to see. A child whose SpawnedBy names a run that isn't on the
+// board (spawner pruned, or a standalone `moe pulse new` with no spawner)
+// is likewise left as a normal top-level row. Children never count
+// against CompletedCap — the cap is applied over top-level rows in
+// Render / the serve view.
 //
 // Returns a new slice: children are pulled from their natural slots and
 // re-emitted under their parent, preserving the incoming bucket-then-
@@ -342,6 +348,10 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 		spawner := idx.SpawnedBy[key]
 		if spawner == "" {
 			continue
+		}
+		if rows[i].Bucket != BucketCompletedRuns {
+			continue // an open spawned run (a broken sweep left open for
+			// failure-escalation) stays a top-level ACTIVE row
 		}
 		parentKey := rows[i].Project + "/" + spawner
 		if _, ok := rowIdx[parentKey]; !ok {
