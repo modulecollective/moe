@@ -273,6 +273,16 @@ func Get(name string) (Agent, error) {
 	return a, nil
 }
 
+// Names returns the sorted list of registered agent backend names. It
+// takes the read lock itself, unlike the internal names helper, so
+// callers outside this package (the stylesheet vocabulary builder) can
+// enumerate the registry without reaching into its lock.
+func Names() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return names()
+}
+
 // names returns the sorted list of registered agent names. Used for
 // error-message context. Caller holds the read lock.
 func names() []string {
