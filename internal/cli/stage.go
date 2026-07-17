@@ -221,6 +221,19 @@ func stageAgentName(opts stageSessionOpts, md *run.Metadata, sheetAgent string) 
 	return resolveAgentName(opts.Agent, runDefault, sheetAgent)
 }
 
+// stylesheetVocab builds the vocabulary the stylesheet is validated
+// against from the live registries this package owns: every registered
+// workflow mapped to its stage names, plus the registered agent
+// backends. Reading straight from the registries means new workflows,
+// stages, or agents extend the accepted vocabulary automatically.
+func stylesheetVocab() stylesheet.Vocab {
+	wf := make(map[string][]string, len(workflows))
+	for name, w := range workflows {
+		wf[name] = w.Stages()
+	}
+	return stylesheet.Vocab{Workflows: wf, Agents: agent.Names()}
+}
+
 // stageModel decides the `--model` value for a stage turn. An explicit
 // value from a bounded curation caller (opts.Model) always wins — same
 // shape as the agent ladder's explicit-beats-stylesheet rule. Otherwise
@@ -372,6 +385,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	sheet, err := stylesheet.Load(root)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	// Validate the sheet's own vocabulary against the live registries
+	// before resolving. A misspelled selector, property, or agent value
+	// refuses the turn here — same fail-loud path as a parse error —
+	// rather than silently matching nothing on some future turn.
+	if err := sheet.Validate(stylesheetVocab()); err != nil {
+		moePrintf(stderr, "stylesheet %s: %v\n", filepath.Join(root, stylesheet.FileName), err)
 		return 1
 	}
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
