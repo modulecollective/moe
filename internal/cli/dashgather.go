@@ -123,6 +123,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		SessionDocsByRun: sessionDocsByRun,
 		NextByRun:        nextByRun,
 		Chores:           choreInputs,
+		PullNext:         gatherPullNext(root, mds, idx),
 	})
 	if err != nil {
 		return DashSnapshot{}, err
