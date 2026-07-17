@@ -97,8 +97,11 @@ func init() {
 	})
 	// Pulse has no workspace and no moe/<run> branch, so close has
 	// nothing workflow-specific to clean up — pass nil and ride the
-	// shared harvest / state-guard / status-flip path. The followups the
-	// survey filed promote through the standard editor-pop prune gate.
+	// shared harvest / state-guard / status-flip path. The happy-path
+	// survey auto-closes through this same registration (skipEdit, so
+	// filings promote to ideas unreviewed); the verb itself is the manual
+	// ending for interactive sittings and failed sweeps, where the
+	// editor-pop prune gate still applies.
 	g.Register(closeCommand(pulseWorkflow, "Close pulse run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "cat",

@@ -214,27 +214,29 @@ Every pulse does two things:
   No stage executes; the opened runs wait in `moe dash` like any other. This is
   the one sanctioned auto-mint: automation acts on a chore definition you
   authored, but never makes a fresh decision.
-- **The survey (rate-limited).** A headless, read-only agent sweep — it reads
+- **The survey (every fire).** A headless, read-only agent sweep — it reads
   the journal since the last pulse, the twin, and the open backlog; files
   followups; and writes a short report whose last section, `## Pull next`,
   ranks the top few open ideas to pull next with a one-line why. `moe dash`
-  floats those picks to the top of BACKLOG, each carrying its reason. The
-  single regulator is single-flight: a project with an open pulse run skips the
-  survey, so cadence = your prune rate. Neglect a pulse run and the sweeps stop
-  until you close it.
+  floats those picks to the top of BACKLOG, each carrying its reason. A clean
+  sweep auto-closes its own run: the filed followups harvest straight into
+  ideas (review them by scrapping on the dash), and the next run-traffic event
+  can fire a fresh sweep. Single-flight is failure escalation, not pacing: a
+  lingering open pulse run means a failed or abandoned sweep, and further
+  surveys stay blocked until you inspect and close it.
 
 ```sh
 moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
 moe pulse pulse <project>/<run>           # reopen a sweep to inspect or re-run it
-moe pulse close [--no-edit] <project>/<run>  # harvest the sweep's followups into ideas
+moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted sweep by hand
 ```
 
 The survey blocks with a `Ctrl-C to skip` banner; interrupting it abandons the
 sweep and leaves the run open for a manual sitting or close. `moe pulse new` is
 also the verb an external cron would call — the primitives are cron-safe, but
-MoE ships no scheduler of its own. Nothing auto-promotes or auto-executes: the
-Pull next list and the followup harvest are advisory, and you hold every
-execution trigger.
+MoE ships no scheduler of its own. Nothing auto-executes: filed followups
+promote to ideas at the auto-close, but an idea is an inert backlog entry —
+the Pull next list is advisory and you hold every execution trigger.
 
 ## Twin
 
