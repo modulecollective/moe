@@ -310,29 +310,36 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // than as a standalone completed row that eats a history slot. General
 // on the edge, not gated on workflow — pulse is just its first consumer.
 //
-//   - A parent with exactly one child keeps its single row and gains a
-//     " · spawned → <slug>" hint (the chainHint arrow form); the child
-//     row is dropped, so the pulse costs zero rows.
-//   - A parent with two-plus children (an sdlc run pulses at push and at
-//     close) renders like a chain: the parent followed by its children as
-//     Member rows, newest first, each normalised into the parent's bucket
-//     so a still-active parent and its already-closed pulse render in one
-//     section.
+// A folding row attaches to the nearest top-level ancestor, not just its
+// direct spawner: the SpawnedBy chain is walked upward past ancestors
+// that themselves fold, so a two-hop chain (sdlc-run → pulse → reflect)
+// nests both descendants under the sdlc run rather than dropping the
+// grandchild. Rendering, keyed by the top-level row's total descendant
+// count over the whole hoisted subtree:
 //
-// Only completed children nest. A spawned run that is still open — a
-// broken sweep left open by design so a human escalates to it (a pulse
-// no longer blocks on it; it just sits visible) — classifies into
-// BucketActiveRuns and stays a top-level ACTIVE row; folding it under a
-// (completed or pushed) parent would hide the very thing the operator is
-// meant to see. A child whose SpawnedBy names a run that isn't on the
-// board (spawner pruned, or a standalone `moe pulse new` with no spawner)
-// is likewise left as a normal top-level row. Children never count
-// against CompletedCap — the cap is applied over top-level rows in
-// Render / the serve view.
+//   - Exactly one descendant → the parent keeps its single row and gains
+//     a " · spawned → <slug>" hint (the child row is dropped, so a single
+//     pulse costs zero rows).
+//   - Two-plus descendants → the parent followed by its descendants as
+//     Member rows in lineage (DFS) order — direct children newest-first,
+//     each immediately followed by its own subtree — every descendant
+//     normalised into the parent's bucket so a still-active parent and
+//     its already-closed pulse render in one section.
 //
-// Returns a new slice: children are pulled from their natural slots and
-// re-emitted under their parent, preserving the incoming bucket-then-
-// recency order for every unaffected row.
+// Only completed rows fold. A spawned run that is still open — a broken
+// sweep left open by design so a human escalates to it (a pulse no longer
+// blocks on it; it just sits visible) — classifies into BucketActiveRuns
+// and stays a top-level ACTIVE row; folding it under a (completed or
+// pushed) parent would hide the very thing the operator is meant to see.
+// A row whose spawner chain doesn't resolve to an on-board top-level
+// ancestor — spawner pruned, a standalone `moe pulse new` with no
+// spawner, or a data cycle in SpawnedBy — is left as a normal top-level
+// row. Members never count against CompletedCap — the cap is applied over
+// top-level rows in Render / the serve view.
+//
+// Returns a new slice: folding rows are pulled from their natural slots
+// and re-emitted under their ancestor, preserving the incoming bucket-
+// then-recency order for every unaffected row.
 func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	if idx == nil || len(idx.SpawnedBy) == 0 {
 		return rows
@@ -341,51 +348,93 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	for i := range rows {
 		rowIdx[rows[i].Project+"/"+rows[i].Run] = i
 	}
-	childrenOf := make(map[string][]int)
-	isChild := make(map[int]bool)
-	for i := range rows {
-		key := rows[i].Project + "/" + rows[i].Run
-		spawner := idx.SpawnedBy[key]
+	// spawnerIdx returns the row index of row i's direct spawner, or -1 if
+	// it has no SpawnedBy edge or that edge isn't on the board.
+	spawnerIdx := func(i int) int {
+		spawner := idx.SpawnedBy[rows[i].Project+"/"+rows[i].Run]
 		if spawner == "" {
-			continue
+			return -1
 		}
-		if rows[i].Bucket != BucketCompletedRuns {
-			continue // an open spawned run (a broken sweep left open for
-			// failure-escalation) stays a top-level ACTIVE row
+		if j, ok := rowIdx[rows[i].Project+"/"+spawner]; ok {
+			return j
 		}
-		parentKey := rows[i].Project + "/" + spawner
-		if _, ok := rowIdx[parentKey]; !ok {
-			continue // unresolved spawner — render the child on its own
-		}
-		childrenOf[parentKey] = append(childrenOf[parentKey], i)
-		isChild[i] = true
+		return -1
 	}
-	if len(isChild) == 0 {
+	// folds reports whether row i is pulled under an ancestor: it is
+	// completed, has an on-board direct spawner, and its upward SpawnedBy
+	// walk is acyclic (so it terminates at a top-level ancestor). A cycle
+	// in the journal-derived edges degrades to a top-level row, never a
+	// hang or a dropped row.
+	folds := func(i int) bool {
+		if rows[i].Bucket != BucketCompletedRuns {
+			return false
+		}
+		p := spawnerIdx(i)
+		if p < 0 {
+			return false
+		}
+		visited := map[int]bool{i: true}
+		for p >= 0 {
+			if visited[p] {
+				return false // cycle — treat i as unresolved, top-level
+			}
+			visited[p] = true
+			if rows[p].Bucket != BucketCompletedRuns {
+				return true // reached a top-level ancestor, no cycle
+			}
+			p = spawnerIdx(p)
+		}
+		return true // chain ran off the board — top-level ancestor reached
+	}
+	// directChildren maps a spawner's row index to its folding children,
+	// in incoming row order (recency-sorted, so newest-first).
+	directChildren := make(map[int][]int)
+	child := make([]bool, len(rows))
+	for i := range rows {
+		if folds(i) {
+			child[i] = true
+			directChildren[spawnerIdx(i)] = append(directChildren[spawnerIdx(i)], i)
+		}
+	}
+	if len(directChildren) == 0 {
 		return rows
 	}
+	var subtreeCount func(i int) int
+	subtreeCount = func(i int) int {
+		n := 0
+		for _, ci := range directChildren[i] {
+			n += 1 + subtreeCount(ci)
+		}
+		return n
+	}
 	out := make([]Row, 0, len(rows))
+	var emitSubtree func(i int, bucket Bucket)
+	emitSubtree = func(i int, bucket Bucket) {
+		for _, ci := range directChildren[i] {
+			m := rows[ci]
+			m.Member = true
+			m.Bucket = bucket
+			out = append(out, m)
+			emitSubtree(ci, bucket)
+		}
+	}
 	for i := range rows {
-		if isChild[i] {
-			continue // emitted under its parent below
+		if child[i] {
+			continue // emitted under its ancestor below
 		}
 		parent := rows[i]
-		kids := childrenOf[parent.Project+"/"+parent.Run]
-		switch len(kids) {
-		case 0:
+		kids := directChildren[i]
+		switch {
+		case len(kids) == 0:
 			out = append(out, parent)
-		case 1:
-			// One child: a textual arrow on the parent, no extra row.
+		case subtreeCount(i) == 1:
+			// One descendant: a textual arrow on the parent, no extra row.
+			// The sole descendant is the single direct child.
 			parent.Note += " · spawned → " + rows[kids[0]].Run
 			out = append(out, parent)
 		default:
-			// Rows arrive recency-sorted, so kids is already newest-first.
 			out = append(out, parent)
-			for _, ci := range kids {
-				child := rows[ci]
-				child.Member = true
-				child.Bucket = parent.Bucket
-				out = append(out, child)
-			}
+			emitSubtree(i, parent.Bucket)
 		}
 	}
 	return out

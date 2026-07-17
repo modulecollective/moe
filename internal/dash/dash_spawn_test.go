@@ -108,6 +108,156 @@ func TestSpawnMultiChildRendersMemberRows(t *testing.T) {
 	}
 }
 
+// TestSpawnDepth2ChainRendersThreeRows: a closed two-hop chain
+// (ship-it → pulse → reflect) hoists both descendants under the top-level
+// sdlc run — three rows in lineage (DFS) order, no arrow on the root, and
+// every descendant a Member. Without the multi-level walk the reflect
+// would fold under the (itself folded) pulse and vanish entirely.
+func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "ship-it", "sdlc"),
+		closedRun("p", "pulse-1", "pulse"),
+		closedRun("p", "reflect-1", "twin"),
+	}
+	when := map[string]time.Time{
+		"p/ship-it":   base.Add(-3 * time.Hour),
+		"p/pulse-1":   base.Add(-2 * time.Hour),
+		"p/reflect-1": base.Add(-1 * time.Hour),
+	}
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{
+		"p/pulse-1":   "ship-it",
+		"p/reflect-1": "pulse-1",
+	})
+
+	var order []string
+	for _, r := range completed {
+		order = append(order, r.Project+"/"+r.Run)
+	}
+	want := []string{"p/ship-it", "p/pulse-1", "p/reflect-1"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("completed order = %v, want root then lineage %v", order, want)
+	}
+	if byKey["p/ship-it"].Member {
+		t.Fatal("the top-level sdlc run must not be a Member")
+	}
+	if !byKey["p/pulse-1"].Member || !byKey["p/reflect-1"].Member {
+		t.Fatal("both hoisted descendants must be Member rows")
+	}
+	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
+		t.Fatalf("a root with member descendants must not carry the arrow: %q", byKey["p/ship-it"].Note)
+	}
+}
+
+// TestSpawnOpenMidChainArrowsOnActivePulse: ship-it(closed) →
+// pulse(open) → reflect(closed). The open pulse doesn't fold (top-level
+// ACTIVE); the reflect's walk stops at the pulse and attaches there, so
+// the ACTIVE pulse gains the spawned arrow and reflect costs zero
+// completed rows. ship-it gets nothing — its only child didn't fold.
+func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "ship-it", "sdlc"),
+		{ID: "pulse-1", Project: "p", Workflow: "pulse", Status: run.StatusInProgress},
+		closedRun("p", "reflect-1", "twin"),
+	}
+	when := map[string]time.Time{
+		"p/ship-it":   base.Add(-3 * time.Hour),
+		"p/pulse-1":   base.Add(-2 * time.Hour),
+		"p/reflect-1": base.Add(-1 * time.Hour),
+	}
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{
+		"p/pulse-1":   "ship-it",
+		"p/reflect-1": "pulse-1",
+	})
+
+	if _, ok := byKey["p/reflect-1"]; ok {
+		t.Fatal("reflect-1 should fold into the pulse's arrow, not render its own row")
+	}
+	// Only ship-it remains a top-level completed row.
+	if len(completed) != 1 || completed[0].Project+"/"+completed[0].Run != "p/ship-it" {
+		t.Fatalf("completed rows = %+v, want only p/ship-it", completed)
+	}
+	pulse := byKey["p/pulse-1"]
+	if pulse.Bucket != BucketActiveRuns || pulse.Member {
+		t.Fatalf("open mid-chain pulse must stay a top-level ACTIVE row: %+v", pulse)
+	}
+	if !strings.Contains(pulse.Note, "· spawned → reflect-1") {
+		t.Fatalf("active pulse note = %q, want the spawned arrow to reflect-1", pulse.Note)
+	}
+	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
+		t.Fatalf("ship-it must carry no arrow — its only child stayed top-level: %q", byKey["p/ship-it"].Note)
+	}
+}
+
+// TestSpawnChainWithSiblingKeepsLineageOrder: a root with both a chain
+// (pulse-old → reflect) and a bare sibling pulse (pulse-new) emits in
+// lineage order — each direct child immediately followed by its own
+// subtree — so the newer sibling never interleaves into the older
+// child's lineage.
+func TestSpawnChainWithSiblingKeepsLineageOrder(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "ship-it", "sdlc"),
+		closedRun("p", "pulse-old", "pulse"),
+		closedRun("p", "reflect-1", "twin"),
+		closedRun("p", "pulse-new", "pulse"),
+	}
+	when := map[string]time.Time{
+		"p/ship-it":   base.Add(-4 * time.Hour),
+		"p/pulse-old": base.Add(-3 * time.Hour),
+		"p/reflect-1": base.Add(-2 * time.Hour),
+		"p/pulse-new": base.Add(-1 * time.Hour),
+	}
+	_, completed := buildSpawn(t, runs, when, map[string]string{
+		"p/pulse-old": "ship-it",
+		"p/reflect-1": "pulse-old",
+		"p/pulse-new": "ship-it",
+	})
+
+	var order []string
+	for _, r := range completed {
+		order = append(order, r.Project+"/"+r.Run)
+	}
+	// Direct children newest-first (pulse-new, pulse-old); pulse-old's
+	// reflect follows pulse-old, not the newer sibling.
+	want := []string{"p/ship-it", "p/pulse-new", "p/pulse-old", "p/reflect-1"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("completed order = %v, want lineage DFS %v", order, want)
+	}
+}
+
+// TestSpawnCycleRendersTopLevel: a two-row SpawnedBy cycle (a → b → a) is
+// bad data; both rows degrade to top-level completed rows with no arrow,
+// and the walk must not hang.
+func TestSpawnCycleRendersTopLevel(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "a", "sdlc"),
+		closedRun("p", "b", "pulse"),
+	}
+	when := map[string]time.Time{
+		"p/a": base.Add(-2 * time.Hour),
+		"p/b": base.Add(-1 * time.Hour),
+	}
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{
+		"p/a": "b",
+		"p/b": "a",
+	})
+
+	if len(completed) != 2 {
+		t.Fatalf("completed rows = %d, want 2 (cycle degrades to top-level): %+v", len(completed), completed)
+	}
+	for _, k := range []string{"p/a", "p/b"} {
+		if byKey[k].Member {
+			t.Fatalf("%s must render top-level under a cycle, not as a Member", k)
+		}
+		if strings.Contains(byKey[k].Note, "spawned →") {
+			t.Fatalf("%s must carry no spawned arrow under a cycle: %q", k, byKey[k].Note)
+		}
+	}
+}
+
 // TestSpawnUnresolvedParentRendersTopLevel: a pulse whose spawner is not
 // on the board (pruned, or a standalone `moe pulse new`) renders as a
 // normal top-level completed row.
