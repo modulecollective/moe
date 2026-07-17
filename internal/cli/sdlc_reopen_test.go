@@ -603,3 +603,27 @@ func TestSDLCReopenAgentFlagRejectsUnknown(t *testing.T) {
 		t.Fatalf("expected unknown-backend error, got: %q", errb.String())
 	}
 }
+
+// TestSDLCReopenParkPrintsHintWithoutPrompt: --park opens the reopened
+// run and prints the next-stage hint, then stops without the chain
+// prompt. The seeded design canvas is not a committed work turn, so
+// Workflow.Next lands on design — the run's first live gate.
+func TestSDLCReopenParkPrintsHintWithoutPrompt(t *testing.T) {
+	seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--park", "tele/fix-it"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	dated := "fix-it-" + todayDateSuffix()
+	if !strings.Contains(out.String(), "opened run tele/"+dated+" (reopen of fix-it)") {
+		t.Fatalf("missing open confirmation for %q in %q", dated, out.String())
+	}
+	if !strings.Contains(out.String(), "next: moe sdlc design tele/"+dated) {
+		t.Fatalf("missing next-stage hint: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}

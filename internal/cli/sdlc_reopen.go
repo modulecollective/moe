@@ -54,8 +54,9 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
 	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual stylesheet → $MOE_AGENT → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
+	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] <project>/<slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] [--park] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -196,6 +197,9 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "opened run %s/%s (reopen of %s)\n", md.Project, md.ID, priorSlug)
+	if *park {
+		return promptNextStageParked(root, md, stdout, stderr)
+	}
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

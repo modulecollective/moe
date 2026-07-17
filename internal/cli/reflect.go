@@ -52,8 +52,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	fs := flag.NewFlagSet(workflow+" reflect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
+	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] [--park] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
 		moePrintln(stderr, "dispatches the first stage of the six-stage ladder. Each managed doc")
@@ -162,6 +163,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	// it; `!!` to cascade headless through the ladder and ship this run,
 	// `!!!` to also ride the chain; `!` for headless dispatch of just
 	// the next stage.
+	if *park {
+		return promptNextStageParked(root, md, stdout, stderr)
+	}
 	return promptNextStage(root, md, "", stdout, stderr)
 }
 

@@ -133,8 +133,9 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chore open", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	now := fs.Bool("now", false, "open even if cooling down or not yet due (still refuses if a run is already open)")
+	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chore open [--now] <project>/<chore>")
+		moePrintln(stderr, "usage: moe chore open [--now] [--park] <project>/<chore>")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -155,6 +156,9 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	md, code := openDueChore(root, projectID, choreName, *now, stdout, stderr)
 	if code != 0 {
 		return code
+	}
+	if *park {
+		return promptNextStageParked(root, md, stdout, stderr)
 	}
 	return promptNextStage(root, md, "", stdout, stderr)
 }

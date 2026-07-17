@@ -208,3 +208,24 @@ func TestRunChoreOpenNowFlagOpensCoolingChore(t *testing.T) {
 		t.Errorf("chore should have an open run after --now")
 	}
 }
+
+// --park opens the chore run, prints the next-stage hint, and stops
+// without the chain prompt. Chores default to the sdlc workflow, so the
+// hint points at design. Mirrors TestRunNewParkPrintsHintAndExits.
+func TestRunChoreOpenParkPrintsHintWithoutPrompt(t *testing.T) {
+	seedChoreRoot(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := runChoreOpen([]string{"--park", "moe/readme-refresh"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("runChoreOpen --park = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("opened chore moe/readme-refresh")) {
+		t.Errorf("stdout missing open confirmation: %q", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("next: moe sdlc design moe/readme-refresh")) {
+		t.Errorf("stdout missing next-stage hint: %q", stdout.String())
+	}
+	if bytes.Contains(stdout.Bytes(), []byte("run now?")) {
+		t.Errorf("--park must not print the chain prompt: %q", stdout.String())
+	}
+}

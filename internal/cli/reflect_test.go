@@ -633,3 +633,31 @@ func TestFindInProgressTwinRunDetectsExisting(t *testing.T) {
 		t.Errorf("findInProgressTwinRun(other) = %q, want \"\"", other)
 	}
 }
+
+// TestTwinReflectParkPrintsHintWithoutPrompt: --park opens the reflect
+// run and prints the next-stage hint, then stops without prompting to
+// ride the ladder. The parked hint resolves via Workflow.Next to the
+// twin ladder's first stage (vision). Mirrors the --agent persistence
+// test's fixture; the assertion doubles as the "no chain prompt" check.
+func TestTwinReflectParkPrintsHintWithoutPrompt(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"twin", "reflect", "--park", "tele"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "opened twin reflect tele/") {
+		t.Fatalf("missing open confirmation: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "next: moe twin vision tele/") {
+		t.Fatalf("missing next-stage hint: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}
