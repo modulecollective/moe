@@ -126,6 +126,34 @@ func TestPulseFiresFromSDLCClose(t *testing.T) {
 	}
 }
 
+// TestPulseDoesNotFireFromServeClose: serve dispatches closes through the
+// same closeRunInProcess seam, but a browser POST has no Ctrl-C for the
+// blocking survey and the chore auto-open would bypass serve's --insecure
+// spawn gate — so serve passes tailPulse=false. Driving the seam exactly
+// as serve's CloseRun callback does (registry lookup, skipEdit=true,
+// tailPulse=false) pins that an sdlc close through serve stays quiet.
+func TestPulseDoesNotFireFromServeClose(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "ship-it"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fired := stubFirePulse(t)
+
+	reg, ok := lookupCloseRegistration("sdlc")
+	if !ok {
+		t.Fatal("sdlc has no close registration")
+	}
+	if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
+		"tele", "ship-it", true /*skipEdit*/, false /*tailPulse*/, io.Discard, io.Discard); err != nil {
+		t.Fatalf("closeRunInProcess: %v", err)
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire for a serve close", *fired)
+	}
+}
+
 // TestPulseDoesNotFireFromChatClose: chat is not run traffic — closing a
 // chat run must not pulse. This is the workflow guard that also keeps
 // chat/kb/hooks/chores/idea and pulse itself out.

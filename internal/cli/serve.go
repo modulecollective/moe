@@ -104,6 +104,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		// run's own workflow through the close registry — the same
 		// (subject, cleanup) pair `moe <workflow> close` registered —
 		// so the in-process path and the CLI verb stay one pipeline.
+		//
+		// tailPulse=false: a browser POST has no Ctrl-C for the blocking
+		// survey and discards its banner, and the chore auto-open the
+		// pulse carries would bypass serve's --insecure spawn gate. The
+		// pulse stays a terminal-surface tail; see closeRunInProcess.
 		CloseRun: func(project, runID string) error {
 			md, err := run.Load(root, project, runID)
 			if err != nil {
@@ -115,7 +120,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 					"workflow %s has no close pipeline", md.Workflow)}
 			}
 			return closeRunInProcess(root, md.Workflow, reg.subject,
-				reg.cleanup, project, runID, true, io.Discard, io.Discard)
+				reg.cleanup, project, runID, true, false /*tailPulse*/, io.Discard, io.Discard)
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed
