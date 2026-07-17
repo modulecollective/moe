@@ -38,7 +38,7 @@ const (
 // stage session — the one place every stage-using verb funnels through.
 func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
 	if cliout.IsTTY(w) {
-		io.WriteString(w, titleSeq("", stage, project, run))
+		io.WriteString(w, titleSeq("", run))
 	}
 	cliout.Printf(w, "%s  [%s] %s · %s  ·  %s/%s\n", bar, agent, workflow, stage, project, run)
 }
@@ -51,17 +51,22 @@ func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
 // committed" stdout line the caller prints just above.
 func StageExit(w io.Writer, workflow, stage, project, runID string) {
 	if cliout.IsTTY(w) {
-		io.WriteString(w, titleSeq("✓", stage, project, runID))
+		io.WriteString(w, titleSeq("✓", runID))
 	}
 	cliout.Printf(w, "%s %s complete  ·  %s/%s %s\n", barOpen, stage, project, runID, barClose)
 }
 
-func titleSeq(status, stage, project, run string) string {
-	title := "moe " + stage
+// titleSeq builds the OSC 2 pane/window title. The title is the run
+// slug alone — it's the field that tells panes apart, and tmux's stock
+// status-right shows only the first ~21 chars, so every extra prefix
+// byte crowds out identity. The status mark leads (`✓ <run>`) because
+// truncation keeps the head of the string. Stage, project, and the moe
+// brand stay in the banner text lines in scrollback.
+func titleSeq(status, run string) string {
+	title := run
 	if status != "" {
-		title += " " + status
+		title = status + " " + run
 	}
-	title += " · " + project + "/" + run
 	// OSC payloads are a terminal-control boundary: drop malformed input
 	// and controls that could terminate or replace the title sequence.
 	title = strings.Map(func(r rune) rune {

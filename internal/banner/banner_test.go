@@ -32,40 +32,34 @@ func TestStageExit(t *testing.T) {
 
 func TestTitleSeq(t *testing.T) {
 	tests := []struct {
-		name    string
-		status  string
-		stage   string
-		project string
-		run     string
-		want    string
+		name   string
+		status string
+		run    string
+		want   string
 	}{
 		{
-			name:    "running",
-			stage:   "design",
-			project: "moe",
-			run:     "nice-banners",
-			want:    "\x1b]2;moe design · moe/nice-banners\x07",
+			name: "running",
+			run:  "nice-banners",
+			want: "\x1b]2;nice-banners\x07",
 		},
 		{
-			name:    "complete",
-			status:  "✓",
-			stage:   "design",
-			project: "moe",
-			run:     "nice-banners",
-			want:    "\x1b]2;moe design ✓ · moe/nice-banners\x07",
+			// The ✓ leads: truncation keeps the head, and the long
+			// slugs most at risk of truncation need the mark visible.
+			name:   "complete",
+			status: "✓",
+			run:    "nice-banners",
+			want:   "\x1b]2;✓ nice-banners\x07",
 		},
 		{
-			name:    "control characters stripped",
-			stage:   "de\x1b\x07sign",
-			project: "moe\n",
-			run:     "nice\x9b-banners",
-			want:    "\x1b]2;moe design · moe/nice-banners\x07",
+			name: "control characters stripped",
+			run:  "nice\x1b\x07\x9b-banners\n",
+			want: "\x1b]2;nice-banners\x07",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := titleSeq(tt.status, tt.stage, tt.project, tt.run); got != tt.want {
+			if got := titleSeq(tt.status, tt.run); got != tt.want {
 				t.Fatalf("titleSeq() = %q, want %q", got, tt.want)
 			}
 		})
