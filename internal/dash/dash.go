@@ -55,6 +55,35 @@ const (
 // archive.
 const CompletedCap = 10
 
+// CompletedCutoff returns how many leading completed rows to render so
+// that the newest CompletedCap top-level rows are shown, each dragging
+// its nested member children (spawned pulses) along for free. Member
+// rows never count against the cap, so a parent and its children are
+// admitted or evicted as a unit. Returns n unchanged when showAll is
+// set or the top-level count is already within the cap.
+//
+// Shared by the CLI Render and the serve dash view so the terminal and
+// the web page cap identically — the completed slice each holds is
+// parent-then-children contiguous (BuildRows nests them), so counting
+// non-member rows is the same walk on both. isMember reports whether
+// row i is a nested child.
+func CompletedCutoff(n int, showAll bool, isMember func(i int) bool) int {
+	if showAll {
+		return n
+	}
+	tops := 0
+	for i := range n {
+		if isMember(i) {
+			continue
+		}
+		if tops == CompletedCap {
+			return i
+		}
+		tops++
+	}
+	return n
+}
+
 // Bucket labels a row's section. Active runs (next stage to run) and
 // completed runs (pushed or terminal) live on different rails from
 // backlog ideas; the operator's eye lands on active work first, so
@@ -186,6 +215,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 		return rows[i].When.After(rows[j].When)
 	})
 	groupActiveChains(rows, in.Index, byRunKey)
+	rows = nestSpawnedRuns(rows, in.Index)
 	floatPullNext(rows, in.PullNext)
 	var choreRows []Row
 	for _, c := range in.Chores {
@@ -270,6 +300,83 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 			active[i].Note += chainHint(idx, byKey[k], byKey)
 		}
 	}
+}
+
+// nestSpawnedRuns threads every machine-spawned run (one whose
+// SpawnedBy resolves to another dashboard row) under its spawner, so a
+// tailed pulse renders as lineage on the run that triggered it rather
+// than as a standalone completed row that eats a history slot. General
+// on the edge, not gated on workflow — pulse is just its first consumer.
+//
+//   - A parent with exactly one child keeps its single row and gains a
+//     " · spawned → <slug>" hint (the chainHint arrow form); the child
+//     row is dropped, so the pulse costs zero rows.
+//   - A parent with two-plus children (an sdlc run pulses at push and at
+//     close) renders like a chain: the parent followed by its children as
+//     Member rows, newest first, each normalised into the parent's bucket
+//     so a still-active parent and its already-closed pulse render in one
+//     section.
+//
+// A child whose SpawnedBy names a run that isn't on the board (spawner
+// pruned, or a standalone `moe pulse new` with no spawner) is left as a
+// normal top-level row. Children never count against CompletedCap — the
+// cap is applied over top-level rows in Render / the serve view.
+//
+// Returns a new slice: children are pulled from their natural slots and
+// re-emitted under their parent, preserving the incoming bucket-then-
+// recency order for every unaffected row.
+func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
+	if idx == nil || len(idx.SpawnedBy) == 0 {
+		return rows
+	}
+	rowIdx := make(map[string]int, len(rows))
+	for i := range rows {
+		rowIdx[rows[i].Project+"/"+rows[i].Run] = i
+	}
+	childrenOf := make(map[string][]int)
+	isChild := make(map[int]bool)
+	for i := range rows {
+		key := rows[i].Project + "/" + rows[i].Run
+		spawner := idx.SpawnedBy[key]
+		if spawner == "" {
+			continue
+		}
+		parentKey := rows[i].Project + "/" + spawner
+		if _, ok := rowIdx[parentKey]; !ok {
+			continue // unresolved spawner — render the child on its own
+		}
+		childrenOf[parentKey] = append(childrenOf[parentKey], i)
+		isChild[i] = true
+	}
+	if len(isChild) == 0 {
+		return rows
+	}
+	out := make([]Row, 0, len(rows))
+	for i := range rows {
+		if isChild[i] {
+			continue // emitted under its parent below
+		}
+		parent := rows[i]
+		kids := childrenOf[parent.Project+"/"+parent.Run]
+		switch len(kids) {
+		case 0:
+			out = append(out, parent)
+		case 1:
+			// One child: a textual arrow on the parent, no extra row.
+			parent.Note += " · spawned → " + rows[kids[0]].Run
+			out = append(out, parent)
+		default:
+			// Rows arrive recency-sorted, so kids is already newest-first.
+			out = append(out, parent)
+			for _, ci := range kids {
+				child := rows[ci]
+				child.Member = true
+				child.Bucket = parent.Bucket
+				out = append(out, child)
+			}
+		}
+	}
+	return out
 }
 
 // floatPullNext reorders the BACKLOG bucket so the latest pulse's
@@ -655,10 +762,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	}
 	fmt.Fprintln(w)
 
-	shown := completed
-	if !showAll && len(completed) > CompletedCap {
-		shown = completed[:CompletedCap]
-	}
+	shown := completed[:CompletedCutoff(len(completed), showAll, func(i int) bool { return completed[i].Member })]
 	if len(shown) < len(completed) {
 		cliout.Printf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
 	} else {
@@ -669,7 +773,11 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
-			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+			slug := r.Project + "/" + r.Run
+			if r.Member {
+				slug = "↳ " + slug
+			}
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}

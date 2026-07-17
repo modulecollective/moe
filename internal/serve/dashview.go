@@ -119,8 +119,8 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		}
 	}
 	vm.CompletedTotal = len(vm.Completed)
-	if !showAll && len(vm.Completed) > dash.CompletedCap {
-		vm.Completed = vm.Completed[:dash.CompletedCap]
-	}
+	// Cap over top-level rows: a spawned member child rides in with its
+	// parent and never counts against the cap (same rule as the CLI dash).
+	vm.Completed = vm.Completed[:dash.CompletedCutoff(len(vm.Completed), showAll, func(i int) bool { return vm.Completed[i].Member })]
 	return vm
 }

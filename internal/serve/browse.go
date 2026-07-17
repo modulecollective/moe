@@ -215,7 +215,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		// reflect this project alone.
 		vm.bannerArtVM = newBannerArt(now, rows, histogram)
 		for _, row := range rows {
-			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: row.Note, When: dash.HumanAgo(now, row.When)}
+			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: row.Note, When: dash.HumanAgo(now, row.When), Member: row.Member}
 			switch row.Bucket {
 			case dash.BucketActiveRuns:
 				vm.Active = append(vm.Active, rvm)

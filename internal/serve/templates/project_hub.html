@@ -91,7 +91,7 @@
     {{if .Completed}}
     <ul class="rows">
       {{range .Completed}}
-      <li class="row">
+      <li class="row{{if .Member}} chained{{end}}">
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
