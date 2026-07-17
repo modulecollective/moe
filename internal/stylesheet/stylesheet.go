@@ -6,8 +6,8 @@
 // rules plus `/* ... */` comments — parsed by this hand-rolled stdlib
 // parser rather than a dependency, same spirit as internal/md. The file
 // is syntactically valid CSS (so the `.css` extension buys editor
-// highlighting and unknown properties are ignored, as a browser would),
-// but the semantics are moe's own and diverge in two knowing ways:
+// highlighting), but the semantics are moe's own and diverge in two
+// knowing ways:
 //
 //   - Selectors are reinterpreted. Two axes only — workflow and stage.
 //     A bare identifier (`sdlc`) is a workflow; a leading-dot identifier
@@ -267,9 +267,9 @@ func allStages(v Vocab) []string {
 // first, then the body is read as a sequence of `selector { decls }`
 // blocks. Structural errors (unterminated comment or block, malformed
 // selector, a declaration missing its colon or value) return an error
-// with a 1-based line number. Unknown property names are not errors —
-// they are legal CSS a browser would ignore, and Resolve simply never
-// reads them.
+// with a 1-based line number. Unknown property names are not parse
+// errors — rejecting them is Validate's job, so a sheet can be parsed
+// without a vocabulary in hand.
 func Parse(src []byte) (*Sheet, error) {
 	s, err := stripComments(string(src))
 	if err != nil {
