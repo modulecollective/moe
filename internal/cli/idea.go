@@ -155,52 +155,38 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Write the stub to a tempfile outside the bureaucracy tree so the
-	// editor flow doesn't dirty it. We pass the edited body into
-	// run.New as seed content — run.New writes the canvas at its
-	// canonical location and commits run.json + canvas atomically.
-	tmpDir, err := os.MkdirTemp("", "moe-idea-new-")
-	if err != nil {
-		moePrintf(stderr, "idea: tempdir: %v\n", err)
-		return 1
+	// Pop $EDITOR on a stub written outside the bureaucracy tree, then
+	// pass the edited body into run.New as seed content — run.New writes
+	// the canvas at its canonical location and commits run.json + canvas
+	// atomically. captureEditorBody returns tmpPath when there is edited
+	// text worth preserving (the editor ran); the deferred cleanup below
+	// removes it on success and keepTmp guards the post-editor failure
+	// window.
+	body, tmpPath, code := captureEditorBody("moe-idea-new-", fmt.Sprintf("# %s\n", slug), stdout, stderr)
+	if code != 0 {
+		if tmpPath != "" {
+			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
+		}
+		return code
 	}
-	// Default-clean: cleanup happens unless a post-editor failure
-	// flips keepTmp. The editor session is a multi-minute window, so
-	// anything that fails after the operator may have written content
-	// keeps the tempfile and names its absolute path on stderr — the
-	// pre-flight above closes the common collision case, this is the
-	// safety net for whatever races slip through (concurrent harvest,
-	// late-arriving error from run.New).
+	// Default-clean: cleanup happens unless a post-editor failure flips
+	// keepTmp. The editor session is a multi-minute window, so anything
+	// that fails after the operator may have written content keeps the
+	// tempfile and names its absolute path on stderr — the pre-flight
+	// above closes the common collision case, this is the safety net for
+	// whatever races slip through (concurrent harvest, late-arriving
+	// error from run.New).
 	keepTmp := false
 	defer func() {
 		if !keepTmp {
-			os.RemoveAll(tmpDir)
+			os.RemoveAll(filepath.Dir(tmpPath))
 		}
 	}()
-	tmpPath := filepath.Join(tmpDir, "content.md")
-	if err := os.WriteFile(tmpPath, []byte(fmt.Sprintf("# %s\n", slug)), 0o644); err != nil {
-		moePrintf(stderr, "idea: write stub: %v\n", err)
-		return 1
-	}
-
-	if code := launchEditor(tmpPath, stdout, stderr); code != 0 {
-		keepTmp = true
-		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-		return code
-	}
-
-	body, err := os.ReadFile(tmpPath)
-	if err != nil {
-		keepTmp = true
-		moePrintf(stderr, "idea: read edited canvas: %v\n", err)
-		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-		return 1
-	}
 
 	opts := run.Options{
 		ID:       slug,
 		Workflow: dash.IdeaWorkflow,
-		SeedDocs: map[string]string{dash.IdeaDocID: string(body)},
+		SeedDocs: map[string]string{dash.IdeaDocID: body},
 	}
 	var md *run.Metadata
 	err = sync.WithJournalPush(root, repolock.Options{
@@ -614,6 +600,48 @@ func requireCleanTree(root string) error {
 	return nil
 }
 
+// captureEditorBody seeds a fresh tempfile (content.md under a
+// prefix-named tempdir outside the bureaucracy tree) with stub, launches
+// $EDITOR/$VISUAL on it, and returns the edited body. Callers gate on an
+// editor being configured before invoking.
+//
+// tmpPath is returned non-empty only when the editor actually ran, i.e.
+// when there may be operator-typed text worth preserving: a failure
+// before the editor pops (tempdir/stub write) cleans up its own scratch
+// dir and returns an empty path, while an editor-launch or read failure
+// returns the live path so the caller can preserve it. code is 0 on
+// success. On success the caller owns tmpPath — it should delete
+// filepath.Dir(tmpPath) once the body is committed, and keep it (naming
+// the path on stderr) if the commit fails, since the multi-minute editor
+// window makes the typed body the recoverable asset.
+func captureEditorBody(prefix, stub string, stdout, stderr io.Writer) (body, tmpPath string, code int) {
+	tmpDir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		moePrintf(stderr, "tempdir: %v\n", err)
+		return "", "", 1
+	}
+	path := filepath.Join(tmpDir, "content.md")
+	if err := os.WriteFile(path, []byte(stub), 0o644); err != nil {
+		// Nothing typed yet — drop the scratch dir and return no path so
+		// the caller never advertises a "preserved" file holding only the
+		// stub.
+		os.RemoveAll(tmpDir)
+		moePrintf(stderr, "write stub: %v\n", err)
+		return "", "", 1
+	}
+	// Past this point the operator may type into the file, so failures
+	// hand the path back for the caller to preserve.
+	if c := launchEditor(path, stdout, stderr); c != 0 {
+		return "", path, c
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		moePrintf(stderr, "read edited canvas: %v\n", err)
+		return "", path, 1
+	}
+	return string(b), path, 0
+}
+
 // launchEditor opens path in $VISUAL or $EDITOR with stdio wired to
 // the terminal, so the operator drops straight into editing the file.
 // Callers are expected to have gated on an editor being available —
@@ -629,7 +657,7 @@ func launchEditor(path string, stdout, stderr io.Writer) int {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		moePrintf(stderr, "idea: editor exited: %v\n", err)
+		moePrintf(stderr, "editor exited: %v\n", err)
 		return 1
 	}
 	return 0
