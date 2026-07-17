@@ -30,7 +30,8 @@ source of truth for the exact command surface; this page is a map.
 - `moe version` prints the moe version.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
 - `moe <workflow> log <project>/<run> [<stage>]` renders a past stage
-  transcript in workflow context.
+  transcript in workflow context. Both `cat` and `log` accept `@latest` in the
+  `<run>` slot to mean the workflow's most-recent run.
 
 ### Project And Run Management
 
@@ -62,6 +63,8 @@ source of truth for the exact command surface; this page is a map.
   journaled run.
 - `moe chores new|code|close|harvest|cat|log` edits project chore definitions
   through a journaled run.
+- `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
+  backlog sweep.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
 `followups.md` harvest into ideas without closing it — the way to pick up

@@ -10,7 +10,7 @@ environment reference, see [reference.md](reference.md).
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <name>] [--agent <name>] <project>/<slug>
+moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
@@ -43,7 +43,18 @@ default branch, or opens a PR with `--pr`.
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
 seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
 starts a new run seeded with a terminal prior run's design canvas, useful
-when a closed or merged topic still has more work behind it.
+when a closed or merged topic still has more work behind it; reopen inherits
+the prior run's agent and workspace, with `--workspace`/`--no-workspace` and
+`--agent`/`--no-agent` to override or clear either.
+
+Two more flags shape how `new` opens the run. `--seed` pops `$EDITOR` on a
+stub and opens the run with your edited body as the first-stage seed (mutually
+exclusive with `--from-idea`, which already claims that seed). `--park` opens
+the run and stops, printing the next-stage hint instead of prompting to run
+the first stage — handy for minting a run to pick up later. `--park` composes
+with either seed: `--seed --park` mints from a typed seed and walks away,
+`--from-idea --park` promotes an idea and walks away. All three ride the shared
+`new` facade, so every workflow's `new` that takes `--from-idea` takes these too.
 
 ### Cascades: the bang vocabulary
 

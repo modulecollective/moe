@@ -36,8 +36,8 @@ MoE has two repos in play:
   agent backend.
 - `bureaucracy/` is your private operating journal: registered projects,
   runs, stage documents, ideas, project twins, lore, hooks, and the markdown
-  fragments that steer agents. MoE finds it by walking up from `$PWD` to a
-  `bureaucracy.conf` marker, or by reading `$MOE_HOME`.
+  fragments that steer agents. MoE finds it by reading `$MOE_HOME`, or by
+  walking up from `$PWD` to a `bureaucracy.conf` marker.
 
 The bureaucracy is the journal. Target projects are registered as submodules
 under it. MoE materializes a project before commands touch its source, so cold
