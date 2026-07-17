@@ -257,5 +257,26 @@ func ensureGitignore(root string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("sandbox: stat %s: %w", p, err)
 	}
-	return os.WriteFile(p, []byte("*\n"), 0o644)
+	// Atomic tmp+rename, not a bare WriteFile: O_TRUNC leaves a window
+	// where the ignore file exists but is empty, and concurrent
+	// first-touch of a fresh `.moe/` would race it into momentarily
+	// un-ignoring the tree. Racers write identical content, so
+	// last-writer-wins rename is idempotent. (Mirrors repolock's copy.)
+	tmp, err := os.CreateTemp(dir, ".gitignore.tmp.*")
+	if err != nil {
+		return fmt.Errorf("sandbox: write %s: %w", p, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write([]byte("*\n")); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sandbox: write %s: %w", p, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("sandbox: write %s: %w", p, err)
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
+		return fmt.Errorf("sandbox: write %s: %w", p, err)
+	}
+	return nil
 }

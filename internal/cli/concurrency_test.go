@@ -68,10 +68,24 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 	}
 	wg.Wait()
 
+	// Report every goroutine's error, not just the first in index
+	// order: a flake here is a race, and the root cause may be a
+	// sibling goroutine, not goroutine 0. Collect all before failing.
+	failed := false
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: %v", i, err)
+			failed = true
+		}
+	}
+	if failed {
+		t.Fatalf("one or more goroutines failed; see errors above")
+	}
+
 	seen := map[string]bool{}
 	for i, err := range errs {
 		if err != nil {
-			t.Fatalf("goroutine %d: %v", i, err)
+			continue
 		}
 		if seen[ids[i]] {
 			t.Errorf("duplicate run id %q", ids[i])

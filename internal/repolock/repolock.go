@@ -741,6 +741,14 @@ func readInstanceID(path string) (string, error) {
 
 // ensureGitignore drops `*` into <dir>/.gitignore so `.moe/`'s contents
 // never appear in git status. Lazy-write: existing file is left alone.
+//
+// The write is atomic (tmp+rename, like tryCreate and instanceID): a
+// plain os.WriteFile opens with O_TRUNC, leaving a window where the
+// ignore file exists but is empty. Concurrent first-touch of a fresh
+// `.moe/` — several moe processes, or the concurrency test's goroutines —
+// would race that window and momentarily un-ignore `.moe/`, which a lock
+// holder's `git status` can catch as a spurious dirty tree. Two racers
+// write identical content, so last-writer-wins rename is idempotent.
 func ensureGitignore(dir string) error {
 	p := filepath.Join(dir, ".gitignore")
 	if _, err := os.Stat(p); err == nil {
@@ -748,7 +756,20 @@ func ensureGitignore(dir string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("repolock: stat %s: %w", p, err)
 	}
-	if err := os.WriteFile(p, []byte("*\n"), 0o644); err != nil {
+	tmp, err := os.CreateTemp(dir, ".gitignore.tmp.*")
+	if err != nil {
+		return fmt.Errorf("repolock: write %s: %w", p, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write([]byte("*\n")); err != nil {
+		tmp.Close()
+		return fmt.Errorf("repolock: write %s: %w", p, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("repolock: write %s: %w", p, err)
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
 		return fmt.Errorf("repolock: write %s: %w", p, err)
 	}
 	return nil
