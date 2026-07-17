@@ -58,7 +58,10 @@ stage headless through push, then ships — fire-and-forget. `--park` and
 mints from a typed seed and walks away, `--from-idea --ship` promotes an idea
 and rides it to the ship. All ride the shared `new` facade, so every workflow's
 `new` that takes `--from-idea` takes these too (`--ship` needs the workflow to
-have a cascade dispatcher, which it refuses to mint a run without).
+have a cascade dispatcher, which it refuses to mint a run without). `--park`
+also reaches past `new`: `moe chore open`, `moe twin reflect`, and
+`moe sdlc reopen` — the other creators that end at the chain prompt — take it
+with the same meaning.
 
 ### Cascades: the bang vocabulary
 
@@ -205,7 +208,7 @@ Two command families, mirroring hooks:
 moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
-moe chore open [--now] <project>/<chore>      # open the seeded run for a due chore
+moe chore open [--now] [--park] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
