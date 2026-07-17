@@ -409,8 +409,8 @@ func MergedSHA(root, projectID, runID string) string {
 // like `auth-2`, or the same slug in another project, can't match), and
 // because the bodies are already in hand each record is re-parsed and
 // its exact MoE-Run / MoE-Project trailers checked before the requested
-// value is extracted — the same belt choreTouchedByPush wears, which
-// also rejects a commit that merely quotes another run's trailer line.
+// value is extracted, which also rejects a commit that merely quotes
+// another run's trailer line.
 func TrailerValue(root, projectID, runID, trailer string) string {
 	out, err := git.Output(root, "log",
 		"--all-match",

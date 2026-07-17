@@ -705,11 +705,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	answer := strings.ToLower(strings.TrimSpace(line))
 	switch answer {
 	case "m":
-		code := next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
-		if code != 0 {
-			return code
-		}
-		return maybeOfferChoreChain(root, md, choreChainOffer, stdout, stderr)
+		return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	case "!!":
 		// `!!` at the push gate uses the typed cascade push path, not
 		// Command.Run: cascade harvest is --no-edit even though manual
@@ -1179,10 +1175,6 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 		if ship != 0 {
 			return steps, false, ship
-		}
-		root, rootErr := findRoot(stderr)
-		if rootErr == nil {
-			maybeOfferChoreChain(root, md, choreChainNote, stdout, stderr)
 		}
 		// Chain ride (`!!!` only): after the parent's terminal stage
 		// ships, if a live chain edge points at an unresolved child,
