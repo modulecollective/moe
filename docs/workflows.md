@@ -199,6 +199,43 @@ journaled run. `moe chore open` refuses if the chore isn't due, already has an
 open run, or is cooling down. Pass `--now` to open it anyway when it's cooling
 down or not yet due — it still refuses if a run is already open.
 
+## Pulse
+
+A pulse is a read-only sweep of one project that feeds the backlog and ranks
+what to pull from it. It is the "work just landed — what's next?" reflex: it
+fires at the tail of the operator-rooted run-traffic verbs (`moe sdlc close`,
+`moe sdlc push`, `moe twin close`, and the cascades' auto-close), never on its
+own clock and never from `moe sync`. Scope is always the driven run's project.
+
+Every pulse does two things:
+
+- **Chore auto-open (always).** Every due chore for the project gets its run
+  opened — the same seeded run `moe chore open` would mint — and nothing more.
+  No stage executes; the opened runs wait in `moe dash` like any other. This is
+  the one sanctioned auto-mint: automation acts on a chore definition you
+  authored, but never makes a fresh decision.
+- **The survey (rate-limited).** A headless, read-only agent sweep — it reads
+  the journal since the last pulse, the twin, and the open backlog; files
+  followups; and writes a short report whose last section, `## Pull next`,
+  ranks the top few open ideas to pull next with a one-line why. `moe dash`
+  floats those picks to the top of BACKLOG, each carrying its reason. The
+  single regulator is single-flight: a project with an open pulse run skips the
+  survey, so cadence = your prune rate. Neglect a pulse run and the sweeps stop
+  until you close it.
+
+```sh
+moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
+moe pulse pulse <project>/<run>           # reopen a sweep to inspect or re-run it
+moe pulse close [--no-edit] <project>/<run>  # harvest the sweep's followups into ideas
+```
+
+The survey blocks with a `Ctrl-C to skip` banner; interrupting it abandons the
+sweep and leaves the run open for a manual sitting or close. `moe pulse new` is
+also the verb an external cron would call — the primitives are cron-safe, but
+MoE ships no scheduler of its own. Nothing auto-promotes or auto-executes: the
+Pull next list and the followup harvest are advisory, and you hold every
+execution trigger.
+
 ## Twin
 
 `moe twin reflect <project>` walks the fixed digital-twin documents —
