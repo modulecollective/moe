@@ -190,3 +190,124 @@ func TestLoadValidFile(t *testing.T) {
 		t.Errorf("got (%q,%q), want (codex,fable)", a, m)
 	}
 }
+
+// testVocab mirrors a slice of moe's live registry big enough to
+// exercise every Validate branch: a multi-stage workflow (sdlc), a
+// single-stage one (pulse) whose stage name doubles as a cross-workflow
+// probe, and two agent backends.
+func testVocab() Vocab {
+	return Vocab{
+		Workflows: map[string][]string{
+			"sdlc":  {"design", "code", "review", "test", "push"},
+			"pulse": {"pulse"},
+		},
+		Agents: []string{"claude", "codex"},
+	}
+}
+
+// TestValidateErrors pins that each typo class refuses with a message
+// carrying the offending line number, the offender, and the known set.
+func TestValidateErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		subs []string
+	}{
+		{"unknown workflow (wf.stage)", "sldc.design { model: opus; }", []string{"line 1", "unknown workflow", `"sldc"`, "sdlc", "pulse"}},
+		{"unknown workflow (bare)", "sldc { model: opus; }", []string{"unknown workflow", `"sldc"`}},
+		{"cross-workflow stage", "sdlc.pulse { model: opus; }", []string{"unknown stage", `"pulse"`, "in workflow", `"sdlc"`, "design"}},
+		{"unknown stage (bare)", ".reveiw { model: opus; }", []string{"unknown stage", `"reveiw"`, "review"}},
+		{"unknown property", "sdlc.design { modle: opus; }", []string{"unknown property", `"modle"`, "agent, model"}},
+		{"unknown agent", "sdlc.design { agent: codxe; }", []string{"unknown agent", `"codxe"`, "claude, codex"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, err := Parse([]byte(c.src))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			err = s.Validate(testVocab())
+			if err == nil {
+				t.Fatalf("expected validation error, got nil")
+			}
+			for _, sub := range c.subs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("error %q missing %q", err.Error(), sub)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateErrorLine pins that the reported line tracks the rule's
+// position, not always line 1.
+func TestValidateErrorLine(t *testing.T) {
+	s, err := Parse([]byte("sdlc.design { model: fable; }\n\nsldc.review { model: fable; }\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := s.Validate(testVocab()); err == nil || !strings.Contains(err.Error(), "line 3") {
+		t.Fatalf("want line 3 violation, got %v", err)
+	}
+}
+
+// TestValidatePasses pins the legible sheets: nil/empty, a `*`-only
+// sheet (properties checked, selector unconstrained), each valid
+// selector shape, and a verbatim copy of the operator's live file.
+func TestValidatePasses(t *testing.T) {
+	if err := (*Sheet)(nil).Validate(testVocab()); err != nil {
+		t.Errorf("nil sheet: %v", err)
+	}
+	if err := (&Sheet{}).Validate(testVocab()); err != nil {
+		t.Errorf("empty sheet: %v", err)
+	}
+	good := []string{
+		"* { model: fable; agent: claude; }",
+		"sdlc { agent: codex; }",
+		".review { model: fable; }",
+		"sdlc.code { agent: claude; model: opus; }",
+		"pulse.pulse { agent: claude; model: sonnet; }",
+	}
+	for _, src := range good {
+		s, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
+		}
+		if err := s.Validate(testVocab()); err != nil {
+			t.Errorf("valid sheet %q rejected: %v", src, err)
+		}
+	}
+}
+
+// TestValidateOperatorFile pins that the checked-in live stylesheet
+// (pulse.pulse / sdlc.design / sdlc.review, agent claude) validates
+// cleanly against the vocabulary — the acceptance case.
+func TestValidateOperatorFile(t *testing.T) {
+	const src = `/* Model stylesheet — see projects/moe/runs/model-stylesheets.
+   Stages not matched here keep the vendor CLI's own default model.
+   ` + "`fable`" + ` is claude's floating latest-in-family alias. */
+
+pulse.pulse { agent: claude; model: sonnet; }
+sdlc.design { agent: claude; model: fable; }
+sdlc.review { agent: claude; model: fable; }
+`
+	s, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := s.Validate(testVocab()); err != nil {
+		t.Errorf("operator file rejected: %v", err)
+	}
+}
+
+// TestValidateModelUnchecked pins the one deliberate hole: a model value
+// with no catalog behind it floats through Validate untouched.
+func TestValidateModelUnchecked(t *testing.T) {
+	s, err := Parse([]byte("sdlc.design { model: no-such-model-9000; }"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := s.Validate(testVocab()); err != nil {
+		t.Errorf("model value should not be validated: %v", err)
+	}
+}

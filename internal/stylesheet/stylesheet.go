@@ -23,10 +23,16 @@
 //     `model` rule and the winning `agent` rule need not be the same
 //     rule.
 //
-// Values are bare tokens handed verbatim to the vendor CLI's `--model` /
-// resolved through the agent registry; moe keeps no model catalog and
-// does no validation. A bad id fails loudly at turn start as the vendor
-// CLI's own error, which is the truthful failure mode.
+// Values are bare tokens: a `model` is handed verbatim to the vendor
+// CLI's `--model`, an `agent` is resolved through the agent registry.
+// Validate (run at the load site) checks the sheet's own vocabulary
+// against the live registries — selectors name real workflows and
+// stages, property names are ones moe reads, and `agent` values name
+// registered backends — so a typo refuses the turn at load rather than
+// matching nothing forever. Model values are the one exception: moe
+// keeps no model catalog, so a bad model id floats through to fail
+// loudly at turn start as the vendor CLI's own error, which is the
+// truthful failure mode.
 package stylesheet
 
 import (
@@ -35,6 +41,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -50,10 +58,12 @@ type Sheet struct {
 
 // rule is one `selector { decls }` block. decls maps property name to
 // value; a property repeated within a block keeps the last value (map
-// assignment), matching CSS.
+// assignment), matching CSS. line is the 1-based line of the selector,
+// carried so Validate can name the offending rule.
 type rule struct {
 	sel   selector
 	decls map[string]string
+	line  int
 }
 
 // selector is a parsed selector reduced to its two axes plus a
@@ -134,6 +144,125 @@ func (s *Sheet) property(workflow, stage, prop string) string {
 	return val
 }
 
+// Vocab is the set of names Validate checks a sheet against: every
+// registered workflow mapped to its stage names, and every registered
+// agent backend. The cli package owns both registries and builds this;
+// keeping it a plain struct passed in leaves internal/stylesheet
+// dependency-free.
+type Vocab struct {
+	Workflows map[string][]string // workflow name → its stage names
+	Agents    []string            // registered backend names
+}
+
+// Validate checks every rule against the known vocabulary v and returns
+// the first violation, or nil if the whole sheet is legible. It is
+// strict by design: a selector naming an unregistered workflow or stage,
+// a property moe never reads, or an `agent` value with no registered
+// backend each refuse loudly at load rather than matching nothing
+// forever. Model values are not checked — moe keeps no model catalog.
+// Errors carry the offending rule's 1-based line number and the set of
+// known names, mirroring the LookupWorkflow / agent.Get error style.
+//
+// The whole file is validated, not just the rules matching the current
+// turn: a rule that never applies is precisely the silent-typo case this
+// guards against.
+func (s *Sheet) Validate(v Vocab) error {
+	if s == nil {
+		return nil
+	}
+	for _, r := range s.rules {
+		if err := r.validate(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validate checks one rule's selector and declarations against v.
+func (r rule) validate(v Vocab) error {
+	if err := r.sel.validate(v, r.line); err != nil {
+		return err
+	}
+	// Property names are checked in a stable (sorted) order so a rule
+	// with more than one violation reports the same one every run.
+	props := make([]string, 0, len(r.decls))
+	for prop := range r.decls {
+		props = append(props, prop)
+	}
+	sort.Strings(props)
+	for _, prop := range props {
+		if prop != "agent" && prop != "model" {
+			return fmt.Errorf("line %d: unknown property %q (known: agent, model)", r.line, prop)
+		}
+	}
+	if a, ok := r.decls["agent"]; ok && !slices.Contains(v.Agents, a) {
+		return fmt.Errorf("line %d: unknown agent %q (known: %s)", r.line, a, strings.Join(v.Agents, ", "))
+	}
+	return nil
+}
+
+// validate checks a selector's workflow and stage axes against v. A `*`
+// selector (both axes empty) constrains nothing and always passes.
+func (sel selector) validate(v Vocab, line int) error {
+	switch {
+	case sel.workflow != "" && sel.stage != "": // wf.stage
+		stages, ok := v.Workflows[sel.workflow]
+		if !ok {
+			return fmt.Errorf("line %d: unknown workflow %q (known: %s)", line, sel.workflow, strings.Join(workflowNames(v), ", "))
+		}
+		if !slices.Contains(stages, sel.stage) {
+			return fmt.Errorf("line %d: unknown stage %q in workflow %q (known: %s)", line, sel.stage, sel.workflow, strings.Join(stages, ", "))
+		}
+	case sel.workflow != "": // bare workflow
+		if _, ok := v.Workflows[sel.workflow]; !ok {
+			return fmt.Errorf("line %d: unknown workflow %q (known: %s)", line, sel.workflow, strings.Join(workflowNames(v), ", "))
+		}
+	case sel.stage != "": // bare .stage
+		if !stageInAnyWorkflow(v, sel.stage) {
+			return fmt.Errorf("line %d: unknown stage %q (known: %s)", line, sel.stage, strings.Join(allStages(v), ", "))
+		}
+	}
+	return nil
+}
+
+// workflowNames returns v's workflow names, sorted, for error context.
+func workflowNames(v Vocab) []string {
+	names := make([]string, 0, len(v.Workflows))
+	for n := range v.Workflows {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// stageInAnyWorkflow reports whether stage belongs to at least one
+// registered workflow — the check for a bare `.stage` selector.
+func stageInAnyWorkflow(v Vocab, stage string) bool {
+	for _, stages := range v.Workflows {
+		if slices.Contains(stages, stage) {
+			return true
+		}
+	}
+	return false
+}
+
+// allStages returns the sorted, deduplicated stage names across every
+// registered workflow, for a bare-stage error's known set.
+func allStages(v Vocab) []string {
+	seen := map[string]bool{}
+	for _, stages := range v.Workflows {
+		for _, st := range stages {
+			seen[st] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for st := range seen {
+		out = append(out, st)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Parse parses stylesheet source into a Sheet. Comments are stripped
 // first, then the body is read as a sequence of `selector { decls }`
 // blocks. Structural errors (unterminated comment or block, malformed
@@ -177,7 +306,7 @@ func Parse(src []byte) (*Sheet, error) {
 		if err != nil {
 			return nil, err
 		}
-		rules = append(rules, rule{sel: sel, decls: decls})
+		rules = append(rules, rule{sel: sel, decls: decls, line: lineAt(s, i)})
 		i = i + open + 1 + closeRel + 1
 	}
 	return &Sheet{rules: rules}, nil
