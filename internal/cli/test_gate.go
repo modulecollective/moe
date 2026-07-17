@@ -11,6 +11,17 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+// reviewStageGate refuses to advance the run when the review canvas
+// left the JSON gate anything but "ready", or — for canvases carrying
+// the newer skeleton — left "## Followups filed" on its seeded
+// placeholder. That section is the audit trail forcing every
+// non-blocking finding to a deliberate disposition (filed, or an
+// explicit "None"); leaving it unfilled is the omission failure this
+// gate exists to catch.
+//
+// The heading-presence guard preserves legacy behavior: an in-flight
+// run whose review canvas predates the section has no heading, so the
+// check is skipped and only the ready-status test applies.
 func reviewStageGate(root string, md *run.Metadata) (bool, error) {
 	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, "review"))
 	body, err := os.ReadFile(canvas)
@@ -21,7 +32,14 @@ func reviewStageGate(root string, md *run.Metadata) (bool, error) {
 		return false, err
 	}
 	status, ok := stageGateStatus(string(body))
-	return ok && status == "ready", nil
+	if !ok || status != "ready" {
+		return false, nil
+	}
+	sections := parseTestCanvasSections(string(body))
+	if followups, present := sections["Followups filed"]; present && !testSectionFilled(followups) {
+		return false, nil
+	}
+	return true, nil
 }
 
 // testStageGate is the satisfiability gate registered on sdlc's test

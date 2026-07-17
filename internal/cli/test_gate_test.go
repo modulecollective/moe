@@ -123,6 +123,54 @@ func TestReviewStageGateAcceptsReadyCanvas(t *testing.T) {
 	}
 }
 
+// reviewCanvasWithFollowups builds a ready review canvas whose
+// "## Followups filed" section carries the given body.
+func reviewCanvasWithFollowups(followups string) string {
+	return "# Review\n\n## Gate\n\n```json\n{\"status\":\"ready\"}\n```\n\n## Followups filed\n\n" + followups + "\n"
+}
+
+// TestReviewStageGateEnforcesFollowupsSection: a ready canvas carrying
+// the "## Followups filed" heading passes only when the section is
+// filled — a real "None" statement or slug rows — and is refused while
+// it still sits on the seeded placeholder.
+func TestReviewStageGateEnforcesFollowupsSection(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	cases := []struct {
+		name      string
+		followups string
+		want      bool
+	}{
+		{
+			"placeholder refused",
+			"(agent fills: one row per followup filed in the run's followups.md — `slug` — why it's deferred; or an explicit \"None — every finding was fixed in place, blocks the gate, or wasn't worth deferring.\")",
+			false,
+		},
+		{
+			"explicit none passes",
+			"None — every finding was fixed in place, blocks the gate, or wasn't worth deferring.",
+			true,
+		},
+		{
+			"slug rows pass",
+			"`pulse-noop-auto-closes-skeleton` — deferred to its own run",
+			true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writeStageCanvas(t, root, md, "review", reviewCanvasWithFollowups(tc.followups))
+			ok, err := reviewStageGate(root, md)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok != tc.want {
+				t.Fatalf("reviewStageGate = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestReviewStageGateRefusesBlockedAndMalformedCanvas(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}

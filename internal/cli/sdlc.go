@@ -580,6 +580,10 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 ## Fixes applied
 
 (agent fills: one row per in-place fix, naming what/why plus the check re-run; empty if none)
+
+## Followups filed
+
+(agent fills: one row per followup filed in the run's followups.md — ` + "`slug`" + ` — why it's deferred; or an explicit "None — every finding was fixed in place, blocks the gate, or wasn't worth deferring.")
 `
 
 // testCanvasSkeleton is the fixed structural shape every test canvas

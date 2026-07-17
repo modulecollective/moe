@@ -36,6 +36,14 @@ scope for this run goes to the run's followups.md via the
 `moe-bureaucracy` skill. Style nits, preference calls, and low-value
 cleanup get omitted.
 
+Every finding worth writing down gets exactly one disposition: **fixed
+in place** (a `Fixes applied` row), **blocks the gate** (a `Findings`
+row plus `{"status":"blocked"}`), **filed as a followup** (a
+followups.md entry plus a `Followups filed` row), or **deliberately
+dropped** (omitted, or named as a drop). A finding left in the report
+with no disposition is itself a defect the gate refuses — "noted, no
+disposition" is not a legal exit.
+
 Use `{"status":"ready"}` only when no blocking findings remain. Use
 `{"status":"blocked"}` when a known issue should send the run back to
 code. The gate is a stop button for known problems, not a demand for
@@ -68,6 +76,10 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 ## Fixes applied
 
 (agent fills: one row per in-place fix, naming what/why plus the check re-run; empty if none)
+
+## Followups filed
+
+(agent fills: one row per followup filed in the run's followups.md — `slug` — why it's deferred; or an explicit "None — every finding was fixed in place, blocks the gate, or wasn't worth deferring.")
 ````
 
 ## Committing
@@ -92,4 +104,7 @@ far downstream at push.
 - `Fixes applied` has a row for every in-place edit you made, each
   naming what/why and the check you re-ran to prove it holds (empty
   section if you fixed nothing).
+- `Followups filed` has a row for every followup you filed this stage,
+  or an explicit "None" statement; the gate refuses a ready canvas that
+  leaves it on the placeholder.
 - `git status` in the sandbox is clean — every fix is committed.
