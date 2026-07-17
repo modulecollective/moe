@@ -115,15 +115,21 @@ sdlc.review { model: fable; }
 The file is checked into the bureaucracy and rides the same auto-sync as the
 rest of it, so every entry point sees the same rules. A missing file means no
 rules — today's behaviour. A file that fails to parse **refuses the stage turn
-loudly** with the parse error rather than silently ignoring your rules.
+loudly** with the parse error rather than silently ignoring your rules. So does
+one that parses but names something MoE doesn't know: a selector for an
+unregistered workflow or stage, a property MoE never reads, or an `agent:` value
+with no registered backend all refuse at load — with the offending line and the
+set of known names — so a typo that would otherwise match nothing forever
+surfaces on the next turn. Model values are the one exception (see below).
 
 **Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
 comments. Two properties in v1:
 
 - `model` — handed verbatim to the backend's `--model` (unless a paired
   `agent:` scopes it to a backend the turn isn't running — see Precedence
-  below). MoE keeps no model catalog and does no validation: a bad id fails at
-  turn start as the backend CLI's own error. Family aliases
+  below). MoE keeps no model catalog, so unlike selectors, property names, and
+  `agent:` values, a `model:` value is **not** validated at load: a bad id fails
+  at turn start as the backend CLI's own error. Family aliases
   (`fable`/`opus`/`sonnet` on claude) and un-dated ids (`gpt-5-codex` on codex)
   float with releases; full ids (`claude-fable-5`) pin.
 - `agent` — the backend name (`claude` | `codex`), resolved through the same
