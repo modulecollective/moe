@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestPulseRegistered partners with TestSDLCRegistered: a registration
@@ -208,5 +211,112 @@ func TestPulseSurveySingleFlight(t *testing.T) {
 
 	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("hook survey exit=%d, want 0 (quiet skip)", code)
+	}
+}
+
+// TestPulseSurveyAutoClosesOnSuccess is the core of this run: a clean
+// (exit 0) survey auto-closes its own run so single-flight sees no open
+// run and the next run-traffic event fires a fresh sweep. The stubbed
+// agent turn files one followup, so the assertion also pins that the
+// skipEdit auto-close harvests filings into ideas (review moves from a
+// $EDITOR prune at close to scrapping on the dash).
+func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	var calls int
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		calls++
+		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte("- [ ] `tidy-pulse` — Tidy the pulse survey\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d stderr=%q", code, errb.String())
+	}
+	if calls != 1 {
+		t.Fatalf("openPulse calls=%d, want 1", calls)
+	}
+
+	// Single-flight sees no open pulse run — the auto-close fired.
+	if open, err := findInProgressPulseRun(root, "moe"); err != nil {
+		t.Fatal(err)
+	} else if open != "" {
+		t.Fatalf("pulse run %s still open after a clean survey; auto-close did not fire", open)
+	}
+
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pulses, ideas int
+	for _, md := range mds {
+		switch md.Workflow {
+		case pulseWorkflow:
+			pulses++
+			if md.Status != run.StatusClosed {
+				t.Fatalf("pulse run %s status=%q, want closed", md.ID, md.Status)
+			}
+		case dash.IdeaWorkflow:
+			if md.Project == "moe" {
+				ideas++
+			}
+		}
+	}
+	if pulses != 1 {
+		t.Fatalf("want exactly one pulse run, got %d", pulses)
+	}
+	if ideas != 1 {
+		t.Fatalf("want the filed followup harvested into one idea, got %d ideas", ideas)
+	}
+}
+
+// TestPulseSurveyFailureLeavesRunOpenForEscalation: a non-zero survey
+// (agent failure or SIGINT) is not propagated but does not auto-close —
+// the run stays open, and single-flight then blocks the next auto-fire
+// so a broken sweep escalates to a human instead of silently retrying.
+func TestPulseSurveyFailureLeavesRunOpenForEscalation(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	var calls int
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		calls++
+		return 1
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	// Failure is not a verb failure…
+	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("survey exit=%d, want 0 (failure not propagated)", code)
+	}
+	// …but the run stays open for a manual look.
+	open, err := findInProgressPulseRun(root, "moe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open == "" {
+		t.Fatal("a failed survey should leave its run open for manual escalation")
+	}
+
+	// Single-flight as escalation: the next auto-fire skips before the
+	// agent turn — no second run, no retry.
+	if code := runPulseSurvey(root, "moe", false /*hook*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("second survey exit=%d, want 0 (single-flight skip)", code)
+	}
+	if calls != 1 {
+		t.Fatalf("openPulse calls=%d, want 1 — the escalation skip must not reach the agent turn again", calls)
 	}
 }

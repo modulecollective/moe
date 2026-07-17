@@ -23,9 +23,13 @@ import (
 //   - Always: open every due chore's run for the project (never execute
 //     one) via openChoreInProcess. Automation acts on standing intent —
 //     a chore the operator authored — but never makes a fresh decision.
-//   - Every time it can: the survey — a blocking, headless stage the
-//     open-run single-flight guard rate-limits (cadence = the
-//     operator's prune rate, per project).
+//   - Every time it can: the survey — a blocking, headless stage that
+//     opens a run, sweeps, files followups, writes its report, and
+//     auto-closes itself on a clean exit. The open-run single-flight
+//     guard is no longer a rate limiter: on the happy path each survey
+//     closes its own run, so a lingering open run means a failed or
+//     abandoned sweep, and the guard holds further surveys until a human
+//     looks at it.
 //
 // `moe pulse new <project>` runs the whole pulse by hand; it is also
 // the verb an external cron would call. Cron itself stays out of moe —
@@ -178,17 +182,30 @@ func autoOpenDueChores(root, projectID string, stdout, stderr io.Writer) {
 }
 
 // runPulseSurvey is the agent part of the pulse. It is a var so tests
-// exercising the deterministic parts (single-flight, chore auto-open)
-// can stub the agent turn out.
+// exercising the deterministic parts (single-flight, chore auto-open,
+// auto-close) can stub the agent turn out.
 //
-// The regulator is single-flight: a project with an open pulse run
-// skips (the previous sweep must be pruned/closed first, so cadence =
-// the operator's prune rate). The hook skips quietly; `moe pulse new`
-// names the open run and refuses. Otherwise it opens the run and
-// executes its stage headless, blocking, behind a loud banner — a
-// SIGINT abandons the sweep and leaves the run open for a manual
-// sitting or close.
-var runPulseSurvey = func(root, projectID string, manual bool, stdout, stderr io.Writer) int {
+// Single-flight is failure escalation, not pacing: a project with an
+// open pulse run skips, because on the happy path a survey auto-closes
+// its own run (below), so a lingering open run is a failed, SIGINT'd, or
+// close-refused sweep and the next survey must wait for a human to look.
+// The hook skips quietly; `moe pulse new` names the open run and
+// refuses. Otherwise it opens the run and executes its stage headless,
+// blocking, behind a loud banner — a SIGINT abandons the sweep and
+// leaves the run open. On a clean (exit 0) survey it auto-closes the run
+// so the next run-traffic event fires a fresh sweep.
+//
+// Body assigned in init() rather than at declaration to break the
+// firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
+// introduces (auto-close → closeRunInProcess → firePulse) — the same
+// init-order dodge openPulseStage uses.
+var runPulseSurvey func(root, projectID string, manual bool, stdout, stderr io.Writer) int
+
+func init() {
+	runPulseSurvey = pulseSurvey
+}
+
+func pulseSurvey(root, projectID string, manual bool, stdout, stderr io.Writer) int {
 	open, err := findInProgressPulseRun(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: scan runs for %s: %v\n", projectID, err)
@@ -213,11 +230,32 @@ var runPulseSurvey = func(root, projectID string, manual bool, stdout, stderr io
 	}
 
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
-	// The run stays open regardless of the survey's outcome; the
-	// operator prunes it at their convenience. A non-zero exit (agent
-	// failure or SIGINT) is not propagated — abandoning a sweep is not a
-	// verb failure.
-	openPulse(projectID, md.ID, true /*headless*/, "", stdout, stderr)
+	// A non-zero exit (agent failure or SIGINT) is never propagated —
+	// abandoning a sweep is not a verb failure — and it leaves the run
+	// open: single-flight then blocks further surveys until the operator
+	// inspects and closes the broken sweep by hand.
+	if code := openPulse(projectID, md.ID, true /*headless*/, "", stdout, stderr); code != 0 {
+		return 0
+	}
+	// Clean sweep: auto-close the run so the next run-traffic event can
+	// fire a fresh survey. Route through the registered close (subject +
+	// cleanup) so there's no parallel close path. skipEdit harvests
+	// followups.md as-is — the filings promote to ideas unreviewed;
+	// review moves to scrapping on the dash. tailPulse=false because
+	// pulse never tails pulse (pulseFiresForWorkflow excludes it — the
+	// false just says so at the call). A close failure warns and leaves
+	// the run open, mirroring firePulse's warn-only posture: the report
+	// and filings are already durable on disk, so a failed auto-close is
+	// a close-by-hand-later, not a lost sweep.
+	reg, ok := lookupCloseRegistration(pulseWorkflow)
+	if !ok {
+		moePrintf(stderr, "pulse: no close registration for %q — leaving run %s/%s open\n", pulseWorkflow, projectID, md.ID)
+		return 0
+	}
+	if err := closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
+		projectID, md.ID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr); err != nil {
+		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
+	}
 	return 0
 }
 
@@ -240,8 +278,9 @@ func findInProgressPulseRun(root, projectID string) (string, error) {
 // openPulse is the Go-level seam behind `moe pulse pulse` and the
 // survey's headless execution. Read-only both-legs-strict sandbox (the
 // design/chat shape): the survey reads the project but never edits it,
-// and the boundary guard enforces that.
-func openPulse(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+// and the boundary guard enforces that. It is a var so runPulseSurvey's
+// auto-close can be tested without running the agent turn.
+var openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
