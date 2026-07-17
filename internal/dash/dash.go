@@ -320,8 +320,8 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 //     section.
 //
 // Only completed children nest. A spawned run that is still open — a
-// broken sweep left open by design so a human escalates to it, the
-// single-flight failure surface the design preserves — classifies into
+// broken sweep left open by design so a human escalates to it (a pulse
+// no longer blocks on it; it just sits visible) — classifies into
 // BucketActiveRuns and stays a top-level ACTIVE row; folding it under a
 // (completed or pushed) parent would hide the very thing the operator is
 // meant to see. A child whose SpawnedBy names a run that isn't on the

@@ -109,6 +109,24 @@ func stubFirePulse(t *testing.T) *[]string {
 	return &fired
 }
 
+// openPulseRuns returns the ids of a project's in-progress pulse runs.
+// The single-flight guard (and its findInProgressPulseRun helper) is
+// gone, so tests scan directly to observe how many sweeps are piled up.
+func openPulseRuns(t *testing.T, root, projectID string) []string {
+	t.Helper()
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open []string
+	for _, md := range mds {
+		if md.Project == projectID && md.Workflow == pulseWorkflow && md.Status == run.StatusInProgress {
+			open = append(open, md.ID)
+		}
+	}
+	return open
+}
+
 // TestPulseFiresFromSDLCClose: closing an sdlc run — run traffic — tails
 // a pulse for the run's project.
 func TestPulseFiresFromSDLCClose(t *testing.T) {
@@ -197,28 +215,52 @@ func TestPulseDoesNotFireFromEnterTerminal(t *testing.T) {
 	}
 }
 
-// TestPulseSurveySingleFlight: an open pulse run gates the survey. The
-// manual path refuses loudly and names the run; the hook path skips
-// quietly. Neither reaches the agent turn, so no survey stub is needed.
-func TestPulseSurveySingleFlight(t *testing.T) {
+// TestPulseSurveyAllowsConcurrentRuns: the single-flight guard is gone.
+// With a pulse run already open, a fresh survey still opens a second run
+// with a distinct slug — it neither refuses nor skips. The stubbed sweep
+// exits clean, so the new run auto-closes while the pre-existing one
+// stays open beside it.
+func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 	root := seedCloseFixture(t, "moe", "pulse-open", pulseWorkflow, run.StatusInProgress)
 
-	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, true /*manual*/, io.Discard, &errb); code != 1 {
-		t.Fatalf("manual survey exit=%d, want 1 (refusal); stderr=%q", code, errb.String())
+	orig := openPulse
+	var calls int
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		calls++
+		return 0
 	}
-	if !strings.Contains(errb.String(), "already has an open pulse run") {
-		t.Fatalf("manual refusal should name the open run, got %q", errb.String())
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0 (no single-flight refusal); stderr=%q", code, errb.String())
+	}
+	if calls != 1 {
+		t.Fatalf("openPulse calls=%d, want 1 — the open pulse-open run must not gate the sweep", calls)
 	}
 
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("hook survey exit=%d, want 0 (quiet skip)", code)
+	// Two distinct pulse runs now exist: the pre-seeded pulse-open (still
+	// open) and the freshly opened one (auto-closed on the clean exit).
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == pulseWorkflow {
+			ids[md.ID] = md.Status
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("pulse runs = %v, want two distinct runs (pulse-open plus a fresh sweep)", ids)
+	}
+	if _, ok := ids["pulse-open"]; !ok {
+		t.Fatalf("pre-seeded pulse-open run missing from %v", ids)
 	}
 }
 
-// TestPulseSurveyAutoClosesOnSuccess is the core of this run: a clean
-// (exit 0) survey auto-closes its own run so single-flight sees no open
-// run and the next run-traffic event fires a fresh sweep. The stubbed
+// TestPulseSurveyAutoClosesOnSuccess: a clean (exit 0) survey auto-closes
+// its own run so no pulse run is left lingering on the dash. The stubbed
 // agent turn files one followup, so the assertion also pins that the
 // skipEdit auto-close harvests filings into ideas (review moves from a
 // $EDITOR prune at close to scrapping on the dash).
@@ -243,18 +285,16 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
 		t.Fatalf("openPulse calls=%d, want 1", calls)
 	}
 
-	// Single-flight sees no open pulse run — the auto-close fired.
-	if open, err := findInProgressPulseRun(root, "moe"); err != nil {
-		t.Fatal(err)
-	} else if open != "" {
-		t.Fatalf("pulse run %s still open after a clean survey; auto-close did not fire", open)
+	// No pulse run left open — the auto-close fired.
+	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
+		t.Fatalf("pulse runs %v still open after a clean survey; auto-close did not fire", open)
 	}
 
 	mds, err := run.Scan(root)
@@ -298,7 +338,7 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 
@@ -327,11 +367,13 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	}
 }
 
-// TestPulseSurveyFailureLeavesRunOpenForEscalation: a non-zero survey
-// (agent failure or SIGINT) is not propagated but does not auto-close —
-// the run stays open, and single-flight then blocks the next auto-fire
-// so a broken sweep escalates to a human instead of silently retrying.
-func TestPulseSurveyFailureLeavesRunOpenForEscalation(t *testing.T) {
+// TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock: a non-zero survey
+// (agent failure or SIGINT) is not propagated and does not auto-close —
+// the run stays open on the dash for a human to look at. Escalation is
+// now by visibility, not by blocking: the next auto-fire still runs a
+// fresh survey, so a persistently broken sweep piles up open runs rather
+// than silently starving the pulse.
+func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "moe")
@@ -345,24 +387,24 @@ func TestPulseSurveyFailureLeavesRunOpenForEscalation(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	// Failure is not a verb failure…
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (failure not propagated)", code)
 	}
 	// …but the run stays open for a manual look.
-	open, err := findInProgressPulseRun(root, "moe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if open == "" {
-		t.Fatal("a failed survey should leave its run open for manual escalation")
+	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
+		t.Fatalf("open pulse runs = %v, want exactly one left open by the failed sweep", open)
 	}
 
-	// Single-flight as escalation: the next auto-fire skips before the
-	// agent turn — no second run, no retry.
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, false /*hook*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("second survey exit=%d, want 0 (single-flight skip)", code)
+	// No single-flight: the next auto-fire still reaches the agent turn
+	// and opens a second run, so the broken sweeps pile up (visible on the
+	// dash) instead of blocking.
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("second survey exit=%d, want 0 (failure not propagated)", code)
 	}
-	if calls != 1 {
-		t.Fatalf("openPulse calls=%d, want 1 — the escalation skip must not reach the agent turn again", calls)
+	if calls != 2 {
+		t.Fatalf("openPulse calls=%d, want 2 — the second fire must run a fresh survey", calls)
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 2 {
+		t.Fatalf("open pulse runs = %v, want two piled up after two failed sweeps", open)
 	}
 }

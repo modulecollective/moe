@@ -149,8 +149,8 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // carries mints runs — a spawn-bucket action serve gates behind
 // --insecure. Firing it from a safe-by-default serve close would both
 // hang the POST for the survey's duration and bypass that gate. The
-// pulse stays best-effort and single-flight, so the next CLI/cascade
-// run-traffic verb tails it anyway; a serve close simply doesn't.
+// pulse stays best-effort, so the next CLI/cascade run-traffic verb
+// tails it anyway; a serve close simply doesn't.
 func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit, tailPulse bool, stdout, stderr io.Writer) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err

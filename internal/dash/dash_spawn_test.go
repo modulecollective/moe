@@ -165,7 +165,7 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 // open — the broken-sweep case, where a failed survey leaves the run
 // open by design so a human escalates to it — must not fold under its
 // (completed) parent. It stays a top-level ACTIVE row and the parent
-// gets no spawned arrow, so the single-flight failure surface survives.
+// gets no spawned arrow, so the broken sweep stays visible on the dash.
 func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
