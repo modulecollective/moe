@@ -231,10 +231,10 @@ Every pulse does two things:
   ranks the top few open ideas to pull next with a one-line why. `moe dash`
   floats those picks to the top of BACKLOG, each carrying its reason. A clean
   sweep auto-closes its own run: the filed followups harvest straight into
-  ideas (review them by scrapping on the dash), and the next run-traffic event
-  can fire a fresh sweep. Single-flight is failure escalation, not pacing: a
-  lingering open pulse run means a failed or abandoned sweep, and further
-  surveys stay blocked until you inspect and close it.
+  ideas (review them by scrapping on the dash). Every fire runs a fresh sweep
+  unconditionally — a lingering open pulse run means a failed or abandoned
+  sweep, sitting visible on the dash's ACTIVE list until you inspect and
+  close it, but it never blocks the next survey.
 
 ```sh
 moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
