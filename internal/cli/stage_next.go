@@ -41,7 +41,18 @@ import (
 // the stage they just read, or skip over intermediate stages (test →
 // design) instead of stepping back one at a time.
 func promptNextStage(root string, md *run.Metadata, justFinished string, stdout, stderr io.Writer) int {
-	return promptNextStageOverride(root, md, justFinished, "", stdout, stderr)
+	return promptNextStageOverride(root, md, justFinished, "", false, stdout, stderr)
+}
+
+// promptNextStageParked is the `--park` tail: print the next incomplete
+// stage's invocation hint and return 0 without ever prompting to run it.
+// It routes through promptNextStageOverride with park=true, which forces
+// the same print-only branch non-TTY callers already take — so an
+// interactive `moe sdlc new --park` and a scripted one both just emit
+// `next: moe sdlc design p/s` and exit, leaving the promote-then-ride
+// default untouched for the plain prompt.
+func promptNextStageParked(root string, md *run.Metadata, stdout, stderr io.Writer) int {
+	return promptNextStageOverride(root, md, "", "", true, stdout, stderr)
 }
 
 // promptNextStageOverride is promptNextStage with an optional override
@@ -52,7 +63,14 @@ func promptNextStage(root string, md *run.Metadata, justFinished string, stdout,
 // code/design to re-fix the rebase), but the next step to offer is the
 // push retry, not code's successor (test). Every other caller goes
 // through promptNextStage with override="" — byte-for-byte the old path.
-func promptNextStageOverride(root string, md *run.Metadata, justFinished, override string, stdout, stderr io.Writer) int {
+//
+// park forces the print-only branch regardless of whether stdin is a
+// terminal: it is the `--park` path (open the run and stop), which wants
+// the same `next: …` hint a non-TTY caller gets, but must also suppress
+// the chain prompt when a human is watching. Only promptNextStageParked
+// passes true; every other caller passes false and keeps the tty-gated
+// prompt.
+func promptNextStageOverride(root string, md *run.Metadata, justFinished, override string, park bool, stdout, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -75,7 +93,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 			if md.Status == run.StatusInProgress {
 				if g, err := LookupGroup(md.Workflow); err == nil {
 					if closeCmd := g.Lookup("close"); closeCmd != nil {
-						if !stdinIsTerminal() {
+						if park || !stdinIsTerminal() {
 							moePrintf(stdout,
 								"%s sealed — run `moe %s close %s/%s` to mark the run terminal.\n",
 								justFinished, md.Workflow, md.Project, md.ID)
@@ -131,7 +149,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		(justFinished == "review" || justFinished == "test") {
 		if canvas := readPrintableCanvas(root, md, justFinished); canvas != "" {
 			if status, ok := stageGateStatus(canvas); ok && status == "blocked" {
-				if !stdinIsTerminal() {
+				if park || !stdinIsTerminal() {
 					// No operator to choose; point the nudge back at code
 					// (where the fix lives), not the forward stage.
 					moePrintf(stdout, "next: moe %s code %s/%s (%s blocked — kick back to fix)\n",
@@ -143,7 +161,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		}
 	}
 	hint := fmt.Sprintf("moe %s %s %s/%s", wf.Name, next.Name, md.Project, md.ID)
-	if !stdinIsTerminal() {
+	if park || !stdinIsTerminal() {
 		moePrintf(stdout, "next: %s\n", hint)
 		return 0
 	}

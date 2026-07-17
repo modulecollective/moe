@@ -738,7 +738,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		// callsite threading the flag. See the field doc comments above.
 		return 0
 	}
-	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, stdout, stderr)
+	return promptNextStageOverride(root, md, docID, opts.NextStageOverride, false, stdout, stderr)
 }
 
 // skipPostTurnPrompt decides whether runStageSession's tail fires the

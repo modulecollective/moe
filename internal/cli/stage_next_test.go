@@ -85,7 +85,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			var stdout, stderr bytes.Buffer
-			if code := promptNextStageOverride(t.TempDir(), md, "code", tc.override, &stdout, &stderr); code != 0 {
+			if code := promptNextStageOverride(t.TempDir(), md, "code", tc.override, false, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 			}
 			if !strings.Contains(stdout.String(), "next: "+tc.want) {

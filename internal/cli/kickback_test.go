@@ -250,7 +250,7 @@ func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
 			}
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			var stdout, stderr bytes.Buffer
-			if code := promptNextStageOverride(root, md, "review", "", &stdout, &stderr); code != 0 {
+			if code := promptNextStageOverride(root, md, "review", "", false, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 			}
 			if !strings.Contains(stdout.String(), tc.want) {
@@ -293,7 +293,7 @@ func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
 	// Recovery turn: justFinished="code", override="review".
-	if code := promptNextStageOverride(root, md, "code", "review", &stdout, &stderr); code != 0 {
+	if code := promptNextStageOverride(root, md, "code", "review", false, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()

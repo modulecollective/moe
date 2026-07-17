@@ -2,8 +2,11 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
@@ -65,12 +68,25 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// workflows below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
+	// --park and --seed are workflow-generic (they live on the shared new
+	// facade, so sdlc/kb/hooks all get them). --park opens the run and
+	// prints the next-stage hint instead of prompting to ride the chain;
+	// --seed pops $EDITOR and opens the run with the edited body as its
+	// first-stage seed. They compose (`--seed --park` = mint and walk
+	// away); --seed and --from-idea are mutually exclusive (both claim
+	// the first-stage seed).
+	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
+	seed := fs.Bool("seed", false, "pop $EDITOR on a stub and open the run with the edited body as its first-stage seed (mutually exclusive with --from-idea)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] <project>/<slug>\n", workflowName)
-		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] --from-idea <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park] <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park] --from-idea <project>/<slug>\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if *seed && *fromIdea != "" {
+		moePrintf(stderr, "%s new: --seed and --from-idea are mutually exclusive (both seed the first stage)\n", workflowName)
 		return 2
 	}
 	if *fromIdea != "" {
@@ -185,18 +201,48 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			// is still greppable via the new run's MoE-Idea trailer.
 		}
 	} else {
-		m, err := runopen.Open(root, project, run.Options{
+		openOpts := run.Options{
 			ID:        slug,
 			Workflow:  workflowName,
 			Workspace: *workspaceName,
 			Agent:     *agentOverride,
-		}, stdout, stderr)
+		}
+		// seedTmpPath is non-empty once --seed's editor capture has left a
+		// tempfile worth preserving; keepSeedTmp defers its cleanup so a
+		// late runopen.Open failure keeps the operator's typed seed.
+		var seedTmpPath string
+		keepSeedTmp := false
+		if *seed {
+			code := seedFirstStage(root, wf, project, slug, &openOpts, &seedTmpPath, stdout, stderr)
+			if code != 0 {
+				return code
+			}
+			defer func() {
+				if !keepSeedTmp {
+					os.RemoveAll(filepath.Dir(seedTmpPath))
+				}
+			}()
+		}
+		m, err := runopen.Open(root, project, openOpts, stdout, stderr)
 		if err != nil {
+			if seedTmpPath != "" {
+				keepSeedTmp = true
+				moePrintf(stderr, "%s new: %v\n", workflowName, err)
+				moePrintf(stderr, "%s new: your edited seed is preserved at %s\n", workflowName, seedTmpPath)
+				return 1
+			}
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
 		md = m
 		moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
+	}
+
+	// --park: open the run and stop. Print the next-stage hint (the same
+	// line the non-TTY path emits) and exit without the chain prompt —
+	// the "just open it" flow that costs an `n` + Enter otherwise.
+	if *park {
+		return promptNextStageParked(root, md, stdout, stderr)
 	}
 
 	// Fresh run — no stage has just finished, so promptNextStage falls
@@ -234,5 +280,72 @@ func preflightWorkspaceClaim(root, projectID, name string, stderr io.Writer) int
 			name, projectID, holder.Run)
 		return 1
 	}
+	return 0
+}
+
+// seedFirstStage runs --seed's editor capture and, on success, wires the
+// edited body into opts.SeedDocs under the workflow's first stage — the
+// same SeedDocs mechanism `--from-idea`'s promote uses. It gates on an
+// editor being configured, pre-flights the slug so a collision fails
+// before the editor pops (not after the operator types into a tempfile
+// we'd throw away), pops $EDITOR on a `# slug` stub, and refuses to mint
+// anything when the operator leaves the stub unchanged.
+//
+// *tmpPath is set to the capture tempfile so the caller can preserve it
+// (and name its path) if the later open commit fails — the multi-minute
+// editor window makes the typed seed the recoverable asset. On every
+// failure seedFirstStage resolves within itself (prints the cause;
+// preserves the tempfile on an editor/read failure, cleans it up on an
+// unchanged-stub abort) and returns a nonzero exit code; the caller just
+// bubbles it up.
+//
+// The unchanged-stub abort deliberately diverges from `idea new`, which
+// happily captures a bare heading: an idea is cheap to capture and cheap
+// to close, but an accidental sdlc run is a dashboard entry that needs an
+// explicit close, so a no-op edit should mint nothing.
+func seedFirstStage(root string, wf *Workflow, project, slug string, opts *run.Options, tmpPath *string, stdout, stderr io.Writer) int {
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintf(stderr, "%s new: set $EDITOR or $VISUAL — --seed needs an editor\n", wf.Name)
+		return 1
+	}
+	stages := wf.Stages()
+	if len(stages) == 0 {
+		moePrintf(stderr, "%s new: workflow %q has no stages to seed\n", wf.Name, wf.Name)
+		return 1
+	}
+	// Pre-flight the slug before the editor pop. run.New re-checks inside
+	// the lock and is the authority on collisions; this refuses the
+	// obvious case up front. Match run.New's wording so the operator sees
+	// the same error regardless of which gate caught it.
+	if taken, err := run.SlugTaken(root, project, slug); err != nil {
+		moePrintf(stderr, "%s new: %v\n", wf.Name, err)
+		return 1
+	} else if taken {
+		suggestion, serr := run.NextFreeID(root, project, slug)
+		if serr != nil {
+			moePrintf(stderr, "%s new: %v\n", wf.Name, serr)
+			return 1
+		}
+		moePrintf(stderr,
+			"%s new: slug %q in project %s is already used (existing run or prior history); try %q or pick a different name\n",
+			wf.Name, slug, project, suggestion)
+		return 1
+	}
+	stub := fmt.Sprintf("# %s\n", slug)
+	body, tp, code := captureEditorBody("moe-"+wf.Name+"-seed-", stub, stdout, stderr)
+	*tmpPath = tp
+	if code != 0 {
+		if tp != "" {
+			moePrintf(stderr, "%s new: your edited seed is preserved at %s\n", wf.Name, tp)
+		}
+		return code
+	}
+	if strings.TrimSpace(body) == "" || strings.TrimSpace(body) == strings.TrimSpace(stub) {
+		os.RemoveAll(filepath.Dir(tp))
+		*tmpPath = ""
+		moePrintf(stderr, "%s new: aborting: seed unchanged\n", wf.Name)
+		return 1
+	}
+	opts.SeedDocs = map[string]string{stages[0]: body}
 	return 0
 }

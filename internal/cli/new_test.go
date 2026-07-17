@@ -314,6 +314,234 @@ func TestRunNewSlugCollisionFailsLoudWithSuggestion(t *testing.T) {
 	}
 }
 
+// writingEditor points EDITOR at a script that appends content to the
+// file it's handed, so --seed's editor capture produces a body that
+// differs from the stub (unlike stubEditor's no-op `true`).
+func writingEditor(t *testing.T, content string) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "seed-editor.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '"+content+"\\n' >> \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+}
+
+// --park opens the run and prints the next-stage hint without prompting.
+// The assertion doubles as the "no chain prompt" check: the interactive
+// prompt's "run now?" text must never appear.
+func TestRunNewParkPrintsHintAndExits(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--park", "tele/park-me"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "opened run tele/park-me") {
+		t.Fatalf("missing open confirmation: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "next: moe sdlc design tele/park-me") {
+		t.Fatalf("missing next-stage hint: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}
+
+// --park composes with --from-idea: promote, print the hint, stop.
+func TestRunNewParkWithFromIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	captureIdea(t, "tele", "parked-promote")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--from-idea=tele/parked-promote", "--park"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	dated := "parked-promote-" + todayDateSuffix()
+	if !strings.Contains(out.String(), "next: moe sdlc design tele/"+dated) {
+		t.Fatalf("missing next-stage hint for promoted run: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}
+
+// --seed pops the editor and opens the run with the edited body as its
+// first-stage (design) seed — the same SeedDocs mechanism promote uses.
+func TestRunNewSeedOpensWithEditedBody(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	writingEditor(t, "Design the thing")
+	suppressNextStagePrompt(t)
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "tele/seeded"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "opened run tele/seeded") {
+		t.Fatalf("missing open confirmation: %q", out.String())
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "seeded", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("seeded design doc missing: %v", err)
+	}
+	if !strings.Contains(string(body), "Design the thing") {
+		t.Fatalf("edited seed body not on the first-stage canvas: %q", body)
+	}
+	// The stub H1 (# slug) rides along above the operator's addition.
+	if !strings.Contains(string(body), "# seeded") {
+		t.Fatalf("stub heading missing from seeded canvas: %q", body)
+	}
+}
+
+// --seed --park is the operator's stated common case: mint the run from
+// an editor seed and walk away, no chain prompt.
+func TestRunNewSeedParkComposition(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	writingEditor(t, "walk away seed")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "--park", "tele/seed-park"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "next: moe sdlc design tele/seed-park") {
+		t.Fatalf("missing next-stage hint: %q", out.String())
+	}
+	if strings.Contains(out.String(), "run now?") {
+		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "seed-park", "documents", "design", "content.md"))
+	if err != nil {
+		t.Fatalf("seeded design doc missing: %v", err)
+	}
+	if !strings.Contains(string(body), "walk away seed") {
+		t.Fatalf("edited seed body not on the first-stage canvas: %q", body)
+	}
+}
+
+// An unchanged stub (editor is a no-op) mints nothing — an accidental
+// sdlc run is a dashboard entry that needs an explicit close, so --seed
+// aborts rather than capturing a bare heading the way `idea new` does.
+func TestRunNewSeedAbortsOnUnchangedStub(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t) // EDITOR=true: leaves the stub untouched
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "tele/untouched"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on unchanged stub, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "seed unchanged") {
+		t.Fatalf("expected 'seed unchanged' abort, got: %q", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "untouched")); !os.IsNotExist(err) {
+		t.Fatalf("aborted --seed must mint nothing; run dir exists (err=%v)", err)
+	}
+}
+
+// --seed and --from-idea both claim the first-stage seed — reject the
+// combination at the verb boundary.
+func TestRunNewSeedMutuallyExclusiveWithFromIdea(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "--from-idea=tele/whatever"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "mutually exclusive") {
+		t.Fatalf("expected mutual-exclusion error, got: %q", errb.String())
+	}
+}
+
+// --seed needs an editor; with neither $EDITOR nor $VISUAL set it fails
+// before touching disk.
+func TestRunNewSeedRequiresEditor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	noEditor(t)
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "tele/no-ed"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero with no editor, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "needs an editor") {
+		t.Fatalf("expected editor-required error, got: %q", errb.String())
+	}
+}
+
+// --seed pre-flights the slug before the editor pops: a collision fails
+// fast and the editor never runs (so the operator never types into a
+// tempfile we'd throw away). The fake editor bumps a counter; after the
+// colliding second --seed it must still read zero.
+func TestRunNewSeedSlugPreflightFiresBeforeEditor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	suppressNextStagePrompt(t)
+
+	// First run takes the slug via a plain (non-seed) open.
+	if code := runNew("sdlc", []string{"tele/taken"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup open failed")
+	}
+
+	editorDir := t.TempDir()
+	marker := filepath.Join(editorDir, "ran")
+	script := filepath.Join(editorDir, "counting-editor.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'ran\\n' >> "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--seed", "tele/taken"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on slug collision, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "already used") {
+		t.Fatalf("expected collision error, got: %q", errb.String())
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("editor ran before the slug pre-flight (marker exists, err=%v)", err)
+	}
+}
+
 func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runNew("sdlc", []string{"--help"}, &out, &errb)
