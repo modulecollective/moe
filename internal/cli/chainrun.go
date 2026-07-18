@@ -38,11 +38,6 @@ const (
 	// chainDoc is the stageless document id. The chain canvas lives at
 	// documents/chain/content.md.
 	chainDoc = "chain"
-	// legacyQueueWorkflow is the pre-rename name for the same thing.
-	// Registered as a DAG-only workflow (no command group) so historical
-	// queue runs still resolve in `moe log`, cat, and serve run pages.
-	// Nothing mints one any more.
-	legacyQueueWorkflow = "queue"
 )
 
 // chainCanvasSkeleton is what a freshly minted chain run opens with.
@@ -64,12 +59,6 @@ func init() {
 	w := NewWorkflow(chainWorkflow)
 	w.RegisterDoc(chainDoc)
 	RegisterWorkflow(w)
-
-	// Legacy shim: resolve historical queue runs' canvases and
-	// transcripts. No command group, no mint path, no chain membership.
-	q := NewWorkflow(legacyQueueWorkflow)
-	q.RegisterStage(legacyQueueWorkflow)
-	RegisterWorkflow(q)
 }
 
 func runChainNew(args []string, stdout, stderr io.Writer) int {

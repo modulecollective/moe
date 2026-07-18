@@ -301,9 +301,6 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // delete-means-unchain authority clears any edge to a run it didn't
 // show on the next save, so a head the editor hid would lose its whole
 // batch the first time the operator saved.
-//
-// The retired `queue` workflow is deliberately absent: no live queue
-// run exists, and its shim registration is for rendering history only.
 func chainableWorkflow(workflow string) bool {
 	return operatorCascades(workflow) || workflow == chainWorkflow
 }

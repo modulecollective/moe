@@ -540,40 +540,6 @@ func TestChainCanvasResolvesWithoutAStage(t *testing.T) {
 	}
 }
 
-// TestLegacyQueueRunsStillResolve: the `queue` workflow keeps a DAG-only
-// registration so history renders. Nothing mints one any more, but
-// `moe log`, cat, and serve run pages all look the workflow up, and a
-// closed queue run predates the rename.
-func TestLegacyQueueRunsStillResolve(t *testing.T) {
-	root := spawnFixture(t)
-
-	if _, err := run.New(root, "moe", run.Options{
-		ID:       "queue-2026-07-01",
-		Workflow: legacyQueueWorkflow,
-		SeedDocs: map[string]string{legacyQueueWorkflow: "# Queue\n\n## Queued\n- `fix-old`\n"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	path, err := resolveCanvasPath(root, legacyQueueWorkflow, "moe", "queue-2026-07-01", legacyQueueWorkflow)
-	if err != nil {
-		t.Fatalf("historical queue canvas no longer resolves: %v", err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "fix-old") {
-		t.Errorf("resolved the wrong file:\n%s", body)
-	}
-
-	// But the retired workflow is not chainable, so a stale queue run
-	// can never be offered in the editor or kicked.
-	if chainableWorkflow(legacyQueueWorkflow) {
-		t.Error("the retired queue workflow must not be chainable")
-	}
-}
-
 func slicesContains(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {
