@@ -87,6 +87,13 @@ const (
 	ChatDocID    = "chat"
 )
 
+// ChainWorkflow is the chain workflow's name as written to run.json.
+// dash needs it to recognise a chain head in classify: a head has no
+// stages, so it arrives trivially "done", but the operator verb is
+// kick, not close (see there). The cli chain const aliases this so the
+// string lives in exactly one place.
+const ChainWorkflow = "chain"
+
 // CompletedCap bounds the COMPLETED section. Finished runs are
 // history — useful as recent context, not as a backlog — so the dash
 // shows the newest N and lets the bureaucracy repo itself be the
@@ -705,6 +712,14 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 		if dec.Perpetual && dec.Stage != "" {
 			runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
 			return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
+		}
+		if md.Workflow == ChainWorkflow && run.ChainChildLive(idx.ChainedChild[runKey], byRunKey) {
+			// A loaded chain head. It is trivially "done" (it has no
+			// stages at all), but the operator verb is kick — close
+			// would drop the batch's collection point without riding
+			// it. A spent or empty head falls through to `close?`,
+			// which is honest: there's nothing left to ride.
+			return BucketActiveRuns, prefix + "parked · kick?", "done", ""
 		}
 		// The run has walked every stage but isn't terminal yet — it
 		// still needs an operator action (`moe <wf> close`) to land in

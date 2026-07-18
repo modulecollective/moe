@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -34,7 +35,10 @@ import (
 // head is inert; execution is operator-rooted.** The pulse proposes and
 // the chain holds; only an operator kick (or their own `!!!`) executes.
 const (
-	chainWorkflow = "chain"
+	// chainWorkflow is the workflow name written to run.json. Aliased
+	// from dash so the string lives in one place — dash also needs it
+	// to spell a parked head's hint (see dash.ChainWorkflow).
+	chainWorkflow = dash.ChainWorkflow
 	// chainDoc is the stageless document id. The chain canvas lives at
 	// documents/chain/content.md.
 	chainDoc = "chain"

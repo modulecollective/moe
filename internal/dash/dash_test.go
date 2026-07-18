@@ -407,3 +407,110 @@ func TestChatClosedRendersResumeInCompleted(t *testing.T) {
 		t.Fatalf("note=%q want %q", r.Note, "chat:closed · resume?")
 	}
 }
+
+// chainRows builds rows for a chain head plus its children, with the
+// head's empty ladder modelled as `Done: true` (what NextWithIndex
+// returns for a stageless workflow) and children on the normal sdlc
+// ladder. Keyed by "<project>/<slug>".
+func chainRows(t *testing.T, runs []*run.Metadata, chained map[string]string) map[string]Row {
+	t.Helper()
+	next := make(map[string]NextDecision)
+	for _, md := range runs {
+		if md.Status != run.StatusInProgress {
+			continue
+		}
+		if md.Workflow == ChainWorkflow {
+			next[md.Project+"/"+md.ID] = NextDecision{Done: true}
+		} else {
+			next[md.Project+"/"+md.ID] = NextDecision{Stage: "design"}
+		}
+	}
+	rows, err := BuildRows(Inputs{
+		Now:       time.Now().UTC(),
+		Runs:      runs,
+		Index:     &run.JournalIndex{ChainedChild: chained},
+		NextByRun: next,
+	})
+	if err != nil {
+		t.Fatalf("BuildRows: %v", err)
+	}
+	m := make(map[string]Row, len(rows))
+	for _, r := range rows {
+		m[r.Project+"/"+r.Run] = r
+	}
+	return m
+}
+
+func chainHead(project, id string) *run.Metadata {
+	return &run.Metadata{ID: id, Project: project, Workflow: ChainWorkflow, Status: run.StatusInProgress}
+}
+
+// TestChainHeadWithLiveChildHintsKick is the core of the change: a
+// loaded head is trivially "done" (no stages), but the operator verb is
+// kick — close would drop the batch's collection point without riding
+// it.
+func TestChainHeadWithLiveChildHintsKick(t *testing.T) {
+	head := chainHead("moe", "dev-observability")
+	child := &run.Metadata{ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
+	r := chainRows(t, []*run.Metadata{head, child},
+		map[string]string{"moe/dev-observability": "moe/fix-a"})["moe/dev-observability"]
+	if r.Bucket != BucketActiveRuns {
+		t.Fatalf("bucket=%v want ACTIVE", r.Bucket)
+	}
+	if r.Note != "chain:parked · kick?" {
+		t.Fatalf("note=%q want %q", r.Note, "chain:parked · kick?")
+	}
+	if strings.Contains(r.Note, "close?") {
+		t.Fatalf("loaded head must not nag close: %q", r.Note)
+	}
+	if r.Stage != "done" {
+		t.Fatalf("stage=%q want %q (no advance button, generic glyph)", r.Stage, "done")
+	}
+}
+
+// TestChainHeadWithoutLiveChildHintsClose: a spent head (all children
+// terminal) or an empty one (no edge yet) genuinely is done, so the
+// existing close nag stays.
+func TestChainHeadWithoutLiveChildHintsClose(t *testing.T) {
+	head := chainHead("moe", "dev-observability")
+	for name, tc := range map[string]struct {
+		runs    []*run.Metadata
+		chained map[string]string
+	}{
+		"spent": {
+			runs: []*run.Metadata{head, &run.Metadata{
+				ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusClosed}},
+			chained: map[string]string{"moe/dev-observability": "moe/fix-a"},
+		},
+		"empty": {runs: []*run.Metadata{head}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := chainRows(t, tc.runs, tc.chained)["moe/dev-observability"]
+			if r.Bucket != BucketActiveRuns {
+				t.Fatalf("bucket=%v want ACTIVE", r.Bucket)
+			}
+			if r.Note != "chain:done · close?" {
+				t.Fatalf("note=%q want %q", r.Note, "chain:done · close?")
+			}
+		})
+	}
+}
+
+// TestChainHeadKickHintSurvivesGrouping: groupActiveChains draws the
+// live child adjacently beneath the head and suppresses the textual
+// `· chained →` hint — the kick hint has to survive that pass.
+func TestChainHeadKickHintSurvivesGrouping(t *testing.T) {
+	head := chainHead("moe", "dev-observability")
+	child := &run.Metadata{ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
+	byKey := chainRows(t, []*run.Metadata{head, child},
+		map[string]string{"moe/dev-observability": "moe/fix-a"})
+	if byKey["moe/dev-observability"].Member {
+		t.Errorf("head should not be a member")
+	}
+	if !byKey["moe/fix-a"].Member {
+		t.Errorf("live child should nest under the head")
+	}
+	if got := byKey["moe/dev-observability"].Note; got != "chain:parked · kick?" {
+		t.Errorf("head note = %q, want %q (no text chain hint when adjacent)", got, "chain:parked · kick?")
+	}
+}
