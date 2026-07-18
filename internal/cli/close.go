@@ -25,9 +25,7 @@ import (
 // non-empty seal (an empty capture on close is operator intent, not a
 // missed write). Everything else is a staged workflow whose close runs
 // the harvest and the canvas seal.
-func isCaptureWorkflow(workflow string) bool {
-	return workflow == dash.IdeaWorkflow || workflow == dash.IntentWorkflow
-}
+func isCaptureWorkflow(workflow string) bool { return dash.IsCapture(workflow) }
 
 // closeCleanup runs workflow-specific tear-down after state guards pass
 // and before the shared status-flip commit. Returning an error aborts
@@ -49,7 +47,7 @@ var closeRegistrations = map[string]closeRegistration{}
 // lookupCloseRegistration returns the (subject, cleanup) recorded when
 // workflow registered its close command. ok=false means the workflow
 // has no closeCommand-built close (idea is the case today — its close
-// is bespoke, runopen.CloseIdea).
+// is bespoke, runopen.CloseCapture).
 func lookupCloseRegistration(workflow string) (closeRegistration, bool) {
 	reg, ok := closeRegistrations[workflow]
 	return reg, ok

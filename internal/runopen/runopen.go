@@ -15,7 +15,7 @@
 //     Knowing the slug synchronously is what lets serve drop the
 //     `:promoting` placeholder + `opened run …` regex it used before.
 //
-// Open, Promote, CloseIdea, Reopen, and ReopenIdea take the repolock
+// Open, Promote, CloseCapture, Reopen, and ReopenIdea take the repolock
 // around their mutations so concurrent invocations do not clobber
 // each other.s git index.
 package runopen
@@ -35,12 +35,12 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// ErrNotIdea is returned when the slug names a run that
-// is not an in-progress idea — either a different workflow, or an
-// idea that has already been promoted/closed. Defence in depth: serve
-// handlers gate on the same check before rendering actions, and this
-// catches replayed POSTs landing on a now-terminal idea.
-var ErrNotIdea = errors.New("runopen: not an in-progress idea (workflow!=idea or status!=in_progress)")
+// ErrNotCapture is returned when the slug names a run that is not an
+// in-progress capture (idea or intent) — either a staged workflow, or
+// a capture that has already been promoted/closed. Defence in depth:
+// serve handlers gate on the same check before rendering actions, and
+// this catches replayed POSTs landing on a now-terminal capture.
+var ErrNotCapture = errors.New("runopen: not an in-progress capture (workflow not idea/intent, or status!=in_progress)")
 
 // ErrNotReopenableIdea is returned by ReopenIdea when the slug is not
 // an idea that can be flipped back to in_progress. The wrapped error
@@ -51,7 +51,7 @@ var ErrNotReopenableIdea = errors.New("runopen: not a reopenable idea")
 // state — a non-idea run that is pushed, already terminal, or of a
 // different workflow — rather than an internal failure (the
 // canvas-empty gate, a dirty tree, a commit error). The sdlc-side peer
-// of ErrNotIdea.
+// of ErrNotCapture.
 //
 // The close pipeline itself stays in the cli package (it leans on
 // cli-resident workspace teardown and harvest helpers), but serve must
@@ -209,26 +209,29 @@ func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata, stdout,
 	})
 }
 
-// CloseIdea flips an in-progress idea run to closed and commits only
-// its run.json with the standard idea close trailer block.
-func CloseIdea(root, projectID, slug string, stdout, stderr io.Writer) error {
+// CloseCapture flips an in-progress capture run (idea or intent) to
+// closed and commits only its run.json with that workflow's close
+// trailer block. Subject and lock purpose derive from the run's own
+// workflow, so the resulting commit is byte-identical to the one the
+// matching CLI verb (`moe idea close` / `moe intent close`) writes.
+func CloseCapture(root, projectID, slug string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
 	}
-	if md.Workflow != dash.IdeaWorkflow || md.Status != run.StatusInProgress {
-		return ErrNotIdea
+	if !dash.IsCapture(md.Workflow) || md.Status != run.StatusInProgress {
+		return ErrNotCapture
 	}
 
 	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	msg := fmt.Sprintf("Close idea %s/%s\n\n", projectID, slug) +
+	msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) +
 		trailers.Block{
 			Run:      slug,
 			Project:  projectID,
-			Workflow: dash.IdeaWorkflow,
+			Workflow: md.Workflow,
 		}.String()
 	return sync.WithJournalPush(root, repolock.Options{
-		Purpose: "idea-close",
+		Purpose: md.Workflow + "-close",
 		Run:     projectID + "/" + slug,
 	}, stdout, stderr, func() error {
 		md.Status = run.StatusClosed
@@ -339,32 +342,34 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 	return projectID, slug, true
 }
 
-// EditIdea overwrites the idea's canvas with body and commits the
-// change under the standard idea-edit trailer block. Body is taken
-// verbatim — CRLF normalisation is the caller's responsibility.
+// EditCapture overwrites a capture run's canvas (idea or intent) with
+// body and commits the change under that workflow's edit trailer
+// block. Body is taken verbatim — CRLF normalisation is the caller's
+// responsibility.
 //
 // Returns run.ErrNothingToCommit when body matches the on-disk content
 // (caller can treat this as success). Returns run.ErrRunNotFound when
-// no such run exists. Returns ErrNotIdea when the run is not an
-// in-progress idea (defence in depth — promoted ideas are owned by the
-// destination's design stage and must not be rewritten through this
-// path).
+// no such run exists. Returns ErrNotCapture when the run is not an
+// in-progress capture (defence in depth — promoted ideas are owned by
+// the destination's design stage and must not be rewritten through
+// this path).
 //
-// The CLI's `moe idea edit` does not migrate to EditIdea: its editor
-// flow writes the file in place via $EDITOR and a body-in API doesn't
-// fit cleanly. The trailer block is the same shape
-// (work: update idea, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
-func EditIdea(root, projectID, slug, body string, stdout, stderr io.Writer) error {
+// The CLI's `moe idea edit` / `moe intent edit` do not migrate here:
+// their editor flow writes the file in place via $EDITOR and a body-in
+// API doesn't fit cleanly. The trailer block is the same shape
+// (work: update <doc>, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
+func EditCapture(root, projectID, slug, body string, stdout, stderr io.Writer) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
 	}
-	if md.Workflow != dash.IdeaWorkflow || md.Status != run.StatusInProgress {
-		return ErrNotIdea
+	docID, ok := dash.CaptureDocID(md.Workflow)
+	if !ok || md.Status != run.StatusInProgress {
+		return ErrNotCapture
 	}
 
-	canvasRel := run.ContentPath(projectID, slug, dash.IdeaDocID)
-	docDir := run.DocDir(projectID, slug, dash.IdeaDocID)
+	canvasRel := run.ContentPath(projectID, slug, docID)
+	docDir := run.DocDir(projectID, slug, docID)
 	if err := os.MkdirAll(filepath.Join(root, docDir), 0o755); err != nil {
 		return fmt.Errorf("runopen: mkdir doc dir: %w", err)
 	}
@@ -372,15 +377,15 @@ func EditIdea(root, projectID, slug, body string, stdout, stderr io.Writer) erro
 		return fmt.Errorf("runopen: write canvas: %w", err)
 	}
 
-	msg := fmt.Sprintf("work: update %s\n\n", dash.IdeaDocID) +
+	msg := fmt.Sprintf("work: update %s\n\n", docID) +
 		trailers.Block{
 			Run:      slug,
 			Project:  projectID,
-			Workflow: dash.IdeaWorkflow,
-			Document: dash.IdeaDocID,
+			Workflow: md.Workflow,
+			Document: docID,
 		}.String()
 	return sync.WithJournalPush(root, repolock.Options{
-		Purpose: "idea-edit",
+		Purpose: md.Workflow + "-edit",
 		Run:     projectID + "/" + slug,
 	}, stdout, stderr, func() error {
 		return run.StageAndCommit(root, msg, docDir)

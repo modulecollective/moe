@@ -280,8 +280,9 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleClose closes a run from the per-run page. It loads the run's
-// metadata and dispatches by workflow: idea runs flip closed in-process
-// via runopen.CloseIdea (no harvest, no sandbox); everything else
+// metadata and dispatches by workflow: capture runs (idea, intent) flip
+// closed in-process via runopen.CloseCapture (no harvest, no sandbox);
+// everything else
 // routes through the CloseRun callback, which dispatches the full cli
 // close pipeline by the run's own workflow with --no-edit semantics.
 // One route, one guard set, regardless of run kind — a stale or
@@ -302,30 +303,30 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if md.Workflow == dash.IdeaWorkflow {
-		s.closeIdeaRun(w, r, projectID, slug, id)
+	if dash.IsCapture(md.Workflow) {
+		s.closeCaptureRun(w, r, projectID, slug, id, md.Workflow)
 		return
 	}
 	s.closeWorkflowRun(w, r, projectID, slug, id)
 }
 
-func (s *Server) closeIdeaRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
-	if err := runopen.CloseIdea(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
+func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, projectID, slug, id, workflow string) {
+	if err := runopen.CloseCapture(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
-		case errors.Is(err, runopen.ErrNotIdea):
-			http.Error(w, "run "+id+" is not a closable idea", http.StatusConflict)
+		case errors.Is(err, runopen.ErrNotCapture):
+			http.Error(w, "run "+id+" is not a closable "+workflow, http.StatusConflict)
 		default:
-			s.logf("close idea %s: %v", id, err)
-			http.Error(w, "close idea: "+err.Error(), http.StatusInternalServerError)
+			s.logf("close %s %s: %v", workflow, id, err)
+			http.Error(w, "close "+workflow+": "+err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// closeWorkflowRun closes an in-progress non-idea run through the
+// closeWorkflowRun closes an in-progress non-capture run through the
 // CloseRun callback, which dispatches the registered close pipeline by
 // the run's workflow. serve owns the PTY children it spawned, so the
 // one guard it applies itself is the live-child refusal: closing while
@@ -599,19 +600,25 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // live-child refusal guards the click.
 func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	base := "/run/" + projectID + "/" + slug
-	if md.Workflow == dash.IdeaWorkflow {
+	if dash.IsCapture(md.Workflow) {
 		switch md.Status {
 		case run.StatusInProgress:
-			// edit / close are journal-only; promote spawns the
-			// destination run's agent, so it's gated to insecure mode.
-			out := []runAction{{Label: "edit idea", Href: base + "/edit"}}
-			if s.opts.Insecure {
+			// edit / close are journal-only, so both captures get them
+			// in safe mode. promote spawns the destination run's agent,
+			// so it's gated to insecure mode — and to ideas, which are
+			// the only capture that promotes.
+			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
+			if s.opts.Insecure && md.Workflow == dash.IdeaWorkflow {
 				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
 			}
-			return append(out, runAction{Label: "close idea", Href: base + "/close", Method: "POST"})
+			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
 		case run.StatusClosed:
-			return []runAction{
-				{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+			// Reopen stays idea-only: the intent verb set has no reopen
+			// (cli/intent.go), and the web must not exceed the CLI's.
+			if md.Workflow == dash.IdeaWorkflow {
+				return []runAction{
+					{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+				}
 			}
 		}
 		return nil
@@ -1120,20 +1127,23 @@ func (s *Server) gatherNewIdeaVM() (newIdeaVM, error) {
 	return newIdeaVM{Projects: projectIDs}, nil
 }
 
-// editIdeaVM backs the per-idea edit page (GET /run/{p}/{s}/edit).
-// Body is the current canvas content (seeded into the textarea); a
-// missing file falls back to empty and the operator can save into it.
+// editCaptureVM backs the per-capture edit page (GET
+// /run/{p}/{s}/edit) for both ideas and intents. Body is the current
+// canvas content (seeded into the textarea); a missing file falls back
+// to empty and the operator can save into it. Kind is the capture's
+// workflow, so the page's chrome says "edit intent" on an intent.
 // ErrorBanner is populated on POST validation failure.
-type editIdeaVM struct {
+type editCaptureVM struct {
 	Project     string
 	Slug        string
+	Kind        string
 	Body        string
 	ErrorBanner string
 }
 
-// handleIdeaEditForm renders the textarea seeded with the idea's
+// handleCaptureEditForm renders the textarea seeded with the capture's
 // canvas. 404 / 409 mirror handlePromoteForm's gates.
-func (s *Server) handleIdeaEditForm(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCaptureEditForm(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
@@ -1148,32 +1158,34 @@ func (s *Server) handleIdeaEditForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if !isPromotableIdea(md) {
+	docID, ok := dash.CaptureDocID(md.Workflow)
+	if !ok || md.Status != run.StatusInProgress {
 		http.Error(w,
-			"run "+id+" is not an editable idea (workflow="+md.Workflow+", status="+md.Status+")",
+			"run "+id+" is not an editable capture (workflow="+md.Workflow+", status="+md.Status+")",
 			http.StatusConflict)
 		return
 	}
 
-	body, err := os.ReadFile(filepath.Join(s.opts.Root, run.ContentPath(projectID, slug, dash.IdeaDocID)))
+	body, err := os.ReadFile(filepath.Join(s.opts.Root, run.ContentPath(projectID, slug, docID)))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		s.logf("edit form: read canvas %s/%s: %v", projectID, slug, err)
 		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, "edit_idea.html", editIdeaVM{
+	s.render(w, r, "edit_idea.html", editCaptureVM{
 		Project: projectID,
 		Slug:    slug,
+		Kind:    md.Workflow,
 		Body:    string(body),
 	})
 }
 
-// handleIdeaEditSubmit writes the textarea body to the idea's canvas
-// and commits with the trailers that runIdeaEdit produces. CRLF is
-// normalised to LF (mirrors handleNewIdeaSubmit). Defends against a
-// replayed POST landing on a now-promoted idea by re-checking
-// isPromotableIdea inside runopen.EditIdea.
-func (s *Server) handleIdeaEditSubmit(w http.ResponseWriter, r *http.Request) {
+// handleCaptureEditSubmit writes the textarea body to the capture's
+// canvas and commits with the trailers the matching CLI edit verb
+// produces. CRLF is normalised to LF (mirrors handleNewIdeaSubmit).
+// Defends against a replayed POST landing on a now-terminal capture by
+// re-checking the gate inside runopen.EditCapture.
+func (s *Server) handleCaptureEditSubmit(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
@@ -1184,31 +1196,40 @@ func (s *Server) handleIdeaEditSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
 
-	err := runopen.EditIdea(s.opts.Root, projectID, slug, body, s.syncWriter(), s.syncWriter())
+	err := runopen.EditCapture(s.opts.Root, projectID, slug, body, s.syncWriter(), s.syncWriter())
 	switch {
 	case errors.Is(err, run.ErrRunNotFound):
 		http.Error(w, "no such run: "+id, http.StatusNotFound)
 		return
-	case errors.Is(err, runopen.ErrNotIdea):
+	case errors.Is(err, runopen.ErrNotCapture):
 		http.Error(w,
-			"run "+id+" is not an editable idea",
+			"run "+id+" is not an editable capture",
 			http.StatusConflict)
 		return
 	case errors.Is(err, run.ErrNothingToCommit):
 		// No-op edit — body matched on-disk content. Treat as success;
 		// the operator wanted to land their text and it's there.
 	case err != nil:
-		s.renderIdeaEditError(w, r, projectID, slug, body, "edit: "+err.Error())
+		s.renderCaptureEditError(w, r, projectID, slug, body, "edit: "+err.Error())
 		return
 	}
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-func (s *Server) renderIdeaEditError(w http.ResponseWriter, r *http.Request, projectID, slug, body, msg string) {
+// renderCaptureEditError re-renders the edit page with the operator's
+// unsaved body and a banner. It re-loads the run only for the Kind
+// label — the happy path never pays for this — and leaves Kind empty
+// if the load fails, which the template falls back on.
+func (s *Server) renderCaptureEditError(w http.ResponseWriter, r *http.Request, projectID, slug, body, msg string) {
+	kind := ""
+	if md, err := run.Load(s.opts.Root, projectID, slug); err == nil {
+		kind = md.Workflow
+	}
 	w.WriteHeader(http.StatusUnprocessableEntity)
-	s.render(w, r, "edit_idea.html", editIdeaVM{
+	s.render(w, r, "edit_idea.html", editCaptureVM{
 		Project:     projectID,
 		Slug:        slug,
+		Kind:        kind,
 		Body:        body,
 		ErrorBanner: msg,
 	})

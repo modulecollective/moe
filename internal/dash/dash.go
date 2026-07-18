@@ -49,6 +49,32 @@ const (
 	IntentDocID    = "intent"
 )
 
+// IsCapture reports whether a workflow is one of the cheap
+// operator-authored capture surfaces — ideas and intents. Both are
+// single-stage workflows whose run *is* the capture: the canvas is the
+// whole artifact, no agent ever runs, and edit/close are plain journal
+// commits. Callers that treat the pair alike (cli's close pipeline,
+// runopen's edit/close helpers, serve's action chips and edit form)
+// route through here rather than re-spelling the two-way comparison.
+func IsCapture(workflow string) bool {
+	return workflow == IdeaWorkflow || workflow == IntentWorkflow
+}
+
+// CaptureDocID returns the single canvas doc id for a capture
+// workflow, ok=false for anything else. The two ids happen to equal
+// their workflow names, but the switch keeps the constants
+// load-bearing: a caller that derived the doc id by reusing the
+// workflow string would silently keep working if either pair diverged.
+func CaptureDocID(workflow string) (string, bool) {
+	switch workflow {
+	case IdeaWorkflow:
+		return IdeaDocID, true
+	case IntentWorkflow:
+		return IntentDocID, true
+	}
+	return "", false
+}
+
 // ChatWorkflow and ChatDocID are the chat workflow's cross-cutting
 // contract, the same shape as the idea pair: the workflow name written
 // to run.json and the doc id for the single chat stage. dash needs the

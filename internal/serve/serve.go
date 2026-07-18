@@ -324,8 +324,8 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /run/{project}/{slug}/transcript/{stage}", s.handleTranscript)
 	s.router.HandleFunc("GET /run/{project}/{slug}/promote", s.handlePromoteForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
-	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleIdeaEditForm)
-	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
+	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleCaptureEditForm)
+	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleCaptureEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
 	// Stage advancement for in-progress cascade-workflow runs:
