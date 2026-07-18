@@ -345,17 +345,14 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 // same (subject, cleanup) the happy-path auto-close and the interrupt
 // disposal both ride, so there's no parallel close path. skipEdit
 // harvests followups.md as-is; tailPulse=false because pulse never
-// tails pulse (pulseFiresForWorkflow excludes it). The interrupted bool
-// closeRunInProcess returns is irrelevant here (tailPulse=false fires no
-// pulse), so it's dropped.
+// tails pulse (pulseFiresForWorkflow excludes it).
 func closePulseRun(root, projectID, runID string, stdout, stderr io.Writer) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {
 		return fmt.Errorf("no close registration for %q", pulseWorkflow)
 	}
-	_, err := closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
+	return closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
 		projectID, runID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr)
-	return err
 }
 
 // disposePulseRun closes a just-minted pulse run the operator Ctrl-C'd

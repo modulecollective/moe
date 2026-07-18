@@ -119,11 +119,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return &runopen.NotClosableError{Reason: fmt.Sprintf(
 					"workflow %s has no close pipeline", md.Workflow)}
 			}
-			// tailPulse=false fires no pulse, so the interrupt bool is
-			// always false here — drop it.
-			_, err = closeRunInProcess(root, md.Workflow, reg.subject,
+			return closeRunInProcess(root, md.Workflow, reg.subject,
 				reg.cleanup, project, runID, true, false /*tailPulse*/, io.Discard, io.Discard)
-			return err
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed

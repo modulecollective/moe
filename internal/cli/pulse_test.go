@@ -383,7 +383,7 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 	if !ok {
 		t.Fatal("sdlc has no close registration")
 	}
-	if _, err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
+	if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
 		"tele", "ship-it", true /*skipEdit*/, false /*tailPulse*/, io.Discard, io.Discard); err != nil {
 		t.Fatalf("closeRunInProcess: %v", err)
 	}
