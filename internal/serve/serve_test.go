@@ -1668,10 +1668,15 @@ var testNewRunWorkflows = []NewRunWorkflow{
 	{Name: "sdlc", FirstStage: "design", Workspace: true},
 }
 
-// testWorkflowUI mirrors the production declarations cli/serve.go wires
-// (the cli registry is unreachable from here — internal/cli imports
-// internal/serve): sdlc cascades with push excluded, everything else is
-// undeclared.
+// testWorkflowUI is the sdlc slice of the production declarations
+// cli/serve.go wires (the cli registry is unreachable from here —
+// internal/cli imports internal/serve): sdlc cascades with push
+// excluded, and this stub declares nothing else. Production also
+// declares twin/kb/hooks/chores as cascade workflows; the tests here
+// only need one cascade workflow and one undeclared one to cover the
+// rendering branches. The stub-vs-production seam is covered
+// cli-side by TestServeRunPageChipsComposeWithRealLookup, which wires
+// the real lookup into a real server.
 func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	switch workflow {
 	case "sdlc":
