@@ -732,15 +732,16 @@ func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
 			reflectMD = mds[i]
 		}
 	}
-	if reflectMD.SpawnedBy != pulseID {
-		t.Fatalf("reflect SpawnedBy = %q, want the pulse slug %q", reflectMD.SpawnedBy, pulseID)
+	wantSpawner := "moe/" + pulseID
+	if reflectMD.SpawnedBy != wantSpawner {
+		t.Fatalf("reflect SpawnedBy = %q, want the qualified pulse slug %q", reflectMD.SpawnedBy, wantSpawner)
 	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := idx.SpawnedBy["moe/"+reflectID]; got != pulseID {
-		t.Fatalf("index SpawnedBy[moe/%s] = %q, want %q (MoE-Spawned-By trailer missing?)", reflectID, got, pulseID)
+	if got := idx.SpawnedBy["moe/"+reflectID]; got != wantSpawner {
+		t.Fatalf("index SpawnedBy[moe/%s] = %q, want %q (MoE-Spawned-By trailer missing?)", reflectID, got, wantSpawner)
 	}
 }
 

@@ -423,7 +423,12 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 		moePrintf(stderr, "pulse: reflect spawn: build twin wiki for %s: %v\n", projectID, err)
 		return
 	}
-	md, err := mintReflectRun(root, projectID, pulseSlug, "" /*agent*/, canonical, stdout, stderr)
+	// Qualify the spawner to "<project>/<slug>" before minting, mirroring
+	// pulseSurvey: run.Options.SpawnedBy is the qualified spawner, and the
+	// journal index treats these edges as always qualified. pulseSlug is the
+	// pulse run's own slug and is never empty here, so no empty-guard is
+	// needed.
+	md, err := mintReflectRun(root, projectID, projectID+"/"+pulseSlug, "" /*agent*/, canonical, stdout, stderr)
 	if err != nil {
 		var refusal *reflectRefusal
 		if errors.As(err, &refusal) {
