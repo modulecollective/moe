@@ -69,7 +69,12 @@ func newPushFixture(t *testing.T) *pushFixture {
 	trailerstest.SeedRun(t, root, projectID, runID, "sdlc", run.StatusInProgress)
 	writeFile(t, filepath.Join(root, "projects", projectID, "project.json"),
 		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
-	gittest.Run(t, root, "add", ".gitmodules", subPath, filepath.Join("projects", projectID, "project.json"))
+	// bureaucracy.conf rides along here: markBureaucracy only writes the
+	// marker, and run.New refuses a dirty tree — so any test that chains
+	// push into a run-opening path (runopen.Open, maybeSpawnFixRuns)
+	// would fail on the stray marker instead of on the behaviour it tests.
+	gittest.Run(t, root, "add", "bureaucracy.conf", ".gitmodules", subPath,
+		filepath.Join("projects", projectID, "project.json"))
 	gittest.Run(t, root, "commit", "-m", "Register project "+projectID)
 	writeContent(t, root, projectID, runID, "code", "# code doc\n")
 	gittest.Run(t, root, "add", filepath.Join("projects", projectID, "runs", runID, "documents", "code", "content.md"))
@@ -92,6 +97,19 @@ func newPushFixture(t *testing.T) *pushFixture {
 	tipSHA := gittest.HeadSHA(t, clonePath)
 
 	stubSynthesisWritesCanvas(t, root, projectID, runID, "# Push\n\n## PR body\n\nSynthesized body for review.\n\n## Ship readiness\n\nGreen.\n\n## Conflicts surfaced\n\n")
+
+	// Lock the invariant: a stray file here turns into "working tree has
+	// uncommitted changes" from run.New far downstream, which reads like
+	// a product defect. Fail in the fixture, naming the paths.
+	if entries, err := git.Status(root); err != nil {
+		t.Fatal(err)
+	} else if len(entries) > 0 {
+		var stray []string
+		for _, e := range entries {
+			stray = append(stray, e.XY+" "+e.Path)
+		}
+		t.Fatalf("push fixture left the bureaucracy root dirty: %s", strings.Join(stray, ", "))
+	}
 
 	return &pushFixture{
 		t:         t,
