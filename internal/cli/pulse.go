@@ -491,16 +491,20 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 	moePrintf(stderr, "pulse: drift flagged — opened twin reflect %s/%s (%s)\n", projectID, md.ID, why)
 }
 
-// pulseKickoffWithContext appends the twin-reflect context line to the
-// static kickoff. Wired as InitialPromptBuilder, so root is the session
-// worktree runStageSession hands the builder. Best-effort: a feedback
-// read that fails drops the line rather than failing the sweep.
-func pulseKickoffWithContext(root, projectID string) string {
-	line := pendingTwinObservationsLine(root, projectID)
-	if line == "" {
-		return pulseKickoff
+// pulseKickoffWithContext appends the harness-computed context blocks to
+// the static kickoff — the twin-reflect line and the GitHub block. Wired
+// as InitialPromptBuilder, so root is the session worktree
+// runStageSession hands the builder. Best-effort throughout: a gather
+// that fails drops its own block rather than failing the sweep.
+func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) string {
+	blocks := []string{pulseKickoff}
+	if line := pendingTwinObservationsLine(root, projectID); line != "" {
+		blocks = append(blocks, line)
 	}
-	return pulseKickoff + "\n\n" + line
+	if gh := pulseGitHubContext(root, projectID, runID, stderr); gh != "" {
+		blocks = append(blocks, gh)
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 // pendingTwinObservationsLine reports how many twin observations are
@@ -570,7 +574,7 @@ var openPulse = func(projectID, runID string, headless bool, agentOverride strin
 				if pi.interrupted() {
 					return "", errPulseSkipped
 				}
-				return pulseKickoffWithContext(workRoot, projectID), nil
+				return pulseKickoffWithContext(workRoot, projectID, runID, stderr), nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
 		}, stdout, stderr)
