@@ -29,8 +29,11 @@ Start from the delta, not the whole project:
   merged, what they touched.
 - **Drift in the touched areas** — twin-vs-code drift only where recent
   work reached. Do not re-survey the whole twin every pulse.
-- **The backlog itself** — the open ideas, and the previous pulse
-  report.
+- **The backlog itself** — the open ideas, the open **intents** (the
+  operator's standing direction for this project), and the previous
+  pulse report. The intents are not optional reading here: they are
+  where the project is going, and steering the sweep by them is the
+  pulse's job in a way it is no other stage's.
 
 This turn recurs on every pulse. It is a sweep, not an investigation.
 Anything that needs deep digging becomes a followup *naming the
@@ -64,6 +67,11 @@ a higher conviction bar, and prefer one strong novel entry over several
 mild ones. The operator prunes speculative lines fastest, so the
 marking is what keeps the creative license cheap.
 
+When intents are open, aim the novelty: a speculative proposal should
+serve one, and its Why names it (`intent: <slug>`). Unaimed novelty
+stays legal, at the same higher conviction bar — intents steer the
+creative license, they don't fence it.
+
 ## Filing — use the skills, don't restate them
 
 The `moe-bureaucracy` skill owns the filing idioms: the followups
@@ -86,7 +94,9 @@ Backtick-wrapped slug, em-dash separator, terse why. The slug is an
 *existing* open idea's slug — Pull next ranks the backlog you already
 have, it does not invent new work (that's what followups are for). At
 most three. The reasons are why-*now* reasons: "unblocked by what just
-landed" beats generic importance.
+landed" beats generic importance. A why-now may cite an open intent
+the same way — "serves `north-star`" — alongside the unblocked-by style
+when a pick advances the operator's standing direction.
 
 ## Report skeleton
 
@@ -97,7 +107,9 @@ The canvas is skimmed at prune time, so keep it tight:
   backlog).
 - **New filings** — one line per followup filed. "None" is valid.
 - **Backlog hygiene** — stale/duplicate flags, advisory prose only. You
-  flag; the operator acts. Never close an idea.
+  flag; the operator acts. Never close an idea. This extends to
+  intents: flag one that looks satisfied or gone stale, advisory only —
+  the operator closes intents, you never do.
 - **Pull next** — the exact grammar above, at most three.
 - **Gate** — always last. A machine-readable verdict the harness reads
   after your turn; see below.
@@ -135,3 +147,7 @@ harness parses once your turn exits. It carries two signals:
 - No rewriting idea canvases to influence their rank.
 - No closing or promoting ideas — Pull next and the harvest are
   advisory; the operator holds the trigger.
+- No minting or editing intents. If a theme looks missing, name it in
+  the report; the operator decides whether to park it. Intents are
+  operator-authored — the harvester files followups into ideas, never
+  intents.

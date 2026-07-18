@@ -149,6 +149,128 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 }
 
+// seedIntentRun materialises an intent run on disk: run.json (workflow
+// intent, given status) plus a canvas with the given body. Test helper
+// for the intents reference section and dash tests, which read run.json
+// (via run.Scan) and the canvas's first heading.
+func seedIntentRun(t *testing.T, root, projectID, slug, status, canvasBody string) {
+	t.Helper()
+	md := &run.Metadata{
+		ID:        slug,
+		Project:   projectID,
+		Status:    status,
+		Workflow:  "intent",
+		Documents: map[string]*run.Document{},
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatalf("save intent run %s: %v", slug, err)
+	}
+	path := filepath.Join(root, run.ContentPath(projectID, slug, "intent"))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(canvasBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestIntentsReferenceSection pins the catalog: open intents render as
+// `slug — title` lines (title from the canvas's first heading) pointing
+// at each canvas path; closed intents are excluded; and a project with
+// no open intents produces no section at all.
+func TestIntentsReferenceSection(t *testing.T) {
+	root := newTestBureaucracy(t)
+	seedIntentRun(t, root, "tele", "north-star", run.StatusInProgress, "# Be the fastest dash\n\nbody\n")
+	seedIntentRun(t, root, "tele", "retired", run.StatusClosed, "# Old direction\n")
+
+	got := intentsReferenceSection(root, "tele")
+	for _, want := range []string{
+		"## Project intents",
+		"`north-star` — Be the fastest dash",
+		filepath.Join(root, run.ContentPath("tele", "north-star", "intent")),
+		"never create or edit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("intents section missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "retired") || strings.Contains(got, "Old direction") {
+		t.Errorf("closed intent must be excluded from the catalog:\n%s", got)
+	}
+
+	// A project with no open intents produces no section — the empty
+	// case pays zero prompt cost.
+	if empty := intentsReferenceSection(root, "no-such-project"); empty != "" {
+		t.Errorf("expected empty section for a project with no open intents, got:\n%s", empty)
+	}
+}
+
+// TestIntentTitleFallsBackToSlug: a headless canvas (no `# ` heading)
+// falls back to the slug rather than rendering a blank title.
+func TestIntentTitleFallsBackToSlug(t *testing.T) {
+	root := newTestBureaucracy(t)
+	seedIntentRun(t, root, "tele", "headless", run.StatusInProgress, "no heading here, just prose\n")
+	if got := intentTitle(root, "tele", "headless"); got != "headless" {
+		t.Errorf("expected slug fallback %q, got %q", "headless", got)
+	}
+}
+
+// TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore pins the design
+// contract: the intents catalog lands after the twin reference and
+// before the lore catalog, so the agent reads project-specific direction
+// between what the project *is* (twin) and the project-agnostic facts
+// (lore).
+func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	twinDir := wiki.TwinDir(root, "tele")
+	if err := os.MkdirAll(twinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loreDir := wiki.LoreDir(root)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "entry.md"),
+		[]byte("---\ntitle: Sentinel\napplies-when: testing\n---\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedIntentRun(t, root, "tele", "aim-here", run.StatusInProgress, "# Aim here\n")
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	twinIdx := strings.Index(got, "## Project digital twin")
+	intentIdx := strings.Index(got, "## Project intents")
+	loreIdx := strings.Index(got, "## Lore (cross-project)")
+	if twinIdx < 0 || intentIdx < 0 || loreIdx < 0 {
+		t.Fatalf("missing a section; twin=%d intents=%d lore=%d in:\n%s", twinIdx, intentIdx, loreIdx, got)
+	}
+	if !(twinIdx < intentIdx && intentIdx < loreIdx) {
+		t.Errorf("expected twin < intents < lore ordering; got twin=%d intents=%d lore=%d", twinIdx, intentIdx, loreIdx)
+	}
+}
+
+// TestBuildSystemPromptOmitsIntentsWhenNone: a project with no open
+// intents produces no "## Project intents" section in the assembled
+// prompt.
+func TestBuildSystemPromptOmitsIntentsWhenNone(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "## Project intents") {
+		t.Errorf("expected no intents section for a project with no open intents:\n%s", got)
+	}
+}
+
 // TestFollowupsReferenceSection pins the followups nudge: a short
 // "Out-of-scope work" block naming the per-run followups path and the
 // moe-bureaucracy skill by name. Sibling of TwinReferenceSection /

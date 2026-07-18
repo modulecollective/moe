@@ -9,6 +9,7 @@ import (
 	"time"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -54,8 +55,19 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 		sections = append(sections, ref)
 	}
 
+	// Intents-as-context: the project's open intents, the operator's
+	// standing direction. Lands between the twin (what the project *is*)
+	// and the lore catalog (project-agnostic operational facts) — the
+	// same ordering argument the lore placement records, one level up:
+	// project-specific direction reads before project-agnostic facts.
+	// Empty when the project has no open intents, so most turns pay
+	// nothing.
+	if ref := intentsReferenceSection(root, md.Project); ref != "" {
+		sections = append(sections, ref)
+	}
+
 	// Lore-as-context: portable, cross-project facts catalog. Lands
-	// right after the twin so project-specific intent is read before
+	// right after the intents so project-specific intent is read before
 	// the project-agnostic operational facts that build on it.
 	if ref := wiki.LoreReferenceSectionAt(root); ref != "" {
 		sections = append(sections, ref)
@@ -249,6 +261,51 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 	b.WriteString("before continuing. If the change invalidates the approach, surface it to\n")
 	b.WriteString("the operator rather than smuggling a deviation in.\n")
 	return b.String(), nil
+}
+
+// intentsReferenceSection emits a catalog of the project's open intents
+// — the operator's standing direction — in the same lore-style grammar:
+// one line per intent (backtick slug, em-dash, title from the canvas's
+// first heading), each pointing at its canvas path, with a framing that
+// tells the agent to read the ones that bear on what it's deciding.
+// Bodies stay on disk; the catalog is the budgeted summary, and a lazy
+// agent can skip the read everywhere except the pulse (whose fragment
+// mandates it) — the accepted lore trade, ambient cheapness over
+// guaranteed ingestion.
+//
+// Returns "" when the project has no open intents (or on any scan
+// error), so the empty case slots cleanly into buildSystemPrompt's
+// section join and most turns pay nothing.
+func intentsReferenceSection(root, projectID string) string {
+	if root == "" || projectID == "" {
+		return ""
+	}
+	entries, err := scanOpenIntents(root, projectID)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
+
+	var b strings.Builder
+	b.WriteString("## Project intents\n\n")
+	b.WriteString(`This project has open intents — short, operator-authored statements
+of where it's going: a theme, a bet, a direction it's heading. Read the
+ones that bear on what you're deciding before substantive work. They
+aim the discretionary calls (what to propose, what to prioritise); they
+don't fence what's allowed.
+
+`)
+	for _, e := range entries {
+		title := intentTitle(root, e.project, e.slug)
+		path := filepath.Join(root, run.ContentPath(e.project, e.slug, dash.IntentDocID))
+		fmt.Fprintf(&b, "- `%s` — %s\n  %s\n", e.slug, title, path)
+	}
+	b.WriteString(`
+Intents are operator-authored — you read them, you never create or edit
+them. If a theme looks missing, name it in a report; the operator
+decides whether to park it.
+`)
+	return b.String()
 }
 
 // followupsReferenceSection emits a one-paragraph nudge naming the
