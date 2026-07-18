@@ -40,6 +40,12 @@ Start from the delta, not the whole project:
   CI URL, the diff behind a foreign merge. Optional and bounded: the
   block is enough for the sweep, and a dig that grows past a couple of
   reads is a followup naming the question.
+- **What is already sequenced** — your kickoff carries a chain-state
+  block: the active runs the operator has chained, head first. Chain
+  order lives in journal trailers, so neither the journal slice nor the
+  disk scan shows it — the scan tells you a run is in progress, never
+  that it is third in a batch about to be kicked. Work already queued
+  is work you do not file, rank, or spawn again.
 - **The backlog itself** — the open ideas, the open **intents** (the
   operator's standing direction for this project), and the previous
   pulse report. The intents are not optional reading here: they are
@@ -67,6 +73,10 @@ question* — not the answer, and not the dig.
   evidence. Nothing on that list is settled by its *slug* — one
   observation gets refiled under three different names, so match on
   what the run was about.
+- **Check what is already chained.** The mirror of the rule above,
+  pointed forward: read findings and Pull next picks against the
+  chain-state block, because a thing the next chained run will fix is
+  not a finding and a pick the queue already covers is not next.
 - **A quiet pulse is a valid pulse.** "Nothing new since <last pulse>"
   plus one line of why is a *successful* report. Never manufacture
   findings to justify the turn. Write the report anyway — an empty
@@ -203,9 +213,13 @@ arguing.
 **Why the bar is yours to hold.** There is no cap on how many entries
 the harness will take, and no harness-side judgment about which to
 trim — only a mechanical skip when a slug already names an in-progress
-run. The queue is the operator's review gate, and an over-full queue is
-prunable junk rather than a disaster. But a queue that costs more to
-prune than it saves is a queue the operator stops reading. Two entries
+run — which means a proposal that matches a queued fix by *content* is
+a duplicate the harness will happily mint under your fresh slug. Read
+the chain-state block before proposing: the harness dedupes slugs, you
+dedupe substance. The queue is the operator's review gate, and an
+over-full queue is prunable junk rather than a disaster. But a queue
+that costs more to prune than it saves is a queue the operator stops
+reading. Two entries
 you are sure of beat six you are hoping about. Zero is the normal
 number.
 
