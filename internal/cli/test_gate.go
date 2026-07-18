@@ -105,7 +105,13 @@ func parseTestCanvasSections(body string) map[string]string {
 	return out
 }
 
-func stageGateStatus(body string) (string, bool) {
+// stageGateJSON extracts the raw JSON payload from a canvas's `## Gate`
+// section's ```json fence. Returns (payload, true) when the fence is
+// present and closed with non-blank content; (nil, false) otherwise.
+// The section/fence grammar is shared across the review/test advance
+// gates and the pulse auto-close gate; each caller unmarshals the bytes
+// into its own shape.
+func stageGateJSON(body string) ([]byte, bool) {
 	sections := parseTestCanvasSections(body)
 	gate := sections["Gate"]
 	lines := strings.Split(gate, "\n")
@@ -120,18 +126,30 @@ func stageGateStatus(body string) (string, bool) {
 			continue
 		}
 		if s == "```" {
-			var payload struct {
-				Status string `json:"status"`
+			payload := fenced.String()
+			if strings.TrimSpace(payload) == "" {
+				return nil, false
 			}
-			if err := json.Unmarshal([]byte(fenced.String()), &payload); err != nil {
-				return "", false
-			}
-			return payload.Status, payload.Status != ""
+			return []byte(payload), true
 		}
 		fenced.WriteString(ln)
 		fenced.WriteByte('\n')
 	}
-	return "", false
+	return nil, false
+}
+
+func stageGateStatus(body string) (string, bool) {
+	payload, ok := stageGateJSON(body)
+	if !ok {
+		return "", false
+	}
+	var p struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return "", false
+	}
+	return p.Status, p.Status != ""
 }
 
 // testSectionFilled returns true when section body has at least one

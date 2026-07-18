@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
+	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -99,59 +101,16 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		moePrintf(stderr, "wiki: %v\n", err)
 		return 1
 	}
-	if canonical == nil {
-		moePrintf(stderr, "wiki: builder returned nil config; reflect requires a registered wiki\n")
-		return 1
-	}
-	if canonical.Mode != wiki.Closed {
-		moePrintf(stderr, "wiki: reflect is closed-schema only (%s is %s)\n", workflow, canonical.Mode)
-		return 1
-	}
 
-	// Guardrail: refuse with a revert-first redirect if the operator
-	// has touched managed docs outside the changelog.
-	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
-		moePrintf(stderr, "%s\n", unrecordedEditsRedirect(workflow, det))
-		return 1
-	}
-
-	// Refuse if an in-progress twin run already exists. Two concurrent
-	// reflects would each see the same kickoff context (events,
-	// findings, feedback) but write divergent stage commits, and the
-	// `EventsSinceCheckpoint` filter has no way to distinguish them.
-	// One pass at a time.
-	if existing, err := findInProgressTwinRun(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	} else if existing != "" {
-		moePrintf(stderr,
-			"twin reflect: a pass is already in progress (%s/%s) — resume it with `moe twin <stage> %s/%s` or close it before starting another\n",
-			projectID, existing, projectID, existing)
-		return 1
-	}
-
-	// Mint the run. workflow="twin"; the id-base "reflect" routes the
-	// slug through nextFreeDatedID, producing `reflect-YYYY-MM-DD` (or
-	// `reflect-YYYY-MM-DD-2` on same-day collision). Slug is the
-	// operator-facing handle.
-	opts := run.Options{
-		IDBase:   "reflect",
-		Workflow: "twin",
-		Agent:    *agentOverride,
-	}
-	var md *run.Metadata
-	err = sync.WithJournalPush(root, repolock.Options{
-		Purpose: "run-new",
-		Run:     projectID,
-	}, stdout, stderr, func() error {
-		m, err := run.New(root, projectID, opts)
-		if err != nil {
-			return err
-		}
-		md = m
-		return nil
-	})
+	// Guard-and-mint core, shared with pulse's auto-spawn. spawnedBy=""
+	// — the operator ran the verb, so the run threads no parent edge.
+	md, err := mintReflectRun(root, projectID, "" /*spawnedBy*/, *agentOverride, canonical, stdout, stderr)
 	if err != nil {
+		var refusal *reflectRefusal
+		if errors.As(err, &refusal) {
+			moePrintln(stderr, refusal.redirect(workflow, projectID))
+			return 1
+		}
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -167,6 +126,119 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		return promptNextStageParked(root, md, stdout, stderr)
 	}
 	return promptNextStage(root, md, "", stdout, stderr)
+}
+
+// reflectRefusalKind classifies the operator-prerequisite refusals the
+// reflect mint core can raise, so the two callers format their own
+// messaging off one typed value.
+type reflectRefusalKind int
+
+const (
+	// reflectRefusalUnrecorded: managed docs were edited outside a
+	// reflect pass — the operator lands them through a pass (or reverts)
+	// first.
+	reflectRefusalUnrecorded reflectRefusalKind = iota
+	// reflectRefusalInProgress: a twin pass is already open for the
+	// project (including a prior auto-spawned reflect still parked).
+	reflectRefusalInProgress
+)
+
+// reflectRefusal is a guard refusal from mintReflectRun: an operator
+// prerequisite, not an I/O failure. The verb prints redirect() and exits
+// 1; pulse's auto-spawn warns (or stays silent) and skips. It carries
+// the data each message needs — the detection result for the unrecorded
+// case, the in-progress run's slug for the other.
+type reflectRefusal struct {
+	kind reflectRefusalKind
+	det  wiki.DetectionResult // set for reflectRefusalUnrecorded
+	slug string               // set for reflectRefusalInProgress
+}
+
+func (r *reflectRefusal) Error() string {
+	switch r.kind {
+	case reflectRefusalInProgress:
+		return fmt.Sprintf("twin reflect: a pass is already in progress (%s)", r.slug)
+	default:
+		return fmt.Sprintf("twin reflect: unrecorded edits to %s", strings.Join(r.det.UnrecordedDocs, ", "))
+	}
+}
+
+// redirect renders the verb's operator-facing one-liner for this
+// refusal — the exact messages runReflectSession printed before the
+// core was extracted.
+func (r *reflectRefusal) redirect(workflow, projectID string) string {
+	if r.kind == reflectRefusalInProgress {
+		return fmt.Sprintf(
+			"twin reflect: a pass is already in progress (%s/%s) — resume it with `moe twin <stage> %s/%s` or close it before starting another",
+			projectID, r.slug, projectID, r.slug)
+	}
+	return unrecordedEditsRedirect(workflow, r.det)
+}
+
+// mintReflectRun runs the reflect preconditions and mints a parked twin
+// reflect run for the project. It is the guard-and-mint core shared by
+// the interactive `moe twin reflect` verb and pulse's auto-spawn. On a
+// guard refusal (managed docs edited out of band, or a twin pass already
+// in progress) it returns a *reflectRefusal the caller surfaces its own
+// way; other non-nil errors are config or mint failures. spawnedBy
+// stamps the MoE-Spawned-By edge and trailer ("" for the operator-run
+// verb, which threads no parent); agentOverride persists the run's
+// backend ("" on the pulse path, which resolves at stage time).
+func mintReflectRun(root, projectID, spawnedBy, agentOverride string, canonical *wiki.Config, stdout, stderr io.Writer) (*run.Metadata, error) {
+	if canonical == nil {
+		return nil, fmt.Errorf("wiki: builder returned nil config; reflect requires a registered wiki")
+	}
+	if canonical.Mode != wiki.Closed {
+		return nil, fmt.Errorf("wiki: reflect is closed-schema only (%s is %s)", canonical.Name, canonical.Mode)
+	}
+
+	// Guardrail: managed docs touched outside a reflect pass need the
+	// operator to land them through a pass first (revert clears it). The
+	// detection error is ignored — a failed scan never blocks the mint,
+	// mirroring the pre-extraction verb.
+	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
+		return nil, &reflectRefusal{kind: reflectRefusalUnrecorded, det: det}
+	}
+
+	// One pass at a time: two concurrent reflects would each see the same
+	// kickoff context (events, findings, feedback) but write divergent
+	// stage commits, and the `EventsSinceCheckpoint` filter has no way to
+	// distinguish them. An already-parked auto-spawned reflect is
+	// in_progress, so this is also pulse's anti-double-open guard.
+	if existing, err := findInProgressTwinRun(root, projectID); err != nil {
+		return nil, err
+	} else if existing != "" {
+		return nil, &reflectRefusal{kind: reflectRefusalInProgress, slug: existing}
+	}
+
+	// Mint the run. workflow="twin"; the id-base "reflect" routes the
+	// slug through nextFreeDatedID, producing `reflect-YYYY-MM-DD` (or
+	// `reflect-YYYY-MM-DD-2` on same-day collision). Slug is the
+	// operator-facing handle. SpawnedBy is paired across metadata and
+	// trailer exactly as `moe sdlc reopen` pairs ReopenOf.
+	opts := run.Options{
+		IDBase:    "reflect",
+		Workflow:  "twin",
+		Agent:     agentOverride,
+		SpawnedBy: spawnedBy,
+		Trailers:  trailers.Block{SpawnedBy: spawnedBy},
+	}
+	var md *run.Metadata
+	err := sync.WithJournalPush(root, repolock.Options{
+		Purpose: "run-new",
+		Run:     projectID,
+	}, stdout, stderr, func() error {
+		m, err := run.New(root, projectID, opts)
+		if err != nil {
+			return err
+		}
+		md = m
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return md, nil
 }
 
 // findInProgressTwinRun returns the slug of an in-progress twin run
