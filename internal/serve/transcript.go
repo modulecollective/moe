@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/transcript"
@@ -24,9 +26,20 @@ const pageUnits = 200
 // (transcript's defaultMaxOutputLines): a tool result at or under this
 // many lines renders with its <details> open; longer output starts
 // collapsed so a big Read or test dump doesn't swamp the page. The web
-// page keeps the full output either way and lets <details> do the hiding
-// — elision is a terminal-only concern.
+// page inlines the whole output either way (up to resultCapBytes) and
+// lets <details> do the hiding — line elision is a terminal-only concern.
 const resultCollapseLines = 40
+
+// resultCapBytes bounds how many bytes of a single tool result get
+// inlined into the page. Measured across the corpus on 2026-07-18
+// (49,485 results in 1,602 thread files): the Claude harness truncates
+// its own results at ~66 KB and codex's cluster at ~40 KB with a single
+// 160 KB outlier, so 128 KiB sits above every legitimate result and
+// below the one pathology. This is boundary validation, not readability
+// — the JSONL is written by external processes whose caps are
+// undocumented, non-contractual, and already differ by 2.4×. The full
+// output stays on disk in the thread file.
+const resultCapBytes = 128 << 10
 
 // transcriptVM backs the transcript page and its load-earlier fragment.
 type transcriptVM struct {
@@ -268,10 +281,62 @@ func (u unit) view() unitVM {
 
 func fillResult(vm *unitVM, e transcript.Event) {
 	vm.HasResult = true
-	vm.Result = e.Output
+	vm.Result = capResult(e.Output)
 	vm.ResultError = e.Error
+	// ResultLines counts the original output: the summary should report
+	// what the tool actually produced, and capResult's marker accounts
+	// for the gap.
 	vm.ResultLines = countLines(e.Output)
 	vm.ResultOpen = vm.ResultLines <= resultCollapseLines
+}
+
+// capResult trims s to resultCapBytes by keeping its head and tail and
+// replacing the middle with a marker line, mirroring the text renderer's
+// head+tail elide(). Cuts land on newline boundaries where there is one
+// in reach and on rune boundaries otherwise, so a single-line whale
+// (minified JSON, say) still renders as valid UTF-8.
+func capResult(s string) string {
+	if len(s) <= resultCapBytes {
+		return s
+	}
+	half := resultCapBytes / 2
+	head := s[:half]
+	if i := strings.LastIndexByte(head, '\n'); i >= 0 {
+		head = head[:i]
+	} else {
+		head = trimPartialRuneRight(head)
+	}
+	tail := s[len(s)-half:]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 {
+		tail = tail[i+1:]
+	} else {
+		tail = trimPartialRuneLeft(tail)
+	}
+	// Round up so a barely-over-cap result doesn't claim "0 KiB elided".
+	elided := (len(s) - len(head) - len(tail) + 1023) / 1024
+	return head + fmt.Sprintf("\n[%d KiB elided]\n", elided) + tail
+}
+
+// trimPartialRuneRight drops a trailing incomplete UTF-8 sequence.
+func trimPartialRuneRight(s string) string {
+	for i := 0; i < utf8.UTFMax && s != ""; i++ {
+		if r, size := utf8.DecodeLastRuneInString(s); r != utf8.RuneError || size > 1 {
+			break
+		}
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// trimPartialRuneLeft drops a leading incomplete UTF-8 sequence.
+func trimPartialRuneLeft(s string) string {
+	for i := 0; i < utf8.UTFMax && s != ""; i++ {
+		if r, size := utf8.DecodeRuneInString(s); r != utf8.RuneError || size > 1 {
+			break
+		}
+		s = s[1:]
+	}
+	return s
 }
 
 // distinctModels returns the non-empty models in first-appearance order.

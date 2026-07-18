@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -304,5 +306,124 @@ func TestRunPageShowsTranscriptLinks(t *testing.T) {
 	// The code stage has a canvas but no thread — no transcript link.
 	if strings.Contains(out, `href="/run/alpha/fix-it/transcript/code?agent=claude"`) {
 		t.Errorf("code stage has no thread; it should not get a transcript link\n%s", out)
+	}
+}
+
+// bigResultThread builds a one-turn claude thread whose single tool
+// result carries out as its content.
+func bigResultThread(t *testing.T, out string) string {
+	t.Helper()
+	quoted, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"type":"assistant","timestamp":"2026-05-16T21:17:31.000Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"tu-1","name":"Read","input":{"file_path":"/x/big"}}]}}
+{"type":"user","timestamp":"2026-05-16T21:17:31.500Z","message":{"role":"user","content":[{"tool_use_id":"tu-1","type":"tool_result","content":` + string(quoted) + `}]}}
+`
+}
+
+// fillerResult builds a multi-line blob of about size bytes with
+// HEADSENTINEL first, MIDSENTINEL in the middle and TAILSENTINEL last,
+// returning it alongside its line count.
+func fillerResult(size int) (string, int) {
+	var b strings.Builder
+	lines := 0
+	add := func(s string) {
+		b.WriteString(s)
+		b.WriteByte('\n')
+		lines++
+	}
+	add("HEADSENTINEL")
+	half := size / 2 / 100
+	for i := 0; i < half; i++ {
+		add(fmt.Sprintf("head filler %04d %s", i, strings.Repeat("a", 80)))
+	}
+	add("MIDSENTINEL")
+	for i := 0; i < half; i++ {
+		add(fmt.Sprintf("tail filler %04d %s", i, strings.Repeat("b", 80)))
+	}
+	add("TAILSENTINEL")
+	return b.String(), lines
+}
+
+// TestTranscriptCapsHugeResult: a tool result past resultCapBytes renders
+// its head and tail with the middle replaced by a marker, and the summary
+// still reports the line count the tool actually produced.
+func TestTranscriptCapsHugeResult(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	out, lines := fillerResult(2 * resultCapBytes)
+	if len(out) <= resultCapBytes {
+		t.Fatalf("fixture is only %d bytes; cap is %d", len(out), resultCapBytes)
+	}
+	writeThread(t, root, "alpha", "fix-it", "design", "claude", bigResultThread(t, out))
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, RunStages: ladderStages})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/transcript/design", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"HEADSENTINEL", "TAILSENTINEL", "KiB elided", fmt.Sprintf("· %d lines", lines)} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+	if strings.Contains(body, "MIDSENTINEL") {
+		t.Errorf("middle of an over-cap result should be elided")
+	}
+	if len(body) > 3*resultCapBytes/2 {
+		t.Errorf("page is %d bytes for a %d-byte result; cap did not bound it", len(body), len(out))
+	}
+}
+
+// TestTranscriptKeepsResultUnderCap: a large-but-legal result (bigger
+// than any the claude harness emits) passes through whole, marker-free.
+func TestTranscriptKeepsResultUnderCap(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	out, _ := fillerResult(resultCapBytes / 2)
+	if len(out) > resultCapBytes {
+		t.Fatalf("fixture is %d bytes; wanted under the %d cap", len(out), resultCapBytes)
+	}
+	writeThread(t, root, "alpha", "fix-it", "design", "claude", bigResultThread(t, out))
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, RunStages: ladderStages})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/transcript/design", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"HEADSENTINEL", "MIDSENTINEL", "TAILSENTINEL"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q from an under-cap result", want)
+		}
+	}
+	if strings.Contains(body, "elided") {
+		t.Errorf("under-cap result should not be elided")
+	}
+}
+
+// TestCapResultSingleLineWhale: a newline-free result — minified JSON,
+// say — still gets capped, and the cuts land on rune boundaries so the
+// page stays valid UTF-8.
+func TestCapResultSingleLineWhale(t *testing.T) {
+	// "é" is two bytes, so a repeat count that overruns the half-budget
+	// puts a cut mid-rune unless capResult walks back.
+	whale := "START" + strings.Repeat("é", resultCapBytes) + "END"
+	got := capResult(whale)
+	if len(got) >= len(whale) {
+		t.Fatalf("whale not capped: %d bytes in, %d out", len(whale), len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("capped output is not valid UTF-8")
+	}
+	if !strings.HasPrefix(got, "START") || !strings.HasSuffix(got, "END") {
+		t.Errorf("capped output should keep the head and tail of the line")
+	}
+	if !strings.Contains(got, "KiB elided") {
+		t.Errorf("capped output should carry the elision marker")
 	}
 }
