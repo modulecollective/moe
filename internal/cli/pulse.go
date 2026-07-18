@@ -134,6 +134,13 @@ func init() {
 
 	w := NewWorkflow(pulseWorkflow)
 	w.RegisterStage(pulseDoc)
+	// Machine-minted and machine-driven: pulse registers a cascade
+	// dispatcher (so its own auto-drive can reach the stage seam) but
+	// must stay out of the operator cascade vocabulary. SetMachinePaced
+	// is the one declaration that excludes it everywhere operatorCascades
+	// keys — stage-verb flags, chain edit, serve chips — the sibling of
+	// chat's SetPerpetual.
+	w.SetMachinePaced()
 	RegisterWorkflow(w)
 }
 

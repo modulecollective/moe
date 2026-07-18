@@ -26,10 +26,44 @@ func TestLookupServeWorkflowUISdlc(t *testing.T) {
 	}
 }
 
+// The operator-paced workflows all declare a serve UI now, deriving the
+// cascade trio from operatorCascades rather than a per-decl bit. Each
+// renders its spawnable stages, the cascade chips, and (where a close
+// pipeline is registered) the close chip.
+func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
+	cases := []struct {
+		workflow string
+		stages   []string
+	}{
+		{"twin", []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize"}},
+		{"kb", []string{"research", "summarize"}},
+		{"hooks", []string{"code"}},
+		{"chores", []string{"code"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.workflow, func(t *testing.T) {
+			ui, ok := lookupServeWorkflowUI(tc.workflow)
+			if !ok {
+				t.Fatalf("%s should carry a serve declaration", tc.workflow)
+			}
+			if !slices.Equal(ui.Stages, tc.stages) {
+				t.Errorf("%s spawnable stages = %v, want %v", tc.workflow, ui.Stages, tc.stages)
+			}
+			if !ui.Cascade {
+				t.Errorf("%s should declare the cascade trio (operatorCascades)", tc.workflow)
+			}
+			if !ui.Close {
+				t.Errorf("%s should report a registered close pipeline", tc.workflow)
+			}
+		})
+	}
+}
+
 // Workflows that declared nothing stay read-only in serve, even when
-// they registered a CLI close (chat does).
+// they registered a CLI close (chat does) or a cascade dispatcher
+// (chat, pulse do). No serve declaration → no run-page affordances.
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
-	for _, wf := range []string{"chat", "kb", "twin", "hooks", "idea", "pulse", "nope"} {
+	for _, wf := range []string{"chat", "idea", "pulse", "nope"} {
 		if _, ok := lookupServeWorkflowUI(wf); ok {
 			t.Errorf("workflow %q should have no serve declaration", wf)
 		}

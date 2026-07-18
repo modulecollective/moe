@@ -55,8 +55,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the seal (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] [--park] <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] [--park|--ship] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
 		moePrintln(stderr, "dispatches the first stage of the six-stage ladder. Each managed doc")
@@ -72,6 +73,9 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if code := preflightMintTail(workflow+" reflect", workflow, *park, *ship, stderr); code != 0 {
+		return code
 	}
 	if *agentOverride != "" {
 		if _, err := agent.Get(*agentOverride); err != nil {
@@ -116,16 +120,14 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	}
 	moePrintf(stdout, "opened twin reflect %s/%s\n", md.Project, md.ID)
 
-	// Hand off to the chain prompt's fresh-run path. justFinished="" so
-	// promptNextStage falls back to Workflow.Next, which returns the
-	// first parked stage (vision). The chain prompt offers `Y` to run
-	// it; `!!` to cascade headless through the ladder and ship this run,
-	// `!!!` to also ride the chain; `!` for headless dispatch of just
-	// the next stage.
-	if *park {
-		return promptNextStageParked(root, md, stdout, stderr)
-	}
-	return promptNextStage(root, md, "", stdout, stderr)
+	// Hand off through the shared mint tail. --park prints the next-stage
+	// hint and stops; --ship cascades headless through the ladder and
+	// seals the pass (`!!` from the first parked stage, vision — a twin
+	// run auto-closes after finalize instead of pushing); neither offers
+	// the chain prompt's fresh-run path (justFinished="" → Workflow.Next
+	// returns the first parked stage, and the operator picks `Y` / `!` /
+	// `!!` / `!!!` there).
+	return mintTail(root, md, *park, *ship, stdout, stderr)
 }
 
 // reflectRefusalKind classifies the operator-prerequisite refusals the

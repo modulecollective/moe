@@ -134,8 +134,9 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	now := fs.Bool("now", false, "open even if cooling down or not yet due (still refuses if a run is already open)")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chore open [--now] [--park] <project>/<chore>")
+		moePrintln(stderr, "usage: moe chore open [--now] [--park|--ship] <project>/<chore>")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -143,6 +144,12 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	// The chore's target workflow is only known after the open, so the
+	// --ship-can't-cascade preflight can't run here; parkShipExclusive is
+	// the parse-time half, and mintTail's own ship guard is the other.
+	if code := parkShipExclusive("chore open", *park, *ship, stderr); code != 0 {
+		return code
 	}
 	projectID, choreName, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -157,10 +164,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	if *park {
-		return promptNextStageParked(root, md, stdout, stderr)
-	}
-	return promptNextStage(root, md, "", stdout, stderr)
+	return mintTail(root, md, *park, *ship, stdout, stderr)
 }
 
 // openDueChore is the CLI-facing wrapper around openChoreInProcess: it

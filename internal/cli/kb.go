@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"flag"
 	"io"
 	"path/filepath"
 
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -89,6 +87,11 @@ func init() {
 	w.RegisterStage("research")
 	w.RegisterStage("summarize", "research")
 	RegisterWorkflow(w)
+
+	// Serve declaration: render the cascade trio plus the close chip on
+	// kb run pages. Cascade is derived from operatorCascades; newRun
+	// stays false (serve's new-run form is sdlc-only for now).
+	registerServeWorkflow("kb", serveWorkflowDecl{})
 }
 
 // kbLintWikiBuilder is the (root, projectID) → *wiki.Config adapter
@@ -101,34 +104,17 @@ func kbLintWikiBuilder(root, projectID string) (*wiki.Config, error) {
 }
 
 func runResearch(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("kb research", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb research [--agent <name>] <project>/<run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive agent session on the research bibliography.")
-		moePrintln(stderr, "The agent extends the source list with web searches rather than replacing it.")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
-	projectID, runID, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "kb research: %v\n", err)
-		return 2
-	}
-	return openKbResearch(projectID, runID, false, *agentOverride, stdout, stderr)
+	return runStageVerb(stageVerbCfg{
+		workflow: "kb",
+		verb:     "kb research",
+		stage:    "research",
+		usage: []string{
+			"Opens an interactive agent session on the research bibliography.",
+			"The agent extends the source list with web searches rather than replacing it.",
+		},
+		open:        openKbResearch,
+		resolveSlug: plainRunSlug,
+	}, args, stdout, stderr)
 }
 
 // openKbResearch is the Go-level seam behind `moe kb research`. The
@@ -152,36 +138,19 @@ func openKbResearch(projectID, runID string, headless bool, agentOverride string
 }
 
 func runSummarize(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("kb summarize", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe kb summarize [--agent <name>] <project>/<run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive agent ingest session on the project's wiki.")
-		moePrintln(stderr, "The agent works the run's research bibliography into projects/<project>/knowledge/")
-		moePrintln(stderr, "— editing existing topic docs, creating new ones, and maintaining index.md.")
-		moePrintln(stderr, "Per-run canvas is a scratchpad; the wiki diff is the artifact.")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
-	projectID, runID, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "kb summarize: %v\n", err)
-		return 2
-	}
-	return openKbSummarize(projectID, runID, false, *agentOverride, stdout, stderr)
+	return runStageVerb(stageVerbCfg{
+		workflow: "kb",
+		verb:     "kb summarize",
+		stage:    "summarize",
+		usage: []string{
+			"Opens an interactive agent ingest session on the project's wiki.",
+			"The agent works the run's research bibliography into projects/<project>/knowledge/",
+			"— editing existing topic docs, creating new ones, and maintaining index.md.",
+			"Per-run canvas is a scratchpad; the wiki diff is the artifact.",
+		},
+		open:        openKbSummarize,
+		resolveSlug: plainRunSlug,
+	}, args, stdout, stderr)
 }
 
 // openKbSummarize is the Go-level seam behind `moe kb summarize`. Same

@@ -92,18 +92,14 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%s new: --seed and --from-idea are mutually exclusive (both seed the first stage)\n", workflowName)
 		return 2
 	}
-	if *ship && *park {
-		moePrintf(stderr, "%s new: --ship and --park are opposite tails (one cascades to the ship, the other stops) — pick one\n", workflowName)
-		return 2
-	}
-	// Preflight the cascade dispatcher before the open commit: --ship
-	// hands off to the same cascade path the `!!` chain answer takes, and
-	// a workflow with no registered dispatcher can't cascade. Every
+	// Preflight the mint tail before the open commit: --park/--ship are
+	// opposite tails, and --ship hands off to the same cascade path the
+	// `!!` chain answer takes — a workflow that doesn't cascade
+	// (no dispatcher, perpetual, or machine-paced) can't ship. Every
 	// workflow ships one today, but the `new` facade is generic — refuse
 	// at flag-parse time rather than minting a run we then can't ship.
-	if *ship && lookupCascadeDispatcher(workflowName) == nil {
-		moePrintf(stderr, "%s new: --ship: workflow %q has no cascade — open without --ship and drive the stages yourself\n", workflowName, workflowName)
-		return 2
+	if code := preflightMintTail(workflowName+" new", workflowName, *park, *ship, stderr); code != 0 {
+		return code
 	}
 	if *fromIdea != "" {
 		if fs.NArg() != 0 {
@@ -254,44 +250,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		moePrintf(stdout, "opened run %s/%s\n", md.Project, md.ID)
 	}
 
-	// --park: open the run and stop. Print the next-stage hint (the same
-	// line the non-TTY path emits) and exit without the chain prompt —
-	// the "just open it" flow that costs an `n` + Enter otherwise.
-	if *park {
-		return promptNextStageParked(root, md, stdout, stderr)
-	}
-
-	// --ship: open the run and cascade to the ship without a stop at the
-	// chain prompt. Resolve the first incomplete stage the same way
-	// promptNextStage's default branch does (Next() on a fresh run reports
-	// the workflow's first stage), then hand off to the existing cascade
-	// with the literal `!!` answer — ship this run, stop. No new cascade
-	// code: the summary line, failure exit codes, and blocked-gate
-	// behaviour come along for free, exactly as if the operator had typed
-	// `!!` at the prompt. `!!` not `!!!`: a freshly minted run has no
-	// chained children, so the ride variant is a no-op here.
-	if *ship {
-		stage, kind, err := wf.Next(root, md)
-		if err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		if kind != NextKindStage || stage == "" {
-			// A fresh run always has a first incomplete stage; this guard
-			// mirrors promptNextStage's default branch for the impossible
-			// case rather than feeding an empty start to the cascade.
-			return 0
-		}
-		return dispatchCascade("!!", stage, root, md, stdout, stderr)
-	}
-
-	// Fresh run — no stage has just finished, so promptNextStage falls
-	// back to Next() and offers the workflow's first incomplete stage. The
-	// operator picks `!<stage>`, `!!` (ship this run), or `!!!` (ship +
-	// ride the chain) at the chain prompt after seeing the seeded canvas;
-	// --ship above is the decided-up-front twin of `!!` for the tee-up
-	// flow that doesn't want to sit at the prompt.
-	return promptNextStage(root, md, "", stdout, stderr)
+	// The shared mint tail: --park prints the next-stage hint and stops,
+	// --ship cascades headless to the ship (`!!` from the first pending
+	// stage), neither offers the standard chain prompt where the operator
+	// picks `!<stage>` / `!!` / `!!!` after seeing the seeded canvas.
+	return mintTail(root, md, *park, *ship, stdout, stderr)
 }
 
 // preflightWorkspaceClaim refuses to bind a run to a workspace that is

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -18,39 +16,28 @@ import (
 
 // twinStageRun is the Command.Run factory behind every per-stage twin
 // verb (`moe twin vision`, `moe twin architecture`, …). The stage name
-// is baked into the closure so the dispatch table in twin.go stays a
-// thin list of (name, Run) pairs.
+// is baked into the cfg so the dispatch table in twin.go stays a thin
+// list of (name, Run) pairs. Routes through the shared runStageVerb
+// body so twin's six verbs carry the same cascade vocabulary
+// (--once/--to/--ship/--chain) sdlc's do — twin operatorCascades, so
+// the flags are honored. Per-turn --agent (persistAgent: false) and a
+// plain slug resolver are twin's only departures from sdlc's cfg.
 func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {
-		fs := flag.NewFlagSet("twin "+stage, flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
-		fs.Usage = func() {
-			moePrintf(stderr, "usage: moe twin %s [--agent <name>] <project>/<run>\n", stage)
-			moePrintln(stderr, "")
-			moePrintf(stderr, "Opens an interactive agent session on the %s-stage canvas\n", stage)
-			moePrintln(stderr, "of a twin reflect run. First use on a run creates the document;")
-			moePrintln(stderr, "re-runs resume the session.")
-		}
-		if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-			return 2
-		}
-		if fs.NArg() != 1 {
-			fs.Usage()
-			return 2
-		}
-		if *agentOverride != "" {
-			if _, err := agent.Get(*agentOverride); err != nil {
-				moePrintf(stderr, "%v\n", err)
-				return 2
-			}
-		}
-		projectID, runID, err := splitProjectRun(fs.Arg(0))
-		if err != nil {
-			moePrintf(stderr, "twin %s: %v\n", stage, err)
-			return 2
-		}
-		return openTwinStage(stage, projectID, runID, false, *agentOverride, stdout, stderr)
+		return runStageVerb(stageVerbCfg{
+			workflow: "twin",
+			verb:     "twin " + stage,
+			stage:    stage,
+			usage: []string{
+				"Opens an interactive agent session on the " + stage + "-stage canvas",
+				"of a twin reflect run. First use on a run creates the document;",
+				"re-runs resume the session.",
+			},
+			open: func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+				return openTwinStage(stage, projectID, runID, headless, agentOverride, stdout, stderr)
+			},
+			resolveSlug: plainRunSlug,
+		}, args, stdout, stderr)
 	}
 }
 

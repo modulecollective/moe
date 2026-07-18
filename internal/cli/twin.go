@@ -194,4 +194,11 @@ func init() {
 	// this gate decides whether the committed turn was substantive.
 	w.RegisterStageGate("finalize", finalizeStageGate)
 	RegisterWorkflow(w)
+
+	// Serve declaration: render the cascade trio (advance/ship/chain)
+	// plus the close chip on twin run pages. The cascade bit is derived
+	// from operatorCascades, not declared. newRun stays false — serve's
+	// new-run form is sdlc-only for now; a twin pass is minted by
+	// `moe twin reflect`, which serve doesn't front.
+	registerServeWorkflow("twin", serveWorkflowDecl{})
 }

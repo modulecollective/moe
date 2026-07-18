@@ -22,10 +22,11 @@ import (
 // Verbs that miss any leg of the test (project, session, twin)
 // live as plain CommandGroups; they have no Workflow at all.
 type Workflow struct {
-	Name       string
-	stageOrder []string
-	prereqs    map[string][]string
-	perpetual  bool
+	Name         string
+	stageOrder   []string
+	prereqs      map[string][]string
+	perpetual    bool
+	machinePaced bool
 	// successors is the inverse of prereqs, computed at RegisterStage
 	// time. A stage's successor is any stage that names it as a prereq;
 	// stageSatisfied uses this to walk forward (a stage stays "parked"
@@ -70,6 +71,23 @@ func (w *Workflow) SetPerpetual() {
 // Perpetual reports whether this workflow is intentionally long-lived.
 func (w *Workflow) Perpetual() bool {
 	return w.perpetual
+}
+
+// SetMachinePaced marks this workflow as opened and driven by moe
+// itself rather than paced by an operator (pulse is the sole case
+// today: machine-minted, machine-driven). It is the sibling of
+// SetPerpetual — a one-line declaration that keeps the workflow out of
+// the operator-cascade vocabulary (stage-verb cascade flags, chain
+// membership, serve chips) via the operatorCascades predicate, instead
+// of a per-surface allowlist.
+func (w *Workflow) SetMachinePaced() {
+	w.machinePaced = true
+}
+
+// MachinePaced reports whether this workflow is opened and driven by
+// moe rather than an operator. See SetMachinePaced.
+func (w *Workflow) MachinePaced() bool {
+	return w.machinePaced
 }
 
 // RegisterStageGate attaches an additional satisfiability check to

@@ -19,10 +19,6 @@ import (
 type serveWorkflowDecl struct {
 	// excludeStages are registered stage verbs serve must not spawn.
 	excludeStages []string
-	// cascade declares that the workflow's stage verbs accept --ship /
-	// --chain, so serve renders the advance/ship/chain trio (keyed off
-	// the run's next stage).
-	cascade bool
 	// newRun fronts the workflow in serve's /run/new and promote forms.
 	newRun bool
 	// workspace mirrors runNew's "only sdlc and hooks accept
@@ -73,8 +69,12 @@ func lookupServeWorkflowUI(workflow string) (serve.WorkflowUI, bool) {
 	}
 	_, hasClose := lookupCloseRegistration(workflow)
 	return serve.WorkflowUI{
-		Stages:    stages,
-		Cascade:   decl.cascade,
+		Stages: stages,
+		// Cascade is derived from the operatorCascades predicate, not
+		// declared per-workflow: the same property that gates the
+		// stage-verb flags and chain membership gates the serve chips, so
+		// a workflow can't render a ship chip its stage verbs won't honor.
+		Cascade:   operatorCascades(workflow),
 		Perpetual: wf.Perpetual(),
 		Close:     hasClose,
 	}, true

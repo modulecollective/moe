@@ -286,7 +286,7 @@ func TestSDLCStageUnknownDestinationStage(t *testing.T) {
 			if code != 2 {
 				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 			}
-			if !strings.Contains(errb.String(), "--to=nonsense is not an sdlc stage") {
+			if !strings.Contains(errb.String(), "--to=nonsense is not a stage of sdlc") {
 				t.Fatalf("expected unknown-stage error, got: %q", errb.String())
 			}
 			if !strings.Contains(errb.String(), "design, code, review, test, push") {
@@ -314,7 +314,7 @@ func TestSDLCStageRejectsBangDestination(t *testing.T) {
 				if code != 2 {
 					t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 				}
-				if !strings.Contains(errb.String(), "--to="+bang+" is not an sdlc stage") {
+				if !strings.Contains(errb.String(), "--to="+bang+" is not a stage of sdlc") {
 					t.Fatalf("expected unknown-stage error for --to=%s, got: %q", bang, errb.String())
 				}
 				if len(*stages) != 0 || len(*pushes) != 0 {
@@ -608,7 +608,8 @@ func TestSDLCStageRejectsToWhenNothingFollows(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := dispatchCascadeForStage("sdlc push", "push", "tele", "ghost", "!push", "push", &out, &errb)
+	cfg := sdlcStageVerbCfg("push", nil, nil)
+	code := dispatchCascadeForStage(cfg, "tele", "ghost", "!push", "push", &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}

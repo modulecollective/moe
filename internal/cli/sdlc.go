@@ -2,14 +2,12 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -103,141 +101,62 @@ func init() {
 	// Serve declaration: front sdlc in the new-run/promote forms and
 	// render the cascade trio (advance/ship/chain) on run pages. push
 	// is excluded from web spawning — terminal/CLI-only stays a
-	// recorded decision; the bang vocabulary collapses there.
+	// recorded decision; the bang vocabulary collapses there. The
+	// cascade bit is no longer declared here — lookupServeWorkflowUI
+	// derives it from operatorCascades.
 	registerServeWorkflow("sdlc", serveWorkflowDecl{
 		excludeStages: []string{"push"},
-		cascade:       true,
 		newRun:        true,
 		workspace:     true,
 	})
 }
 
+// sdlcStageVerbCfg builds the shared stage-verb config for an sdlc
+// stage: sdlc is the one workflow with a promoted/reopened slug lineage
+// (resolveSDLCRunSlug) and the one that persists --agent to run.json.
+func sdlcStageVerbCfg(stage string, usage []string, open func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int) stageVerbCfg {
+	return stageVerbCfg{
+		workflow:     "sdlc",
+		verb:         "sdlc " + stage,
+		stage:        stage,
+		usage:        usage,
+		open:         open,
+		resolveSlug:  resolveSDLCRunSlug,
+		persistAgent: true,
+	}
+}
+
 func runDesign(args []string, stdout, stderr io.Writer) int {
-	return runSDLCStage(stageVerbCfg{
-		verb:  "sdlc design",
-		stage: "design",
-		usage: []string{
-			"Opens an interactive agent session on the design canvas.",
-			"First use on a run creates the document; re-runs resume the session.",
-		},
-		open: openSdlcDesign,
-	}, args, stdout, stderr)
+	return runStageVerb(sdlcStageVerbCfg("design", []string{
+		"Opens an interactive agent session on the design canvas.",
+		"First use on a run creates the document; re-runs resume the session.",
+	}, openSdlcDesign), args, stdout, stderr)
 }
 
 func runCode(args []string, stdout, stderr io.Writer) int {
-	return runSDLCStage(stageVerbCfg{
-		verb:  "sdlc code",
-		stage: "code",
-		usage: []string{
-			"Opens an interactive agent session on the code canvas. The agent",
-			"works inside a private sandbox clone of the project's submodule, isolated",
-			"from other activity until `moe sdlc push` opens a PR.",
-		},
-		open: openSdlcCode,
-	}, args, stdout, stderr)
+	return runStageVerb(sdlcStageVerbCfg("code", []string{
+		"Opens an interactive agent session on the code canvas. The agent",
+		"works inside a private sandbox clone of the project's submodule, isolated",
+		"from other activity until `moe sdlc push` opens a PR.",
+	}, openSdlcCode), args, stdout, stderr)
 }
 
 func runReview(args []string, stdout, stderr io.Writer) int {
-	return runSDLCStage(stageVerbCfg{
-		verb:  "sdlc review",
-		stage: "review",
-		usage: []string{
-			"Opens an interactive agent session on the review canvas. The agent",
-			"performs a senior-engineer review of the code stage's committed diff,",
-			"blocking only for correctness, scope, maintainability, or reviewability",
-			"issues that should send the run back to code.",
-		},
-		open: openSdlcReview,
-	}, args, stdout, stderr)
+	return runStageVerb(sdlcStageVerbCfg("review", []string{
+		"Opens an interactive agent session on the review canvas. The agent",
+		"performs a senior-engineer review of the code stage's committed diff,",
+		"blocking only for correctness, scope, maintainability, or reviewability",
+		"issues that should send the run back to code.",
+	}, openSdlcReview), args, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
-	return runSDLCStage(stageVerbCfg{
-		verb:  "sdlc test",
-		stage: "test",
-		usage: []string{
-			"Opens an interactive agent session on the test canvas. The agent",
-			"verifies the reviewed work — running the project's checks, driving",
-			"the change end-to-end, applying small in-place fixes, and narrating what",
-			"was and wasn't verified on the canvas. Pre-push hooks still gate ship.",
-		},
-		open: openSdlcTest,
-	}, args, stdout, stderr)
-}
-
-// stageVerbCfg holds the per-stage knobs runSDLCStage threads through:
-// the operator-facing verb label (for error messages), the stage's
-// position in the workflow ladder (the cascade's start when a mode
-// flag is set), the multi-line usage preamble (printed above the flag
-// list), and the typed-CLI opener the no-flag path falls into.
-type stageVerbCfg struct {
-	verb  string
-	stage string
-	usage []string
-	open  func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int
-}
-
-// runSDLCStage is the shared body behind runDesign / runCode / runReview / runTest:
-// parse the per-stage flags, branch to interactive (no cascade flag)
-// or cascade (one of --once / --to / --ship / --chain), and surface
-// cascade-mode mutual exclusion at parse time.
-// Same shape every sdlc stage verb takes — keeping the body in one
-// place is what made adding the cascade flags a one-stop edit.
-func runSDLCStage(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet(cfg.verb, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "set the run's agent (claude/codex); persists to run.json")
-	once := fs.Bool("once", false, "run "+cfg.stage+" headless and park at the next chain prompt (= ! at the chain prompt)")
-	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
-	ship := fs.Bool("ship", false, "headless cascade through push, ship this run (= !!)")
-	chain := fs.Bool("chain", false, "headless cascade through push, then ride the whole chain (= !!!)")
-	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb)
-		moePrintln(stderr, "")
-		for _, line := range cfg.usage {
-			moePrintln(stderr, line)
-		}
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Cascade mode flags (mutually exclusive):")
-		moePrintln(stderr, "  --once         dispatch one stage headless, park at the next gate (= !)")
-		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")
-		moePrintln(stderr, "  --ship         headless cascade through push, ship this run (= !!)")
-		moePrintln(stderr, "  --chain        headless cascade through push, then ride the whole chain (= !!!)")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
-	projectID, runID, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "%s: %v\n", cfg.verb, err)
-		return 2
-	}
-	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship, *chain)
-	if !ok {
-		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --ship, --chain) are mutually exclusive\n", cfg.verb)
-		return 2
-	}
-	if *agentOverride != "" {
-		resolvedRunID, code := persistSDLCStageAgent(cfg.verb, cfg.stage, projectID, runID, *agentOverride, stdout, stderr)
-		if code != 0 {
-			return code
-		}
-		runID = resolvedRunID
-	}
-	if answer == "" {
-		return cfg.open(projectID, runID, false, *agentOverride, stdout, stderr)
-	}
-	return dispatchCascadeForStage(cfg.verb, cfg.stage, projectID, runID, answer, *to, stdout, stderr)
+	return runStageVerb(sdlcStageVerbCfg("test", []string{
+		"Opens an interactive agent session on the test canvas. The agent",
+		"verifies the reviewed work — running the project's checks, driving",
+		"the change end-to-end, applying small in-place fixes, and narrating what",
+		"was and wasn't verified on the canvas. Pre-push hooks still gate ship.",
+	}, openSdlcTest), args, stdout, stderr)
 }
 
 func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
@@ -282,137 +201,6 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 	}
 	moePrintf(stdout, "switched run agent to %s\n", agentName)
 	return resolvedRunID, 0
-}
-
-// cascadeAnswerFromFlags translates the four mode flags (--once,
-// --to, --ship, --chain) into the bang answer dispatchCascade
-// understands at the chain prompt. Exactly one of the four may be
-// set; otherwise the flags conflict and ok=false. An empty answer
-// with ok=true signals the no-flag case the caller routes through
-// the standard interactive opener.
-//
-// The mapping mirrors the chain-prompt bang vocabulary one-for-one:
-//
-//	--once        → "!"            run startStage headless, park
-//	--to=<stage>  → "!" + <stage>  walk headless to that gate
-//	--ship        → "!!"           headless cascade, ship this run
-//	--chain       → "!!!"          headless cascade, ship + ride the chain
-func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer string, ok bool) {
-	set := 0
-	if once {
-		set++
-	}
-	if to != "" {
-		set++
-	}
-	if ship {
-		set++
-	}
-	if chain {
-		set++
-	}
-	if set > 1 {
-		return "", false
-	}
-	switch {
-	case once:
-		return "!", true
-	case to != "":
-		return "!" + to, true
-	case ship:
-		return "!!", true
-	case chain:
-		return "!!!", true
-	}
-	return "", true
-}
-
-// dispatchCascadeForStage is the CLI-flag analogue of the chain
-// prompt's bang dispatch: validate the --to=<stage> destination up
-// front so a typo exits 2 (a real parse error) instead of falling
-// through to dispatchCascade's chain-prompt-shaped no-op return of
-// 0; resolve and guard the run (terminal / pushed / non-sdlc
-// refused fast); then hand to dispatchCascade exactly as the chain
-// prompt does. verb is the "sdlc <stage>" preamble used in stderr
-// so unknown-destination errors surface under the command the
-// operator just typed.
-//
-// Validation keys on the raw `to` flag, not the composed answer:
-// cascadeAnswerFromFlags maps `--to=<stage>` to `"!"+<stage>`, so
-// `--to=!` composes to the same `!!` string `--ship` legitimately
-// produces. Sniffing the answer would let `--to=!` / `--to=!!` slip
-// past as valid ship/chain forms; the ladder check below runs against
-// the operator's actual `--to` value instead.
-func dispatchCascadeForStage(verb, stage, projectID, runID, answer, to string, stdout, stderr io.Writer) int {
-	if to != "" {
-		dest := to
-		wf, err := LookupWorkflow("sdlc")
-		if err != nil {
-			moePrintf(stderr, "%s: %v\n", verb, err)
-			return 1
-		}
-		stages := wf.Stages()
-		destIdx := indexOfString(stages, dest)
-		if destIdx < 0 {
-			moePrintf(stderr, "%s: --to=%s is not an sdlc stage; try: %s\n", verb, dest, strings.Join(stages, ", "))
-			return 2
-		}
-		startIdx := indexOfString(stages, stage)
-		if destIdx <= startIdx {
-			past := stages[startIdx+1:]
-			if len(past) == 0 {
-				moePrintf(stderr, "%s: --to=%s is at or behind %s and no stage follows %s\n", verb, dest, stage, stage)
-			} else {
-				moePrintf(stderr, "%s: --to=%s is at or behind %s — pick a stage past %s (try: %s)\n", verb, dest, stage, stage, strings.Join(past, ", "))
-			}
-			return 2
-		}
-	}
-	md, root, code := resolveAndGuardForCascade(verb, projectID, runID, stdout, stderr)
-	if code != 0 {
-		return code
-	}
-	return dispatchCascade(answer, stage, root, md, stdout, stderr)
-}
-
-// resolveAndGuardForCascade is the cascade-entry preflight every
-// `moe sdlc <stage> --<mode>` invocation shares: resolve the typed
-// slug (descendant-walk for promoted/reopened lineage), load the
-// run, refuse non-sdlc / terminal / pushed runs. Returns the
-// resolved metadata, the bureaucracy root, and 0 on success; a
-// non-zero exit code (with stderr already written) on refusal.
-//
-// The chain-prompt's bang dispatch enters dispatchCascade through
-// promptStageNextStage, which has already loaded md by then — so
-// these guards only need to fire on the CLI-flag-entry leg.
-func resolveAndGuardForCascade(verb, projectID, runID string, stdout, stderr io.Writer) (*run.Metadata, string, int) {
-	resolved, code := resolveSDLCRunSlug(verb, projectID, runID, stdout, stderr)
-	if code != 0 {
-		return nil, "", code
-	}
-	runID = resolved
-	root, err := findRoot(stderr)
-	if err != nil {
-		return nil, "", 1
-	}
-	md, err := run.Load(root, projectID, runID)
-	if err != nil {
-		moePrintf(stderr, "%s: %v\n", verb, err)
-		return nil, "", 1
-	}
-	if md.Workflow != "sdlc" {
-		moePrintf(stderr, "%s: %s/%s is a %s run, not sdlc\n", verb, projectID, runID, md.Workflow)
-		return nil, "", 1
-	}
-	switch md.Status {
-	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		moePrintf(stderr, "%s: %s/%s is %s; nothing to cascade\n", verb, projectID, runID, md.Status)
-		return nil, "", 1
-	case run.StatusPushed:
-		moePrintf(stderr, "%s: %s/%s already pushed; cascade cannot drive a pushed run\n", verb, projectID, runID)
-		return nil, "", 1
-	}
-	return md, root, 0
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The

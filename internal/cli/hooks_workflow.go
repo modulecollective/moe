@@ -1,12 +1,10 @@
 package cli
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
 
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
@@ -50,39 +48,28 @@ func init() {
 	w := NewWorkflow(hooksWorkflow)
 	w.RegisterStage(hooksCodeDoc)
 	RegisterWorkflow(w)
+
+	// Serve declaration: render the cascade trio plus the close chip on
+	// hooks run pages. Single-stage, so the trio's "→ <stage>" advance
+	// collapses at the last stage exactly as it does on the CLI. Cascade
+	// is derived from operatorCascades; newRun stays false.
+	registerServeWorkflow(hooksWorkflow, serveWorkflowDecl{})
 }
 
 func runHooksCode(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("hooks code", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe hooks code [--agent <name>] <project>/<run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive agent session on the run's code canvas.")
-		moePrintln(stderr, "The agent edits scripts under projects/<project>/hooks/<event>.d/* and")
-		moePrintln(stderr, "iterates via `moe hook fire <project> <event>`. Edits commit alongside")
-		moePrintln(stderr, "the canvas on session close.")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
-	projectID, runID, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "hooks code: %v\n", err)
-		return 2
-	}
-	return openHooksCode(projectID, runID, false, *agentOverride, stdout, stderr)
+	return runStageVerb(stageVerbCfg{
+		workflow: hooksWorkflow,
+		verb:     "hooks code",
+		stage:    hooksCodeDoc,
+		usage: []string{
+			"Opens an interactive agent session on the run's code canvas.",
+			"The agent edits scripts under projects/<project>/hooks/<event>.d/* and",
+			"iterates via `moe hook fire <project> <event>`. Edits commit alongside",
+			"the canvas on session close.",
+		},
+		open:        openHooksCode,
+		resolveSlug: plainRunSlug,
+	}, args, stdout, stderr)
 }
 
 // openHooksCode is the Go-level seam behind `moe hooks code`. Mirrors
