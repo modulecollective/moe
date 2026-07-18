@@ -35,6 +35,11 @@ Start from the delta, not the whole project:
   cannot see either. A merge marked as landing outside moe never
   appeared in the journal at all, so "What landed" is incomplete
   without it; a red default branch is a finding on its own.
+  `gh` works from inside this sandbox, so you may dig one level
+  deeper when a row warrants it — the failing run's logs behind a red
+  CI URL, the diff behind a foreign merge. Optional and bounded: the
+  block is enough for the sweep, and a dig that grows past a couple of
+  reads is a followup naming the question.
 - **The backlog itself** — the open ideas, the open **intents** (the
   operator's standing direction for this project), and the previous
   pulse report. The intents are not optional reading here: they are
