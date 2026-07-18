@@ -415,6 +415,16 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // blocks on it; it just sits visible) — classifies into BucketActiveRuns
 // and stays a top-level ACTIVE row; folding it under a (completed or
 // pushed) parent would hide the very thing the operator is meant to see.
+// But every on-board spawn edge renders either way: an open child's
+// direct spawner gains the same " · spawned → <project>/<slug>" hint on
+// its own row (one per open child, newest-first) while the child runs,
+// which is exactly when clicking through to it is most useful. The two
+// mechanisms are mutually exclusive per child — a child either folds or
+// is hinted — so an edge never renders twice. One interaction rule keeps
+// them composable: a sole folding descendant that itself has an open
+// child is emitted as a Member row rather than dropped for the
+// arrow-only shortcut, so its hint stays attached to a row that renders.
+//
 // A row whose spawner chain doesn't resolve to an on-board top-level
 // ancestor — spawner pruned, a standalone `moe pulse new` with no
 // spawner, or a data cycle in SpawnedBy — is left as a normal top-level
@@ -484,7 +494,32 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 			directChildren[spawnerIdx(i)] = append(directChildren[spawnerIdx(i)], i)
 		}
 	}
-	if len(directChildren) == 0 {
+	// openKids maps a spawner's row index to its open (non-completed)
+	// children, in incoming row order (recency-sorted, so newest-first).
+	// These rows never move — they are hinted on the spawner, not folded —
+	// so this is a direct-edge lookup with no upward walk and no cycle
+	// concern.
+	openKids := make(map[int][]int)
+	for i := range rows {
+		if rows[i].Bucket == BucketCompletedRuns {
+			continue
+		}
+		if p := spawnerIdx(i); p >= 0 {
+			openKids[p] = append(openKids[p], i)
+		}
+	}
+	// openHints is the note suffix row i carries for its open children.
+	openHints := func(i int) string {
+		var b strings.Builder
+		for _, ci := range openKids[i] {
+			b.WriteString(" · spawned → ")
+			b.WriteString(rows[ci].Project)
+			b.WriteString("/")
+			b.WriteString(rows[ci].Run)
+		}
+		return b.String()
+	}
+	if len(directChildren) == 0 && len(openKids) == 0 {
 		return rows
 	}
 	var subtreeCount func(i int) int
@@ -502,6 +537,7 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 			m := rows[ci]
 			m.Member = true
 			m.Bucket = bucket
+			m.Note += openHints(ci)
 			out = append(out, m)
 			emitSubtree(ci, bucket)
 		}
@@ -511,13 +547,16 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 			continue // emitted under its ancestor below
 		}
 		parent := rows[i]
+		parent.Note += openHints(i)
 		kids := directChildren[i]
 		switch {
 		case len(kids) == 0:
 			out = append(out, parent)
-		case subtreeCount(i) == 1:
+		case subtreeCount(i) == 1 && len(openKids[kids[0]]) == 0:
 			// One descendant: a textual arrow on the parent, no extra row.
-			// The sole descendant is the single direct child.
+			// The sole descendant is the single direct child. Skipped when
+			// that child has an open child of its own — dropping its row
+			// would drop the hint carrying that live edge.
 			parent.Note += " · spawned → " + rows[kids[0]].Project + "/" + rows[kids[0]].Run
 			out = append(out, parent)
 		default:

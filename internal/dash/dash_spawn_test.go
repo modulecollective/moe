@@ -214,8 +214,8 @@ func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
 	if !strings.Contains(pulse.Note, "· spawned → p/reflect-1") {
 		t.Fatalf("active pulse note = %q, want the spawned arrow to reflect-1", pulse.Note)
 	}
-	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
-		t.Fatalf("ship-it must carry no arrow — its only child stayed top-level: %q", byKey["p/ship-it"].Note)
+	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
+		t.Fatalf("ship-it note = %q, want a hint to its open child pulse-1", got)
 	}
 }
 
@@ -343,8 +343,9 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 // TestSpawnOpenChildStaysTopLevelActive: a spawned pulse that is still
 // open — the broken-sweep case, where a failed survey leaves the run
 // open by design so a human escalates to it — must not fold under its
-// (completed) parent. It stays a top-level ACTIVE row and the parent
-// gets no spawned arrow, so the broken sweep stays visible on the dash.
+// (completed) parent. It stays a top-level ACTIVE row, so the broken
+// sweep stays visible on the dash — and the parent still renders the
+// edge as a hint, so the operator can click through to the live child.
 func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
@@ -367,8 +368,53 @@ func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
 	if child.Member {
 		t.Fatal("open pulse child must be a top-level row, not a Member")
 	}
+	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
+		t.Fatalf("parent note = %q, want a hint to its still-open child", got)
+	}
+}
+
+// TestSpawnOpenGrandchildKeepsMemberRow pins the composability rule: the
+// sole-descendant shortcut (drop the child row, arrow on the parent) must
+// not fire when that child has an open child of its own — dropping the row
+// would take its hint down with it. sdlc ← pulse (both completed) ←
+// reflect (open): pulse renders as a Member carrying the reflect hint.
+func TestSpawnOpenGrandchildKeepsMemberRow(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("p", "ship-it", "sdlc"),
+		closedRun("p", "pulse-1", "pulse"),
+		{ID: "reflect-1", Project: "p", Workflow: "twin", Status: run.StatusInProgress},
+	}
+	when := map[string]time.Time{
+		"p/ship-it":   base.Add(-3 * time.Hour),
+		"p/pulse-1":   base.Add(-2 * time.Hour),
+		"p/reflect-1": base.Add(-1 * time.Hour),
+	}
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{
+		"p/pulse-1":   "p/ship-it",
+		"p/reflect-1": "p/pulse-1",
+	})
+
+	var order []string
+	for _, r := range completed {
+		order = append(order, r.Project+"/"+r.Run)
+	}
+	want := []string{"p/ship-it", "p/pulse-1"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("completed order = %v, want the pulse kept as a member row %v", order, want)
+	}
+	if !byKey["p/pulse-1"].Member {
+		t.Fatal("pulse-1 must render as a Member under ship-it, not be dropped for an arrow")
+	}
+	if got := byKey["p/pulse-1"].Note; !strings.Contains(got, "· spawned → p/reflect-1") {
+		t.Fatalf("pulse-1 note = %q, want the hint to its open child", got)
+	}
 	if got := byKey["p/ship-it"].Note; strings.Contains(got, "spawned →") {
-		t.Fatalf("parent must not carry a spawned arrow for an open child: %q", got)
+		t.Fatalf("ship-it has no open child of its own and folds pulse-1 as a member — no hint: %q", got)
+	}
+	reflect := byKey["p/reflect-1"]
+	if reflect.Bucket != BucketActiveRuns || reflect.Member {
+		t.Fatalf("open reflect must stay a top-level ACTIVE row: %+v", reflect)
 	}
 }
 
