@@ -58,7 +58,15 @@ question* — not the answer, and not the dig.
 - **Check settled decisions.** Twin non-goals and prior drops are
   settled until new evidence reopens them (`moe-context` reads them).
   Resurrecting a recorded drop requires new evidence, named in the
-  entry.
+  entry. The kickoff carries a **Recently settled runs** block for
+  exactly this — the closed and merged runs of the last fortnight,
+  which the open backlog does not show you. Read a finding against it
+  before filing: a match on a `merged` run usually means you are
+  re-observing pre-fix behaviour rather than finding a live bug, and a
+  match on a `closed` run is a drop that stays dropped without new
+  evidence. Nothing on that list is settled by its *slug* — one
+  observation gets refiled under three different names, so match on
+  what the run was about.
 - **A quiet pulse is a valid pulse.** "Nothing new since <last pulse>"
   plus one line of why is a *successful* report. Never manufacture
   findings to justify the turn. Write the report anyway — an empty

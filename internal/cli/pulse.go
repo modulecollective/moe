@@ -652,7 +652,8 @@ func slugBaseInProgress(inProgress []string, base string) bool {
 }
 
 // pulseKickoffWithContext appends the harness-computed context blocks to
-// the static kickoff — the twin-reflect line and the GitHub block. Wired
+// the static kickoff — the twin-reflect line, the GitHub block, and the
+// recently-settled-runs block. Wired
 // as InitialPromptBuilder, so root is the session worktree
 // runStageSession hands the builder. Best-effort throughout: a gather
 // that fails drops its own block rather than failing the sweep.
@@ -663,6 +664,9 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 	}
 	if gh := pulseGitHubContext(root, projectID, runID, stderr); gh != "" {
 		blocks = append(blocks, gh)
+	}
+	if settled := settledRunsBlock(root, projectID); settled != "" {
+		blocks = append(blocks, settled)
 	}
 	return strings.Join(blocks, "\n\n")
 }
