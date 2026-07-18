@@ -536,8 +536,8 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 // taught in the stage fragment, where judgment belongs.
 //
 // The one mechanical guard is dedupe: an entry whose slug base already
-// names an in-progress run is skipped, so a red CI check that survives
-// two pulses doesn't queue the same fix twice.
+// names a live — in-progress or pushed — run is skipped, so a red CI
+// check that survives two pulses doesn't queue the same fix twice.
 //
 // Warn-only throughout, like the reflect spawn beside it: the report and
 // filings are already durable, so a failed mint is a spawn-by-hand-later,
@@ -546,7 +546,7 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 	if len(spawns) == 0 {
 		return
 	}
-	inProgress, err := inProgressSlugs(root, projectID)
+	live, err := liveSlugs(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: spawn: scan runs for %s: %v\n", projectID, err)
 		return
@@ -559,8 +559,8 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
 			continue
 		}
-		if slugBaseMatches(inProgress, slug) {
-			moePrintf(stderr, "pulse: spawn: %s already has an in-progress run for %q — skipping\n", projectID, slug)
+		if slugBaseMatches(live, slug) {
+			moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
 			continue
 		}
 		title := strings.TrimSpace(s.Title)
@@ -580,7 +580,7 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		}
 		// Claim the base so a second entry in the same batch proposing the
 		// same slug hits the dedupe rather than minting a dated sibling.
-		inProgress = append(inProgress, md.ID)
+		live = append(live, md.ID)
 		spawned = append(spawned, spawnedRun{
 			runID:     md.ID,
 			title:     title,
@@ -612,16 +612,20 @@ func spawnDesignSeed(title string, s pulseSpawn) string {
 	return seed
 }
 
-// inProgressSlugs lists the project's in-progress run slugs — the
-// dedupe set the spawn guard checks against.
-func inProgressSlugs(root, projectID string) ([]string, error) {
+// liveSlugs lists the project's live run slugs — the dedupe set the
+// spawn guard checks against. Live means in progress or pushed and
+// waiting on a human to merge: in both cases the fix is already in
+// flight, and whatever it addresses stays broken until it lands.
+// Merged, closed and promoted runs are out — a finding that survives a
+// merge is a new finding, not a duplicate.
+func liveSlugs(root, projectID string) ([]string, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, md := range mds {
-		if md.Project == projectID && md.Status == run.StatusInProgress {
+		if md.Project == projectID && (md.Status == run.StatusInProgress || md.Status == run.StatusPushed) {
 			out = append(out, md.ID)
 		}
 	}
@@ -634,8 +638,8 @@ var datedSlugSuffix = regexp.MustCompile(`^-\d{4}-\d{2}-\d{2}(-\d+)?$`)
 
 // slugBaseMatches reports whether any slug in the set was derived from
 // base — the bare base, or one of IDBase's dated forms. The spawn guard
-// passes the in-progress set; the close-time followup-claim check passes
-// every run on record.
+// passes the live set; the close-time followup-claim check passes every
+// run on record.
 //
 // Deliberately not a bare prefix match: `fix-ci` and `fix-ci-red-main`
 // are different proposals, and a greedy prefix would silently skip the

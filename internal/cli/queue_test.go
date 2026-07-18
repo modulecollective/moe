@@ -171,9 +171,93 @@ func TestSpawnSkipsSlugsAlreadyInProgress(t *testing.T) {
 	if got := runsWithWorkflow(t, root, "moe", "sdlc"); len(got) != 1 {
 		t.Fatalf("sdlc runs %v, want 1 — the second proposal should dedupe", got)
 	}
-	if !strings.Contains(errb.String(), "already has an in-progress run") {
+	if !strings.Contains(errb.String(), "already has a live run") {
 		t.Errorf("stderr=%q, want the dedupe skip named", errb.String())
 	}
+}
+
+// TestSpawnSkipsSlugsAlreadyPushed: a fix pushed with `--pr` is waiting
+// on a human to merge, so whatever it fixes is still broken on the
+// default branch. Re-proposing it is the duplicate the guard exists to
+// stop — the run leaving StatusInProgress must not drop it from the set.
+func TestSpawnSkipsSlugsAlreadyPushed(t *testing.T) {
+	root := spawnFixture(t)
+
+	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
+	}, io.Discard, io.Discard)
+	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusPushed)
+
+	var errb bytes.Buffer
+	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
+	}, io.Discard, &errb)
+
+	if got := sdlcRuns(t, root, "moe"); len(got) != 1 {
+		t.Fatalf("sdlc runs %v, want 1 — a pushed run still dedupes", got)
+	}
+	if !strings.Contains(errb.String(), "already has a live run") {
+		t.Errorf("stderr=%q, want the dedupe skip named", errb.String())
+	}
+}
+
+// TestSpawnRespawnsAfterMerge pins the other half of the decision: once
+// the fix has merged, a still-red check means the fix didn't take or
+// something new broke. That's a new run, not a duplicate — so widening
+// the live set further has to argue with this test.
+func TestSpawnRespawnsAfterMerge(t *testing.T) {
+	root := spawnFixture(t)
+
+	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
+	}, io.Discard, io.Discard)
+	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusMerged)
+
+	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
+	}, io.Discard, io.Discard)
+
+	got := sdlcRuns(t, root, "moe")
+	if len(got) != 2 {
+		t.Fatalf("sdlc runs %v, want 2 — a merged run should not dedupe", got)
+	}
+}
+
+// setRunStatus rewrites a run's status in place, standing in for the
+// lifecycle transitions (`moe sdlc push`, `moe run close`) the spawn
+// guard has to read correctly.
+func setRunStatus(t *testing.T, root, projectID, id, status string) {
+	t.Helper()
+	md, err := run.Load(root, projectID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = status
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	// runopen.Open refuses a dirty tree, so land the transition the way
+	// the real lifecycle commands do before the next pulse runs.
+	if err := run.StageAndCommit(root, "test: set "+id+" to "+status, run.Dir(projectID, id)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// sdlcRuns lists the project's sdlc runs at any status — runsWithWorkflow
+// filters to in-progress, which hides exactly the runs these tests move.
+func sdlcRuns(t *testing.T, root, projectID string) []string {
+	t.Helper()
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, md := range mds {
+		if md.Project == projectID && md.Workflow == "sdlc" {
+			out = append(out, md.ID)
+		}
+	}
+	return out
 }
 
 // TestSpawnDedupeIsNotPrefixGreedy: `fix-ci` and `fix-ci-red-main` are
