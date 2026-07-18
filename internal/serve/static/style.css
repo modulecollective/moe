@@ -225,6 +225,7 @@ section h2 .count {
 .row .slug { font-size: 0.95rem; color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
 .row .when { color: var(--muted); font-size: 0.85rem; }
 .row .note { color: var(--muted); font-size: 0.9rem; flex-basis: 100%; }
+.note a { color: inherit; }
 @media (min-width: 640px) {
   .row .note { flex-basis: auto; flex-grow: 1; }
 }
