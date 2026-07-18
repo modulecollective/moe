@@ -1271,14 +1271,15 @@ func gitLogFormat(t *testing.T, root string, n int, rev, format string) string {
 // registry for the duration of the test run. Tests use it to probe the
 // missing-fragment fallback without touching real workflows. The name
 // is derived from t.Name() so parallel runs don't collide on the
-// registry's duplicate-guard panic. The registry has no deregister
-// hook; entries just accumulate across tests in the same process,
-// which is fine — they're only read by LookupWorkflow/WorkflowNames.
+// registry's duplicate-guard panic. The entry is deleted on cleanup:
+// t.Name() is stable across `-count` iterations, so leaving it behind
+// makes the second iteration panic on the duplicate guard.
 func registerThrowawayWorkflow(t *testing.T, suffix string) *Workflow {
 	t.Helper()
 	name := "test-" + suffix + "-" + strings.ReplaceAll(t.Name(), "/", "-")
 	wf := NewWorkflow(name)
 	wf.RegisterStage("ghost")
 	RegisterWorkflow(wf)
+	t.Cleanup(func() { delete(workflows, name) })
 	return wf
 }

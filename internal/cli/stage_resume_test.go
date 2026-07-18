@@ -127,6 +127,7 @@ func setupResumeFixture(t *testing.T, name string) (string, *fakeAgent) {
 		transcriptFound: true,
 	}
 	agent.Register(name, fake)
+	t.Cleanup(func() { agent.Unregister(name) })
 	return root, fake
 }
 

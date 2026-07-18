@@ -259,6 +259,18 @@ func Register(name string, a Agent) {
 	registry[name] = a
 }
 
+// Unregister removes the Agent registered under name, if any. It
+// exists for tests that register a fake backend and need the registry
+// back the way they found it — without it, a fixture that registers a
+// fixed name panics on the second iteration under `go test -count=2`.
+// Unknown names are a no-op: the guard that matters is Register's
+// duplicate panic, which stays.
+func Unregister(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(registry, name)
+}
+
 // Get returns the Agent registered under name. Unknown names return
 // an error rather than silently falling back to a default; the
 // caller (a CLI flag or env var) should surface the failure to the
