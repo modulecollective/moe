@@ -36,7 +36,7 @@ type Workflow struct {
 	successors map[string][]string
 	// stageGates lets a stage layer an additional satisfiability check
 	// on top of the default "has a work-turn newer than upstream" rule.
-	// Today only sdlc's test stage uses it: a committed test-canvas
+	// sdlc's test stage and twin's finalize use it: a committed canvas
 	// that left the structural sections empty must not advance the
 	// stage. The gate runs *after* the default work-turn check, only
 	// when that check passed — so a stage with no work-turn stays

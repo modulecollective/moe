@@ -126,7 +126,7 @@ type Options struct {
 	// The cli wrapper populates this from $MOE_SERVE_NOTIFY_URL.
 	NotifyURL string
 
-	// CloseRun closes an in-progress non-idea (sdlc) run in-process:
+	// CloseRun closes an in-progress non-idea run in-process:
 	// the full cli close pipeline — workspace release, follow-up/lore
 	// harvest, status flip, trailered commit — run with --no-edit
 	// semantics. cli/serve.go wires this to the cli close core so the
@@ -136,7 +136,7 @@ type Options struct {
 	// Returns *runopen.NotClosableError when the run's state forbids a
 	// close (pushed, already terminal, wrong workflow); the close route
 	// maps that to 409 and anything else to 500. Absent means the close
-	// route returns 500 for sdlc runs (idea closes don't need it).
+	// route returns 500 for non-idea runs (idea closes don't need it).
 	CloseRun func(project, run string) error
 
 	// GatherChore returns the computed state of one chore for the chore
@@ -328,7 +328,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleIdeaEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
-	// Stage advancement for in-progress cascade-workflow (sdlc) runs:
+	// Stage advancement for in-progress cascade-workflow runs:
 	// /advance spawns the next stage interactively under the serve
 	// handshake; /ship spawns it under --ship (headless cascade through
 	// push, ship this run); /chain spawns it under --chain (ship this

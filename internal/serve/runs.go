@@ -383,7 +383,7 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 // spawnMode selects which cascade flag (if any) spawnNextStage appends
-// to `moe sdlc <stage> <id>`. The three web chips map one-to-one onto
+// to `moe <workflow> <stage> <id>`. The three web chips map one-to-one onto
 // the modes, and each mode onto the bang vocabulary: advance (= `!`,
 // no flag), ship (= `!!`, --ship, ship this run), chain (= `!!!`,
 // --chain, ship + ride the whole chain).
@@ -430,7 +430,7 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnAdvance)
 }
 
-// handleShip spawns the run's next sdlc stage under --ship: the
+// handleShip spawns the run's next stage under --ship: the
 // headless cascade that drives every remaining stage through push and
 // ships this run, then stops. The "ship" chip posts here. Bigger lever
 // than advance — one click can open/merge a PR — but still operator-
@@ -440,7 +440,7 @@ func (s *Server) handleShip(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnShip)
 }
 
-// handleChain spawns the run's next sdlc stage under --chain: the same
+// handleChain spawns the run's next stage under --chain: the same
 // headless cascade as ship, but after this run ships it rides the chain
 // into the next live child. The "chain" chip posts here — the biggest
 // lever on the page, and like ship it stays operator-triggered.
@@ -453,8 +453,8 @@ func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 // stale page) and applies the same guard set the close route uses,
 // then spawns `moe <workflow> <stage> <id>` — appending the mode's
 // cascade flag (--ship / --chain, or none for advance). Only workflows
-// whose declaration carries Cascade qualify (sdlc today — its stage
-// verbs are the ones that accept the flags), and the next stage must
+// whose declaration carries Cascade qualify (the operator-cascade set —
+// their stage verbs accept the flags), and the next stage must
 // be in the declared spawnable set (push stays terminal/CLI-only via
 // sdlc's exclusion). The server-side re-derivation plus spawn's own
 // dup-guard mean a double-click or a stale button can't double-spawn
@@ -583,7 +583,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // page. Idea runs keep their bespoke chips (edit / promote / close /
 // reopen — idea has no stage verbs to derive). Every other workflow's
 // chips are composed from its registration-time serve declaration
-// (Options.WorkflowUI): cascade workflows (sdlc) get the "→ <stage>" /
+// (Options.WorkflowUI): cascade workflows get the "→ <stage>" /
 // "ship" / "chain" trio keyed off the re-derived next stage. Workflows
 // with a close pipeline get a close-run chip when close is the routine
 // idle-page next move; perpetual workflows keep close off the idle page
