@@ -29,6 +29,7 @@
       <li>
         <a class="slug" href="{{.URL}}">{{.Stage}}</a>
         <span class="when">{{.ModTime}}</span>
+        {{range .Transcripts}}<a class="transcript-link" href="{{.URL}}">{{.Agent}} transcript</a>{{end}}
       </li>
       {{end}}
     </ul>

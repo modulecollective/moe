@@ -434,3 +434,84 @@ form.new-run button:hover, form.new-run button:focus {
   color: var(--muted);
   border-bottom: 1px dashed var(--hairline);
 }
+
+/* Per-run transcript links, sitting beside a stage's canvas link. */
+.transcript-link {
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+}
+.transcript-link:hover, .transcript-link:focus { color: var(--fg); border-color: var(--muted); }
+
+/* Agent-transcript viewer */
+.transcript-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; }
+.transcript-meta .t-agent { color: var(--fg); font-weight: 600; }
+.transcript-meta .t-model {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.t-earlier {
+  display: inline-block;
+  margin: 0 0 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+.t-earlier:hover, .t-earlier:focus { border-color: var(--muted); }
+.t-earlier.inert {
+  color: var(--muted);
+  cursor: default;
+  font-style: italic;
+}
+
+.t-units { display: flex; flex-direction: column; gap: 0.9rem; }
+.t-unit {
+  border-left: 2px solid var(--hairline);
+  padding: 0.1rem 0 0.1rem 0.75rem;
+}
+.t-unit.t-user { border-left-color: var(--accent); }
+.t-unit.t-assistant { border-left-color: var(--muted); }
+.t-unit.t-system { border-left-color: var(--warn); }
+.t-role {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.2rem;
+}
+.t-system .t-role { color: var(--warn); }
+.t-text, .t-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.t-toolcall { font-size: 0.85rem; }
+.t-toolcall .t-tool { color: var(--accent); font-weight: 600; }
+.t-toolcall .t-args {
+  color: var(--muted);
+  font: 0.85rem/1.4 var(--mono, monospace);
+  word-break: break-word;
+}
+.t-result {
+  margin-top: 0.35rem;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.t-result > summary {
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.t-result[open] > summary { border-bottom: 1px solid var(--hairline); }
+.t-result .t-output { padding: 0.5rem; overflow-x: auto; }
+.t-result.error { border-color: var(--warn); }
+.t-result.error > summary { color: var(--warn); }

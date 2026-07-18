@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Project}}/{{.Slug}} {{.Stage}} transcript — MoE</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<script>
+(function () {
+  var t = localStorage.getItem('moe-theme') ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → <a href="/run/{{.Project}}/{{.Slug}}">{{.Slug}}</a> → {{.Stage}} transcript</div>
+    </div>
+    {{template "headeractions" .}}
+  </header>
+
+  <p class="meta transcript-meta">
+    <span class="t-agent">{{.Agent}}</span>
+    {{if .OtherAgent}}<a class="t-other" href="?agent={{.OtherAgent}}">view {{.OtherAgent}}</a>{{end}}
+    {{range .Models}}<span class="badge t-model">{{.}}</span>{{end}}
+  </p>
+
+  {{if .Missing}}
+  <p class="empty">no transcript yet at <code>{{.Path}}</code></p>
+  {{else if .Empty}}
+  <p class="empty">no rendered events in this transcript</p>
+  {{else}}
+  <section class="transcript">
+    {{if .AtStart}}
+    <p class="t-earlier inert">start of transcript</p>
+    {{else}}
+    <a class="t-earlier" id="load-earlier" href="?before={{.EarlierBefore}}&amp;agent={{.Agent}}" data-agent="{{.Agent}}" data-atstart="false">load earlier</a>
+    {{end}}
+    <div id="transcript-units" class="t-units">
+      {{range .Units}}{{template "tunit" .}}{{end}}
+    </div>
+  </section>
+  {{end}}
+</main>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+  var cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('moe-theme', next);
+});
+// Load-earlier: fetch the previous chunk as a fragment and prepend it,
+// then rewrite the button's cursor. Progressive enhancement — with JS
+// off the same <a href> navigates to a full page of the earlier window.
+(function () {
+  var btn = document.getElementById('load-earlier');
+  var container = document.getElementById('transcript-units');
+  if (!btn || !container) return;
+  btn.addEventListener('click', function (e) {
+    if (btn.dataset.atstart === 'true') return;
+    e.preventDefault();
+    fetch(btn.getAttribute('href') + '&fragment=1').then(function (r) {
+      return r.text();
+    }).then(function (html) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var chunk = tmp.querySelector('.transcript-chunk');
+      if (!chunk) return;
+      // Insert each fetched unit before the current top, preserving order.
+      var anchor = container.firstElementChild;
+      while (chunk.firstElementChild) {
+        container.insertBefore(chunk.firstElementChild, anchor);
+      }
+      if (chunk.dataset.atstart === 'true') {
+        btn.textContent = 'start of transcript';
+        btn.classList.add('inert');
+        btn.dataset.atstart = 'true';
+        btn.removeAttribute('href');
+      } else {
+        btn.setAttribute('href', '?before=' + chunk.dataset.before + '&agent=' + btn.dataset.agent);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
+
+{{define "tunit"}}
+<div class="t-unit t-{{.Kind}}">
+  {{if eq .Kind "tool"}}
+    {{if .Tool}}<div class="t-toolcall"><span class="t-tool">{{.Tool}}</span>{{if .Args}} <span class="t-args">{{.Args}}</span>{{end}}</div>{{end}}
+    {{if .HasResult}}
+    <details class="t-result{{if .ResultError}} error{{end}}"{{if .ResultOpen}} open{{end}}>
+      <summary>{{if .ResultError}}✗ failed{{else}}output{{end}}{{if .ResultLines}} · {{.ResultLines}} lines{{end}}</summary>
+      <pre class="t-output">{{.Result}}</pre>
+    </details>
+    {{end}}
+  {{else}}
+    <div class="t-role">{{.Kind}}{{if .ShowModel}} · {{.Model}}{{end}}</div>
+    <pre class="t-text">{{.Text}}</pre>
+  {{end}}
+</div>
+{{end}}

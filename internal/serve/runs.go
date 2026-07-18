@@ -247,6 +247,14 @@ type canvasLink struct {
 	Stage   string
 	URL     string // /run/<p>/<r>/canvas/<stage>
 	ModTime string // human "Xm ago"
+	// Transcripts are the per-agent transcript links for this stage (one
+	// per backend thread on disk), rendered beside the canvas link.
+	Transcripts []transcriptLink
+}
+
+type transcriptLink struct {
+	Agent string // "claude" | "codex"
+	URL   string // /run/<p>/<r>/transcript/<stage>?agent=<agent>
 }
 
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
@@ -739,12 +747,34 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 			continue
 		}
 		out = append(out, canvasLink{
-			Stage:   stage,
-			URL:     "/run/" + projectID + "/" + slug + "/canvas/" + stage,
-			ModTime: dash.HumanAgo(now, st.ModTime()),
+			Stage:       stage,
+			URL:         "/run/" + projectID + "/" + slug + "/canvas/" + stage,
+			ModTime:     dash.HumanAgo(now, st.ModTime()),
+			Transcripts: s.transcriptLinks(projectID, slug, stage),
 		})
 	}
 	return out
+}
+
+// transcriptLinks returns the per-agent transcript links for a stage —
+// one per backend thread present on the canonical path. Threads mirror
+// there when a turn closes, so an in-progress stage mid-first-turn has
+// none yet (accurate as of the last closed turn, same posture as the
+// canvas route's live view). Chat runs are where this pays most: the
+// chat canvas is only session markers, the transcript is the content.
+func (s *Server) transcriptLinks(projectID, slug, stage string) []transcriptLink {
+	var links []transcriptLink
+	for _, agent := range []string{"claude", "codex"} {
+		path := filepath.Join(s.opts.Root, run.ThreadPathFor(agent, projectID, slug, stage))
+		if !fileExists(path) {
+			continue
+		}
+		links = append(links, transcriptLink{
+			Agent: agent,
+			URL:   "/run/" + projectID + "/" + slug + "/transcript/" + stage + "?agent=" + agent,
+		})
+	}
+	return links
 }
 
 // promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).

@@ -318,6 +318,10 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
+	// Read-only agent-transcript viewer for a stage. Same safe-mode
+	// bucket as the canvas route; ?agent / ?before / ?fragment are the
+	// backend pick, the paging cursor, and the load-earlier fetch form.
+	s.router.HandleFunc("GET /run/{project}/{slug}/transcript/{stage}", s.handleTranscript)
 	s.router.HandleFunc("GET /run/{project}/{slug}/promote", s.handlePromoteForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
 	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleIdeaEditForm)
