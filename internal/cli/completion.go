@@ -43,6 +43,7 @@ const (
 	argProjectRun
 	argWorkspace
 	argIdea
+	argIntent
 )
 
 // flagArgKind maps a value-taking flag to the candidate source for its
@@ -243,6 +244,8 @@ func valueCandidates(root string, k argKind) []string {
 		return workspaceCandidates(root)
 	case argIdea:
 		return ideaCandidates(root)
+	case argIntent:
+		return intentCandidates(root)
 	default:
 		return nil
 	}
@@ -261,7 +264,10 @@ func projectRunCandidates(root string) []string {
 	}
 	out := make([]string, 0, len(mds))
 	for _, md := range mds {
-		if md.Workflow == dash.IdeaWorkflow {
+		// Idea and intent runs share the slug shape but are their own
+		// token kinds (argIdea / argIntent); an sdlc/kb verb can't act on
+		// one, so keep them out of the generic project/run set.
+		if md.Workflow == dash.IdeaWorkflow || md.Workflow == dash.IntentWorkflow {
 			continue
 		}
 		out = append(out, md.Project+"/"+md.ID)
@@ -281,6 +287,30 @@ func ideaCandidates(root string) []string {
 	var out []string
 	for _, md := range mds {
 		if md.Workflow != dash.IdeaWorkflow {
+			continue
+		}
+		if md.Status != run.StatusInProgress {
+			continue
+		}
+		out = append(out, md.Project+"/"+md.ID)
+	}
+	return out
+}
+
+// intentCandidates lists open intents as `project/slug`. Only in-progress
+// intents are offered: edit/close/cat legitimately target a parked
+// intent, and a closed one is a dead target for the write verbs — the
+// live set is what the operator reaches for. (cat also reads closed ones,
+// but the open set is the useful completion default, same call idea's
+// argIdea makes.)
+func intentCandidates(root string) []string {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, md := range mds {
+		if md.Workflow != dash.IntentWorkflow {
 			continue
 		}
 		if md.Status != run.StatusInProgress {

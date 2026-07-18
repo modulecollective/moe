@@ -72,6 +72,20 @@
   </section>
 
   <section class="dash-section">
+    <h2><span>intents <span class="count">({{len .Intents}})</span></span></h2>
+    {{if .Intents}}
+    <ul class="rows">
+      {{range .Intents}}
+      <li class="row">
+        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <span class="note">{{.Note}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(none)</p>{{end}}
+  </section>
+
+  <section class="dash-section">
     <h2><span>backlog <span class="count">({{len .Backlog}})</span></span></h2>
     {{if .Backlog}}
     <ul class="rows">

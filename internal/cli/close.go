@@ -17,6 +17,18 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
+// isCaptureWorkflow reports whether a workflow is one of the cheap
+// operator-authored capture surfaces — ideas and intents. Both share the
+// same close shape: the run *is* the capture, so close skips the
+// followups/lore harvest, gates on a fully clean tree, keeps the short
+// `Close <wf> <p>/<r>` subject, and exempts the canvas from the
+// non-empty seal (an empty capture on close is operator intent, not a
+// missed write). Everything else is a staged workflow whose close runs
+// the harvest and the canvas seal.
+func isCaptureWorkflow(workflow string) bool {
+	return workflow == dash.IdeaWorkflow || workflow == dash.IntentWorkflow
+}
+
 // closeCleanup runs workflow-specific tear-down after state guards pass
 // and before the shared status-flip commit. Returning an error aborts
 // the close before run.json is modified.
@@ -82,8 +94,10 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	// trim the file ahead of time and keep close non-interactive.
 	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
 	fs.Usage = func() {
-		if workflow == dash.IdeaWorkflow {
-			moePrintf(stderr, "usage: moe idea close <project>/<run>\n")
+		if isCaptureWorkflow(workflow) {
+			// Capture closes take no --no-edit: there's no followups
+			// harvest to skip, so the flag would be dead.
+			moePrintf(stderr, "usage: moe %s close <project>/<run>\n", workflow)
 		} else {
 			moePrintf(stderr, "usage: moe %s close [--no-edit] <project>/<run>\n", workflow)
 		}
@@ -156,13 +170,13 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		return err
 	}
 
-	// Idea closes have no follow-ups dance — the run *is* the capture.
-	// For everything else, the operator's local edits to the harvest
-	// scratch files (followups.md, feedback/lore.md) are expected —
-	// that's where stage-time captures land — so the clean-tree gate
-	// ignores changes on those paths. Anything else dirty stays a
-	// refusal.
-	if workflow != dash.IdeaWorkflow {
+	// Capture closes (idea, intent) have no follow-ups dance — the run
+	// *is* the capture. For everything else, the operator's local edits
+	// to the harvest scratch files (followups.md, feedback/lore.md) are
+	// expected — that's where stage-time captures land — so the
+	// clean-tree gate ignores changes on those paths. Anything else dirty
+	// stays a refusal.
+	if !isCaptureWorkflow(workflow) {
 		followupsRel := run.FollowupsPath(projectID, runID)
 		loreRel := run.FeedbackPath(projectID, runID, "lore")
 		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel)
@@ -210,16 +224,17 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// document the run reached must have a non-empty canvas on disk.
 	// This is the post-merge belt to gate-1's pre-merge braces — it
 	// catches a canvas hand-edited or `git rm`'d to zero bytes after
-	// the session merged. Idea is exempt: its content.md is the
-	// operator's free-form capture written at open time, and an empty
-	// idea on close is operator intent, not a missed write.
+	// the session merged. Capture workflows (idea, intent) are exempt:
+	// their content.md is the operator's free-form capture written at
+	// open time, and an empty one on close is operator intent, not a
+	// missed write.
 	//
 	// The walk is over md.Documents, which only carries entries for
 	// documents the run actually opened (EnsureDocument populates it
 	// from the stage session). A run that never reached `code` has no
 	// `code` entry to verify — same satisfaction model Workflow.Next
 	// uses.
-	if workflow != dash.IdeaWorkflow {
+	if !isCaptureWorkflow(workflow) {
 		docIDs := make([]string, 0, len(md.Documents))
 		for docID := range md.Documents {
 			docIDs = append(docIDs, docID)

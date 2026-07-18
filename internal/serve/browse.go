@@ -175,6 +175,7 @@ type hubVM struct {
 	bannerArtVM
 	Project      string
 	Active       []dashRowVM
+	Intents      []dashRowVM
 	Backlog      []dashRowVM
 	Completed    []dashRowVM
 	Chores       []dashRowVM
@@ -221,6 +222,8 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 				vm.Active = append(vm.Active, rvm)
 			case dash.BucketChores:
 				vm.Chores = append(vm.Chores, rvm)
+			case dash.BucketIntents:
+				vm.Intents = append(vm.Intents, rvm)
 			case dash.BucketBacklog:
 				vm.Backlog = append(vm.Backlog, rvm)
 			case dash.BucketCompletedRuns:

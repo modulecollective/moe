@@ -63,7 +63,11 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 
 	nextByRun := make(map[string]dash.NextDecision, len(mds))
 	for _, md := range mds {
-		if md.Workflow == dash.IdeaWorkflow {
+		// Idea and intent are single-stage capture workflows with no
+		// next-stage decision to compute — they never render an ACTIVE
+		// row (ideas classify to BACKLOG, intents to their own section),
+		// so skip the workflow lookup and NextWithIndex entirely.
+		if md.Workflow == dash.IdeaWorkflow || md.Workflow == dash.IntentWorkflow {
 			continue
 		}
 		if md.Status != run.StatusInProgress {
@@ -124,6 +128,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		NextByRun:        nextByRun,
 		Chores:           choreInputs,
 		PullNext:         gatherPullNext(root, mds, idx),
+		Intents:          gatherIntents(root, mds),
 	})
 	if err != nil {
 		return DashSnapshot{}, err

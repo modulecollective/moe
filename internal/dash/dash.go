@@ -37,6 +37,18 @@ const (
 	IdeaDocID    = "idea"
 )
 
+// IntentWorkflow and IntentDocID are the intent workflow's cross-cutting
+// contract, the same shape as the idea pair: the workflow name written
+// to run.json and the doc id for the single canvas stage. Intents are
+// operator-authored standing direction parked on a project — runs in a
+// single-stage workflow whose verbs never launch an agent, exactly like
+// ideas. dash names them because it owns the INTENTS render and is the
+// lowest leaf every caller (cli, serve) already depends on.
+const (
+	IntentWorkflow = "intent"
+	IntentDocID    = "intent"
+)
+
 // ChatWorkflow and ChatDocID are the chat workflow's cross-cutting
 // contract, the same shape as the idea pair: the workflow name written
 // to run.json and the doc id for the single chat stage. dash needs the
@@ -93,6 +105,7 @@ type Bucket int
 const (
 	BucketActiveRuns    Bucket = iota // in-progress runs with a next stage
 	BucketChores                      // due project chores, before they become runs
+	BucketIntents                     // open intents: operator-authored standing direction, above the backlog
 	BucketBacklog                     // captured ideas, not yet promoted to a run
 	BucketCompletedRuns               // pushed or terminal runs, shown as "done"
 	BucketNone                        // not placed in any section (idea with an unrecognised status; in-progress non-idea run with no next-stage decision)
@@ -155,6 +168,21 @@ type Inputs struct {
 	// can only over-highlight, never resurrect. The caller (cli's
 	// GatherDashSnapshot) does the disk work; dash stays pure.
 	PullNext []PullNextPick
+	// Intents is the set of open intents (slug + title) to render in the
+	// INTENTS section. Titles come off each canvas's first heading, so
+	// the caller (GatherDashSnapshot) does the disk read; dash stays
+	// pure. BuildRows filters by ProjectFilter and sorts by project then
+	// slug so the render is stable.
+	Intents []IntentInput
+}
+
+// IntentInput is one open intent for the INTENTS section: the project
+// it's parked on, its slug, and the title read off the canvas's first
+// heading (falls back to the slug when the canvas has no heading).
+type IntentInput struct {
+	Project string
+	Slug    string
+	Title   string
 }
 
 // PullNextPick is one ranked backlog pick parsed from a pulse run's
@@ -241,6 +269,36 @@ func BuildRows(in Inputs) ([]Row, error) {
 			insert++
 		}
 		rows = append(rows[:insert], append(choreRows, rows[insert:]...)...)
+	}
+
+	// Intents ride in from Inputs (not classify — they carry a title read
+	// off-disk and never join the run board). Splice them after the
+	// ACTIVE/CHORES prefix so INTENTS sits directly above BACKLOG, sorted
+	// by project then slug for a stable render.
+	var intentRows []Row
+	for _, it := range in.Intents {
+		if in.ProjectFilter != "" && it.Project != in.ProjectFilter {
+			continue
+		}
+		intentRows = append(intentRows, Row{
+			Project: it.Project,
+			Run:     it.Slug,
+			Note:    it.Title,
+			Bucket:  BucketIntents,
+		})
+	}
+	sort.SliceStable(intentRows, func(i, j int) bool {
+		if intentRows[i].Project != intentRows[j].Project {
+			return intentRows[i].Project < intentRows[j].Project
+		}
+		return intentRows[i].Run < intentRows[j].Run
+	})
+	if len(intentRows) > 0 {
+		insert := 0
+		for insert < len(rows) && (rows[insert].Bucket == BucketActiveRuns || rows[insert].Bucket == BucketChores) {
+			insert++
+		}
+		rows = append(rows[:insert], append(intentRows, rows[insert:]...)...)
 	}
 	return rows, nil
 }
@@ -506,6 +564,13 @@ func floatPullNext(rows []Row, picks []PullNextPick) {
 func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string, nextByRun map[string]NextDecision) (Bucket, string, string, string) {
 	runKey := md.Project + "/" + md.ID
 	prefix := md.Workflow + ":"
+	if md.Workflow == IntentWorkflow {
+		// Intents never join the run board. Open ones render in the
+		// INTENTS section (fed from Inputs.Intents); closed ones drop out
+		// entirely — an intent is standing direction, not run traffic, so
+		// a retired intent is not history worth a COMPLETED row.
+		return BucketNone, "", "", ""
+	}
 	if md.Workflow == IdeaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
@@ -773,13 +838,15 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	}
 	fmt.Fprintln(w)
 
-	var active, chores, backlog, completed []Row
+	var active, chores, intents, backlog, completed []Row
 	for _, r := range rows {
 		switch r.Bucket {
 		case BucketActiveRuns:
 			active = append(active, r)
 		case BucketChores:
 			chores = append(chores, r)
+		case BucketIntents:
+			intents = append(intents, r)
 		case BucketBacklog:
 			backlog = append(backlog, r)
 		case BucketCompletedRuns:
@@ -810,6 +877,22 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range chores {
 			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
+
+	// INTENTS renders even at zero: an empty list is itself a signal
+	// (the robots are running unaimed), and the standing heading keeps
+	// the noun discoverable. slug + title, no timestamp — intents are
+	// parked, not dated.
+	cliout.Printf(w, "INTENTS (%d)\n", len(intents))
+	if len(intents) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range intents {
+			fmt.Fprintf(tw, "  %s/%s\t%s\n", r.Project, r.Run, r.Note)
 		}
 		tw.Flush()
 	}
