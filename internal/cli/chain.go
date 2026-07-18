@@ -1,10 +1,10 @@
 // Package cli — chain verbs.
 //
 // `moe chain edit` opens a rebase-style editor over every active
-// operator-cascade run (sdlc, twin, kb, hooks, chores — every workflow
-// operatorCascades admits) across every project, grouped into blocks
-// that mirror the dash's chains. A blank line is a chain boundary: each
-// contiguous block of
+// chainable run (sdlc, twin, kb, hooks, chores — every workflow
+// operatorCascades admits — plus the pulse's queue heads) across every
+// project, grouped into blocks that mirror the dash's chains. A blank
+// line is a chain boundary: each contiguous block of
 // run lines becomes one linear chain (line i chains-to line i+1 within
 // its block; the block's last line chains-to nothing). The editor is
 // WYSIWYG — the blocks you see are the chains you get. The offered runs
@@ -46,7 +46,7 @@ func init() {
 	g := NewCommandGroup("chain", "manage run chains")
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "rebase-style editor over active operator-cascade runs; reorder to chain",
+		Summary: "rebase-style editor over active chainable runs; reorder to chain",
 		Run:     runChainEdit,
 	})
 	g.Register(&Command{
@@ -73,7 +73,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe chain edit")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens $EDITOR on every active operator-cascade run across every")
+		moePrintln(stderr, "Opens $EDITOR on every active chainable run across every")
 		moePrintln(stderr, "project, grouped into blocks that mirror the dash's chains. A blank line")
 		moePrintln(stderr, "separates chains: each block of run lines becomes one linear chain")
 		moePrintln(stderr, "(each chains-to the one below it within the block). Move a line into")
@@ -108,9 +108,9 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	items := activeCascadeChainItems(mds, idx, byKey)
+	items := activeChainItems(mds, idx, byKey)
 	if len(items) == 0 {
-		moePrintln(stderr, "chain edit: no active operator-cascade runs")
+		moePrintln(stderr, "chain edit: no active chainable runs")
 		return 0
 	}
 
@@ -157,7 +157,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	for _, block := range desired {
 		for _, k := range block {
 			if !activeKeys[k] {
-				moePrintf(stderr, "chain edit: %q is not an active operator-cascade run\n", k)
+				moePrintf(stderr, "chain edit: %q is not an active chainable run\n", k)
 				return 1
 			}
 		}
@@ -266,15 +266,30 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// activeCascadeChainItems gathers the active operator-cascade runs and
-// annotates each with its current chain state. Membership keys on the
-// operatorCascades predicate, not a workflow name: any workflow that
+// chainableWorkflow reports whether a run's workflow can appear in the
+// chain editor. The base set is operatorCascades — any workflow that
 // registers a cascade dispatcher and isn't perpetual/machine-paced
-// (sdlc, twin, kb, hooks, chores today) is chainable, so the editor
-// offers it. chat (perpetual) and pulse (machine-paced) stay out via
-// the predicate, not a list here. Widening the offered set is mandatory
-// for chain membership: chain edit's delete-means-unchain authority
-// clears any edge to a run it didn't show on the next save.
+// (sdlc, twin, kb, hooks, chores today), keyed on the predicate rather
+// than a workflow name so a new operator-paced workflow is chainable
+// the day it registers. chat (perpetual) and pulse (machine-paced)
+// stay out via that predicate.
+//
+// queue is the one addition on top, and the one place chain membership
+// legitimately parts from the cascade vocabulary: a queue run is a
+// per-project placeholder heading a batch of parked fix runs, with no
+// stage ladder of its own to walk — so the cascade flags and serve
+// chips would be meaningless on it — but the operator must be able to
+// reorder or prune that batch, and drop the head itself, before `moe
+// queue kick` rides it. Offering it is also mandatory rather than
+// cosmetic: chain edit's delete-means-unchain authority clears any edge
+// to a run it didn't show on the next save, so a queue the editor
+// hid would lose its whole batch the first time the operator saved.
+func chainableWorkflow(workflow string) bool {
+	return operatorCascades(workflow) || workflow == queueWorkflow
+}
+
+// activeChainItems gathers the active chainable runs and annotates each
+// with its current chain state.
 //
 // Render order matches the dash's ACTIVE section — chains render as
 // contiguous head→tail blocks, each block (or standalone run) floating
@@ -286,11 +301,11 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // Each returned block is one chain unit (an orphan, or a head→tail
 // chain); renderChainEditFile emits a blank line between blocks so the
 // editor's blank lines are the chain boundaries.
-func activeCascadeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
+func activeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
 	chainedFrom := invertEffectiveChain(idx.ChainedChild, byKey)
 	itemByKey := map[string]chainItem{}
 	for _, md := range mds {
-		if !operatorCascades(md.Workflow) || md.Status != run.StatusInProgress {
+		if !chainableWorkflow(md.Workflow) || md.Status != run.StatusInProgress {
 			continue
 		}
 		key := md.Project + "/" + md.ID

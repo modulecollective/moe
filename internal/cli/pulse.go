@@ -372,6 +372,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	if gate.Reflect.Due {
 		maybeSpawnReflect(root, projectID, md.ID, gate.Reflect.Why, stdout, stderr)
 	}
+	maybeSpawnFixRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -429,6 +430,32 @@ type pulseGate struct {
 		Due bool   `json:"due"`
 		Why string `json:"why"`
 	} `json:"reflect"`
+	// Spawn carries the survey's high-confidence fix proposals. The
+	// agent proposes; the harness executes — so the survey sandbox stays
+	// read-only and needs no new tools. Each entry becomes a parked sdlc
+	// run chained under the project's queue.
+	Spawn []pulseSpawn `json:"spawn"`
+}
+
+// pulseSpawn is one proposed fix run. Slug is the slug base (the harness
+// dates it on collision); Title and Why are what the operator reads on
+// the queue canvas before kicking; Design seeds the new run's design
+// canvas, so the design stage starts from the survey's findings instead
+// of re-deriving them.
+type pulseSpawn struct {
+	Slug   string `json:"slug"`
+	Title  string `json:"title"`
+	Why    string `json:"why"`
+	Design string `json:"design"`
+}
+
+// spawnedRun is one minted fix run, threaded to the queue stamper so it
+// can write the canvas line and the chain edge.
+type spawnedRun struct {
+	runID     string
+	title     string
+	why       string
+	pulseSlug string
 }
 
 // readPulseGate reads the survey canvas and parses its `## Gate` JSON
@@ -489,6 +516,124 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 		return
 	}
 	moePrintf(stderr, "pulse: drift flagged — opened twin reflect %s/%s (%s)\n", projectID, md.ID, why)
+}
+
+// maybeSpawnFixRuns mints a parked sdlc run for each high-confidence fix
+// the survey's gate proposed, then chains the batch under the project's
+// queue run. The pulse *makes* runs; it never *runs* them — every entry
+// parks at design and only `moe queue kick` (or a manual stage verb)
+// executes anything.
+//
+// No numeric cap. The harness has no basis for judging which proposals
+// to trim, and the queue is itself the review gate: spawned runs are
+// parked, visible as one dash unit, and prunable with `moe chain edit`.
+// Over-proposal is visible junk, which the pulse already prefers to
+// invisible absence. The bar — mechanical, bounded, verifiable — is
+// taught in the stage fragment, where judgment belongs.
+//
+// The one mechanical guard is dedupe: an entry whose slug base already
+// names an in-progress run is skipped, so a red CI check that survives
+// two pulses doesn't queue the same fix twice.
+//
+// Warn-only throughout, like the reflect spawn beside it: the report and
+// filings are already durable, so a failed mint is a spawn-by-hand-later,
+// not a lost sweep.
+func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdout, stderr io.Writer) {
+	if len(spawns) == 0 {
+		return
+	}
+	inProgress, err := inProgressSlugs(root, projectID)
+	if err != nil {
+		moePrintf(stderr, "pulse: spawn: scan runs for %s: %v\n", projectID, err)
+		return
+	}
+
+	var spawned []spawnedRun
+	for _, s := range spawns {
+		slug := strings.TrimSpace(s.Slug)
+		if slug == "" || run.Slugify(slug) != slug {
+			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
+			continue
+		}
+		if slugBaseInProgress(inProgress, slug) {
+			moePrintf(stderr, "pulse: spawn: %s already has an in-progress run for %q — skipping\n", projectID, slug)
+			continue
+		}
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = slug
+		}
+		md, err := runopen.Open(root, projectID, run.Options{
+			IDBase:    slug,
+			Workflow:  "sdlc",
+			SeedDocs:  map[string]string{"design": spawnDesignSeed(title, s)},
+			SpawnedBy: projectID + "/" + pulseSlug,
+			Trailers:  trailers.Block{SpawnedBy: projectID + "/" + pulseSlug},
+		}, stdout, stderr)
+		if err != nil {
+			moePrintf(stderr, "pulse: spawn %q for %s: %v\n", slug, projectID, err)
+			continue
+		}
+		// Claim the base so a second entry in the same batch proposing the
+		// same slug hits the dedupe rather than minting a dated sibling.
+		inProgress = append(inProgress, md.ID)
+		spawned = append(spawned, spawnedRun{
+			runID:     md.ID,
+			title:     title,
+			why:       strings.TrimSpace(s.Why),
+			pulseSlug: pulseSlug,
+		})
+		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
+	}
+
+	if err := stampQueueBatch(root, projectID, spawned, stdout, stderr); err != nil {
+		moePrintf(stderr, "pulse: queue %d spawned run(s) for %s: %v — the runs are open but unchained\n",
+			len(spawned), projectID, err)
+	}
+}
+
+// spawnDesignSeed builds the design canvas body a spawned run opens
+// with. The survey's own markdown is the body when it wrote one;
+// otherwise the title and why are all there is, which is still a
+// better starting point than an empty canvas.
+func spawnDesignSeed(title string, s pulseSpawn) string {
+	body := strings.TrimSpace(s.Design)
+	if body != "" {
+		return body + "\n"
+	}
+	seed := "# " + title + "\n"
+	if why := strings.TrimSpace(s.Why); why != "" {
+		seed += "\n" + why + "\n"
+	}
+	return seed
+}
+
+// inProgressSlugs lists the project's in-progress run slugs — the
+// dedupe set the spawn guard checks against.
+func inProgressSlugs(root, projectID string) ([]string, error) {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, md := range mds {
+		if md.Project == projectID && md.Status == run.StatusInProgress {
+			out = append(out, md.ID)
+		}
+	}
+	return out, nil
+}
+
+// slugBaseInProgress reports whether any in-progress slug was derived
+// from base — either the bare base or one of run.Options.IDBase's dated
+// forms (base-YYYY-MM-DD, base-YYYY-MM-DD-2).
+func slugBaseInProgress(inProgress []string, base string) bool {
+	for _, slug := range inProgress {
+		if slug == base || strings.HasPrefix(slug, base+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // pulseKickoffWithContext appends the harness-computed context blocks to

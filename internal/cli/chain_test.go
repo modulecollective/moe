@@ -723,13 +723,16 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	}
 }
 
-// TestActiveCascadeChainItemsMembership pins that chain-edit membership
-// keys on operatorCascades, not on workflow=="sdlc": every
-// operator-paced workflow (sdlc, twin, kb, hooks, chores) is offered,
-// while chat (perpetual) and pulse (machine-paced) stay out — the same
-// predicate the stage-verb flags and serve chips use. A merged run is
-// excluded by status regardless of workflow.
-func TestActiveCascadeChainItemsMembership(t *testing.T) {
+// TestActiveChainItemsMembership pins that chain-edit membership keys
+// on operatorCascades, not on workflow=="sdlc": every operator-paced
+// workflow (sdlc, twin, kb, hooks, chores) is offered, while chat
+// (perpetual) and pulse (machine-paced) stay out — the same predicate
+// the stage-verb flags and serve chips use. queue is the one workflow
+// admitted on top of the predicate: it has no stage ladder of its own,
+// so it takes no cascade flags, but the operator must be able to prune
+// and reorder the batch it heads. A merged run is excluded by status
+// regardless of workflow.
+func TestActiveChainItemsMembership(t *testing.T) {
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	mk := func(id, workflow, status string) *run.Metadata {
 		return &run.Metadata{ID: id, Project: "p", Workflow: workflow, Status: status}
@@ -740,9 +743,10 @@ func TestActiveCascadeChainItemsMembership(t *testing.T) {
 		mk("k", "kb", run.StatusInProgress),
 		mk("h", "hooks", run.StatusInProgress),
 		mk("c", "chores", run.StatusInProgress),
-		mk("chat1", "chat", run.StatusInProgress),   // perpetual — excluded
-		mk("pulse1", "pulse", run.StatusInProgress), // machine-paced — excluded
-		mk("done", "sdlc", run.StatusMerged),        // terminal — excluded
+		mk("q", queueWorkflow, run.StatusInProgress), // batch head — admitted on top of the predicate
+		mk("chat1", "chat", run.StatusInProgress),    // perpetual — excluded
+		mk("pulse1", "pulse", run.StatusInProgress),  // machine-paced — excluded
+		mk("done", "sdlc", run.StatusMerged),         // terminal — excluded
 	}
 	when := map[string]time.Time{}
 	byKey := map[string]*run.Metadata{}
@@ -753,17 +757,17 @@ func TestActiveCascadeChainItemsMembership(t *testing.T) {
 	}
 	idx := &run.JournalIndex{LastActivity: when, ChainedChild: map[string]string{}}
 
-	blocks := activeCascadeChainItems(mds, idx, byKey)
+	blocks := activeChainItems(mds, idx, byKey)
 	got := map[string]bool{}
 	for _, block := range blocks {
 		for _, it := range block {
 			got[it.Key] = true
 		}
 	}
-	want := map[string]bool{"p/s": true, "p/t": true, "p/k": true, "p/h": true, "p/c": true}
+	want := map[string]bool{"p/s": true, "p/t": true, "p/k": true, "p/h": true, "p/c": true, "p/q": true}
 	for k := range want {
 		if !got[k] {
-			t.Errorf("operator-paced run %q should be offered for chaining", k)
+			t.Errorf("chainable run %q should be offered for chaining", k)
 		}
 	}
 	for _, k := range []string{"p/chat1", "p/pulse1", "p/done"} {
@@ -795,7 +799,7 @@ func TestChainEditTwinEdgeSurvivesSave(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	body := renderChainEditFile(activeCascadeChainItems(mds, idx, byKey))
+	body := renderChainEditFile(activeChainItems(mds, idx, byKey))
 	parsed, err := parseChainEditFile(body)
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
@@ -839,7 +843,7 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	blocks := activeCascadeChainItems(mds, idx, byKey)
+	blocks := activeChainItems(mds, idx, byKey)
 	// The blocks are the dash units: the 3-run chain, the orphan, then
 	// the 2-run chain. The blank lines the render writes between these
 	// are the chain boundaries.
@@ -921,7 +925,7 @@ func TestChainEditRoundTripIsNoOp(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	body := renderChainEditFile(activeCascadeChainItems(mds, idx, byKey))
+	body := renderChainEditFile(activeChainItems(mds, idx, byKey))
 	parsed, err := parseChainEditFile(body)
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
