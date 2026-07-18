@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -21,7 +20,7 @@ import (
 // into ideas); true harvests as-is (sync reconciling an upstream merge,
 // and `close --no-edit`).
 //
-// The whole rule "any non-idea run reaching a terminal status
+// The whole rule "any non-capture run reaching a terminal status
 // harvests its follow-ups" lives here, once. Every site that flips a
 // run to merged or closed must flow through this helper — the lint
 // test in terminal_lint_test.go pins that invariant.
@@ -34,7 +33,7 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 		return nil, fmt.Errorf("enterTerminal: not a terminal status: %q", newStatus)
 	}
 	paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
-	if md.Workflow != dash.IdeaWorkflow {
+	if !isCaptureWorkflow(md.Workflow) {
 		if err := harvestFollowups(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
 			return nil, err
 		}

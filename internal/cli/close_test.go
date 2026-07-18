@@ -11,6 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // seedCloseFixture composes the test setup every close test wants: a
@@ -437,6 +438,80 @@ func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "moe kb research tele/kb-empty") {
 		t.Fatalf("kb refusal should suggest the kb verb: %q", errb.String())
+	}
+}
+
+// TestIntentCloseSkipsHarvest: intent is a capture workflow, so its
+// close skips the followups/lore harvest the same way idea's does.
+// Regression canary for enterTerminal's isCaptureWorkflow gate — with
+// the older `!= dash.IdeaWorkflow` guard, the hand-authored scratch
+// files below get harvested (fanned out into an idea run and
+// lore/<slug>.md, and rewritten in place), or the unchecked entries pop
+// $EDITOR, which EDITOR=false turns into a hard close failure.
+func TestIntentCloseSkipsHarvest(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "harvest-exempt", "intent", run.StatusInProgress)
+
+	followupsRel := run.FollowupsPath("tele", "harvest-exempt")
+	loreRel := run.FeedbackPath("tele", "harvest-exempt", "lore")
+	followupsBody := "- [ ] `some-followup` — A follow-up nobody should harvest\n"
+	loreBody := "- [ ] `some-fact` — A portable fact nobody should promote\n"
+	for rel, body := range map[string]string{followupsRel: followupsBody, loreRel: loreBody} {
+		abs := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gittest.Run(t, root, "add", rel)
+	}
+	// Capture close runs requireCleanTree, so the fixture must be
+	// committed before the verb runs.
+	gittest.Run(t, root, "commit", "-m", "seed scratch files")
+
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	// Captures don't expose --no-edit, so close passes skipEdit=false.
+	// A false editor makes any pop a loud failure rather than a hang.
+	t.Setenv("EDITOR", "false")
+	t.Setenv("VISUAL", "false")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"intent", "close", "tele/harvest-exempt"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	if got, err := os.ReadFile(filepath.Join(root, followupsRel)); err != nil {
+		t.Fatalf("followups.md: %v", err)
+	} else if string(got) != followupsBody {
+		t.Fatalf("followups.md rewritten by harvest:\n%q", string(got))
+	}
+	if got, err := os.ReadFile(filepath.Join(root, loreRel)); err != nil {
+		t.Fatalf("feedback/lore.md: %v", err)
+	} else if string(got) != loreBody {
+		t.Fatalf("feedback/lore.md rewritten by harvest:\n%q", string(got))
+	}
+
+	// Nothing fanned out: no idea run minted from the follow-up, no
+	// promoted lore file at the bureaucracy root.
+	entries, err := os.ReadDir(filepath.Join(root, "projects", "tele", "runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "harvest-exempt" {
+			t.Fatalf("harvest minted a run: %s", e.Name())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel)); !os.IsNotExist(err) {
+		t.Fatalf("harvest promoted lore, stat err=%v", err)
+	}
+
+	// The close commit carries the status flip and nothing else.
+	touched := gittest.Output(t, root, "show", "--name-only", "--format=", "HEAD")
+	want := filepath.Join(run.Dir("tele", "harvest-exempt"), "run.json")
+	if got := strings.Fields(touched); len(got) != 1 || got[0] != want {
+		t.Fatalf("close commit touched %v, want only %s", got, want)
 	}
 }
 
