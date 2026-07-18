@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,11 +23,11 @@ func TestParseClaude_TestdataFixture(t *testing.T) {
 	// the assistant `thinking` block.
 	want := []Event{
 		{Kind: KindUserText, Text: "please look at the canvas"},
-		{Kind: KindToolCall, Tool: "Read", Args: "/abs/path/canvas.md", CallID: "tu-1"},
+		{Kind: KindToolCall, Tool: "Read", Args: "/abs/path/canvas.md", CallID: "tu-1", Model: "claude-opus-4-8"},
 		{Kind: KindToolResult, CallID: "tu-1", Output: "line1\nline2\nline3"},
-		{Kind: KindToolCall, Tool: "Bash", Args: "npm test", CallID: "tu-2"},
+		{Kind: KindToolCall, Tool: "Bash", Args: "npm test", CallID: "tu-2", Model: "claude-opus-4-8"},
 		{Kind: KindToolResult, CallID: "tu-2", Output: "exit code 1\noops", Error: true},
-		{Kind: KindAssistantText, Text: "All set."},
+		{Kind: KindAssistantText, Text: "All set.", Model: "claude-opus-4-8"},
 		{Kind: KindSystem, Text: "/remote-control is active"},
 	}
 	if len(events) != len(want) {
@@ -39,7 +40,7 @@ func TestParseClaude_TestdataFixture(t *testing.T) {
 		got := events[i]
 		if got.Kind != w.Kind || got.Text != w.Text || got.Tool != w.Tool ||
 			got.Args != w.Args || got.CallID != w.CallID || got.Output != w.Output ||
-			got.Error != w.Error {
+			got.Error != w.Error || got.Model != w.Model {
 			t.Errorf("event[%d] = %+v, want %+v", i, got, w)
 		}
 		if got.Time.IsZero() {
@@ -51,6 +52,24 @@ func TestParseClaude_TestdataFixture(t *testing.T) {
 	wantTime, _ := time.Parse(time.RFC3339Nano, "2026-05-16T21:17:27.689Z")
 	if !events[0].Time.Equal(wantTime) {
 		t.Errorf("event[0].Time = %v, want %v", events[0].Time, wantTime)
+	}
+}
+
+// TestParseClaudeSkipsSyntheticModel: the SDK stamps some assistant
+// messages with model "<synthetic>" (queued-input echoes and the like).
+// Those must parse to events with an empty Model so the placeholder
+// never surfaces as a model chip.
+func TestParseClaudeSkipsSyntheticModel(t *testing.T) {
+	line := `{"type":"assistant","timestamp":"2026-05-16T21:17:34.000Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"queued"}]}}`
+	events, err := parseClaude(strings.NewReader(line))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Model != "" {
+		t.Errorf("synthetic model leaked: got %q, want empty", events[0].Model)
 	}
 }
 

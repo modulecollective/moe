@@ -61,6 +61,12 @@ type Event struct {
 	CallID string
 	Output string
 	Error  bool
+	// Model is the backend model that produced this event, when the
+	// source carries it (claude's per-message `model`, codex's
+	// `turn_context.model`). Empty when the source doesn't name one —
+	// user/system events, or a backend that omits it. The text renderer
+	// ignores this field; only the web transcript viewer surfaces it.
+	Model string
 }
 
 // Parser is an adapter that turns one backend's JSONL stream into a

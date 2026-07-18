@@ -29,6 +29,7 @@ type claudeEvent struct {
 
 type claudeMessage struct {
 	Role    string          `json:"role,omitempty"`
+	Model   string          `json:"model,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 }
 
@@ -107,6 +108,14 @@ func claudeAssistantEvents(m *claudeMessage, ts time.Time) []Event {
 	if err := json.Unmarshal(m.Content, &blocks); err != nil {
 		return nil
 	}
+	// "<synthetic>" is an SDK-internal placeholder observed on real
+	// assistant messages the model never actually produced (queued-input
+	// echoes and the like); treat it as "no model" so it doesn't show up
+	// as a spurious chip.
+	model := m.Model
+	if model == "<synthetic>" {
+		model = ""
+	}
 	var out []Event
 	for _, b := range blocks {
 		switch b.Type {
@@ -114,7 +123,7 @@ func claudeAssistantEvents(m *claudeMessage, ts time.Time) []Event {
 			if b.Text == "" {
 				continue
 			}
-			out = append(out, Event{Kind: KindAssistantText, Time: ts, Text: b.Text})
+			out = append(out, Event{Kind: KindAssistantText, Time: ts, Text: b.Text, Model: model})
 		case "tool_use":
 			out = append(out, Event{
 				Kind:   KindToolCall,
@@ -122,6 +131,7 @@ func claudeAssistantEvents(m *claudeMessage, ts time.Time) []Event {
 				Tool:   b.Name,
 				Args:   summariseClaudeInput(b.Name, b.Input),
 				CallID: b.ID,
+				Model:  model,
 			})
 			// "thinking" is intentionally dropped in v1 — the operator
 			// asked for context after a one-shot bails, not a replay

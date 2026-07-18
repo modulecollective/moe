@@ -42,6 +42,9 @@ type codexPayload struct {
 	Output string `json:"output,omitempty"`
 	// event_msg variants we surface
 	Reason string `json:"reason,omitempty"`
+	// turn_context: the model codex ran the turn under. Tracked as parse
+	// state and stamped onto every event until the next turn_context.
+	Model string `json:"model,omitempty"`
 }
 
 // parseCodex turns a codex rollout JSONL reader into normalised
@@ -56,6 +59,11 @@ func parseCodex(r io.Reader) ([]Event, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	var out []Event
+	// model is the current turn's model, updated by each turn_context and
+	// stamped onto the events every other line produces. A file that
+	// resumes under a different model carries a second turn_context, so
+	// later events pick up the new value.
+	var model string
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 || line[0] != '{' {
@@ -70,15 +78,22 @@ func parseCodex(r io.Reader) ([]Event, error) {
 			continue
 		}
 		ts := parseClaudeTimestamp(env.Timestamp) // RFC3339Nano — same shape
+		var evs []Event
 		switch env.Type {
 		case "response_item":
-			out = append(out, codexResponseItem(p, ts)...)
+			evs = codexResponseItem(p, ts)
 		case "event_msg":
-			out = append(out, codexEventMsg(p, ts)...)
-			// session_meta and turn_context are dropped: pure
-			// bookkeeping (instructions blob, sandbox policy
-			// recap), nothing the operator reads.
+			evs = codexEventMsg(p, ts)
+		case "turn_context":
+			// Pure bookkeeping except for the model, which we lift into
+			// parse state. session_meta stays dropped (instructions blob,
+			// sandbox policy recap — nothing the operator reads).
+			model = p.Model
 		}
+		for i := range evs {
+			evs[i].Model = model
+		}
+		out = append(out, evs...)
 	}
 	if err := sc.Err(); err != nil {
 		return out, fmt.Errorf("transcript: scan codex jsonl: %w", err)

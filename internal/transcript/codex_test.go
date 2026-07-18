@@ -23,14 +23,16 @@ func TestParseCodex_TestdataFixture(t *testing.T) {
 	// the response_item, so we only need to verify we don't
 	// double-render — the fixture's single assistant message
 	// produces a single event).
+	// Every event carries the turn_context model — codex stamps it once
+	// per turn and it applies to the whole turn.
 	want := []Event{
-		{Kind: KindUserText, Text: "start the session"},
-		{Kind: KindAssistantText, Text: "On it."},
-		{Kind: KindToolCall, Tool: "exec_command", Args: "sed -n '1,10p' canvas.md", CallID: "call_1"},
-		{Kind: KindToolResult, CallID: "call_1", Output: "sed: can't read canvas.md: No such file or directory\n", Error: true},
-		{Kind: KindToolCall, Tool: "apply_patch", Args: "internal/foo.go", CallID: "call_2"},
-		{Kind: KindToolResult, CallID: "call_2", Output: "Success. Updated the following files:\nM internal/foo.go\n", Error: false},
-		{Kind: KindSystem, Text: "codex turn aborted: interrupted"},
+		{Kind: KindUserText, Text: "start the session", Model: "gpt-5-codex"},
+		{Kind: KindAssistantText, Text: "On it.", Model: "gpt-5-codex"},
+		{Kind: KindToolCall, Tool: "exec_command", Args: "sed -n '1,10p' canvas.md", CallID: "call_1", Model: "gpt-5-codex"},
+		{Kind: KindToolResult, CallID: "call_1", Output: "sed: can't read canvas.md: No such file or directory\n", Error: true, Model: "gpt-5-codex"},
+		{Kind: KindToolCall, Tool: "apply_patch", Args: "internal/foo.go", CallID: "call_2", Model: "gpt-5-codex"},
+		{Kind: KindToolResult, CallID: "call_2", Output: "Success. Updated the following files:\nM internal/foo.go\n", Error: false, Model: "gpt-5-codex"},
+		{Kind: KindSystem, Text: "codex turn aborted: interrupted", Model: "gpt-5-codex"},
 	}
 	if len(events) != len(want) {
 		for i, e := range events {
@@ -42,7 +44,7 @@ func TestParseCodex_TestdataFixture(t *testing.T) {
 		got := events[i]
 		if got.Kind != w.Kind || got.Text != w.Text || got.Tool != w.Tool ||
 			got.Args != w.Args || got.CallID != w.CallID || got.Output != w.Output ||
-			got.Error != w.Error {
+			got.Error != w.Error || got.Model != w.Model {
 			t.Errorf("event[%d] = %+v, want %+v", i, got, w)
 		}
 	}

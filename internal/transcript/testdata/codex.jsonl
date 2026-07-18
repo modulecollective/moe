@@ -1,5 +1,6 @@
 {"timestamp":"2026-05-15T16:20:42.295Z","type":"session_meta","payload":{"id":"sess-1","cwd":"/work","base_instructions":{"text":"…"}}}
 {"timestamp":"2026-05-15T16:20:42.296Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t-1"}}
+{"timestamp":"2026-05-15T16:20:42.296Z","type":"turn_context","payload":{"type":"turn_context","cwd":"/work","model":"gpt-5-codex","sandbox_policy":{}}}
 {"timestamp":"2026-05-15T16:20:42.296Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<system prompt>"}]}}
 {"timestamp":"2026-05-15T16:20:42.296Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"start the session"}]}}
 {"timestamp":"2026-05-15T16:20:42.494Z","type":"event_msg","payload":{"type":"token_count","info":null}}
