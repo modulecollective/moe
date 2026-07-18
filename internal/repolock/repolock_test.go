@@ -211,6 +211,45 @@ func TestReleaseAfterTakeoverLeavesFile(t *testing.T) {
 	}
 }
 
+// TestReleaseRetriesPastBusyGuard pins the release-side retry budget: a
+// Release whose guard stays held longer than the old ~155ms give-up window
+// must ride out the busy guard and still remove the lock, not abandon the
+// file to the stale-threshold self-heal.
+func TestReleaseRetriesPastBusyGuard(t *testing.T) {
+	root := t.TempDir()
+	l, err := Acquire(root, silentOpts("holder"))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	moeDir := filepath.Join(root, ".moe")
+	lockPath := filepath.Join(moeDir, "lock")
+
+	// Hold the guard directly, comfortably past the old 155ms budget but
+	// well inside the new ~2s one.
+	release, ok, err := acquireGuard(moeDir)
+	if err != nil || !ok {
+		t.Fatalf("acquireGuard: ok=%v err=%v", ok, err)
+	}
+
+	relErr := make(chan error, 1)
+	go func() { relErr <- l.Release() }()
+
+	time.Sleep(500 * time.Millisecond)
+	release()
+
+	select {
+	case err := <-relErr:
+		if err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Release did not return after the guard was freed")
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock file still present after Release: err=%v", err)
+	}
+}
+
 // TestBeatSkipsOnBusyGuard: when the guard is held, a heartbeat tick skips
 // (returns true, keeping the lock) rather than blocking or rewriting.
 func TestBeatSkipsOnBusyGuard(t *testing.T) {

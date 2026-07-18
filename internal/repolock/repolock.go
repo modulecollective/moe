@@ -326,19 +326,30 @@ func (l *Lock) removeIfOwned() error {
 	return removeLock(l.path)
 }
 
-// acquireGuardRetry takes the guard for Release, retrying a busy guard a
-// few times before giving up. Release must not block unboundedly, but an
-// ownership-conditioned removal must not race a concurrent takeover
-// either, so it retries briefly and then degrades to leaving the file.
+// acquireGuardRetry takes the guard for Release, riding out a load spike
+// on a busy guard before giving up. Release must not block unboundedly,
+// but an ownership-conditioned removal must not race a concurrent takeover
+// either, so it retries with capped backoff for ~2s and then degrades to
+// leaving the file. The budget is attempt-counted, not deadline-based, so
+// it stays bounded even under an injected frozen clock (opts.Now), while
+// opts.Sleep keeps it fast in tests. Guard critical sections are
+// milliseconds, so ~2s clears any realistic pileup with an order of
+// magnitude of headroom while staying trivial next to the StaleThreshold
+// stall a give-up would cost the next acquirer.
 func acquireGuardRetry(moeDir string, opts Options) (release func(), ok bool, err error) {
 	backoff := 5 * time.Millisecond
-	for range 5 {
+	const maxBackoff = 100 * time.Millisecond
+	// 5+10+20+40+80 then 100ms × 20 ≈ 2.2s total sleep across 25 attempts.
+	for range 25 {
 		release, ok, err := acquireGuard(moeDir)
 		if err != nil || ok {
 			return release, ok, err
 		}
 		opts.Sleep(backoff)
 		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
 	return nil, false, nil
 }
