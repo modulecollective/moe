@@ -39,6 +39,15 @@ const (
 // its result read as one tight block — both backends emit them in
 // call-then-result order, so adjacency is the pairing.
 //
+// Before a header-bearing event whose Model differs from the last one
+// announced, Render prints a "model: <id>" marker line so the operator
+// sees which backend produced the turn. In the common case (one model
+// per transcript) that is a single line at the first modelled event;
+// on a genuine mid-transcript switch a second marker lands at the
+// switch point. Empty-model events (user/system, synthetic
+// placeholders) neither announce nor reset the tracker, so a transcript
+// with no modelled events renders exactly as it did before.
+//
 // Returns the first write error (io errors abort the render rather
 // than silently dropping later events). Zero events render to an
 // empty writer — callers print their own "no transcript" notice.
@@ -47,9 +56,21 @@ func Render(w io.Writer, ev []Event, opts RenderOptions) error {
 	if max == 0 {
 		max = defaultMaxOutputLines
 	}
+	lastModel := ""
 	for i, e := range ev {
 		if i > 0 && e.Kind != KindToolResult {
 			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		// A tool result folds under its call and never carries its own
+		// header, so a marker is only ever considered before a headered
+		// event. The blank line above already separates this event from
+		// the previous one; the marker slots into that gap with its own
+		// trailing blank before the header.
+		if e.Kind != KindToolResult && e.Model != "" && e.Model != lastModel {
+			lastModel = e.Model
+			if _, err := fmt.Fprintf(w, "model: %s\n\n", e.Model); err != nil {
 				return err
 			}
 		}

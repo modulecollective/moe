@@ -65,7 +65,8 @@ type Event struct {
 	// source carries it (claude's per-message `model`, codex's
 	// `turn_context.model`). Empty when the source doesn't name one —
 	// user/system events, or a backend that omits it. The text renderer
-	// ignores this field; only the web transcript viewer surfaces it.
+	// emits a "model:" marker when it changes; the web transcript viewer
+	// shows it as a per-message chip.
 	Model string
 }
 
