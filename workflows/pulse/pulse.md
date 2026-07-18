@@ -98,7 +98,34 @@ The canvas is skimmed at prune time, so keep it tight:
 - **New filings** — one line per followup filed. "None" is valid.
 - **Backlog hygiene** — stale/duplicate flags, advisory prose only. You
   flag; the operator acts. Never close an idea.
-- **Pull next** — always last, the exact grammar above, at most three.
+- **Pull next** — the exact grammar above, at most three.
+- **Gate** — always last. A machine-readable verdict the harness reads
+  after your turn; see below.
+
+## The gate — machine-readable, always written
+
+The canvas ends with a `## Gate` section: a fenced `json` block the
+harness parses once your turn exits. It carries two signals:
+
+    ## Gate
+
+    ```json
+    {"status": "ok", "reflect": {"due": false}}
+    ```
+
+- **`status`** — a short word (e.g. `"ok"`) that says *the survey
+  actually ran and concluded*. This is the only thing that lets the
+  harness auto-close the run: a turn that crashes or exits without
+  filling it leaves the seeded placeholder, and the run stays open on
+  the dash for a human to look at. There's no ready/blocked vocabulary
+  — a pulse only ever closes or lingers.
+- **`reflect`** — set `{"due": true, "why": "<one line>"}` when the
+  cycle warrants a twin reflect; omit it or set `{"due": false}`
+  otherwise. On a due verdict the harness opens a parked reflect run
+  (execution stays a human pull). The `why` is required when due and
+  rides next to the verdict on this canvas. The *criteria* for when a
+  reflect is due are in your kickoff — flag it for a real drift signal,
+  never to justify the turn.
 
 ## Hard don'ts
 

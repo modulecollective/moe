@@ -9,10 +9,31 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
+
+// writePulseGate stands in for the survey agent turn's canvas write: it
+// overwrites the run's pulse canvas with a `## Gate` section carrying the
+// given JSON payload and commits it (the real turn commits its canvas, so
+// the working tree is clean when a downstream reflect mint runs). Leaving
+// the seeded skeleton untouched instead models an unfilled gate.
+func writePulseGate(t *testing.T, root, projectID, runID, gateJSON string) {
+	t.Helper()
+	rel := run.ContentPath(projectID, runID, pulseDoc)
+	body := "# Pulse\n\n## Gate\n\n```json\n" + gateJSON + "\n```\n"
+	full := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "--", rel)
+	gittest.Run(t, root, "commit", "-m", "work: pulse survey "+runID)
+}
 
 // TestPulseRegistered partners with TestSDLCRegistered: a registration
 // drift in init() would silently drop the pulse workflow. Walking the
@@ -273,6 +294,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	var calls int
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 		calls++
+		writePulseGate(t, root, projectID, runID, `{"status": "ok", "reflect": {"due": false}}`)
 		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
 		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
 			t.Fatal(err)
@@ -406,5 +428,158 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 2 {
 		t.Fatalf("open pulse runs = %v, want two piled up after two failed sweeps", open)
+	}
+}
+
+// twinRuns returns id→status for a project's twin-workflow runs — the
+// reflect runs the pulse gate can auto-spawn.
+func twinRuns(t *testing.T, root, projectID string) map[string]string {
+	t.Helper()
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, md := range mds {
+		if md.Project == projectID && md.Workflow == "twin" {
+			out[md.ID] = md.Status
+		}
+	}
+	return out
+}
+
+// TestPulseSurveyUnfilledGateLeavesRunOpen: a survey that exits 0 but
+// leaves the gate on its unparsable skeleton placeholder (a no-op turn,
+// or a crash after writing nothing) must NOT auto-close. The run lingers
+// on the dash's ACTIVE list — escalation by visibility — and no reflect
+// is spawned off a sweep that never concluded.
+func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	// Stub writes nothing — the run opens with the skeleton's unparsable
+	// `## Gate` placeholder, which is exactly the no-op shape.
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
+		t.Fatalf("open pulse runs = %v, want one left open by the unfilled gate", open)
+	}
+	if tw := twinRuns(t, root, "moe"); len(tw) != 0 {
+		t.Fatalf("twin runs = %v, want none minted off an unfilled gate", tw)
+	}
+	if !strings.Contains(errb.String(), "unfilled gate") {
+		t.Errorf("stderr = %q, want an unfilled-gate warning", errb.String())
+	}
+}
+
+// TestPulseSurveyDueVerdictSpawnsReflect: a filled gate flagging
+// reflect.due mints a parked twin reflect run stamped with the pulse as
+// its spawner, and the pulse still auto-closes — opening rides the pulse,
+// execution stays a human pull.
+func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		writePulseGate(t, root, projectID, runID,
+			`{"status": "ok", "reflect": {"due": true, "why": "boundary move the twin docs miss"}}`)
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("survey exit=%d, want 0", code)
+	}
+
+	// The pulse auto-closed…
+	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
+		t.Fatalf("open pulse runs = %v, want none — a due verdict must not block auto-close", open)
+	}
+	// …and a single parked reflect run was minted.
+	tw := twinRuns(t, root, "moe")
+	if len(tw) != 1 {
+		t.Fatalf("twin runs = %v, want exactly one auto-spawned reflect", tw)
+	}
+	var reflectID string
+	for id, status := range tw {
+		reflectID = id
+		if status != run.StatusInProgress {
+			t.Errorf("reflect run %s status=%q, want in_progress (parked)", id, status)
+		}
+	}
+	// Find the pulse run's slug so we can assert the spawn edge points at it.
+	var pulseID string
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == pulseWorkflow {
+			pulseID = md.ID
+		}
+	}
+	if pulseID == "" {
+		t.Fatal("no pulse run found")
+	}
+	var reflectMD *run.Metadata
+	for i := range mds {
+		if mds[i].ID == reflectID {
+			reflectMD = mds[i]
+		}
+	}
+	if reflectMD.SpawnedBy != pulseID {
+		t.Fatalf("reflect SpawnedBy = %q, want the pulse slug %q", reflectMD.SpawnedBy, pulseID)
+	}
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.SpawnedBy["moe/"+reflectID]; got != pulseID {
+		t.Fatalf("index SpawnedBy[moe/%s] = %q, want %q (MoE-Spawned-By trailer missing?)", reflectID, got, pulseID)
+	}
+}
+
+// TestPulseSurveyDueButTwinInProgressSkips: a due verdict is a silent
+// no-op when a twin pass is already open (a parked prior reflect counts
+// — parked runs are in_progress). No second reflect is minted, and the
+// pulse still auto-closes.
+func TestPulseSurveyDueButTwinInProgressSkips(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+	// A reflect already parked for this project.
+	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+		writePulseGate(t, root, projectID, runID,
+			`{"status": "ok", "reflect": {"due": true, "why": "drift piled up"}}`)
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("survey exit=%d, want 0", code)
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
+		t.Fatalf("open pulse runs = %v, want none — the skip must not block auto-close", open)
+	}
+	tw := twinRuns(t, root, "moe")
+	if len(tw) != 1 {
+		t.Fatalf("twin runs = %v, want the single pre-existing reflect (no second mint)", tw)
+	}
+	if _, ok := tw["reflect-2026-05-14"]; !ok {
+		t.Fatalf("twin runs = %v, want the pre-seeded reflect-2026-05-14 untouched", tw)
 	}
 }
