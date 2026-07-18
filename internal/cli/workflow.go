@@ -34,6 +34,14 @@ type Workflow struct {
 	// prompt asks Successor(stage) for the DAG-level "what's next?"
 	// answer, decoupled from Next()'s git-derived satisfaction walk.
 	successors map[string][]string
+	// docsOnly holds canvas documents that are not stages — a run
+	// document with no ladder position and nothing to satisfy. chain is
+	// the only case: it registers no stages (so it is trivially done the
+	// moment it exists), but its canvas still has to resolve for the
+	// serve run page and `moe <wf> cat`. Kept out of stageOrder so
+	// Next(), the cascade, and the stage-fragment coverage check never
+	// see it.
+	docsOnly []string
 	// stageGates lets a stage layer an additional satisfiability check
 	// on top of the default "has a work-turn newer than upstream" rule.
 	// sdlc's test stage and twin's finalize use it: a committed canvas
@@ -153,6 +161,36 @@ func (w *Workflow) RegisterStage(name string, prereqs ...string) {
 func (w *Workflow) Stages() []string {
 	out := make([]string, len(w.stageOrder))
 	copy(out, w.stageOrder)
+	return out
+}
+
+// RegisterDoc adds a canvas document that is deliberately not a stage.
+// Panics on a name already registered as a stage or a doc — same
+// fail-loud contract as RegisterStage.
+//
+// The distinction matters for exactly one thing: whether the run owes a
+// turn. A stage is something Next() can find unsatisfied; a doc is a
+// file the run carries. `chain` is the sole caller — its canvas is the
+// pulse's log of what it chained, written by the harness, and the run is
+// done the moment it exists.
+func (w *Workflow) RegisterDoc(name string) {
+	for _, d := range w.Docs() {
+		if d == name {
+			panic("cli: duplicate document " + w.Name + " " + name)
+		}
+	}
+	w.docsOnly = append(w.docsOnly, name)
+}
+
+// Docs returns every canvas document this workflow's runs carry —
+// stages first (ladder order), then the stageless documents. This is
+// the right question for canvas resolution (`moe <wf> cat`, serve's run
+// page and canvas route); Stages() stays the right question for
+// anything that walks the ladder.
+func (w *Workflow) Docs() []string {
+	out := make([]string, 0, len(w.stageOrder)+len(w.docsOnly))
+	out = append(out, w.stageOrder...)
+	out = append(out, w.docsOnly...)
 	return out
 }
 

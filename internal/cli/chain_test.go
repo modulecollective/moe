@@ -743,7 +743,7 @@ func TestActiveChainItemsMembership(t *testing.T) {
 		mk("k", "kb", run.StatusInProgress),
 		mk("h", "hooks", run.StatusInProgress),
 		mk("c", "chores", run.StatusInProgress),
-		mk("q", queueWorkflow, run.StatusInProgress), // batch head — admitted on top of the predicate
+		mk("q", chainWorkflow, run.StatusInProgress), // batch head — admitted on top of the predicate
 		mk("chat1", "chat", run.StatusInProgress),    // perpetual — excluded
 		mk("pulse1", "pulse", run.StatusInProgress),  // machine-paced — excluded
 		mk("done", "sdlc", run.StatusMerged),         // terminal — excluded

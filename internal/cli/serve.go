@@ -93,7 +93,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			if err != nil {
 				return nil, err
 			}
-			return wf.Stages(), nil
+			// Docs(), not Stages(): the run page lists the canvases a run
+			// carries, and a stageless canvas (chain's) is still one.
+			return wf.Docs(), nil
 		},
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
 			return GatherRunRow(root, project, runID, time.Now().UTC())

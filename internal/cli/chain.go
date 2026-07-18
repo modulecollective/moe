@@ -1,8 +1,13 @@
 // Package cli — chain verbs.
 //
+// One noun: the chain. `moe chain new` mints a placeholder head (see
+// chainrun.go), `moe chain edit` moves runs under it, `moe chain kick`
+// rides it headlessly, `moe chain close` drops a head without riding,
+// and `moe chain clear` wipes every edge.
+//
 // `moe chain edit` opens a rebase-style editor over every active
 // chainable run (sdlc, twin, kb, hooks, chores — every workflow
-// operatorCascades admits — plus the pulse's queue heads) across every
+// operatorCascades admits — plus chain heads) across every
 // project, grouped into blocks that mirror the dash's chains. A blank
 // line is a chain boundary: each contiguous block of
 // run lines becomes one linear chain (line i chains-to line i+1 within
@@ -43,12 +48,24 @@ import (
 )
 
 func init() {
-	g := NewCommandGroup("chain", "manage run chains")
+	g := NewCommandGroup(chainWorkflow, "manage run chains")
+	g.Register(&Command{
+		Name:    "new",
+		Summary: "mint a chain run — a placeholder head to collect a batch under",
+		Run:     runChainNew,
+	})
 	g.Register(&Command{
 		Name:    "edit",
 		Summary: "rebase-style editor over active chainable runs; reorder to chain",
 		Run:     runChainEdit,
 	})
+	g.Register(&Command{
+		Name:    "kick",
+		Summary: "ride a chain headlessly from the named head",
+		Run:     runChainKick,
+		argKind: argProjectRun,
+	})
+	g.Register(closeCommand(chainWorkflow, "Close chain run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "clear",
 		Summary: "drop every currently-live chain edge",
@@ -274,18 +291,21 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // the day it registers. chat (perpetual) and pulse (machine-paced)
 // stay out via that predicate.
 //
-// queue is the one addition on top, and the one place chain membership
-// legitimately parts from the cascade vocabulary: a queue run is a
-// per-project placeholder heading a batch of parked fix runs, with no
-// stage ladder of its own to walk — so the cascade flags and serve
-// chips would be meaningless on it — but the operator must be able to
-// reorder or prune that batch, and drop the head itself, before `moe
-// queue kick` rides it. Offering it is also mandatory rather than
-// cosmetic: chain edit's delete-means-unchain authority clears any edge
-// to a run it didn't show on the next save, so a queue the editor
-// hid would lose its whole batch the first time the operator saved.
+// chain is the one addition on top, and the one place chain membership
+// legitimately parts from the cascade vocabulary: a chain run is a
+// placeholder heading a batch, with no stage ladder of its own to walk
+// — so the cascade flags and serve chips would be meaningless on it —
+// but the operator must be able to reorder or prune that batch, and
+// drop the head itself, before `moe chain kick` rides it. Offering it
+// is also mandatory rather than cosmetic: chain edit's
+// delete-means-unchain authority clears any edge to a run it didn't
+// show on the next save, so a head the editor hid would lose its whole
+// batch the first time the operator saved.
+//
+// The retired `queue` workflow is deliberately absent: no live queue
+// run exists, and its shim registration is for rendering history only.
 func chainableWorkflow(workflow string) bool {
-	return operatorCascades(workflow) || workflow == queueWorkflow
+	return operatorCascades(workflow) || workflow == chainWorkflow
 }
 
 // activeChainItems gathers the active chainable runs and annotates each

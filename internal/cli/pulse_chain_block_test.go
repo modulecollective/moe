@@ -26,14 +26,14 @@ func TestChainStateBlockRendersUnits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	now := time.Now().Local()
 
-	seedRun(t, root, "moe", "queue-batch", queueWorkflow, run.StatusInProgress, now, nil)
+	seedRun(t, root, "moe", "chain-batch", chainWorkflow, run.StatusInProgress, now, nil)
 	seedRun(t, root, "moe", "fix-red-ci", "sdlc", run.StatusInProgress, now,
 		map[string]string{"design": "# Fix red CI on main\n\nbody\n"})
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, now, nil)
-	chainEdge(t, root, "moe/queue-batch", "moe/fix-red-ci")
+	chainEdge(t, root, "moe/chain-batch", "moe/fix-red-ci")
 
 	got := chainStateBlock(root, "moe")
-	want := "- `queue-batch` (queue) — queue-batch → `fix-red-ci` (sdlc) — Fix red CI on main"
+	want := "- `chain-batch` (chain) — chain-batch → `fix-red-ci` (sdlc) — Fix red CI on main"
 	if !strings.Contains(got, want) {
 		t.Errorf("block missing unit line %q:\n%s", want, got)
 	}

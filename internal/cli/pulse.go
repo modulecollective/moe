@@ -437,13 +437,13 @@ type pulseGate struct {
 	// Spawn carries the survey's high-confidence fix proposals. The
 	// agent proposes; the harness executes — so the survey sandbox stays
 	// read-only and needs no new tools. Each entry becomes a parked sdlc
-	// run chained under the project's queue.
+	// run; a batch of two or more is chained under a fresh chain run.
 	Spawn []pulseSpawn `json:"spawn"`
 }
 
 // pulseSpawn is one proposed fix run. Slug is the slug base (the harness
 // dates it on collision); Title and Why are what the operator reads on
-// the queue canvas before kicking; Design seeds the new run's design
+// the chain canvas before kicking; Design seeds the new run's design
 // canvas, so the design stage starts from the survey's findings instead
 // of re-deriving them.
 type pulseSpawn struct {
@@ -453,7 +453,7 @@ type pulseSpawn struct {
 	Design string `json:"design"`
 }
 
-// spawnedRun is one minted fix run, threaded to the queue stamper so it
+// spawnedRun is one minted fix run, threaded to the chain stamper so it
 // can write the canvas line and the chain edge.
 type spawnedRun struct {
 	runID     string
@@ -523,13 +523,13 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 }
 
 // maybeSpawnFixRuns mints a parked sdlc run for each high-confidence fix
-// the survey's gate proposed, then chains the batch under the project's
-// queue run. The pulse *makes* runs; it never *runs* them — every entry
-// parks at design and only `moe queue kick` (or a manual stage verb)
-// executes anything.
+// the survey's gate proposed, then chains the batch under a freshly
+// minted chain run. The pulse *makes* runs; it never *runs* them — every
+// entry parks at design and only `moe chain kick` (or a manual stage
+// verb) executes anything.
 //
 // No numeric cap. The harness has no basis for judging which proposals
-// to trim, and the queue is itself the review gate: spawned runs are
+// to trim, and the chain is itself the review gate: spawned runs are
 // parked, visible as one dash unit, and prunable with `moe chain edit`.
 // Over-proposal is visible junk, which the pulse already prefers to
 // invisible absence. The bar — mechanical, bounded, verifiable — is
@@ -590,8 +590,8 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
 	}
 
-	if err := stampQueueBatch(root, projectID, spawned, stdout, stderr); err != nil {
-		moePrintf(stderr, "pulse: queue %d spawned run(s) for %s: %v — the runs are open but unchained\n",
+	if err := stampChainBatch(root, projectID, pulseSlug, spawned, stdout, stderr); err != nil {
+		moePrintf(stderr, "pulse: chain %d spawned run(s) for %s: %v — the runs are open but unchained\n",
 			len(spawned), projectID, err)
 	}
 }

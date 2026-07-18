@@ -14,7 +14,7 @@ import (
 // surveying agent can cheaply or safely do by hand, and run.json shows
 // which runs are in-progress but never their order. So a sweep can file
 // a finding the very next chained run will fix, pick a Pull next the
-// queue already covers, or spawn a duplicate of a queued fix under a
+// chain already covers, or spawn a duplicate of a queued fix under a
 // different slug — the slug-dedupe guard in maybeSpawnFixRuns catches
 // none of those.
 
@@ -81,7 +81,7 @@ func chainStateBlock(root, projectID string) string {
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
-	sb.WriteString("\nA chain headed by a queue run is the batch the operator will kick as-is. " +
+	sb.WriteString("\nA chain headed by a chain run is the batch the operator will kick as-is. " +
 		"Check three things against this list before writing. A finding an upcoming chained run " +
 		"will already fix is not a finding — verify against current code first, same posture as " +
 		"the merged-run rule. A Pull next pick a chained run already covers is noise. And a spawn " +

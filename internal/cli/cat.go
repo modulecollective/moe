@@ -129,9 +129,12 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 	if md.Workflow != workflow {
 		return "", fmt.Errorf("%s is a %s run, use 'moe %s cat'", runID, md.Workflow, md.Workflow)
 	}
-	stages := wf.Stages()
-	if !stageRegistered(stages, stage) {
-		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, stages)
+	// Docs() rather than Stages(): a workflow can carry a canvas that is
+	// not a ladder position (chain's is), and resolving a path is a
+	// question about documents, not about what the run owes.
+	docs := wf.Docs()
+	if !stageRegistered(docs, stage) {
+		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, docs)
 	}
 
 	canvasRel := run.ContentPath(projectID, runID, stage)

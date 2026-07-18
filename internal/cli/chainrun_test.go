@@ -38,10 +38,10 @@ func runsWithWorkflow(t *testing.T, root, projectID, workflow string) []string {
 	return out
 }
 
-// TestSpawnMintsParkedRunsUnderAQueue is the core of Part 2: a gate
-// carrying spawn entries mints one parked sdlc run each, opens a queue
-// placeholder, and chains queue → fix1 → fix2 in the proposed order.
-func TestSpawnMintsParkedRunsUnderAQueue(t *testing.T) {
+// TestSpawnMintsParkedRunsUnderAChain: a gate carrying two spawn
+// entries mints one parked sdlc run each, opens a chain placeholder,
+// and chains chain → fix1 → fix2 in the proposed order.
+func TestSpawnMintsParkedRunsUnderAChain(t *testing.T) {
 	root := spawnFixture(t)
 
 	var errb bytes.Buffer
@@ -54,9 +54,9 @@ func TestSpawnMintsParkedRunsUnderAQueue(t *testing.T) {
 	if len(sdlcRuns) != 2 {
 		t.Fatalf("sdlc runs %v, want 2; stderr=%s", sdlcRuns, errb.String())
 	}
-	queueRuns := runsWithWorkflow(t, root, "moe", queueWorkflow)
-	if len(queueRuns) != 1 {
-		t.Fatalf("queue runs %v, want exactly 1; stderr=%s", queueRuns, errb.String())
+	chainRuns := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	if len(chainRuns) != 1 {
+		t.Fatalf("chain runs %v, want exactly 1 fresh chain head; stderr=%s", chainRuns, errb.String())
 	}
 
 	// Every spawned run parks: opened, never advanced.
@@ -92,15 +92,15 @@ func TestSpawnMintsParkedRunsUnderAQueue(t *testing.T) {
 		t.Errorf("design canvas did not carry the proposed seed:\n%s", seed)
 	}
 
-	// The chain runs queue → first proposal → second proposal.
+	// The chain runs head → first proposal → second proposal.
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	queueKey := "moe/" + queueRuns[0]
-	first := idx.ChainedChild[queueKey]
+	chainKey := "moe/" + chainRuns[0]
+	first := idx.ChainedChild[chainKey]
 	if !strings.HasPrefix(first, "moe/fix-ci-red-main") {
-		t.Fatalf("queue chains to %q, want the first proposal", first)
+		t.Fatalf("chain head chains to %q, want the first proposal", first)
 	}
 	second := idx.ChainedChild[first]
 	if !strings.HasPrefix(second, "moe/fix-doc-drift") {
@@ -109,46 +109,98 @@ func TestSpawnMintsParkedRunsUnderAQueue(t *testing.T) {
 	if tail := idx.ChainedChild[second]; tail != "" {
 		t.Errorf("last proposal chains to %q, want nothing", tail)
 	}
+
+	// The head carries the spawner too, so the whole batch reads as the
+	// survey's lineage rather than the fix runs alone.
+	headMD, err := run.Load(root, "moe", chainRuns[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headMD.SpawnedBy != "moe/pulse-2026-07-18" {
+		t.Errorf("chain head spawned_by=%q, want the pulse that proposed the batch", headMD.SpawnedBy)
+	}
+
+	// Both entries are on the chain canvas — that's what the operator
+	// reads before kicking.
+	canvas, err := os.ReadFile(filepath.Join(root, run.ContentPath("moe", chainRuns[0], chainDoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"fix-ci-red-main", "fix-doc-drift", "pulse-2026-07-18"} {
+		if !strings.Contains(string(canvas), want) {
+			t.Errorf("chain canvas missing %q:\n%s", want, canvas)
+		}
+	}
 }
 
-// TestSpawnAppendsToTheLiveQueue: a later pulse appends to the existing
-// queue's tail rather than minting a second queue for the project.
-func TestSpawnAppendsToTheLiveQueue(t *testing.T) {
+// TestSpawnNeverAppendsToAnExistingChain is the safety property the
+// rename bought: the pulse mints a fresh head per batch and has no
+// append path at all. Two consecutive pulses produce two independent
+// chain units — never an edge stamped behind a head the operator may
+// already be riding, and never a machine proposal dumped into a curated
+// topic chain.
+func TestSpawnNeverAppendsToAnExistingChain(t *testing.T) {
 	root := spawnFixture(t)
 
 	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
-	}, io.Discard, io.Discard)
-	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
 		{Slug: "fix-two", Title: "Two"},
 	}, io.Discard, io.Discard)
+	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+		{Slug: "fix-three", Title: "Three"},
+		{Slug: "fix-four", Title: "Four"},
+	}, io.Discard, io.Discard)
 
-	queueRuns := runsWithWorkflow(t, root, "moe", queueWorkflow)
-	if len(queueRuns) != 1 {
-		t.Fatalf("queue runs %v, want exactly 1 live queue per project", queueRuns)
+	chainRuns := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	if len(chainRuns) != 2 {
+		t.Fatalf("chain runs %v, want 2 — one fresh head per batch", chainRuns)
 	}
 
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := idx.ChainedChild["moe/"+queueRuns[0]]
-	if !strings.HasPrefix(first, "moe/fix-one") {
-		t.Fatalf("queue chains to %q, want fix-one", first)
+	// Neither head hangs off anything, and neither batch's tail chains
+	// onward: the two units are disjoint.
+	for _, id := range chainRuns {
+		key := "moe/" + id
+		for parent, child := range idx.ChainedChild {
+			if child == key {
+				t.Errorf("chain head %s is chained under %s — the pulse must never append", key, parent)
+			}
+		}
 	}
-	if second := idx.ChainedChild[first]; !strings.HasPrefix(second, "moe/fix-two") {
-		t.Fatalf("fix-one chains to %q, want the later pulse's fix-two appended at the tail", second)
+	for parent, child := range idx.ChainedChild {
+		if (strings.HasPrefix(parent, "moe/fix-two") || strings.HasPrefix(parent, "moe/fix-four")) && child != "" {
+			t.Errorf("batch tail %s chains onward to %s — the pulse must never append", parent, child)
+		}
 	}
+}
 
-	// Both entries are on the queue canvas — that's what the operator
-	// reads before kicking.
-	canvas, err := os.ReadFile(filepath.Join(root, run.ContentPath("moe", queueRuns[0], queueDoc)))
+// TestSpawnOfOneParksStandalone: a single proposal needs no placeholder.
+// `moe chain kick` handles a chain of one, so minting a head for it
+// would be a run to review and close for nothing.
+func TestSpawnOfOneParksStandalone(t *testing.T) {
+	root := spawnFixture(t)
+
+	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+		{Slug: "fix-one", Title: "One"},
+	}, io.Discard, io.Discard)
+
+	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
+		t.Fatalf("chain runs %v, want none — a batch of one parks standalone", got)
+	}
+	sdlc := runsWithWorkflow(t, root, "moe", "sdlc")
+	if len(sdlc) != 1 {
+		t.Fatalf("sdlc runs %v, want the lone fix", sdlc)
+	}
+	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"fix-one", "fix-two", "pulse-one", "pulse-two"} {
-		if !strings.Contains(string(canvas), want) {
-			t.Errorf("queue canvas missing %q:\n%s", want, canvas)
+	for parent, child := range idx.ChainedChild {
+		if child == "moe/"+sdlc[0] {
+			t.Errorf("lone fix is chained under %s, want it standalone", parent)
 		}
 	}
 }
@@ -302,13 +354,13 @@ func TestSpawnSkipsUnusableSlugs(t *testing.T) {
 }
 
 // TestSpawnWithNoEntriesTouchesNothing: the overwhelmingly common gate
-// carries no spawn list at all, and must not mint a queue for a project
-// that has nothing queued.
+// carries no spawn list at all, and must not mint a chain head for a
+// project that has nothing queued.
 func TestSpawnWithNoEntriesTouchesNothing(t *testing.T) {
 	root := spawnFixture(t)
 	maybeSpawnFixRuns(root, "moe", "pulse-one", nil, io.Discard, io.Discard)
-	if got := runsWithWorkflow(t, root, "moe", queueWorkflow); len(got) != 0 {
-		t.Fatalf("queue runs %v, want none — an empty spawn list opens nothing", got)
+	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
+		t.Fatalf("chain runs %v, want none — an empty spawn list opens nothing", got)
 	}
 }
 
@@ -342,29 +394,88 @@ func TestPulseGateParsesSpawnList(t *testing.T) {
 	}
 }
 
-// TestQueueKickWithNoLiveQueueRefuses: kicking a project with nothing
-// queued is an operator error worth naming, not a silent success.
-func TestQueueKickWithNoLiveQueueRefuses(t *testing.T) {
+// TestChainNewRequiresASlug: operator-minted chains are the topical
+// ones, so they get named. A bare project is a usage error, not a
+// silently-dated `moe/chain`.
+func TestChainNewRequiresASlug(t *testing.T) {
 	root := spawnFixture(t)
 	t.Chdir(root)
 
 	var errb bytes.Buffer
-	if code := runQueueKick([]string{"moe"}, io.Discard, &errb); code == 0 {
-		t.Fatal("queue kick exited 0 with no live queue")
+	if code := runChainNew([]string{"moe"}, io.Discard, &errb); code != 2 {
+		t.Fatalf("chain new exit=%d, want 2 (usage) for a bare project", code)
 	}
-	if !strings.Contains(errb.String(), "no live queue run") {
-		t.Errorf("stderr=%q, want the empty-queue refusal named", errb.String())
+	if !strings.Contains(errb.String(), "<project>/<run>") {
+		t.Errorf("stderr=%q, want the qualified-argument shape named", errb.String())
+	}
+	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
+		t.Fatalf("chain runs %v, want none — a refused mint opens nothing", got)
 	}
 }
 
-// TestChainEditOffersQueueHeads: the operator prunes and reorders a
-// proposed batch before kicking it, which means the queue head has to
-// show up in the editor alongside the sdlc runs it chains to.
-func TestChainEditOffersQueueHeads(t *testing.T) {
+// TestChainNewMintsAndCoexists: several live chains per project is the
+// point of minting by hand (one per topic), and a re-used slug dates
+// rather than colliding — the IDBase rule the pulse's own mint uses.
+func TestChainNewMintsAndCoexists(t *testing.T) {
 	root := spawnFixture(t)
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
-		{Slug: "fix-one", Title: "One"},
-	}, io.Discard, io.Discard)
+	t.Chdir(root)
+
+	var out bytes.Buffer
+	for _, arg := range []string{"moe/perf-cleanups", "moe/doc-sweep", "moe/perf-cleanups"} {
+		if code := runChainNew([]string{arg}, &out, os.Stderr); code != 0 {
+			t.Fatalf("chain new %s exit=%d", arg, code)
+		}
+	}
+
+	got := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	if len(got) != 3 {
+		t.Fatalf("chain runs %v, want 3 live chains coexisting", got)
+	}
+	var perf int
+	for _, id := range got {
+		if strings.HasPrefix(id, "perf-cleanups") {
+			perf++
+		}
+	}
+	if perf != 2 {
+		t.Errorf("perf-cleanups runs = %d in %v, want 2 (the repeat dates rather than colliding)", perf, got)
+	}
+	// The mint prints the two next steps; a head nobody knows how to use
+	// is a head nobody uses.
+	for _, want := range []string{"moe chain edit", "moe chain kick"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout=%q, want %q in the next-steps hint", out.String(), want)
+		}
+	}
+}
+
+// TestChainNewRefusesANonCanonicalSlug: the slug is operator-typed, so
+// it fails loud rather than being silently slugified into something the
+// operator didn't ask for.
+func TestChainNewRefusesANonCanonicalSlug(t *testing.T) {
+	root := spawnFixture(t)
+	t.Chdir(root)
+
+	var errb bytes.Buffer
+	if code := runChainNew([]string{"moe/Perf-Cleanups"}, io.Discard, &errb); code == 0 {
+		t.Fatal("chain new accepted a non-canonical slug")
+	}
+	if !strings.Contains(errb.String(), "perf-cleanups") {
+		t.Errorf("stderr=%q, want the canonical form suggested", errb.String())
+	}
+}
+
+// TestChainEditOffersMintedHeads: the operator prunes and reorders a
+// batch before kicking it, which means a chain head — hand-minted or
+// pulse-minted — has to show up in the editor alongside the runs it
+// chains to. Offering it is mandatory, not cosmetic: chain edit clears
+// the edges of any run it didn't show.
+func TestChainEditOffersMintedHeads(t *testing.T) {
+	root := spawnFixture(t)
+	t.Chdir(root)
+	if code := runChainNew([]string{"moe/perf-cleanups"}, io.Discard, os.Stderr); code != 0 {
+		t.Fatal("chain new failed")
+	}
 
 	mds, err := run.Scan(root)
 	if err != nil {
@@ -385,10 +496,81 @@ func TestChainEditOffersQueueHeads(t *testing.T) {
 			offered = append(offered, it.Key)
 		}
 	}
-	queueRuns := runsWithWorkflow(t, root, "moe", queueWorkflow)
-	wantQueue := "moe/" + queueRuns[0]
-	if !slicesContains(offered, wantQueue) {
-		t.Fatalf("chain edit offered %v, want the queue head %s among them", offered, wantQueue)
+	chainRuns := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	want := "moe/" + chainRuns[0]
+	if !slicesContains(offered, want) {
+		t.Fatalf("chain edit offered %v, want the chain head %s among them", offered, want)
+	}
+}
+
+// TestChainCanvasResolvesWithoutAStage: the chain workflow registers no
+// stages on purpose (that is what makes a chain run trivially done), so
+// its canvas hangs off RegisterDoc instead. Both the serve run page and
+// `moe <wf> cat` route through resolveCanvasPath — if this regresses,
+// the pulse's log of what it chained becomes unreadable.
+func TestChainCanvasResolvesWithoutAStage(t *testing.T) {
+	root := spawnFixture(t)
+	t.Chdir(root)
+	if code := runChainNew([]string{"moe/perf-cleanups"}, io.Discard, os.Stderr); code != 0 {
+		t.Fatal("chain new failed")
+	}
+	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
+
+	wf, err := LookupWorkflow(chainWorkflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wf.Stages()) != 0 {
+		t.Errorf("chain stages = %v, want none — the empty ladder is what makes a chain run trivially done", wf.Stages())
+	}
+	if got := wf.Docs(); len(got) != 1 || got[0] != chainDoc {
+		t.Fatalf("chain docs = %v, want just %q", got, chainDoc)
+	}
+
+	path, err := resolveCanvasPath(root, chainWorkflow, "moe", heads[0], chainDoc)
+	if err != nil {
+		t.Fatalf("resolve chain canvas: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read chain canvas: %v", err)
+	}
+	if !strings.Contains(string(body), "## Chained") {
+		t.Errorf("chain canvas skeleton missing its heading:\n%s", body)
+	}
+}
+
+// TestLegacyQueueRunsStillResolve: the `queue` workflow keeps a DAG-only
+// registration so history renders. Nothing mints one any more, but
+// `moe log`, cat, and serve run pages all look the workflow up, and a
+// closed queue run predates the rename.
+func TestLegacyQueueRunsStillResolve(t *testing.T) {
+	root := spawnFixture(t)
+
+	if _, err := run.New(root, "moe", run.Options{
+		ID:       "queue-2026-07-01",
+		Workflow: legacyQueueWorkflow,
+		SeedDocs: map[string]string{legacyQueueWorkflow: "# Queue\n\n## Queued\n- `fix-old`\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := resolveCanvasPath(root, legacyQueueWorkflow, "moe", "queue-2026-07-01", legacyQueueWorkflow)
+	if err != nil {
+		t.Fatalf("historical queue canvas no longer resolves: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "fix-old") {
+		t.Errorf("resolved the wrong file:\n%s", body)
+	}
+
+	// But the retired workflow is not chainable, so a stale queue run
+	// can never be offered in the editor or kicked.
+	if chainableWorkflow(legacyQueueWorkflow) {
+		t.Error("the retired queue workflow must not be chainable")
 	}
 }
 

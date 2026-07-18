@@ -60,13 +60,13 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 }
 
 // Workflows that declared nothing stay read-only in serve, even when
-// they registered a CLI close (chat and queue do) or a cascade
+// they registered a CLI close (chat and chain do) or a cascade
 // dispatcher (chat, pulse do). No serve declaration → no run-page
-// affordances. queue is the deliberate case: its single stage has no
-// verb to spawn, so the run page offers nothing even though the
+// affordances. chain is the deliberate case: it has no stages at all,
+// so the run page offers nothing to spawn even though the
 // operator can close and kick it from the CLI.
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
-	for _, wf := range []string{"chat", "idea", "pulse", queueWorkflow, "nope"} {
+	for _, wf := range []string{"chat", "idea", "pulse", chainWorkflow, "nope"} {
 		if _, ok := lookupServeWorkflowUI(wf); ok {
 			t.Errorf("workflow %q should have no serve declaration", wf)
 		}
