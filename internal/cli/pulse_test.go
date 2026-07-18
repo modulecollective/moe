@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/dash"
@@ -14,6 +16,197 @@ import (
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
+
+// newTestPulseInterrupt builds a pulseInterrupt driven by an injected
+// channel (never a real SIGINT), torn down on cleanup. Its latch starts
+// clear; latchedPulseInterrupt returns one already tripped.
+func newTestPulseInterrupt(t *testing.T) *pulseInterrupt {
+	t.Helper()
+	sigCh := make(chan os.Signal, 1)
+	var once sync.Once
+	pi := startPulseInterrupt(sigCh, func() { once.Do(func() { close(sigCh) }) })
+	t.Cleanup(pi.Close)
+	return pi
+}
+
+func latchedPulseInterrupt(t *testing.T) *pulseInterrupt {
+	t.Helper()
+	pi := newTestPulseInterrupt(t)
+	pi.mark()
+	return pi
+}
+
+// TestPulseInterruptLatchesThenReleasesWatcher pins the two-Ctrl-C shape:
+// the first signal latches and then steps the watcher out of the way
+// (signal.Stop) so a second Ctrl-C would get Go's default disposition.
+func TestPulseInterruptLatchesThenReleasesWatcher(t *testing.T) {
+	sigCh := make(chan os.Signal, 1)
+	var stopped atomic.Bool
+	var once sync.Once
+	pi := startPulseInterrupt(sigCh, func() {
+		once.Do(func() {
+			stopped.Store(true)
+			close(sigCh)
+		})
+	})
+	if pi.interrupted() {
+		t.Fatal("latched before any signal")
+	}
+	sigCh <- os.Interrupt
+	<-pi.done // the watcher latches, stops, and exits when sigCh closes
+	if !pi.interrupted() {
+		t.Fatal("first Ctrl-C did not latch")
+	}
+	if !stopped.Load() {
+		t.Fatal("watcher did not step out of the way after the first Ctrl-C")
+	}
+	pi.Close() // idempotent
+}
+
+// TestPulseSurveyLatchBeforeOpenMintsNothing: a Ctrl-C that lands before
+// the run is minted skips with nothing to clean — no run opened, no
+// agent turn.
+func TestPulseSurveyLatchBeforeOpenMintsNothing(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	var calls int
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		calls++
+		return 0
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, latchedPulseInterrupt(t), io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	if calls != 0 {
+		t.Fatalf("openPulse calls=%d, want 0 — a pre-Open Ctrl-C mints nothing", calls)
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
+		t.Fatalf("pulse runs %v opened despite a pre-Open skip", open)
+	}
+	if !strings.Contains(errb.String(), "no run opened") {
+		t.Errorf("stderr=%q, want a 'no run opened' skip line", errb.String())
+	}
+}
+
+// TestPulseSurveySkipDuringSetupDisposesRun: a Ctrl-C in the gap between
+// minting the run and the agent executor trips the pre-executor belt
+// (the prompt builder returns errPulseSkipped, so openPulse exits 1 ≠
+// 130). The just-minted run is disposed via the registered close, not
+// left dangling on the dash.
+func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		// Model the belt: the Ctrl-C latched during setup and the
+		// bootstrap-failure path returned 1.
+		pi.mark()
+		return 1
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
+		t.Fatalf("pulse runs %v left open; the skip should have disposed the run", open)
+	}
+	var closed int
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, md := range mds {
+		if md.Workflow == pulseWorkflow && md.Status == run.StatusClosed {
+			closed++
+		}
+	}
+	if closed != 1 {
+		t.Fatalf("closed pulse runs=%d, want 1 (disposed via the registered close)", closed)
+	}
+	if !strings.Contains(errb.String(), "skipped — closed") {
+		t.Errorf("stderr=%q, want a 'skipped — closed' disposal line", errb.String())
+	}
+}
+
+// TestPulseSurveyMidAgentInterruptLeavesRunOpen: a Ctrl-C that reaches
+// the running agent (openPulse == 130) leaves the run open — a partial
+// sweep may hold real findings — but still propagates the interrupt out
+// so a cascade halts. The stub does not touch the latch; the survey's
+// own 130 branch must mark it.
+func TestPulseSurveyMidAgentInterruptLeavesRunOpen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		return exitInterrupted
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	pi := newTestPulseInterrupt(t)
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, pi, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("survey exit=%d, want 0 (interrupt not a verb failure)", code)
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
+		t.Fatalf("open pulse runs=%v, want exactly one left open by the mid-agent interrupt", open)
+	}
+	if !pi.interrupted() {
+		t.Fatal("the 130 branch did not propagate the interrupt (latch not marked)")
+	}
+}
+
+// TestPulseNewExitsInterruptedOnSkip: `moe pulse new` is the one verb the
+// pulse *is*, so a skipped sweep is the verb's own outcome — exit 130.
+func TestPulseNewExitsInterruptedOnSkip(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	orig := runPulseSurvey
+	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		pi.mark() // the operator Ctrl-C'd the sweep
+		return 0
+	}
+	t.Cleanup(func() { runPulseSurvey = orig })
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"pulse", "new", "moe"}, &out, &errb); code != exitInterrupted {
+		t.Fatalf("`moe pulse new` skip exit=%d, want exitInterrupted (%d); stderr=%q", code, exitInterrupted, errb.String())
+	}
+}
+
+// TestBareCloseExitsZeroOnPulseSkip: the bare `moe sdlc close` verb's own
+// durable work (close committed + pushed) succeeded, so a Ctrl-C'd tail
+// pulse is a successful skip — exit 0, not 130.
+func TestBareCloseExitsZeroOnPulseSkip(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "ship-it"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := firePulse
+	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
+	t.Cleanup(func() { firePulse = orig })
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("bare close exit=%d, want 0 (a skipped tail pulse is not a close failure); stderr=%q", code, errb.String())
+	}
+}
 
 // writePulseGate stands in for the survey agent turn's canvas write: it
 // overwrites the run's pulse canvas with a `## Gate` section carrying the
@@ -123,8 +316,9 @@ func stubFirePulse(t *testing.T) *[]string {
 	t.Helper()
 	var fired []string
 	orig := firePulse
-	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) {
+	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool {
 		fired = append(fired, projectID+" "+spawner)
+		return false
 	}
 	t.Cleanup(func() { firePulse = orig })
 	return &fired
@@ -189,7 +383,7 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 	if !ok {
 		t.Fatal("sdlc has no close registration")
 	}
-	if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
+	if _, err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
 		"tele", "ship-it", true /*skipEdit*/, false /*tailPulse*/, io.Discard, io.Discard); err != nil {
 		t.Fatalf("closeRunInProcess: %v", err)
 	}
@@ -246,14 +440,14 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		calls++
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (no single-flight refusal); stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
@@ -292,7 +486,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		calls++
 		writePulseGate(t, root, projectID, runID, `{"status": "ok", "reflect": {"due": false}}`)
 		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
@@ -307,7 +501,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
@@ -355,12 +549,12 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 
@@ -402,14 +596,14 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		calls++
 		return 1
 	}
 	t.Cleanup(func() { openPulse = orig })
 
 	// Failure is not a verb failure…
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (failure not propagated)", code)
 	}
 	// …but the run stays open for a manual look.
@@ -420,7 +614,7 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	// No single-flight: the next auto-fire still reaches the agent turn
 	// and opens a second run, so the broken sweeps pile up (visible on the
 	// dash) instead of blocking.
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("second survey exit=%d, want 0 (failure not propagated)", code)
 	}
 	if calls != 2 {
@@ -461,13 +655,13 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	orig := openPulse
 	// Stub writes nothing — the run opens with the skeleton's unparsable
 	// `## Gate` placeholder, which is exactly the no-op shape.
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
@@ -491,14 +685,14 @@ func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		writePulseGate(t, root, projectID, runID,
 			`{"status": "ok", "reflect": {"due": true, "why": "boundary move the twin docs miss"}}`)
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 
@@ -562,14 +756,14 @@ func TestPulseSurveyDueButTwinInProgressSkips(t *testing.T) {
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		writePulseGate(t, root, projectID, runID,
 			`{"status": "ok", "reflect": {"due": true, "why": "drift piled up"}}`)
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {

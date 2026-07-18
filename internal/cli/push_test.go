@@ -592,7 +592,7 @@ func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
+		code, _, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -642,7 +642,7 @@ exit 7
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
+		code, _, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -691,7 +691,7 @@ func TestRunPushHeadlessRecoveryOptionReachesRebaseChainBack(t *testing.T) {
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 	}, &stdout, &stderr)
 	if code != 0 {
@@ -732,7 +732,7 @@ exit 7
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 	}, &stdout, &stderr)
 	if code != 0 {
@@ -877,7 +877,7 @@ func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 		SkipTerminalEdit: true,
 	}, &stdout, &stderr)

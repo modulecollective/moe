@@ -104,7 +104,7 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 	t.Helper()
 	var captured []pushFromCascadeInvocation
 	prev := pushFromCascade
-	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
 		inv := pushFromCascadeInvocation{
 			args:    append([]string(nil), args...),
 			options: opts,
@@ -113,9 +113,9 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 		}
 		captured = append(captured, inv)
 		if deferred != nil {
-			return exit, deferred
+			return exit, false, deferred
 		}
-		return exit, nil
+		return exit, false, nil
 	}
 	t.Cleanup(func() { pushFromCascade = prev })
 	return &captured
@@ -142,7 +142,7 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 	t.Helper()
 	var captured []pushFromCascadeInvocation
 	prev := pushFromCascade
-	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
 		if len(captured) >= len(outcomes) {
 			t.Fatalf("pushFromCascade called %d times, want at most %d (runaway retry?)", len(captured)+1, len(outcomes))
 		}
@@ -154,9 +154,9 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 			exit:    out.exit,
 		})
 		if out.deferred != nil {
-			return out.exit, out.deferred
+			return out.exit, false, out.deferred
 		}
-		return out.exit, nil
+		return out.exit, false, nil
 	}
 	t.Cleanup(func() { pushFromCascade = prev })
 	return &captured
@@ -353,6 +353,37 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	// Summary line tags the headless mode per stage.
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
+	}
+}
+
+// TestCascadeYoloPushPulseInterruptHalts: an sdlc `!!!` cascade ships at
+// push, but the operator Ctrl-C's the push's tail pulse. pushFromCascade
+// reports the interrupt, and cascadeShipStep must halt the chain with
+// exitInterrupted before the ride — the sibling ride-on bug fix. The push
+// step reads "interrupted" so the summary doesn't claim a clean ship.
+func TestCascadeYoloPushPulseInterruptHalts(t *testing.T) {
+	stubOpenSdlcStage(t, nil)
+	prev := pushFromCascade
+	var calls int
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
+		calls++
+		return 0, true /*interrupted*/, nil
+	}
+	t.Cleanup(func() { pushFromCascade = prev })
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	var stdout, stderr bytes.Buffer
+	// rideChain=true (`!!!`): the Ctrl-C'd tail pulse must halt before the ride.
+	res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
+	if code != exitInterrupted {
+		t.Fatalf("cascade exit=%d, want exitInterrupted (%d): %+v", code, exitInterrupted, res.ran)
+	}
+	if calls != 1 {
+		t.Fatalf("pushFromCascade called %d times, want 1 (the ride must not fire another push)", calls)
+	}
+	last := res.ran[len(res.ran)-1]
+	if last.stage != "push" || last.code != exitInterrupted {
+		t.Fatalf("last step = %+v, want the push step recorded as interrupted", last)
 	}
 }
 
