@@ -172,7 +172,12 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "chain kick: %s/%s is a %s run — not chainable\n", projectID, runID, md.Workflow)
 		return 1
 	}
-	if parent, ok := liveChainParent(root, md); ok {
+	parent, chained, err := liveChainParent(root, md)
+	if err != nil {
+		moePrintf(stderr, "chain kick: build index: %v\n", err)
+		return 1
+	}
+	if chained {
 		moePrintf(stderr, "chain kick: %s/%s is chained under %s — kick the head\n", projectID, runID, parent)
 		return 1
 	}
@@ -238,10 +243,13 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 // other edge reader already filters those out — so it leaves md kickable
 // as its own head. Fan-in is allowed, so the lowest key wins for a
 // deterministic message; the operator sees a head either way.
-func liveChainParent(root string, md *run.Metadata) (string, bool) {
+//
+// The index error is returned rather than swallowed: this is a refusal
+// guard, and failing open would ride a chain from the middle.
+func liveChainParent(root string, md *run.Metadata) (string, bool, error) {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	key := md.Project + "/" + md.ID
 	var best string
@@ -261,7 +269,7 @@ func liveChainParent(root string, md *run.Metadata) (string, bool) {
 			best = parent
 		}
 	}
-	return best, best != ""
+	return best, best != "", nil
 }
 
 // appendChainEntries writes one line per newly chained run under the
