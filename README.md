@@ -55,7 +55,7 @@ full vocabulary — every stage spelled out, chains, and the matching CLI flags
 
 That last bang is where the economics turn: shape a few runs during the day,
 `moe chain edit` them into a sequence, and fire `!!!` once as you step away.
-The queue then codes, reviews, tests, and ships on capacity your flat-rate dev
+The chain then codes, reviews, tests, and ships on capacity your flat-rate dev
 subscription already pays for while you sleep — each run still gated,
 journaled, and revertible in the morning.
 
@@ -139,7 +139,7 @@ full treatment.
 | [`hooks`](docs/workflows.md#hooks) | `code` | project-specific hook scripts |
 | [`chores`](docs/workflows.md#chores) | `code` | recurring maintenance that surfaces as ready-to-open runs |
 | [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only sweep that fires on run traffic, feeds the backlog, and ranks what to pull next |
-| [`queue`](docs/workflows.md#the-queue) | one `queue` canvas, written by the pulse | the parked fix runs a pulse proposed, reviewed and kicked as one batch |
+| [`chain`](docs/workflows.md#chains) | one `chain` canvas, no stages | a placeholder head: the batch chained behind it rides as one on `moe chain kick` |
 
 ## Going Deeper
 

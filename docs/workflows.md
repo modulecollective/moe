@@ -110,7 +110,7 @@ Why they exist: Claude Code and Codex run on flat-rate dev subscriptions, so
 the capacity you don't use while sleeping or at dinner is already paid for.
 Chains turn that idle capacity into throughput. Shape work into designed runs
 during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
-step away, and the queue codes, reviews, tests, and ships unattended — each run
+step away, and the chain codes, reviews, tests, and ships unattended — each run
 still gated, journaled, and revertible in the morning.
 
 This is deliberately not scheduling. Every chain is rooted in one operator
@@ -119,8 +119,8 @@ pull the trigger at 6pm and the work outlasts your attention", not "MoE runs at
 night".
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
-— every operator-cascade workflow (SDLC, twin, KB, hooks, chores) plus queue —
-grouped into blocks that mirror the dash's chains. A blank line is a chain
+— every operator-cascade workflow (SDLC, twin, KB, hooks, chores) plus chain
+heads — grouped into blocks that mirror the dash's chains. A blank line is a chain
 boundary: each contiguous block of run lines becomes one linear chain (each
 line chains-to the one below it in its block; the block's last line chains-to
 nothing). The editor is WYSIWYG — the blocks you see are the chains you get.
@@ -133,6 +133,27 @@ starts the child at its first pending stage: a fresh child starts at `design`,
 while a partly completed child resumes where it is parked. (`!!` ships the
 parent and stops — it does not ride into the child.) `moe chain clear` drops
 every currently-live chain edge in one commit.
+
+A chain's handle moves every time its head ships, which is awkward when you want
+to collect work under a stable name. `moe chain new <project>/<slug>` mints a
+**chain run**: a placeholder head that registers no stages, so it is done the
+moment it exists and no agent ever opens it. Name it for the topic it collects,
+and keep as many live at once as you have topics.
+
+```sh
+moe chain new moe/perf-cleanups     # mint a head to collect under
+moe chain edit                      # move runs beneath it
+moe chain kick moe/perf-cleanups    # ride the batch headlessly
+moe chain close moe/perf-cleanups   # drop the head without riding
+```
+
+`moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
+that run to its ship, then rides on into each chained run in order. A chain-run
+head has no stages to walk, so it just closes and the ride carries on. An
+ordinary run works too — it ships first, then rides its children — and a run
+with no children is a chain of one, so kick is also how you fire a single parked
+run headlessly. Kick refuses a run that is itself chained under another; kick
+the head instead.
 
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask
@@ -355,26 +376,28 @@ the journal never saw) and the latest CI verdict per workflow on the default
 branch. It's what makes "what landed" honest when work reaches the repo without
 going through a run.
 
-### The queue
+### Proposed fix runs
 
 Most of what a survey finds becomes a followup. Occasionally it finds something
 mechanical, bounded, and verifiable — a red check on the default branch with a
 named failing test, documentation the code plainly contradicts — and proposes it
-as a **fix run**. The harness opens each proposal as a parked `sdlc` run, seeds
-its design canvas from the proposal, and chains it under a per-project **queue**
-run:
+as a **fix run**. The harness opens each proposal as a parked `sdlc` run and
+seeds its design canvas from the proposal. A batch of two or more is chained
+under a freshly minted **chain run** — a placeholder head that holds still while
+the runs behind it ship; a lone proposal just parks on its own.
 
 ```sh
-moe queue cat <project>/<run>    # read what's queued
-moe chain edit                   # reorder or prune the batch (queue heads are offered)
-moe queue kick <project>         # close the queue and ride the chain headlessly
+moe chain edit                     # reorder or prune the batch (heads are offered)
+moe chain kick <project>/<run>     # ride the batch headlessly from its head
 ```
 
-The queue is the review gate. Spawned runs park at `design` and nothing executes
-until you kick — that trigger is yours, exactly like every other cascade. The
-next survey that proposes a fix appends to the live queue; kicking mints a fresh
-one. Prune freely: an over-full queue is junk you can delete, which the pulse
-prefers to a finding that silently went missing.
+The chain is the review gate. Spawned runs park at `design` and nothing executes
+until you kick — that trigger is yours, exactly like every other cascade. Each
+survey mints its own head and never appends to an existing chain, so a batch can
+never land behind a head you are already riding, and machine proposals never
+land in a chain you curated by hand. Fold two batches together with `moe chain
+edit` when you want one. Prune freely: an over-full batch is junk you can
+delete, which the pulse prefers to a finding that silently went missing.
 
 This is the one place MoE opens a run from a fresh machine judgment rather than
 from standing intent you authored. It is bounded by that parked-until-kicked

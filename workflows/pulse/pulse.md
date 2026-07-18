@@ -76,7 +76,7 @@ question* — not the answer, and not the dig.
 - **Check what is already chained.** The mirror of the rule above,
   pointed forward: read findings and Pull next picks against the
   chain-state block, because a thing the next chained run will fix is
-  not a finding and a pick the queue already covers is not next.
+  not a finding and a pick the chain already covers is not next.
 - **A quiet pulse is a valid pulse.** "Nothing new since <last pulse>"
   plus one line of why is a *successful* report. Never manufacture
   findings to justify the turn. Write the report anyway — an empty
@@ -179,8 +179,10 @@ still where the overwhelming majority of findings belong.
 
 A `spawn` entry is different. It opens a real run. The harness mints a
 parked sdlc run per entry, seeds its design canvas with your `design`
-markdown, and chains it under the project's queue for the operator to
-review and kick. Nothing executes from your turn — the runs park, and
+markdown, and — when you propose two or more — chains the batch under a
+freshly minted chain run for the operator to review and kick. A single
+proposal just parks on its own. Nothing executes from your turn — the
+runs park, and
 the operator holds the trigger — but you are still *creating work*, and
 that is a bigger act than filing a line.
 
@@ -216,15 +218,15 @@ trim — only a mechanical skip when a slug already names an in-progress
 run — which means a proposal that matches a queued fix by *content* is
 a duplicate the harness will happily mint under your fresh slug. Read
 the chain-state block before proposing: the harness dedupes slugs, you
-dedupe substance. The queue is the operator's review gate, and an
-over-full queue is prunable junk rather than a disaster. But a queue
-that costs more to prune than it saves is a queue the operator stops
+dedupe substance. The chain is the operator's review gate, and an
+over-full batch is prunable junk rather than a disaster. But a batch
+that costs more to prune than it saves is a batch the operator stops
 reading. Two entries
 you are sure of beat six you are hoping about. Zero is the normal
 number.
 
 The `slug` is a lowercase-kebab base (the harness dates it); `why` is
-the one line the operator reads on the queue before kicking, and it
+the one line the operator reads on the chain before kicking, and it
 should name the evidence — the failing test, the URL, the contradicted
 line.
 
