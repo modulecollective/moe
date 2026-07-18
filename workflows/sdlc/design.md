@@ -59,6 +59,14 @@ Design is ready to hand back when:
    say "not yet, because X." (The stage-location header above names
    the exact invocation.)
 
+Before you hand it over, offer to walk the open questions with the
+operator one by one. Each should leave the walk as one of three things:
+a decision, recorded in the doc with its reasoning; a test-stage probe,
+named in the doc so the code stage's test plan carries it; or an
+explicitly parked unknown, with why proceeding without the answer is
+safe. An open question nobody triaged is a decision the code stage will
+make by accident.
+
 If you're polishing prose, you're done. Stop and hand it over.
 
 ## Resumed or seeded designs
