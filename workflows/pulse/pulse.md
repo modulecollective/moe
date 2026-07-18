@@ -29,6 +29,12 @@ Start from the delta, not the whole project:
   merged, what they touched.
 - **Drift in the touched areas** — twin-vs-code drift only where recent
   work reached. Do not re-survey the whole twin every pulse.
+- **What landed outside moe** — your kickoff carries a GitHub context
+  block the harness gathered: PRs merged since the last pulse, and the
+  latest CI verdict per workflow on the default branch. The journal
+  cannot see either. A merge marked as landing outside moe never
+  appeared in the journal at all, so "What landed" is incomplete
+  without it; a red default branch is a finding on its own.
 - **The backlog itself** — the open ideas, the open **intents** (the
   operator's standing direction for this project), and the previous
   pulse report. The intents are not optional reading here: they are
@@ -138,6 +144,62 @@ harness parses once your turn exits. It carries two signals:
   rides next to the verdict on this canvas. The *criteria* for when a
   reflect is due are in your kickoff — flag it for a real drift signal,
   never to justify the turn.
+- **`spawn`** — an optional list of high-confidence fixes to open as
+  parked runs. Omit it entirely when nothing clears the bar, which is
+  the common case. See below.
+
+## Spawning a fix run — the highest bar on this canvas
+
+Most of what you find is a followup: a line in a file, promoted to an
+idea, pulled when the operator decides. That is still the default and
+still where the overwhelming majority of findings belong.
+
+A `spawn` entry is different. It opens a real run. The harness mints a
+parked sdlc run per entry, seeds its design canvas with your `design`
+markdown, and chains it under the project's queue for the operator to
+review and kick. Nothing executes from your turn — the runs park, and
+the operator holds the trigger — but you are still *creating work*, and
+that is a bigger act than filing a line.
+
+    "spawn": [
+      {"slug": "fix-ci-red-main",
+       "title": "Fix red CI on main",
+       "why": "TestFoo failing since abc123; run <url>",
+       "design": "<markdown seeding the design canvas>"}
+    ]
+
+**The bar: mechanical, bounded, and verifiable.** All three, not two:
+
+- **Mechanical** — the fix is obvious from the evidence. You are not
+  proposing a judgment call, an approach, or a design.
+- **Bounded** — you can say what "done" looks like in one line, and it
+  is small.
+- **Verifiable** — there is a signal that flips when it's fixed: a red
+  check goes green, a stated fact matches the code again.
+
+Worked examples that clear it: a red CI run on the default branch with
+a named failing test; documentation stating something the code plainly
+contradicts; a small bug with a clear repro and one obvious fix.
+
+Everything else stays a followup — including anything you would have
+marked **speculative**. Novelty never spawns. If you find yourself
+writing a `design` body that argues for an approach, you are past the
+bar: file the followup instead and let a real design stage do the
+arguing.
+
+**Why the bar is yours to hold.** There is no cap on how many entries
+the harness will take, and no harness-side judgment about which to
+trim — only a mechanical skip when a slug already names an in-progress
+run. The queue is the operator's review gate, and an over-full queue is
+prunable junk rather than a disaster. But a queue that costs more to
+prune than it saves is a queue the operator stops reading. Two entries
+you are sure of beat six you are hoping about. Zero is the normal
+number.
+
+The `slug` is a lowercase-kebab base (the harness dates it); `why` is
+the one line the operator reads on the queue before kicking, and it
+should name the evidence — the failing test, the URL, the contradicted
+line.
 
 ## Hard don'ts
 

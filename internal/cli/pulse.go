@@ -63,7 +63,10 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"significant twin-relevant change (a decision, a new component, a boundary move the twin docs don't yet describe), or " +
 	"twin staleness has accumulated (many small changes and/or pending twin observations teed up since the last reflect). " +
 	"Do NOT flag reflect due when a twin run is already open, and never manufacture a reflect to justify the turn — the " +
-	"default is `\"reflect\": {\"due\": false}`. The `why` is required when due: one line, the operator reads it next to the verdict."
+	"default is `\"reflect\": {\"due\": false}`. The `why` is required when due: one line, the operator reads it next to the verdict.\n\n" +
+	"The gate may also carry a `\"spawn\"` list: high-confidence fixes the harness should open as parked runs for the operator " +
+	"to review and kick. The bar is mechanical, bounded, and verifiable — all three — and the stage guidance holds it. Omitting " +
+	"`spawn` is the normal outcome; a followup is the default channel for everything that doesn't clear the bar."
 
 // pulseCanvasSkeleton is the fixed structural shape the survey canvas
 // opens with. The agent fills the sections in place. The exact Pull
@@ -93,7 +96,7 @@ const pulseCanvasSkeleton = `# Pulse
 
 ## Gate
 
-(agent fills: a fenced json block — set "status" once the survey concluded, and "reflect": {"due": …, "why": …}. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
+(agent fills: a fenced json block — set "status" once the survey concluded, "reflect": {"due": …, "why": …}, and optionally "spawn": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
 `
 
 func init() {

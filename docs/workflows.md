@@ -315,13 +315,17 @@ operator-rooted run-traffic verbs (`moe sdlc close`, `moe sdlc push`,
 never from `moe sync`. Every fire rides an action you took. Scope is always the
 driven run's project.
 
-Every pulse does two things:
+Every pulse does three things:
 
 - **Chore auto-open (always).** Every due chore for the project gets its run
   opened — the same seeded run `moe chore open` would mint — and nothing more.
   No stage executes; the opened runs wait in `moe dash` like any other. This is
-  the one sanctioned auto-mint: automation acts on a chore definition you
-  authored, but never makes a fresh decision.
+  automation acting on a chore definition you authored, never a fresh decision.
+- **PR reconcile (always).** The project's `pushed` runs are checked against
+  GitHub — the same walk `moe sync` does, scoped to this project — so a PR you
+  merged from your phone reads as `merged` before the survey looks at the
+  delta. Pointer bumps stay `moe sync`'s job. Offline or without `gh`, this
+  warns once and the sweep carries on.
 - **The survey (every fire).** A headless, read-only agent sweep — it reads
   the journal since the last pulse, the twin, and the open backlog; files
   followups; and writes a short report whose last section, `## Pull next`,
@@ -342,9 +346,38 @@ moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted swe
 The survey blocks with a `Ctrl-C to skip` banner; interrupting it abandons the
 sweep and leaves the run open for a manual sitting or close. `moe pulse new` is
 also the verb an external cron would call — the primitives are cron-safe, but
-MoE ships no scheduler of its own. Nothing auto-executes: filed followups
-promote to ideas at the auto-close, but an idea is an inert backlog entry —
-the Pull next list is advisory and you hold every execution trigger.
+MoE ships no scheduler of its own.
+
+The survey's first turn carries a GitHub context block the harness gathered:
+PRs merged since the last pulse (marking the ones that landed outside moe, which
+the journal never saw) and the latest CI verdict per workflow on the default
+branch. It's what makes "what landed" honest when work reaches the repo without
+going through a run.
+
+### The queue
+
+Most of what a survey finds becomes a followup. Occasionally it finds something
+mechanical, bounded, and verifiable — a red check on the default branch with a
+named failing test, documentation the code plainly contradicts — and proposes it
+as a **fix run**. The harness opens each proposal as a parked `sdlc` run, seeds
+its design canvas from the proposal, and chains it under a per-project **queue**
+run:
+
+```sh
+moe queue cat <project>/<run>    # read what's queued
+moe chain edit                   # reorder or prune the batch (queue heads are offered)
+moe queue kick <project>         # close the queue and ride the chain headlessly
+```
+
+The queue is the review gate. Spawned runs park at `design` and nothing executes
+until you kick — that trigger is yours, exactly like every other cascade. The
+next survey that proposes a fix appends to the live queue; kicking mints a fresh
+one. Prune freely: an over-full queue is junk you can delete, which the pulse
+prefers to a finding that silently went missing.
+
+This is the one place MoE opens a run from a fresh machine judgment rather than
+from standing intent you authored. It is bounded by that parked-until-kicked
+rule: the pulse *makes* runs, it never *runs* them.
 
 ## Twin
 

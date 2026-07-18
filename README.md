@@ -139,6 +139,7 @@ full treatment.
 | [`hooks`](docs/workflows.md#hooks) | `code` | project-specific hook scripts |
 | [`chores`](docs/workflows.md#chores) | `code` | recurring maintenance that surfaces as ready-to-open runs |
 | [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only sweep that fires on run traffic, feeds the backlog, and ranks what to pull next |
+| [`queue`](docs/workflows.md#the-queue) | one `queue` canvas, written by the pulse | the parked fix runs a pulse proposed, reviewed and kicked as one batch |
 
 ## Going Deeper
 
