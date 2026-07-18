@@ -32,7 +32,11 @@ func pushCommand(workflow string) *Command {
 		Name:    "push",
 		Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
 		Run: func(args []string, stdout, stderr io.Writer) int {
-			code, _ := runPushTyped(workflow, args, stdout, stderr)
+			// Bare `moe <wf> push` drops the tail pulse's interrupt bool:
+			// the push's durable work succeeded, and a skipped advisory
+			// sweep is a successful skip — exit the push's own code. Only
+			// the cascade seam maps the interrupt to exitInterrupted.
+			code, _, _ := runPushTyped(workflow, args, stdout, stderr)
 			return code
 		},
 		argKind: argProjectRun,
@@ -122,11 +126,15 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 // `push deferred to recovery (...) — stopped` instead of claiming a
 // ship that never happened. Standalone callers (pushCmd.Run) discard
 // the error and propagate just the exit code.
-func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int, error) {
+func runPushTyped(workflow string, args []string, stdout, stderr io.Writer) (int, bool, error) {
 	return runPushTypedWithOptions(workflow, args, pushRunOptions{}, stdout, stderr)
 }
 
-func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, error) {
+// The bool return is the tail pulse's "operator skipped the sweep",
+// threaded up from the merge / PR path so the cascade can halt the
+// chain. It is false on every non-shipping exit. Bare `moe <wf> push`
+// (pushCommand.Run) drops it — the push's own durable work succeeded.
+func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, bool, error) {
 	fs := flag.NewFlagSet(workflow+" push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
@@ -138,22 +146,22 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2, nil
+		return 2, false, nil
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return 2, nil
+		return 2, false, nil
 	}
 	projectID, runID, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
 		moePrintf(stderr, "moe %s push: %v\n", workflow, err)
-		return 2, nil
+		return 2, false, nil
 	}
 
 	if workflow == "sdlc" {
 		resolved, code := resolveSDLCRunSlug(workflow+" push", projectID, runID, stdout, stderr)
 		if code != 0 {
-			return code, nil
+			return code, false, nil
 		}
 		runID = resolved
 	}
@@ -161,18 +169,18 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	root, err := bureaucracy.Find(cwd, os.Getenv)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	// Terminal statuses short-circuit before touching the sandbox — the
@@ -185,27 +193,27 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		} else {
 			moePrintln(stdout, "already merged")
 		}
-		return 0, nil
+		return 0, false, nil
 	case run.StatusClosed:
 		moePrintln(stdout, "already closed")
-		return 0, nil
+		return 0, false, nil
 	}
 
 	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	if err := checkCodeContent(root, md); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	clonePath, err := sandboxClonePath(root, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	branch := branchPrefix + md.ID
 	// A clone left mid-rebase can only have come from a recovery turn
@@ -222,19 +230,19 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
        finish it: GIT_EDITOR=true git -C %s rebase --continue   (resolve any remaining conflicts and `+"`git add`"+` them first)
        or abort:  git -C %s rebase --abort                       (discards the in-progress rebase; re-run `+"`moe %s push %s/%s`"+` to retry)
 `, clonePath, clonePath, clonePath, md.Workflow, md.Project, md.ID)
-		return 1, nil
+		return 1, false, nil
 	}
 	if err := push.CheckCleanWorkTree(clonePath, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	if err := push.EnsureOrigin(clonePath, pj.Remote); err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	hooks := hookEnv{
@@ -264,15 +272,17 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			var conflict *push.RebaseConflictError
 			if errors.As(err, &conflict) {
 				moePrintf(stderr, "%v\n", conflict)
-				return openCodeSessionForRebaseConflict(md, conflict, opts.HeadlessRecovery, stdout, stderr)
+				code, derr := openCodeSessionForRebaseConflict(md, conflict, opts.HeadlessRecovery, stdout, stderr)
+				return code, false, derr
 			}
 			var fail *hookFailure
 			if errors.As(err, &fail) {
 				moePrintf(stderr, "%v\n", fail)
-				return openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
+				code, derr := openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
+				return code, false, derr
 			}
 			moePrintf(stderr, "%v\n", err)
-			return 1, nil
+			return 1, false, nil
 		}
 
 		// When origin already has moe/<run> (a prior `--pr` cycle, a
@@ -287,22 +297,23 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 
 		if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
 			moePrintf(stderr, "%v\n", err)
-			return 1, nil
+			return 1, false, nil
 		}
 
 		if *prFlag {
 			// --pr never ff-pushes, so there's no advance race and no
 			// retry — this returns out of the loop on the first pass.
 			if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
-				return code, nil
+				return code, false, nil
 			}
-			return openPRPath(root, md, pj, branch, stdout, stderr), nil
+			code, interrupted := openPRPath(root, md, pj, branch, stdout, stderr)
+			return code, interrupted, nil
 		}
 
 		// Retries harvest as-is (skipEdit=true): the operator reviewed
 		// followups on attempt 1, so attempts 2+ don't re-pop $EDITOR.
 		skipEdit := opts.SkipTerminalEdit || attempt > 1
-		code, err := mergePath(root, md, pj, clonePath, branch, skipEdit, stdout, stderr)
+		code, interrupted, err := mergePath(root, md, pj, clonePath, branch, skipEdit, stdout, stderr)
 		if errors.Is(err, errFFRetryable) {
 			if attempt < maxPushAttempts {
 				moePrintf(stdout, "origin/%s advanced during checks — rebasing and retrying (attempt %d/%d)\n",
@@ -311,9 +322,9 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			}
 			moePrintf(stderr, "       origin/%s advanced during checks on all %d attempts — re-run `moe %s push %s/%s`\n",
 				pj.DefaultBranch, maxPushAttempts, md.Workflow, md.Project, md.ID)
-			return code, nil
+			return code, false, nil
 		}
-		return code, nil
+		return code, interrupted, nil
 	}
 }
 
@@ -392,17 +403,20 @@ func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) st
 // `moe <wf> code` stays a one-liner until the PR merges. Synthesis
 // already ran in runPushTyped, so this path only consumes the push
 // canvas when a new PR needs a body.
-func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
+// The bool is the tail pulse's "operator skipped the sweep" — false on
+// every pre-pulse exit, and the survey's interrupt only on the genuine
+// first push that fires one.
+func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) (int, bool) {
 	ghRepo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, false
 	}
 
 	url, existing, err := push.FindOpenPR(ghRepo, branch)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return 1, false
 	}
 	if existing {
 		moePrintf(stdout, "existing PR: %s\n", url)
@@ -413,24 +427,25 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		bodyPath, cleanup, err := writePRBodyFile(root, md)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
-			return 1
+			return 1, false
 		}
 		defer cleanup()
 		url, err = push.CreatePR(ghRepo, branch, pj.DefaultBranch, md.ID, bodyPath, stderr)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
-			return 1
+			return 1, false
 		}
 		moePrintf(stdout, "opened PR: %s\n", url)
 	}
 
 	// Only the first push flips status and records the MoE-PR trailer.
 	// Re-runs just pushed branch updates to an already-recorded PR.
+	interrupted := false
 	if md.Status != run.StatusPushed {
 		md.Status = run.StatusPushed
 		if err := run.Save(root, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
-			return 1
+			return 1, false
 		}
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
@@ -449,7 +464,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		})
 		if err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
-			return 1
+			return 1, false
 		}
 		// PR opened and the transition is durable — tail a pulse. Only
 		// the genuine first push reaches here (re-pushes to an existing
@@ -457,10 +472,10 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		// Outside the WithJournalPush closure above: firePulse takes the
 		// repolock itself.
 		if pulseFiresForWorkflow(md.Workflow) {
-			firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+			interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
 		}
 	}
-	return 0
+	return 0, interrupted
 }
 
 // mergePath is the default path: fast-forward the target repo's
@@ -470,12 +485,14 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 // both intact for retry.
 // The int is the shell exit code; the error is errFFRetryable only when
 // the ff-push was rejected because origin's default advanced during the
-// checks (the caller's loop retries on it) and nil otherwise.
-func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) (int, error) {
+// checks (the caller's loop retries on it) and nil otherwise. The bool
+// is the tail pulse's "operator skipped the sweep" — false on every
+// pre-pulse exit, and the survey's interrupt only on the shipped path.
+func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) (int, bool, error) {
 	tipSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
 	if err != nil {
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
-		return 1, nil
+		return 1, false, nil
 	}
 	touched := touchedChoresForBranch(root, md.Project, clonePath, pj.DefaultBranch, branch)
 
@@ -498,7 +515,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	})
 	if err != nil {
 		moePrintf(stderr, "push: harvest: %v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
@@ -522,11 +539,11 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			moePrintf(stderr, "       (could not determine whether origin/%s advanced: %v)\n", pj.DefaultBranch, probeErr)
 		}
 		if advanced {
-			return 1, errFFRetryable
+			return 1, false, errFFRetryable
 		}
 		moePrintf(stderr, "       origin/%s may have advanced between the pre-push rebase and ff-push — re-run `moe %s push %s/%s`\n",
 			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
-		return 1, nil
+		return 1, false, nil
 	}
 
 	if err := push.DeleteRemoteBranch(clonePath, branch, stdout, stderr); err != nil {
@@ -537,7 +554,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	pushCanvasPath, err := writeMechanicalPushNote(root, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	paths = append(paths, pushCanvasPath)
 
@@ -571,16 +588,18 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	})
 	if err != nil {
 		moePrintf(stderr, "commit merge record: %v\n", err)
-		return 1, nil
+		return 1, false, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
 	// The ff-merge landed and the record is committed — tail a pulse.
 	// Outside the WithJournalPush closures above: firePulse takes the
-	// repolock itself.
+	// repolock itself. Its "operator skipped the sweep" bool rides back
+	// out so a cascade halts instead of riding on to the next run.
+	interrupted := false
 	if pulseFiresForWorkflow(md.Workflow) {
-		firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+		interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
 	}
-	return 0, nil
+	return 0, interrupted, nil
 }
 
 // writeMechanicalPushNote leaves an explicit push canvas for the

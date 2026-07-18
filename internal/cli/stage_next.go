@@ -845,7 +845,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 // var to stub the cascade's push step without touching the standalone
 // `moe sdlc push` path (which still goes through pushCmd.Run →
 // runPushTyped → discard-error).
-var pushFromCascade func(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, error)
+var pushFromCascade func(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, bool, error)
 
 func init() {
 	pushFromCascade = runPushTypedWithOptions
@@ -1004,6 +1004,14 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		}
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
+			// The tail pulse's interrupt is deliberately NOT mapped to
+			// exitInterrupted here: this branch is non-sdlc only (sdlc ships
+			// via the push branch above), and the chain ride already ran at
+			// line ~1000, before this close. There is no ride left to skip,
+			// so a Ctrl-C'd tail pulse is exactly the bare-close case — the
+			// cascade's own work (every stage committed, run closed)
+			// succeeded, so it exits on the close's own code, same rule as
+			// `moe <wf> close`.
 			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: code})
 			if code != 0 {
@@ -1165,7 +1173,7 @@ func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canv
 func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, stderr io.Writer) (steps []cascadeStepResult, shipped bool, code int) {
 	retries := 0
 	for {
-		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
+		ship, interrupted, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
 			SkipTerminalEdit: true,
 		}, stdout, stderr)
@@ -1190,10 +1198,20 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 			retries++
 			continue
 		}
-		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 		if ship != 0 {
+			steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 			return steps, false, ship
 		}
+		if interrupted {
+			// The ff-merge shipped, but the operator Ctrl-C'd the tail
+			// pulse. Halt the chain before the ride — record the push step
+			// as interrupted (not "ok") so the summary reads "push
+			// interrupted — stopped", and propagate exitInterrupted so
+			// everything above stops rather than riding on to the next run.
+			steps = append(steps, cascadeStepResult{stage: "push", code: exitInterrupted})
+			return steps, true, exitInterrupted
+		}
+		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 		// Chain ride (`!!!` only): after the parent's terminal stage
 		// ships, if a live chain edge points at an unresolved child,
 		// cascade into it. `!!` stops here — rideChain is the gate.
