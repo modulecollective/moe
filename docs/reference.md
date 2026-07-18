@@ -42,7 +42,8 @@ source of truth for the exact command surface; this page is a map.
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
-- `moe chain edit` opens an editor over active SDLC and queue runs; reorder
+- `moe chain edit` opens an editor over active operator-cascade runs (SDLC,
+  twin, KB, hooks, chores) plus the pulse's queue heads; reorder
   lines to record a run chain in the bureaucracy journal.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
 - `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any

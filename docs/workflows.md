@@ -118,7 +118,8 @@ trigger; MoE ships no cron and nothing starts on a clock. The story is "you
 pull the trigger at 6pm and the work outlasts your attention", not "MoE runs at
 night".
 
-`moe chain edit` opens every active SDLC run across projects in `$EDITOR`,
+`moe chain edit` opens every active chainable run across projects in `$EDITOR`
+— every operator-cascade workflow (SDLC, twin, KB, hooks, chores) plus queue —
 grouped into blocks that mirror the dash's chains. A blank line is a chain
 boundary: each contiguous block of run lines becomes one linear chain (each
 line chains-to the one below it in its block; the block's last line chains-to
