@@ -84,6 +84,7 @@ func TestProjectsIndexAndHub(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
+			{Project: "alpha", Run: "pulse-1", Bucket: dash.BucketActiveRuns, When: time.Now(), Depth: 1},
 			{Project: "alpha", Run: "tidy", Bucket: dash.BucketChores, When: time.Now()},
 			{Project: "beta", Run: "old", Bucket: dash.BucketCompletedRuns, When: time.Now()},
 		}, 2, 1, nil, nil
@@ -99,6 +100,9 @@ func TestProjectsIndexAndHub(t *testing.T) {
 		`href="/chore/alpha/tidy"`,
 		`href="/projects/alpha/knowledge"`,
 		`href="/projects/alpha/twin/architecture"`,
+		// A nested descendant draws its connector on the hub's ACTIVE
+		// list too, same classes as the home dash.
+		`class="row chained depth1"`,
 	)
 
 	// A project with no knowledge/twin reads as empty-state, not broken.
