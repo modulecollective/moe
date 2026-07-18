@@ -115,7 +115,12 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, true /*tailPulse*/, stdout, stderr); err != nil {
+	// The bare close verb drops the tail pulse's interrupt bool: the
+	// close's own durable work succeeded, and a skipped advisory sweep is
+	// a successful skip, not a close failure — exit 0. Only the cascade
+	// seams (which call closeRunInProcess directly) map it to
+	// exitInterrupted to halt the chain.
+	if _, err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, true /*tailPulse*/, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -151,9 +156,14 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // hang the POST for the survey's duration and bypass that gate. The
 // pulse stays best-effort, so the next CLI/cascade run-traffic verb
 // tails it anyway; a serve close simply doesn't.
-func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit, tailPulse bool, stdout, stderr io.Writer) error {
+// The returned bool is "the tail pulse's operator interrupted the sweep"
+// — false unless tailPulse fired a pulse that the operator Ctrl-C'd.
+// Cascade seams thread it to exitInterrupted so the chain halts; the
+// bare `moe <wf> close` verb drops it (a skipped tail pulse is not a
+// close failure).
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit, tailPulse bool, stdout, stderr io.Writer) (bool, error) {
 	if err := requireProject(root, projectID); err != nil {
-		return err
+		return false, err
 	}
 
 	// Idea closes have no follow-ups dance — the run *is* the capture.
@@ -167,24 +177,24 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		loreRel := run.FeedbackPath(projectID, runID, "lore")
 		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel)
 		if derr != nil {
-			return derr
+			return false, derr
 		}
 		if dirty {
-			return errors.New("working tree has uncommitted changes; commit or stash first")
+			return false, errors.New("working tree has uncommitted changes; commit or stash first")
 		}
 	} else if err := requireCleanTree(root); err != nil {
-		return err
+		return false, err
 	}
 
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
+			return false, fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
 		}
-		return fmt.Errorf("%s: %w", workflow, err)
+		return false, fmt.Errorf("%s: %w", workflow, err)
 	}
 	if md.Workflow != workflow {
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+		return false, &runopen.NotClosableError{Reason: fmt.Sprintf(
 			"run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)}
 	}
 
@@ -195,14 +205,14 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		// Refusing here keeps PR-state reconciliation on a single path
 		// (GitHub → sync); letting local close race the remote state
 		// risks divergence on partial failure.
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+		return false, &runopen.NotClosableError{Reason: fmt.Sprintf(
 			"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile",
 			workflow, projectID, runID)}
 	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+		return false, &runopen.NotClosableError{Reason: fmt.Sprintf(
 			"%s %s/%s already %s", workflow, projectID, runID, md.Status)}
 	default:
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
+		return false, &runopen.NotClosableError{Reason: fmt.Sprintf(
 			"%s %s/%s has unexpected status %q", workflow, projectID, runID, md.Status)}
 	}
 
@@ -229,7 +239,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			canvasRel := run.ContentPath(md.Project, md.ID, docID)
 			info, err := os.Stat(filepath.Join(root, canvasRel))
 			if err != nil || info.Size() == 0 {
-				return fmt.Errorf(
+				return false, fmt.Errorf(
 					"%s %s/%s: canvas %s is empty\n"+
 						"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+
 						"  or restore the file from git history",
@@ -260,7 +270,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		}
 		return run.StageAndCommit(root, msg, paths...)
 	}); err != nil {
-		return err
+		return false, err
 	}
 
 	// The close is durable and the repolock released. Tail a pulse for
@@ -269,11 +279,13 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// wired into enterTerminal: sync's reconcile shares that helper and
 	// must never pulse. firePulse opens and commits its own runs, so it
 	// must run outside the WithJournalPush closure above — repolock is
-	// not reentrant.
+	// not reentrant. Its "operator skipped the sweep" bool is returned so
+	// cascade seams can halt the chain.
+	interrupted := false
 	if tailPulse && pulseFiresForWorkflow(workflow) {
-		firePulse(root, projectID, runID /*spawner*/, stdout, stderr)
+		interrupted = firePulse(root, projectID, runID /*spawner*/, stdout, stderr)
 	}
-	return nil
+	return interrupted, nil
 }
 
 // releaseWorkspaceCleanup releases the run's hold on its workspace.

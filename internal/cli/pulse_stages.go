@@ -12,7 +12,10 @@ func init() {
 	openPulseStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 		switch stage {
 		case pulseDoc:
-			return openPulse(projectID, runID, headless, "", stdout, stderr)
+			// No skip latch on this seam: reopening a pulse stage by hand
+			// (or riding a chain into one) is not a run-traffic tail, so it
+			// has no Ctrl-C-to-skip window.
+			return openPulse(projectID, runID, headless, "", nil /*pi*/, stdout, stderr)
 		default:
 			moePrintf(stderr, "pulse: openPulseStage: unknown stage %q\n", stage)
 			return 1

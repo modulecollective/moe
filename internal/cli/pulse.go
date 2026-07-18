@@ -160,18 +160,30 @@ func pulseFiresForWorkflow(workflow string) bool {
 // failure must never change the triggering verb's outcome (it mirrors
 // closeWithAutoResolve's posture, not the abort-on-fail push
 // synthesis). runPulse prints its own warnings; the exit code is
-// dropped here.
-var firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) {
-	runPulse(root, projectID, spawner, stdout, stderr)
+// dropped here. The returned bool is "operator interrupted the sweep" —
+// callers thread it to exitInterrupted so a Ctrl-C halts a cascade
+// instead of riding on to the next run.
+var firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool {
+	_, interrupted := runPulse(root, projectID, spawner, stdout, stderr)
+	return interrupted
 }
 
 // runPulse is the whole pulse: the deterministic chore auto-open (which
 // opens runs but executes none), then the survey. spawner is the
 // triggering run's slug ("" for a manual `moe pulse new`, which threads
 // no parent edge).
-func runPulse(root, projectID, spawner string, stdout, stderr io.Writer) int {
-	autoOpenDueChores(root, projectID, stdout, stderr)
-	return runPulseSurvey(root, projectID, spawner, stdout, stderr)
+//
+// It owns the pulse's scoped Ctrl-C latch (installPulseInterrupt): the
+// "scanning — Ctrl-C to skip" banner prints up front, before the run is
+// minted, so the operator knows the skip window is live from the start.
+// The second return is whether the operator interrupted the sweep.
+func runPulse(root, projectID, spawner string, stdout, stderr io.Writer) (int, bool) {
+	pi := installPulseInterrupt()
+	defer pi.Close()
+	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
+	autoOpenDueChores(root, projectID, pi, stdout, stderr)
+	code := runPulseSurvey(root, projectID, spawner, pi, stdout, stderr)
+	return code, pi.interrupted()
 }
 
 // autoOpenDueChores opens every due chore's run for the project via the
@@ -180,13 +192,19 @@ func runPulse(root, projectID, spawner string, stdout, stderr io.Writer) int {
 // anti-pile-up guard, so a chore that already has an open run is
 // skipped silently; any other failure warns and moves on (a chore
 // pile-up must not derail the sweep or the verb that triggered it).
-func autoOpenDueChores(root, projectID string, stdout, stderr io.Writer) {
+func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: read chore states for %s: %v\n", projectID, err)
 		return
 	}
 	for _, s := range states {
+		// Checkpoint: a Ctrl-C stops opening further chores. Already-opened
+		// ones are standing intent and stay; the survey below sees the latch
+		// and skips too.
+		if pi.interrupted() {
+			return
+		}
 		if !s.Due {
 			continue
 		}
@@ -218,13 +236,13 @@ func autoOpenDueChores(root, projectID string, stdout, stderr io.Writer) {
 // firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
 // introduces (auto-close → closeRunInProcess → firePulse) — the same
 // init-order dodge openPulseStage uses.
-var runPulseSurvey func(root, projectID, spawner string, stdout, stderr io.Writer) int
+var runPulseSurvey func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int
 
 func init() {
 	runPulseSurvey = pulseSurvey
 }
 
-func pulseSurvey(root, projectID, spawner string, stdout, stderr io.Writer) int {
+func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 	// spawner threads the triggering run onto the survey's MoE-Spawned-By
 	// edge (empty on a manual `moe pulse new`, so it renders un-nested).
 	// Both the metadata field and the trailer are set, mirroring how
@@ -236,6 +254,14 @@ func pulseSurvey(root, projectID, spawner string, stdout, stderr io.Writer) int 
 	if spawner != "" {
 		spawner = projectID + "/" + spawner
 	}
+
+	// Checkpoint: a Ctrl-C before the run is minted skips with nothing to
+	// clean — no run, no lock (runopen.Open's window hasn't opened yet).
+	if pi.interrupted() {
+		moePrintf(stderr, "pulse: skipped — no run opened for %s\n", projectID)
+		return 0
+	}
+
 	md, err := runopen.Open(root, projectID, run.Options{
 		IDBase:    pulseWorkflow,
 		Workflow:  pulseWorkflow,
@@ -248,12 +274,38 @@ func pulseSurvey(root, projectID, spawner string, stdout, stderr io.Writer) int 
 		return 1
 	}
 
-	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
+	// Checkpoint: a Ctrl-C landed while the run was being minted — dispose
+	// the just-minted skeleton run so it doesn't linger on the dash with
+	// nothing to review.
+	if pi.interrupted() {
+		disposePulseRun(root, projectID, md.ID, stdout, stderr)
+		return 0
+	}
+
 	// A non-zero exit (agent failure or SIGINT) is never propagated —
-	// abandoning a sweep is not a verb failure — and it leaves the run
-	// open on the dash's ACTIVE list for the operator to inspect and
-	// close by hand. It does not block the next survey.
-	if code := openPulse(projectID, md.ID, true /*headless*/, "", stdout, stderr); code != 0 {
+	// abandoning a sweep is not a verb failure — and (mid-agent) it leaves
+	// the run open on the dash's ACTIVE list for the operator to inspect
+	// and close by hand. It does not block the next survey.
+	code := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
+	switch {
+	case code == exitInterrupted:
+		// Mid-agent Ctrl-C: the survey was actually running and may hold
+		// real findings, so disposing it would harvest half-written
+		// followups into ideas unreviewed. Leave the run open for review —
+		// but propagate the interrupt (mark the latch, since the Ctrl-C may
+		// have been observed only at the agent boundary) so a cascade halts.
+		pi.mark()
+		return 0
+	case pi.interrupted():
+		// The latch is set but the agent never ran to a real conclusion: a
+		// Ctrl-C in a millisecond gap between setup children tripped the
+		// pre-executor belt (openPulse's prompt builder returned
+		// errPulseSkipped, exit 1 ≠ 130). Dispose the just-minted run.
+		disposePulseRun(root, projectID, md.ID, stdout, stderr)
+		return 0
+	case code != 0:
+		// A failed or abandoned sweep with no interrupt — leave the run open
+		// on the dash's ACTIVE list (escalation by visibility).
 		return 0
 	}
 
@@ -283,16 +335,41 @@ func pulseSurvey(root, projectID, spawner string, stdout, stderr io.Writer) int 
 	// the run open, mirroring firePulse's warn-only posture: the report
 	// and filings are already durable on disk, so a failed auto-close is
 	// a close-by-hand-later, not a lost sweep.
-	reg, ok := lookupCloseRegistration(pulseWorkflow)
-	if !ok {
-		moePrintf(stderr, "pulse: no close registration for %q — leaving run %s/%s open\n", pulseWorkflow, projectID, md.ID)
-		return 0
-	}
-	if err := closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
-		projectID, md.ID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr); err != nil {
+	if err := closePulseRun(root, projectID, md.ID, stdout, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
 	}
 	return 0
+}
+
+// closePulseRun closes a pulse run through the registered close — the
+// same (subject, cleanup) the happy-path auto-close and the interrupt
+// disposal both ride, so there's no parallel close path. skipEdit
+// harvests followups.md as-is; tailPulse=false because pulse never
+// tails pulse (pulseFiresForWorkflow excludes it). The interrupted bool
+// closeRunInProcess returns is irrelevant here (tailPulse=false fires no
+// pulse), so it's dropped.
+func closePulseRun(root, projectID, runID string, stdout, stderr io.Writer) error {
+	reg, ok := lookupCloseRegistration(pulseWorkflow)
+	if !ok {
+		return fmt.Errorf("no close registration for %q", pulseWorkflow)
+	}
+	_, err := closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
+		projectID, runID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr)
+	return err
+}
+
+// disposePulseRun closes a just-minted pulse run the operator Ctrl-C'd
+// before the survey could produce anything worth reviewing. The
+// skeleton canvas is non-empty so the close-time canvas gate passes, and
+// the canonical root is committed-clean at that point so the dirty-tree
+// gate passes. A disposal failure warns and leaves the run open —
+// today's worst-case outcome, minus the lock leak.
+func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
+	if err := closePulseRun(root, projectID, runID, stdout, stderr); err != nil {
+		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
+		return
+	}
+	moePrintf(stderr, "pulse: skipped — closed %s/%s\n", projectID, runID)
 }
 
 // pulseGate is the machine-readable verdict the survey agent writes to
@@ -408,12 +485,27 @@ func pendingTwinObservationsLine(root, projectID string) string {
 		len(feedback), strings.Join(runs, ", "))
 }
 
+// errPulseSkipped is the sentinel openPulse's prompt builder returns
+// when the operator's Ctrl-C latched between the post-Open checkpoint
+// and the agent executor — a millisecond gap between setup children
+// that kills no child and fails no step. The builder runs post-worktree,
+// pre-executor, so returning here routes into runStageSession's
+// bootstrap-failure path: the worktree is torn down and openPulse
+// returns 1, which pulseSurvey (latch set, exit ≠ 130) reads as a
+// pre-agent skip and disposes the run.
+var errPulseSkipped = errors.New("pulse: skipped before the survey started")
+
 // openPulse is the Go-level seam behind `moe pulse pulse` and the
 // survey's headless execution. Read-only both-legs-strict sandbox (the
 // design/chat shape): the survey reads the project but never edits it,
 // and the boundary guard enforces that. It is a var so runPulseSurvey's
 // auto-close can be tested without running the agent turn.
-var openPulse = func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+//
+// pi is the survey's Ctrl-C latch (nil on the interactive `moe pulse
+// pulse` path, which has no skip window). The prompt builder is the
+// pre-executor belt: a Ctrl-C that latched during setup returns
+// errPulseSkipped here so the agent never starts.
+var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
@@ -425,6 +517,9 @@ var openPulse = func(projectID, runID string, headless bool, agentOverride strin
 			// hands the builder — the same deferral the twin stages use to
 			// keep a pass off the operator's live checkout.
 			InitialPromptBuilder: func(workRoot string, _ *wiki.Config, _ bool) (string, error) {
+				if pi.interrupted() {
+					return "", errPulseSkipped
+				}
 				return pulseKickoffWithContext(workRoot, projectID), nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
@@ -457,7 +552,15 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "pulse new: %v\n", err)
 		return 1
 	}
-	return runPulse(root, projectID, "" /*spawner*/, stdout, stderr)
+	// `moe pulse new` is the one place the pulse *is* the verb, so a skip
+	// is the verb's own outcome: exit 130. (At a run-traffic tail the
+	// verb's durable work already succeeded, so those callers keep their
+	// own exit code and only thread the interrupt to halt a cascade.)
+	code, interrupted := runPulse(root, projectID, "" /*spawner*/, stdout, stderr)
+	if interrupted {
+		return exitInterrupted
+	}
+	return code
 }
 
 func runPulseStage(args []string, stdout, stderr io.Writer) int {
@@ -488,5 +591,7 @@ func runPulseStage(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "pulse %s: %v\n", pulseDoc, err)
 		return 2
 	}
-	return openPulse(projectID, runID, false, *agentOverride, stdout, stderr)
+	// Interactive reopen: the operator owns this session's Ctrl-C, so no
+	// skip latch (nil pi).
+	return openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
 }
