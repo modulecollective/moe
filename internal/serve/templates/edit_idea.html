@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>edit {{.Project}}/{{.Slug}} — MoE</title>
+{{/* Kind is the capture's workflow (idea|intent); empty only when the
+     error re-render could not re-load the run. */}}
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <script>
 (function () {
@@ -19,7 +21,7 @@
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → <a href="/run/{{.Project}}/{{.Slug}}">{{.Slug}}</a> → edit idea</div>
+      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → <a href="/run/{{.Project}}/{{.Slug}}">{{.Slug}}</a> → edit {{if .Kind}}{{.Kind}}{{else}}capture{{end}}</div>
     </div>
     {{template "headeractions" .}}
   </header>

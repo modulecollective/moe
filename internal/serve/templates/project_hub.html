@@ -77,7 +77,7 @@
     <ul class="rows">
       {{range .Intents}}
       <li class="row">
-        <span class="slug">{{.Project}}/{{.Run}}</span>
+        <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="note">{{.Note}}</span>
       </li>
       {{end}}
