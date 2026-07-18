@@ -304,8 +304,9 @@ type intentEntry struct {
 	slug    string
 }
 
-// scanOpenIntents returns all in-progress intent runs for projectID. If
-// projectID is "", all projects are scanned — used by the dash gatherer.
+// scanOpenIntents returns projectID's in-progress intent runs. (The dash
+// gatherer doesn't come through here — gatherIntents projects the
+// caller's existing scan instead.)
 func scanOpenIntents(root, projectID string) ([]intentEntry, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
@@ -319,7 +320,7 @@ func scanOpenIntents(root, projectID string) ([]intentEntry, error) {
 		if md.Status != run.StatusInProgress {
 			continue
 		}
-		if projectID != "" && md.Project != projectID {
+		if md.Project != projectID {
 			continue
 		}
 		out = append(out, intentEntry{
