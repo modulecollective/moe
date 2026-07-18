@@ -212,6 +212,13 @@ func pulseSurvey(root, projectID, spawner string, stdout, stderr io.Writer) int 
 	// edge (empty on a manual `moe pulse new`, so it renders un-nested).
 	// Both the metadata field and the trailer are set, mirroring how
 	// `moe sdlc reopen` pairs Options.ReopenOf with Trailers.ReopenOf.
+	// Qualify the spawner to "<project>/<slug>" so the lineage edge can name
+	// a foreign spawner (cross-project coordination opens a run in one
+	// project from another); the empty guard keeps a manual `moe pulse new`
+	// from writing a dangling "<project>/".
+	if spawner != "" {
+		spawner = projectID + "/" + spawner
+	}
 	md, err := runopen.Open(root, projectID, run.Options{
 		IDBase:    pulseWorkflow,
 		Workflow:  pulseWorkflow,

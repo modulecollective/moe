@@ -350,8 +350,8 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	for _, md := range mds {
 		if md.Workflow == pulseWorkflow && md.Project == "moe" {
 			pulseID = md.ID
-			if md.SpawnedBy != "ship-it" {
-				t.Fatalf("pulse run SpawnedBy = %q, want ship-it", md.SpawnedBy)
+			if md.SpawnedBy != "moe/ship-it" {
+				t.Fatalf("pulse run SpawnedBy = %q, want moe/ship-it (qualified spawner)", md.SpawnedBy)
 			}
 		}
 	}
@@ -362,8 +362,8 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := idx.SpawnedBy["moe/"+pulseID]; got != "ship-it" {
-		t.Fatalf("index SpawnedBy[moe/%s] = %q, want ship-it (MoE-Spawned-By trailer missing?)", pulseID, got)
+	if got := idx.SpawnedBy["moe/"+pulseID]; got != "moe/ship-it" {
+		t.Fatalf("index SpawnedBy[moe/%s] = %q, want moe/ship-it (MoE-Spawned-By trailer missing?)", pulseID, got)
 	}
 }
 

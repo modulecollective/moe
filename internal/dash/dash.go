@@ -318,7 +318,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // count over the whole hoisted subtree:
 //
 //   - Exactly one descendant → the parent keeps its single row and gains
-//     a " · spawned → <slug>" hint (the child row is dropped, so a single
+//     a " · spawned → <project>/<slug>" hint (the child row is dropped, so a single
 //     pulse costs zero rows).
 //   - Two-plus descendants → the parent followed by its descendants as
 //     Member rows in lineage (DFS) order — direct children newest-first,
@@ -351,11 +351,15 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	// spawnerIdx returns the row index of row i's direct spawner, or -1 if
 	// it has no SpawnedBy edge or that edge isn't on the board.
 	spawnerIdx := func(i int) int {
+		// SpawnedBy values are always qualified "<project>/<slug>" (the index
+		// builder normalizes legacy bare values), so the spawner can live in a
+		// different project than its child — look it up by the qualified key
+		// directly rather than re-qualifying with the child's project.
 		spawner := idx.SpawnedBy[rows[i].Project+"/"+rows[i].Run]
 		if spawner == "" {
 			return -1
 		}
-		if j, ok := rowIdx[rows[i].Project+"/"+spawner]; ok {
+		if j, ok := rowIdx[spawner]; ok {
 			return j
 		}
 		return -1
@@ -430,7 +434,7 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 		case subtreeCount(i) == 1:
 			// One descendant: a textual arrow on the parent, no extra row.
 			// The sole descendant is the single direct child.
-			parent.Note += " · spawned → " + rows[kids[0]].Run
+			parent.Note += " · spawned → " + rows[kids[0]].Project + "/" + rows[kids[0]].Run
 			out = append(out, parent)
 		default:
 			out = append(out, parent)

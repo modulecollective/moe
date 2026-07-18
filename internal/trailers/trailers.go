@@ -53,10 +53,11 @@ type Block struct {
 	Idea          string
 	IdeaMovedFrom string
 	ReopenOf      string
-	// SpawnedBy carries the bare slug of the run that machine-opened this
-	// run (the pulse a close/push tails is the first writer). The general
-	// run-lineage edge, mirrored into Metadata.SpawnedBy / the journal
-	// index's SpawnedBy map.
+	// SpawnedBy carries the qualified "<project>/<slug>" of the run that
+	// machine-opened this run (the pulse a close/push tails is the first
+	// writer). Qualified so the edge can name a foreign spawner for
+	// cross-project coordination. The general run-lineage edge, mirrored
+	// into Metadata.SpawnedBy / the journal index's SpawnedBy map.
 	SpawnedBy string
 	Chore     string
 	// ChoreSkipped carries "<project>/<chore>" on the empty commit

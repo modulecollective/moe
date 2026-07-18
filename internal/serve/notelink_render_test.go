@@ -13,13 +13,14 @@ import (
 // TestDashRendersLinkifiedNotes drives the linkified note through the
 // real template, not just noteHTML in isolation: it proves html/template
 // emits the pre-built anchor verbatim (Note is template.HTML) instead of
-// re-escaping it, and that bare vs. qualified targets resolve as designed.
+// re-escaping it, and that the qualified targets dash emits resolve as
+// designed.
 func TestDashRendersLinkifiedNotes(t *testing.T) {
 	now := time.Now().UTC()
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
-			// Bare spawned target → qualified with the row's project.
-			{Project: "moe", Run: "head", Note: "sdlc:merged · spawned → pulse-child",
+			// Qualified spawned target (what dash emits) → links as-is.
+			{Project: "moe", Run: "head", Note: "sdlc:merged · spawned → moe/pulse-child",
 				Bucket: dash.BucketCompletedRuns, When: now.Add(-time.Hour)},
 			// Qualified chained target → links as-is.
 			{Project: "alpha", Run: "worker", Note: "sdlc:code · chained → beta/child-run",
@@ -39,8 +40,8 @@ func TestDashRendersLinkifiedNotes(t *testing.T) {
 	body := rr.Body.String()
 
 	for _, want := range []string{
-		// Bare target qualifies with the row project; anchor text is the slug.
-		`spawned → <a href="/run/moe/pulse-child">pulse-child</a>`,
+		// Qualified target links as-is; anchor text is the qualified target.
+		`spawned → <a href="/run/moe/pulse-child">moe/pulse-child</a>`,
 		// Qualified target links as-is (not double-qualified).
 		`chained → <a href="/run/beta/child-run">beta/child-run</a>`,
 		// Free-text HTML metachars stay escaped — no raw <b> from note text.
@@ -91,7 +92,7 @@ func TestRunPageRendersLinkifiedRowNote(t *testing.T) {
 		Addr: "127.0.0.1:0",
 		Root: root,
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
-			return dash.Row{Project: p, Run: slug, Note: "sdlc:merged · spawned → pulse-tail",
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:merged · spawned → alpha/pulse-tail",
 				Bucket: dash.BucketCompletedRuns, When: now}, true, nil
 		},
 	})
@@ -100,7 +101,7 @@ func TestRunPageRendersLinkifiedRowNote(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if want := `spawned → <a href="/run/alpha/pulse-tail">pulse-tail</a>`; !strings.Contains(rr.Body.String(), want) {
+	if want := `spawned → <a href="/run/alpha/pulse-tail">alpha/pulse-tail</a>`; !strings.Contains(rr.Body.String(), want) {
 		t.Errorf("run page missing linkified row note %q\n%s", want, rr.Body.String())
 	}
 

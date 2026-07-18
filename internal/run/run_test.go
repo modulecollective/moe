@@ -711,18 +711,24 @@ func TestJournalIndexCapturesReopenedFrom(t *testing.T) {
 
 // TestJournalIndexCapturesSpawnedBy: a spawned run's open commit
 // carries MoE-Spawned-By pointing at its spawner; the index keys it by
-// the spawned run's slug → the spawner slug, the same shape and
-// direction as ReopenedFrom.
+// the spawned run's slug → the qualified spawner, the same shape and
+// direction as ReopenedFrom. A qualified trailer is kept verbatim; a
+// legacy bare trailer normalizes to the spawned run's own project.
 func TestJournalIndexCapturesSpawnedBy(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string) {
 		t.Helper()
 		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
-	// A tailed pulse opens carrying MoE-Spawned-By naming the run that
-	// triggered it.
+	// A tailed pulse opens carrying a qualified MoE-Spawned-By naming the
+	// run that triggered it (the format new writers emit).
 	commitWith("Open run p/pulse-2026-07-17",
-		"MoE-Run: pulse-2026-07-17\nMoE-Project: p\nMoE-Spawned-By: ship-it\n")
+		"MoE-Run: pulse-2026-07-17\nMoE-Project: p\nMoE-Spawned-By: p/ship-it\n")
+	// A legacy commit carries a bare spawner slug; the builder qualifies it
+	// with the spawned run's own project (all historical spawns were
+	// same-project, so this is exact, not a guess).
+	commitWith("Open run p/pulse-legacy",
+		"MoE-Run: pulse-legacy\nMoE-Project: p\nMoE-Spawned-By: ship-it\n")
 	// A run opened by hand carries no edge and must not pollute the map.
 	commitWith("Open run p/loose",
 		"MoE-Run: loose\nMoE-Project: p\n")
@@ -731,8 +737,11 @@ func TestJournalIndexCapturesSpawnedBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
-	if got := idx.SpawnedBy["p/pulse-2026-07-17"]; got != "ship-it" {
-		t.Errorf("SpawnedBy[p/pulse-2026-07-17] = %q, want %q", got, "ship-it")
+	if got := idx.SpawnedBy["p/pulse-2026-07-17"]; got != "p/ship-it" {
+		t.Errorf("SpawnedBy[p/pulse-2026-07-17] = %q, want %q", got, "p/ship-it")
+	}
+	if got := idx.SpawnedBy["p/pulse-legacy"]; got != "p/ship-it" {
+		t.Errorf("SpawnedBy[p/pulse-legacy] = %q, want legacy bare value normalized to %q", got, "p/ship-it")
 	}
 	if _, ok := idx.SpawnedBy["p/loose"]; ok {
 		t.Errorf("SpawnedBy[p/loose] should be absent for a run without the trailer")

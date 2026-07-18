@@ -12,8 +12,9 @@ import (
 
 // buildSpawn runs BuildRows over the given runs with a SpawnedBy edge
 // map and returns the rows keyed by "<project>/<run>" plus the ordered
-// COMPLETED slice — the two views the nesting assertions need. when and
-// spawnedBy are keyed by qualified "<project>/<slug>".
+// COMPLETED slice — the two views the nesting assertions need. when is
+// keyed by qualified "<project>/<slug>"; spawnedBy is keyed and valued
+// by qualified "<project>/<slug>" (the always-qualified index contract).
 func buildSpawn(t *testing.T, runs []*run.Metadata, when map[string]time.Time, spawnedBy map[string]string) (map[string]Row, []Row) {
 	t.Helper()
 	next := make(map[string]NextDecision)
@@ -55,7 +56,7 @@ func TestSpawnOneChildRendersArrowNoRow(t *testing.T) {
 		"p/ship-it": base.Add(-2 * time.Hour),
 		"p/pulse-1": base.Add(-1 * time.Hour),
 	}
-	byKey, completed := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "ship-it"})
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "p/ship-it"})
 
 	if len(completed) != 1 {
 		t.Fatalf("completed rows = %d, want 1 (child folded into an arrow): %+v", len(completed), completed)
@@ -63,7 +64,7 @@ func TestSpawnOneChildRendersArrowNoRow(t *testing.T) {
 	if _, ok := byKey["p/pulse-1"]; ok {
 		t.Fatalf("pulse-1 should not render its own row when it is an only child")
 	}
-	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → pulse-1") {
+	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
 		t.Fatalf("parent note = %q, want the spawned arrow to pulse-1", got)
 	}
 }
@@ -85,8 +86,8 @@ func TestSpawnMultiChildRendersMemberRows(t *testing.T) {
 		"p/pulse-new": base.Add(-1 * time.Hour),
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{
-		"p/pulse-old": "ship-it",
-		"p/pulse-new": "ship-it",
+		"p/pulse-old": "p/ship-it",
+		"p/pulse-new": "p/ship-it",
 	})
 
 	var order []string
@@ -126,8 +127,8 @@ func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
 		"p/reflect-1": base.Add(-1 * time.Hour),
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{
-		"p/pulse-1":   "ship-it",
-		"p/reflect-1": "pulse-1",
+		"p/pulse-1":   "p/ship-it",
+		"p/reflect-1": "p/pulse-1",
 	})
 
 	var order []string
@@ -149,6 +150,34 @@ func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
 	}
 }
 
+// TestSpawnCrossProjectNestsUnderForeignSpawner: a run in project b
+// spawned from a run in project a nests under its foreign spawner. This
+// is the capability the qualified edge buys — the child carries its own
+// project (b) while its spawner lives in a. The arrow names the child's
+// qualified target so the cross-project origin is legible.
+func TestSpawnCrossProjectNestsUnderForeignSpawner(t *testing.T) {
+	base := time.Now().UTC()
+	runs := []*run.Metadata{
+		closedRun("a", "ship-it", "sdlc"),
+		closedRun("b", "pulse-1", "pulse"),
+	}
+	when := map[string]time.Time{
+		"a/ship-it": base.Add(-2 * time.Hour),
+		"b/pulse-1": base.Add(-1 * time.Hour),
+	}
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{"b/pulse-1": "a/ship-it"})
+
+	if len(completed) != 1 {
+		t.Fatalf("completed rows = %d, want 1 (foreign child folded into an arrow): %+v", len(completed), completed)
+	}
+	if _, ok := byKey["b/pulse-1"]; ok {
+		t.Fatal("cross-project only child must fold into its spawner's arrow, not render its own row")
+	}
+	if got := byKey["a/ship-it"].Note; !strings.Contains(got, "· spawned → b/pulse-1") {
+		t.Fatalf("spawner note = %q, want the spawned arrow to the foreign child b/pulse-1", got)
+	}
+}
+
 // TestSpawnOpenMidChainArrowsOnActivePulse: ship-it(closed) →
 // pulse(open) → reflect(closed). The open pulse doesn't fold (top-level
 // ACTIVE); the reflect's walk stops at the pulse and attaches there, so
@@ -167,8 +196,8 @@ func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
 		"p/reflect-1": base.Add(-1 * time.Hour),
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{
-		"p/pulse-1":   "ship-it",
-		"p/reflect-1": "pulse-1",
+		"p/pulse-1":   "p/ship-it",
+		"p/reflect-1": "p/pulse-1",
 	})
 
 	if _, ok := byKey["p/reflect-1"]; ok {
@@ -182,7 +211,7 @@ func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
 	if pulse.Bucket != BucketActiveRuns || pulse.Member {
 		t.Fatalf("open mid-chain pulse must stay a top-level ACTIVE row: %+v", pulse)
 	}
-	if !strings.Contains(pulse.Note, "· spawned → reflect-1") {
+	if !strings.Contains(pulse.Note, "· spawned → p/reflect-1") {
 		t.Fatalf("active pulse note = %q, want the spawned arrow to reflect-1", pulse.Note)
 	}
 	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
@@ -210,9 +239,9 @@ func TestSpawnChainWithSiblingKeepsLineageOrder(t *testing.T) {
 		"p/pulse-new": base.Add(-1 * time.Hour),
 	}
 	_, completed := buildSpawn(t, runs, when, map[string]string{
-		"p/pulse-old": "ship-it",
-		"p/reflect-1": "pulse-old",
-		"p/pulse-new": "ship-it",
+		"p/pulse-old": "p/ship-it",
+		"p/reflect-1": "p/pulse-old",
+		"p/pulse-new": "p/ship-it",
 	})
 
 	var order []string
@@ -241,8 +270,8 @@ func TestSpawnCycleRendersTopLevel(t *testing.T) {
 		"p/b": base.Add(-1 * time.Hour),
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{
-		"p/a": "b",
-		"p/b": "a",
+		"p/a": "p/b",
+		"p/b": "p/a",
 	})
 
 	if len(completed) != 2 {
@@ -265,7 +294,7 @@ func TestSpawnUnresolvedParentRendersTopLevel(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{closedRun("p", "pulse-x", "pulse")}
 	when := map[string]time.Time{"p/pulse-x": base}
-	byKey, completed := buildSpawn(t, runs, when, map[string]string{"p/pulse-x": "ghost"})
+	byKey, completed := buildSpawn(t, runs, when, map[string]string{"p/pulse-x": "p/ghost"})
 
 	if len(completed) != 1 {
 		t.Fatalf("completed rows = %d, want 1", len(completed))
@@ -289,7 +318,7 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 		"p/ship-it": base.Add(-1 * time.Hour),
 		"p/pulse-1": base,
 	}
-	idx := &run.JournalIndex{LastActivity: when, SpawnedBy: map[string]string{"p/pulse-1": "ship-it"}}
+	idx := &run.JournalIndex{LastActivity: when, SpawnedBy: map[string]string{"p/pulse-1": "p/ship-it"}}
 	rows, err := BuildRows(Inputs{Now: base, Runs: runs, Index: idx, NextByRun: map[string]NextDecision{}})
 	if err != nil {
 		t.Fatalf("BuildRows: %v", err)
@@ -306,7 +335,7 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 	if len(completed) != 0 {
 		t.Fatalf("completed rows = %d, want 0 (only child folds into the active parent's arrow)", len(completed))
 	}
-	if len(active) != 1 || !strings.Contains(active[0].Note, "· spawned → pulse-1") {
+	if len(active) != 1 || !strings.Contains(active[0].Note, "· spawned → p/pulse-1") {
 		t.Fatalf("active parent = %+v, want a single row carrying the spawned arrow", active)
 	}
 }
@@ -326,7 +355,7 @@ func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
 		"p/ship-it": base.Add(-2 * time.Hour),
 		"p/pulse-1": base.Add(-1 * time.Hour),
 	}
-	byKey, _ := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "ship-it"})
+	byKey, _ := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "p/ship-it"})
 
 	child, ok := byKey["p/pulse-1"]
 	if !ok {
