@@ -406,6 +406,37 @@ func TestTranscriptKeepsResultUnderCap(t *testing.T) {
 	}
 }
 
+// TestFragmentCapsHugeResult: the load-earlier fragment shares
+// fillResult with the page, so an over-cap result in an earlier window
+// is capped there too. Guards against the two call sites diverging.
+func TestFragmentCapsHugeResult(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	out, _ := fillerResult(2 * resultCapBytes)
+	// The big result sits at the head of the file, so the default tail
+	// window excludes it and only ?before= reaches it.
+	writeThread(t, root, "alpha", "fix-it", "design", "claude", bigResultThread(t, out)+manyUnits(250))
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, RunStages: ladderStages})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/transcript/design?agent=claude&before=51&fragment=1", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("fragment status=%d", rr.Code)
+	}
+	frag := rr.Body.String()
+	for _, want := range []string{"HEADSENTINEL", "TAILSENTINEL", "KiB elided"} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("fragment missing %q", want)
+		}
+	}
+	if strings.Contains(frag, "MIDSENTINEL") {
+		t.Errorf("fragment should elide the middle of an over-cap result")
+	}
+	if len(frag) > 3*resultCapBytes/2 {
+		t.Errorf("fragment is %d bytes for a %d-byte result; cap did not bound it", len(frag), len(out))
+	}
+}
+
 // TestCapResultSingleLineWhale: a newline-free result — minified JSON,
 // say — still gets capped, and the cuts land on rune boundaries so the
 // page stays valid UTF-8.
