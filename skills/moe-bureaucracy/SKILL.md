@@ -127,6 +127,11 @@ hyphen where the em-dash belongs — is **rejected at close**, not
 silently dropped: the harvest fails loud so you (or the operator)
 can fix the shape and re-run, rather than losing the idea.
 
+**The file is the claim.** Never write "filed as followup `x`" in a
+canvas without the matching `followups.md` line — a canvas that
+reports a filing it didn't make loses the item *and* convinces every
+later reader it's tracked. Close warns about claims it can't verify.
+
 Use the body only when context would save a future agent real
 work — the *why*, file:line refs, or a one-sentence approach
 sketch. Skip the body when the title is self-explanatory. The

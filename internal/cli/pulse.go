@@ -559,7 +559,7 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
 			continue
 		}
-		if slugBaseInProgress(inProgress, slug) {
+		if slugBaseMatches(inProgress, slug) {
 			moePrintf(stderr, "pulse: spawn: %s already has an in-progress run for %q — skipping\n", projectID, slug)
 			continue
 		}
@@ -632,15 +632,17 @@ func inProgressSlugs(root, projectID string) ([]string, error) {
 // on collision: `-YYYY-MM-DD`, optionally `-N` for a same-day repeat.
 var datedSlugSuffix = regexp.MustCompile(`^-\d{4}-\d{2}-\d{2}(-\d+)?$`)
 
-// slugBaseInProgress reports whether any in-progress slug was derived
-// from base — the bare base, or one of IDBase's dated forms.
+// slugBaseMatches reports whether any slug in the set was derived from
+// base — the bare base, or one of IDBase's dated forms. The spawn guard
+// passes the in-progress set; the close-time followup-claim check passes
+// every run on record.
 //
 // Deliberately not a bare prefix match: `fix-ci` and `fix-ci-red-main`
 // are different proposals, and a greedy prefix would silently skip the
 // second whenever the first is live. Only a date-shaped remainder counts
 // as "the harness already dated this base".
-func slugBaseInProgress(inProgress []string, base string) bool {
-	for _, slug := range inProgress {
+func slugBaseMatches(slugs []string, base string) bool {
+	for _, slug := range slugs {
 		if slug == base {
 			return true
 		}

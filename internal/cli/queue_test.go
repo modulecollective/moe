@@ -181,16 +181,16 @@ func TestSpawnSkipsSlugsAlreadyInProgress(t *testing.T) {
 // already dated this base" — a bare prefix match would silently drop
 // every proposal that happens to extend a live slug.
 func TestSpawnDedupeIsNotPrefixGreedy(t *testing.T) {
-	if !slugBaseInProgress([]string{"fix-ci-2026-07-18"}, "fix-ci") {
+	if !slugBaseMatches([]string{"fix-ci-2026-07-18"}, "fix-ci") {
 		t.Error("a dated form of the base should dedupe")
 	}
-	if !slugBaseInProgress([]string{"fix-ci-2026-07-18-2"}, "fix-ci") {
+	if !slugBaseMatches([]string{"fix-ci-2026-07-18-2"}, "fix-ci") {
 		t.Error("a same-day repeat of the base should dedupe")
 	}
-	if !slugBaseInProgress([]string{"fix-ci"}, "fix-ci") {
+	if !slugBaseMatches([]string{"fix-ci"}, "fix-ci") {
 		t.Error("the bare base should dedupe")
 	}
-	if slugBaseInProgress([]string{"fix-ci-red-main-2026-07-18"}, "fix-ci") {
+	if slugBaseMatches([]string{"fix-ci-red-main-2026-07-18"}, "fix-ci") {
 		t.Error("a longer, different slug must not dedupe against a shorter base")
 	}
 }

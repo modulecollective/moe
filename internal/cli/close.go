@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -233,12 +232,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// `code` entry to verify — same satisfaction model Workflow.Next
 	// uses.
 	if !isCaptureWorkflow(workflow) {
-		docIDs := make([]string, 0, len(md.Documents))
-		for docID := range md.Documents {
-			docIDs = append(docIDs, docID)
-		}
-		sort.Strings(docIDs)
-		for _, docID := range docIDs {
+		for _, docID := range sortedDocIDs(md) {
 			canvasRel := run.ContentPath(md.Project, md.ID, docID)
 			info, err := os.Stat(filepath.Join(root, canvasRel))
 			if err != nil || info.Size() == 0 {
@@ -276,7 +270,17 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		return err
 	}
 
-	// The close is durable and the repolock released. Tail a pulse for
+	// The close is durable and the repolock released. Advisory only,
+	// and deliberately after the commit: a canvas that claims a followup
+	// it never filed is a real dropped thread, but the rules are prose
+	// regexes and blocking on one would risk wedging a cascade on a
+	// false positive. Capture workflows have no canvas-vs-followups
+	// relationship to check.
+	if !isCaptureWorkflow(workflow) {
+		warnUnverifiedFollowupClaims(root, md, stderr)
+	}
+
+	// Tail a pulse for
 	// run-traffic closes — sdlc and twin, including the cascades'
 	// auto-close, which routes through this same path. Deliberately not
 	// wired into enterTerminal: sync's reconcile shares that helper and
