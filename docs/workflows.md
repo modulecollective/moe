@@ -7,6 +7,13 @@ environment reference, see [reference.md](reference.md).
 
 ## SDLC
 
+Designed, reviewed, tested changes used to cost enough that the discipline got
+skipped under deadline. The bet here is that agents changed the price: when
+each stage is one conversation and the handoff is a canvas the next stage
+reads, the full lifecycle becomes the cheap default path rather than the
+ceremony you cut first. The gates earn their place too — `review` and `test`
+exist to kick work back to `code` or `design`, not to decorate the ladder.
+
 `moe sdlc` is the main software-development workflow:
 
 ```sh
@@ -99,13 +106,32 @@ back-pointing `kick back to fix` nudge prints instead).
 ### Chains
 
 Chains are the batch version of that same forward motion for active SDLC runs.
-`moe chain edit` opens every active SDLC run across projects in `$EDITOR`;
-reorder the lines to make a sequence, delete lines you want left unchained,
-and save. `moe dash` shows a `chained -> <project>/<run>` hint for active
-parents with a live child. When a `!!!` cascade reaches the end of a chained
-parent, MoE starts the child at its first pending stage: a fresh child starts
-at `design`, while a partly completed child resumes where it is parked. (`!!`
-ships the parent and stops — it does not ride into the child.)
+Why they exist: Claude Code and Codex run on flat-rate dev subscriptions, so
+the capacity you don't use while sleeping or at dinner is already paid for.
+Chains turn that idle capacity into throughput. Shape work into designed runs
+during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
+step away, and the queue codes, reviews, tests, and ships unattended — each run
+still gated, journaled, and revertible in the morning.
+
+This is deliberately not scheduling. Every chain is rooted in one operator
+trigger; MoE ships no cron and nothing starts on a clock. The story is "you
+pull the trigger at 6pm and the work outlasts your attention", not "MoE runs at
+night".
+
+`moe chain edit` opens every active SDLC run across projects in `$EDITOR`,
+grouped into blocks that mirror the dash's chains. A blank line is a chain
+boundary: each contiguous block of run lines becomes one linear chain (each
+line chains-to the one below it in its block; the block's last line chains-to
+nothing). The editor is WYSIWYG — the blocks you see are the chains you get.
+Move a line into another block to fold it into that chain, and isolate a run in
+its own block (or delete its line) to unchain it. Saving unchanged is a no-op.
+
+`moe dash` shows a `chained -> <project>/<run>` hint for active parents with a
+live child. When a `!!!` cascade reaches the end of a chained parent, MoE
+starts the child at its first pending stage: a fresh child starts at `design`,
+while a partly completed child resumes where it is parked. (`!!` ships the
+parent and stops — it does not ride into the child.) `moe chain clear` drops
+every currently-live chain edge in one commit.
 
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask
@@ -113,6 +139,13 @@ whether you meant the current descendant; in non-interactive use it prints a
 hint.
 
 ## Chat
+
+Half the value of an agent is thinking, not editing. Chat exists for the half
+that shouldn't touch code: a durable, resumable thinking thread that is
+read-only against the project, so exploration can't drift into unreviewed
+edits. Its single write surface is grooming the idea backlog. And the run
+persists across sittings — one long conversation the next `chat` continues, not
+a fresh amnesiac session each time.
 
 `moe chat` is the read-only project-review surface: a thinking partner that
 reads project source through a per-run sandbox clone, never edits it, and
@@ -135,6 +168,11 @@ session makes on your behalf.
 
 ## Knowledge Base (kb)
 
+Background research otherwise decays into scattered chats you re-ask every few
+weeks. kb exists to make the answer durable: research once (a vetted
+bibliography with the gaps named), distill once (a wiki article), and future
+runs read the answer as context instead of re-earning it.
+
 `moe kb` is the research companion: research a topic once with an agent, and
 keep the distilled answer where future runs read it.
 
@@ -155,6 +193,11 @@ opening a run.
 
 ## Ideas
 
+Capture has to be cheaper than the thought is fleeting, or you lose the thought.
+An idea is inert — nothing executes it — so jotting one commits you to nothing;
+promotion into a run preserves the lineage in the journal. That is what lets
+backlog grooming feed runs without ever becoming automation.
+
 `moe idea` is the cheap backlog surface:
 
 ```sh
@@ -174,10 +217,12 @@ run was abandoned and should become backlog again.
 
 ## Chores
 
-Chores turn recurring project maintenance into runs you open on demand. A chore
-definition says what maintenance is due, when it becomes due, and which workflow
-run to open for it. MoE evaluates chores against the journal and surfaces the due
-ones — but nothing fires on its own. A due chore is a seeded run waiting in
+Recurring maintenance otherwise lives in your memory or in a cron job you don't
+trust an agent to run unattended. A chore is standing intent instead: it turns
+recurring project maintenance into runs you open on demand. A chore definition
+says what maintenance is due, when it becomes due, and which workflow run to
+open for it. MoE evaluates chores against the journal and surfaces the due ones
+— but nothing fires on its own. A due chore is a seeded run waiting in
 `moe dash` until you choose to open it.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
@@ -220,10 +265,12 @@ down or not yet due — it still refuses if a run is already open.
 ## Pulse
 
 A pulse is a read-only sweep of one project that feeds the backlog and ranks
-what to pull from it. It is the "work just landed — what's next?" reflex: it
-fires at the tail of the operator-rooted run-traffic verbs (`moe sdlc close`,
-`moe sdlc push`, `moe twin close`, and the cascades' auto-close), never on its
-own clock and never from `moe sync`. Scope is always the driven run's project.
+what to pull from it. "Work just landed — what's next?" is a reflex worth
+automating, but only inside consent bounds: a pulse fires at the tail of the
+operator-rooted run-traffic verbs (`moe sdlc close`, `moe sdlc push`,
+`moe twin close`, and the cascades' auto-close), never on its own clock and
+never from `moe sync`. Every fire rides an action you took. Scope is always the
+driven run's project.
 
 Every pulse does two things:
 
@@ -258,14 +305,37 @@ the Pull next list is advisory and you hold every execution trigger.
 
 ## Twin
 
-`moe twin reflect <project>` walks the fixed digital-twin documents —
-`vision`, `architecture`, `patterns`, `operations`, `glossary` — and folds
-new observations into recorded intent, then a closing `finalize` stage seals
-the pass (clearing hygiene findings and folding events). See
+Code records what was built; it never records what was intended. So agents
+re-derive intent from the code and get it subtly wrong, run after run — the
+same misread of a boundary or a non-goal, rediscovered every time. The digital
+twin exists to write that intent down once. It is recorded intent in five fixed
+documents — `vision`, `architecture`, `patterns`, `operations`, `glossary` —
+that every stage reads before substantive work.
+
+What makes it steering rather than documentation is the precedence rule: when
+the code and the twin disagree, the twin wins until a deliberate edit updates
+it. A run that would contradict a recorded decision has to name the conflict
+first, not quietly diverge. Intent leads; implementation follows.
+
+`moe twin reflect <project>` is the maintenance verb. It walks each document
+against the journal events since the last pass and folds observed drift in
+under a rising edit bar: fill a genuine gap freely, tighten wording only on
+repeated sightings, and reverse a stated bet only loudly and on strong
+evidence. A closing `finalize` stage then seals the pass — clearing hygiene
+findings and rolling events into a history summary, older horizons compressed.
+Runs don't edit the twin directly; they leave observations as feedback notes,
+and reflect is where those get adjudicated. See
 [concepts.md §Feedback Channels](concepts.md#feedback-channels) for how the
 twin steers future runs.
 
 ## Hooks
+
+Some project guidance has to be deterministic rather than prose an agent
+interprets: bringing up a dev environment, tearing it down, gating a push.
+Hooks are that layer — drop-in executable scripts with no manifest, discovered
+by directory. Two loops maintain them: a journaled edit loop
+(`hooks new/code/close`) for durable changes, and a fast one-shot fire loop for
+iterating on a script until it works.
 
 `moe hooks new`, `moe hooks code`, and `moe hooks close` are the journaled
 loop for project hook scripts. `moe hook fire <project> <event>` is the fast

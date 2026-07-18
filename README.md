@@ -14,7 +14,9 @@ memory that can be resumed, reverted, audited, and reused.
 
 There is no daemon, no scheduler, and no swarm. Agents act when you invoke a
 command, and the operator stays strategist, reviewer, and source of judgment.
-The bet behind that stance: agents have made careful work cheap. When a
+MoE is also deliberately single-operator — see [Anti-Social on
+Purpose](#anti-social-on-purpose) for why that is a bet rather than a missing
+feature. The bet behind that stance: agents have made careful work cheap. When a
 designed, reviewed, tested change costs one conversation and two keystrokes,
 the discipline that used to be overhead becomes the default path. What MoE
 removes is the coordination tax — opening work, handing context forward,
@@ -51,6 +53,12 @@ ships this run, and `!!!` ships it and rides on into the next queued run. The
 full vocabulary — every stage spelled out, chains, and the matching CLI flags
 — is in [docs/workflows.md](docs/workflows.md#sdlc).
 
+That last bang is where the economics turn: shape a few runs during the day,
+`moe chain edit` them into a sequence, and fire `!!!` once as you step away.
+The queue then codes, reviews, tests, and ships on capacity your flat-rate dev
+subscription already pays for while you sleep — each run still gated,
+journaled, and revertible in the morning.
+
 ## You Might Want MoE If
 
 - you run several agent threads and need to resume them without chat-history
@@ -61,8 +69,29 @@ full vocabulary — every stage spelled out, chains, and the matching CLI flags
   future runs automatically;
 - you want recurring maintenance to surface as ready-to-open runs instead of
   living in your memory;
+- you pay for a flat-rate dev subscription that idles sixteen hours a day and
+  would rather it worked a queue overnight than sat unused;
 - you prefer explicit CLI commands and Git history over a hosted coordination
   product.
+
+## Anti-Social on Purpose
+
+MoE is deliberately single-operator. There are no accounts, no sharing, and no
+multi-operator coordination surface — that is a recorded non-goal, not a
+feature that hasn't been built yet.
+
+The reason is what total capture buys. MoE saves *everything*: every
+conversation, every turn, every canvas, committed to a private journal. That
+total record is what makes work resumable, auditable, and reusable — and it is
+only comfortable because the journal is yours alone. Do the same across a team
+and you inherit consent, privacy, and signal-to-noise problems that reshape the
+whole system: who reads whose transcripts, what gets redacted before capture,
+whose judgment a shared twin encodes.
+
+So MoE is social in exactly one direction: between one operator and their
+agents. That relationship is what accumulates — canvases, twin, lore, and
+backlog are its shared memory — and the harness's whole job is to make that one
+relationship compound rather than to coordinate many.
 
 ## Install
 
