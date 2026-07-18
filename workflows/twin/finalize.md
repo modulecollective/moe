@@ -33,6 +33,14 @@ during verification.
   sharp, older blurred, oldest gone — so it stays bounded
   instead of growing every reflect. Don't drop signal a future
   reflect will need; do shed detail it won't.
+- **Re-route mis-filed followups.** A followup filed this pass
+  whose action would edit a digital-twin doc is a hygiene
+  finding, not someone else's filing to leave alone: move the
+  line to `feedback/twin.md` and note the move under "What I
+  fixed". The close-time harvest turns `followups.md` into ideas
+  and then runs, and a spawned reflect closes headless — so a
+  twin edit left in the wrong channel becomes a run forbidden to
+  do the work, with no operator triage in between.
 - **Walk the prior stage canvases.** Anything they flagged "for
   operator" or "needs follow-up" that didn't get acted on — fold
   the residue into either an inline fix here or a feedback-twin
