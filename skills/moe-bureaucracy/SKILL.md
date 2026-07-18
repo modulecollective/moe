@@ -25,6 +25,17 @@ worth recording for future runs. MoE keeps three places for this:
 The paths below are pre-substituted for this run. Read top-down and append to
 the first matching channel.
 
+One thing you **never** write: **intents**. An intent
+(`projects/<project>/runs/<slug>/documents/intent/content.md`, the
+single-stage `intent` workflow) is the operator's standing direction for
+a project — where it's going, parked while it's relevant. Agents read
+intents (the `moe-context` skill covers that); only the operator authors
+or closes them. If you think a theme or direction is missing, say so in
+your canvas or a report and let the operator decide whether to park it —
+don't file it as a followup expecting it to become an intent (followups
+become *ideas*, never intents), and never run `moe intent new`/`edit`
+yourself.
+
 ---
 
 ## Twin observations

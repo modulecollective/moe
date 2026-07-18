@@ -215,6 +215,49 @@ to groom the backlog or help shape notes. Every other workflow's `new` accepts
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
 
+## Intents
+
+An **intent** is a short, operator-authored statement of where a project is
+going — a theme, a bet, a "we're heading here" — parked on the project while
+it's relevant and closed when it stops being so. It is not a task: an intent is
+never promoted, never executed, never handed to an agent to advance. Agents
+*read* intents; only the operator writes them.
+
+```sh
+moe intent new <project>/<slug>     # park a new intent in $EDITOR
+moe intent edit <project>/<slug>    # sharpen it — intents are living docs
+moe intent list <project>           # the open intents
+moe intent cat <project>/<slug>     # dump one to stdout
+moe intent close <project>/<slug>   # satisfied or abandoned (status -> closed)
+```
+
+Intents are just runs in a single-stage `intent` workflow, the same shape as
+ideas, with the same discipline that no verb launches an agent — capture stays
+cheap. The canvas body is freeform markdown: no fields, no priority, no
+until-date. Parked = open.
+
+Where intents reach the robots:
+
+- **Stage prompts.** Every agent-facing stage on a project with open intents
+  gets a short catalog section (slug — title, canvas path) between the digital
+  twin and the lore catalog, framed as "where this project is going — read the
+  ones that bear on what you're deciding." It aims the discretionary calls
+  (what to propose, what to prioritise); it doesn't fence what's allowed.
+- **The pulse.** The pulse is the one consumer whose job includes the intents,
+  so its fragment makes the read mandatory: open intents join the survey floor,
+  speculative proposals aim at an open intent (`intent: <slug>` in the Why),
+  Pull-next why-now reasons may cite one ("serves `north-star`"), and backlog
+  hygiene may flag an intent that looks satisfied or stale — advisory only, the
+  operator closes intents.
+- **The dash.** Open intents render in a standing `INTENTS` section above the
+  backlog, on both the CLI dash and `moe serve`. The heading renders even at
+  zero: an empty list is itself a signal that the robots are running unaimed.
+
+No agent mints or edits intents. If a theme looks missing, an agent names it in
+a report; the operator decides whether to park it. Deliberately no `move`, no
+`reopen`, no `log`, and no run↔intent linkage in v1 — an intent's effect shows
+up in what gets filed and ranked, not in an edge table.
+
 ## Chores
 
 Recurring maintenance otherwise lives in your memory or in a cron job you don't

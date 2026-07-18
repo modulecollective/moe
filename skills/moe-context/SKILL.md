@@ -46,6 +46,17 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
   architecture, patterns, operations, glossary. Your
   always-on stage prompt already points here; named again so you
   don't re-discover it.
+- `projects/<p>/runs/<slug>/documents/intent/content.md` — an **intent**:
+  a short, operator-authored statement of where the project is going (a
+  theme, a bet, a direction), parked while it's relevant. Intents are
+  runs in the single-stage `intent` workflow; `moe intent list <p>`
+  names the open ones and `moe intent cat <p>/<slug>` dumps one. They're
+  read-only context — the operator authors them, agents never do (see
+  the write-side rule in `moe-bureaucracy`). When you're making a
+  judgment call about direction (what to propose, what to prioritise),
+  the open intents are the aim; read the ones that bear on it. The
+  always-on stage prompt lists them in a catalog, and the pulse's
+  fragment makes reading them mandatory.
 - `projects/<p>/knowledge/topics/` — the project's open-schema wiki.
 - `lore/<slug>.md` — cross-project facts; the always-on stage prompt
   catalog lists which apply to which contexts.
