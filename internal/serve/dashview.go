@@ -20,9 +20,9 @@ import (
 var noteHintRE = regexp.MustCompile(`(chained|spawned|promoted) → ([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
 
 // noteHTML escapes note for HTML and wraps the target of each machine
-// lineage hint in a link to its run page. A bare target (spawned's
-// same-project slug) is qualified with the row's own project; a target
-// that already carries a "project/" segment links as-is. Every producer
+// lineage hint in a link to its run page. Every producer emits qualified
+// "<project>/<slug>" targets, which link as-is; a bare target (a stray
+// legacy value) is tolerated and qualified with the row's own project. Every producer
 // pre-checks that the target is on the board, so the /run/ link
 // resolves; a since-pruned target 404s like any stale run URL. Notes
 // without the verb-arrow pattern pass through escaped-only.
