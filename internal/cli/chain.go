@@ -5,11 +5,13 @@
 // chains. A blank line is a chain boundary: each contiguous block of
 // run lines becomes one linear chain (line i chains-to line i+1 within
 // its block; the block's last line chains-to nothing). The editor is
-// WYSIWYG — the blocks you see are the chains you get. Per Decision 4,
-// the file is authoritative for parents in it — any chain-to edge whose
-// parent appears in the file is dropped and replaced by the file's
-// blocks; edges whose parent isn't in the file are untouched. So opening
-// the editor and saving unchanged is a no-op for any fan-in-free state.
+// WYSIWYG — the blocks you see are the chains you get. The offered runs
+// are authoritative: a run's saved position sets its outgoing edge, and
+// a run the editor showed but the operator deleted has its edge cleared
+// (delete unchains, same as isolating a run in its own block). Runs the
+// editor never showed — terminal or suppressed parents — keep their
+// edges, so opening the editor and saving unchanged is a no-op for any
+// fan-in-free state.
 //
 // `moe chain clear` drops every currently-live chain edge in one
 // commit. Confirmation prompt by default; --yes skips.
@@ -72,8 +74,8 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "grouped into blocks that mirror the dash's chains. A blank line")
 		moePrintln(stderr, "separates chains: each block of run lines becomes one linear chain")
 		moePrintln(stderr, "(each chains-to the one below it within the block). Move a line into")
-		moePrintln(stderr, "another block to fold it in, isolate it in its own block to unchain")
-		moePrintln(stderr, "it, or delete it to leave its edge untouched.")
+		moePrintln(stderr, "another block to fold it in, or isolate it in its own block")
+		moePrintln(stderr, "(or delete it) to unchain it.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -158,7 +160,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	adds, removes := diffChainEdit(desired, idx.ChainedChild)
+	adds, removes := diffChainEdit(desired, activeKeys, idx.ChainedChild)
 	if len(adds) == 0 && len(removes) == 0 {
 		moePrintln(stdout, "chain edit: no changes")
 		return 0
@@ -370,10 +372,10 @@ func renderChainEditFile(blocks [][]chainItem) string {
 	sb.WriteString("# becomes one linear chain: each line chains-to the one below it\n")
 	sb.WriteString("# within its block; the block's last line chains-to nothing.\n")
 	sb.WriteString("#\n")
-	sb.WriteString("# Move a line into another block to fold it into that chain, put\n")
-	sb.WriteString("# it alone (blank lines around it) to unchain it, or delete it to\n")
-	sb.WriteString("# leave its edge untouched. Lines starting with # are ignored;\n")
-	sb.WriteString("# only the leading <project>/<slug> token is parsed.\n")
+	sb.WriteString("# Move a line into another block to fold it into that chain, or\n")
+	sb.WriteString("# isolate it (blank lines around it, or delete it) to unchain it.\n")
+	sb.WriteString("# Lines starting with # are ignored; only the leading\n")
+	sb.WriteString("# <project>/<slug> token is parsed.\n")
 	sb.WriteString("#\n")
 	sb.WriteString("# Save unchanged for a no-op.\n")
 	sb.WriteString("#\n")
@@ -435,16 +437,22 @@ func parseChainEditFile(body string) ([][]string, error) {
 // save. blocks are the saved file's chains — within each block, the
 // slug at position i chains-to position i+1 and the last slug has no
 // successor. Blocks don't chain into one another: a block boundary is a
-// chain boundary. live is the journal index's current chain map.
+// chain boundary. offered is the set of runs the editor showed the
+// operator (active, non-suppressed); live is the journal index's
+// current chain map.
 //
-// Per Decision 4, parents IN the file are authoritative — their
-// desired live child replaces whatever the index says (including
-// clearing to no child if the parent is the last line of its block).
-// Parents NOT in the file are untouched.
+// Authoritativeness is scoped to the offered set. A run that appears in
+// the file gets the outgoing edge its saved position implies (including
+// no edge if it is the last line of its block). A run the editor
+// offered but the operator deleted from the file gets its edge cleared
+// too — delete unchains, the same as isolating a run in its own block.
+// A parent the editor never showed (terminal or suppressed) keeps
+// whatever edge the index holds, so a save can never clear an edge the
+// operator never saw.
 //
 // Each emitted trailer value is "<parent> <child>". Outputs are
 // sorted by parent for deterministic commit bodies and tests.
-func diffChainEdit(blocks [][]string, live map[string]string) (adds, removes []string) {
+func diffChainEdit(blocks [][]string, offered map[string]bool, live map[string]string) (adds, removes []string) {
 	want := map[string]string{}
 	for _, block := range blocks {
 		for i, k := range block {
@@ -453,6 +461,14 @@ func diffChainEdit(blocks [][]string, live map[string]string) (adds, removes []s
 			} else {
 				want[k] = ""
 			}
+		}
+	}
+	// An offered run absent from the file was deleted: the operator
+	// wants it unchained, not left alone. Give it an empty desired edge
+	// so a live edge diffs to a clear.
+	for k := range offered {
+		if _, ok := want[k]; !ok {
+			want[k] = ""
 		}
 	}
 	parents := make([]string, 0, len(want))

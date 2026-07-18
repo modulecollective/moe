@@ -76,12 +76,28 @@ func TestParseChainEditFileEmpty(t *testing.T) {
 	}
 }
 
+// keysOf builds an offered-run set from the file's blocks, plus any
+// extra runs the editor showed but the file no longer lists (deleted
+// lines). Most diff tests offer exactly the runs in the file.
+func keysOf(blocks [][]string, extra ...string) map[string]bool {
+	m := map[string]bool{}
+	for _, b := range blocks {
+		for _, k := range b {
+			m[k] = true
+		}
+	}
+	for _, k := range extra {
+		m[k] = true
+	}
+	return m
+}
+
 func TestDiffChainEditNewChainOnAllOrphans(t *testing.T) {
 	// All three runs are unchained today. The save links them
 	// head-first into a linear chain.
 	blocks := [][]string{{"p/a", "p/b", "p/c"}}
 	live := map[string]string{}
-	adds, removes := diffChainEdit(blocks, live)
+	adds, removes := diffChainEdit(blocks, keysOf(blocks), live)
 	wantAdds := []string{"p/a p/b", "p/b p/c"}
 	if !reflect.DeepEqual(adds, wantAdds) {
 		t.Errorf("adds = %v, want %v", adds, wantAdds)
@@ -98,7 +114,7 @@ func TestDiffChainEditReplaceMidchainEdge(t *testing.T) {
 	// line, so desired b → "" matches live b → "" → no-op.
 	blocks := [][]string{{"p/a", "p/c", "p/b"}}
 	live := map[string]string{"p/a": "p/b"}
-	adds, removes := diffChainEdit(blocks, live)
+	adds, removes := diffChainEdit(blocks, keysOf(blocks), live)
 	wantAdds := []string{"p/a p/c", "p/c p/b"}
 	wantRemoves := []string{"p/a p/b"}
 	if !reflect.DeepEqual(adds, wantAdds) {
@@ -109,18 +125,43 @@ func TestDiffChainEditReplaceMidchainEdge(t *testing.T) {
 	}
 }
 
-func TestDiffChainEditUntouchedWhenParentAbsent(t *testing.T) {
-	// Decision 4: parents NOT in the file are untouched. p/x has
-	// a live edge but isn't in `desired`; the diff must not emit
-	// any trailer for it.
+func TestDiffChainEditDeletedRunUnchains(t *testing.T) {
+	// Decision 3: a run the editor offered but the operator deleted
+	// from the file gets its outgoing edge cleared — delete unchains.
+	// p/x was offered and has a live edge but is absent from `desired`;
+	// its edge must be dropped, not left alone.
 	blocks := [][]string{{"p/a", "p/b"}}
 	live := map[string]string{
 		"p/x": "p/y",
 		"p/a": "p/old",
 	}
-	adds, removes := diffChainEdit(blocks, live)
-	// p/a's edge changes from old → b; p/b is the file's last line
-	// so its desired-child is "" matching live's absence → no-op.
+	offered := keysOf(blocks, "p/x", "p/y")
+	adds, removes := diffChainEdit(blocks, offered, live)
+	// p/a's edge changes from old → b; p/b is the file's last line so
+	// its desired-child is "" matching live's absence → no-op. p/x was
+	// deleted, so its live edge clears.
+	wantAdds := []string{"p/a p/b"}
+	wantRemoves := []string{"p/a p/old", "p/x p/y"}
+	if !reflect.DeepEqual(adds, wantAdds) {
+		t.Errorf("adds = %v, want %v", adds, wantAdds)
+	}
+	if !reflect.DeepEqual(removes, wantRemoves) {
+		t.Errorf("removes = %v, want %v", removes, wantRemoves)
+	}
+}
+
+func TestDiffChainEditUnofferedParentUntouched(t *testing.T) {
+	// The scope guard on Decision 3: a parent the editor never showed
+	// (terminal or suppressed) keeps its live edge. p/x has a live edge
+	// but was not offered, so it must not be cleared — a save can't
+	// touch an edge the operator never saw.
+	blocks := [][]string{{"p/a", "p/b"}}
+	live := map[string]string{
+		"p/x": "p/y",
+		"p/a": "p/old",
+	}
+	offered := keysOf(blocks) // p/x deliberately absent from the offered set
+	adds, removes := diffChainEdit(blocks, offered, live)
 	wantAdds := []string{"p/a p/b"}
 	wantRemoves := []string{"p/a p/old"}
 	if !reflect.DeepEqual(adds, wantAdds) {
@@ -135,7 +176,7 @@ func TestDiffChainEditNoChanges(t *testing.T) {
 	// The saved file matches the live chain exactly.
 	blocks := [][]string{{"p/a", "p/b"}}
 	live := map[string]string{"p/a": "p/b"}
-	adds, removes := diffChainEdit(blocks, live)
+	adds, removes := diffChainEdit(blocks, keysOf(blocks), live)
 	if len(adds) != 0 || len(removes) != 0 {
 		t.Errorf("unchanged save should produce no trailers: adds=%v removes=%v", adds, removes)
 	}
@@ -148,13 +189,13 @@ func TestDiffChainEditBlocksStaySeparate(t *testing.T) {
 	// a hard chain boundary, so an unchanged two-chain save is a no-op.
 	blocks := [][]string{{"p/a", "p/b"}, {"p/c", "p/d"}}
 	live := map[string]string{"p/a": "p/b", "p/c": "p/d"}
-	adds, removes := diffChainEdit(blocks, live)
+	adds, removes := diffChainEdit(blocks, keysOf(blocks), live)
 	if len(adds) != 0 || len(removes) != 0 {
 		t.Errorf("two separate chains should produce no trailers: adds=%v removes=%v", adds, removes)
 	}
 	// And with no live edges, each block links only within itself —
 	// no p/b p/c edge bridging the boundary.
-	adds, removes = diffChainEdit(blocks, map[string]string{})
+	adds, removes = diffChainEdit(blocks, keysOf(blocks), map[string]string{})
 	wantAdds := []string{"p/a p/b", "p/c p/d"}
 	if !reflect.DeepEqual(adds, wantAdds) {
 		t.Errorf("adds = %v, want %v (no cross-block edge)", adds, wantAdds)
@@ -170,7 +211,7 @@ func TestDiffChainEditLastLineClearsItsOldEdge(t *testing.T) {
 	// still in the file so its edge must be cleared.
 	blocks := [][]string{{"p/a"}}
 	live := map[string]string{"p/a": "p/old"}
-	adds, removes := diffChainEdit(blocks, live)
+	adds, removes := diffChainEdit(blocks, keysOf(blocks), live)
 	if len(adds) != 0 {
 		t.Errorf("adds should be empty, got %v", adds)
 	}
@@ -801,7 +842,11 @@ func TestChainEditRoundTripIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
 	}
-	adds, removes := diffChainEdit(parsed, idx.ChainedChild)
+	offered := map[string]bool{}
+	for _, md := range mds {
+		offered[md.Project+"/"+md.ID] = true
+	}
+	adds, removes := diffChainEdit(parsed, offered, idx.ChainedChild)
 	if len(adds) != 0 || len(removes) != 0 {
 		t.Fatalf("round-trip should be a no-op: adds=%v removes=%v\nrendered:\n%s", adds, removes, body)
 	}
