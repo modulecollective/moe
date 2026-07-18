@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -189,8 +191,47 @@ func runPulse(root, projectID, spawner string, stdout, stderr io.Writer) (int, b
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
 	autoOpenDueChores(root, projectID, pi, stdout, stderr)
+	reconcileAtPulse(root, projectID, pi, stdout, stderr)
 	code := runPulseSurvey(root, projectID, spawner, pi, stdout, stderr)
 	return code, pi.interrupted()
+}
+
+// reconcileAtPulse asks GitHub about this project's pushed runs and
+// applies whatever landed out of band, so a PR the operator merged from
+// their phone is `merged` in the journal *before* the survey reads its
+// delta. Same walk `moe sync` does, scoped to one project — sync still
+// owns pointer bumps; the pulse takes only the reconcile step.
+//
+// Warn-only like everything else in the pulse: a reconcile failure
+// (offline, no gh, a wedged lock) must not derail the sweep or the verb
+// that triggered it. The repolock is acquired here because firePulse
+// runs after the triggering verb released it, and it is held only for
+// the walk — the survey's own run-open takes its own. The journal push
+// is conditional on something actually having moved: the common case is
+// a project with nothing pushed, which should stay a disk-only scan.
+func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
+	// Checkpoint: a Ctrl-C during chore auto-open skips the network walk
+	// too — the operator asked for the sweep to get out of the way.
+	if pi.interrupted() {
+		return
+	}
+	err := repolock.With(root, repolock.Options{
+		Purpose:   "pulse-reconcile",
+		Budget:    repolock.CronBudget,
+		Heartbeat: true,
+	}, func() error {
+		moved, err := reconcilePushedRuns(root, projectID, stdout, stderr)
+		if err != nil {
+			return err
+		}
+		if moved == 0 {
+			return nil
+		}
+		return sync.AutoPush(root, stdout, stderr)
+	})
+	if err != nil {
+		moePrintf(stderr, "pulse: reconcile pushed runs for %s: %v\n", projectID, err)
+	}
 }
 
 // autoOpenDueChores opens every due chore's run for the project via the

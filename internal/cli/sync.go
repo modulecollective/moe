@@ -118,7 +118,7 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// Reconcile any pushed runs: if GitHub says the PR merged or
 	// closed, flip the run's status and clean up the branch + sandbox
 	// so the end state matches the direct-merge path.
-	if err := reconcilePushedRuns(root, stdout, stderr); err != nil {
+	if _, err := reconcilePushedRuns(root, "" /*all projects*/, stdout, stderr); err != nil {
 		return err
 	}
 
@@ -141,10 +141,17 @@ func doSync(root string, stdout, stderr io.Writer) error {
 // and records a closing trailer. Open PRs are a silent no-op; sync
 // prints exactly one line per transition and nothing for runs that
 // didn't move.
-func reconcilePushedRuns(root string, stdout, stderr io.Writer) error {
+//
+// projectID scopes the walk: "" is every project (sync's shape), a
+// project id is that project alone (the pulse's tail reconcile, which
+// has no business touching a neighbour's runs). The returned count is
+// how many runs actually transitioned — the pulse uses it to decide
+// whether the journal is worth pushing, since the common case moves
+// nothing and a no-op push is a network leg for free.
+func reconcilePushedRuns(root, projectID string, stdout, stderr io.Writer) (int, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
-		return fmt.Errorf("moe sync: scan runs: %w", err)
+		return 0, fmt.Errorf("moe sync: scan runs: %w", err)
 	}
 	// Deterministic order so transition lines come out the same way
 	// across invocations — helps when the operator is scanning output
@@ -155,61 +162,75 @@ func reconcilePushedRuns(root string, stdout, stderr io.Writer) error {
 		}
 		return mds[i].ID < mds[j].ID
 	})
+	moved := 0
 	for _, md := range mds {
 		if md.Status != run.StatusPushed {
 			continue
 		}
-		if err := reconcileOnePushedRun(root, md, stdout, stderr); err != nil {
-			return err
+		if projectID != "" && md.Project != projectID {
+			continue
+		}
+		ok, err := reconcileOnePushedRun(root, md, stdout, stderr)
+		if err != nil {
+			return moved, err
+		}
+		if ok {
+			moved++
 		}
 	}
-	return nil
+	return moved, nil
 }
 
-func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+// reconcileOnePushedRun asks GitHub about one pushed run's PR and
+// applies the transition it implies. The bool is whether the run
+// actually moved — a still-open PR, a skipped run, or a deferred
+// harvest all report false.
+func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) (bool, error) {
 	prURL := push.TrailerValue(root, md.Project, md.ID, "MoE-PR")
 	if prURL == "" {
 		// No MoE-PR trailer on record despite StatusPushed. Flag and
 		// skip rather than guess — the operator can untangle by hand.
 		moePrintf(stderr, "moe sync: %s/%s is pushed but has no MoE-PR trailer; skipping\n", md.Project, md.ID)
-		return nil
+		return false, nil
 	}
 	state, err := sync.PRStateOf(prURL)
 	if err != nil {
 		moePrintf(stderr, "moe sync: %s/%s: %v; skipping\n", md.Project, md.ID, err)
-		return nil
+		return false, nil
 	}
 	switch strings.ToUpper(state.State) {
 	case "OPEN":
-		return nil
+		return false, nil
 	case "MERGED":
 		mergeSHA := state.MergeCommit.OID
 		if mergeSHA == "" {
 			moePrintf(stderr, "moe sync: %s/%s merged but gh returned no mergeCommit; skipping\n", md.Project, md.ID)
-			return nil
+			return false, nil
 		}
 		ok, err := finalizePushedRun(root, md, run.StatusMerged, trailers.Block{
 			Merged:       mergeSHA,
 			ChoreTouched: touchedChoresForCommit(root, md.Project, mergeSHA),
 		}, stderr)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if ok {
 			moePrintf(stdout, "%s: pushed -> merged (%s)\n", md.ID, git.ShortSHA(mergeSHA))
 		}
+		return ok, nil
 	case "CLOSED":
 		ok, err := finalizePushedRun(root, md, run.StatusClosed, trailers.Block{Closed: prURL}, stderr)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if ok {
 			moePrintf(stdout, "%s: pushed -> closed\n", md.ID)
 		}
+		return ok, nil
 	default:
 		moePrintf(stderr, "moe sync: %s/%s has unexpected PR state %q; skipping\n", md.Project, md.ID, state.State)
 	}
-	return nil
+	return false, nil
 }
 
 // finalizePushedRun harvests follow-ups, flips md.Status, deletes the

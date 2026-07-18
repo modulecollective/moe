@@ -214,7 +214,7 @@ func TestReconcileTransitionsMerged(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if err := reconcilePushedRuns(f.root, &stdout, &stderr); err != nil {
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
 		t.Fatalf("reconcile: %v\nstderr=%s", err, stderr.String())
 	}
 
@@ -249,7 +249,7 @@ func TestReconcileTransitionsClosed(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if err := reconcilePushedRuns(f.root, &stdout, &stderr); err != nil {
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
 		t.Fatalf("reconcile: %v\nstderr=%s", err, stderr.String())
 	}
 
@@ -281,7 +281,7 @@ func TestReconcileOpenIsNoop(t *testing.T) {
 	before := lastCommitMessage(t, f.root)
 
 	var stdout, stderr bytes.Buffer
-	if err := reconcilePushedRuns(f.root, &stdout, &stderr); err != nil {
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
 		t.Fatalf("reconcile: %v\nstderr=%s", err, stderr.String())
 	}
 
@@ -307,7 +307,7 @@ func TestReconcileSkipsNonPushedRuns(t *testing.T) {
 	// would fail. That's the assertion: we shouldn't call gh at all.
 
 	var stdout, stderr bytes.Buffer
-	if err := reconcilePushedRuns(f.root, &stdout, &stderr); err != nil {
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
 		t.Fatalf("reconcile: %v\nstderr=%s", err, stderr.String())
 	}
 	if stdout.Len() != 0 {
