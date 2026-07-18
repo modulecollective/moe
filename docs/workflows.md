@@ -155,6 +155,11 @@ with no children is a chain of one, so kick is also how you fire a single parked
 run headlessly. Kick refuses a run that is itself chained under another; kick
 the head instead.
 
+Kick exits non-zero if any run in the chain stalls — the stalled stage's own
+exit code, with a `chain ride into <run> exited N` line on stderr naming where.
+A cron or script driving kick can treat the exit code as "the whole chain rode
+clean", and read stderr only when it didn't. `!!!` behaves the same way.
+
 When you type an older idea or run slug into an SDLC command, MoE follows
 promotion and reopen trailers where it can. In an interactive shell it can ask
 whether you meant the current descendant; in non-interactive use it prints a

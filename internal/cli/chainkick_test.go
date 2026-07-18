@@ -242,3 +242,56 @@ func TestChainKickRequiresAQualifiedRun(t *testing.T) {
 		t.Fatalf("chain kick exit=%d, want 2 (usage) for a bare project", code)
 	}
 }
+
+// TestChainKickStalledRideExitsNonZero is the reason this seam exists:
+// kick is the programmatic entry point (cron, scripts), so a chain that
+// stalls partway must reach the shell as a non-zero exit rather than as
+// a stderr line nobody parses. The head still closes — its own work was
+// trivially done, and leaving it open to punish a child's failure would
+// park a dead run on the dash.
+func TestChainKickStalledRideExitsNonZero(t *testing.T) {
+	root, _, _ := kickFixture(t)
+	// Re-stub: the first child's design stage fails.
+	stages := stubOpenSdlcStage(t, map[string]int{"design": 1})
+	pushes := stubPushFromCascade(t, 0, nil)
+
+	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+		{Slug: "fix-one", Title: "One"},
+		{Slug: "fix-two", Title: "Two"},
+	}, io.Discard, os.Stderr)
+
+	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	if len(heads) != 1 {
+		t.Fatalf("chain runs %v, want 1", heads)
+	}
+	head := heads[0]
+
+	var out, errb bytes.Buffer
+	if code := runChainKick([]string{"moe/" + head}, &out, &errb); code != 1 {
+		t.Fatalf("chain kick exit=%d, want 1 (the stalled child's code)\nstdout=%q\nstderr=%q", code, out.String(), errb.String())
+	}
+
+	// The head still closed — the ride's failure is not its failure.
+	md, err := run.Load(root, "moe", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusClosed {
+		t.Errorf("head status=%s, want closed — a stalled ride must not leave the head parked", md.Status)
+	}
+
+	// The walk stopped at the failing stage: fix-one's later stages never
+	// dispatched, and fix-two was never reached.
+	got := kickStages(*stages)
+	want := []string{"fix-one:design"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("dispatched %v, want %v\nstdout=%q", got, want, out.String())
+	}
+	if len(*pushes) != 0 {
+		t.Errorf("pushes=%d, want 0 — nothing reached a ship", len(*pushes))
+	}
+	// The exit code says "something stalled"; stderr says which run.
+	if !strings.Contains(errb.String(), "chain ride into moe/fix-one exited 1") {
+		t.Errorf("expected stalled-ride stderr line naming the child, got:\n%s", errb.String())
+	}
+}

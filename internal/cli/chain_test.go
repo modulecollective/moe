@@ -573,12 +573,14 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateRideOrdinaryFailureStillSwallowed is the contract's
-// other half: an ordinary (non-interrupt) child-cascade failure stays
-// best-effort swallowed — the parent's ship is authoritative and a
-// sideways child must not retroactively fail it. Only Ctrl-C halts the
-// parent. Mirror of the interrupt test with a bare exit 1 in the child.
-func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
+// TestCascadeFromGateRideOrdinaryFailurePropagates is the contract's
+// other half: an ordinary (non-interrupt) child-cascade failure comes
+// back as the cascade's exit code, same as an interrupt does. The
+// parent's ship stays recorded where it belongs (res.shipped, the
+// summary line) — but the invocation rode into a run that stalled, and
+// its caller gets to see that without scraping stderr. Mirror of the
+// interrupt test with a bare exit 1 in the child.
+func TestCascadeFromGateRideOrdinaryFailurePropagates(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -601,11 +603,11 @@ func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d, want 0 (ordinary child failure stays swallowed); stderr=%q", code, stderr.String())
+	if code != 1 {
+		t.Fatalf("cascade exit=%d, want 1 (the child's code, propagated verbatim); stderr=%q", code, stderr.String())
 	}
 	if !res.shipped {
-		t.Fatalf("parent cascade must still ship: %+v", res)
+		t.Fatalf("parent cascade must still ship — the exit code reports the ride, not the parent: %+v", res)
 	}
 	// Child interrupted-free failure: design dispatched, code/review/test did not.
 	wantStages := []string{"code", "review", "test", "design"}
@@ -616,9 +618,10 @@ func TestCascadeFromGateRideOrdinaryFailureStillSwallowed(t *testing.T) {
 	if !reflect.DeepEqual(gotStages, wantStages) {
 		t.Fatalf("openSdlcStage stages = %v, want %v", gotStages, wantStages)
 	}
-	// The swallow is logged on stderr (not propagated as the parent's code).
+	// The stderr line stays: the exit code says "something stalled", the
+	// line says which run.
 	if !strings.Contains(stderr.String(), "chain ride into tele/child-run exited 1") {
-		t.Errorf("expected swallowed-failure stderr line, got:\n%s", stderr.String())
+		t.Errorf("expected stalled-ride stderr line naming the child, got:\n%s", stderr.String())
 	}
 }
 
@@ -953,5 +956,61 @@ func TestChainAnnotationMultipleParentsFanIn(t *testing.T) {
 	chainedFrom := invertEffectiveChain(chainedChild, byKey)
 	if got := chainAnnotation("p/c", chainedChild, chainedFrom, byKey); got != "chained-from p/a, p/b" {
 		t.Errorf("p/c annotation = %q, want \"chained-from p/a, p/b\"", got)
+	}
+}
+
+// TestCascadeFromGateNonSdlcRideFailureStillClosesParent pins the
+// ordering at the non-sdlc seam, where the ride runs *before* the
+// parent's auto-close. A stalled ride propagates its code — but it must
+// not skip the close on the way out: the parent's own walk succeeded,
+// and leaving it open would park a dead run on the dash to punish a
+// child's failure. (Ctrl-C is the exception and keeps its early return;
+// there the operator asked for everything to stop.)
+func TestCascadeFromGateNonSdlcRideFailureStillClosesParent(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "reflect-run", Workflow: "twin"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	// After both runs exist: run.New refuses a dirty tree.
+	writeSatisfiedTwinFinalizeCanvas(t, root, parentMD)
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/reflect-run tele/child-run\n")
+
+	t.Chdir(root)
+	stubOpenTwinStage(t, nil)
+	childCaptured := stubOpenSdlcStage(t, map[string]int{"design": 1})
+	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "", false, true, parentMD, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("cascade exit=%d, want 1 (the stalled child's code); stderr=%q", code, stderr.String())
+	}
+	// The close ran anyway, and the parent is recorded as shipped.
+	if len(*closeCaptured) != 1 {
+		t.Fatalf("close dispatched %d times, want 1 — a stalled ride must not skip the parent's auto-close", len(*closeCaptured))
+	}
+	if !res.shipped {
+		t.Fatalf("parent must still be recorded shipped: %+v", res)
+	}
+	// The child stopped at its failing stage.
+	gotStages := make([]string, 0, len(*childCaptured))
+	for _, inv := range *childCaptured {
+		gotStages = append(gotStages, inv.stage)
+	}
+	if !reflect.DeepEqual(gotStages, []string{"design"}) {
+		t.Fatalf("child stages = %v, want [design]", gotStages)
+	}
+	if !strings.Contains(stderr.String(), "chain ride into tele/child-run exited 1") {
+		t.Errorf("expected stalled-ride stderr line, got:\n%s", stderr.String())
 	}
 }

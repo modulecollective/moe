@@ -997,8 +997,15 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		// the non-sdlc analogue. `!!` stops here — rideChain is the gate.
 		// A Ctrl-C inside the ride halts the chain before the
 		// auto-close, same as the sdlc push branch.
+		//
+		// An ordinary ride failure does not: this parent's own walk
+		// succeeded, and skipping its close would park a dead run on the
+		// dash to punish a child's failure. So remember the code, close,
+		// and propagate below.
+		var rideCode int
 		if rideChain {
-			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
+			rideCode = maybeRideChain(md, rideChain, stdout, stderr)
+			if rideCode == exitInterrupted {
 				return res, rideCode
 			}
 		}
@@ -1019,6 +1026,10 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 			}
 			res.shipped = true
 		}
+		// The close's own code already returned above if non-zero — it is
+		// this run's own failure and the nearer of the two. Otherwise the
+		// stalled ride is what's left to report.
+		return res, rideCode
 	}
 	return res, 0
 }
@@ -1217,13 +1228,13 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		// cascade into it. `!!` stops here — rideChain is the gate.
 		// Recursive by construction — the child's cascadeFromGate reaches
 		// its own push (sdlc) or auto-close (non-sdlc) and re-fires this
-		// hook on its own outgoing edge. An operator Ctrl-C inside the
-		// ride propagates back as exitInterrupted: stop the whole chain
-		// now rather than returning to a re-prompt. The parent has already
-		// shipped — steps records that honestly — but the abort code halts
-		// everything above it.
+		// hook on its own outgoing edge. A ride that stalls — Ctrl-C or
+		// an ordinary stage failure — propagates back as this cascade's
+		// exit code: the parent has already shipped, and shipped=true
+		// records that honestly, but the invocation as a whole did not
+		// come out clean and its caller deserves to know.
 		if rideChain {
-			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode == exitInterrupted {
+			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode != 0 {
 				return steps, true, rideCode
 			}
 		}
@@ -1240,19 +1251,26 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 // stage and re-fires this hook on its own outgoing edge, so `!!!` rides
 // the whole chain in one shot.
 //
-// Returns the exit code the parent should propagate: 0 for "carry on"
-// (the common case) and exitInterrupted when the child ride was cut
-// short by an operator Ctrl-C. An interrupt is the one child-ride
-// outcome that halts the parent — the operator asked to stop the whole
-// cascade, not just the child — so the caller returns it up the stack.
-// Every other failure stays swallowed (returns 0): the parent's cascade
-// outcome is the authoritative one, and a child ride that goes sideways
-// must not retroactively mark the parent's ship as failed.
+// Returns the child cascade's exit code verbatim, for the caller to
+// propagate. A ride that stalls is a failed invocation: `chain kick` is
+// the programmatic entry point (cron, scripts), and a caller that can
+// only tell a clean ride from a stalled one by scraping stderr has no
+// usable signal. The parent's ship stays authoritative where it is
+// actually recorded — the run still ships and its summary still reads
+// "— shipped"; the process exit code describes the whole invocation,
+// and the invocation included a ride that stalled. exitInterrupted
+// keeps its existing meaning by falling out of the same rule.
+//
+// Recursion falls out: a grandchild failure surfaces as the child
+// cascade's non-zero exit, which this propagates in turn, and each
+// level prints its own "chain ride into … exited N" so the trail names
+// the stalled run at every depth.
 //
 // Best-effort otherwise: every no-op mode (missing index, malformed
-// child key, terminal child, child missing from disk) returns 0
-// silently except where it's worth a stderr line (the index can't be
-// built, or a non-interrupt child cascade exits non-zero).
+// child key, terminal child, child missing from disk, nothing pending)
+// returns 0 — no ride happened, which is not a failure — silently
+// except where it's worth a stderr line (the index can't be built, or
+// a non-interrupt child cascade exits non-zero).
 //
 // findRoot is re-derived here so the helper's signature stays a
 // drop-in at any cascade seam; the cost is one extra git rev-parse
@@ -1313,16 +1331,14 @@ func maybeRideChain(parentMD *run.Metadata, rideChain bool, stdout, stderr io.Wr
 	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}
-	if childCode == exitInterrupted {
-		// Propagate the stop: the child summary already read
-		// "… interrupted — stopped"; the parent halts on the same code
-		// instead of swallowing it and riding onward.
-		return exitInterrupted
-	}
-	if childCode != 0 {
+	if childCode != 0 && childCode != exitInterrupted {
+		// Interrupt needs no line — the child summary already read
+		// "… interrupted — stopped". Every other failure gets the
+		// pointer at *which* run stalled, since the code alone doesn't
+		// say and a deep chain may print several.
 		moePrintf(stderr, "chain ride into %s exited %d\n", childKey, childCode)
 	}
-	return 0
+	return childCode
 }
 
 // renderCascadeSummary formats the single-line summary printed after
