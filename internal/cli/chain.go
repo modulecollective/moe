@@ -10,8 +10,9 @@
 // a run the editor showed but the operator deleted has its edge cleared
 // (delete unchains, same as isolating a run in its own block). Runs the
 // editor never showed — terminal or suppressed parents — keep their
-// edges, so opening the editor and saving unchanged is a no-op for any
-// fan-in-free state.
+// edges. Opening the editor and saving unchanged is a no-op for any
+// fan-in-free state with no stale edges (a live edge whose child is
+// terminal diffs to a clear, since its parent renders as an orphan).
 //
 // `moe chain clear` drops every currently-live chain edge in one
 // commit. Confirmation prompt by default; --yes skips.
@@ -447,8 +448,11 @@ func parseChainEditFile(body string) ([][]string, error) {
 // offered but the operator deleted from the file gets its edge cleared
 // too — delete unchains, the same as isolating a run in its own block.
 // A parent the editor never showed (terminal or suppressed) keeps
-// whatever edge the index holds, so a save can never clear an edge the
-// operator never saw.
+// whatever edge the index holds, so a save can never clear an edge
+// whose parent the operator never saw. An active parent whose live
+// edge points at a terminal child does render (as an orphan), so a
+// save clears that stale edge — harmless, since every edge reader
+// already filters it out via run.ChainChildLive.
 //
 // Each emitted trailer value is "<parent> <child>". Outputs are
 // sorted by parent for deterministic commit bodies and tests.
