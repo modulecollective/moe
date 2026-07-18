@@ -292,6 +292,11 @@ func TestFollowupsReferenceSection(t *testing.T) {
 		// note so a wrong shape reads as recoverable, not silent.
 		"`- [ ] `slug` — Title`",
 		"rejected at close",
+		// Routing travels with the grammar: a twin-doc edit filed as a
+		// followup is harvested into an idea and promoted to a run whose
+		// workflow holds twin docs read-only.
+		"`feedback/twin.md`",
+		"`feedback/lore.md`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("followups reference missing %q in:\n%s", want, got)
