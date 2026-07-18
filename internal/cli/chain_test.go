@@ -723,6 +723,90 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	}
 }
 
+// TestActiveCascadeChainItemsMembership pins that chain-edit membership
+// keys on operatorCascades, not on workflow=="sdlc": every
+// operator-paced workflow (sdlc, twin, kb, hooks, chores) is offered,
+// while chat (perpetual) and pulse (machine-paced) stay out — the same
+// predicate the stage-verb flags and serve chips use. A merged run is
+// excluded by status regardless of workflow.
+func TestActiveCascadeChainItemsMembership(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	mk := func(id, workflow, status string) *run.Metadata {
+		return &run.Metadata{ID: id, Project: "p", Workflow: workflow, Status: status}
+	}
+	mds := []*run.Metadata{
+		mk("s", "sdlc", run.StatusInProgress),
+		mk("t", "twin", run.StatusInProgress),
+		mk("k", "kb", run.StatusInProgress),
+		mk("h", "hooks", run.StatusInProgress),
+		mk("c", "chores", run.StatusInProgress),
+		mk("chat1", "chat", run.StatusInProgress),   // perpetual — excluded
+		mk("pulse1", "pulse", run.StatusInProgress), // machine-paced — excluded
+		mk("done", "sdlc", run.StatusMerged),        // terminal — excluded
+	}
+	when := map[string]time.Time{}
+	byKey := map[string]*run.Metadata{}
+	for i, md := range mds {
+		key := md.Project + "/" + md.ID
+		when[key] = base.Add(time.Duration(-i) * time.Hour)
+		byKey[key] = md
+	}
+	idx := &run.JournalIndex{LastActivity: when, ChainedChild: map[string]string{}}
+
+	blocks := activeCascadeChainItems(mds, idx, byKey)
+	got := map[string]bool{}
+	for _, block := range blocks {
+		for _, it := range block {
+			got[it.Key] = true
+		}
+	}
+	want := map[string]bool{"p/s": true, "p/t": true, "p/k": true, "p/h": true, "p/c": true}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("operator-paced run %q should be offered for chaining", k)
+		}
+	}
+	for _, k := range []string{"p/chat1", "p/pulse1", "p/done"} {
+		if got[k] {
+			t.Errorf("non-cascade run %q must not be offered for chaining", k)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("offered set = %v, want exactly %v", got, want)
+	}
+}
+
+// TestChainEditTwinEdgeSurvivesSave: a twin run can head a chain and its
+// outgoing edge survives a no-op round trip — proving twin is a
+// first-class chain member now, not just visible. Renders live state
+// (an sdlc run chained to a twin run), parses it back, and asserts the
+// diff is empty so the twin edge is neither dropped nor duplicated.
+func TestChainEditTwinEdgeSurvivesSave(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	mds := []*run.Metadata{
+		{ID: "code-it", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress},
+		{ID: "reflect-x", Project: "p", Workflow: "twin", Status: run.StatusInProgress},
+	}
+	when := map[string]time.Time{"p/code-it": base, "p/reflect-x": base.Add(-time.Hour)}
+	chained := map[string]string{"p/code-it": "p/reflect-x"} // sdlc → twin
+	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}
+	byKey := map[string]*run.Metadata{}
+	for _, md := range mds {
+		byKey[md.Project+"/"+md.ID] = md
+	}
+
+	body := renderChainEditFile(activeCascadeChainItems(mds, idx, byKey))
+	parsed, err := parseChainEditFile(body)
+	if err != nil {
+		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
+	}
+	offered := map[string]bool{"p/code-it": true, "p/reflect-x": true}
+	adds, removes := diffChainEdit(parsed, offered, idx.ChainedChild)
+	if len(adds) != 0 || len(removes) != 0 {
+		t.Fatalf("twin edge must survive a no-op save: adds=%v removes=%v\n%s", adds, removes, body)
+	}
+}
+
 // TestActiveSDLCChainItemsMatchDashOrder pins the render order: the
 // `chain edit` file lists runs in the same grouped order the dash's
 // ACTIVE section shows — chains as contiguous head→tail blocks, each
@@ -755,7 +839,7 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	blocks := activeSDLCChainItems(mds, idx, byKey)
+	blocks := activeCascadeChainItems(mds, idx, byKey)
 	// The blocks are the dash units: the 3-run chain, the orphan, then
 	// the 2-run chain. The blank lines the render writes between these
 	// are the chain boundaries.
@@ -837,7 +921,7 @@ func TestChainEditRoundTripIsNoOp(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	body := renderChainEditFile(activeSDLCChainItems(mds, idx, byKey))
+	body := renderChainEditFile(activeCascadeChainItems(mds, idx, byKey))
 	parsed, err := parseChainEditFile(body)
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)

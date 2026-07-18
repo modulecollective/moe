@@ -1,8 +1,10 @@
 // Package cli — chain verbs.
 //
-// `moe chain edit` opens a rebase-style editor over every active sdlc
-// run across every project, grouped into blocks that mirror the dash's
-// chains. A blank line is a chain boundary: each contiguous block of
+// `moe chain edit` opens a rebase-style editor over every active
+// operator-cascade run (sdlc, twin, kb, hooks, chores — every workflow
+// operatorCascades admits) across every project, grouped into blocks
+// that mirror the dash's chains. A blank line is a chain boundary: each
+// contiguous block of
 // run lines becomes one linear chain (line i chains-to line i+1 within
 // its block; the block's last line chains-to nothing). The editor is
 // WYSIWYG — the blocks you see are the chains you get. The offered runs
@@ -44,7 +46,7 @@ func init() {
 	g := NewCommandGroup("chain", "manage run chains")
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "rebase-style editor over active sdlc runs; reorder to chain",
+		Summary: "rebase-style editor over active operator-cascade runs; reorder to chain",
 		Run:     runChainEdit,
 	})
 	g.Register(&Command{
@@ -71,8 +73,8 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe chain edit")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens $EDITOR on every active sdlc run across every project,")
-		moePrintln(stderr, "grouped into blocks that mirror the dash's chains. A blank line")
+		moePrintln(stderr, "Opens $EDITOR on every active operator-cascade run across every")
+		moePrintln(stderr, "project, grouped into blocks that mirror the dash's chains. A blank line")
 		moePrintln(stderr, "separates chains: each block of run lines becomes one linear chain")
 		moePrintln(stderr, "(each chains-to the one below it within the block). Move a line into")
 		moePrintln(stderr, "another block to fold it in, or isolate it in its own block")
@@ -106,9 +108,9 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	items := activeSDLCChainItems(mds, idx, byKey)
+	items := activeCascadeChainItems(mds, idx, byKey)
 	if len(items) == 0 {
-		moePrintln(stderr, "chain edit: no active sdlc runs")
+		moePrintln(stderr, "chain edit: no active operator-cascade runs")
 		return 0
 	}
 
@@ -155,7 +157,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	for _, block := range desired {
 		for _, k := range block {
 			if !activeKeys[k] {
-				moePrintf(stderr, "chain edit: %q is not an active sdlc run\n", k)
+				moePrintf(stderr, "chain edit: %q is not an active operator-cascade run\n", k)
 				return 1
 			}
 		}
@@ -264,22 +266,31 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// activeSDLCChainItems gathers the active sdlc runs and annotates each
-// with its current chain state. Render order matches the dash's ACTIVE
-// section — chains render as contiguous head→tail blocks, each block (or
-// standalone run) floating by its most-recent member — so the operator
-// reads the editor the way they read the dash and can fold a run into an
-// existing chain instead of rebuilding from scratch. The grouping is
-// shared with the dash via run.OrderChainUnits.
+// activeCascadeChainItems gathers the active operator-cascade runs and
+// annotates each with its current chain state. Membership keys on the
+// operatorCascades predicate, not a workflow name: any workflow that
+// registers a cascade dispatcher and isn't perpetual/machine-paced
+// (sdlc, twin, kb, hooks, chores today) is chainable, so the editor
+// offers it. chat (perpetual) and pulse (machine-paced) stay out via
+// the predicate, not a list here. Widening the offered set is mandatory
+// for chain membership: chain edit's delete-means-unchain authority
+// clears any edge to a run it didn't show on the next save.
+//
+// Render order matches the dash's ACTIVE section — chains render as
+// contiguous head→tail blocks, each block (or standalone run) floating
+// by its most-recent member — so the operator reads the editor the way
+// they read the dash and can fold a run into an existing chain instead
+// of rebuilding from scratch. The grouping is shared with the dash via
+// run.OrderChainUnits.
 //
 // Each returned block is one chain unit (an orphan, or a head→tail
 // chain); renderChainEditFile emits a blank line between blocks so the
 // editor's blank lines are the chain boundaries.
-func activeSDLCChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
+func activeCascadeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
 	chainedFrom := invertEffectiveChain(idx.ChainedChild, byKey)
 	itemByKey := map[string]chainItem{}
 	for _, md := range mds {
-		if md.Workflow != "sdlc" || md.Status != run.StatusInProgress {
+		if !operatorCascades(md.Workflow) || md.Status != run.StatusInProgress {
 			continue
 		}
 		key := md.Project + "/" + md.ID
