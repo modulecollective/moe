@@ -98,7 +98,7 @@ const ChainWorkflow = "chain"
 // history — useful as recent context, not as a backlog — so the dash
 // shows the newest N and lets the bureaucracy repo itself be the
 // archive.
-const CompletedCap = 10
+const CompletedCap = 5
 
 // CompletedCutoff returns how many leading completed rows to render so
 // that the newest CompletedCap top-level rows are shown, each dragging

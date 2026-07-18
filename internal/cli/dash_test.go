@@ -523,11 +523,11 @@ func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 	}
 }
 
-// TestDashCompletedCapsAtTen seeds more completed runs than the
+// TestDashCompletedCapsAtCap seeds more completed runs than the
 // dashboard cap and asserts (a) the header shows "N of total" and
-// (b) only the newest ten rows render. The cap exists so the section
-// doesn't grow unbounded and drown the live sections above it.
-func TestDashCompletedCapsAtTen(t *testing.T) {
+// (b) only the newest CompletedCap rows render. The cap exists so the
+// section doesn't grow unbounded and drown the live sections above it.
+func TestDashCompletedCapsAtCap(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
@@ -549,14 +549,15 @@ func TestDashCompletedCapsAtTen(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "COMPLETED (10 of 12)") {
-		t.Fatalf("expected capped header, got:\n%s", got)
+	if want := fmt.Sprintf("COMPLETED (%d of 12)", dash.CompletedCap); !strings.Contains(got, want) {
+		t.Fatalf("expected capped header %q, got:\n%s", want, got)
 	}
-	// Oldest two (done-00, done-01) should be dropped; newest (done-11) shown.
+	// The newest CompletedCap render; everything older is truncated.
 	if !containsRunRow(got, "tele", "done-11", "sdlc:merged") {
 		t.Fatalf("expected newest completed run to render, got:\n%s", got)
 	}
-	for _, dropped := range []string{"done-00", "done-01"} {
+	for i := 0; i < 12-dash.CompletedCap; i++ {
+		dropped := fmt.Sprintf("done-%02d", i)
 		if strings.Contains(got, dropped) {
 			t.Fatalf("expected %q to be truncated below cap, got:\n%s", dropped, got)
 		}
@@ -784,14 +785,14 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
 
-	// Default: capped at 10.
+	// Default: capped at CompletedCap.
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "COMPLETED (10 of 12)") {
-		t.Fatalf("expected capped header by default, got:\n%s", out.String())
+	if want := fmt.Sprintf("COMPLETED (%d of 12)", dash.CompletedCap); !strings.Contains(out.String(), want) {
+		t.Fatalf("expected capped header %q by default, got:\n%s", want, out.String())
 	}
 
 	// --all: every completed row renders, plain header.
