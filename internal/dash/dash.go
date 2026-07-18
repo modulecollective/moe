@@ -102,23 +102,23 @@ const CompletedCap = 5
 
 // CompletedCutoff returns how many leading completed rows to render so
 // that the newest CompletedCap top-level rows are shown, each dragging
-// its nested member children (spawned pulses) along for free. Member
-// rows never count against the cap, so a parent and its children are
+// its nested descendants (spawned pulses) along for free. Nested rows
+// never count against the cap, so a parent and its subtree are
 // admitted or evicted as a unit. Returns n unchanged when showAll is
 // set or the top-level count is already within the cap.
 //
 // Shared by the CLI Render and the serve dash view so the terminal and
 // the web page cap identically — the completed slice each holds is
-// parent-then-children contiguous (BuildRows nests them), so counting
-// non-member rows is the same walk on both. isMember reports whether
-// row i is a nested child.
-func CompletedCutoff(n int, showAll bool, isMember func(i int) bool) int {
+// parent-then-descendants contiguous (BuildRows nests them), so counting
+// top-level rows is the same walk on both. isNested reports whether
+// row i renders under a parent.
+func CompletedCutoff(n int, showAll bool, isNested func(i int) bool) int {
 	if showAll {
 		return n
 	}
 	tops := 0
 	for i := range n {
-		if isMember(i) {
+		if isNested(i) {
 			continue
 		}
 		if tops == CompletedCap {
@@ -155,12 +155,15 @@ type Row struct {
 	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
-	// Member is true for a row that renders nested under a parent — an
-	// active row that follows its chain parent in the grouped ACTIVE
-	// order, or a completed spawned run (a tailed pulse) re-attached
-	// under its spawner. The renderer draws a connector for it. Heads,
-	// singletons, and backlog rows are false.
-	Member bool
+	// Depth is how many levels the row renders nested under a parent —
+	// 0 for a top-level row, 1 for an active row that follows its chain
+	// parent in the grouped ACTIVE order or for a completed spawned run
+	// (a tailed pulse) re-attached under its spawner, 2+ for deeper
+	// spawn lineage (a reflect under a pulse under its sdlc run). The
+	// renderer indents by Depth and draws a connector for Depth ≥ 1.
+	// Chain members stay flat at 1 — a chain is a sequence of peer
+	// stages, not a lineage ladder.
+	Depth int
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -367,17 +370,21 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	}
 	units := run.OrderChainUnits(items, idx, byKey)
 
-	// Emit units head-first. A run past the head of a multi-run unit is a
-	// Member (the renderer draws its connector). A parent whose live child
-	// follows it in the unit has that edge shown adjacently, so it skips
-	// the textual hint below; every other consecutive pair came from the
-	// childOf walk, so "has a successor in its unit" is exactly that set.
+	// Emit units head-first. A run past the head of a multi-run unit nests
+	// one level (the renderer draws its connector) — chain members stay
+	// flat at Depth 1 however long the chain, since the stages are peers
+	// rather than a lineage. A parent whose live child follows it in the
+	// unit has that edge shown adjacently, so it skips the textual hint
+	// below; every other consecutive pair came from the childOf walk, so
+	// "has a successor in its unit" is exactly that set.
 	shownEdge := make(map[string]bool)
 	i := 0
 	for _, u := range units {
 		for pos, k := range u {
 			row := rowByKey[k]
-			row.Member = len(u) >= 2 && pos > 0
+			if len(u) >= 2 && pos > 0 {
+				row.Depth = 1
+			}
 			active[i] = row
 			i++
 			if pos+1 < len(u) {
@@ -405,17 +412,12 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // direct spawner: the SpawnedBy chain is walked upward past ancestors
 // that themselves fold, so a two-hop chain (sdlc-run → pulse → reflect)
 // nests both descendants under the sdlc run rather than dropping the
-// grandchild. Rendering, keyed by the top-level row's total descendant
-// count over the whole hoisted subtree:
-//
-//   - Exactly one descendant → the parent keeps its single row and gains
-//     a " · spawned → <project>/<slug>" hint (the child row is dropped, so a single
-//     pulse costs zero rows).
-//   - Two-plus descendants → the parent followed by its descendants as
-//     Member rows in lineage (DFS) order — direct children newest-first,
-//     each immediately followed by its own subtree — every descendant
-//     normalised into the parent's bucket so a still-active parent and
-//     its already-closed pulse render in one section.
+// grandchild. Rendering is uniform: the parent followed by its
+// descendants as nested rows in lineage (DFS) order — direct children
+// newest-first, each immediately followed by its own subtree, Depth
+// rising one level per generation — every descendant normalised into
+// the parent's bucket so a still-active parent and its already-closed
+// pulse render in one section.
 //
 // Only completed rows fold. A spawned run that is still open — a broken
 // sweep left open by design so a human escalates to it (a pulse no longer
@@ -427,16 +429,13 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // its own row (one per open child, newest-first) while the child runs,
 // which is exactly when clicking through to it is most useful. The two
 // mechanisms are mutually exclusive per child — a child either folds or
-// is hinted — so an edge never renders twice. One interaction rule keeps
-// them composable: a sole folding descendant that itself has an open
-// child is emitted as a Member row rather than dropped for the
-// arrow-only shortcut, so its hint stays attached to a row that renders.
+// is hinted — so an edge never renders twice.
 //
 // A row whose spawner chain doesn't resolve to an on-board top-level
 // ancestor — spawner pruned, a standalone `moe pulse new` with no
 // spawner, or a data cycle in SpawnedBy — is left as a normal top-level
-// row. Members never count against CompletedCap — the cap is applied over
-// top-level rows in Render / the serve view.
+// row. Nested rows never count against CompletedCap — the cap is applied
+// over top-level rows in Render / the serve view.
 //
 // Returns a new slice: folding rows are pulled from their natural slots
 // and re-emitted under their ancestor, preserving the incoming bucket-
@@ -529,24 +528,16 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	if len(directChildren) == 0 && len(openKids) == 0 {
 		return rows
 	}
-	var subtreeCount func(i int) int
-	subtreeCount = func(i int) int {
-		n := 0
-		for _, ci := range directChildren[i] {
-			n += 1 + subtreeCount(ci)
-		}
-		return n
-	}
 	out := make([]Row, 0, len(rows))
-	var emitSubtree func(i int, bucket Bucket)
-	emitSubtree = func(i int, bucket Bucket) {
+	var emitSubtree func(i int, bucket Bucket, depth int)
+	emitSubtree = func(i int, bucket Bucket, depth int) {
 		for _, ci := range directChildren[i] {
 			m := rows[ci]
-			m.Member = true
+			m.Depth = depth
 			m.Bucket = bucket
 			m.Note += openHints(ci)
 			out = append(out, m)
-			emitSubtree(ci, bucket)
+			emitSubtree(ci, bucket, depth+1)
 		}
 	}
 	for i := range rows {
@@ -555,21 +546,8 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 		}
 		parent := rows[i]
 		parent.Note += openHints(i)
-		kids := directChildren[i]
-		switch {
-		case len(kids) == 0:
-			out = append(out, parent)
-		case subtreeCount(i) == 1 && len(openKids[kids[0]]) == 0:
-			// One descendant: a textual arrow on the parent, no extra row.
-			// The sole descendant is the single direct child. Skipped when
-			// that child has an open child of its own — dropping its row
-			// would drop the hint carrying that live edge.
-			parent.Note += " · spawned → " + rows[kids[0]].Project + "/" + rows[kids[0]].Run
-			out = append(out, parent)
-		default:
-			out = append(out, parent)
-			emitSubtree(i, parent.Bucket)
-		}
+		out = append(out, parent)
+		emitSubtree(i, parent.Bucket, 1) // no-op when there are no folding children
 	}
 	return out
 }
@@ -889,6 +867,17 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 	return state
 }
 
+// nestPrefix is the indent a row of the given Depth carries in front of
+// its slug: nothing at top level, then a connector per level, each
+// generation two columns further right so a reflect under a pulse under
+// its sdlc run reads as a ladder rather than a flat list.
+func nestPrefix(depth int) string {
+	if depth < 1 {
+		return ""
+	}
+	return strings.Repeat("  ", depth-1) + "↳ "
+}
+
 // Render prints the full dashboard: factory art, three sections
 // (ACTIVE, BACKLOG, COMPLETED), and the footer. tabwriter aligns
 // columns per section so a long idea title doesn't widen the run
@@ -940,10 +929,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
-			slug := r.Project + "/" + r.Run
-			if r.Member {
-				slug = "↳ " + slug
-			}
+			slug := nestPrefix(r.Depth) + r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
@@ -990,7 +976,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	}
 	fmt.Fprintln(w)
 
-	shown := completed[:CompletedCutoff(len(completed), showAll, func(i int) bool { return completed[i].Member })]
+	shown := completed[:CompletedCutoff(len(completed), showAll, func(i int) bool { return completed[i].Depth > 0 })]
 	if len(shown) < len(completed) {
 		cliout.Printf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
 	} else {
@@ -1001,10 +987,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
-			slug := r.Project + "/" + r.Run
-			if r.Member {
-				slug = "↳ " + slug
-			}
+			slug := nestPrefix(r.Depth) + r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()

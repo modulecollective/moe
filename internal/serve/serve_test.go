@@ -197,23 +197,24 @@ func TestDashShowAllStripsCap(t *testing.T) {
 	}
 }
 
-func TestNewDashVMCarriesChainMember(t *testing.T) {
+func TestNewDashVMCarriesRowDepth(t *testing.T) {
 	now := time.Now().UTC()
 	rows := []dash.Row{
 		{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
-		{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
+		{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
+		{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
 		{Project: "p", Run: "solo", Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
 	}
 	vm := newDashVM(now, rows, 1, 1, nil, false)
-	if len(vm.Active) != 3 {
-		t.Fatalf("active len = %d, want 3", len(vm.Active))
+	if len(vm.Active) != 4 {
+		t.Fatalf("active len = %d, want 4", len(vm.Active))
 	}
 	for i, want := range []struct {
-		run    string
-		member bool
-	}{{"head", false}, {"child", true}, {"solo", false}} {
-		if vm.Active[i].Run != want.run || vm.Active[i].Member != want.member {
-			t.Errorf("row %d = {run:%s member:%v}, want {run:%s member:%v}", i, vm.Active[i].Run, vm.Active[i].Member, want.run, want.member)
+		run   string
+		depth int
+	}{{"head", 0}, {"child", 1}, {"grandchild", 2}, {"solo", 0}} {
+		if vm.Active[i].Run != want.run || vm.Active[i].Depth != want.depth {
+			t.Errorf("row %d = {run:%s depth:%d}, want {run:%s depth:%d}", i, vm.Active[i].Run, vm.Active[i].Depth, want.run, want.depth)
 		}
 	}
 }
@@ -324,7 +325,8 @@ func TestDashRendersChainedClass(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
-			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Member: true},
+			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
+			{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
 		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
@@ -333,8 +335,13 @@ func TestDashRendersChainedClass(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if got := strings.Count(rr.Body.String(), `class="row chained"`); got != 1 {
-		t.Errorf("want one chained row, got %d\n%s", got, rr.Body.String())
+	// Each nested row carries the connector class plus a per-depth class,
+	// so the stylesheet can indent depth 2 past depth 1.
+	if got := strings.Count(rr.Body.String(), `class="row chained depth1"`); got != 1 {
+		t.Errorf("want one depth-1 chained row, got %d\n%s", got, rr.Body.String())
+	}
+	if got := strings.Count(rr.Body.String(), `class="row chained depth2"`); got != 1 {
+		t.Errorf("want one depth-2 chained row, got %d\n%s", got, rr.Body.String())
 	}
 }
 

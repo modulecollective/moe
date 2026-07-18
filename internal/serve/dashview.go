@@ -57,10 +57,11 @@ type dashRowVM struct {
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
 	Live bool
-	// Member is true for a row that renders nested under a parent — a
-	// chained active row, or a completed spawned run (a tailed pulse) —
-	// the template indents it and draws a connector.
-	Member bool
+	// Depth is how many levels the row renders nested under a parent —
+	// 0 top-level, 1 for a chained active row or a completed spawned run
+	// (a tailed pulse), 2+ for deeper spawn lineage. The template draws a
+	// connector for Depth ≥ 1 and indents further per level.
+	Depth int
 }
 
 // bannerArtVM is the shared banner-art block both the home dash and a
@@ -138,7 +139,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			Run:     r.Run,
 			Note:    noteHTML(r.Project, r.Note),
 			When:    dash.HumanAgo(now, r.When),
-			Member:  r.Member,
+			Depth:   r.Depth,
 		}
 		switch r.Bucket {
 		case dash.BucketActiveRuns:
@@ -154,8 +155,8 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		}
 	}
 	vm.CompletedTotal = len(vm.Completed)
-	// Cap over top-level rows: a spawned member child rides in with its
+	// Cap over top-level rows: a spawned descendant rides in with its
 	// parent and never counts against the cap (same rule as the CLI dash).
-	vm.Completed = vm.Completed[:dash.CompletedCutoff(len(vm.Completed), showAll, func(i int) bool { return vm.Completed[i].Member })]
+	vm.Completed = vm.Completed[:dash.CompletedCutoff(len(vm.Completed), showAll, func(i int) bool { return vm.Completed[i].Depth > 0 })]
 	return vm
 }

@@ -105,7 +105,7 @@
     {{if .Completed}}
     <ul class="rows">
       {{range .Completed}}
-      <li class="row{{if .Member}} chained{{end}}">
+      <li class="row{{if .Depth}} chained depth{{.Depth}}{{end}}">
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>

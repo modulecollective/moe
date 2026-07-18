@@ -221,6 +221,10 @@ section h2 .count {
 }
 .row:last-child { border-bottom: none; }
 .row.chained { padding-left: 1.5rem; }
+/* Spawn lineage nests deeper than one level (sdlc run → pulse → reflect);
+   each generation steps right so the ladder reads as a hierarchy. */
+.row.chained.depth2 { padding-left: 3rem; }
+.row.chained.depth3 { padding-left: 4.5rem; }
 .row.chained::before { content: "↳"; color: var(--muted); flex-shrink: 0; }
 .row .slug { font-size: 0.95rem; color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
 .row .when { color: var(--muted); font-size: 0.85rem; }

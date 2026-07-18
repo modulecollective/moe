@@ -43,10 +43,10 @@ func closedRun(project, id, workflow string) *run.Metadata {
 	return &run.Metadata{ID: id, Project: project, Workflow: workflow, Status: run.StatusClosed}
 }
 
-// TestSpawnOneChildRendersArrowNoRow: a parent with a single spawned
-// pulse keeps its one completed row and gains a "· spawned →" hint; the
-// pulse costs zero rows.
-func TestSpawnOneChildRendersArrowNoRow(t *testing.T) {
+// TestSpawnOneChildNestsAsRow: a parent with a single spawned pulse
+// renders it as a nested row, same as any other descendant count — one
+// grammar, no inline-arrow special case.
+func TestSpawnOneChildNestsAsRow(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
@@ -58,22 +58,30 @@ func TestSpawnOneChildRendersArrowNoRow(t *testing.T) {
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{"p/pulse-1": "p/ship-it"})
 
-	if len(completed) != 1 {
-		t.Fatalf("completed rows = %d, want 1 (child folded into an arrow): %+v", len(completed), completed)
+	var order []string
+	for _, r := range completed {
+		order = append(order, r.Project+"/"+r.Run)
 	}
-	if _, ok := byKey["p/pulse-1"]; ok {
-		t.Fatalf("pulse-1 should not render its own row when it is an only child")
+	want := []string{"p/ship-it", "p/pulse-1"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("completed order = %v, want parent then nested child %v", order, want)
 	}
-	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
-		t.Fatalf("parent note = %q, want the spawned arrow to pulse-1", got)
+	if got := byKey["p/ship-it"].Depth; got != 0 {
+		t.Fatalf("parent Depth = %d, want 0", got)
+	}
+	if got := byKey["p/pulse-1"].Depth; got != 1 {
+		t.Fatalf("sole child Depth = %d, want 1", got)
+	}
+	if got := byKey["p/ship-it"].Note; strings.Contains(got, "spawned →") {
+		t.Fatalf("a folded child renders as a row, not an arrow on the parent: %q", got)
 	}
 }
 
-// TestSpawnMultiChildRendersMemberRows: a parent that spawned two
+// TestSpawnMultiChildRendersNestedRows: a parent that spawned two
 // pulses (an sdlc run pulses at push and at close) renders like a chain
-// — the parent followed by both children as Member rows, newest first,
+// — the parent followed by both children as nested rows, newest first,
 // and no arrow hint on the parent.
-func TestSpawnMultiChildRendersMemberRows(t *testing.T) {
+func TestSpawnMultiChildRendersNestedRows(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
@@ -98,22 +106,23 @@ func TestSpawnMultiChildRendersMemberRows(t *testing.T) {
 	if strings.Join(order, ",") != strings.Join(want, ",") {
 		t.Fatalf("completed order = %v, want parent then children newest-first %v", order, want)
 	}
-	if byKey["p/ship-it"].Member {
-		t.Fatal("parent row must not be a Member")
+	if got := byKey["p/ship-it"].Depth; got != 0 {
+		t.Fatalf("parent Depth = %d, want 0", got)
 	}
-	if !byKey["p/pulse-new"].Member || !byKey["p/pulse-old"].Member {
-		t.Fatal("both spawned children must be Member rows")
+	if byKey["p/pulse-new"].Depth != 1 || byKey["p/pulse-old"].Depth != 1 {
+		t.Fatal("both spawned children must nest one level under the parent")
 	}
 	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
-		t.Fatalf("multi-child parent must not carry the single-child arrow: %q", byKey["p/ship-it"].Note)
+		t.Fatalf("a parent whose children all fold carries no arrow: %q", byKey["p/ship-it"].Note)
 	}
 }
 
 // TestSpawnDepth2ChainRendersThreeRows: a closed two-hop chain
 // (ship-it → pulse → reflect) hoists both descendants under the top-level
 // sdlc run — three rows in lineage (DFS) order, no arrow on the root, and
-// every descendant a Member. Without the multi-level walk the reflect
-// would fold under the (itself folded) pulse and vanish entirely.
+// each generation one Depth deeper than the last. Without the multi-level
+// walk the reflect would fold under the (itself folded) pulse and vanish
+// entirely.
 func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
@@ -139,22 +148,22 @@ func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
 	if strings.Join(order, ",") != strings.Join(want, ",") {
 		t.Fatalf("completed order = %v, want root then lineage %v", order, want)
 	}
-	if byKey["p/ship-it"].Member {
-		t.Fatal("the top-level sdlc run must not be a Member")
-	}
-	if !byKey["p/pulse-1"].Member || !byKey["p/reflect-1"].Member {
-		t.Fatal("both hoisted descendants must be Member rows")
+	wantDepth := map[string]int{"p/ship-it": 0, "p/pulse-1": 1, "p/reflect-1": 2}
+	for k, d := range wantDepth {
+		if got := byKey[k].Depth; got != d {
+			t.Errorf("%s Depth = %d, want %d (one level per generation)", k, got, d)
+		}
 	}
 	if strings.Contains(byKey["p/ship-it"].Note, "spawned →") {
-		t.Fatalf("a root with member descendants must not carry the arrow: %q", byKey["p/ship-it"].Note)
+		t.Fatalf("a root with nested descendants must not carry the arrow: %q", byKey["p/ship-it"].Note)
 	}
 }
 
 // TestSpawnCrossProjectNestsUnderForeignSpawner: a run in project b
 // spawned from a run in project a nests under its foreign spawner. This
 // is the capability the qualified edge buys — the child carries its own
-// project (b) while its spawner lives in a. The arrow names the child's
-// qualified target so the cross-project origin is legible.
+// project (b) while its spawner lives in a. The nested row keeps its own
+// qualified slug so the cross-project origin is legible.
 func TestSpawnCrossProjectNestsUnderForeignSpawner(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
@@ -167,23 +176,26 @@ func TestSpawnCrossProjectNestsUnderForeignSpawner(t *testing.T) {
 	}
 	byKey, completed := buildSpawn(t, runs, when, map[string]string{"b/pulse-1": "a/ship-it"})
 
-	if len(completed) != 1 {
-		t.Fatalf("completed rows = %d, want 1 (foreign child folded into an arrow): %+v", len(completed), completed)
+	var order []string
+	for _, r := range completed {
+		order = append(order, r.Project+"/"+r.Run)
 	}
-	if _, ok := byKey["b/pulse-1"]; ok {
-		t.Fatal("cross-project only child must fold into its spawner's arrow, not render its own row")
+	want := []string{"a/ship-it", "b/pulse-1"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("completed order = %v, want the foreign child nested under its spawner %v", order, want)
 	}
-	if got := byKey["a/ship-it"].Note; !strings.Contains(got, "· spawned → b/pulse-1") {
-		t.Fatalf("spawner note = %q, want the spawned arrow to the foreign child b/pulse-1", got)
+	if byKey["b/pulse-1"].Depth != 1 {
+		t.Fatal("cross-project child must nest one level under its foreign spawner")
 	}
 }
 
-// TestSpawnOpenMidChainArrowsOnActivePulse: ship-it(closed) →
+// TestSpawnOpenMidChainNestsUnderActivePulse: ship-it(closed) →
 // pulse(open) → reflect(closed). The open pulse doesn't fold (top-level
 // ACTIVE); the reflect's walk stops at the pulse and attaches there, so
-// the ACTIVE pulse gains the spawned arrow and reflect costs zero
-// completed rows. ship-it gets nothing — its only child didn't fold.
-func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
+// it renders as a nested row normalised into the pulse's ACTIVE bucket
+// rather than as its own completed row. ship-it keeps only the hint for
+// its still-open child.
+func TestSpawnOpenMidChainNestsUnderActivePulse(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
@@ -200,19 +212,21 @@ func TestSpawnOpenMidChainArrowsOnActivePulse(t *testing.T) {
 		"p/reflect-1": "p/pulse-1",
 	})
 
-	if _, ok := byKey["p/reflect-1"]; ok {
-		t.Fatal("reflect-1 should fold into the pulse's arrow, not render its own row")
-	}
-	// Only ship-it remains a top-level completed row.
+	// Only ship-it remains a top-level completed row — reflect-1 moved
+	// into ACTIVE alongside the pulse it hangs off.
 	if len(completed) != 1 || completed[0].Project+"/"+completed[0].Run != "p/ship-it" {
 		t.Fatalf("completed rows = %+v, want only p/ship-it", completed)
 	}
 	pulse := byKey["p/pulse-1"]
-	if pulse.Bucket != BucketActiveRuns || pulse.Member {
+	if pulse.Bucket != BucketActiveRuns || pulse.Depth != 0 {
 		t.Fatalf("open mid-chain pulse must stay a top-level ACTIVE row: %+v", pulse)
 	}
-	if !strings.Contains(pulse.Note, "· spawned → p/reflect-1") {
-		t.Fatalf("active pulse note = %q, want the spawned arrow to reflect-1", pulse.Note)
+	reflect := byKey["p/reflect-1"]
+	if reflect.Bucket != BucketActiveRuns || reflect.Depth != 1 {
+		t.Fatalf("closed reflect must nest under the active pulse: %+v", reflect)
+	}
+	if strings.Contains(pulse.Note, "spawned →") {
+		t.Fatalf("pulse note = %q, want no arrow — reflect-1 renders as a nested row", pulse.Note)
 	}
 	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
 		t.Fatalf("ship-it note = %q, want a hint to its open child pulse-1", got)
@@ -278,8 +292,8 @@ func TestSpawnCycleRendersTopLevel(t *testing.T) {
 		t.Fatalf("completed rows = %d, want 2 (cycle degrades to top-level): %+v", len(completed), completed)
 	}
 	for _, k := range []string{"p/a", "p/b"} {
-		if byKey[k].Member {
-			t.Fatalf("%s must render top-level under a cycle, not as a Member", k)
+		if byKey[k].Depth != 0 {
+			t.Fatalf("%s must render top-level under a cycle, not nested", k)
 		}
 		if strings.Contains(byKey[k].Note, "spawned →") {
 			t.Fatalf("%s must carry no spawned arrow under a cycle: %q", k, byKey[k].Note)
@@ -299,16 +313,16 @@ func TestSpawnUnresolvedParentRendersTopLevel(t *testing.T) {
 	if len(completed) != 1 {
 		t.Fatalf("completed rows = %d, want 1", len(completed))
 	}
-	if byKey["p/pulse-x"].Member {
-		t.Fatal("an orphaned spawned run must render top-level, not as a Member")
+	if byKey["p/pulse-x"].Depth != 0 {
+		t.Fatal("an orphaned spawned run must render top-level, not nested")
 	}
 }
 
-// TestSpawnCrossBucketArrowOnActiveParent: while the parent is pushed
-// (ACTIVE, awaiting merge) it has exactly one pulse child (fired at
-// push), which renders as an arrow on the active row — no completed
-// child row, so the cross-bucket nesting never materialises a row.
-func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
+// TestSpawnCrossBucketNestsUnderActiveParent: while the parent is pushed
+// (ACTIVE, awaiting merge) its closed pulse child nests under it in
+// ACTIVE — the child is normalised into the parent's bucket, so it never
+// leaves a stray row in COMPLETED.
+func TestSpawnCrossBucketNestsUnderActiveParent(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
 		{ID: "ship-it", Project: "p", Workflow: "sdlc", Status: run.StatusPushed},
@@ -333,10 +347,16 @@ func TestSpawnCrossBucketArrowOnActiveParent(t *testing.T) {
 		}
 	}
 	if len(completed) != 0 {
-		t.Fatalf("completed rows = %d, want 0 (only child folds into the active parent's arrow)", len(completed))
+		t.Fatalf("completed rows = %d, want 0 (the child nests into the active parent's bucket)", len(completed))
 	}
-	if len(active) != 1 || !strings.Contains(active[0].Note, "· spawned → p/pulse-1") {
-		t.Fatalf("active parent = %+v, want a single row carrying the spawned arrow", active)
+	if len(active) != 2 {
+		t.Fatalf("active rows = %+v, want the pushed parent plus its nested pulse", active)
+	}
+	if active[0].Run != "ship-it" || active[0].Depth != 0 {
+		t.Fatalf("active[0] = %+v, want the top-level pushed parent", active[0])
+	}
+	if active[1].Run != "pulse-1" || active[1].Depth != 1 {
+		t.Fatalf("active[1] = %+v, want the pulse nested one level", active[1])
 	}
 }
 
@@ -365,20 +385,19 @@ func TestSpawnOpenChildStaysTopLevelActive(t *testing.T) {
 	if child.Bucket != BucketActiveRuns {
 		t.Fatalf("open pulse child bucket = %v, want BucketActiveRuns", child.Bucket)
 	}
-	if child.Member {
-		t.Fatal("open pulse child must be a top-level row, not a Member")
+	if child.Depth != 0 {
+		t.Fatal("open pulse child must be a top-level row, not nested")
 	}
 	if got := byKey["p/ship-it"].Note; !strings.Contains(got, "· spawned → p/pulse-1") {
 		t.Fatalf("parent note = %q, want a hint to its still-open child", got)
 	}
 }
 
-// TestSpawnOpenGrandchildKeepsMemberRow pins the composability rule: the
-// sole-descendant shortcut (drop the child row, arrow on the parent) must
-// not fire when that child has an open child of its own — dropping the row
-// would take its hint down with it. sdlc ← pulse (both completed) ←
-// reflect (open): pulse renders as a Member carrying the reflect hint.
-func TestSpawnOpenGrandchildKeepsMemberRow(t *testing.T) {
+// TestSpawnOpenGrandchildHintsOnNestedRow: the open-child hint attaches
+// to whichever row carries the edge, nested or not. sdlc ← pulse (both
+// completed) ← reflect (open): the pulse nests under ship-it and carries
+// the reflect hint itself, while the open reflect stays top-level ACTIVE.
+func TestSpawnOpenGrandchildHintsOnNestedRow(t *testing.T) {
 	base := time.Now().UTC()
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
@@ -401,60 +420,66 @@ func TestSpawnOpenGrandchildKeepsMemberRow(t *testing.T) {
 	}
 	want := []string{"p/ship-it", "p/pulse-1"}
 	if strings.Join(order, ",") != strings.Join(want, ",") {
-		t.Fatalf("completed order = %v, want the pulse kept as a member row %v", order, want)
+		t.Fatalf("completed order = %v, want the pulse nested under its parent %v", order, want)
 	}
-	if !byKey["p/pulse-1"].Member {
-		t.Fatal("pulse-1 must render as a Member under ship-it, not be dropped for an arrow")
+	if byKey["p/pulse-1"].Depth != 1 {
+		t.Fatal("pulse-1 must nest one level under ship-it")
 	}
 	if got := byKey["p/pulse-1"].Note; !strings.Contains(got, "· spawned → p/reflect-1") {
 		t.Fatalf("pulse-1 note = %q, want the hint to its open child", got)
 	}
 	if got := byKey["p/ship-it"].Note; strings.Contains(got, "spawned →") {
-		t.Fatalf("ship-it has no open child of its own and folds pulse-1 as a member — no hint: %q", got)
+		t.Fatalf("ship-it has no open child of its own and nests pulse-1 as a row — no hint: %q", got)
 	}
 	reflect := byKey["p/reflect-1"]
-	if reflect.Bucket != BucketActiveRuns || reflect.Member {
+	if reflect.Bucket != BucketActiveRuns || reflect.Depth != 0 {
 		t.Fatalf("open reflect must stay a top-level ACTIVE row: %+v", reflect)
 	}
 }
 
 // TestCompletedCutoffCountsTopLevelOnly pins the cap semantics directly:
-// member children never count against CompletedCap, so a shown parent
+// nested children never count against CompletedCap, so a shown parent
 // drags all its children in and the cutoff falls on the (cap+1)th
 // top-level row.
 func TestCompletedCutoffCountsTopLevelOnly(t *testing.T) {
-	// Layout: CompletedCap top-level rows, each followed by one member,
-	// then one more top-level row (the eviction boundary) with a member.
-	var member []bool
+	// Layout: CompletedCap top-level rows, each followed by one nested
+	// child, then one more top-level row (the eviction boundary) with a child.
+	var nested []bool
 	for range CompletedCap + 1 {
-		member = append(member, false, true) // parent, child
+		nested = append(nested, false, true) // parent, child
 	}
-	isMember := func(i int) bool { return member[i] }
+	isNested := func(i int) bool { return nested[i] }
 
-	if got := CompletedCutoff(len(member), true /*showAll*/, isMember); got != len(member) {
-		t.Fatalf("showAll cutoff = %d, want %d (no cap)", got, len(member))
+	if got := CompletedCutoff(len(nested), true /*showAll*/, isNested); got != len(nested) {
+		t.Fatalf("showAll cutoff = %d, want %d (no cap)", got, len(nested))
 	}
 	// The (cap+1)th parent sits at index 2*CompletedCap; the cut drops it
 	// and its child, keeping the first CompletedCap parents + their kids.
-	if got := CompletedCutoff(len(member), false, isMember); got != 2*CompletedCap {
-		t.Fatalf("cutoff = %d, want %d (cap parents + their members, evicting the extra parent)", got, 2*CompletedCap)
+	if got := CompletedCutoff(len(nested), false, isNested); got != 2*CompletedCap {
+		t.Fatalf("cutoff = %d, want %d (cap parents + their children, evicting the extra parent)", got, 2*CompletedCap)
 	}
 }
 
 // TestRenderNestedCompletedDrawsConnector: the CLI completed section
-// draws the "↳" connector for a spawned member child, matching the
-// active-chain renderer.
+// draws the "↳" connector for a spawned child, matching the active-chain
+// renderer, and steps each further generation two columns right so a
+// depth-2 reflect reads as hanging off the pulse, not off the root.
 func TestRenderNestedCompletedDrawsConnector(t *testing.T) {
 	rows := []Row{
 		{Project: "p", Run: "ship-it", Note: "sdlc: closed", Bucket: BucketCompletedRuns},
-		{Project: "p", Run: "pulse-a", Note: "pulse: closed", Bucket: BucketCompletedRuns, Member: true},
-		{Project: "p", Run: "pulse-b", Note: "pulse: closed", Bucket: BucketCompletedRuns, Member: true},
+		{Project: "p", Run: "pulse-a", Note: "pulse: closed", Bucket: BucketCompletedRuns, Depth: 1},
+		{Project: "p", Run: "reflect-a", Note: "twin: closed", Bucket: BucketCompletedRuns, Depth: 2},
 	}
 	var buf bytes.Buffer
 	Render(&buf, time.Now().UTC(), nil, rows, 1, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
 	out := buf.String()
-	if !strings.Contains(out, "↳ p/pulse-a") || !strings.Contains(out, "↳ p/pulse-b") {
-		t.Fatalf("completed member rows should render with the ↳ connector:\n%s", out)
+	// Each rendered row already carries a two-space section indent, so
+	// depth 1 is "  ↳ " and depth 2 is that plus one more level.
+	if !strings.Contains(out, "\n  ↳ p/pulse-a") {
+		t.Fatalf("a depth-1 row should render with the ↳ connector:\n%s", out)
+	}
+	if !strings.Contains(out, "\n    ↳ p/reflect-a") {
+		t.Fatalf("a depth-2 row should indent past its depth-1 parent:\n%s", out)
 	}
 	if strings.Contains(out, "↳ p/ship-it") {
 		t.Fatalf("the parent row must not carry a connector:\n%s", out)

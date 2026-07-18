@@ -93,17 +93,19 @@ func TestActiveChainGroupsHeadToTailAndFloats(t *testing.T) {
 }
 
 func TestActiveChainConnectorFlags(t *testing.T) {
-	// Members get Member=true; head and singleton stay false.
+	// Chain members nest one level; head and singleton stay top-level.
+	// A 3-run chain does not ladder — b and c are peer stages, both at
+	// Depth 1 — unlike spawn lineage, which deepens per generation.
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	runs := []*run.Metadata{activeRun("p", "a"), activeRun("p", "b"), activeRun("p", "c"), activeRun("p", "x")}
 	when := map[string]time.Time{"a": base, "b": base.Add(-time.Hour), "c": base.Add(-2 * time.Hour), "x": base.Add(-3 * time.Hour)}
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
-	want := map[string]bool{"p/a": false, "p/b": true, "p/c": true, "p/x": false}
+	want := map[string]int{"p/a": 0, "p/b": 1, "p/c": 1, "p/x": 0}
 	for _, r := range active {
 		key := r.Project + "/" + r.Run
-		if r.Member != want[key] {
-			t.Errorf("%s Member = %v, want %v", key, r.Member, want[key])
+		if r.Depth != want[key] {
+			t.Errorf("%s Depth = %d, want %d", key, r.Depth, want[key])
 		}
 	}
 }
@@ -121,7 +123,7 @@ func TestActiveChainHintAdjacentSuppressedFanInRetained(t *testing.T) {
 	for _, r := range active {
 		byKey[r.Project+"/"+r.Run] = r
 	}
-	if !byKey["p/c"].Member {
+	if byKey["p/c"].Depth != 1 {
 		t.Errorf("p/c should be a connected member")
 	}
 	if strings.Contains(byKey["p/a"].Note, "chained →") {
@@ -143,10 +145,10 @@ func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/b", "p/c")
-	if active[0].Member {
+	if active[0].Depth != 0 {
 		t.Errorf("terminal-parent child p/b should be a head, not a member")
 	}
-	if !active[1].Member {
+	if active[1].Depth != 1 {
 		t.Errorf("p/c should be a connected member under p/b")
 	}
 }
@@ -168,7 +170,7 @@ func TestActiveStandaloneBetweenChainsByRecency(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/d": "p/e"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/a", "p/b", "p/x", "p/d", "p/e")
-	if active[2].Member {
+	if active[2].Depth != 0 {
 		t.Errorf("standalone p/x should be ungrouped")
 	}
 }
