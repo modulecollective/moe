@@ -366,9 +366,8 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 
 // pulseKickoffWithContext appends the twin-reflect context line to the
 // static kickoff. Wired as InitialPromptBuilder, so root is the session
-// worktree runStageSession hands the builder. Best-effort: a project
-// with no twin, or a feedback read that fails, drops the line rather
-// than failing the sweep.
+// worktree runStageSession hands the builder. Best-effort: a feedback
+// read that fails drops the line rather than failing the sweep.
 func pulseKickoffWithContext(root, projectID string) string {
 	line := pendingTwinObservationsLine(root, projectID)
 	if line == "" {
@@ -381,8 +380,9 @@ func pulseKickoffWithContext(root, projectID string) string {
 // teed up for the next reflect and which runs they came from — the one
 // computed input behind the "staleness accumulated" criterion, which the
 // agent can't cheaply derive itself (loadTwinFeedback filters against the
-// reflect checkpoint's LastIngestAt). Returns "" when the project has no
-// twin or the read fails.
+// reflect checkpoint's LastIngestAt). Returns "" when the feedback read
+// fails; a project with no twin checkpoint reads as a first reflect, so
+// with no committed feedback it gets the quiet "none pending" line.
 func pendingTwinObservationsLine(root, projectID string) string {
 	cfg, err := twinWikiBuilder(root, projectID)
 	if err != nil || cfg == nil {
