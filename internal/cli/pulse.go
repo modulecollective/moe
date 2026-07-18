@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
@@ -627,12 +628,23 @@ func inProgressSlugs(root, projectID string) ([]string, error) {
 	return out, nil
 }
 
+// datedSlugSuffix matches what run.Options.IDBase appends to a slug base
+// on collision: `-YYYY-MM-DD`, optionally `-N` for a same-day repeat.
+var datedSlugSuffix = regexp.MustCompile(`^-\d{4}-\d{2}-\d{2}(-\d+)?$`)
+
 // slugBaseInProgress reports whether any in-progress slug was derived
-// from base — either the bare base or one of run.Options.IDBase's dated
-// forms (base-YYYY-MM-DD, base-YYYY-MM-DD-2).
+// from base — the bare base, or one of IDBase's dated forms.
+//
+// Deliberately not a bare prefix match: `fix-ci` and `fix-ci-red-main`
+// are different proposals, and a greedy prefix would silently skip the
+// second whenever the first is live. Only a date-shaped remainder counts
+// as "the harness already dated this base".
 func slugBaseInProgress(inProgress []string, base string) bool {
 	for _, slug := range inProgress {
-		if slug == base || strings.HasPrefix(slug, base+"-") {
+		if slug == base {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(slug, base); ok && datedSlugSuffix.MatchString(rest) {
 			return true
 		}
 	}
