@@ -478,7 +478,7 @@ func TestChainHeadWithoutLiveChildHintsClose(t *testing.T) {
 		chained map[string]string
 	}{
 		"spent": {
-			runs: []*run.Metadata{head, &run.Metadata{
+			runs: []*run.Metadata{head, {
 				ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusClosed}},
 			chained: map[string]string{"moe/dev-observability": "moe/fix-a"},
 		},
