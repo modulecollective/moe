@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -96,5 +98,42 @@ func seedServeRun(t *testing.T, root, projectID, runID, workflow string) {
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestParkedRunRowResolvesToFirstStage pins the fact the park-by-default
+// UI leans on: a run parked from the serve form (or from promote) — no
+// agent has touched it, no stage document exists — resolves through the
+// real GatherRunRow to its workflow's first stage. That Stage is what
+// composeRunActions matches against ui.Stages to render the "→ design"
+// chip, so if a parked run resolved to "" the destination page would
+// offer no ride and "park now, decide later" would be a dead end.
+//
+// The chip-rendering half is covered above (and in internal/serve by
+// TestPromoteParksThenRunPageRidesIt) against a stubbed row; this is the
+// one assertion that runs the real gatherer.
+func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
+	root := t.TempDir()
+	gittest.InitAt(t, root)
+	seedServeRun(t, root, "alpha", "seed-run", "sdlc")
+	gittest.Commit(t, root, "seed project")
+
+	// Park a run exactly the way serve's handleNewRunSubmit does.
+	if _, err := runopen.Open(root, "alpha", run.Options{
+		ID: "parked-one", Workflow: "sdlc", Agent: "claude",
+	}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("runopen.Open: %v", err)
+	}
+
+	row, ok, err := GatherRunRow(root, "alpha", "parked-one", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GatherRunRow: %v", err)
+	}
+	if !ok {
+		t.Fatal("parked run not found by the real dash lookup")
+	}
+	if row.Stage != "design" {
+		t.Errorf("parked sdlc run Stage = %q, want %q — the destination page's ride chip keys off this",
+			row.Stage, "design")
 	}
 }
