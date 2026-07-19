@@ -50,6 +50,13 @@ Start from the delta, not the whole project:
   disk scan shows it — the scan tells you a run is in progress, never
   that it is third in a batch about to be kicked. Work already queued
   is work you do not file, rank, or spawn again.
+- **What is advanced and waiting** — your kickoff may carry an
+  advanced-runs block: runs that reached a chain prompt where the
+  operator chose "advance, don't run now". They are stalled
+  mid-workflow, and nothing else in the system will pick them up —
+  the disk scan shows them as in progress, indistinguishable from a
+  run someone is actively driving. Grooming them is your job. See
+  "Grooming lanes".
 - **The backlog itself** — the open ideas, the open **intents** (the
   operator's standing direction for this project), and the previous
   pulse report. The intents are not optional reading here: they are
@@ -254,6 +261,20 @@ Placement is judgment, not a rule. Work that continues a thread goes
 takes no placement. Prefer extending an existing thread to forking a
 new one: threads that multiply for no reason are the mess a later
 pulse has to clean up (by moving runs, which is the same act).
+
+**An advanced run is the easiest thing on this canvas to groom.** The
+lane bar asks whether the operator would kick these runs, in this
+order, unchanged — and for an advanced run they have already answered
+the hard half: they sat at its chain prompt and said the next stage is
+what should happen, just not right then. That is more consent than a
+run you spawned three paragraphs ago carries. So an advanced run
+clears the bar on its own, and leaving one loose is the choice that
+needs justifying, not chaining it. Place it where it belongs — `onto`
+a thread it continues, or its own group when it stands alone.
+
+What you cannot infer from the marker is *urgency*, only readiness. It
+says "carry this forward", not "carry it first". Order an advanced run
+against the rest of the queue on the merits, same as anything else.
 
 **Nothing you place executes.** Chaining under a parked thread is
 curation: that thread runs when someone kicks it. The one exception is
