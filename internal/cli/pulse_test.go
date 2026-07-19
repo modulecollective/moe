@@ -278,8 +278,8 @@ func TestPulseWorkflowSingleStage(t *testing.T) {
 // TestBuildSystemPromptInjectsPulseFragment is the wiring check:
 // workflows/pulse/pulse.md lands in the prompt at the pulse stage.
 // Sentinels on the stage heading and the one idiom the fragment owns
-// (the Pull next grammar) so the assertion flags a fragment rename or a
-// dropped idiom.
+// (the lane bar) so the assertion flags a fragment rename or a dropped
+// idiom.
 func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{
@@ -294,8 +294,8 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	if !strings.Contains(got, "# Stage: pulse") {
 		t.Fatalf("prompt missing pulse fragment heading:\n%s", got)
 	}
-	if !strings.Contains(got, "Pull next") {
-		t.Fatalf("pulse.md missing the Pull next grammar it owns:\n%s", got)
+	if !strings.Contains(got, "The lane bar") {
+		t.Fatalf("pulse.md missing the lane bar it owns:\n%s", got)
 	}
 }
 

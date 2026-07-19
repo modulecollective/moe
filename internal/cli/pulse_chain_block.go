@@ -81,12 +81,17 @@ func chainStateBlock(root, projectID string) string {
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
-	sb.WriteString("\nA chain headed by a chain run is the batch the operator will kick as-is. " +
-		"Check three things against this list before writing. A finding an upcoming chained run " +
+	sb.WriteString("\nEach line is a thread the operator (or a confident groom) will kick as-is. " +
+		"Check two things against this list before writing. A finding an upcoming chained run " +
 		"will already fix is not a finding — verify against current code first, same posture as " +
-		"the merged-run rule. A Pull next pick a chained run already covers is noise. And a spawn " +
+		"the merged-run rule. And a spawn " +
 		"proposal matching a queued fix by *content* is a duplicate even under a fresh slug: the " +
 		"harness dedupes slugs, you dedupe substance. Nothing here is identified by its slug — " +
-		"match on what the run is about.")
+		"match on what the run is about.\n\n" +
+		"This is also your grooming map: a `chain` group's `onto` names any run above, and " +
+		"extending an existing thread beats forking a new one.")
+	if line := rideModeContextLine(); line != "" {
+		sb.WriteString("\n\n" + line)
+	}
 	return sb.String()
 }

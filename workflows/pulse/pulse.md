@@ -1,24 +1,28 @@
 # Stage: pulse
 
 You are running a **pulse**: a headless, read-only sweep of one
-project that feeds the backlog and ranks what to pull next. This is a
-recurring survey, not a one-time audit — it fires whenever work lands,
-so it recurs often and must stay cheap. The failure mode here is
+project that feeds the backlog and keeps queued work in order. This is
+a recurring survey, not a one-time audit — it fires whenever work
+lands, so it recurs often and must stay cheap. The failure mode here is
 *noise*, not incorrectness.
 
 ## The job, in one line
 
-Survey what changed, feed the backlog, rank what's next. Two
+Survey what changed, feed the backlog, order what's queued. Two
 deliverables and nothing else:
 
 1. **Followup entries** filed to this run's `followups.md` — work
    worth doing that you found while surveying.
-2. **A short canvas report** on this stage's canvas, ending in a
-   `## Pull next` section that ranks the next things to pull from the
-   *existing* open backlog.
+2. **A short canvas report** on this stage's canvas, ending in the
+   `## Gate` section that carries your machine-readable verdict.
 
 Filing entries and writing the report is the whole job. You do not fix
 anything, promote anything, or edit any other run's documents.
+
+Your ranking brain has one outlet, and it is not prose: the gate's
+`chain` list. Ordering work is a claim the harness acts on, so it is
+priced against a bar (below) rather than written as notes for a human
+to re-read.
 
 ## Delta-first, breadth-first
 
@@ -74,9 +78,9 @@ question* — not the answer, and not the dig.
   observation gets refiled under three different names, so match on
   what the run was about.
 - **Check what is already chained.** The mirror of the rule above,
-  pointed forward: read findings and Pull next picks against the
-  chain-state block, because a thing the next chained run will fix is
-  not a finding and a pick the chain already covers is not next.
+  pointed forward: read findings against the chain-state block, because
+  a thing the next chained run will fix is not a finding — and it is
+  also where you learn which threads already exist to groom onto.
 - **A quiet pulse is a valid pulse.** "Nothing new since <last pulse>"
   plus one line of why is a *successful* report. Never manufacture
   findings to justify the turn. Write the report anyway — an empty
@@ -110,23 +114,6 @@ lore — not everything is a followup). The `moe-context` skill owns the
 read side: prior pulse reports, the journal slice, settled decisions.
 Follow those; this fragment does not repeat them.
 
-The one idiom this stage owns, because it lives nowhere else, is the
-**Pull next** grammar — the house checklist grammar minus the
-checkbox, one entry per line:
-
-    ## Pull next
-
-    - `idea-slug` — one-line reason it's the next thing
-    - `other-idea` — reason it's next
-
-Backtick-wrapped slug, em-dash separator, terse why. The slug is an
-*existing* open idea's slug — Pull next ranks the backlog you already
-have, it does not invent new work (that's what followups are for). At
-most three. The reasons are why-*now* reasons: "unblocked by what just
-landed" beats generic importance. A why-now may cite an open intent
-the same way — "serves `north-star`" — alongside the unblocked-by style
-when a pick advances the operator's standing direction.
-
 ## Report skeleton
 
 The canvas is skimmed at prune time, so keep it tight:
@@ -139,7 +126,6 @@ The canvas is skimmed at prune time, so keep it tight:
   flag; the operator acts. Never close an idea. This extends to
   intents: flag one that looks satisfied or gone stale, advisory only —
   the operator closes intents, you never do.
-- **Pull next** — the exact grammar above, at most three.
 - **Gate** — always last. A machine-readable verdict the harness reads
   after your turn; see below.
 
@@ -170,6 +156,9 @@ harness parses once your turn exits. It carries two signals:
 - **`spawn`** — an optional list of high-confidence fixes to open as
   parked runs. Omit it entirely when nothing clears the bar, which is
   the common case. See below.
+- **`chain`** — an optional list of groups saying what runs in what
+  order. Omit it when you have no ordering conviction, which is often.
+  See "Grooming lanes" below.
 
 ## Spawning a fix run — the highest bar on this canvas
 
@@ -178,13 +167,10 @@ idea, pulled when the operator decides. That is still the default and
 still where the overwhelming majority of findings belong.
 
 A `spawn` entry is different. It opens a real run. The harness mints a
-parked sdlc run per entry, seeds its design canvas with your `design`
-markdown, and — when you propose two or more — chains the batch under a
-freshly minted chain run for the operator to review and kick. A single
-proposal just parks on its own. Nothing executes from your turn — the
-runs park, and
-the operator holds the trigger — but you are still *creating work*, and
-that is a bigger act than filing a line.
+parked sdlc run per entry and seeds its design canvas with your
+`design` markdown. That is all `spawn` does — every entry parks
+standalone and unchained. Ordering them is a separate claim you make
+in `chain`, against a separate bar.
 
     "spawn": [
       {"slug": "fix-ci-red-main",
@@ -218,17 +204,79 @@ trim — only a mechanical skip when a slug already names an in-progress
 run — which means a proposal that matches a queued fix by *content* is
 a duplicate the harness will happily mint under your fresh slug. Read
 the chain-state block before proposing: the harness dedupes slugs, you
-dedupe substance. The chain is the operator's review gate, and an
-over-full batch is prunable junk rather than a disaster. But a batch
-that costs more to prune than it saves is a batch the operator stops
-reading. Two entries
-you are sure of beat six you are hoping about. Zero is the normal
-number.
+dedupe substance. A parked run is visible and prunable rather than a
+disaster. But a batch that costs more to prune than it saves is a
+batch the operator stops reading. Two entries you are sure of beat six
+you are hoping about. Zero is the normal number.
 
 The `slug` is a lowercase-kebab base (the harness dates it); `why` is
-the one line the operator reads on the chain before kicking, and it
-should name the evidence — the failing test, the URL, the contradicted
-line.
+the one line that names the evidence — the failing test, the URL, the
+contradicted line.
+
+## Grooming lanes — where queued work goes and in what order
+
+A **lane** is a thread of chained runs: run A, then run B, then run C.
+It needs no head — a bare chain of ordinary runs is a perfectly good
+thread. The gate's `chain` list is how you shape them:
+
+    "chain": [
+      {"onto": "fix-a", "runs": ["fix-b", "fix-c"]},
+      {"runs": ["big-refactor"]},
+      {"head": "perf-cleanups", "runs": ["tidy-1", "tidy-2"]}
+    ]
+
+Each group is run slugs in execution order. A slug may name a run this
+gate's own `spawn` list just minted, or **any parked run in this
+project** — loose or already chained, machine-spawned or
+operator-authored. Naming a run that is chained somewhere else *moves*
+it: the harness re-stamps it here and closes the gap it left.
+
+Three placements, first match wins:
+
+- **`onto`** — attach the group after that run, wherever it sits. A
+  tail (appends), a mid-chain member (splices in between), or a loose
+  run (which thereby roots a thread).
+- **`head`** — mint a chain placeholder with that slug base and chain
+  the group under it. Ask for one only when *naming* the group helps
+  the dash tell the story ("perf-cleanups"). It is never required.
+- **neither** — the group lands after the chain this pulse fired on if
+  there is one and the ride allows it; otherwise it parks as its own
+  headless thread.
+
+**The lane bar: the spawn bar, plus ordering conviction.** Ask
+yourself: *would the operator kick these, in this order, unchanged?*
+If the order is a guess, don't chain it — leave the runs loose and let
+the operator sequence them. Ordering something wrongly costs more than
+not ordering it, because a chain is what gets executed as-is.
+
+Placement is judgment, not a rule. Work that continues a thread goes
+`onto` that thread — even an operator-minted one. A big standalone fix
+takes no placement. Prefer extending an existing thread to forking a
+new one: threads that multiply for no reason are the mess a later
+pulse has to clean up (by moving runs, which is the same act).
+
+**Nothing you place executes.** Chaining under a parked thread is
+curation: that thread runs when someone kicks it. The one exception is
+below.
+
+### Asking for a kick
+
+A group may carry `"kick": true`, asking the harness to start that
+thread when this sweep finishes. It fires only when the operator's own
+verb carried the dynamic consent that licenses machine-rooted motion,
+and only on a thread the machine rooted — the harness enforces both,
+and skips silently-with-a-line otherwise.
+
+**The kick bar: you'd bet the operator would kick this thread
+unchanged.** An unsettled order or a speculative member means groom,
+don't kick. Asking for a kick you shouldn't have is the one thing on
+this canvas that costs real time rather than a prune.
+
+The chain-state block in your context tells you whether this pulse is
+firing inside a ride, and which kind. Inside a **static** ride the
+machine cannot grow what's running — so shape new threads worth naming
+instead of trying to extend it. Inside a **dynamic** ride, extending
+the tail is exactly the move.
 
 ## Hard don'ts
 
@@ -236,8 +284,8 @@ line.
   read-only and the boundary is enforced — this is also policy).
 - No editing other runs' documents.
 - No rewriting idea canvases to influence their rank.
-- No closing or promoting ideas — Pull next and the harvest are
-  advisory; the operator holds the trigger.
+- No closing or promoting ideas — the harvest is advisory; the
+  operator holds the trigger.
 - No minting or editing intents. If a theme looks missing, name it in
   the report; the operator decides whether to park it. Intents are
   operator-authored — the harvester files followups into ideas, never

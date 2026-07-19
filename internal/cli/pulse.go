@@ -55,9 +55,8 @@ const (
 // this just points the agent at the job.
 const pulseKickoff = "Run the pulse for this project: a delta-first, read-only sweep. " +
 	"Survey what changed since the last pulse — the journal, twin-vs-code drift in the touched areas, the open backlog — " +
-	"file followup entries for work worth doing, and write the canvas report ending in a `## Pull next` section that ranks " +
-	"the next things to pull from the existing open backlog. Follow the stage guidance. A quiet pulse — \"nothing new since " +
-	"the last pulse\" — is a valid, successful report; never manufacture findings.\n\n" +
+	"file followup entries for work worth doing, and write the canvas report. Follow the stage guidance. A quiet pulse — " +
+	"\"nothing new since the last pulse\" — is a valid, successful report; never manufacture findings.\n\n" +
 	"Close the canvas with the `## Gate` section (a ```json fence). Set \"status\" to a short word (e.g. \"ok\") once the " +
 	"survey actually ran and concluded — that is what tells the harness this was a real sweep, not a crashed no-op. " +
 	"Flag a twin reflect as due — `\"reflect\": {\"due\": true, \"why\": \"<one line>\"}` — when either the cycle landed a " +
@@ -65,14 +64,21 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"twin staleness has accumulated (many small changes and/or pending twin observations teed up since the last reflect). " +
 	"Do NOT flag reflect due when a twin run is already open, and never manufacture a reflect to justify the turn — the " +
 	"default is `\"reflect\": {\"due\": false}`. The `why` is required when due: one line, the operator reads it next to the verdict.\n\n" +
-	"The gate may also carry a `\"spawn\"` list: high-confidence fixes the harness should open as parked runs for the operator " +
-	"to review and kick. The bar is mechanical, bounded, and verifiable — all three — and the stage guidance holds it. Omitting " +
-	"`spawn` is the normal outcome; a followup is the default channel for everything that doesn't clear the bar."
+	"The gate may also carry a `\"spawn\"` list: high-confidence fixes the harness should open as parked runs. The bar is " +
+	"mechanical, bounded, and verifiable — all three — and the stage guidance holds it. Omitting `spawn` is the normal " +
+	"outcome; a followup is the default channel for everything that doesn't clear the bar.\n\n" +
+	"And a `\"chain\"` list: groups of run slugs in execution order, each attached after an existing run (`\"onto\"`), under a " +
+	"freshly named head (`\"head\"`), or left to land opportunistically. A group may name runs this gate just spawned or any " +
+	"parked run in the project — naming one that is chained elsewhere moves it. This is where your ordering judgment goes; " +
+	"there is no prose ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in " +
+	"this order, unchanged? If the order is a guess, leave the runs loose. A group may add `\"kick\": true` to ask the harness " +
+	"to start that thread — highest bar on the canvas, and the harness refuses it unless the operator's own verb licensed " +
+	"machine-rooted motion. Omitting `chain` is a perfectly normal outcome. See the stage guidance."
 
 // pulseCanvasSkeleton is the fixed structural shape the survey canvas
-// opens with. The agent fills the sections in place. The exact Pull
-// next grammar (backtick slug, em-dash, why-now) is taught in the stage
-// fragment, not restated here.
+// opens with. The agent fills the sections in place. The gate's grammar
+// — spawn entries, chain groups, the bars each is held to — is taught
+// in the stage fragment, not restated here.
 const pulseCanvasSkeleton = `# Pulse
 
 ## What landed
@@ -91,13 +97,9 @@ const pulseCanvasSkeleton = `# Pulse
 
 (agent fills: stale/duplicate flags, advisory only. Empty is fine.)
 
-## Pull next
-
-(agent fills: at most 3 ranked backlog picks. See the stage guidance for the exact grammar. Empty means no highlights.)
-
 ## Gate
 
-(agent fills: a fenced json block — set "status" once the survey concluded, "reflect": {"due": …, "why": …}, and optionally "spawn": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
+(agent fills: a fenced json block — set "status" once the survey concluded, "reflect": {"due": …, "why": …}, and optionally "spawn": [...] and "chain": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
 `
 
 func init() {

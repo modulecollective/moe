@@ -365,9 +365,9 @@ Every pulse does three things:
   warns once and the sweep carries on.
 - **The survey (every fire).** A headless, read-only agent sweep — it reads
   the journal since the last pulse, the twin, and the open backlog; files
-  followups; and writes a short report whose last section, `## Pull next`,
-  ranks the top few open ideas to pull next with a one-line why. `moe dash`
-  floats those picks to the top of BACKLOG, each carrying its reason. A clean
+  followups; and writes a short report ending in a machine-readable `## Gate`.
+  The gate may also open parked fix runs (`spawn`) and order queued work into
+  chained lanes (`chain`) — see "Grooming lanes" in the stage guidance. A clean
   sweep auto-closes its own run: the filed followups harvest straight into
   ideas (review them by scrapping on the dash). Every fire runs a fresh sweep
   unconditionally — a lingering open pulse run means a failed or abandoned

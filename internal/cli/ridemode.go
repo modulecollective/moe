@@ -69,6 +69,26 @@ func withRideMode(m rideMode) func() {
 	return func() { currentRideMode = prev }
 }
 
+// rideModeContextLine tells a mid-ride survey which kind of ride it is
+// inside, so its placement judgment can adapt. Empty when no ride is in
+// flight — most pulses — because a line that says "nothing is riding"
+// is context the agent can't act on.
+func rideModeContextLine() string {
+	switch currentRideMode {
+	case rideStatic:
+		return "This pulse is firing inside a **static** ride: the operator's kick is walking a chain " +
+			"right now, and the machine cannot grow it. A placement aimed into that chain will be " +
+			"redirected to its own thread. Shape new threads worth naming instead of trying to extend " +
+			"the one that's running, and don't ask for a kick — it will be refused."
+	case rideDynamic:
+		return "This pulse is firing inside a **dynamic** ride: the operator licensed the machine to " +
+			"extend it. Work groomed onto the ridden chain's tail will run in this same ride, and a " +
+			"`\"kick\": true` group may start a thread of its own. Both are real motion with no human " +
+			"look in between — hold the ordering and kick bars accordingly."
+	}
+	return ""
+}
+
 // rideModeForAnswer maps a chain-prompt bang answer to its mode. Only
 // the two ride forms carry one; `!`, `!<stage>` and `!!` do not ride, so
 // there is no unit for the machine to grow or refrain from growing.
