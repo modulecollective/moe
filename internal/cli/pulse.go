@@ -373,10 +373,19 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		moePrintf(stderr, "pulse: %s/%s left an unfilled gate — leaving the run open for review\n", projectID, md.ID)
 		return 0
 	}
+	// Mint, then groom, then place the reflect, then kick. The order is
+	// the design's: a group can only name runs that exist, the reflect
+	// belongs at the *post-groom* tail so it reads the settled record
+	// after the fixes it follows, and a kick must not start until the
+	// thread it names has stopped moving.
+	reflectID := ""
 	if gate.Reflect.Due {
-		maybeSpawnReflect(root, projectID, md.ID, gate.Reflect.Why, stdout, stderr)
+		reflectID = maybeSpawnReflect(root, projectID, md.ID, gate.Reflect.Why, stdout, stderr)
 	}
-	maybeSpawnFixRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
+	minted := maybeSpawnFixRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
+	threads := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
+	stampReflectOnUnit(root, projectID, md.ID, reflectID, spawner, stdout, stderr)
+	pulseSelfKick(root, threads, spawner, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -437,8 +446,14 @@ type pulseGate struct {
 	// Spawn carries the survey's high-confidence fix proposals. The
 	// agent proposes; the harness executes — so the survey sandbox stays
 	// read-only and needs no new tools. Each entry becomes a parked sdlc
-	// run; a batch of two or more is chained under a fresh chain run.
+	// run, unchained: ordering is a separate claim, made in Chain.
 	Spawn []pulseSpawn `json:"spawn"`
+	// Chain carries the survey's ordering opinion: groups of run slugs
+	// in execution order, each placed after an existing run, under a
+	// freshly named head, or self-rooted. See pulse_groom.go. A spawn
+	// entry named in no group parks standalone — ordering is a claim,
+	// and the lane bar prices it separately from the spawn bar.
+	Chain []pulseChainGroup `json:"chain"`
 }
 
 // pulseSpawn is one proposed fix run. Slug is the slug base (the harness
@@ -487,11 +502,14 @@ func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
 // prior auto-spawned reflect still parked, is a silent skip — no sense
 // opening a second; out-of-band twin edits warn and skip, since the
 // operator has to clear those before any reflect can run.
-func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) {
+// Returns the minted run's id, or "" when nothing was minted — the
+// handle stampReflectOnUnit needs to place it at a chain's tail once
+// this sweep's grooming has settled.
+func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) string {
 	canonical, err := twinWikiBuilder(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: reflect spawn: build twin wiki for %s: %v\n", projectID, err)
-		return
+		return ""
 	}
 	// Qualify the spawner to "<project>/<slug>" before minting, mirroring
 	// pulseSurvey: run.Options.SpawnedBy is the qualified spawner, and the
@@ -505,23 +523,29 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 			if refusal.kind == reflectRefusalUnrecorded {
 				moePrintf(stderr, "pulse: reflect not spawned for %s — %v; the operator lands those first\n", projectID, refusal)
 			}
-			return
+			return ""
 		}
 		moePrintf(stderr, "pulse: reflect spawn for %s: %v\n", projectID, err)
-		return
+		return ""
 	}
 	moePrintf(stderr, "pulse: drift flagged — opened twin reflect %s/%s (%s)\n", projectID, md.ID, why)
+	return md.ID
 }
 
 // maybeSpawnFixRuns mints a parked sdlc run for each high-confidence fix
-// the survey's gate proposed, then chains the batch under a freshly
-// minted chain run. The pulse *makes* runs; it never *runs* them — every
-// entry parks at design and only `moe chain kick` (or a manual stage
-// verb) executes anything.
+// the survey's gate proposed. Minting is all it does: ordering is a
+// separate claim the gate makes in its `chain` list, priced against a
+// higher bar, and groomChains is what stamps it. A spawn entry named in
+// no group parks standalone and unchained — which is the normal outcome
+// for work whose order the survey isn't sure of.
+//
+// Returns proposed-slug → minted-run-id, so a `chain` group can name
+// this batch's own runs by the slug the survey wrote even when the
+// harness dated it on collision.
 //
 // No numeric cap. The harness has no basis for judging which proposals
-// to trim, and the chain is itself the review gate: spawned runs are
-// parked, visible as one dash unit, and prunable with `moe chain edit`.
+// to trim, and parked is itself the review gate: spawned runs are
+// visible on the dash and prunable with `moe chain edit`.
 // Over-proposal is visible junk, which the pulse already prefers to
 // invisible absence. The bar — mechanical, bounded, verifiable — is
 // taught in the stage fragment, where judgment belongs.
@@ -533,21 +557,17 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 // Warn-only throughout, like the reflect spawn beside it: the report and
 // filings are already durable, so a failed mint is a spawn-by-hand-later,
 // not a lost sweep.
-func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdout, stderr io.Writer) {
+func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdout, stderr io.Writer) map[string]string {
 	if len(spawns) == 0 {
-		return
+		return nil
 	}
 	live, err := liveSlugs(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: spawn: scan runs for %s: %v\n", projectID, err)
-		return
+		return nil
 	}
 
-	// spawned is the batch's run IDs in mint order — everything the chain
-	// stamper needs, now that the head's canvas carries no membership list
-	// for the titles and whys to feed. Those live on each child's own
-	// seeded design canvas.
-	var spawned []string
+	minted := map[string]string{}
 	for _, s := range spawns {
 		slug := strings.TrimSpace(s.Slug)
 		if slug == "" || run.Slugify(slug) != slug {
@@ -576,14 +596,10 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		// Claim the base so a second entry in the same batch proposing the
 		// same slug hits the dedupe rather than minting a dated sibling.
 		live = append(live, md.ID)
-		spawned = append(spawned, md.ID)
+		minted[slug] = md.ID
 		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
 	}
-
-	if err := stampChainBatch(root, projectID, pulseSlug, spawned, stdout, stderr); err != nil {
-		moePrintf(stderr, "pulse: chain %d spawned run(s) for %s: %v — the runs are open but unchained\n",
-			len(spawned), projectID, err)
-	}
+	return minted
 }
 
 // spawnDesignSeed builds the design canvas body a spawned run opens

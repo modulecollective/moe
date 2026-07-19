@@ -196,14 +196,6 @@ type Inputs struct {
 	SessionDocsByRun map[string][]string     // keyed "<project>/<slug>"
 	NextByRun        map[string]NextDecision // keyed "<project>/<slug>"; populated only for in-progress, non-idea runs.
 	Chores           []ChoreInput
-	// PullNext is the latest pulse run's ranked backlog picks per
-	// project, in report order. BuildRows floats the ones that still
-	// name an open idea to the top of BACKLOG, each carrying its reason
-	// as the row note. Picks whose idea has been promoted or closed have
-	// no backlog row to float, so they simply drop out — a stale report
-	// can only over-highlight, never resurrect. The caller (cli's
-	// GatherDashSnapshot) does the disk work; dash stays pure.
-	PullNext []PullNextPick
 	// Intents is the set of open intents (slug + title) to render in the
 	// INTENTS section. Titles come off each canvas's first heading, so
 	// the caller (GatherDashSnapshot) does the disk read; dash stays
@@ -219,15 +211,6 @@ type IntentInput struct {
 	Project string
 	Slug    string
 	Title   string
-}
-
-// PullNextPick is one ranked backlog pick parsed from a pulse run's
-// "## Pull next" section: the project, the open-idea slug it names, and
-// the one-line why-now reason.
-type PullNextPick struct {
-	Project string
-	Slug    string
-	Reason  string
 }
 
 // BuildRows maps scanned metadata to dashboard rows. Per-run journal
@@ -282,7 +265,6 @@ func BuildRows(in Inputs) ([]Row, error) {
 	})
 	groupActiveChains(rows, in.Index, byRunKey)
 	rows = nestSpawnedRuns(rows, in.Index)
-	floatPullNext(rows, in.PullNext)
 	var choreRows []Row
 	for _, c := range in.Chores {
 		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
@@ -550,61 +532,6 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 		emitSubtree(i, parent.Bucket, 1) // no-op when there are no folding children
 	}
 	return out
-}
-
-// floatPullNext reorders the BACKLOG bucket so the latest pulse's
-// ranked picks lead it, each carrying its why-now reason as the row
-// note. It touches only rows already classified into BucketBacklog
-// (open ideas), so the open-idea intersection is automatic: a pick
-// whose idea has been promoted or closed has no backlog row to float
-// and drops out. Unmatched backlog rows keep their recency order after
-// the picks.
-//
-// rows must be bucket-then-recency sorted, so BucketBacklog is a
-// contiguous block (chore rows are spliced in later, after this runs).
-func floatPullNext(rows []Row, picks []PullNextPick) {
-	if len(picks) == 0 {
-		return
-	}
-	reason := make(map[string]string, len(picks))
-	rank := make(map[string]int, len(picks))
-	for i, p := range picks {
-		key := p.Project + "/" + p.Slug
-		if _, seen := reason[key]; seen {
-			continue // first mention wins the rank
-		}
-		reason[key] = p.Reason
-		rank[key] = i
-	}
-
-	lo := 0
-	for lo < len(rows) && rows[lo].Bucket != BucketBacklog {
-		lo++
-	}
-	hi := lo
-	for hi < len(rows) && rows[hi].Bucket == BucketBacklog {
-		hi++
-	}
-	if lo == hi {
-		return
-	}
-
-	backlog := rows[lo:hi]
-	matched := make([]Row, 0, len(backlog))
-	rest := make([]Row, 0, len(backlog))
-	for _, r := range backlog {
-		key := r.Project + "/" + r.Run
-		if why, ok := reason[key]; ok {
-			r.Note = "pull: " + why
-			matched = append(matched, r)
-		} else {
-			rest = append(rest, r)
-		}
-	}
-	sort.SliceStable(matched, func(i, j int) bool {
-		return rank[matched[i].Project+"/"+matched[i].Run] < rank[matched[j].Project+"/"+matched[j].Run]
-	})
-	copy(backlog, append(matched, rest...))
 }
 
 // classify decides which section a run lands in, what note to render,

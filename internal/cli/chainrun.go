@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -21,9 +20,16 @@ import (
 // A **chain run** is a placeholder head: a run whose only job is to be
 // the stable handle for the batch chained behind it. `moe chain new`
 // mints one by hand (a topic — `moe chain new moe/perf-cleanups`); the
-// pulse mints one per spawn batch. Either way the head holds still while
-// its children ship, which is what a bare chain of ordinary runs cannot
-// do — the handle would move every time the head shipped.
+// pulse mints one when a groom group names a `head`. Either way the
+// head holds still while its children ship, which is what a bare chain
+// of ordinary runs cannot do — the handle would move every time the
+// head shipped.
+//
+// A head is a convenience, not the primitive. Grooming's primitive is
+// "chain after an existing item" (pulse_groom.go), and a bare chain of
+// ordinary runs is a perfectly good thread — it just has a moving
+// handle. Mint a head when naming the group helps the dash tell the
+// story; skip it everywhere else.
 //
 // The workflow registers **no stages**. That is the whole trick: a run
 // with no ladder is trivially done the moment it exists, so `moe chain
@@ -37,8 +43,11 @@ import (
 // note's whole job.
 //
 // The invariant the whole surface preserves: **chaining under a parked
-// head is inert; execution is operator-rooted.** The pulse proposes and
-// the chain holds; only an operator kick (or their own `!!!`) executes.
+// chain is inert.** Grooming reshapes membership; it never starts
+// anything. Motion roots in an operator kick — static (`!!!`, the
+// machine can't grow it) or dynamic (`!!!!`, it can) — or in a
+// confident pulse downstream of a fourth bang the operator typed
+// (pulse_kick.go).
 const (
 	// chainWorkflow is the workflow name written to run.json. Aliased
 	// from dash so the string lives in one place — dash also needs it
@@ -458,82 +467,6 @@ func runChainNote(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stdout, "wrote chain note %s/%s\n", projectID, runID)
 	}
 	return 0
-}
-
-// stampChainEdges commits the chain edges a spawn batch established.
-// One commit, not one per run: the batch is one event, and
-// BuildJournalIndex's grep picks up MoE-Chained-To alongside the
-// MoE-Run trailer on the same commit.
-//
-// The commit touches no files — the head's canvas is the operator's
-// purpose note, not a membership list — so it is an --allow-empty
-// commit carrying only trailers, the same shape `moe chain edit` uses.
-// Unlike chain edit there *is* a canonical run to scope to (the head
-// this batch was just minted under), so the run trailers ride along.
-// No Document trailer: nothing wrote to the doc.
-//
-// Caller holds the repolock.
-func stampChainEdges(root, projectID, chainID string, edges []string) error {
-	msg := fmt.Sprintf("chain: chain %d run(s) under %s/%s\n\n", len(edges), projectID, chainID) +
-		trailers.Block{
-			Run:       chainID,
-			Project:   projectID,
-			Workflow:  chainWorkflow,
-			ChainedTo: edges,
-		}.String()
-	return git.Run(root, "commit", "--allow-empty", "-m", msg)
-}
-
-// stampChainBatch is the durable half of a spawn batch: it mints a
-// *fresh* chain run and stamps the edges that string the new runs under
-// it. Runs under its own repolock acquisition and pushes the journal,
-// since it is called after the survey's own lock windows have closed.
-//
-// It writes nothing to the head's canvas. That was one appended line
-// per spawned run, frozen at mint time: a reorder, a prune, a member
-// shipping — none of it reached the page, so the list started
-// stale-able and only degraded. Membership renders live from these
-// edges instead, on the dash, in `moe chain edit`, and on the head's
-// own run page.
-//
-// The pulse never appends to an existing chain — not its own, not the
-// operator's. A live-pen lookup plus a tail walk would let a batch land
-// under a chain that is mid-ride (maybeRideChain rebuilds the journal
-// index at every hop, so an edge stamped behind a still-live run would
-// execute headlessly with no review) or dump machine proposals into a
-// curated topic chain. Minting fresh costs the accumulating pen — one
-// thing to review across pulses — and buys back both. Batches that pile
-// up are visible chain units on the dash, and `moe chain edit` merges
-// them by hand when the operator wants one.
-//
-// A batch of one gets no head at all: kick handles a chain of one, so a
-// single parked fix needs no placeholder. Its "why" already rides on the
-// run's seeded design canvas.
-func stampChainBatch(root, projectID, pulseSlug string, spawned []string, stdout, stderr io.Writer) error {
-	if len(spawned) < 2 {
-		return nil
-	}
-	chainMD, err := mintChainRun(root, projectID, chainWorkflow, projectID+"/"+pulseSlug, "" /*note*/, stdout, stderr)
-	if err != nil {
-		return fmt.Errorf("mint chain run: %w", err)
-	}
-	moePrintf(stderr, "pulse: opened chain %s/%s\n", projectID, chainMD.ID)
-
-	chainKey := projectID + "/" + chainMD.ID
-	tail := chainKey
-	var edges []string
-	for _, runID := range spawned {
-		childKey := projectID + "/" + runID
-		edges = append(edges, tail+" "+childKey)
-		tail = childKey
-	}
-
-	return sync.WithJournalPush(root, repolock.Options{
-		Purpose: "chain-stamp",
-		Run:     chainKey,
-	}, stdout, stderr, func() error {
-		return stampChainEdges(root, projectID, chainMD.ID, edges)
-	})
 }
 
 // mintChainRun opens a chain placeholder. IDBase rather than ID so a

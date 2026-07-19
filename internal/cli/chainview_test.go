@@ -16,10 +16,10 @@ import (
 // returning (head, first, second).
 func chainBatch(t *testing.T, root string) (string, string, string) {
 	t.Helper()
-	maybeSpawnFixRuns(root, "moe", "pulse-2026-07-19", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-2026-07-19", "batch", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
-	}, io.Discard, os.Stderr)
+	}, os.Stderr)
 
 	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
 	if len(heads) != 1 {

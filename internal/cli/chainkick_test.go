@@ -49,10 +49,10 @@ func kickStages(invs []openSdlcStageInvocation) []string {
 func TestChainKickChainRunHeadClosesAndRides(t *testing.T) {
 	root, stages, pushes := kickFixture(t)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
-	}, io.Discard, os.Stderr)
+	}, os.Stderr)
 
 	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
 	if len(heads) != 1 {
@@ -255,10 +255,10 @@ func TestChainKickStalledRideExitsNonZero(t *testing.T) {
 	stages := stubOpenSdlcStage(t, map[string]int{"design": 1})
 	pushes := stubPushFromCascade(t, 0, nil)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
-	}, io.Discard, os.Stderr)
+	}, os.Stderr)
 
 	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
 	if len(heads) != 1 {

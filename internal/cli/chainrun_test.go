@@ -22,6 +22,25 @@ func spawnFixture(t *testing.T) string {
 	return root
 }
 
+// spawnAndHead mints a batch and grooms it under a freshly named
+// machine head — the shape a pulse batch had back when the harness
+// minted one head per batch, and still the shape the chain fixtures
+// below want. Now it takes an explicit `head` group to ask for it,
+// which is the point: heads are a grouping convenience the survey
+// requests, not something grooming does on its own.
+func spawnAndHead(t *testing.T, root, projectID, pulseSlug, head string, spawns []pulseSpawn, stderr io.Writer) {
+	t.Helper()
+	minted := maybeSpawnFixRuns(root, projectID, pulseSlug, spawns, io.Discard, stderr)
+	var runs []string
+	for _, s := range spawns {
+		if _, ok := minted[s.Slug]; ok {
+			runs = append(runs, s.Slug)
+		}
+	}
+	groomChains(root, projectID, pulseSlug,
+		[]pulseChainGroup{{Head: head, Runs: runs}}, minted, "" /*spawner*/, io.Discard, stderr)
+}
+
 // runsWithWorkflow lists the project's in-progress runs for a workflow.
 func runsWithWorkflow(t *testing.T, root, projectID, workflow string) []string {
 	t.Helper()
@@ -38,17 +57,17 @@ func runsWithWorkflow(t *testing.T, root, projectID, workflow string) []string {
 	return out
 }
 
-// TestSpawnMintsParkedRunsUnderAChain: a gate carrying two spawn
-// entries mints one parked sdlc run each, opens a chain placeholder,
-// and chains chain → fix1 → fix2 in the proposed order.
-func TestSpawnMintsParkedRunsUnderAChain(t *testing.T) {
+// TestSpawnAndGroomUnderAnExplicitHead: two spawn entries mint one
+// parked sdlc run each, and a `head` group opens a chain placeholder
+// and chains head → fix1 → fix2 in the group's order.
+func TestSpawnAndGroomUnderAnExplicitHead(t *testing.T) {
 	root := spawnFixture(t)
 
 	var errb bytes.Buffer
-	maybeSpawnFixRuns(root, "moe", "pulse-2026-07-18", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-2026-07-18", "ci-and-docs", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI on main", Why: "TestX failing since abc123", Design: "# Fix red CI\n\nTestX asserts a stale path.\n"},
 		{Slug: "fix-doc-drift", Title: "Fix doc drift", Why: "README names a removed flag"},
-	}, io.Discard, &errb)
+	}, &errb)
 
 	sdlcRuns := runsWithWorkflow(t, root, "moe", "sdlc")
 	if len(sdlcRuns) != 2 {
@@ -138,74 +157,33 @@ func TestSpawnMintsParkedRunsUnderAChain(t *testing.T) {
 	}
 }
 
-// TestSpawnNeverAppendsToAnExistingChain is the safety property the
-// rename bought: the pulse mints a fresh head per batch and has no
-// append path at all. Two consecutive pulses produce two independent
-// chain units — never an edge stamped behind a head the operator may
-// already be riding, and never a machine proposal dumped into a curated
-// topic chain.
-func TestSpawnNeverAppendsToAnExistingChain(t *testing.T) {
+// TestSpawnAloneMintsNoHeadAndNoEdges: minting is all the spawn step
+// does. Ordering is a separate claim, priced against a separate bar, so
+// a gate that proposes runs without grooming them leaves them parked,
+// unchained, and headless. (This replaces the old fresh-head-per-batch
+// behaviour, whose no-append safety property is now the static ride's
+// job — see TestGroomStaticRideRedirectsIntoTheRiddenUnit.)
+func TestSpawnAloneMintsNoHeadAndNoEdges(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, io.Discard, io.Discard)
-	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
-		{Slug: "fix-three", Title: "Three"},
-		{Slug: "fix-four", Title: "Four"},
-	}, io.Discard, io.Discard)
 
-	chainRuns := runsWithWorkflow(t, root, "moe", chainWorkflow)
-	if len(chainRuns) != 2 {
-		t.Fatalf("chain runs %v, want 2 — one fresh head per batch", chainRuns)
+	if len(minted) != 2 {
+		t.Fatalf("minted %v, want both proposals", minted)
 	}
-
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Neither head hangs off anything, and neither batch's tail chains
-	// onward: the two units are disjoint.
-	for _, id := range chainRuns {
-		key := "moe/" + id
-		for parent, child := range idx.ChainedChild {
-			if child == key {
-				t.Errorf("chain head %s is chained under %s — the pulse must never append", key, parent)
-			}
-		}
-	}
-	for parent, child := range idx.ChainedChild {
-		if (strings.HasPrefix(parent, "moe/fix-two") || strings.HasPrefix(parent, "moe/fix-four")) && child != "" {
-			t.Errorf("batch tail %s chains onward to %s — the pulse must never append", parent, child)
-		}
-	}
-}
-
-// TestSpawnOfOneParksStandalone: a single proposal needs no placeholder.
-// `moe chain kick` handles a chain of one, so minting a head for it
-// would be a run to review and close for nothing.
-func TestSpawnOfOneParksStandalone(t *testing.T) {
-	root := spawnFixture(t)
-
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
-		{Slug: "fix-one", Title: "One"},
-	}, io.Discard, io.Discard)
-
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
-		t.Fatalf("chain runs %v, want none — a batch of one parks standalone", got)
-	}
-	sdlc := runsWithWorkflow(t, root, "moe", "sdlc")
-	if len(sdlc) != 1 {
-		t.Fatalf("sdlc runs %v, want the lone fix", sdlc)
+		t.Fatalf("chain runs %v, want none — a head is minted only on request", got)
 	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for parent, child := range idx.ChainedChild {
-		if child == "moe/"+sdlc[0] {
-			t.Errorf("lone fix is chained under %s, want it standalone", parent)
+		if child != "" {
+			t.Errorf("edge %s -> %s stamped, want the batch unchained", parent, child)
 		}
 	}
 }
