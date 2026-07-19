@@ -506,11 +506,11 @@ func TestChainHeadKickHintSurvivesGrouping(t *testing.T) {
 	child := &run.Metadata{ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
 	byKey := chainRows(t, []*run.Metadata{head, child},
 		map[string]string{"moe/dev-observability": "moe/fix-a"})
-	if byKey["moe/dev-observability"].Member {
-		t.Errorf("head should not be a member")
+	if got := byKey["moe/dev-observability"].Depth; got != 0 {
+		t.Errorf("head depth = %d, want 0 (heads stay top-level)", got)
 	}
-	if !byKey["moe/fix-a"].Member {
-		t.Errorf("live child should nest under the head")
+	if got := byKey["moe/fix-a"].Depth; got != 1 {
+		t.Errorf("live child depth = %d, want 1 (nests under the head)", got)
 	}
 	if got := byKey["moe/dev-observability"].Note; got != "chain:parked · kick?" {
 		t.Errorf("head note = %q, want %q (no text chain hint when adjacent)", got, "chain:parked · kick?")
