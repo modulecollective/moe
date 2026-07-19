@@ -58,10 +58,14 @@ type dashRowVM struct {
 	// for active rows; backlog/completed always render Live=false.
 	Live bool
 	// Depth is how many levels the row renders nested under a parent —
-	// 0 top-level, 1 for a chained active row or a completed spawned run
-	// (a tailed pulse), 2+ for deeper spawn lineage. The template draws a
-	// connector for Depth ≥ 1 and indents further per level.
+	// 0 top-level, 1 for a completed spawned run (a tailed pulse), 2+ for
+	// deeper spawn lineage. The template draws a "↳" connector for
+	// Depth ≥ 1 and indents further per level. Lineage only — chain
+	// membership is Chained.
 	Depth int
+	// Chained marks an active row that follows its chain parent. It
+	// renders flush-left with a "→" connector instead of indenting.
+	Chained bool
 }
 
 // bannerArtVM is the shared banner-art block both the home dash and a
@@ -140,6 +144,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			Note:    noteHTML(r.Project, r.Note),
 			When:    dash.HumanAgo(now, r.When),
 			Depth:   r.Depth,
+			Chained: r.Chained,
 		}
 		switch r.Bucket {
 		case dash.BucketActiveRuns:

@@ -461,8 +461,9 @@ func TestCompletedCutoffCountsTopLevelOnly(t *testing.T) {
 }
 
 // TestRenderNestedCompletedDrawsConnector: the CLI completed section
-// draws the "↳" connector for a spawned child, matching the active-chain
-// renderer, and steps each further generation two columns right so a
+// draws the "↳" connector for a spawned child — lineage, unlike an
+// active chain's flush "→" — and steps each further generation two
+// columns right so a
 // depth-2 reflect reads as hanging off the pulse, not off the root.
 func TestRenderNestedCompletedDrawsConnector(t *testing.T) {
 	rows := []Row{

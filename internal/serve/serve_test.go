@@ -320,11 +320,12 @@ func TestDashRendersHistogram(t *testing.T) {
 	}
 }
 
-func TestDashRendersChainedClass(t *testing.T) {
+func TestDashRendersConnectorClasses(t *testing.T) {
 	now := time.Now().UTC()
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
+			{Project: "p", Run: "next", Bucket: dash.BucketActiveRuns, When: now.Add(-30 * time.Minute), Chained: true},
 			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
 			{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
 		}, 1, 1, nil, nil
@@ -335,13 +336,17 @@ func TestDashRendersChainedClass(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	// Each nested row carries the connector class plus a per-depth class,
-	// so the stylesheet can indent depth 2 past depth 1.
-	if got := strings.Count(rr.Body.String(), `class="row chained depth1"`); got != 1 {
-		t.Errorf("want one depth-1 chained row, got %d\n%s", got, rr.Body.String())
+	// A chain member is flush-left `chained` with no depth class; a lineage
+	// row is `nested` plus a per-depth class, so the stylesheet can indent
+	// depth 2 past depth 1.
+	if got := strings.Count(rr.Body.String(), `class="row chained"`); got != 1 {
+		t.Errorf("want one flush chained row, got %d\n%s", got, rr.Body.String())
 	}
-	if got := strings.Count(rr.Body.String(), `class="row chained depth2"`); got != 1 {
-		t.Errorf("want one depth-2 chained row, got %d\n%s", got, rr.Body.String())
+	if got := strings.Count(rr.Body.String(), `class="row nested depth1"`); got != 1 {
+		t.Errorf("want one depth-1 nested row, got %d\n%s", got, rr.Body.String())
+	}
+	if got := strings.Count(rr.Body.String(), `class="row nested depth2"`); got != 1 {
+		t.Errorf("want one depth-2 nested row, got %d\n%s", got, rr.Body.String())
 	}
 }
 

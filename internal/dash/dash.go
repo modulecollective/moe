@@ -156,14 +156,18 @@ type Row struct {
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
 	// Depth is how many levels the row renders nested under a parent —
-	// 0 for a top-level row, 1 for an active row that follows its chain
-	// parent in the grouped ACTIVE order or for a completed spawned run
-	// (a tailed pulse) re-attached under its spawner, 2+ for deeper
-	// spawn lineage (a reflect under a pulse under its sdlc run). The
-	// renderer indents by Depth and draws a connector for Depth ≥ 1.
-	// Chain members stay flat at 1 — a chain is a sequence of peer
-	// stages, not a lineage ladder.
+	// 0 for a top-level row, 1 for a completed spawned run (a tailed
+	// pulse) re-attached under its spawner, 2+ for deeper spawn lineage
+	// (a reflect under a pulse under its sdlc run). The renderer indents
+	// by Depth and draws a "↳" connector for Depth ≥ 1. Depth is lineage
+	// only; chain membership is Chained.
 	Depth int
+	// Chained is true for an active row that follows its chain parent in
+	// the grouped ACTIVE order. Chain members render flush-left with a
+	// "→" connector rather than indented — a chain is a sequence of peer
+	// stages, not a lineage ladder, so it gets its own glyph instead of
+	// borrowing Depth's.
+	Chained bool
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -353,10 +357,10 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	}
 	units := run.OrderChainUnits(items, idx, byKey)
 
-	// Emit units head-first. A run past the head of a multi-run unit nests
-	// one level (the renderer draws its connector) — chain members stay
-	// flat at Depth 1 however long the chain, since the stages are peers
-	// rather than a lineage. A parent whose live child follows it in the
+	// Emit units head-first. A run past the head of a multi-run unit is
+	// marked Chained, so the renderer draws a flush "→" connector — the
+	// stages are peers rather than a lineage, so they don't indent and
+	// don't touch Depth. A parent whose live child follows it in the
 	// unit has that edge shown adjacently, so it skips the textual hint
 	// below; every other consecutive pair came from the childOf walk, so
 	// "has a successor in its unit" is exactly that set.
@@ -366,7 +370,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 		for pos, k := range u {
 			row := rowByKey[k]
 			if len(u) >= 2 && pos > 0 {
-				row.Depth = 1
+				row.Chained = true
 			}
 			active[i] = row
 			i++
@@ -919,6 +923,18 @@ func nestPrefix(depth int) string {
 	return strings.Repeat("  ", depth-1) + "↳ "
 }
 
+// rowPrefix is what a row carries in front of its slug. A chained row
+// gets a flush "→" — it follows the row above in a planned sequence, not
+// under it — while lineage keeps the indented "↳" ladder. In monospace
+// the connector *is* the indent, so the distinct glyph is what separates
+// the two relationships on the CLI.
+func rowPrefix(r Row) string {
+	if r.Chained {
+		return "→ "
+	}
+	return nestPrefix(r.Depth)
+}
+
 // Render prints the full dashboard: factory art, three sections
 // (ACTIVE, BACKLOG, COMPLETED), and the footer. tabwriter aligns
 // columns per section so a long idea title doesn't widen the run
@@ -970,7 +986,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
-			slug := nestPrefix(r.Depth) + r.Project + "/" + r.Run
+			slug := rowPrefix(r) + r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()

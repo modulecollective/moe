@@ -220,12 +220,16 @@ section h2 .count {
   border-bottom: 1px solid var(--hairline);
 }
 .row:last-child { border-bottom: none; }
-.row.chained { padding-left: 1.5rem; }
+/* A chained row follows the one above in a planned sequence — a peer, not
+   a child — so it stays flush left and carries "→" rather than the "↳"
+   lineage ladder below. */
+.row.chained::before { content: "→"; color: var(--muted); flex-shrink: 0; }
+.row.nested { padding-left: 1.5rem; }
 /* Spawn lineage nests deeper than one level (sdlc run → pulse → reflect);
    each generation steps right so the ladder reads as a hierarchy. */
-.row.chained.depth2 { padding-left: 3rem; }
-.row.chained.depth3 { padding-left: 4.5rem; }
-.row.chained::before { content: "↳"; color: var(--muted); flex-shrink: 0; }
+.row.nested.depth2 { padding-left: 3rem; }
+.row.nested.depth3 { padding-left: 4.5rem; }
+.row.nested::before { content: "↳"; color: var(--muted); flex-shrink: 0; }
 .row .slug { font-size: 0.95rem; color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
 .row .when { color: var(--muted); font-size: 0.85rem; }
 .row .note { color: var(--muted); font-size: 0.9rem; flex-basis: 100%; }

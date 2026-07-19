@@ -1,6 +1,7 @@
 package dash
 
 import (
+	"bytes"
 	"math/rand"
 	"strings"
 	"testing"
@@ -93,19 +94,22 @@ func TestActiveChainGroupsHeadToTailAndFloats(t *testing.T) {
 }
 
 func TestActiveChainConnectorFlags(t *testing.T) {
-	// Chain members nest one level; head and singleton stay top-level.
-	// A 3-run chain does not ladder — b and c are peer stages, both at
-	// Depth 1 — unlike spawn lineage, which deepens per generation.
+	// Chain members are marked Chained; head and singleton are not. A
+	// chain never indents — b and c are peer stages, both at Depth 0 —
+	// unlike spawn lineage, which deepens Depth per generation.
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	runs := []*run.Metadata{activeRun("p", "a"), activeRun("p", "b"), activeRun("p", "c"), activeRun("p", "x")}
 	when := map[string]time.Time{"a": base, "b": base.Add(-time.Hour), "c": base.Add(-2 * time.Hour), "x": base.Add(-3 * time.Hour)}
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
-	want := map[string]int{"p/a": 0, "p/b": 1, "p/c": 1, "p/x": 0}
+	want := map[string]bool{"p/a": false, "p/b": true, "p/c": true, "p/x": false}
 	for _, r := range active {
 		key := r.Project + "/" + r.Run
-		if r.Depth != want[key] {
-			t.Errorf("%s Depth = %d, want %d", key, r.Depth, want[key])
+		if r.Chained != want[key] {
+			t.Errorf("%s Chained = %v, want %v", key, r.Chained, want[key])
+		}
+		if r.Depth != 0 {
+			t.Errorf("%s Depth = %d, want 0 (chains never indent)", key, r.Depth)
 		}
 	}
 }
@@ -123,7 +127,7 @@ func TestActiveChainHintAdjacentSuppressedFanInRetained(t *testing.T) {
 	for _, r := range active {
 		byKey[r.Project+"/"+r.Run] = r
 	}
-	if byKey["p/c"].Depth != 1 {
+	if !byKey["p/c"].Chained {
 		t.Errorf("p/c should be a connected member")
 	}
 	if strings.Contains(byKey["p/a"].Note, "chained →") {
@@ -145,10 +149,10 @@ func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/b", "p/c")
-	if active[0].Depth != 0 {
+	if active[0].Chained {
 		t.Errorf("terminal-parent child p/b should be a head, not a member")
 	}
-	if active[1].Depth != 1 {
+	if !active[1].Chained {
 		t.Errorf("p/c should be a connected member under p/b")
 	}
 }
@@ -170,7 +174,7 @@ func TestActiveStandaloneBetweenChainsByRecency(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/d": "p/e"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/a", "p/b", "p/x", "p/d", "p/e")
-	if active[2].Depth != 0 {
+	if active[2].Chained {
 		t.Errorf("standalone p/x should be ungrouped")
 	}
 }
@@ -506,13 +510,35 @@ func TestChainHeadKickHintSurvivesGrouping(t *testing.T) {
 	child := &run.Metadata{ID: "fix-a", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
 	byKey := chainRows(t, []*run.Metadata{head, child},
 		map[string]string{"moe/dev-observability": "moe/fix-a"})
-	if got := byKey["moe/dev-observability"].Depth; got != 0 {
-		t.Errorf("head depth = %d, want 0 (heads stay top-level)", got)
+	if got := byKey["moe/dev-observability"].Chained; got {
+		t.Errorf("head Chained = %v, want false (heads stay unmarked)", got)
 	}
-	if got := byKey["moe/fix-a"].Depth; got != 1 {
-		t.Errorf("live child depth = %d, want 1 (nests under the head)", got)
+	if got := byKey["moe/fix-a"].Chained; !got {
+		t.Errorf("live child Chained = %v, want true (follows the head)", got)
 	}
 	if got := byKey["moe/dev-observability"].Note; got != "chain:parked · kick?" {
 		t.Errorf("head note = %q, want %q (no text chain hint when adjacent)", got, "chain:parked · kick?")
+	}
+}
+
+// TestRenderChainedActiveRowIsFlushWithArrow: a chain member renders
+// flush-left with "→" — the same column as its head, one glyph apart
+// from the indented "↳" a spawn descendant would carry. In monospace
+// the connector is the only thing separating the two relationships.
+func TestRenderChainedActiveRowIsFlushWithArrow(t *testing.T) {
+	rows := []Row{
+		{Project: "p", Run: "head", Note: "sdlc:design", Bucket: BucketActiveRuns},
+		{Project: "p", Run: "next", Note: "sdlc:design", Bucket: BucketActiveRuns, Chained: true},
+	}
+	var buf bytes.Buffer
+	Render(&buf, time.Now().UTC(), nil, rows, 1, 1, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	out := buf.String()
+	// Rows carry a two-space section indent; the chained row adds only
+	// the glyph, so both slugs start at the same column as "  p/head".
+	if !strings.Contains(out, "\n  → p/next") {
+		t.Fatalf("a chained row should render flush with the → connector:\n%s", out)
+	}
+	if strings.Contains(out, "↳ p/next") {
+		t.Fatalf("a chained row must not borrow the lineage connector:\n%s", out)
 	}
 }

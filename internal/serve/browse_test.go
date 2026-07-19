@@ -102,7 +102,7 @@ func TestProjectsIndexAndHub(t *testing.T) {
 		`href="/projects/alpha/twin/architecture"`,
 		// A nested descendant draws its connector on the hub's ACTIVE
 		// list too, same classes as the home dash.
-		`class="row chained depth1"`,
+		`class="row nested depth1"`,
 	)
 
 	// A project with no knowledge/twin reads as empty-state, not broken.
