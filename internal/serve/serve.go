@@ -119,12 +119,12 @@ type Options struct {
 	//
 	// The head's canvas is the operator's purpose note and says nothing
 	// about membership; this is where the head page gets the batch. The
-	// second return is the kick chip's gate: a head chained under a live
+	// second return is the kick chips' gate: a head chained under a live
 	// parent is one `moe chain kick` refuses ("kick the head"), so the
 	// page must not offer it.
 	//
 	// Only called for chain-workflow runs. Absent — or erroring — leaves
-	// the head page as it was: no members section, no kick chip.
+	// the head page as it was: no members section, no kick chips.
 	ChainMembers func(project, run string) (members []dash.Row, chainedUnder string, err error)
 
 	// Insecure enables the spawn bucket — the POST routes that run

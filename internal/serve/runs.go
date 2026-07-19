@@ -275,7 +275,7 @@ type chainMemberVM struct {
 // chainState is the head-page slice of live chain truth, gathered once
 // per page: the batch, and whether the head is kickable from here. The
 // callback replays the journal index, so both consumers (the members
-// section and the kick chip) read one gather.
+// section and the kick chips) read one gather.
 type chainState struct {
 	Members []chainMemberVM
 	// Kickable narrows to what the dash's `parked · kick?` hint already
@@ -291,7 +291,7 @@ type chainState struct {
 // gatherChainState reads the live chain for a chain head. Everything
 // else — a non-chain run, no callback wired, a gather error — yields
 // the zero value, which renders as the read-only page chain heads had
-// before: no members section, no kick chip. A gather error is logged
+// before: no members section, no kick chips. A gather error is logged
 // and swallowed rather than failing the page, matching fillRunRow: the
 // canvas link and the meta line are still worth serving.
 func (s *Server) gatherChainState(md *run.Metadata, projectID, slug string, now time.Time) chainState {
