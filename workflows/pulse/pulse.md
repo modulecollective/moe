@@ -273,9 +273,10 @@ don't kick. Asking for a kick you shouldn't have is the one thing on
 this canvas that costs real time rather than a prune.
 
 When this pulse is firing inside a ride, your context carries a block
-saying so and naming which kind. Inside a **static** ride the
-machine cannot grow what's running — so shape new threads worth naming
-instead of trying to extend it. Inside a **dynamic** ride, extending
+saying so and naming which kind. Inside a **static** ride the machine
+can neither grow nor shrink what's running — a group naming a ridden
+run gets that entry dropped — so shape new threads worth naming
+instead of trying to reshape it. Inside a **dynamic** ride, extending
 the tail is exactly the move.
 
 ## Hard don'ts

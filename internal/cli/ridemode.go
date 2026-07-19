@@ -3,9 +3,10 @@ package cli
 // Ride modes are consent vocabulary, one notch past `!!!`.
 //
 // `!!!` (and plain `moe chain kick`) is the **static** ride: the
-// machine cannot grow it. Tail pulses still survey, spawn and groom,
-// but a placement that resolves into the unit being ridden is
-// redirected to a self-rooted thread, so what the operator saw at kick
+// machine cannot reshape it. Tail pulses still survey, spawn and
+// groom, but a placement that resolves into the unit being ridden is
+// redirected to a self-rooted thread and a group naming a ridden
+// member has that entry dropped, so what the operator saw at kick
 // time is what runs.
 //
 // `!!!!` (and `moe chain kick --dynamic`) is the **dynamic** ride, and
