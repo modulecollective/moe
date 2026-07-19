@@ -120,15 +120,20 @@ func TestSpawnMintsParkedRunsUnderAChain(t *testing.T) {
 		t.Errorf("chain head spawned_by=%q, want the pulse that proposed the batch", headMD.SpawnedBy)
 	}
 
-	// Both entries are on the chain canvas — that's what the operator
-	// reads before kicking.
+	// The canvas names the spawning pulse and nothing else. Membership
+	// used to be appended here, one line per run, frozen at mint time —
+	// it is the edges above that the operator reads before kicking now,
+	// rendered live. Provenance is the one fact those edges don't carry.
 	canvas, err := os.ReadFile(filepath.Join(root, run.ContentPath("moe", chainRuns[0], chainDoc)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"fix-ci-red-main", "fix-doc-drift", "pulse-2026-07-18"} {
-		if !strings.Contains(string(canvas), want) {
-			t.Errorf("chain canvas missing %q:\n%s", want, canvas)
+	if !strings.Contains(string(canvas), "pulse-2026-07-18") {
+		t.Errorf("chain canvas missing its provenance line:\n%s", canvas)
+	}
+	for _, unwanted := range []string{"fix-ci-red-main", "fix-doc-drift"} {
+		if strings.Contains(string(canvas), unwanted) {
+			t.Errorf("chain canvas should not list member %q — that's the drift the live section ends:\n%s", unwanted, canvas)
 		}
 	}
 }
@@ -507,7 +512,7 @@ func TestChainEditOffersMintedHeads(t *testing.T) {
 // stages on purpose (that is what makes a chain run trivially done), so
 // its canvas hangs off RegisterDoc instead. Both the serve run page and
 // `moe <wf> cat` route through resolveCanvasPath — if this regresses,
-// the pulse's log of what it chained becomes unreadable.
+// the operator's purpose note becomes unreachable.
 func TestChainCanvasResolvesWithoutAStage(t *testing.T) {
 	root := spawnFixture(t)
 	t.Chdir(root)
@@ -535,8 +540,23 @@ func TestChainCanvasResolvesWithoutAStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read chain canvas: %v", err)
 	}
-	if !strings.Contains(string(body), "## Chained") {
+	if !strings.Contains(string(body), "# Chain") {
 		t.Errorf("chain canvas skeleton missing its heading:\n%s", body)
+	}
+	// The seeded note is a heading plus an HTML comment and nothing else:
+	// an untouched note renders as a bare heading, not as boilerplate the
+	// operator has to recognise as unwritten. And no membership list —
+	// that is the drift the live members section exists to end.
+	if strings.Contains(string(body), "## Chained") {
+		t.Errorf("chain canvas should carry no membership section:\n%s", body)
+	}
+	open, close := strings.Index(string(body), "<!--"), strings.Index(string(body), "-->")
+	if open < 0 || close < open {
+		t.Fatalf("chain canvas skeleton missing its HTML-comment hint:\n%s", body)
+	}
+	rendered := string(body)[:open] + string(body)[close+len("-->"):]
+	if got := strings.TrimSpace(rendered); got != "# Chain" {
+		t.Errorf("unseeded note should render as just a heading, got %q from:\n%s", got, body)
 	}
 }
 

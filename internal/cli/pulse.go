@@ -453,15 +453,6 @@ type pulseSpawn struct {
 	Design string `json:"design"`
 }
 
-// spawnedRun is one minted fix run, threaded to the chain stamper so it
-// can write the canvas line and the chain edge.
-type spawnedRun struct {
-	runID     string
-	title     string
-	why       string
-	pulseSlug string
-}
-
 // readPulseGate reads the survey canvas and parses its `## Gate` JSON
 // fence (the shared `stageGateJSON` grammar). ok is false for every
 // no-op shape the auto-close refusal keys on: a missing/unreadable
@@ -552,7 +543,11 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		return
 	}
 
-	var spawned []spawnedRun
+	// spawned is the batch's run IDs in mint order — everything the chain
+	// stamper needs, now that the head's canvas carries no membership list
+	// for the titles and whys to feed. Those live on each child's own
+	// seeded design canvas.
+	var spawned []string
 	for _, s := range spawns {
 		slug := strings.TrimSpace(s.Slug)
 		if slug == "" || run.Slugify(slug) != slug {
@@ -581,12 +576,7 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		// Claim the base so a second entry in the same batch proposing the
 		// same slug hits the dedupe rather than minting a dated sibling.
 		live = append(live, md.ID)
-		spawned = append(spawned, spawnedRun{
-			runID:     md.ID,
-			title:     title,
-			why:       strings.TrimSpace(s.Why),
-			pulseSlug: pulseSlug,
-		})
+		spawned = append(spawned, md.ID)
 		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
 	}
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -28,8 +30,11 @@ import (
 // kick` closes it and rides on without a special case, and nothing can
 // ever open an agent session on it. Its one document (`chain`) is
 // registered via RegisterDoc so the canvas still resolves for serve and
-// cat — it is moe-owned, one line appended per run the pulse chains,
-// same posture as idea and intent.
+// cat — it is the operator's **purpose note**: why this batch exists,
+// what ties it together. Membership is not written there. The edges are
+// the truth, so the head's run page renders the batch live from them;
+// the one thing the journal cannot derive is the why, and that is the
+// note's whole job.
 //
 // The invariant the whole surface preserves: **chaining under a parked
 // head is inert; execution is operator-rooted.** The pulse proposes and
@@ -44,18 +49,36 @@ const (
 	chainDoc = "chain"
 )
 
-// chainCanvasSkeleton is what a freshly minted chain run opens with.
-// The harness appends one line per run the pulse chains under it; runs
-// the operator moves in with `moe chain edit` appear in the chain but
-// get no canvas line. The chain edges are the truth kick rides; the
-// canvas is commentary.
+// chainCanvasSkeleton is what a freshly minted chain run opens with: a
+// heading and a prompt, and nothing that pretends to be content. The
+// prompt is an HTML comment so an untouched note renders as a bare
+// heading rather than placeholder boilerplate the operator has to
+// recognise as unwritten.
+//
+// Nothing here lists members. `moe chain edit` moves runs under a head
+// without touching this file, and the pulse no longer appends either —
+// a membership list in the canvas is a second copy of journal state
+// that every edge writer would have to maintain, and it went stale the
+// first time anything was reordered, shipped, or pruned.
 const chainCanvasSkeleton = `# Chain
 
-Runs chained behind this head ride as one batch on kick. Reorder or
-prune with ` + "`moe chain edit`" + `; kick the head to walk them headlessly.
+<!-- Why does this batch exist — what ties these runs together?
 
-## Chained
+     Write it here (` + "`moe chain note <project>/<slug>`" + `, or just edit this
+     file). Membership and status render live on the head's run page
+     from the chain edges; don't list runs here. -->
 `
+
+// chainSeed builds the purpose-note seed for a fresh head. A
+// pulse-minted head gets one provenance line naming the survey that
+// spawned it — the only fact about a machine batch that isn't already
+// on the edges or on each child's own seeded design canvas.
+func chainSeed(spawnedBy string) string {
+	if spawnedBy == "" {
+		return chainCanvasSkeleton
+	}
+	return chainCanvasSkeleton + "\nSpawned by `" + spawnedBy + "`.\n"
+}
 
 func init() {
 	// The chain-run workflow. No RegisterStage call — see the file
@@ -68,13 +91,18 @@ func init() {
 func runChainNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chain new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	seed := fs.Bool("seed", false, "pop $EDITOR on the purpose note and mint the head with the edited body")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chain new <project>/<slug>")
+		moePrintln(stderr, "usage: moe chain new [--seed] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a chain run: a placeholder head that holds still while the")
 		moePrintln(stderr, "runs chained behind it ship. Name it for the topic it collects")
 		moePrintln(stderr, "(moe chain new moe/perf-cleanups); the slug is dated on collision.")
 		moePrintln(stderr, "A project can hold several live chains at once.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Returns immediately with an empty purpose note. --seed pops $EDITOR")
+		moePrintln(stderr, "on that note first; `moe chain note` writes it later either way.")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -102,7 +130,14 @@ func runChainNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	md, err := mintChainRun(root, projectID, slug, "" /*spawnedBy*/, stdout, stderr)
+	note := ""
+	if *seed {
+		if code := seedChainNote(&note, stdout, stderr); code != 0 {
+			return code
+		}
+	}
+
+	md, err := mintChainRun(root, projectID, slug, "" /*spawnedBy*/, note, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "chain new: %v\n", err)
 		return 1
@@ -110,8 +145,41 @@ func runChainNew(args []string, stdout, stderr io.Writer) int {
 	key := projectID + "/" + md.ID
 	moePrintf(stdout, "opened chain %s\n", key)
 	moePrintln(stdout, "next:")
+	moePrintf(stdout, "  moe chain note %s    # why this batch exists\n", key)
 	moePrintln(stdout, "  moe chain edit    # move runs under it")
 	moePrintf(stdout, "  moe chain kick %s    # ride the chain headlessly\n", key)
+	return 0
+}
+
+// seedChainNote is `moe chain new --seed`: the editor pop at mint. The
+// workflow-generic --seed (new.go) seeds a workflow's *first stage*; a
+// chain head has no stages, so chain's version seeds the purpose note
+// instead — the only doc it has.
+//
+// Same shape as seedFirstStage minus the slug pre-flight: chain new
+// mints with IDBase, so a name that's been used before is dated rather
+// than refused, and there is no collision to fail fast on. The
+// unchanged-stub abort carries over — an operator who asked for the
+// editor and typed nothing meant to back out, and plain `moe chain new`
+// is right there for a head with no note.
+func seedChainNote(note *string, stdout, stderr io.Writer) int {
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "chain new: set $EDITOR or $VISUAL — --seed needs an editor")
+		return 1
+	}
+	body, tmpPath, code := captureEditorBody("moe-chain-seed-", chainCanvasSkeleton, stdout, stderr)
+	if code != 0 {
+		if tmpPath != "" {
+			moePrintf(stderr, "chain new: your edited note is preserved at %s\n", tmpPath)
+		}
+		return code
+	}
+	defer os.RemoveAll(filepath.Dir(tmpPath))
+	if strings.TrimSpace(body) == "" || strings.TrimSpace(body) == strings.TrimSpace(chainCanvasSkeleton) {
+		moePrintln(stderr, "chain new: aborting: note unchanged")
+		return 1
+	}
+	*note = body
 	return 0
 }
 
@@ -234,8 +302,7 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 // any. Only a live parent refuses a kick: it is the one that still has a
 // head to kick instead. A terminal parent's edge is history — every
 // other edge reader already filters those out — so it leaves md kickable
-// as its own head. Fan-in is allowed, so the lowest key wins for a
-// deterministic message; the operator sees a head either way.
+// as its own head.
 //
 // The index error is returned rather than swallowed: this is a refusal
 // guard, and failing open would ride a chain from the middle.
@@ -244,61 +311,167 @@ func liveChainParent(root string, md *run.Metadata) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	key := md.Project + "/" + md.ID
+	mds, err := run.Scan(root)
+	if err != nil {
+		return "", false, err
+	}
+	byKey := make(map[string]*run.Metadata, len(mds))
+	for _, m := range mds {
+		byKey[m.Project+"/"+m.ID] = m
+	}
+	parent := liveChainParentOf(md.Project+"/"+md.ID, idx.ChainedChild, byKey)
+	return parent, parent != "", nil
+}
+
+// liveChainParentOf is the pure lookup behind liveChainParent: the
+// in-progress run that chains to key, or "" for none. Fan-in is
+// allowed, so the lowest key wins for a deterministic answer; the
+// caller names a head either way. Split out so the serve head page can
+// ask the same question off an index it has already built rather than
+// replaying the journal a second time.
+func liveChainParentOf(key string, chainedChild map[string]string, byKey map[string]*run.Metadata) string {
 	var best string
-	for parent, child := range idx.ChainedChild {
+	for parent, child := range chainedChild {
 		if child != key {
 			continue
 		}
-		pp, pr, err := splitProjectRun(parent)
-		if err != nil {
-			continue
-		}
-		pmd, err := run.Load(root, pp, pr)
-		if err != nil || pmd.Status != run.StatusInProgress {
+		pmd, ok := byKey[parent]
+		if !ok || pmd.Status != run.StatusInProgress {
 			continue
 		}
 		if best == "" || parent < best {
 			best = parent
 		}
 	}
-	return best, best != "", nil
+	return best
 }
 
-// appendChainEntries writes one line per newly chained run under the
-// chain canvas's `## Chained` heading and commits it together with the
-// chain edges the spawn established. One commit, not one per run: the
-// batch is one event, and BuildJournalIndex's grep picks up
-// MoE-Chained-To alongside the MoE-Run trailer on the same commit.
+// runChainNote edits a chain head's purpose note — the one thing the
+// canvas carries, and the one thing the journal can't derive from the
+// edges. Same shape as `moe idea edit`: $EDITOR on the file in place,
+// then one trailered commit under the repolock with a journal push.
 //
-// Caller holds the repolock.
-func appendChainEntries(root, projectID, chainID string, lines, edges []string) error {
-	canvasRel := run.ContentPath(projectID, chainID, chainDoc)
-	body, err := os.ReadFile(filepath.Join(root, canvasRel))
-	if err != nil {
-		return fmt.Errorf("read chain canvas: %w", err)
+// A separate verb rather than a mode of `chain edit`: edit is the
+// batch's *shape* (reorder, prune, unchain, merge chains) across every
+// project at once, and there is no head in scope to attach prose to.
+func runChainNote(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("chain note", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe chain note <project>/<run>")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Opens $EDITOR on the chain head's purpose note: why this batch")
+		moePrintln(stderr, "exists, what ties it together. Membership is not written here —")
+		moePrintln(stderr, "it renders live from the chain edges on the head's run page.")
 	}
-	updated := strings.TrimRight(string(body), "\n") + "\n" + strings.Join(lines, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(root, canvasRel), []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("write chain canvas: %w", err)
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	projectID, runID, err := splitProjectRun(fs.Arg(0))
+	if err != nil {
+		moePrintf(stderr, "chain note: %v\n", err)
+		return 2
 	}
 
-	msg := fmt.Sprintf("chain: append %d run(s) to %s/%s\n\n", len(lines), projectID, chainID) +
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
+		moePrintf(stderr, "chain note: %v\n", err)
+		return 1
+	}
+	if err := requireCleanTree(root); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "chain note: %v\n", err)
+		return 1
+	}
+	if md.Workflow != chainWorkflow {
+		moePrintf(stderr, "chain note: %s/%s is a %s run — only chain heads carry a note\n", projectID, runID, md.Workflow)
+		return 1
+	}
+	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
+		moePrintln(stderr, "chain note: set $EDITOR or $VISUAL — chain note needs an editor")
+		return 1
+	}
+
+	abs := filepath.Join(root, run.ContentPath(projectID, runID, chainDoc))
+	if _, err := os.Stat(abs); err != nil {
+		moePrintf(stderr, "chain note: canvas missing: %v\n", err)
+		return 1
+	}
+	if code := launchEditor(abs, stdout, stderr); code != 0 {
+		return code
+	}
+
+	msg := fmt.Sprintf("work: update %s\n\n", chainDoc) +
+		trailers.Block{
+			Run:      runID,
+			Project:  projectID,
+			Workflow: chainWorkflow,
+			Document: chainDoc,
+		}.String()
+	err = sync.WithJournalPush(root, repolock.Options{
+		Purpose: "chain-note",
+		Run:     projectID + "/" + runID,
+	}, stdout, stderr, func() error {
+		return run.StageAndCommit(root, msg, run.DocDir(projectID, runID, chainDoc))
+	})
+	switch {
+	case errors.Is(err, run.ErrNothingToCommit):
+		moePrintf(stdout, "chain note %s/%s unchanged\n", projectID, runID)
+	case err != nil:
+		moePrintf(stderr, "chain note: commit: %v\n", err)
+		return 1
+	default:
+		moePrintf(stdout, "wrote chain note %s/%s\n", projectID, runID)
+	}
+	return 0
+}
+
+// stampChainEdges commits the chain edges a spawn batch established.
+// One commit, not one per run: the batch is one event, and
+// BuildJournalIndex's grep picks up MoE-Chained-To alongside the
+// MoE-Run trailer on the same commit.
+//
+// The commit touches no files — the head's canvas is the operator's
+// purpose note, not a membership list — so it is an --allow-empty
+// commit carrying only trailers, the same shape `moe chain edit` uses.
+// Unlike chain edit there *is* a canonical run to scope to (the head
+// this batch was just minted under), so the run trailers ride along.
+// No Document trailer: nothing wrote to the doc.
+//
+// Caller holds the repolock.
+func stampChainEdges(root, projectID, chainID string, edges []string) error {
+	msg := fmt.Sprintf("chain: chain %d run(s) under %s/%s\n\n", len(edges), projectID, chainID) +
 		trailers.Block{
 			Run:       chainID,
 			Project:   projectID,
 			Workflow:  chainWorkflow,
-			Document:  chainDoc,
 			ChainedTo: edges,
 		}.String()
-	return run.StageAndCommit(root, msg, run.DocDir(projectID, chainID, chainDoc))
+	return git.Run(root, "commit", "--allow-empty", "-m", msg)
 }
 
 // stampChainBatch is the durable half of a spawn batch: it mints a
-// *fresh* chain run, appends the batch's lines to its canvas, and stamps
-// the edges that string the new runs under it. Runs under its own
-// repolock acquisition and pushes the journal, since it is called after
-// the survey's own lock windows have closed.
+// *fresh* chain run and stamps the edges that string the new runs under
+// it. Runs under its own repolock acquisition and pushes the journal,
+// since it is called after the survey's own lock windows have closed.
+//
+// It writes nothing to the head's canvas. That was one appended line
+// per spawned run, frozen at mint time: a reorder, a prune, a member
+// shipping — none of it reached the page, so the list started
+// stale-able and only degraded. Membership renders live from these
+// edges instead, on the dash, in `moe chain edit`, and on the head's
+// own run page.
 //
 // The pulse never appends to an existing chain — not its own, not the
 // operator's. A live-pen lookup plus a tail walk would let a batch land
@@ -313,11 +486,11 @@ func appendChainEntries(root, projectID, chainID string, lines, edges []string) 
 // A batch of one gets no head at all: kick handles a chain of one, so a
 // single parked fix needs no placeholder. Its "why" already rides on the
 // run's seeded design canvas.
-func stampChainBatch(root, projectID, pulseSlug string, spawned []spawnedRun, stdout, stderr io.Writer) error {
+func stampChainBatch(root, projectID, pulseSlug string, spawned []string, stdout, stderr io.Writer) error {
 	if len(spawned) < 2 {
 		return nil
 	}
-	chainMD, err := mintChainRun(root, projectID, chainWorkflow, projectID+"/"+pulseSlug, stdout, stderr)
+	chainMD, err := mintChainRun(root, projectID, chainWorkflow, projectID+"/"+pulseSlug, "" /*note*/, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("mint chain run: %w", err)
 	}
@@ -325,19 +498,18 @@ func stampChainBatch(root, projectID, pulseSlug string, spawned []spawnedRun, st
 
 	chainKey := projectID + "/" + chainMD.ID
 	tail := chainKey
-	var lines, edges []string
-	for _, s := range spawned {
-		childKey := projectID + "/" + s.runID
+	var edges []string
+	for _, runID := range spawned {
+		childKey := projectID + "/" + runID
 		edges = append(edges, tail+" "+childKey)
 		tail = childKey
-		lines = append(lines, fmt.Sprintf("- `%s` — %s (proposed by %s): %s", s.runID, s.title, s.pulseSlug, s.why))
 	}
 
 	return sync.WithJournalPush(root, repolock.Options{
-		Purpose: "chain-append",
+		Purpose: "chain-stamp",
 		Run:     chainKey,
 	}, stdout, stderr, func() error {
-		return appendChainEntries(root, projectID, chainMD.ID, lines, edges)
+		return stampChainEdges(root, projectID, chainMD.ID, edges)
 	})
 }
 
@@ -347,11 +519,17 @@ func stampChainBatch(root, projectID, pulseSlug string, spawned []spawnedRun, st
 // rather than colliding with history. spawnedBy is the qualified spawner
 // for a machine mint and empty for `moe chain new`, so a pulse's whole
 // batch — head included — reads as the survey's lineage.
-func mintChainRun(root, projectID, base, spawnedBy string, stdout, stderr io.Writer) (*run.Metadata, error) {
+//
+// note is the purpose-note body; empty takes the default skeleton (plus
+// a provenance line when spawnedBy is set). Only `--seed` passes one.
+func mintChainRun(root, projectID, base, spawnedBy, note string, stdout, stderr io.Writer) (*run.Metadata, error) {
+	if note == "" {
+		note = chainSeed(spawnedBy)
+	}
 	opts := run.Options{
 		IDBase:   base,
 		Workflow: chainWorkflow,
-		SeedDocs: map[string]string{chainDoc: chainCanvasSkeleton},
+		SeedDocs: map[string]string{chainDoc: note},
 	}
 	if spawnedBy != "" {
 		opts.SpawnedBy = spawnedBy

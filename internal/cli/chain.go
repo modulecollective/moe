@@ -1,9 +1,10 @@
 // Package cli — chain verbs.
 //
 // One noun: the chain. `moe chain new` mints a placeholder head (see
-// chainrun.go), `moe chain edit` moves runs under it, `moe chain kick`
-// rides it headlessly, `moe chain close` drops a head without riding,
-// and `moe chain clear` wipes every edge.
+// chainrun.go), `moe chain edit` moves runs under it, `moe chain note`
+// writes why the batch exists, `moe chain kick` rides it headlessly,
+// `moe chain close` drops a head without riding, and `moe chain clear`
+// wipes every edge.
 //
 // `moe chain edit` opens a rebase-style editor over every active
 // chainable run (sdlc, twin, kb, hooks, chores — every workflow
@@ -58,6 +59,12 @@ func init() {
 		Name:    "edit",
 		Summary: "rebase-style editor over active chainable runs; reorder to chain",
 		Run:     runChainEdit,
+	})
+	g.Register(&Command{
+		Name:    "note",
+		Summary: "edit a chain head's purpose note — why this batch exists",
+		Run:     runChainNote,
+		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "kick",
