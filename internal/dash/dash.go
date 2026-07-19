@@ -265,6 +265,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 	})
 	groupActiveChains(rows, in.Index, byRunKey)
 	rows = nestSpawnedRuns(rows, in.Index)
+	rows = nestPromotedIdeas(rows, in.Index)
 	var choreRows []Row
 	for _, c := range in.Chores {
 		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
@@ -530,6 +531,119 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 		parent.Note += openHints(i)
 		out = append(out, parent)
 		emitSubtree(i, parent.Bucket, 1) // no-op when there are no folding children
+	}
+	return out
+}
+
+// nestPromotedIdeas folds a settled promotion edge into the same
+// two-rung ladder spawn and chain lineage already render: the idea on
+// top, the run it was promoted to nested beneath it as a "↳" row,
+// instead of two unrelated flat COMPLETED rows with the relationship
+// squeezed into the idea's "idea:promoted → x/y" note.
+//
+// The idea goes on top because that is what "↳" means everywhere else
+// on the board — the ancestor above, later work beneath. The idea is
+// the origin; the run is the continuation.
+//
+// The pair is anchored at the *successor's* recency slot, not the
+// idea's. This is the one deliberate deviation from nestSpawnedRuns,
+// and it is load-bearing: COMPLETED shows only the newest CompletedCap
+// top-level rows, and an idea's last activity is its promote commit, so
+// folding at the idea's slot would bury a run that merged weeks after
+// promotion below the cap — the fresh merge would vanish from the
+// default dash, a regression against the flat rendering. A spawner's
+// activity tracks its children's, so spawn doesn't have this problem;
+// promotion does, because the parent is prehistory rather than an
+// ongoing story. The idea row keeps its own (older) When — the pair
+// moves, the ages stay honest.
+//
+// Only a pair with both ends completed and top-level folds. A reopened
+// idea is back in BACKLOG, and folding there would drag its dead
+// destination run out of COMPLETED and into the backlog; the
+// both-completed gate handles that without a workflow special case. An
+// open successor keeps today's rendering — a top-level ACTIVE row, with
+// the inline "idea:promoted → x/y" hint left on the idea, matching the
+// spawn open-hint convention. An off-board successor keeps the bare
+// "idea:promoted" fallback.
+//
+// Running after nestSpawnedRuns means an already-attached spawn subtree
+// rides along: an idea → run → tailed-pulse lineage composes into a
+// three-rung ladder for free, because the successor moves as a block —
+// its own row plus the nested tail already hanging off it. The idea
+// side needs no such handling: only pulse, reflect and chain runs ever
+// write SpawnedBy, so nothing nests under an idea.
+func nestPromotedIdeas(rows []Row, idx *run.JournalIndex) []Row {
+	if idx == nil || len(idx.PromotedTo) == 0 {
+		return rows
+	}
+	rowIdx := make(map[string]int, len(rows))
+	for i := range rows {
+		rowIdx[rows[i].Project+"/"+rows[i].Run] = i
+	}
+	// blockEnd returns one past the last row of top-level row i's block:
+	// i itself plus the contiguous run of nested rows nestSpawnedRuns
+	// attached beneath it.
+	blockEnd := func(i int) int {
+		e := i + 1
+		for e < len(rows) && rows[e].Depth > 0 {
+			e++
+		}
+		return e
+	}
+	// ideaOf maps a successor's row index to its promoting idea's row
+	// index. Built by walking rows in order rather than ranging over the
+	// PromotedTo map so a destination claimed by two ideas resolves to
+	// the same one every render.
+	ideaOf := make(map[int]int)
+	claimed := make(map[int]bool)
+	for i := range rows {
+		if rows[i].Bucket != BucketCompletedRuns || rows[i].Depth != 0 {
+			continue
+		}
+		dest := idx.PromotedTo[rows[i].Project+"/"+rows[i].Run]
+		if dest == "" {
+			continue
+		}
+		d, ok := rowIdx[dest]
+		if !ok || d == i || claimed[d] {
+			continue
+		}
+		if rows[d].Bucket != BucketCompletedRuns || rows[d].Depth != 0 {
+			continue
+		}
+		ideaOf[d] = i
+		claimed[d] = true
+	}
+	if len(ideaOf) == 0 {
+		return rows
+	}
+	// moved marks each idea row skipped at its natural slot, because the
+	// successor's slot re-emits it above the successor.
+	moved := make([]bool, len(rows))
+	for _, i := range ideaOf {
+		moved[i] = true
+	}
+	out := make([]Row, 0, len(rows))
+	for i := 0; i < len(rows); i++ {
+		if moved[i] {
+			continue
+		}
+		if ideaIdx, ok := ideaOf[i]; ok {
+			idea := rows[ideaIdx]
+			// The destination is a row of its own now, so the note's
+			// " → <key>" suffix would say it twice.
+			idea.Note = strings.TrimSuffix(idea.Note, " → "+rows[i].Project+"/"+rows[i].Run)
+			out = append(out, idea)
+			end := blockEnd(i)
+			for k := i; k < end; k++ {
+				m := rows[k]
+				m.Depth++
+				out = append(out, m)
+			}
+			i = end - 1
+			continue
+		}
+		out = append(out, rows[i])
 	}
 	return out
 }

@@ -650,6 +650,45 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 	}
 }
 
+// TestDashPromotedIdeaNestsSettledSuccessor: once the successor run has
+// merged, the promotion edge stops being an inline arrow and becomes a
+// ladder — the idea row on top, the run nested beneath it as a "↳" row,
+// the same grammar chain and spawn lineage already use.
+func TestDashPromotedIdeaNestsSettledSuccessor(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	trailerstest.SeedRun(t, root, "tele", "search-idea", dash.IdeaWorkflow, run.StatusPromoted)
+	trailerstest.SeedRun(t, root, "tele", "search-impl", "sdlc", run.StatusMerged)
+	trailerstest.CommitTrailer(t, root, "Promote idea tele/search-idea → tele/search-impl",
+		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
+		time.Now().UTC().Add(-21*24*time.Hour))
+	trailerstest.CommitTrailer(t, root, "push: search-impl merged",
+		"MoE-Run: search-impl\nMoE-Project: tele\nMoE-Merged: deadbeef",
+		time.Now().UTC().Add(-2*time.Hour))
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "↳ tele/search-impl") {
+		t.Fatalf("expected the merged successor nested under its idea, got:\n%s", got)
+	}
+	if strings.Contains(got, "idea:promoted → ") {
+		t.Fatalf("expected the inline arrow to drop once the pair folds, got:\n%s", got)
+	}
+	// Idea on top: the ancestor above, the continuation beneath.
+	ideaAt := strings.Index(got, "tele/search-idea")
+	implAt := strings.Index(got, "↳ tele/search-impl")
+	if ideaAt < 0 || implAt < 0 || ideaAt > implAt {
+		t.Fatalf("expected the idea row above its nested successor, got:\n%s", got)
+	}
+}
+
 // TestDashFilterByProject: with two registered projects each holding an
 // active run, `--project foo` narrows the dashboard to foo's row only.
 // Empty-string default = no filter, so this also pins that the flag
