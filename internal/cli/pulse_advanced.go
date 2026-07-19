@@ -17,13 +17,16 @@ import (
 // which records "this stage is done, I'm just not running the next one
 // now."
 //
-// Nothing carried those runs forward. Pulses fire at the tail of
-// run-traffic verbs, so a stalled run generates no traffic and no pulse
-// looks at it again; on 2026-07-19 two runs sat design-complete for an
-// evening with nothing to chain them. The marker is the one signal on
-// disk that distinguishes "parked forward" from "in flight" without
-// guessing, so the sweep gets it as context and the `a` keystroke gets
-// its own pulse tail.
+// Nothing carried those runs forward: on 2026-07-19 two runs sat
+// design-complete for an evening with nothing to chain them. The marker
+// is the one signal on disk that distinguishes "parked forward" from
+// "in flight" without guessing, so the sweep gets it as context.
+//
+// `a` deliberately does not fire a pulse of its own — it means "park it
+// for later", not "queue it now", and the operator has verbs for the
+// latter. So an `a` that is the last event of the day waits for the
+// next pulse fired off some other run's traffic. Accepted: pickup is
+// not meant to be immediate.
 
 // advancedRun is one row of the block.
 type advancedRun struct {
