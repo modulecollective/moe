@@ -19,8 +19,9 @@
 // Because reach is the only gate, the spawn bucket is opt-in. Several
 // POST routes run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary
 // code), so by default — safe mode — they refuse with 403 and the UI
-// doesn't offer them: only idea capture, run close/edit/reopen, and the
-// read-only views work. Options.Insecure (the --insecure flag or a
+// doesn't offer them: idea capture, run close/edit/reopen, opening or
+// promoting into a *parked* run, and the read-only views work.
+// Options.Insecure (the --insecure flag or a
 // non-empty MOE_SERVE_INSECURE) re-enables the whole spawn bucket,
 // trading the safe default for serve's phone-facing "launch a run"
 // feature. That's an acknowledged choice: anything that can reach the
@@ -127,13 +128,15 @@ type Options struct {
 	// the head page as it was: no members section, no kick chips.
 	ChainMembers func(project, run string) (members []dash.Row, chainedUnder string, err error)
 
-	// Insecure enables the spawn bucket — the POST routes that run
-	// `moe <wf> <stage>` agent subprocesses (new run, promote,
-	// advance/ship/chain, chain kick, chore open). Off by default (safe
-	// mode): those routes refuse with 403 and their UI entry points
-	// don't render; the journal-write and read-only routes are
-	// unaffected. The cli wrapper sets this from the --insecure flag or
-	// a non-empty $MOE_SERVE_INSECURE.
+	// Insecure enables the spawn bucket — the POSTs that run
+	// `moe <wf> <stage>` agent subprocesses (the new-run and promote
+	// forms' "& run" submits, advance/ship/chain, chain kick, chore
+	// open). Off by default (safe mode): those refuse with 403 and
+	// their UI entry points don't render; the journal-write routes —
+	// including parking a run from the new-run and promote forms' bare
+	// submits — and the read-only views are unaffected. The cli wrapper
+	// sets this from the --insecure flag or a non-empty
+	// $MOE_SERVE_INSECURE.
 	Insecure bool
 
 	// NotifyURL is the webhook URL we POST a small JSON payload to
@@ -462,9 +465,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 // spawnAllowed gates the spawn bucket — the POST routes that run agent
 // subprocesses. In safe mode (the default) it writes a 403 and returns
 // false; with Insecure set it returns true and the handler proceeds.
-// The four spawn handlers call it first thing. The matching UI gating
-// (so safe mode never offers a route it would refuse) lives in the view
-// models, not here.
+// The always-spawning handlers (advance/ship/chain, kick, chore open)
+// call it first thing; the dual-submit new-run and promote handlers
+// call it only when the spawn submit was used, before opening anything.
+// The matching UI gating (so safe mode never offers a control it would
+// refuse) lives in the view models, not here.
 func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
 	if s.opts.Insecure {
 		return true
