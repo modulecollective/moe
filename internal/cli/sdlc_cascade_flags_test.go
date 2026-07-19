@@ -495,6 +495,20 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 			flags:  []string{"--chain"},
 			expect: expect{stages: []string{"test"}, wantHeadless: true, wantShipPushed: true},
 		},
+		// --dynamic: the same walk and the same ride as --chain. The
+		// fourth bang differs only in what a tail pulse under it may do,
+		// which travels as the ride mode — so the dispatch shape here is
+		// identical, and that identity is the thing worth pinning.
+		{
+			verb:   sdlcStageVerbs[0],
+			flags:  []string{"--dynamic"},
+			expect: expect{stages: []string{"design", "code", "review", "test"}, wantHeadless: true, wantShipPushed: true},
+		},
+		{
+			verb:   sdlcStageVerbs[3],
+			flags:  []string{"--dynamic"},
+			expect: expect{stages: []string{"test"}, wantHeadless: true, wantShipPushed: true},
+		},
 	}
 	for _, tc := range cases {
 		name := tc.verb.name + "/" + strings.Join(tc.flags, "+")

@@ -205,13 +205,32 @@ func (g *chainGraph) diff() (adds, removes []string) {
 }
 
 func dropString(xs []string, want string) []string {
-	out := xs[:0]
+	var out []string
 	for _, x := range xs {
 		if x != want {
 			out = append(out, x)
 		}
 	}
 	return out
+}
+
+// loadChainGraph builds the live edge graph off the journal. ok is
+// false when the read fails; every caller treats that as "can't tell"
+// and takes its conservative branch.
+func loadChainGraph(root string) (*chainGraph, bool) {
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		return nil, false
+	}
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil, false
+	}
+	byKey := make(map[string]*run.Metadata, len(mds))
+	for _, md := range mds {
+		byKey[md.Project+"/"+md.ID] = md
+	}
+	return newChainGraph(idx, byKey), true
 }
 
 // groomedThread records where a group landed, for the kick step. Root

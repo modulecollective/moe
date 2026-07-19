@@ -76,20 +76,8 @@ func stampReflectOnUnit(root, projectID, pulseSlug, reflectID, spawnerKey string
 // sweep: grooming committed since, and the whole point of stamping here
 // is to land *after* whatever it appended.
 func liveChainTail(root, key string) (string, bool) {
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		return "", false
-	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		return "", false
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, md := range mds {
-		byKey[md.Project+"/"+md.ID] = md
-	}
-	g := newChainGraph(idx, byKey)
-	if len(g.unit(key)) < 2 {
+	g, ok := loadChainGraph(root)
+	if !ok || len(g.unit(key)) < 2 {
 		return "", false
 	}
 	return g.tailFrom(key), true
@@ -166,17 +154,9 @@ func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdo
 // A read failure reads as "member", which is the conservative answer:
 // it suppresses a kick rather than risking a nested ride.
 func chainMember(root, key string) bool {
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
+	g, ok := loadChainGraph(root)
+	if !ok {
 		return true
 	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		return true
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, md := range mds {
-		byKey[md.Project+"/"+md.ID] = md
-	}
-	return len(newChainGraph(idx, byKey).unit(key)) >= 2
+	return len(g.unit(key)) >= 2
 }
