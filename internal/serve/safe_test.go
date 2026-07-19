@@ -17,22 +17,26 @@ import (
 // every spawn-bucket POST refuses with 403 and never spawns a child.
 // The guard fires before any load, so the routes refuse even for runs
 // that don't exist — exactly the point: no reachable path to code exec.
+//
+// /run/new and /promote are dual-submit: the bare submit parks (no
+// spawn, allowed in safe mode) and only `spawn=1` reaches the gate, so
+// those two carry the form body that asks for the agent.
 func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
-	for _, path := range []string{
-		"/run/new",
-		"/run/alpha/x/promote",
-		"/run/alpha/x/advance",
-		"/run/alpha/x/ship",
-		"/run/alpha/x/chain",
-		"/run/alpha/x/kick",
-		"/run/alpha/x/kick-dynamic",
-		"/chore/alpha/x/open",
+	for path, body := range map[string]string{
+		"/run/new":                  "spawn=1",
+		"/run/alpha/x/promote":      "spawn=1",
+		"/run/alpha/x/advance":      "",
+		"/run/alpha/x/ship":         "",
+		"/run/alpha/x/chain":        "",
+		"/run/alpha/x/kick":         "",
+		"/run/alpha/x/kick-dynamic": "",
+		"/chore/alpha/x/open":       "",
 	} {
 		t.Run(path, func(t *testing.T) {
 			s := newSafeTestServer(t, Options{
 				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo",
 			})
-			req := httptest.NewRequest("POST", path, strings.NewReader(""))
+			req := httptest.NewRequest("POST", path, strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr, req)
@@ -98,10 +102,11 @@ func TestSafeModeAllowsIdeaClose(t *testing.T) {
 	}
 }
 
-// TestSafeModeDashHidesSpawnLinks: the dash drops the "new run" / "new
-// plan" links (both spawn an agent) but keeps "new idea" — safe mode
-// never offers a link the server would refuse.
-func TestSafeModeDashHidesSpawnLinks(t *testing.T) {
+// TestSafeModeDashKeepsNewLinks: both dash "new" links survive safe
+// mode. Capturing an idea was always journal-only; opening a run is
+// too now that the new-run form's bare submit parks. The spawning
+// submit on the form itself is what safe mode hides.
+func TestSafeModeDashKeepsNewLinks(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
 	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 
@@ -111,20 +116,18 @@ func TestSafeModeDashHidesSpawnLinks(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, banned := range []string{`href="/run/new"`} {
-		if strings.Contains(body, banned) {
-			t.Errorf("safe-mode dash must not render %q\n%s", banned, body)
+	for _, want := range []string{`href="/run/new"`, `href="/idea/new"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("safe-mode dash should render %q\n%s", want, body)
 		}
-	}
-	if !strings.Contains(body, `href="/idea/new"`) {
-		t.Errorf("safe-mode dash should still render the new-idea link\n%s", body)
 	}
 }
 
-// TestSafeModeIdeaPageHidesPromote: an in-progress idea keeps its
-// journal-only chips (edit, close) but drops promote, which spawns the
-// destination run's agent.
-func TestSafeModeIdeaPageHidesPromote(t *testing.T) {
+// TestSafeModeIdeaPageShowsPromote: an in-progress idea keeps all three
+// journal-only chips. Promote parks the destination run by default, so
+// it's the same class as edit and close; only the promote page's
+// "promote & run" submit is gated.
+func TestSafeModeIdeaPageShowsPromote(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
@@ -137,14 +140,40 @@ func TestSafeModeIdeaPageHidesPromote(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/run/alpha/my-idea/edit"`,
+		`href="/run/alpha/my-idea/promote"`,
 		`action="/run/alpha/my-idea/close"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("safe-mode idea page missing %q\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, `href="/run/alpha/my-idea/promote"`) {
-		t.Errorf("safe-mode idea page must not render the promote chip\n%s", body)
+}
+
+// TestSafeModeFormsHideSpawnButton: the promote and new-run forms each
+// render their parking submit in safe mode and drop the spawning one —
+// safe mode never offers a button the POST handler would refuse.
+func TestSafeModeFormsHideSpawnButton(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	for _, tc := range []struct{ path, park string }{
+		{"/run/alpha/my-idea/promote", ">promote<"},
+		{"/run/new", ">open run<"},
+	} {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", tc.path, nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s: want 200, got %d body=%s", tc.path, rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		if !strings.Contains(body, tc.park) {
+			t.Errorf("GET %s: missing the parking submit %q\n%s", tc.path, tc.park, body)
+		}
+		if strings.Contains(body, `name="spawn"`) {
+			t.Errorf("GET %s: safe mode must not render the spawning submit\n%s", tc.path, body)
+		}
 	}
 }
 
@@ -204,5 +233,134 @@ func TestSafeModeChorePageHidesOpen(t *testing.T) {
 	}
 	if !strings.Contains(body, "schedule") {
 		t.Errorf("safe-mode chore page should still render the schedule detail\n%s", body)
+	}
+}
+
+// TestSafeModePromoteParks: the bare promote submit is journal-only —
+// it opens the destination run queued at its first stage, marks the
+// idea promoted, and redirects, all without the --insecure flag. This
+// is the operator's usual move; riding the run is the rarer one.
+func TestSafeModePromoteParks(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
+	gittest.Commit(t, root, "seed idea")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
+	if got := rr.Header().Get("Location"); got != "/run/alpha/"+dated {
+		t.Fatalf("Location = %q, want /run/alpha/%s", got, dated)
+	}
+	dest, err := run.Load(root, "alpha", dated)
+	if err != nil {
+		t.Fatalf("destination run.Load: %v", err)
+	}
+	if dest.Status != run.StatusInProgress {
+		t.Errorf("destination status = %q, want in-progress", dest.Status)
+	}
+	src, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Status != run.StatusPromoted {
+		t.Errorf("source idea status = %q, want promoted", src.Status)
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("parking must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestSafeModePromoteSpawnRefusesBeforePromote pins the handler's
+// ordering: the spawn gate fires before runopen.Promote, so a refused
+// "promote & run" click leaves the idea untouched. Gating after the
+// open would half-promote — destination run on disk, idea marked, no
+// agent — from a click safe mode was supposed to refuse outright.
+func TestSafeModePromoteSpawnRefusesBeforePromote(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
+	gittest.Commit(t, root, "seed idea")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader("spawn=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
+	if _, err := run.Load(root, "alpha", dated); err == nil {
+		t.Error("refused promote must not open the destination run")
+	}
+	src, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Status != run.StatusInProgress {
+		t.Errorf("source idea status = %q, want in-progress (untouched)", src.Status)
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestSafeModeNewRunParks: the new-run form's bare submit opens a run
+// with no agent, the same journal-only write promote's does.
+func TestSafeModeNewRunParks(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedProject(t, root, "alpha")
+	gittest.Commit(t, root, "seed project")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/first-thing" {
+		t.Fatalf("Location = %q", got)
+	}
+	if _, err := run.Load(root, "alpha", "first-thing"); err != nil {
+		t.Fatalf("run.Load after park: %v", err)
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("parking must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestSafeModeNewRunSpawnRefusesBeforeOpen: the /run/new mirror of the
+// ordering probe above — a refused "open & run" leaves no run on disk.
+func TestSafeModeNewRunSpawnRefusesBeforeOpen(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedProject(t, root, "alpha")
+	gittest.Commit(t, root, "seed project")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing&spawn=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := run.Load(root, "alpha", "first-thing"); err == nil {
+		t.Error("refused open must not leave a run on disk")
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
 	}
 }

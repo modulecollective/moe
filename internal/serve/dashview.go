@@ -124,10 +124,6 @@ type dashVM struct {
 	ProjectCount   int
 	ActiveProjects int
 	ShowAll        bool
-	// Insecure mirrors Options.Insecure: the "new run" link spawns an
-	// agent, so it only renders in insecure mode. The "new idea" link
-	// is journal-only and always renders.
-	Insecure bool
 }
 
 func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {

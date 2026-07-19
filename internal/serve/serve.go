@@ -431,7 +431,6 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, histogram, showAll)
-	vm.Insecure = s.opts.Insecure
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path

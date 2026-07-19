@@ -18,9 +18,10 @@ source of truth for the exact command surface; this page is a map.
   project knowledge topics, twin documents, and a dashboard with the same
   daily-activity chart (and a project-scoped one on each project page). **Safe
   by default:** all views,
-  idea capture/edit/close/reopen, and run close/edit/reopen work, but the
-  run-spawning actions — opening new runs, advancing a stage, kicking a chain
-  head, and opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
+  idea capture/edit/close/reopen, run close/edit/reopen, and opening or
+  promoting into a *parked* run work, but the run-spawning actions — the
+  new-run and promote forms' "& run" submits, advancing a stage, kicking a
+  chain head, and opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
   non-empty `MOE_SERVE_INSECURE`) to enable them; anything that can reach the
   listener can then execute code.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore

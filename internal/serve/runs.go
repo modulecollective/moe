@@ -77,6 +77,10 @@ type newRunVM struct {
 	Workspace string
 	Agent     string
 	Workflow  string
+	// Insecure gates the "open & run" button. Opening a parked run is
+	// journal-only and stays available in safe mode; only the spawning
+	// submit is hidden.
+	Insecure bool
 }
 
 // newRunWorkflow resolves a submitted (or query-string) workflow name
@@ -110,9 +114,11 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "new.html", vm)
 }
 
-// handleNewRunSubmit validates the form, opens the run in-process,
-// then spawns `moe <workflow> <first-stage> <p>/<slug>` as a
-// PTY-backed agent session and redirects to the per-run page. Opening
+// handleNewRunSubmit validates the form, opens the run in-process, and
+// redirects to the per-run page. The run is parked — queued at its
+// first stage with no agent — unless the operator submitted the "open &
+// run" button (`spawn`), which additionally spawns `moe <workflow>
+// <first-stage> <p>/<slug>` as a PTY-backed agent session. Opening
 // synchronously means an open failure surfaces in the HTTP response
 // (instead of the prior spawn-succeeded-but-open-failed half-state),
 // and the child has no slug-discovery to do on its way to the agent.
@@ -120,11 +126,15 @@ func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
 // Validation failures re-render the form with an ErrorBanner so the
 // operator can correct without retyping.
 func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
-	if !s.spawnAllowed(w) {
-		return
-	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Only the spawning submit needs insecure mode; parking is
+	// journal-only. Gate before the open so a refused click leaves no
+	// half-created run behind.
+	spawn := r.FormValue("spawn") != ""
+	if spawn && !s.spawnAllowed(w) {
 		return
 	}
 	id := strings.TrimSpace(r.FormValue("id"))
@@ -177,11 +187,13 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runID := md.Project + "/" + md.ID
-	args := []string{wf.Name, wf.FirstStage, runID}
-	if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		fail("spawn: " + err.Error())
-		return
+	if spawn {
+		runID := md.Project + "/" + md.ID
+		args := []string{wf.Name, wf.FirstStage, runID}
+		if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+			fail("spawn: " + err.Error())
+			return
+		}
 	}
 	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
@@ -767,11 +779,13 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		switch md.Status {
 		case run.StatusInProgress:
 			// edit / close are journal-only, so both captures get them
-			// in safe mode. promote spawns the destination run's agent,
-			// so it's gated to insecure mode — and to ideas, which are
-			// the only capture that promotes.
+			// in safe mode. promote parks the destination run by
+			// default — also journal-only — so the chip joins them;
+			// only the page's "promote & run" submit is insecure-gated.
+			// It stays idea-only: ideas are the only capture that
+			// promotes.
 			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
-			if s.opts.Insecure && md.Workflow == dash.IdeaWorkflow {
+			if md.Workflow == dash.IdeaWorkflow {
 				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
 			}
 			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
@@ -965,6 +979,10 @@ type promoteVM struct {
 	Workflows   []NewRunWorkflow
 	Workflow    string // selected entry, echoed on error re-render
 	ErrorBanner string
+	// Insecure gates the "promote & run" button. Parking the
+	// destination run is journal-only and stays available in safe mode;
+	// only the spawning submit is hidden.
+	Insecure bool
 }
 
 // gatherPromoteVM returns the dropdown content the promote page needs.
@@ -988,6 +1006,7 @@ func (s *Server) gatherPromoteVM(projectID, slug string) (promoteVM, error) {
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
 		Workflows:  s.opts.NewRunWorkflows,
+		Insecure:   s.opts.Insecure,
 	}
 	if len(vm.Workflows) > 0 {
 		vm.Workflow = vm.Workflows[0].Name
@@ -1032,22 +1051,28 @@ func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
 
 // handlePromote opens the destination run in-process by calling
 // runopen.Promote with the chosen workflow (sdlc default; the web face
-// of `moe <workflow> new --from-idea`), then spawns
+// of `moe <workflow> new --from-idea`) and redirects to the new run's
+// page. The destination is parked unless the operator submitted the
+// "promote & run" button (`spawn`), which additionally spawns
 // `moe <workflow> <first-stage> <p>/<newslug>` as a PTY-backed agent
-// session and redirects to the new run's page. Opening synchronously
-// means the destination's slug is known before the spawn — no
-// placeholder id, no stdout regex, no rename race. Validation failures
-// re-render the promote page with an inline error banner.
+// session. Opening synchronously means the destination's slug is known
+// before the spawn — no placeholder id, no stdout regex, no rename
+// race. Validation failures re-render the promote page with an inline
+// error banner.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
-	if !s.spawnAllowed(w) {
-		return
-	}
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Only the spawning submit needs insecure mode; parking the
+	// destination is journal-only. Gate before runopen.Promote so a
+	// refused click doesn't half-promote the idea.
+	spawn := r.FormValue("spawn") != ""
+	if spawn && !s.spawnAllowed(w) {
 		return
 	}
 	wsName := strings.TrimSpace(r.FormValue("workspace"))
@@ -1106,11 +1131,13 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		s.logf("promote: mark idea %s/%s promoted: %v", projectID, slug, promoted.MarkErr)
 	}
 
-	destID := promoted.Run.Project + "/" + promoted.Run.ID
-	args := []string{wf.Name, wf.FirstStage, destID}
-	if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		fail("spawn: " + err.Error())
-		return
+	if spawn {
+		destID := promoted.Run.Project + "/" + promoted.Run.ID
+		args := []string{wf.Name, wf.FirstStage, destID}
+		if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+			fail("spawn: " + err.Error())
+			return
+		}
 	}
 	http.Redirect(w, r, "/run/"+promoted.Run.Project+"/"+promoted.Run.ID, http.StatusSeeOther)
 }
@@ -1153,6 +1180,7 @@ func (s *Server) gatherNewRunVM() (newRunVM, error) {
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
 		Workflows:  s.opts.NewRunWorkflows,
+		Insecure:   s.opts.Insecure,
 	}
 	if len(vm.Workflows) > 0 {
 		vm.Workflow = vm.Workflows[0].Name

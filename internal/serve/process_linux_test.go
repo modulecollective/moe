@@ -105,6 +105,7 @@ func TestPOSTNewRunOpensAndSpawnsAgent(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("id", "alpha/first-thing")
+	form.Set("spawn", "1") // the "open & run" submit; bare open parks
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -272,6 +273,7 @@ func TestPromotePOSTOpensRunAndSpawnsAgent(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("agent", "claude")
+	form.Set("spawn", "1") // the "promote & run" submit; bare promote parks
 	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

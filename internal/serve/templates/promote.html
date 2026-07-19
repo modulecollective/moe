@@ -54,6 +54,7 @@
     </label>
 
     <button type="submit">promote</button>
+    {{if .Insecure}}<button type="submit" name="spawn" value="1">promote &amp; run</button>{{end}}
   </form>
 </main>
 <script>

@@ -70,6 +70,7 @@
     </label>
 
     <button type="submit">open run</button>
+    {{if .Insecure}}<button type="submit" name="spawn" value="1">open &amp; run</button>{{end}}
   </form>
   {{end}}
 </main>
