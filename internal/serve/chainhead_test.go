@@ -96,10 +96,12 @@ func TestNonChainRunSkipsChainMembers(t *testing.T) {
 	}
 }
 
-// TestChainHeadKickChipGating walks every reason the kick chip does or
-// doesn't render. The chip is the first web surface for an action the
-// dash has been naming since chain heads existed, so what it refuses
-// matters as much as what it offers.
+// TestChainHeadKickChipGating walks every reason the kick chips do or
+// don't render. They are the first web surface for an action the
+// dash has been naming since chain heads existed, so what they refuse
+// matters as much as what they offer. Both chips gate identically —
+// the dynamic ride is a wider ride, not a differently-permitted one —
+// so every case asserts on the pair.
 func TestChainHeadKickChipGating(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -121,9 +123,15 @@ func TestChainHeadKickChipGating(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := chainHeadServer(t, tc.members, tc.chainedUnder, tc.insecure)
 			body := getRunPage(t, s, "/run/alpha/batch")
+			// The closing quote keeps the static check from matching the
+			// dynamic form's action — keep it that way.
 			got := strings.Contains(body, `action="/run/alpha/batch/kick"`)
 			if got != tc.want {
 				t.Errorf("kick chip rendered=%v, want %v\n%s", got, tc.want, body)
+			}
+			gotDyn := strings.Contains(body, `action="/run/alpha/batch/kick-dynamic"`)
+			if gotDyn != tc.want {
+				t.Errorf("kick dynamic chip rendered=%v, want %v\n%s", gotDyn, tc.want, body)
 			}
 		})
 	}
@@ -160,6 +168,25 @@ func TestKickPOSTRefusesNonChainRun(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/fix-it/kick", strings.NewReader("")))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestKickDynamicPOSTRefusesNonChainRun: the dynamic route shares
+// /kick's body, so it inherits every guard. Cheap insurance that the
+// body actually stayed shared — a copy-paste fork would show up here
+// first.
+func TestKickDynamicPOSTRefusesNonChainRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/fix-it/kick-dynamic", strings.NewReader("")))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
 	}

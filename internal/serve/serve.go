@@ -352,6 +352,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
 	s.router.HandleFunc("POST /run/{project}/{slug}/kick", s.handleKick)
+	s.router.HandleFunc("POST /run/{project}/{slug}/kick-dynamic", s.handleKickDynamic)
 	// Chore detail page + open action. A chore isn't a run, so it has
 	// its own /chore namespace; "open" mints a fresh run of the chore's
 	// configured workflow (the analog of promoting an idea).

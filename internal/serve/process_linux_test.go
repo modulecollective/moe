@@ -464,6 +464,35 @@ func TestKickPOSTSpawnsChainKick(t *testing.T) {
 	}
 }
 
+// TestKickDynamicPOSTSpawnsDynamicChainKick: the "kick dynamic" chip is
+// the web spelling of `!!!!`, so it must reach the CLI as --dynamic. The
+// flag is the whole difference between the two routes; if it were
+// dropped the page would silently offer two identical rides.
+func TestKickDynamicPOSTSpawnsDynamicChainKick(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "batch", dash.ChainWorkflow)
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		ChainMembers: func(string, string) ([]dash.Row, string, error) {
+			return []dash.Row{{Project: "alpha", Run: "fix-one", Note: "sdlc:code"}}, "", nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/batch/kick-dynamic", strings.NewReader("")))
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	c, ok := s.children.get("alpha/batch")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "chain kick --dynamic alpha/batch" {
+		t.Errorf("spawn args = %q, want %q", got, "chain kick --dynamic alpha/batch")
+	}
+}
+
 // withShortShutdownGrace shrinks the phase budgets for the duration
 // of a test so we don't spend 20+ seconds per shutdown case. Not
 // safe under t.Parallel.
