@@ -184,8 +184,8 @@ to twelve merges. The grant is typed, process-wide, and dies with the process.
 
 ## What carries the weight
 
-Three structural guards sit on the self-kick, and each is impossible-by-
-construction rather than restraint-by-good-manners:
+Three structural guards sit on the self-kick, and each is
+impossible-by-construction rather than restraint-by-good-manners:
 
 The ride must be **dynamic** — a fourth bang a human typed upstream. A plain
 push, a `!!`, a `!!!` all groom and park. The surprise ride is not a thing the
