@@ -229,6 +229,11 @@ type runVM struct {
 	Status      string
 	Live        bool
 	CanvasLinks []canvasLink
+	// ChainMembers is the live batch hanging off a chain head, head→tail;
+	// empty for every other workflow. The head's canvas is the operator's
+	// purpose note, so this — not the canvas — is where membership and
+	// per-member status live on the page.
+	ChainMembers []chainMemberVM
 	// Actions is the peer-affordances block on the per-run page. For
 	// an in-progress idea this is edit, promote, and close; for a
 	// closed idea this is reopen; other runs render no actions.
@@ -255,6 +260,62 @@ type canvasLink struct {
 type transcriptLink struct {
 	Agent string // "claude" | "codex"
 	URL   string // /run/<p>/<r>/transcript/<stage>?agent=<agent>
+}
+
+// chainMemberVM is one run in a chain head's batch, rendered with the
+// dash's own note and timestamp so the head page and the dash agree
+// about what a member's state is called.
+type chainMemberVM struct {
+	ID   string // <project>/<slug>
+	URL  string // /run/<project>/<slug>
+	Note template.HTML
+	When string
+}
+
+// chainState is the head-page slice of live chain truth, gathered once
+// per page: the batch, and whether the head is kickable from here. The
+// callback replays the journal index, so both consumers (the members
+// section and the kick chip) read one gather.
+type chainState struct {
+	Members []chainMemberVM
+	// Kickable narrows to what the dash's `parked · kick?` hint already
+	// promises: an in-progress head with a live batch behind it, not
+	// itself chained under a live parent. `moe chain kick` would also
+	// accept an *empty* head — it closes it and rides nothing — but the
+	// dash calls that head `done · close?`, and a chip labelled "kick"
+	// that silently closes a placeholder is not the action it names.
+	// The web never exceeds the CLI; here it deliberately offers less.
+	Kickable bool
+}
+
+// gatherChainState reads the live chain for a chain head. Everything
+// else — a non-chain run, no callback wired, a gather error — yields
+// the zero value, which renders as the read-only page chain heads had
+// before: no members section, no kick chip. A gather error is logged
+// and swallowed rather than failing the page, matching fillRunRow: the
+// canvas link and the meta line are still worth serving.
+func (s *Server) gatherChainState(md *run.Metadata, projectID, slug string, now time.Time) chainState {
+	if md.Workflow != dash.ChainWorkflow || s.opts.ChainMembers == nil {
+		return chainState{}
+	}
+	rows, chainedUnder, err := s.opts.ChainMembers(projectID, slug)
+	if err != nil {
+		s.logf("chain members %s/%s: %v", projectID, slug, err)
+		return chainState{}
+	}
+	out := chainState{
+		Kickable: chainedUnder == "" && len(rows) > 0 && md.Status == run.StatusInProgress,
+	}
+	for _, row := range rows {
+		id := row.Project + "/" + row.Run
+		out.Members = append(out.Members, chainMemberVM{
+			ID:   id,
+			URL:  "/run/" + id,
+			Note: noteHTML(row.Project, row.Note),
+			When: dash.HumanAgo(now, row.When),
+		})
+	}
+	return out
 }
 
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +510,65 @@ func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnChain)
 }
 
+// handleKick rides a chain head headlessly from the browser by spawning
+// `moe chain kick <id>` — the same verb, unwrapped. The "kick" chip on
+// a parked head's page posts here, finally giving the dash's `parked ·
+// kick?` hint a web surface to name: before this the hint pointed at an
+// action only a terminal could take.
+//
+// A spawnNextStage sibling in posture, not in body: a chain head has no
+// stage ladder, so there is no next stage to re-derive server-side and
+// no spawnable-set check to make. What remains are the stage-free
+// guards — insecure gate, workflow, in-progress, no live child.
+//
+// Deliberately *not* re-checked here: whether the head is itself
+// chained under a live parent. That refusal needs the journal index,
+// `moe chain kick` already makes it (fail-closed, index errors
+// propagate), and the chip doesn't render when it would fire. Copying
+// it into serve would be a second authority on the same question that
+// could disagree with the first.
+func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
+	if !s.spawnAllowed(w) {
+		return
+	}
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return
+		}
+		s.logf("kick %s: load: %v", id, err)
+		http.Error(w, "kick: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if md.Workflow != dash.ChainWorkflow {
+		http.Error(w, "run "+id+" is a "+md.Workflow+" run, not a chain head", http.StatusConflict)
+		return
+	}
+	if md.Status != run.StatusInProgress {
+		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
+		return
+	}
+	if c, ok := s.children.get(id); ok {
+		if exited, _ := c.snapshot(); !exited {
+			http.Error(w,
+				"run "+id+" has a live agent mid-turn — wait for it to finish, then kick",
+				http.StatusConflict)
+			return
+		}
+	}
+	if _, err := s.children.spawn(id, s.opts.MoeBin, []string{"chain", "kick", id}, s.opts.Root, s.opts.Logger); err != nil {
+		s.logf("kick %s: spawn: %v", id, err)
+		http.Error(w, "kick: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
 // spawnNextStage is the shared body behind /advance, /ship, and /chain.
 // It re-derives the next stage server-side (never trusting a possibly-
 // stale page) and applies the same guard set the close route uses,
@@ -573,10 +693,12 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
+	chain := s.gatherChainState(md, projectID, slug, now)
+	vm.ChainMembers = chain.Members
 	// No live child on the read-only path (this serve isn't parenting the
 	// run), so the spawn chips gate on live=false. fillRunRow ran first
 	// so vm.NextStage is populated.
-	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false)
+	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false, chain)
 	return vm, nil
 }
 
@@ -598,8 +720,19 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // for the sandbox clone). Close chips stay for non-perpetual
 // workflows, and for live perpetual pages; the close route's own
 // live-child refusal guards the click.
-func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
+func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool, chain chainState) []runAction {
 	base := "/run/" + projectID + "/" + slug
+	if md.Workflow == dash.ChainWorkflow {
+		// A chain head declares no serve workflow UI — it has no stages,
+		// so there is nothing for the cascade trio to spawn — which is why
+		// its one chip is bespoke like idea's rather than derived. It
+		// spawns an agent ride all the same, so it keeps the trio's gates:
+		// insecure mode, and not while a child is mid-turn.
+		if !live && s.opts.Insecure && chain.Kickable {
+			return []runAction{{Label: "kick", Href: base + "/kick", Method: "POST"}}
+		}
+		return nil
+	}
 	if dash.IsCapture(md.Workflow) {
 		switch md.Status {
 		case run.StatusInProgress:
@@ -709,9 +842,11 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
+		chain := s.gatherChainState(md, projectID, slug, now)
+		vm.ChainMembers = chain.Members
 		// !exited == an agent mid-turn; composeRunActions drops the spawn
 		// chips in that case. fillRunRow above populated vm.NextStage.
-		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited)
+		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited, chain)
 	}
 	return vm
 }

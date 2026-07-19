@@ -31,7 +31,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "", "listen address override (host or host:port); default 127.0.0.1:4242")
 	port := fs.Int("port", serve.DefaultPort, "listen port (ignored when --addr already includes one)")
-	insecure := fs.Bool("insecure", false, "enable run-spawning actions (new run, promote, advance/ship/chain, chore open); off by default")
+	insecure := fs.Bool("insecure", false, "enable run-spawning actions (new run, promote, advance/ship/chain, chain kick, chore open); off by default")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--insecure]")
 		moePrintln(stderr, "")
@@ -99,6 +99,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		},
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
 			return GatherRunRow(root, project, runID, time.Now().UTC())
+		},
+		// The chain head's own page is where the dash's `parked · kick?`
+		// hint sends the operator, so it's where the batch has to be
+		// legible. Membership is journal state, so it crosses the seam as
+		// a callback like every other journal-shaped fact.
+		ChainMembers: func(project, runID string) ([]dash.Row, string, error) {
+			return chainMembers(root, project, runID, time.Now().UTC())
 		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the

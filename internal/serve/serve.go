@@ -112,9 +112,24 @@ type Options struct {
 	// every hit — no row data is fatal, just less informative.
 	GatherRunRow func(project, run string) (row dash.Row, ok bool, err error)
 
+	// ChainMembers returns the live batch hanging off a chain head: one
+	// dash.Row per member in head→tail order — the runs `moe chain kick`
+	// would actually ride — plus the qualified key of a live parent the
+	// head is itself chained under ("" when it heads its own chain).
+	//
+	// The head's canvas is the operator's purpose note and says nothing
+	// about membership; this is where the head page gets the batch. The
+	// second return is the kick chip's gate: a head chained under a live
+	// parent is one `moe chain kick` refuses ("kick the head"), so the
+	// page must not offer it.
+	//
+	// Only called for chain-workflow runs. Absent — or erroring — leaves
+	// the head page as it was: no members section, no kick chip.
+	ChainMembers func(project, run string) (members []dash.Row, chainedUnder string, err error)
+
 	// Insecure enables the spawn bucket — the POST routes that run
 	// `moe <wf> <stage>` agent subprocesses (new run, promote,
-	// advance/ship/chain, chore open). Off by default (safe
+	// advance/ship/chain, chain kick, chore open). Off by default (safe
 	// mode): those routes refuse with 403 and their UI entry points
 	// don't render; the journal-write and read-only routes are
 	// unaffected. The cli wrapper sets this from the --insecure flag or
@@ -336,6 +351,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
+	s.router.HandleFunc("POST /run/{project}/{slug}/kick", s.handleKick)
 	// Chore detail page + open action. A chore isn't a run, so it has
 	// its own /chore namespace; "open" mints a fresh run of the chore's
 	// configured workflow (the analog of promoting an idea).

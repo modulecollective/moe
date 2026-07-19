@@ -21,6 +21,21 @@
   </section>
   {{end}}
 
+  {{if .ChainMembers}}
+  <section class="chain-members">
+    <h2>chained</h2>
+    <ul>
+      {{range .ChainMembers}}
+      <li>
+        <a class="slug" href="{{.URL}}">{{.ID}}</a>
+        <span class="note">{{.Note}}</span>
+        <span class="when">{{.When}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
   {{if .CanvasLinks}}
   <section class="canvases">
     <h2>canvases</h2>

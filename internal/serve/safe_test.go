@@ -24,6 +24,7 @@ func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 		"/run/alpha/x/advance",
 		"/run/alpha/x/ship",
 		"/run/alpha/x/chain",
+		"/run/alpha/x/kick",
 		"/chore/alpha/x/open",
 	} {
 		t.Run(path, func(t *testing.T) {

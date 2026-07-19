@@ -381,9 +381,10 @@ form.new-run button:hover, form.new-run button:focus {
   line-height: 1.45;
 }
 
-/* Per-run canvases list */
-.canvases ul { list-style: none; padding: 0; margin: 0; }
-.canvases li {
+/* Per-run canvases list, and the chain head's live member list —
+   same row shape, so one rule set. */
+.canvases ul, .chain-members ul { list-style: none; padding: 0; margin: 0; }
+.canvases li, .chain-members li {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -393,8 +394,8 @@ form.new-run button:hover, form.new-run button:focus {
   color: var(--muted);
   border-bottom: 1px solid var(--hairline);
 }
-.canvases li:last-child { border-bottom: none; }
-.canvases li .slug { color: var(--fg); }
+.canvases li:last-child, .chain-members li:last-child { border-bottom: none; }
+.canvases li .slug, .chain-members li .slug { color: var(--fg); }
 
 .meta.applies-when { color: var(--muted); }
 .lore-row .note { color: var(--muted); }
