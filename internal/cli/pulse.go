@@ -22,9 +22,9 @@ import (
 
 // The pulse workflow is the level-3 "gather" primitive: a headless,
 // read-only sweep of one project that files followup entries (→ ideas
-// via the existing harvest) and writes a short report ranking what to
-// pull next from the existing open backlog. It has no push — the
-// artifact is the filed followups plus the canvas report.
+// via the existing harvest) and writes a short report whose gate may
+// spawn parked fix runs and groom queued work into lanes. It has no
+// push — the artifact is the filed followups plus the canvas report.
 //
 // A pulse is more than the survey. It fires at the tail of the
 // operator-rooted run-traffic verbs (sdlc close, sdlc push, twin close,
@@ -783,7 +783,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
 		moePrintln(stderr, "(never executes one), then a headless read-only survey that files")
-		moePrintln(stderr, "followups and writes a report ranking what to pull next.")
+		moePrintln(stderr, "followups, writes a report, and may spawn and groom parked fix runs.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

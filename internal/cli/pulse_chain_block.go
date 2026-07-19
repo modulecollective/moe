@@ -13,10 +13,10 @@ import (
 // trailers, whose effective state needs the BuildJournalIndex replay no
 // surveying agent can cheaply or safely do by hand, and run.json shows
 // which runs are in-progress but never their order. So a sweep can file
-// a finding the very next chained run will fix, pick a Pull next the
-// chain already covers, or spawn a duplicate of a queued fix under a
-// different slug — the slug-dedupe guard in maybeSpawnFixRuns catches
-// none of those.
+// a finding the very next chained run will fix, aim a groom group at an
+// order the chain already records, or spawn a duplicate of a queued fix
+// under a different slug — the slug-dedupe guard in maybeSpawnFixRuns
+// catches none of those.
 
 // chainStateBlock renders the chain-state context block, or "" when
 // nothing is sequenced. Best-effort like its siblings in

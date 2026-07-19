@@ -53,7 +53,7 @@ func TestFollowupClaimSlugsNewFilingsSection(t *testing.T) {
 - ` + "`stale-binary-refile`" + ` — chains refile settled observations
 - ` + "`other-thing`" + ` — something else
 
-## Pull next
+## Backlog signals
 
 - ` + "`ranked-idea`" + ` — already open, not a filing
 `)
