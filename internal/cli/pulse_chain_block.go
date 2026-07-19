@@ -90,8 +90,5 @@ func chainStateBlock(root, projectID string) string {
 		"match on what the run is about.\n\n" +
 		"This is also your grooming map: a `chain` group's `onto` names any run above, and " +
 		"extending an existing thread beats forking a new one.")
-	if line := rideModeContextLine(); line != "" {
-		sb.WriteString("\n\n" + line)
-	}
 	return sb.String()
 }

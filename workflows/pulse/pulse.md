@@ -272,8 +272,8 @@ unchanged.** An unsettled order or a speculative member means groom,
 don't kick. Asking for a kick you shouldn't have is the one thing on
 this canvas that costs real time rather than a prune.
 
-The chain-state block in your context tells you whether this pulse is
-firing inside a ride, and which kind. Inside a **static** ride the
+When this pulse is firing inside a ride, your context carries a block
+saying so and naming which kind. Inside a **static** ride the
 machine cannot grow what's running — so shape new threads worth naming
 instead of trying to extend it. Inside a **dynamic** ride, extending
 the tail is exactly the move.

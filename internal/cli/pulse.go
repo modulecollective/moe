@@ -699,6 +699,15 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 	if chains := chainStateBlock(root, projectID); chains != "" {
 		blocks = append(blocks, chains)
 	}
+	// Its own block, not a tail on the chain-state one. A tail pulse
+	// fires after its spawner merged, so the ridden unit is usually
+	// below the two-active-member bar chainStateBlock renders at — and
+	// an unchained spawner (the self-kick door) has no chain at all.
+	// Nested, the line reached the agent only when some *unrelated*
+	// chain happened to be active: absent in both cases it exists for.
+	if ride := rideModeContextLine(); ride != "" {
+		blocks = append(blocks, ride)
+	}
 	return strings.Join(blocks, "\n\n")
 }
 

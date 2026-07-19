@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // TestRideModeForAnswer pins the bang-to-mode ladder. The two
@@ -76,4 +80,33 @@ func TestRideModeContextLine(t *testing.T) {
 			t.Errorf("dynamic context line = %q, want the self-kick license named", got)
 		}
 	}()
+}
+
+// TestPulseKickoffCarriesRideLineWithNothingChained pins the *wiring*,
+// not the renderer. The line used to hang off chainStateBlock, which
+// renders only for an active chain of two or more members — so it
+// reached the agent in neither case it exists for. A tail pulse fires
+// after its spawner merged (the ridden unit drops below the bar), and
+// the self-kick door is an unchained spawner with no chain at all.
+func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
+
+	if got := chainStateBlock(root, "moe"); got != "" {
+		t.Fatalf("fixture wants no chain block, got %q", got)
+	}
+	func() {
+		defer withRideMode(rideDynamic)()
+		got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+		if !strings.Contains(got, "firing inside a **dynamic** ride") {
+			t.Errorf("dynamic ride line missing from the kickoff:\n%s", got)
+		}
+	}()
+	// Outside a ride there is nothing to say, and a "nothing is riding"
+	// block would be context the agent can't act on.
+	got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+	if strings.Contains(got, "firing inside") {
+		t.Errorf("kickoff names a ride outside one:\n%s", got)
+	}
 }
