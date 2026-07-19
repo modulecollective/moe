@@ -152,7 +152,7 @@ func TestKBWorkflowNextWalksStages(t *testing.T) {
 func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb"}
-	got, err := buildSystemPrompt(root, md, "research", "", nil)
+	got, err := buildSystemPrompt(root, md, "research", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestBuildSystemPromptInjectsKBResearchFragment(t *testing.T) {
 func TestBuildSystemPromptInjectsKBSummarizeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb"}
-	got, err := buildSystemPrompt(root, md, "summarize", "", nil)
+	got, err := buildSystemPrompt(root, md, "summarize", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestKBWikiBuilderPopulatesPromptAndPaths(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("kbWikiBuilder returned nil config")
 	}
-	got, err := buildSystemPrompt(root, md, "summarize", "", cfg)
+	got, err := buildSystemPrompt(root, md, "summarize", "", false, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

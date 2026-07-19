@@ -62,7 +62,7 @@ func TestBuildSystemPromptInjectsHooksCodeFragment(t *testing.T) {
 		Project:  "moe",
 		Workflow: hooksWorkflow,
 	}
-	got, err := buildSystemPrompt(root, md, hooksCodeDoc, "", nil)
+	got, err := buildSystemPrompt(root, md, hooksCodeDoc, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

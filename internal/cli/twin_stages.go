@@ -82,8 +82,8 @@ func init() {
 }
 
 // runTwinStageSession wraps runStageSession with the twin-specific
-// options the six stages share: closed-schema wiki builder, no
-// sandbox (document-only), and SkipFinalize=true for every stage *but*
+// options the six stages share: closed-schema wiki builder, a
+// read-only source sandbox, and SkipFinalize=true for every stage *but*
 // finalize. Finalize additionally wires the post-flight hygiene gate
 // (the engine refuses to seal the pass with leftover findings) and a
 // canvas skeleton.
@@ -99,6 +99,17 @@ func runTwinStageSession(stage, projectID, runID string, headless bool, agentOve
 	opts := stageSessionOpts{
 		Headless: headless,
 		Agent:    agentOverride,
+		// The design/chat/pulse shape: a per-run clone of the project's
+		// source, exposed via --add-dir, with a close gate that refuses
+		// the stage if any tracked file moved. A reflect stage's job is
+		// to check prose claims against the code that motivated them,
+		// and it cannot do that from the session worktree — a plain
+		// `git worktree add` leaves projects/<p>/src an unpopulated
+		// submodule mountpoint. Uniform across all six stages: finalize
+		// doesn't strictly need source, but one opts literal beats a
+		// per-stage split and the boundary gate is pure protection.
+		NeedsSandbox:           true,
+		EnforceSandboxBoundary: true,
 		// Deferred so the kickoff's by-path references (history summary,
 		// managed docs) render against the worktree, not the canonical
 		// checkout. Building it eagerly here — before the worktree

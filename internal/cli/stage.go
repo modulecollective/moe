@@ -679,7 +679,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				ExtraEnv:             mapToEnv(devEnv),
 				AddDirs:              devEnvWritableDirs(devEnv),
 				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, worktreeWiki)
+					// Read-only wording for the strict-boundary stages,
+					// but not for review: it enforces the boundary *and*
+					// commits its own fixes (BoundaryAllowsCommits), so
+					// the writable paragraph is the true one there.
+					readOnly := opts.EnforceSandboxBoundary && !opts.BoundaryAllowsCommits
+					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, worktreeWiki)
 					if err != nil {
 						return "", err
 					}

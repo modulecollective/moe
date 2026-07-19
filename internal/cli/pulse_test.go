@@ -287,7 +287,7 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 		Project:  "moe",
 		Workflow: pulseWorkflow,
 	}
-	got, err := buildSystemPrompt(root, md, pulseDoc, "", nil)
+	got, err := buildSystemPrompt(root, md, pulseDoc, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

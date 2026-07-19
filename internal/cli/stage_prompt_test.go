@@ -125,7 +125,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	seedIntentRun(t, root, "tele", "aim-here", run.StatusInProgress, "# Aim here\n")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 func TestBuildSystemPromptOmitsIntentsWhenNone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", nil)
+	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,13 +359,13 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
 	wantDocOnly := filepath.Join(root, run.ContentPath(md.Project, md.ID, "design"))
-	docOnly := operationalCore(root, md, "design", "")
+	docOnly := operationalCore(root, md, "design", "", false)
 	if !strings.Contains(docOnly, wantDocOnly) {
 		t.Errorf("doc-only prompt missing absolute canvas path %q:\n%s", wantDocOnly, docOnly)
 	}
 
 	wantCode := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
-	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it")
+	codeStage := operationalCore(root, md, "code", "/sandbox/clones/tele/fix-it", false)
 	if !strings.Contains(codeStage, wantCode) {
 		t.Errorf("code-stage prompt missing absolute canvas path %q:\n%s", wantCode, codeStage)
 	}
@@ -375,6 +375,51 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 		if strings.Contains(codeStage, deny) {
 			t.Errorf("code-stage prompt still names shuttle path %q:\n%s", deny, codeStage)
 		}
+	}
+}
+
+// TestOperationalCoreReadOnlySandboxParagraph pins the two variants of
+// the clone paragraph. A strict-boundary stage (design, chat, pulse,
+// twin) used to inherit the writable wording — "additional writable
+// directory … where you read and edit the project's code" — and then
+// had to contradict it in its own fragment, which only sdlc/design.md
+// actually did. Rendering the honest paragraph centrally is what lets
+// twin's six fragments say nothing about the sandbox at all.
+//
+// The writable leg is the guard on the other side: review enforces the
+// boundary too, but commits its own fixes, so it must keep the
+// writable wording.
+func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "pass", Project: "moe", Workflow: "twin"}
+	clone := "/sandbox/clones/moe/pass"
+
+	readOnly := operationalCore(root, md, "architecture", clone, true)
+	if !strings.Contains(readOnly, clone) {
+		t.Fatalf("read-only prompt must still name the clone path:\n%s", readOnly)
+	}
+	for _, want := range []string{"exposed read-only", "refuses to close"} {
+		if !strings.Contains(readOnly, want) {
+			t.Errorf("read-only prompt missing %q:\n%s", want, readOnly)
+		}
+	}
+	for _, deny := range []string{"additional writable", "read and edit the project's code"} {
+		if strings.Contains(readOnly, deny) {
+			t.Errorf("read-only prompt still carries writable wording %q:\n%s", deny, readOnly)
+		}
+	}
+
+	writable := operationalCore(root, md, "code", clone, false)
+	if !strings.Contains(writable, "additional writable") {
+		t.Errorf("writable prompt lost its wording:\n%s", writable)
+	}
+	if strings.Contains(writable, "exposed read-only") {
+		t.Errorf("writable prompt leaked the read-only wording:\n%s", writable)
+	}
+
+	// Document-only stages have no clone, so neither paragraph renders.
+	if got := operationalCore(root, md, "architecture", "", true); strings.Contains(got, "exposed read-only") {
+		t.Errorf("no clone means no sandbox paragraph:\n%s", got)
 	}
 }
 
@@ -392,7 +437,7 @@ func TestOperationalCoreNamesMoeContextSkill(t *testing.T) {
 		if stage == "code" {
 			clone = "/sandbox/clones/tele/fix-it"
 		}
-		got := operationalCore(root, md, stage, clone)
+		got := operationalCore(root, md, stage, clone, false)
 		for _, want := range []string{
 			"`moe-context`",
 			"prior run",
@@ -419,7 +464,7 @@ func TestOperationalCoreNoLongerCarriesTraceBlocks(t *testing.T) {
 		if stage == "code" {
 			clone = "/sandbox/clones/tele/fix-it"
 		}
-		got := operationalCore(root, md, stage, clone)
+		got := operationalCore(root, md, stage, clone, false)
 		// Phrases that anchor the three extracted paragraphs.
 		for _, deny := range []string{
 			"belongs in the digital",
@@ -693,7 +738,7 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildSystemPrompt(root, md, "code", clone, nil)
+	got, err := buildSystemPrompt(root, md, "code", clone, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

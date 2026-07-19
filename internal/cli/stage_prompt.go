@@ -26,7 +26,12 @@ import (
 // Per-document fragments, overrides, and upstream-document assembly are
 // expected later passes; each new source of guidance slots in as another
 // (string, error)-returning block below.
-func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, wikiCfg *wiki.Config) (string, error) {
+//
+// sandboxReadOnly renders the clone paragraph in its read-only variant
+// (verify facts, don't edit) instead of the writable one. Set by
+// BuildSpec for the strict-boundary stages — design, chat, pulse, twin
+// — whose close gate refuses any tracked-file change.
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool, wikiCfg *wiki.Config) (string, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -79,7 +84,7 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, w
 	// recognise-and-contribute cue before operationalCore.
 	sections = append(sections, followupsReferenceSection(root, md))
 
-	sections = append(sections, operationalCore(root, md, docID, clonePath))
+	sections = append(sections, operationalCore(root, md, docID, clonePath, sandboxReadOnly))
 
 	// Project-specific AGENTS.md / CLAUDE.md from the clone. Codex /
 	// claude both walk from cwd up to the git root looking for these
@@ -359,7 +364,7 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 // under the session worktree — at session open) so both backends load
 // it via progressive disclosure and pay the prose cost only on turns
 // where the agent actually reaches for it.
-func operationalCore(root string, md *run.Metadata, docID, clonePath string) string {
+func operationalCore(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool) string {
 	// Every agent-writable path is now its natural absolute bureaucracy
 	// path. Code-bearing stages run with cwd = bureaucracy session
 	// worktree and reach the project clone via --add-dir; document-only
@@ -386,7 +391,36 @@ the journal sliced by run / doc / workflow) are reachable via the
 question whose answer might already be in a prior run.
 `, docID, md.ID, md.Project, content)
 
-	if clonePath != "" {
+	if clonePath != "" && sandboxReadOnly {
+		// Read-only variant for the strict-boundary stages. Without it
+		// they inherit the writable wording below and have to contradict
+		// it downstream in their own fragments — which is what
+		// workflows/sdlc/design.md's "The project sandbox is read-only"
+		// section was doing alone. That section stays: it adds
+		// stage-specific framing (verify while drafting) on top of this
+		// generic contract.
+		out += fmt.Sprintf(`
+Your project's source tree is exposed read-only as an additional
+directory at:
+  %s
+That's a private per-run clone of the target project's submodule.
+Read it to check facts against the code — an API shape, a symbol's
+callers, what a command actually prints — instead of reasoning from
+memory. The project's dev-env is set up there, so its toolchain
+works.
+
+The stage refuses to close if any tracked file in the clone changed,
+so don't commit and don't leave modified or deleted tracked files
+behind. Untracked scratch files are fine.
+
+Your working directory is the bureaucracy session worktree, where the
+canvas above lives at its natural path. Write run artifacts (canvas,
+followups, twin feedback) at the absolute bureaucracy paths named in
+this prompt. Run metadata, prior canvases, digital-twin docs, and
+other bureaucracy paths are read-only context; do not edit those
+paths.
+`, clonePath)
+	} else if clonePath != "" {
 		out += fmt.Sprintf(`
 Your project's source tree is exposed as an additional writable
 directory at:

@@ -359,7 +359,7 @@ for a in "$@"; do
   case "$a" in --append-system-prompt) next=1 ;; esac
 done
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
-sandbox=$(printf '%s' "$prompt" | awk '/exposed as an additional writable/ {getline; getline; gsub(/^ +| +$/, ""); print; exit}')
+sandbox=$(printf '%s' "$prompt" | awk '/exposed .*as an additional/ {getline; getline; gsub(/^ +| +$/, ""); print; exit}')
 if [ -n "$canvas" ]; then printf 'design canvas content\n' >> "$canvas"; fi
 if [ -n "$sandbox" ]; then
   (cd "$sandbox" && printf 'spike code\n' > spike.txt && git add spike.txt && git commit -m 'spike during design') >/dev/null 2>&1

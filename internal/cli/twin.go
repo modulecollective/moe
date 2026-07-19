@@ -164,8 +164,9 @@ func init() {
 		Run:     twinStageRun("finalize"),
 	})
 	// Close marks the in-progress twin run terminal once finalize has
-	// landed. Mirrors `moe sdlc close`: no cleanup hook, since twin
-	// runs have no sandbox.
+	// landed. No cleanup hook — same contract as chat: twin stages do
+	// open a sandbox clone, but a read-only one nothing pushes, so it
+	// waits for `moe clone gc` rather than a bespoke teardown.
 	g.Register(closeCommand("twin", "Close twin reflect pass %s/%s", nil))
 	g.Register(harvestCommand("twin"))
 	g.Register(&Command{
