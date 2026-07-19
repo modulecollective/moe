@@ -127,10 +127,16 @@ type Session struct {
 	WorktreePath string
 }
 
-// branchName returns the branch name for a (project, run, doc) tuple.
+// BranchName returns the branch name for a (project, run, doc) tuple.
 // Kept separate from Open so callers can grep for existing sessions
 // without opening one.
-func branchName(projectID, runID, docID string) string {
+//
+// Exported because the branch is the only "is this stage open right
+// now" signal readable from a *linked worktree*: refs live in the
+// common dir, while List's worktree paths are resolved against the
+// root it is handed. Close and Abandon both delete the branch, so
+// its existence is exactly "a session is open".
+func BranchName(projectID, runID, docID string) string {
 	return "session/" + projectID + "/" + runID + "/" + docID
 }
 
@@ -148,7 +154,7 @@ func worktreesDir(root string) string {
 // worktree (orphaned state from a botched close or manual tampering),
 // return an error pointing the operator at `moe session abandon`.
 func Open(root, projectID, runID, docID string) (*Session, error) {
-	branch := branchName(projectID, runID, docID)
+	branch := BranchName(projectID, runID, docID)
 
 	existing, err := findWorktreeForBranch(root, branch)
 	if err != nil {

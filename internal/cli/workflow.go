@@ -301,16 +301,15 @@ func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.Journal
 //     rather than by a downstream turn. A stage whose canvas is merely
 //     complete is not consent to proceed — the operator has to have
 //     said so.
-//   - That stage has no session yet. This is the double-run guard, and
-//     the session id is the signal rather than a work-turn: opening a
-//     stage mints the session and commits run.json *before* the agent
-//     runs (commitSessionStart), while the work-turn grep is anchored
-//     to `work: update` and deliberately ignores that commit. So a run
-//     the operator picked up by hand leaves pickup range at the moment
-//     `moe sdlc <stage>` starts, not at its first canvas edit — a pulse
-//     firing from unrelated traffic mid-session cannot groom underneath
-//     it. A started-then-abandoned session stays out of range too,
-//     which is the safe direction to be wrong in.
+//   - That stage has no session recorded in run.json. This covers the
+//     run whose session has already merged back to main. It does *not*
+//     cover a session that is still open: commitSessionStart writes
+//     run.json on the session branch, which reaches main only when the
+//     turn commits, so a mid-session run reads here as having no
+//     session at all. The live half of the double-run guard therefore
+//     lives in advancedRunsBlock, which checks for the session branch.
+//     Keep both: this one is free, and it still holds when a session
+//     merged without producing a work-turn.
 //
 // Everything else is out by construction: terminal runs short-circuit
 // in NextWithIndex, in-flight runs have no marker (no guessing), and a

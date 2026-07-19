@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -53,11 +54,15 @@ func TestAdvancedRunsBlockSkipsUnadvancedRun(t *testing.T) {
 	}
 }
 
-// TestAdvancedRunsBlockSkipsStartedSuccessor is the double-run guard.
-// The operator hit `a` and later started `moe sdlc code` by hand; a
-// pulse fired by unrelated traffic mid-session must not still see the
-// run as waiting. The session id is what makes that visible — it is
-// committed before the agent runs, well ahead of any code work-turn.
+// TestAdvancedRunsBlockSkipsStartedSuccessor covers the run.json half of
+// the double-run guard: a session that already merged back to main
+// leaves its id in run.json, and the run must stay out of pickup range
+// even though no work-turn followed. The *live* half — a session still
+// open, whose run.json has not reached main yet — is
+// TestAdvancedRunsBlockSkipsLiveSession below. Both are needed; this
+// test alone passes against an implementation that grooms underneath
+// every in-flight stage, which is what shipped until the test stage
+// drove a real pulse.
 func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 	root := newTestBureaucracy(t)
 	now := time.Now().Local()
@@ -85,6 +90,47 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 
 	if got := advancedRunsBlock(root, "moe"); got != "" {
 		t.Errorf("a run whose successor session already started must leave pickup range:\n%s", got)
+	}
+}
+
+// TestAdvancedRunsBlockSkipsLiveSession is the failure a real pulse
+// caught and run.json could not. `moe sdlc code` opens a session
+// worktree and commits run.json *on the session branch*; that branch
+// merges to main only when the turn commits. So for the whole duration
+// of an open stage — exactly the window the guard exists to close —
+// run.Scan reads a run.json with no session id, and the run reads as
+// still waiting. session.Open is the production seam, so the test
+// drives it rather than simulating a branch.
+func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "moe", "picked-up-live", "sdlc", run.StatusInProgress, now, nil)
+	advanceAt(t, root, "moe", "picked-up-live", "design", now.Add(-2*time.Hour))
+	if got := advancedRunsBlock(root, "moe"); !strings.Contains(got, "picked-up-live") {
+		t.Fatalf("precondition: run should be eligible before its code session opens:\n%s", got)
+	}
+
+	if _, err := session.Open(root, "moe", "picked-up-live", "code"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := advancedRunsBlock(root, "moe"); got != "" {
+		t.Errorf("a run with a live code session must not be groomed underneath:\n%s", got)
+	}
+
+	// The block does not render against the bureaucracy root in
+	// production: pulseKickoffWithContext is wired as an
+	// InitialPromptBuilder, so it is handed the pulse's *own* session
+	// worktree. A guard that reads worktree-registry state (session.List)
+	// resolves its paths against that workRoot and silently finds
+	// nothing, which is how the first attempt at this fix still shipped
+	// the bug. Re-assert from a linked worktree.
+	pulseSess, err := session.Open(root, "moe", "the-pulse", "pulse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := advancedRunsBlock(pulseSess.WorktreePath, "moe"); got != "" {
+		t.Errorf("guard must hold when the block renders from the pulse's worktree:\n%s", got)
 	}
 }
 

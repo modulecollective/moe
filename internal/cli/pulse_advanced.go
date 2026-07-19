@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 )
 
 // The settled-runs block covers decisions already made; the chain-state
@@ -56,7 +58,6 @@ func advancedRunsBlock(root, projectID string) string {
 	if err != nil {
 		return ""
 	}
-
 	var rows []advancedRun
 	for _, md := range mds {
 		if md.Project != projectID {
@@ -68,6 +69,21 @@ func advancedRunsBlock(root, projectID string) string {
 		}
 		stage, marked, err := w.AdvancedTo(root, md, idx)
 		if err != nil || stage == "" {
+			continue
+		}
+		// The live half of the double-run guard. AdvancedTo's run.json
+		// check only sees a session that already merged back to main:
+		// commitSessionStart writes run.json on the session branch, so
+		// for the whole duration of an open stage run.Scan reads no
+		// session id at all — the exact window the guard exists to
+		// close. The branch is the signal that works here, and it is
+		// the *only* one that does: this block renders against the
+		// pulse's own session worktree (InitialPromptBuilder hands the
+		// builder a workRoot), where session.List resolves its worktree
+		// paths against the wrong directory and finds nothing. Refs
+		// live in the common dir, so HasRef reads true from any
+		// worktree, and Close/Abandon both delete the branch.
+		if git.HasRef(root, "refs/heads/"+session.BranchName(md.Project, md.ID, stage)) {
 			continue
 		}
 		rows = append(rows, advancedRun{
