@@ -95,8 +95,13 @@ func (pi *pulseInterrupt) mark() {
 }
 
 // Close tears the watcher down on a clean finish and waits for the
-// watch goroutine to drain. Idempotent via the injected stop's guard.
+// watch goroutine to drain. Idempotent via the injected stop's guard,
+// and nil-safe like interrupted and mark — the survey closes the window
+// early before rooting a ride, and it may hold no latch at all.
 func (pi *pulseInterrupt) Close() {
+	if pi == nil {
+		return
+	}
 	pi.stop()
 	<-pi.done
 }

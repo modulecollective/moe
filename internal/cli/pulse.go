@@ -387,7 +387,6 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	minted := maybeSpawnFixRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
 	threads := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
 	stampReflectOnUnit(root, projectID, md.ID, reflectID, spawner, stdout, stderr)
-	pulseSelfKick(root, threads, spawner, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -402,6 +401,21 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	if err := closePulseRun(root, projectID, md.ID, stdout, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
 	}
+
+	// The kick is last, and deliberately *outside* the pulse's skip
+	// window. pi latches the first Ctrl-C and then steps aside, which is
+	// exactly right while the sweep is the thing running — but a ride the
+	// pulse roots is not the sweep. Left inside, a Ctrl-C aimed at the
+	// ride would be swallowed by the latch: the ride would carry on and
+	// the finished sweep would be reported as interrupted. Closing the
+	// latch first hands SIGINT back to the ride's own handling, the same
+	// as an operator-typed kick.
+	//
+	// Closing the pulse run first is the other half: a ride can run for
+	// a long time, and a sweep that has already done all its work should
+	// not sit on the dash's ACTIVE list for the duration.
+	pi.Close()
+	pulseSelfKick(root, threads, spawner, stdout, stderr)
 	return 0
 }
 
