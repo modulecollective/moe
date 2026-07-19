@@ -37,6 +37,18 @@ end-to-end CLI path. Use the run's configured dev environment, keep the
 invocation scoped to the surface under test, and record the command and
 result on the test canvas.
 
+When the surface under test sits behind an agent turn — the rendered
+prompt text a stage hands its agent, the sandbox boundary gate — don't
+spend a live session. Put a **fake `claude` early on `PATH`** that dumps
+its argv to a file and writes the stage canvas itself. Both backends
+resolve their binary through `exec.LookPath` — the same seam the
+`fakeClaudeOnPath` test helper uses — so real `moe sdlc` / `twin` /
+`pulse` invocations against a scratch bureaucracy run end-to-end with no
+session spent. Two gotchas: stage ladders are ordered (walk from the
+first stage), and the scratch bureaucracy needs `.claude/` and
+`.mcp.json` in `.git/info/exclude`. Full recipe: the digital twin's
+operations.md, "Driving `moe` end-to-end without an agent session".
+
 In test stage, **don't** spawn `moe serve` to check rendered HTML or
 HTTP status — assert it in-process with `httptest` against
 `s.Handler()` (the existing `internal/serve` test idiom). If a live
