@@ -142,10 +142,20 @@ and keep as many live at once as you have topics.
 
 ```sh
 moe chain new moe/perf-cleanups     # mint a head to collect under
+moe chain note moe/perf-cleanups    # why this batch exists
 moe chain edit                      # move runs beneath it
 moe chain kick moe/perf-cleanups    # ride the batch headlessly
 moe chain close moe/perf-cleanups   # drop the head without riding
 ```
+
+A head's canvas is its **purpose note**: what ties the batch together, in your
+words. It's the one thing the chain edges can't tell you, and it's optional —
+`moe chain new` returns immediately with an empty note, `--seed` pops `$EDITOR`
+at mint, and `moe chain note` writes it whenever. Membership is not written
+there. The head's run page in `moe serve` renders the batch live from the
+edges, one row per member with the dash's own status vocabulary, and offers a
+**kick** chip beside it (insecure mode only) so the dash's `parked · kick?`
+hint has a surface in the browser.
 
 `moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
 that run to its ship, then rides on into each chained run in order. A chain-run

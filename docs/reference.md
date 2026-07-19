@@ -19,8 +19,8 @@ source of truth for the exact command surface; this page is a map.
   daily-activity chart (and a project-scoped one on each project page). **Safe
   by default:** all views,
   idea capture/edit/close/reopen, and run close/edit/reopen work, but the
-  run-spawning actions — opening new runs, advancing a stage, and
-  opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
+  run-spawning actions — opening new runs, advancing a stage, kicking a chain
+  head, and opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
   non-empty `MOE_SERVE_INSECURE`) to enable them; anything that can reach the
   listener can then execute code.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
@@ -42,11 +42,14 @@ source of truth for the exact command surface; this page is a map.
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
-- `moe chain new <project>/<slug>` mints a chain run: a stageless placeholder
-  head to collect a batch under.
+- `moe chain new [--seed] <project>/<slug>` mints a chain run: a stageless
+  placeholder head to collect a batch under. `--seed` pops `$EDITOR` on its
+  purpose note first.
 - `moe chain edit` opens an editor over active operator-cascade runs (SDLC,
   twin, KB, hooks, chores) plus chain heads; reorder
   lines to record a run chain in the bureaucracy journal.
+- `moe chain note <project>/<run>` edits a head's purpose note: why the batch
+  exists. Membership isn't written there — it renders live from the edges.
 - `moe chain kick <project>/<run>` rides a chain headlessly from the named head.
 - `moe chain close [--no-edit] <project>/<run>` drops a head without riding it.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
