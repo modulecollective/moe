@@ -321,7 +321,7 @@ func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 }
 
 // twinFeedbackEntry is one note left under projects/<p>/runs/<slug>/
-// feedback/twin.md by a non-twin workflow agent, surfaced into the
+// feedback/twin.md by a workflow agent, surfaced into the
 // next reflect's kickoff. Provenance (runID) lets the agent trace a
 // note back to where it came from; `when` is the git-time of the
 // most recent commit touching the file, used to filter against the
@@ -343,6 +343,14 @@ type twinFeedbackEntry struct {
 // checkpoint anchors the "since when" boundary. Missing checkpoint /
 // empty LastIngestAt means "first reflect" — every present feedback
 // file lands.
+//
+// One exception to the threshold: the run named by the checkpoint's
+// LastIngestRun. A reflect pass seals the checkpoint and writes its own
+// feedback/twin.md in the same stage-exit commit, so that note's
+// git-time never post-dates the threshold it created — yet it plainly
+// wasn't ingested by the pass that filed it. It bypasses the filter so
+// it reaches the next pass, then ages out once that pass seals and
+// LastIngestRun moves on.
 func loadTwinFeedback(root, projectID string, cfg wiki.Config) ([]twinFeedbackEntry, error) {
 	cp, hasCheckpoint, err := wiki.ReadCheckpoint(cfg.ContentDir)
 	if err != nil {
@@ -381,7 +389,8 @@ func loadTwinFeedback(root, projectID string, cfg wiki.Config) ([]twinFeedbackEn
 			// will fold it in.
 			continue
 		}
-		if !threshold.IsZero() && !when.After(threshold) {
+		sealedOwn := hasCheckpoint && cp.LastIngestRun != "" && md.ID == cp.LastIngestRun
+		if !threshold.IsZero() && !when.After(threshold) && !sealedOwn {
 			continue
 		}
 		out = append(out, twinFeedbackEntry{

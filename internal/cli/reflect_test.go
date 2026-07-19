@@ -422,6 +422,73 @@ func TestLoadTwinFeedbackFiltersByCheckpoint(t *testing.T) {
 	}
 }
 
+// A reflect pass writes its own feedback/twin.md and the sealed
+// checkpoint in the same stage-exit commit, so the note's git-time
+// never post-dates the threshold it created. The run named by
+// LastIngestRun therefore bypasses the time filter — otherwise a
+// twin→twin deferral is a silent drop. Three runs pin the boundary:
+// the sealing run at the threshold second, the sealing run's note
+// filed by an *earlier* stage (strictly before threshold), and an
+// unrelated run at the same second that must still drop.
+func TestLoadTwinFeedbackSurfacesSealingRunsOwnNote(t *testing.T) {
+	threshold := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name    string
+		filedAt time.Time
+	}{
+		{"same commit as the seal", threshold},
+		{"filed by an earlier stage of the pass", threshold.Add(-1 * time.Hour)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			twinDir := wiki.TwinDir(root, "tele")
+			if err := os.MkdirAll(twinDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			writeRunMeta(t, root, "tele", "reflect-run", "twin")
+			writeFeedbackAndCommit(t, root, "tele", "reflect-run", "twin", "residue note", tc.filedAt)
+
+			// Unrelated run at exactly the threshold second: not the
+			// sealing run, so the time filter still drops it.
+			writeRunMeta(t, root, "tele", "other-run", "sdlc")
+			writeFeedbackAndCommit(t, root, "tele", "other-run", "twin", "other note", threshold)
+
+			if err := wiki.WriteCheckpoint(twinDir, wiki.Checkpoint{
+				Version:       wiki.CheckpointVersion,
+				LastIngestAt:  threshold.Format(time.RFC3339),
+				LastIngestRun: "reflect-run",
+				Project:       "tele",
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg := wiki.Config{
+				Mode:            wiki.Closed,
+				Name:            "twin",
+				ContentDir:      twinDir,
+				Project:         "tele",
+				BureaucracyPath: root,
+				ManagedDocs:     []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
+			}
+			got, err := loadTwinFeedback(root, "tele", cfg)
+			if err != nil {
+				t.Fatalf("loadTwinFeedback: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("expected 1 entry (reflect-run), got %d: %+v", len(got), got)
+			}
+			if got[0].runID != "reflect-run" {
+				t.Errorf("entry runID = %q, want reflect-run", got[0].runID)
+			}
+			if !strings.Contains(got[0].body, "residue note") {
+				t.Errorf("entry body = %q, want 'residue note'", got[0].body)
+			}
+		})
+	}
+}
+
 // No checkpoint means first reflect: every committed feedback file
 // lands regardless of age. Same fixture shape as the filter test, but
 // without a checkpoint on disk.
