@@ -316,6 +316,119 @@ func TestGroomStaticRideRedirectsIntoTheRiddenUnit(t *testing.T) {
 	}
 }
 
+// TestGroomStaticRideFencesAMoveOut: the other direction of the same
+// contract. A group that names a still-parked member of the ridden unit
+// in `runs` would detach it and re-chain it elsewhere — shrinking the
+// ride the operator kicked, so the entry is dropped instead.
+func TestGroomStaticRideFencesAMoveOut(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "spawner", "member", "elsewhere")
+	spawnerKey := "moe/" + minted["spawner"]
+	memberKey := "moe/" + minted["member"]
+	elsewhereKey := "moe/" + minted["elsewhere"]
+
+	groomChains(root, "moe", "pulse-setup",
+		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+
+	defer withRideMode(rideStatic)()
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-groom",
+		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member"}}}, minted, spawnerKey, io.Discard, &errb)
+
+	edges := liveEdges(t, root)
+	if edges[spawnerKey] != memberKey {
+		t.Fatalf("edges = %v, want the ridden unit intact (%s -> %s)", edges, spawnerKey, memberKey)
+	}
+	if edges[elsewhereKey] == memberKey {
+		t.Fatalf("edges = %v, want %s not moved out of the ride", edges, memberKey)
+	}
+	if !strings.Contains(errb.String(), "static ride") {
+		t.Errorf("stderr = %q, want the dropped entry named", errb.String())
+	}
+}
+
+// TestGroomStaticRideRedirectDoesNotYankMembers: a group whose `onto`
+// and whose `runs` both sit inside the ridden unit is a reorder of the
+// ride. The anchor-side redirect alone would self-root the group, which
+// detaches the members and shrinks the ride — exactly what the fence
+// exists to prevent. With the members fenced too, the group resolves to
+// nothing and dies before any edge is stamped.
+func TestGroomStaticRideRedirectDoesNotYankMembers(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "spawner", "member", "member2")
+	spawnerKey := "moe/" + minted["spawner"]
+	memberKey := "moe/" + minted["member"]
+	member2Key := "moe/" + minted["member2"]
+
+	groomChains(root, "moe", "pulse-setup",
+		[]pulseChainGroup{{Runs: []string{"spawner", "member", "member2"}}}, minted, "", io.Discard, os.Stderr)
+
+	defer withRideMode(rideStatic)()
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-groom",
+		[]pulseChainGroup{{Onto: "member", Runs: []string{"member2"}}}, minted, spawnerKey, io.Discard, &errb)
+
+	edges := liveEdges(t, root)
+	if edges[spawnerKey] != memberKey || edges[memberKey] != member2Key {
+		t.Fatalf("edges = %v, want the ridden unit fully intact (%s -> %s -> %s)",
+			edges, spawnerKey, memberKey, member2Key)
+	}
+}
+
+// TestGroomStaticRideDropsOnlyTheRiddenEntry: the fence is per-entry,
+// matching the sweep's warn-and-continue grain for member problems. A
+// mixed group still grooms its groomable runs.
+func TestGroomStaticRideDropsOnlyTheRiddenEntry(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "spawner", "member", "elsewhere", "fix-new")
+	spawnerKey := "moe/" + minted["spawner"]
+	memberKey := "moe/" + minted["member"]
+	elsewhereKey := "moe/" + minted["elsewhere"]
+	newKey := "moe/" + minted["fix-new"]
+
+	groomChains(root, "moe", "pulse-setup",
+		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+
+	defer withRideMode(rideStatic)()
+	groomChains(root, "moe", "pulse-groom",
+		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member", "fix-new"}}},
+		minted, spawnerKey, io.Discard, os.Stderr)
+
+	edges := liveEdges(t, root)
+	if edges[elsewhereKey] != newKey {
+		t.Fatalf("edges = %v, want the groomable %s placed onto %s", edges, newKey, elsewhereKey)
+	}
+	if edges[spawnerKey] != memberKey {
+		t.Fatalf("edges = %v, want %s still in the ride", edges, memberKey)
+	}
+}
+
+// TestGroomDynamicRideAllowsAMoveOut: the consent notch. `!!!!` licenses
+// the machine to reshape the ride, so move-out stays legal there — this
+// guards the new fence against over-firing.
+func TestGroomDynamicRideAllowsAMoveOut(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "spawner", "member", "elsewhere")
+	spawnerKey := "moe/" + minted["spawner"]
+	memberKey := "moe/" + minted["member"]
+	elsewhereKey := "moe/" + minted["elsewhere"]
+
+	groomChains(root, "moe", "pulse-setup",
+		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+
+	defer withRideMode(rideDynamic)()
+	groomChains(root, "moe", "pulse-groom",
+		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member"}}}, minted, spawnerKey, io.Discard, os.Stderr)
+
+	edges := liveEdges(t, root)
+	if edges[elsewhereKey] != memberKey {
+		t.Fatalf("edges = %v, want %s moved onto %s under a dynamic ride", edges, memberKey, elsewhereKey)
+	}
+	if edges[spawnerKey] == memberKey {
+		t.Fatalf("edges = %v, want %s detached from the old unit", edges, memberKey)
+	}
+}
+
 // TestGroomResolvesADatedSlug: the survey names the slug it proposed;
 // the harness may have minted a dated sibling. The resolver has to see
 // through that or every collision would silently drop its group.

@@ -36,8 +36,10 @@ import (
 //
 // Appending or moving onto a *parked* chain — anyone's — is curation,
 // not execution: nothing moves until that chain's kick. The one place
-// grooming is fenced is the unit a *static* ride is currently walking;
-// see groomAnchor.
+// grooming is fenced is the unit a *static* ride is currently walking,
+// in both directions: a placement aimed into it is redirected (see
+// groomAnchor), and a `runs` slug naming one of its members is dropped
+// rather than moved out (see placeGroup).
 
 // pulseChainGroup is one entry in the gate's `chain` list: a group of
 // run slugs in execution order, plus where they go.
@@ -355,6 +357,15 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 				label, slug, sw.projectID)
 			continue
 		}
+		if sw.fenced(key) {
+			// The other half of the static fence: a group may name a
+			// still-parked member of the ridden unit and move it *out*,
+			// which shrinks the ride the operator consented to just as
+			// surely as an `onto` would grow it.
+			moePrintf(stderr, "pulse: groom: %s names %s inside the chain this static ride is walking — dropping that entry (`!!!!` to reshape a ride)\n",
+				label, key)
+			continue
+		}
 		if indexOfString(members, key) >= 0 {
 			continue
 		}
@@ -481,11 +492,19 @@ func (sw *groomSweep) groomAnchor(label string, grp pulseChainGroup, members []s
 	}
 }
 
-// fenced reports whether a placement target sits inside the unit a
-// static ride is currently walking. `!!!`'s contract is that the
-// machine cannot grow the ride, so a placement that would land there is
-// redirected to a self-rooted thread instead of refused — the work is
-// still worth teeing up, it just doesn't join this ride.
+// fenced reports whether a run sits inside the unit a static ride is
+// currently walking. `!!!`'s contract is that what the operator saw at
+// kick time is what runs, which the sweep honours in both directions:
+//
+//   - As a placement target (groomAnchor), the group is redirected to a
+//     self-rooted thread rather than refused — the work is still worth
+//     teeing up, it just doesn't join this ride.
+//   - As a group member (placeGroup), the entry is dropped, because
+//     grooming a ridden run somewhere else would detach it and shrink
+//     the ride out from under the kick.
+//
+// Since neither direction can touch the unit, the spawnerUnit snapshot
+// taken at sweep start stays exact for the whole sweep.
 //
 // The spawner's unit *is* the ridden unit, so no extra identity has to
 // be threaded down here to know which one that is.

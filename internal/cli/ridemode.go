@@ -77,9 +77,10 @@ func rideModeContextLine() string {
 	switch currentRideMode {
 	case rideStatic:
 		return "This pulse is firing inside a **static** ride: the operator's kick is walking a chain " +
-			"right now, and the machine cannot grow it. A placement aimed into that chain will be " +
-			"redirected to its own thread. Shape new threads worth naming instead of trying to extend " +
-			"the one that's running, and don't ask for a kick — it will be refused."
+			"right now, and the machine can neither grow nor shrink it. A placement aimed into that " +
+			"chain will be redirected to its own thread, and a group naming one of its runs will have " +
+			"that entry dropped rather than move the run out. Shape new threads worth naming instead " +
+			"of trying to reshape the one that's running, and don't ask for a kick — it will be refused."
 	case rideDynamic:
 		return "This pulse is firing inside a **dynamic** ride: the operator licensed the machine to " +
 			"extend it. Work groomed onto the ridden chain's tail will run in this same ride, and a " +
