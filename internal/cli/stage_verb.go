@@ -175,8 +175,9 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
 	ship := fs.Bool("ship", false, "headless cascade through push, ship this run (= !!)")
 	chain := fs.Bool("chain", false, "headless cascade through push, then ride the whole chain (= !!!)")
+	dynamic := fs.Bool("dynamic", false, "as --chain, but the ride may grow while it runs (= !!!!)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb)
+		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>\n", cfg.verb)
 		moePrintln(stderr, "")
 		for _, line := range cfg.usage {
 			moePrintln(stderr, line)
@@ -187,6 +188,8 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")
 		moePrintln(stderr, "  --ship         headless cascade through push, ship this run (= !!)")
 		moePrintln(stderr, "  --chain        headless cascade through push, then ride the whole chain (= !!!)")
+		moePrintln(stderr, "  --dynamic      as --chain, but the ride may grow: tail pulses may groom onto")
+		moePrintln(stderr, "                 the ridden chain's tail, and kick threads they root (= !!!!)")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -206,9 +209,9 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintf(stderr, "%s: %v\n", cfg.verb, err)
 		return 2
 	}
-	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship, *chain)
+	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship, *chain, *dynamic)
 	if !ok {
-		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --ship, --chain) are mutually exclusive\n", cfg.verb)
+		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --ship, --chain, --dynamic) are mutually exclusive\n", cfg.verb)
 		return 2
 	}
 	if answer != "" && !operatorCascades(cfg.workflow) {
@@ -238,9 +241,9 @@ func agentFlagUsage(persist bool) string {
 	return "override the run's agent for this turn (claude/codex); does not persist"
 }
 
-// cascadeAnswerFromFlags translates the four mode flags (--once,
-// --to, --ship, --chain) into the bang answer dispatchCascade
-// understands at the chain prompt. Exactly one of the four may be
+// cascadeAnswerFromFlags translates the five mode flags (--once,
+// --to, --ship, --chain, --dynamic) into the bang answer dispatchCascade
+// understands at the chain prompt. Exactly one of the five may be
 // set; otherwise the flags conflict and ok=false. An empty answer
 // with ok=true signals the no-flag case the caller routes through
 // the standard interactive opener.
@@ -251,7 +254,12 @@ func agentFlagUsage(persist bool) string {
 //	--to=<stage>  → "!" + <stage>  walk headless to that gate
 //	--ship        → "!!"           headless cascade, ship this run
 //	--chain       → "!!!"          headless cascade, ship + ride the chain
-func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer string, ok bool) {
+//	--dynamic     → "!!!!"         same ride, and the machine may extend it
+//
+// --dynamic is a fifth mutually-exclusive member rather than a modifier
+// on --chain, mirroring the bang grammar it maps to: the consent levels
+// are a ladder, not a flag plus an option.
+func cascadeAnswerFromFlags(once bool, to string, ship, chain, dynamic bool) (answer string, ok bool) {
 	set := 0
 	if once {
 		set++
@@ -263,6 +271,9 @@ func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer stri
 		set++
 	}
 	if chain {
+		set++
+	}
+	if dynamic {
 		set++
 	}
 	if set > 1 {
@@ -277,6 +288,8 @@ func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer stri
 		return "!!", true
 	case chain:
 		return "!!!", true
+	case dynamic:
+		return "!!!!", true
 	}
 	return "", true
 }

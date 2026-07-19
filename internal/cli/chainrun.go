@@ -186,14 +186,21 @@ func seedChainNote(note *string, stdout, stderr io.Writer) int {
 func runChainKick(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chain kick", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	dynamic := fs.Bool("dynamic", false, "ride dynamically: tail pulses may groom onto this chain's tail and kick threads they root (= !!!!)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chain kick <project>/<run>")
+		moePrintln(stderr, "usage: moe chain kick [--dynamic] <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Rides the named chain from its head, headlessly: the head cascades")
 		moePrintln(stderr, "to its ship, then each chained run is walked design -> ... -> push")
 		moePrintln(stderr, "in the order the chain records. A chain run head has no stages, so")
 		moePrintln(stderr, "it just closes and the ride carries on into its children. Reorder or")
 		moePrintln(stderr, "prune with `moe chain edit` first.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Default is the static ride: the machine cannot grow it. What is")
+		moePrintln(stderr, "chained now is what runs. --dynamic lifts that — tail pulses may")
+		moePrintln(stderr, "append work onto the tail this ride has yet to reach, so the ride")
+		moePrintln(stderr, "can outlive the batch you can see.")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -212,6 +219,22 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
+	mode := rideStatic
+	if *dynamic {
+		mode = rideDynamic
+	}
+	return chainKickRun(root, projectID, runID, mode, stdout, stderr)
+}
+
+// chainKickRun is the kick body, split from the verb's flag parsing so
+// the pulse's own self-kick (item 6 of the grooming design) roots a ride
+// through exactly this path rather than a sibling implementation. mode
+// is the consent level the ride carries — static for a bare `moe chain
+// kick`, dynamic for `--dynamic` and for every kick the pulse roots
+// itself (a confident pulse rooting a bounded-only ride would defeat the
+// point; an operator who wants bounded keeps `!!!`).
+func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr io.Writer) int {
+	defer withRideMode(mode)()
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)
 		return 1

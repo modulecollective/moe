@@ -427,7 +427,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if dispatcher != nil {
-		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain")
+		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain · !!!! = ride dynamic")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -705,7 +705,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if md.Workflow == "sdlc" {
-		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain")
+		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain · !!!! = ride dynamic (the machine may extend it)")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -728,10 +728,15 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		// `!!` at the push gate uses the typed cascade push path, not
 		// Command.Run: cascade harvest is --no-edit even though manual
 		// `m` keeps the editor pop.
-		return promptPushCascadeShip(md, false, stdout, stderr)
+		return promptPushCascadeShip(md, false, rideNone, stdout, stderr)
 	case "!!!":
 		// Same typed cascade push path as `!!`, plus the chain ride.
-		return promptPushCascadeShip(md, true, stdout, stderr)
+		return promptPushCascadeShip(md, true, rideStatic, stdout, stderr)
+	case "!!!!":
+		// Same ride, with the dynamic license: the tail pulse may groom
+		// onto the ridden unit's tail and — on an unchained run, where
+		// this is the whole point — kick a thread it just groomed.
+		return promptPushCascadeShip(md, true, rideDynamic, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
@@ -751,7 +756,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		wf, werr := LookupWorkflow(md.Workflow)
 		if werr == nil {
 			moePrintf(stderr,
-				"cascade: `%s` is at or behind the push gate; type `!!` (ship this run) / `!!!` (ship + ride the chain) or pick m/p/n/x/b. (stages: %s)\n",
+				"cascade: `%s` is at or behind the push gate; type `!!` (ship this run) / `!!!` (ship + ride the chain) / `!!!!` (ride dynamic) or pick m/p/n/x/b. (stages: %s)\n",
 				answer, strings.Join(wf.Stages(), ", "))
 		}
 		return 0
@@ -761,7 +766,8 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	return 0
 }
 
-func promptPushCascadeShip(md *run.Metadata, rideChain bool, stdout, stderr io.Writer) int {
+func promptPushCascadeShip(md *run.Metadata, rideChain bool, mode rideMode, stdout, stderr io.Writer) int {
+	defer withRideMode(mode)()
 	steps, shipped, code := cascadeShipStep(md.Workflow, md, rideChain, stdout, stderr)
 	res := cascadeResult{ran: steps, shipped: shipped}
 	if summary := renderCascadeSummary(md.Project+"/"+md.ID, res); summary != "" {
@@ -789,13 +795,20 @@ func promptPushCascadeShip(md *run.Metadata, rideChain bool, stdout, stderr io.W
 // Returns the exit code to bubble up: the failing stage's code on a
 // cascade failure, 0 on a successful park-at-gate or ship.
 func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, stderr io.Writer) int {
+	// The consent level the operator just typed, held for the whole
+	// dispatch so every tail pulse under it — this run's and every run
+	// the ride reaches — reads the same mode. See ridemode.go.
+	defer withRideMode(rideModeForAnswer(answer))()
+
 	var destination string
 	oneStep := false
 	rideChain := false
 	switch {
 	case answer == "!!":
 		// Ship this run and stop — no chain ride.
-	case answer == "!!!":
+	case answer == "!!!", answer == "!!!!":
+		// Both ride; the fourth bang differs only in what the tail
+		// pulse may do, which travels as the ride mode, not here.
 		rideChain = true
 	case answer == "!":
 		oneStep = true
