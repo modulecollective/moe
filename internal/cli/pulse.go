@@ -699,6 +699,9 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 	if chains := chainStateBlock(root, projectID); chains != "" {
 		blocks = append(blocks, chains)
 	}
+	if advanced := advancedRunsBlock(root, projectID); advanced != "" {
+		blocks = append(blocks, advanced)
+	}
 	// Its own block, not a tail on the chain-state one. A tail pulse
 	// fires after its spawner merged, so the ridden unit is usually
 	// below the two-active-member bar chainStateBlock renders at — and

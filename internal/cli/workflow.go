@@ -288,6 +288,70 @@ func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.Journal
 	return "", NextKindDone, nil
 }
 
+// AdvancedTo reports the stage md is waiting at *because the operator
+// advanced it there* — the chain prompt's `a` key ("decline, advance to
+// <next>"), which commits an `advance:` marker satisfying the stage the
+// operator just finished. It returns the awaited stage, the marker's
+// committer time, and whether the run is in that state at all.
+//
+// This is the pulse's pickup signal. Two conditions, both narrow on
+// purpose:
+//
+//   - Next lands on a stage whose prereq was satisfied by a marker
+//     rather than by a downstream turn. A stage whose canvas is merely
+//     complete is not consent to proceed — the operator has to have
+//     said so.
+//   - That stage has no session yet. This is the double-run guard, and
+//     the session id is the signal rather than a work-turn: opening a
+//     stage mints the session and commits run.json *before* the agent
+//     runs (commitSessionStart), while the work-turn grep is anchored
+//     to `work: update` and deliberately ignores that commit. So a run
+//     the operator picked up by hand leaves pickup range at the moment
+//     `moe sdlc <stage>` starts, not at its first canvas edit — a pulse
+//     firing from unrelated traffic mid-session cannot groom underneath
+//     it. A started-then-abandoned session stays out of range too,
+//     which is the safe direction to be wrong in.
+//
+// Everything else is out by construction: terminal runs short-circuit
+// in NextWithIndex, in-flight runs have no marker (no guessing), and a
+// machine-paced workflow never reaches a chain prompt to mint one.
+func (w *Workflow) AdvancedTo(root string, md *run.Metadata, idx *run.JournalIndex) (string, time.Time, error) {
+	var zero time.Time
+	stage, kind, err := w.NextWithIndex(root, md, idx)
+	if err != nil || kind != NextKindStage {
+		return "", zero, err
+	}
+	if doc := md.Documents[stage]; doc != nil && doc.Session != "" {
+		return "", zero, nil
+	}
+	// The freshest qualifying marker across the awaited stage's prereqs.
+	// Today's ladders are linear, so this is one prereq; taking the max
+	// keeps a future fan-in reading as "advanced when the last gate was".
+	var marked time.Time
+	for _, prereq := range w.prereqs[stage] {
+		advWhen, err := advanceTime(root, md.Project, md.ID, prereq, idx)
+		if err != nil {
+			return "", zero, err
+		}
+		prereqWhen, err := workTurnTime(root, md.Project, md.ID, prereq, idx)
+		if err != nil {
+			return "", zero, err
+		}
+		// Same rule stageSatisfied applies: a marker older than the
+		// stage's own latest turn has been out-dated by a re-edit.
+		if advWhen.IsZero() || prereqWhen.IsZero() || advWhen.Before(prereqWhen) {
+			continue
+		}
+		if advWhen.After(marked) {
+			marked = advWhen
+		}
+	}
+	if marked.IsZero() {
+		return "", zero, nil
+	}
+	return stage, marked, nil
+}
+
 func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, idx *run.JournalIndex) (bool, error) {
 	stageWhen, err := workTurnTime(root, md.Project, md.ID, stage, idx)
 	if err != nil {
