@@ -70,9 +70,12 @@ typed seed and walks away, `--from-idea --dynamic` promotes an idea and rides it
 with the machine free to grow the ride. All ride the shared `new` facade, so
 every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
 needs the workflow to have a cascade dispatcher, which it refuses to mint a run
-without). `--park` also reaches past `new`: `moe chore open`,
-`moe twin reflect`, and `moe sdlc reopen` — the other creators that end at the
-chain prompt — take it with the same meaning.
+without). These tails reach past `new`: `moe chore open`, `moe twin reflect`,
+and `moe sdlc reopen` — the other creators that end at the chain prompt — take
+`--park` and the whole `--ship`/`--chain`/`--dynamic` ladder with the same
+meaning. (`--chain`'s ride is usually a no-op on a freshly minted run, which
+heads no chain yet; it's offered because the ladder is one vocabulary and the
+rung's consent is what matters — same as `new --chain` on a fresh run.)
 
 ### Cascades: the bang vocabulary
 
@@ -341,7 +344,7 @@ Two command families, mirroring hooks:
 moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
-moe chore open [--now] [--park] <project>/<chore>  # open the seeded run for a due chore
+moe chore open [--now] [--park|--ship|--chain|--dynamic] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
