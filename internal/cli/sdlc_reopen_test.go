@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -625,5 +626,119 @@ func TestSDLCReopenParkPrintsHintWithoutPrompt(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "run now?") {
 		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}
+
+// The consent ladder on `sdlc reopen` is the same ladder new and the
+// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
+// `!!!!`. A reopened run mints seeded at design; the cascade rides it
+// from there under the flag's ride mode — the seam this verifies. The
+// first dispatch must be design on the reopened successor, not the prior.
+func TestSDLCReopenCascadeLadderCarriesConsent(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want rideMode
+	}{
+		{flag: "--ship", want: rideNone},
+		{flag: "--chain", want: rideStatic},
+		{flag: "--dynamic", want: rideDynamic},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
+
+			var modes []rideMode
+			type inv struct {
+				stage, runID string
+			}
+			var stages []inv
+			prev := openSdlcStage
+			openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+				modes = append(modes, currentRideMode)
+				stages = append(stages, inv{stage, runID})
+				return 0
+			}
+			t.Cleanup(func() { openSdlcStage = prev })
+			prevGate := checkCascadeStageGate
+			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, _ string, _ io.Writer) (bool, int) {
+				return true, 0
+			}
+			t.Cleanup(func() { checkCascadeStageGate = prevGate })
+			stubPushFromCascade(t, 0, nil)
+
+			var out, errb bytes.Buffer
+			if code := Run([]string{"sdlc", "reopen", tc.flag, "tele/fix-it"}, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+			}
+			if len(stages) == 0 {
+				t.Fatalf("%s cascaded no stages", tc.flag)
+			}
+			dated := "fix-it-" + todayDateSuffix()
+			if stages[0].stage != "design" || stages[0].runID != dated {
+				t.Fatalf("cascade first step = %+v, want design on %s", stages[0], dated)
+			}
+			for i, got := range modes {
+				if got != tc.want {
+					t.Fatalf("stage %d ran under ride mode %v, want %v", i, got, tc.want)
+				}
+			}
+			if strings.Contains(out.String(), "run now?") {
+				t.Errorf("%s must not print the chain prompt: %q", tc.flag, out.String())
+			}
+		})
+	}
+}
+
+// The ladder is a ladder, not a set of composable modifiers — two rungs
+// at once is a usage error, refused before any mint.
+func TestSDLCReopenLadderRungsMutuallyExclusive(t *testing.T) {
+	seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--chain", "--dynamic", "tele/fix-it"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "one ladder") {
+		t.Errorf("expected the ladder error, got: %q", errb.String())
+	}
+}
+
+// --park is the opposite tail to every rung, not just --ship, and the
+// message names the rung the operator actually typed.
+func TestSDLCReopenParkExcludesEveryCascadeRung(t *testing.T) {
+	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+		t.Run(flag, func(t *testing.T) {
+			seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
+
+			var out, errb bytes.Buffer
+			code := Run([]string{"sdlc", "reopen", flag, "--park", "tele/fix-it"}, &out, &errb)
+			if code != 2 {
+				t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "opposite tails") || !strings.Contains(errb.String(), flag) {
+				t.Errorf("expected an opposite-tails error naming %s, got: %q", flag, errb.String())
+			}
+		})
+	}
+}
+
+// A cascade flag doesn't bypass reopen's status guard: an in-progress
+// prior still refuses before any mint, so no successor run is created.
+func TestSDLCReopenDynamicStillRefusesInProgress(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "still-here", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "reopen", "--dynamic", "tele/still-here"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on in-progress prior; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "in_progress") {
+		t.Fatalf("expected in-progress refusal, got: %q", errb.String())
+	}
+	dated := "still-here-" + todayDateSuffix()
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated)); !os.IsNotExist(err) {
+		t.Fatalf("refused reopen must mint nothing; successor dir exists (err=%v)", err)
 	}
 }

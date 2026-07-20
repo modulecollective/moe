@@ -134,9 +134,13 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	now := fs.Bool("now", false, "open even if cooling down or not yet due (still refuses if a run is already open)")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
+	// The consent ladder, same trio the stage verbs and `new` carry
+	// (`!!` / `!!!` / `!!!!`). Mutually exclusive with each other and --park.
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain/--dynamic)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship/--dynamic)")
+	dynamic := fs.Bool("dynamic", false, "open the run, ship it, ride the chain, and license the machine to extend that ride (the flag twin of `!!!!`; mutually exclusive with --park/--ship/--chain)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chore open [--now] [--park|--ship] <project>/<chore>")
+		moePrintln(stderr, "usage: moe chore open [--now] [--park|--ship|--chain|--dynamic] <project>/<chore>")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -145,11 +149,18 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	// One bang answer out of the ladder, or "" for no cascade tail. ok is
+	// false only when more than one rung was typed.
+	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain, *dynamic)
+	if !ok {
+		moePrintln(stderr, "chore open: --ship, --chain and --dynamic are one ladder — pick one")
+		return 2
+	}
 	// The chore's target workflow is only known after the open, so the
-	// --ship-can't-cascade preflight can't run here; parkCascadeExclusive
+	// cascade-can't-cascade preflight can't run here; parkCascadeExclusive
 	// is the parse-time half, and mintTail's own cascade guard is the
 	// other.
-	if code := parkCascadeExclusive("chore open", *park, shipAnswer(*ship), stderr); code != 0 {
+	if code := parkCascadeExclusive("chore open", *park, cascade, stderr); code != 0 {
 		return code
 	}
 	projectID, choreName, err := splitProjectRun(fs.Arg(0))
@@ -165,7 +176,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	return mintTail(root, md, *park, shipAnswer(*ship), stdout, stderr)
+	return mintTail(root, md, *park, cascade, stdout, stderr)
 }
 
 // openDueChore is the CLI-facing wrapper around openChoreInProcess: it

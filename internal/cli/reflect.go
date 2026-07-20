@@ -55,9 +55,17 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	fs.SetOutput(stderr)
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the seal (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
+	// The consent ladder, same trio the stage verbs and `new` carry
+	// (`!!` / `!!!` / `!!!!`). `--ship` seals the pass headless; `--chain`
+	// and `--dynamic` are meaningful even on a fresh unchained reflect —
+	// `--chain`'s ride is usually a no-op there, but `--dynamic` licenses
+	// the machine to act on what the pass surfaces (tail pulses grooming
+	// onto the ridden tail). Mutually exclusive with each other and --park.
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the seal (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain/--dynamic)")
+	chain := fs.Bool("chain", false, "open the run, seal the pass, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship/--dynamic)")
+	dynamic := fs.Bool("dynamic", false, "open the run, seal the pass, ride the chain, and license the machine to extend that ride (the flag twin of `!!!!`; mutually exclusive with --park/--ship/--chain)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] [--park|--ship] <project>\n", workflow)
+		moePrintf(stderr, "usage: moe %s reflect [--agent <name>] [--park|--ship|--chain|--dynamic] <project>\n", workflow)
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Mints a fresh reflect-<timestamp> run for the project's twin and")
 		moePrintln(stderr, "dispatches the first stage of the six-stage ladder. Each managed doc")
@@ -74,7 +82,15 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		fs.Usage()
 		return 2
 	}
-	if code := preflightMintTail(workflow+" reflect", workflow, *park, shipAnswer(*ship), stderr); code != 0 {
+	// One bang answer out of the ladder, or "" for no cascade tail. ok is
+	// false only when more than one rung was typed — they're a ladder,
+	// not a set.
+	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain, *dynamic)
+	if !ok {
+		moePrintf(stderr, "%s reflect: --ship, --chain and --dynamic are one ladder — pick one\n", workflow)
+		return 2
+	}
+	if code := preflightMintTail(workflow+" reflect", workflow, *park, cascade, stderr); code != 0 {
 		return code
 	}
 	if *agentOverride != "" {
@@ -121,13 +137,14 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	moePrintf(stdout, "opened twin reflect %s/%s\n", md.Project, md.ID)
 
 	// Hand off through the shared mint tail. --park prints the next-stage
-	// hint and stops; --ship cascades headless through the ladder and
-	// seals the pass (`!!` from the first parked stage, vision — a twin
-	// run auto-closes after finalize instead of pushing); neither offers
-	// the chain prompt's fresh-run path (justFinished="" → Workflow.Next
+	// hint and stops; a cascade rung cascades headless through the ladder
+	// and seals the pass (`!!` from the first parked stage, vision — a twin
+	// run auto-closes after finalize instead of pushing — with `!!!`/`!!!!`
+	// riding whatever the sealed pass chains onto); neither offers the
+	// chain prompt's fresh-run path (justFinished="" → Workflow.Next
 	// returns the first parked stage, and the operator picks `Y` / `!` /
-	// `!!` / `!!!` there).
-	return mintTail(root, md, *park, shipAnswer(*ship), stdout, stderr)
+	// `!!` / `!!!` / `!!!!` there).
+	return mintTail(root, md, *park, cascade, stdout, stderr)
 }
 
 // reflectRefusalKind classifies the operator-prerequisite refusals the

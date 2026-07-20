@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // seedChoreRoot builds a minimal bureaucracy with one project and one
@@ -227,5 +230,89 @@ func TestRunChoreOpenParkPrintsHintWithoutPrompt(t *testing.T) {
 	}
 	if bytes.Contains(stdout.Bytes(), []byte("run now?")) {
 		t.Errorf("--park must not print the chain prompt: %q", stdout.String())
+	}
+}
+
+// The consent ladder on `chore open` is the same ladder new and the
+// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
+// `!!!!`. Chores open an sdlc run, so the cascade drives openSdlcStage +
+// push; the assertion reads currentRideMode from inside the cascade, the
+// seam that proves the flag's consent reached the ride.
+func TestRunChoreOpenCascadeLadderCarriesConsent(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want rideMode
+	}{
+		{flag: "--ship", want: rideNone},
+		{flag: "--chain", want: rideStatic},
+		{flag: "--dynamic", want: rideDynamic},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			seedChoreRoot(t)
+
+			var modes []rideMode
+			prev := openSdlcStage
+			openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+				modes = append(modes, currentRideMode)
+				return 0
+			}
+			t.Cleanup(func() { openSdlcStage = prev })
+			prevGate := checkCascadeStageGate
+			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, _ string, _ io.Writer) (bool, int) {
+				return true, 0
+			}
+			t.Cleanup(func() { checkCascadeStageGate = prevGate })
+			stubPushFromCascade(t, 0, nil)
+
+			var stdout, stderr bytes.Buffer
+			if code := runChoreOpen([]string{tc.flag, "moe/readme-refresh"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+			}
+			if len(modes) == 0 {
+				t.Fatalf("%s cascaded no stages", tc.flag)
+			}
+			for i, got := range modes {
+				if got != tc.want {
+					t.Fatalf("stage %d ran under ride mode %v, want %v", i, got, tc.want)
+				}
+			}
+			if strings.Contains(stdout.String(), "run now?") {
+				t.Errorf("%s must not print the chain prompt: %q", tc.flag, stdout.String())
+			}
+		})
+	}
+}
+
+// The ladder is a ladder, not a set of composable modifiers — two rungs
+// at once is a usage error, refused before any open.
+func TestRunChoreOpenLadderRungsMutuallyExclusive(t *testing.T) {
+	seedChoreRoot(t)
+
+	var stdout, stderr bytes.Buffer
+	code := runChoreOpen([]string{"--chain", "--dynamic", "moe/readme-refresh"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "one ladder") {
+		t.Errorf("expected the ladder error, got: %q", stderr.String())
+	}
+}
+
+// --park is the opposite tail to every rung, not just --ship, and the
+// message names the rung the operator actually typed.
+func TestRunChoreOpenParkExcludesEveryCascadeRung(t *testing.T) {
+	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+		t.Run(flag, func(t *testing.T) {
+			seedChoreRoot(t)
+
+			var stdout, stderr bytes.Buffer
+			code := runChoreOpen([]string{flag, "--park", "moe/readme-refresh"}, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("expected usage exit (2), got %d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "opposite tails") || !strings.Contains(stderr.String(), flag) {
+				t.Errorf("expected an opposite-tails error naming %s, got: %q", flag, stderr.String())
+			}
+		})
 	}
 }

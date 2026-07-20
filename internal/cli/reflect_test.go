@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -825,5 +826,107 @@ func TestTwinReflectParkPrintsHintWithoutPrompt(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "run now?") {
 		t.Fatalf("--park must not print the chain prompt: %q", out.String())
+	}
+}
+
+// The consent ladder on `twin reflect` is the same ladder new and the
+// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
+// `!!!!`, and the ride mode each answer sets is what the reflect stages
+// run under. A flag that opened the pass and cascaded but carried no
+// consent is exactly the gap this closes — so the assertion reads
+// currentRideMode from inside the cascade, the seam that matters.
+func TestTwinReflectCascadeLadderCarriesConsent(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want rideMode
+	}{
+		{flag: "--ship", want: rideNone},
+		{flag: "--chain", want: rideStatic},
+		{flag: "--dynamic", want: rideDynamic},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			trailerstest.SeedProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			// Twin cascades to a close, not a push. Stub the close so the
+			// walk terminates without the real close machinery, and record
+			// the ride mode each stage dispatch saw. The finalize gate reads
+			// a canvas off disk; write a satisfied one on the first stage
+			// call, when the minted run id is finally known.
+			stubGroupCloseCommand(t, "twin", 0)
+			var modes []rideMode
+			wroteCanvas := false
+			prev := openTwinStage
+			openTwinStage = func(stage, projectID, runID string, headless bool, _ string, _, _ io.Writer) int {
+				modes = append(modes, currentRideMode)
+				if !wroteCanvas {
+					writeSatisfiedTwinFinalizeCanvas(t, root, &run.Metadata{ID: runID, Project: projectID, Workflow: "twin"})
+					wroteCanvas = true
+				}
+				return 0
+			}
+			t.Cleanup(func() { openTwinStage = prev })
+
+			var out, errb bytes.Buffer
+			if code := Run([]string{"twin", "reflect", tc.flag, "tele"}, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+			}
+			if len(modes) == 0 {
+				t.Fatalf("%s cascaded no stages", tc.flag)
+			}
+			for i, got := range modes {
+				if got != tc.want {
+					t.Fatalf("stage %d ran under ride mode %v, want %v", i, got, tc.want)
+				}
+			}
+			if strings.Contains(out.String(), "run now?") {
+				t.Errorf("%s must not print the chain prompt: %q", tc.flag, out.String())
+			}
+		})
+	}
+}
+
+// The ladder is a ladder, not a set of composable modifiers — two rungs
+// at once is a usage error, refused before any mint.
+func TestTwinReflectLadderRungsMutuallyExclusive(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"twin", "reflect", "--chain", "--dynamic", "tele"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "one ladder") {
+		t.Errorf("expected the ladder error, got: %q", errb.String())
+	}
+}
+
+// --park is the opposite tail to every rung, not just --ship, and the
+// message names the rung the operator actually typed.
+func TestTwinReflectParkExcludesEveryCascadeRung(t *testing.T) {
+	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+		t.Run(flag, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			trailerstest.SeedProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			var out, errb bytes.Buffer
+			code := Run([]string{"twin", "reflect", flag, "--park", "tele"}, &out, &errb)
+			if code != 2 {
+				t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "opposite tails") || !strings.Contains(errb.String(), flag) {
+				t.Errorf("expected an opposite-tails error naming %s, got: %q", flag, errb.String())
+			}
+		})
 	}
 }

@@ -56,8 +56,8 @@ func cascadeUnavailableReason(workflow string) string {
 
 // mintCascadeFlag names the flag that produced a mint verb's cascade
 // answer, so the exclusion checks below blame the flag the operator
-// actually typed. Only `new` offers the upper two today; every other
-// mint verb tops out at --ship, which is also the zero-ish default.
+// actually typed. Every mint verb now carries the full `--ship` /
+// `--chain` / `--dynamic` ladder, resolved through cascadeAnswerFromFlags.
 func mintCascadeFlag(cascade string) string {
 	switch cascade {
 	case "!!!":
@@ -67,17 +67,6 @@ func mintCascadeFlag(cascade string) string {
 	default:
 		return "--ship"
 	}
-}
-
-// shipAnswer is the cascade answer for the mint verbs whose ladder
-// stops at --ship: `!!`, or "" when the flag is absent. `new` carries
-// the full ladder and resolves its own answer via
-// cascadeAnswerFromFlags.
-func shipAnswer(ship bool) string {
-	if ship {
-		return "!!"
-	}
-	return ""
 }
 
 // parkCascadeExclusive refuses --park alongside a cascade flag, the

@@ -55,8 +55,15 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
 	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual stylesheet → $MOE_AGENT → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
+	// The consent ladder, same trio the stage verbs and `new` carry
+	// (`!!` / `!!!` / `!!!!`). A reopened run mints seeded at design; the
+	// rungs ride it from there, exactly as `new --from-idea --dynamic`
+	// does for a promoted idea. Mutually exclusive with each other and --park.
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain/--dynamic)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship/--dynamic)")
+	dynamic := fs.Bool("dynamic", false, "open the run, ship it, ride the chain, and license the machine to extend that ride (the flag twin of `!!!!`; mutually exclusive with --park/--ship/--chain)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] [--park] <project>/<slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship|--chain|--dynamic] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -70,6 +77,18 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	// One bang answer out of the ladder, or "" for no cascade tail. ok is
+	// false only when more than one rung was typed. The workflow is known
+	// at parse time (always sdlc), so preflightMintTail can run its full
+	// check here — unlike chore open.
+	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain, *dynamic)
+	if !ok {
+		moePrintln(stderr, "sdlc reopen: --ship, --chain and --dynamic are one ladder — pick one")
+		return 2
+	}
+	if code := preflightMintTail("sdlc reopen", "sdlc", *park, cascade, stderr); code != 0 {
+		return code
 	}
 	if *workspaceName != "" && *noWorkspace {
 		moePrintln(stderr, "sdlc reopen: --workspace and --no-workspace are mutually exclusive")
@@ -197,10 +216,10 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "opened run %s/%s (reopen of %s)\n", md.Project, md.ID, priorSlug)
-	if *park {
-		return promptNextStageParked(root, md, stdout, stderr)
-	}
-	return promptNextStage(root, md, "", stdout, stderr)
+	// Shared mint tail: --park prints the next-stage hint and stops, a
+	// cascade rung rides the reopened run headless from design, neither
+	// offers the chain prompt.
+	return mintTail(root, md, *park, cascade, stdout, stderr)
 }
 
 // renderEmptyReopenSeed produces the design-canvas kickoff for a reopen
