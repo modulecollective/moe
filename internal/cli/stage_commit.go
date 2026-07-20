@@ -57,9 +57,9 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 // grep deliberately ignores) but committed empty: under option C there is
 // no file to change, so the marker *is* the message. git.Run is the
 // sanctioned internal/git seam, and --allow-empty is the same form
-// production already uses for marker commits (chain, chore). No repolock
-// wrapper for the same reason commitSessionStart needs none — internal/git
-// owns the index-lock retry.
+// production already uses for marker commits (chain, chore). Lock and
+// push policy live at the callsite, like every other main writer: the
+// chain prompt's `a` branch wraps this in sync.WithJournalPush.
 func commitAdvance(root string, md *run.Metadata, docID string) error {
 	msg := fmt.Sprintf("advance: %s\n\n", docID) +
 		trailers.Block{

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -505,6 +506,38 @@ func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
 	}
 	if kind != NextKindStage || stage != "code" {
 		t.Fatalf("after advance: Next should return code, got kind=%v stage=%q", kind, stage)
+	}
+}
+
+// TestPromptStageNextStageAdvanceRacesMarkerToOrigin: the advance marker
+// is the one main commit written after the session-close push window, so
+// it has to race itself to origin. If it doesn't, a reader of origin
+// during the stale window still sees the run parked at the finished stage
+// and re-runs its agent — the re-run `a` exists to prevent, reintroduced
+// across the sync boundary. Sibling of TestCloseRacesCommitToOrigin.
+func TestPromptStageNextStageAdvanceRacesMarkerToOrigin(t *testing.T) {
+	root := newTestBureaucracy(t)
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+
+	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	feedStdin(t, "a\n")
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin)
+	if local != remote {
+		t.Fatalf("origin main = %s, want advance marker %s", remote, local)
+	}
+	subject := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%s"))
+	if subject != "advance: design" {
+		t.Fatalf("pushed tip subject = %q, want %q", subject, "advance: design")
 	}
 }
 

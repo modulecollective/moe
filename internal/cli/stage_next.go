@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/sync"
 )
 
 // promptNextStage prints the next incomplete stage's exact invocation
@@ -486,7 +488,21 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		// `a` is a decline, so the next stage is not dispatched. The
 		// marker makes Workflow.Next return the successor on the next
 		// pickup instead of re-opening priorCanvas.
-		if err := commitAdvance(root, md, priorCanvas); err != nil {
+		//
+		// WithJournalPush because this is the one main-writing path that
+		// fires *after* the session-close push window: without it the
+		// marker sits local-only until some later verb pushes it as a
+		// passenger, and any reader of origin in between sees the run
+		// still parked at priorCanvas and re-runs its agent — the exact
+		// re-run `a` exists to prevent. Push failure warns and returns
+		// nil, so offline `a` still advances.
+		err := sync.WithJournalPush(root, repolock.Options{
+			Purpose: "stage-advance",
+			Run:     md.Project + "/" + md.ID,
+		}, stdout, stderr, func() error {
+			return commitAdvance(root, md, priorCanvas)
+		})
+		if err != nil {
 			moePrintf(stderr, "advance: %v\n", err)
 			return 1
 		}
