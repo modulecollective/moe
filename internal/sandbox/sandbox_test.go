@@ -269,6 +269,114 @@ func TestRemoveWithDirtyClone(t *testing.T) {
 	}
 }
 
+func TestFreshenBranchFastForwardsCommitFreeBranch(t *testing.T) {
+	src, clone := freshenFixture(t)
+	writeAndCommit(t, src, "code.txt", "v2", "v2")
+
+	behind, err := FreshenBranch(clone, "moe/req-a", "main")
+	if err != nil {
+		t.Fatalf("FreshenBranch: %v", err)
+	}
+	if behind != 1 {
+		t.Fatalf("behind = %d, want 1", behind)
+	}
+	if got, want := gittest.Output(t, clone, "rev-parse", "HEAD"), gittest.Output(t, src, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("clone HEAD = %s, want source HEAD %s", got, want)
+	}
+}
+
+func TestFreshenBranchLeavesAheadBranchUntouched(t *testing.T) {
+	_, clone := freshenFixture(t)
+	writeAndCommit(t, clone, "run.txt", "run", "run commit")
+	want := gittest.Output(t, clone, "rev-parse", "HEAD")
+
+	behind, err := FreshenBranch(clone, "moe/req-a", "main")
+	if err != nil {
+		t.Fatalf("FreshenBranch: %v", err)
+	}
+	if behind != 0 {
+		t.Fatalf("behind = %d, want 0", behind)
+	}
+	if got := gittest.Output(t, clone, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("clone HEAD moved from %s to %s", want, got)
+	}
+}
+
+func TestFreshenBranchLeavesDivergedBranchUntouched(t *testing.T) {
+	src, clone := freshenFixture(t)
+	writeAndCommit(t, clone, "run.txt", "run", "run commit")
+	want := gittest.Output(t, clone, "rev-parse", "HEAD")
+	writeAndCommit(t, src, "default.txt", "default", "default commit")
+
+	behind, err := FreshenBranch(clone, "moe/req-a", "main")
+	if err != nil {
+		t.Fatalf("FreshenBranch: %v", err)
+	}
+	if behind != 0 {
+		t.Fatalf("behind = %d, want 0", behind)
+	}
+	if got := gittest.Output(t, clone, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("clone HEAD moved from %s to %s", want, got)
+	}
+}
+
+func TestFreshenBranchReportsDirtyCollisionWithoutMoving(t *testing.T) {
+	src, clone := freshenFixture(t)
+	want := gittest.Output(t, clone, "rev-parse", "HEAD")
+	writeAndCommit(t, src, "code.txt", "upstream", "upstream change")
+	if err := os.WriteFile(filepath.Join(clone, "code.txt"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	behind, err := FreshenBranch(clone, "moe/req-a", "main")
+	if err == nil {
+		t.Fatal("FreshenBranch succeeded despite dirty collision")
+	}
+	if behind != 1 {
+		t.Fatalf("behind = %d, want 1", behind)
+	}
+	if !strings.Contains(err.Error(), "local changes") {
+		t.Fatalf("error does not include git diagnostic: %v", err)
+	}
+	if got := gittest.Output(t, clone, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("clone HEAD moved from %s to %s", want, got)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(clone, "code.txt")); readErr != nil || string(got) != "local" {
+		t.Fatalf("dirty file = %q, err=%v; want local", got, readErr)
+	}
+}
+
+func freshenFixture(t *testing.T) (src, clone string) {
+	t.Helper()
+	gittest.SetupEnv(t)
+	root := t.TempDir()
+	src = filepath.Join(root, "projects", "thing", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, src, "init", "-b", "main")
+	writeAndCommit(t, src, "code.txt", "v1", "v1")
+
+	var err error
+	clone, err = Ensure(root, "thing", "req-a")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if err := CheckoutBranch(clone, "moe/req-a"); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	return src, clone
+}
+
+func writeAndCommit(t *testing.T, repo, name, body, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, repo, "add", name)
+	gittest.Run(t, repo, "commit", "-m", message)
+}
+
 // TestEnsureWritesGitignore confirms the lazy .moe/.gitignore is
 // created so clones never accidentally get staged into the
 // bureaucracy.

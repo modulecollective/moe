@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +57,107 @@ func requireGitForCli(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
+	}
+}
+
+func TestAttachRunWorkspaceFreshensCommitFreeBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		workspace string
+	}{
+		{name: "per-run sandbox"},
+		{name: "named workspace", workspace: "dev"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			seedProjectWithSubmodule(t, root, "tele")
+			md := run.Metadata{Project: "tele", ID: "fix-it", Workspace: tc.workspace}
+			workTree, err := attachRunWorkspace(root, &md, "moe/fix-it")
+			if err != nil {
+				t.Fatalf("initial attach: %v", err)
+			}
+
+			src := filepath.Join(root, "projects", "tele", "src")
+			writeFile(t, filepath.Join(src, "fresh.txt"), "fresh\n")
+			gittest.Run(t, src, "add", "fresh.txt")
+			gittest.Run(t, src, "commit", "-m", "advance main")
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			savedStdout := os.Stdout
+			os.Stdout = w
+			_, attachErr := attachRunWorkspace(root, &md, "moe/fix-it")
+			os.Stdout = savedStdout
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			message, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if attachErr != nil {
+				t.Fatalf("reattach: %v", attachErr)
+			}
+			if got, want := string(message), "freshened moe/fix-it → origin/main (was 1 commits behind)\n"; got != want {
+				t.Fatalf("freshen output = %q, want %q", got, want)
+			}
+			if got, want := gittest.Output(t, workTree, "rev-parse", "HEAD"), gittest.Output(t, src, "rev-parse", "HEAD"); got != want {
+				t.Fatalf("workspace HEAD = %s, want source HEAD %s", got, want)
+			}
+		})
+	}
+}
+
+func TestAttachRunWorkspaceWarnsAndContinuesOnDirtyFreshen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	md := run.Metadata{Project: "tele", ID: "fix-it"}
+	workTree, err := attachRunWorkspace(root, &md, "moe/fix-it")
+	if err != nil {
+		t.Fatalf("initial attach: %v", err)
+	}
+	want := gittest.Output(t, workTree, "rev-parse", "HEAD")
+
+	src := filepath.Join(root, "projects", "tele", "src")
+	writeFile(t, filepath.Join(src, "README.md"), "upstream\n")
+	gittest.Run(t, src, "commit", "-am", "advance main")
+	writeFile(t, filepath.Join(workTree, "README.md"), "local\n")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedStderr := os.Stderr
+	os.Stderr = w
+	_, attachErr := attachRunWorkspace(root, &md, "moe/fix-it")
+	os.Stderr = savedStderr
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	warning, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if attachErr != nil {
+		t.Fatalf("reattach should warn and continue: %v", attachErr)
+	}
+	for _, wantText := range []string{"warning: freshen moe/fix-it", "local changes"} {
+		if !strings.Contains(string(warning), wantText) {
+			t.Errorf("warning missing %q: %q", wantText, warning)
+		}
+	}
+	if got := gittest.Output(t, workTree, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("workspace HEAD moved from %s to %s", want, got)
 	}
 }
 

@@ -30,6 +30,10 @@ import (
 //     anchors a freshly-created branch to the project's default
 //     branch instead of whatever was previously checked out).
 func attachRunWorkspace(root string, md *run.Metadata, branch string) (string, error) {
+	defaultBranch, err := defaultBranchForProject(root, md.Project)
+	if err != nil {
+		return "", err
+	}
 	if md.Workspace == "" {
 		clonePath, err := sandbox.Ensure(root, md.Project, md.ID)
 		if err != nil {
@@ -38,6 +42,7 @@ func attachRunWorkspace(root string, md *run.Metadata, branch string) (string, e
 		if err := sandbox.CheckoutBranch(clonePath, branch); err != nil {
 			return "", err
 		}
+		freshenRunBranch(clonePath, branch, defaultBranch)
 		return clonePath, nil
 	}
 
@@ -46,14 +51,22 @@ func attachRunWorkspace(root string, md *run.Metadata, branch string) (string, e
 	if err != nil {
 		return "", err
 	}
-	baseBranch, err := defaultBranchForProject(root, md.Project)
-	if err != nil {
+	if err := workspace.Attach(wp, branch, defaultBranch); err != nil {
 		return "", err
 	}
-	if err := workspace.Attach(wp, branch, baseBranch); err != nil {
-		return "", err
-	}
+	freshenRunBranch(wp, branch, defaultBranch)
 	return wp, nil
+}
+
+func freshenRunBranch(workTree, branch, defaultBranch string) {
+	behind, err := sandbox.FreshenBranch(workTree, branch, defaultBranch)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: freshen %s to origin/%s: %v\n", branch, defaultBranch, err)
+		return
+	}
+	if behind > 0 {
+		fmt.Printf("freshened %s → origin/%s (was %d commits behind)\n", branch, defaultBranch, behind)
+	}
 }
 
 // resolveRunWorkspacePath returns the working-tree path the run is

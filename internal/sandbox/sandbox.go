@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -154,6 +155,52 @@ func CheckoutBranch(clonePath, branch string) error {
 		return fmt.Errorf("sandbox: checkout -b %s: %w (%s)", branch, err, out)
 	}
 	return nil
+}
+
+// FreshenBranch fast-forwards branch to origin/defaultBranch when the
+// branch has no commits of its own. Branches that already contain the
+// default tip, or that have diverged from it, are left untouched so the
+// push path remains the sole owner of rebases and conflict resolution.
+//
+// The returned count is the number of commits the branch moved forward.
+// A failed fast-forward returns that count with an error so the caller can
+// warn and continue opening the workspace on its existing tip.
+func FreshenBranch(clonePath, branch, defaultBranch string) (int, error) {
+	if out, err := git.Combined(clonePath, "fetch", "origin", defaultBranch); err != nil {
+		return 0, fmt.Errorf("sandbox: fetch origin/%s: %w (%s)", defaultBranch, err, out)
+	}
+
+	originRef := "refs/remotes/origin/" + defaultBranch
+	originSHA, err := git.RevParse(clonePath, originRef)
+	if err != nil {
+		return 0, fmt.Errorf("sandbox: resolve %s: %w", originRef, err)
+	}
+	branchRef := "refs/heads/" + branch
+	branchSHA, err := git.RevParse(clonePath, branchRef)
+	if err != nil {
+		return 0, fmt.Errorf("sandbox: resolve %s: %w", branchRef, err)
+	}
+
+	if git.Probe(clonePath, "merge-base", "--is-ancestor", originSHA, branchSHA) {
+		return 0, nil
+	}
+	if !git.Probe(clonePath, "merge-base", "--is-ancestor", branchSHA, originSHA) {
+		return 0, nil
+	}
+
+	out, err := git.Output(clonePath, "rev-list", "--count", branchSHA+".."+originSHA)
+	if err != nil {
+		return 0, fmt.Errorf("sandbox: count commits behind origin/%s: %w", defaultBranch, err)
+	}
+	behind, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("sandbox: parse commits behind origin/%s: %w", defaultBranch, err)
+	}
+
+	if out, err := git.Combined(clonePath, "merge", "--ff-only", originRef); err != nil {
+		return behind, fmt.Errorf("sandbox: fast-forward %s to origin/%s: %w (%s)", branch, defaultBranch, err, out)
+	}
+	return behind, nil
 }
 
 // Remove tears down the clone at the run's sandbox path. Idempotent:
