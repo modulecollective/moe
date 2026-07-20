@@ -82,3 +82,79 @@ func TestChainStateBlockEmpty(t *testing.T) {
 		t.Errorf("chainStateBlock with nothing chained = %q, want \"\"", got)
 	}
 }
+
+// TestChainStateBlockKeepsTailOfShippedChain reproduces the 2026-07-20
+// incident: a two-item chain whose head merged. The block used to drop
+// the unit (one active member), the sweep saw no order at all, and it
+// narrated the tail — the literal next thing to run — as a run that had
+// been deliberately un-threaded. The settled head must render as the
+// leading term.
+func TestChainStateBlockKeepsTailOfShippedChain(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "shipped-head", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "moe", "queued-tail", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Prefer reflect at end of chain\n\nbody\n"})
+	chainEdge(t, root, "moe/shipped-head", "moe/queued-tail")
+
+	got := chainStateBlock(root, "moe")
+	want := "- `shipped-head` (sdlc, merged) → `queued-tail` (sdlc) — Prefer reflect at end of chain"
+	if !strings.Contains(got, want) {
+		t.Errorf("block missing the settled-head line %q:\n%s", want, got)
+	}
+	if !strings.Contains(got, "already executing") {
+		t.Errorf("block renders a settled head but never tells the agent how to read it:\n%s", got)
+	}
+}
+
+// TestChainStateBlockOrphanStillDropped: the settled-parent exception is
+// narrow. A one-member unit with no chain edge at all is still an orphan
+// and still carries no order information worth spending context on.
+func TestChainStateBlockOrphanStillDropped(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "shipped-head", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "moe", "queued-tail", "sdlc", run.StatusInProgress, now, nil)
+	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "moe/shipped-head", "moe/queued-tail")
+
+	got := chainStateBlock(root, "moe")
+	if strings.Contains(got, "lone-run") {
+		t.Errorf("block lists the orphan `lone-run`:\n%s", got)
+	}
+}
+
+// TestChainStateBlockSettledParentCrossProject: a settled head in
+// another project must render qualified, same rule as active foreign
+// members — an agent must never read `other`'s run as one of its own.
+func TestChainStateBlockSettledParentCrossProject(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "other", "their-head", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "moe", "my-tail", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "other/their-head", "moe/my-tail")
+
+	got := chainStateBlock(root, "moe")
+	if !strings.Contains(got, "`other/their-head` (sdlc, merged) →") {
+		t.Errorf("settled foreign head not rendered qualified:\n%s", got)
+	}
+}
+
+// TestChainStateBlockSettledParentOnlyForeignTail: a settled head in
+// this project whose tail lives entirely elsewhere is not this sweep's
+// business — the touches rule is unchanged by the new exception.
+func TestChainStateBlockSettledParentOnlyForeignTail(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "my-head", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "other", "their-tail", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "moe/my-head", "other/their-tail")
+
+	if got := chainStateBlock(root, "moe"); got != "" {
+		t.Errorf("block rendered a unit with no active member in this project:\n%s", got)
+	}
+}
