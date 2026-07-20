@@ -277,9 +277,9 @@ func TestPulseWorkflowSingleStage(t *testing.T) {
 
 // TestBuildSystemPromptInjectsPulseFragment is the wiring check:
 // workflows/pulse/pulse.md lands in the prompt at the pulse stage.
-// Sentinels on the stage heading and the one idiom the fragment owns
-// (the lane bar) so the assertion flags a fragment rename or a dropped
-// idiom.
+// Sentinels on the stage heading and the idioms the fragment owns (the
+// lane bar, the reflect-placement default) so the assertion flags a
+// fragment rename or a dropped idiom.
 func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{
@@ -296,6 +296,9 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	}
 	if !strings.Contains(got, "The lane bar") {
 		t.Fatalf("pulse.md missing the lane bar it owns:\n%s", got)
+	}
+	if !strings.Contains(got, "the tail is the default") {
+		t.Fatalf("pulse.md missing the reflect placement default:\n%s", got)
 	}
 }
 

@@ -208,10 +208,21 @@ below can name it. And `title`/`design` are meaningless on a reflect —
 it reads the twin, not a seed — so leave them off; they're warned and
 ignored.
 
-**Placement is yours.** A reflect reads the settled record, so if you
-propose one alongside fixes, chain it *after* the fixes it should read.
-A reflect named in no `chain` group parks standalone and unchained,
-same as any other spawn — nothing rides it until someone kicks it.
+**Placement is yours, and the tail is the default.** A reflect sweeps
+the settled record of everything that ran before it, so all things
+equal it goes *last*: when this gate chains anything, name the
+reflect's alias as the final slug of the thread carrying the cycle's
+work. Leaving a pending reflect loose while you chain other work is
+the choice that needs justifying, not chaining it. A reflect named in
+no `chain` group parks standalone and unchained, same as any other
+spawn — nothing rides it until someone kicks it.
+
+Two cases carry that justification. If the thread's membership or
+order is a guess — it fails the lane bar — don't append the reflect to
+it: a reflect reading a half-finished record is one to leave parked.
+And with several threads there is still one reflect and one tail, so
+put it behind the one carrying the cycle's twin-relevant bulk; never
+mint a `head` just to have somewhere to put it.
 
 **The bar: mechanical, bounded, and verifiable.** All three, not two:
 
@@ -346,10 +357,12 @@ pending observations stacked behind it — your kickoff names it when so.
 Parked is where a reflect stays until someone chains or kicks it; it is
 not a verdict that the reflect is done, and it does not make the drift
 it was opened for any less real. Treat it like any other parked
-machine-rooted thread: chain it behind the fixes it should read the
-settled record of, or name it in a group carrying `"kick": true` and
-let it ride. The same kick bar applies — a reflect that would read a
-half-finished record is one to place, not to start.
+machine-rooted thread, and give it the same slot a fresh one would
+get: when this sweep grooms lanes, append it at the tail of the thread
+carrying the work it should read the settled record of, or name it in
+a group carrying `"kick": true` and let it ride. The same kick bar
+applies — a reflect that would read a half-finished record is one to
+place, not to start.
 
 This is a different act from spawning one. Don't ask for a
 `"workflow": "twin"` spawn while a twin run is open — that guard stands
