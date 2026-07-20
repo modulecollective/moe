@@ -162,6 +162,11 @@ func CheckoutBranch(clonePath, branch string) error {
 // default tip, or that have diverged from it, are left untouched so the
 // push path remains the sole owner of rebases and conflict resolution.
 //
+// The branch must be checked out at clonePath: the ancestry guards
+// inspect branch, but the fast-forward is a `merge --ff-only`, which
+// moves HEAD. Both attach paths satisfy this by checking the branch
+// out before freshening.
+//
 // The returned count is the number of commits the branch moved forward.
 // A failed fast-forward returns that count with an error so the caller can
 // warn and continue opening the workspace on its existing tip.
