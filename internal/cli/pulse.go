@@ -511,17 +511,25 @@ func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
 	return g, true
 }
 
-// maybeSpawnReflect mints a parked twin reflect run for a spawn entry
-// asking for workflow "twin". Warn-only throughout — a guard refusal or a
-// mint failure never blocks the pulse's auto-close, since the report and
-// filings are already durable on disk. The guards live in mintReflectRun
-// (shared with `moe twin reflect`): an in-progress twin run, including a
-// prior auto-spawned reflect still parked, is a silent skip — no sense
-// opening a second; out-of-band twin edits warn and skip, since the
-// operator has to clear those before any reflect can run.
-// Returns the minted run's id, or "" when nothing was minted — the
-// handle the alias in `minted` points at, so a chain group can name the
-// reflect.
+// maybeSpawnReflect resolves the project's twin reflect for a pulse-side
+// ask — a spawn entry asking for workflow "twin", or an idea tagged
+// `(twin)`. Every pulse-side ask is a *nomination*, not a create: with no
+// reflect open one is minted; with one already open the mint is a noop and
+// the nomination maps to the open run's id. Chain grooming then treats a
+// mapped nomination like any other member, so a gate naming the reflect at
+// a group's tail repositions the open run instead of dropping it.
+//
+// The one ask that resolves to nothing is unrecorded out-of-band twin
+// edits with no reflect open: there is nothing to map to and minting is
+// refused until the operator lands or reverts them, so it warns and skips.
+//
+// Warn-only throughout — a guard refusal or a mint failure never blocks
+// the pulse's auto-close, since the report and filings are already durable
+// on disk.
+//
+// Returns the resolved run's id, or "" when the ask resolved to nothing —
+// the handle the alias in `minted` points at, so a chain group can name
+// the reflect.
 func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) string {
 	canonical, err := twinWikiBuilder(root, projectID)
 	if err != nil {
@@ -537,9 +545,14 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 	if err != nil {
 		var refusal *reflectRefusal
 		if errors.As(err, &refusal) {
-			if refusal.kind == reflectRefusalUnrecorded {
-				moePrintf(stderr, "pulse: reflect not spawned for %s — %v; the operator lands those first\n", projectID, refusal)
+			if refusal.kind == reflectRefusalInProgress {
+				// The nomination resolves to the open pass. Logged rather
+				// than silent so the sweep output stays honest about which
+				// run the alias — and any chain group naming it — landed on.
+				moePrintf(stderr, "pulse: reflect already open for %s — mapped to %s/%s (%s)\n", projectID, projectID, refusal.slug, why)
+				return refusal.slug
 			}
+			moePrintf(stderr, "pulse: reflect not spawned for %s — %v; the operator lands those first\n", projectID, refusal)
 			return ""
 		}
 		moePrintf(stderr, "pulse: reflect spawn for %s: %v\n", projectID, err)
@@ -559,11 +572,12 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 //
 // Dispatch is per-workflow. sdlc (the default) is the fix-run path
 // below. twin routes through maybeSpawnReflect → mintReflectRun, the
-// same guard-and-mint core `moe twin reflect` uses, so the closed-schema
-// check, the unrecorded-edits refusal and the one-twin-run-in-flight
-// guard all ride along — including across two twin entries in one gate,
-// since the first mint makes that run in-progress. Anything else warns
-// and skips.
+// same core `moe twin reflect` uses, so the closed-schema check and the
+// unrecorded-edits refusal ride along — but where the verb refuses a
+// concurrent pass, the pulse's ask is a nomination that *resolves*: mint
+// if no reflect is open, map onto the open one otherwise. Two twin
+// entries in one gate therefore land on the same run instead of the
+// second going nowhere. Anything else warns and skips.
 //
 // Returns proposed-slug → minted-run-id, so a `chain` group can name
 // this batch's own runs by the slug the survey wrote even when the
@@ -579,8 +593,11 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 //
 // The one mechanical exception to dedupe is a live idea carrying a
 // harvested follow-up's workflow tag: the pulse promotes that capture
-// through the same seam as `--from-idea`. Untagged ideas remain behind a
-// structural human-triage fence. Every other live match still skips.
+// through the same seam as `--from-idea` — except a `(twin)` tag, which
+// is a reflect nomination like any other and resolves through the
+// reflect core, taking the promotion edge but no seed. Untagged ideas
+// remain behind a structural human-triage fence. Every other live match
+// still skips.
 //
 // Warn-only throughout, like the reflect spawn beside it: the report and
 // filings are already durable, so a failed mint is a spawn-by-hand-later,
@@ -638,6 +655,29 @@ func maybeSpawnRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdo
 			idea := matches[0]
 			if idea.PromoteTo == "" {
 				moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
+				continue
+			}
+			if idea.PromoteTo == "twin" {
+				// A `(twin)` tag nominates a reflect; it does not name a
+				// destination to mint. Route it through the same resolve the
+				// gate's twin spawn entries take — mint if no pass is open,
+				// map onto the open one otherwise — and record the promotion
+				// edge onto whichever run that was. No seed doc: a reflect
+				// reads the managed docs, `feedback/twin.md` and the journal,
+				// never a promoted idea's canvas, which stays on the idea and
+				// is reachable through the MoE-Promoted-To edge.
+				id := maybeSpawnReflect(root, projectID, pulseSlug, s.Why, stdout, stderr)
+				if id == "" {
+					continue
+				}
+				if markErr := runopen.MarkPromoted(root, projectID, idea.ID, projectID, id, stdout, stderr); markErr != nil {
+					moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
+				}
+				// Keyed by the idea's slug, which is the handle the gate
+				// already knows — so a chain group naming it orders the
+				// reflect.
+				minted[slug] = id
+				moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)
 				continue
 			}
 			wf, lookupErr := LookupWorkflow(idea.PromoteTo)

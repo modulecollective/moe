@@ -49,10 +49,10 @@ func TestSpawnTwinMintsUnderTheAgentsAlias(t *testing.T) {
 	}
 }
 
-// TestSpawnTwoTwinEntriesMintOne: the one-twin-run-in-flight guard lives
-// in mintReflectRun, so it collapses a doubled ask for free — the first
-// mint makes a twin run in-progress and the second hits the same
-// refusal.
+// TestSpawnTwoTwinEntriesMintOne: two asks, one run — but both aliases
+// resolve. The first mints; the second finds that run in flight and
+// *maps* onto it rather than resolving to nothing, so a chain group
+// naming either alias still orders the reflect.
 func TestSpawnTwoTwinEntriesMintOne(t *testing.T) {
 	root := twinSpawnFixture(t)
 
@@ -61,14 +61,18 @@ func TestSpawnTwoTwinEntriesMintOne(t *testing.T) {
 		{Slug: "twin-b", Workflow: "twin", Why: "second"},
 	}, io.Discard, io.Discard)
 
-	if tw := twinRuns(t, root, "moe"); len(tw) != 1 {
-		t.Fatalf("twin runs = %v, want exactly one — the in-flight guard collapses the second", tw)
+	tw := twinRuns(t, root, "moe")
+	if len(tw) != 1 {
+		t.Fatalf("twin runs = %v, want exactly one — the second ask maps, it does not mint", tw)
 	}
-	if _, ok := minted["twin-a"]; !ok {
-		t.Errorf("minted = %v, want the first alias to resolve", minted)
+	if minted["twin-a"] == "" || minted["twin-b"] == "" {
+		t.Fatalf("minted = %v, want both aliases to resolve", minted)
 	}
-	if _, ok := minted["twin-b"]; ok {
-		t.Errorf("minted = %v, want no alias for the refused second entry", minted)
+	if minted["twin-a"] != minted["twin-b"] {
+		t.Errorf("minted = %v, want both aliases on the one reflect", minted)
+	}
+	if _, ok := tw[minted["twin-b"]]; !ok {
+		t.Errorf("twin runs = %v, want the mapped alias to name the open reflect (%s)", tw, minted["twin-b"])
 	}
 }
 
@@ -168,13 +172,13 @@ func TestSpawnTwinNamedInNoGroupParks(t *testing.T) {
 	}
 }
 
-// TestSpawnTwinRefusedDropsOnlyThatChainMember: refusal degrades
-// gracefully. When the twin mint is refused the alias resolves to
-// nothing, so resolveMember drops that member with its existing warn and
-// the rest of the group grooms normally.
-func TestSpawnTwinRefusedDropsOnlyThatChainMember(t *testing.T) {
+// TestSpawnTwinMapsOntoOpenReflectAndChainsIt: the defect this run
+// fixes. With a reflect already parked the nomination maps onto it
+// instead of resolving to nothing, so the chain group orders the open
+// reflect in position rather than silently shedding the member.
+func TestSpawnTwinMapsOntoOpenReflectAndChainsIt(t *testing.T) {
 	root := twinSpawnFixture(t)
-	// A reflect already parked — the in-flight guard will refuse the mint.
+	// A reflect already parked — the nomination maps onto this run.
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 
 	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
@@ -183,16 +187,27 @@ func TestSpawnTwinRefusedDropsOnlyThatChainMember(t *testing.T) {
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, io.Discard)
 
+	if got := minted["twin-refresh"]; got != "reflect-2026-05-14" {
+		t.Fatalf("minted[twin-refresh] = %q, want the open reflect", got)
+	}
+	if tw := twinRuns(t, root, "moe"); len(tw) != 1 {
+		t.Fatalf("twin runs = %v, want no second reflect minted", tw)
+	}
+
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-one",
 		[]pulseChainGroup{{Runs: []string{"fix-a", "twin-refresh", "fix-b"}}},
 		minted, "", io.Discard, &errb)
 
-	if !strings.Contains(errb.String(), `names "twin-refresh", which is not a parked run`) {
-		t.Errorf("stderr = %q, want the dropped member named", errb.String())
+	if strings.Contains(errb.String(), "which is not a parked run") {
+		t.Errorf("stderr = %q, want no dropped member", errb.String())
 	}
-	// The surviving members still chained to each other, in order.
-	if got := liveEdges(t, root)["moe/"+minted["fix-a"]]; got != "moe/"+minted["fix-b"] {
-		t.Errorf("fix-a chains to %q, want fix-b — the rest of the group grooms normally", got)
+	// The reflect sits in the position the group named, mid-thread.
+	edges := liveEdges(t, root)
+	if got := edges["moe/"+minted["fix-a"]]; got != "moe/reflect-2026-05-14" {
+		t.Errorf("fix-a chains to %q, want the mapped reflect", got)
+	}
+	if got := edges["moe/reflect-2026-05-14"]; got != "moe/"+minted["fix-b"] {
+		t.Errorf("reflect chains to %q, want fix-b", got)
 	}
 }
