@@ -146,9 +146,10 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// The chore's target workflow is only known after the open, so the
-	// --ship-can't-cascade preflight can't run here; parkShipExclusive is
-	// the parse-time half, and mintTail's own ship guard is the other.
-	if code := parkShipExclusive("chore open", *park, *ship, stderr); code != 0 {
+	// --ship-can't-cascade preflight can't run here; parkCascadeExclusive
+	// is the parse-time half, and mintTail's own cascade guard is the
+	// other.
+	if code := parkCascadeExclusive("chore open", *park, shipAnswer(*ship), stderr); code != 0 {
 		return code
 	}
 	projectID, choreName, err := splitProjectRun(fs.Arg(0))
@@ -164,7 +165,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	return mintTail(root, md, *park, *ship, stdout, stderr)
+	return mintTail(root, md, *park, shipAnswer(*ship), stdout, stderr)
 }
 
 // openDueChore is the CLI-facing wrapper around openChoreInProcess: it

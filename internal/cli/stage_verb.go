@@ -54,13 +54,42 @@ func cascadeUnavailableReason(workflow string) string {
 	return fmt.Sprintf("workflow %q has no cascade — open without --ship and drive the stages yourself", workflow)
 }
 
-// parkShipExclusive refuses the --park + --ship combination every mint
-// verb shares: they're opposite tails (one stops, one cascades to the
-// ship). verb is the "<wf> <verb>" stderr prefix. Returns 0 to proceed;
-// exit 2 with the message written on conflict.
-func parkShipExclusive(verb string, park, ship bool, stderr io.Writer) int {
-	if park && ship {
-		moePrintf(stderr, "%s: --ship and --park are opposite tails (one cascades to the ship, the other stops) — pick one\n", verb)
+// mintCascadeFlag names the flag that produced a mint verb's cascade
+// answer, so the exclusion checks below blame the flag the operator
+// actually typed. Only `new` offers the upper two today; every other
+// mint verb tops out at --ship, which is also the zero-ish default.
+func mintCascadeFlag(cascade string) string {
+	switch cascade {
+	case "!!!":
+		return "--chain"
+	case "!!!!":
+		return "--dynamic"
+	default:
+		return "--ship"
+	}
+}
+
+// shipAnswer is the cascade answer for the mint verbs whose ladder
+// stops at --ship: `!!`, or "" when the flag is absent. `new` carries
+// the full ladder and resolves its own answer via
+// cascadeAnswerFromFlags.
+func shipAnswer(ship bool) string {
+	if ship {
+		return "!!"
+	}
+	return ""
+}
+
+// parkCascadeExclusive refuses --park alongside a cascade flag, the
+// combination every mint verb shares: they're opposite tails (one
+// stops, one cascades). cascade is the bang answer the cascade flags
+// resolved to, "" when none was given. verb is the "<wf> <verb>"
+// stderr prefix. Returns 0 to proceed; exit 2 with the message written
+// on conflict.
+func parkCascadeExclusive(verb string, park bool, cascade string, stderr io.Writer) int {
+	if park && cascade != "" {
+		moePrintf(stderr, "%s: %s and --park are opposite tails (one cascades, the other stops) — pick one\n",
+			verb, mintCascadeFlag(cascade))
 		return 2
 	}
 	return 0
@@ -68,36 +97,44 @@ func parkShipExclusive(verb string, park, ship bool, stderr io.Writer) int {
 
 // preflightMintTail is the parse-time mint-verb check for the verbs
 // that know their workflow up front (new, twin reflect): the --park /
-// --ship exclusion, plus a --ship refusal on a workflow that can't
+// cascade exclusion, plus a cascade refusal on a workflow that can't
 // cascade — so a run we couldn't ship is never minted. chore open,
 // whose target workflow is only known after the open, uses
-// parkShipExclusive here and leans on mintTail's own ship guard.
-func preflightMintTail(verb, workflow string, park, ship bool, stderr io.Writer) int {
-	if code := parkShipExclusive(verb, park, ship, stderr); code != 0 {
+// parkCascadeExclusive here and leans on mintTail's own cascade guard.
+func preflightMintTail(verb, workflow string, park bool, cascade string, stderr io.Writer) int {
+	if code := parkCascadeExclusive(verb, park, cascade, stderr); code != 0 {
 		return code
 	}
-	if ship && !operatorCascades(workflow) {
-		moePrintf(stderr, "%s: --ship: %s\n", verb, cascadeUnavailableReason(workflow))
+	if cascade != "" && !operatorCascades(workflow) {
+		moePrintf(stderr, "%s: %s: %s\n", verb, mintCascadeFlag(cascade), cascadeUnavailableReason(workflow))
 		return 2
 	}
 	return 0
 }
 
 // mintTail is the shared post-open tail every mint verb ends with:
-// --park prints the next-stage hint and stops; --ship cascades the
-// fresh run headless to the ship (the `!!` chain answer, dispatched
-// from the first pending stage — a fresh run has no chained children,
-// so `!!` not `!!!`); neither offers the standard chain prompt. Callers
-// that know their workflow at parse time (new, reflect) have already
-// refused a non-cascading --ship via preflightMintTail; the guard here
-// re-checks for chore open, whose workflow is only known now.
-func mintTail(root string, md *run.Metadata, park, ship bool, stdout, stderr io.Writer) int {
+// --park prints the next-stage hint and stops; a cascade flag runs the
+// fresh run headless from its first pending stage; neither offers the
+// standard chain prompt.
+//
+// cascade is the bang answer the verb's flags resolved to, "" for
+// neither tail. --ship is `!!` on every mint verb — a fresh run has no
+// chained children, so shipping it is `!!` not `!!!`. `new` also offers
+// `!!!` / `!!!!`, where the extra bangs are about what happens *after*
+// the ship: ride whatever the run chains onto, and (at four) let the
+// machine extend that ride. Same seam either way — the answer string is
+// all that differs.
+//
+// Callers that know their workflow at parse time (new, reflect) have
+// already refused a non-cascading tail via preflightMintTail; the guard
+// here re-checks for chore open, whose workflow is only known now.
+func mintTail(root string, md *run.Metadata, park bool, cascade string, stdout, stderr io.Writer) int {
 	if park {
 		return promptNextStageParked(root, md, stdout, stderr)
 	}
-	if ship {
+	if cascade != "" {
 		if !operatorCascades(md.Workflow) {
-			moePrintf(stderr, "--ship: %s\n", cascadeUnavailableReason(md.Workflow))
+			moePrintf(stderr, "%s: %s\n", mintCascadeFlag(cascade), cascadeUnavailableReason(md.Workflow))
 			return 1
 		}
 		wf, err := LookupWorkflow(md.Workflow)
@@ -116,7 +153,7 @@ func mintTail(root string, md *run.Metadata, park, ship bool, stdout, stderr io.
 			// case rather than feeding an empty start to the cascade.
 			return 0
 		}
-		return dispatchCascade("!!", stage, root, md, stdout, stderr)
+		return dispatchCascade(cascade, stage, root, md, stdout, stderr)
 	}
 	return promptNextStage(root, md, "", stdout, stderr)
 }

@@ -68,24 +68,43 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// workflows below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
-	// --park, --seed, and --ship are workflow-generic (they live on the
-	// shared new facade, so sdlc/kb/hooks all get them). --park opens the
-	// run and prints the next-stage hint instead of prompting to ride the
-	// chain; --seed pops $EDITOR and opens the run with the edited body as
-	// its first-stage seed; --ship opens the run and cascades every stage
-	// headless to the ship, the flag twin of typing `!!` at the chain
-	// prompt. --seed composes with either tail; --park and --ship are
-	// opposite tails (mutually exclusive); --seed and --from-idea are
+	// --park, --seed, and the cascade ladder are workflow-generic (they
+	// live on the shared new facade, so sdlc/kb/hooks all get them).
+	// --park opens the run and prints the next-stage hint instead of
+	// prompting to ride the chain; --seed pops $EDITOR and opens the run
+	// with the edited body as its first-stage seed.
+	//
+	// --ship / --chain / --dynamic are the same consent ladder the stage
+	// verbs carry, mapping to `!!` / `!!!` / `!!!!`. Opening a run and
+	// riding it is one intent an operator has in one breath — "promote
+	// this idea and ride it dynamic" — and until now the flag path
+	// stopped at `!!`, so that intent wasn't sayable in one command even
+	// though the interactive open prompt has always offered the whole
+	// ladder.
+	//
+	// --seed composes with any tail; --park and the cascade flags are
+	// opposite tails (mutually exclusive), and the cascade flags are
+	// mutually exclusive with each other; --seed and --from-idea are
 	// mutually exclusive (both claim the first-stage seed).
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	seed := fs.Bool("seed", false, "pop $EDITOR on a stub and open the run with the edited body as its first-stage seed (mutually exclusive with --from-idea)")
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain/--dynamic)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship/--dynamic)")
+	dynamic := fs.Bool("dynamic", false, "open the run, ship it, ride the chain, and license the machine to extend that ride (the flag twin of `!!!!`; mutually exclusive with --park/--ship/--chain)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>\n", workflowName)
-		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship] --from-idea <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain|--dynamic] <project>/<slug>\n", workflowName)
+		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship|--chain|--dynamic] --from-idea <project>/<slug>\n", workflowName)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	// One bang answer out of the ladder, or "" for no cascade tail. ok is
+	// false only when the operator typed more than one — the levels are a
+	// ladder, not a set.
+	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain, *dynamic)
+	if !ok {
+		moePrintf(stderr, "%s new: --ship, --chain and --dynamic are one ladder — pick one\n", workflowName)
 		return 2
 	}
 	if *seed && *fromIdea != "" {
@@ -98,7 +117,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// (no dispatcher, perpetual, or machine-paced) can't ship. Every
 	// workflow ships one today, but the `new` facade is generic — refuse
 	// at flag-parse time rather than minting a run we then can't ship.
-	if code := preflightMintTail(workflowName+" new", workflowName, *park, *ship, stderr); code != 0 {
+	if code := preflightMintTail(workflowName+" new", workflowName, *park, cascade, stderr); code != 0 {
 		return code
 	}
 	if *fromIdea != "" {
@@ -254,7 +273,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// --ship cascades headless to the ship (`!!` from the first pending
 	// stage), neither offers the standard chain prompt where the operator
 	// picks `!<stage>` / `!!` / `!!!` after seeing the seeded canvas.
-	return mintTail(root, md, *park, *ship, stdout, stderr)
+	return mintTail(root, md, *park, cascade, stdout, stderr)
 }
 
 // preflightWorkspaceClaim refuses to bind a run to a workspace that is

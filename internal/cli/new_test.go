@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -582,6 +583,102 @@ func TestRunNewShipCascadesToShip(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "run now?") {
 		t.Fatalf("--ship must not print the chain prompt: %q", out.String())
+	}
+}
+
+// The consent ladder on `new` is the same ladder the stage verbs
+// carry: --ship / --chain / --dynamic map to `!!` / `!!!` / `!!!!`, and
+// the mode each answer sets is what the stages actually run under. The
+// stub records currentRideMode from inside the cascade, which is the
+// seam that matters — a flag that opened the run and cascaded but
+// carried no consent is exactly the failure this closes.
+func TestRunNewCascadeLadderCarriesConsent(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want rideMode
+	}{
+		{flag: "--ship", want: rideNone},
+		{flag: "--chain", want: rideStatic},
+		{flag: "--dynamic", want: rideDynamic},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			trailerstest.SeedProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			stages := stubOpenSdlcStage(t, nil)
+			stubPushFromCascade(t, 0, nil)
+			var modes []rideMode
+			prev := openSdlcStage
+			openSdlcStage = func(stage, projectID, runID string, headless bool, so, se io.Writer) int {
+				modes = append(modes, currentRideMode)
+				return prev(stage, projectID, runID, headless, so, se)
+			}
+			t.Cleanup(func() { openSdlcStage = prev })
+
+			var out, errb bytes.Buffer
+			if code := runNew("sdlc", []string{tc.flag, "tele/ladder"}, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, errb.String())
+			}
+			if len(*stages) == 0 {
+				t.Fatalf("%s cascaded nothing", tc.flag)
+			}
+			for i, got := range modes {
+				if got != tc.want {
+					t.Fatalf("stage %d ran under ride mode %v, want %v", i, got, tc.want)
+				}
+			}
+			if strings.Contains(out.String(), "run now?") {
+				t.Errorf("%s must not print the chain prompt: %q", tc.flag, out.String())
+			}
+		})
+	}
+}
+
+// The ladder is a ladder, not a set of composable modifiers — two of
+// its rungs at once is a usage error, refused before any open commit.
+func TestRunNewCascadeLadderRungsMutuallyExclusive(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := runNew("sdlc", []string{"--chain", "--dynamic", "tele/two-rungs"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "one ladder") {
+		t.Errorf("expected the ladder error, got: %q", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "two-rungs")); !os.IsNotExist(err) {
+		t.Errorf("usage error must mint nothing; run dir exists (err=%v)", err)
+	}
+}
+
+// --park is the opposite tail to every rung, not just --ship, and the
+// message names the rung the operator actually typed.
+func TestRunNewParkExcludesEveryCascadeRung(t *testing.T) {
+	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+		t.Run(flag, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			trailerstest.SeedProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			var out, errb bytes.Buffer
+			code := runNew("sdlc", []string{flag, "--park", "tele/both"}, &out, &errb)
+			if code != 2 {
+				t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "opposite tails") || !strings.Contains(errb.String(), flag) {
+				t.Errorf("expected an opposite-tails error naming %s, got: %q", flag, errb.String())
+			}
+		})
 	}
 }
 

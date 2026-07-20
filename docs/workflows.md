@@ -17,7 +17,7 @@ exist to kick work back to `code` or `design`, not to decorate the ladder.
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>
+moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain|--dynamic] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
@@ -58,14 +58,19 @@ A few tail flags shape how `new` opens the run. `--seed` pops `$EDITOR` on a
 stub and opens the run with your edited body as the first-stage seed (mutually
 exclusive with `--from-idea`, which already claims that seed). `--park` opens
 the run and stops, printing the next-stage hint instead of prompting to run
-the first stage — handy for minting a run to pick up later. `--ship` is the
-opposite tail (= `!!` at the chain prompt): it opens the run and cascades every
-stage headless through push, then ships — fire-and-forget. `--park` and
-`--ship` are mutually exclusive. Both compose with either seed: `--seed --park`
-mints from a typed seed and walks away, `--from-idea --ship` promotes an idea
-and rides it to the ship. All ride the shared `new` facade, so every workflow's
-`new` that takes `--from-idea` takes these too (`--ship` needs the workflow to
-have a cascade dispatcher, which it refuses to mint a run without). `--park`
+the first stage — handy for minting a run to pick up later. Opposite it sits
+the cascade ladder, the same one the chain prompt spells in bangs: `--ship`
+(= `!!`) opens the run and cascades every stage headless through push, then
+ships — fire-and-forget; `--chain` (= `!!!`) does that and rides the chain the
+run heads; `--dynamic` (= `!!!!`) rides it and licenses the machine to extend
+that ride, so a tail pulse may groom work onto the tail and start threads it
+rooted. The rungs are a ladder, not modifiers — pick one, and `--park` excludes
+all of them. Every tail composes with either seed: `--seed --park` mints from a
+typed seed and walks away, `--from-idea --dynamic` promotes an idea and rides it
+with the machine free to grow the ride. All ride the shared `new` facade, so
+every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
+needs the workflow to have a cascade dispatcher, which it refuses to mint a run
+without). `--park`
 also reaches past `new`: `moe chore open`, `moe twin reflect`, and
 `moe sdlc reopen` — the other creators that end at the chain prompt — take it
 with the same meaning.

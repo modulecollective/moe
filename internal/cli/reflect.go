@@ -74,7 +74,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 		fs.Usage()
 		return 2
 	}
-	if code := preflightMintTail(workflow+" reflect", workflow, *park, *ship, stderr); code != 0 {
+	if code := preflightMintTail(workflow+" reflect", workflow, *park, shipAnswer(*ship), stderr); code != 0 {
 		return code
 	}
 	if *agentOverride != "" {
@@ -127,7 +127,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	// the chain prompt's fresh-run path (justFinished="" → Workflow.Next
 	// returns the first parked stage, and the operator picks `Y` / `!` /
 	// `!!` / `!!!` there).
-	return mintTail(root, md, *park, *ship, stdout, stderr)
+	return mintTail(root, md, *park, shipAnswer(*ship), stdout, stderr)
 }
 
 // reflectRefusalKind classifies the operator-prerequisite refusals the
