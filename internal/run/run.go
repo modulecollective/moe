@@ -858,6 +858,42 @@ func ChainChildLive(childKey string, byKey map[string]*Metadata) bool {
 	return true
 }
 
+// TerminalChainParentOf returns the settled run that chains to key, or
+// "" for none. The mirror of liveChainParentOf: same fan-in rule (lowest
+// key wins, deterministically), opposite liveness test.
+//
+// The edge outlives its parent — a chain's second-to-last item shipping
+// doesn't remove the trailer — but every grouping view drops it, because
+// a unit needs both endpoints active. That leaves the queued tail looking
+// like an orphan on the dash and in the pulse's chain block the moment
+// the run ahead of it merges. This is the read-side lookup those two
+// surfaces use to annotate the tail with the thread it belongs to.
+//
+// One hop only: for A→B→C with A and B both settled, C's answer is B. The
+// nearest predecessor is the context worth naming; replaying the whole
+// settled ancestry is noise.
+func TerminalChainParentOf(key string, chainedChild map[string]string, byKey map[string]*Metadata) string {
+	var best string
+	for parent, child := range chainedChild {
+		if child != key || parent == key {
+			continue
+		}
+		pmd, ok := byKey[parent]
+		if !ok {
+			continue
+		}
+		switch pmd.Status {
+		case StatusClosed, StatusMerged, StatusPromoted, StatusPushed:
+		default:
+			continue
+		}
+		if best == "" || parent < best {
+			best = parent
+		}
+	}
+	return best
+}
+
 // ChainOrderItem is one active run handed to OrderChainUnits: its
 // qualified "<project>/<slug>" key and the recency time used to place
 // it. Callers pass items in their own recency order (newest first);

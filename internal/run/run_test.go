@@ -1014,3 +1014,51 @@ func TestJournalIndexChoreSkipped(t *testing.T) {
 		t.Errorf("ChoreSkipped should not contain an unrelated chore")
 	}
 }
+
+// TestTerminalChainParentOf pins the three rules the annotation surfaces
+// depend on: settled parents only, fan-in resolves to the lowest key,
+// and a parent missing from disk is ignored (an edge to a pruned run
+// must not name a run the operator can't open).
+func TestTerminalChainParentOf(t *testing.T) {
+	byKey := map[string]*Metadata{
+		"p/merged":  {Project: "p", ID: "merged", Status: StatusMerged},
+		"p/also":    {Project: "p", ID: "also", Status: StatusClosed},
+		"p/running": {Project: "p", ID: "running", Status: StatusInProgress},
+		"p/tail":    {Project: "p", ID: "tail", Status: StatusInProgress},
+	}
+
+	cases := []struct {
+		name  string
+		edges map[string]string
+		want  string
+	}{
+		{"settled parent", map[string]string{"p/merged": "p/tail"}, "p/merged"},
+		{"live parent ignored", map[string]string{"p/running": "p/tail"}, ""},
+		{"fan-in lowest key wins", map[string]string{"p/merged": "p/tail", "p/also": "p/tail"}, "p/also"},
+		{"parent not on disk", map[string]string{"p/pruned": "p/tail"}, ""},
+		{"cleared edge", map[string]string{"p/merged": ""}, ""},
+		{"self edge", map[string]string{"p/tail": "p/tail"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TerminalChainParentOf("p/tail", tc.edges, byKey); got != tc.want {
+				t.Errorf("TerminalChainParentOf = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTerminalChainParentOfOneHop: for A→B→C with A and B both settled,
+// C's context is B. Naming A as well would be a lineage the operator
+// didn't ask for; the nearest predecessor is the useful one.
+func TestTerminalChainParentOfOneHop(t *testing.T) {
+	byKey := map[string]*Metadata{
+		"p/a": {Project: "p", ID: "a", Status: StatusMerged},
+		"p/b": {Project: "p", ID: "b", Status: StatusMerged},
+		"p/c": {Project: "p", ID: "c", Status: StatusInProgress},
+	}
+	edges := map[string]string{"p/a": "p/b", "p/b": "p/c"}
+	if got := TerminalChainParentOf("p/c", edges, byKey); got != "p/b" {
+		t.Errorf("TerminalChainParentOf = %q, want p/b", got)
+	}
+}
