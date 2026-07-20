@@ -35,6 +35,11 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
+// twinWorkflow is the twin (reflect) workflow's name in run.json.
+// Spelled here rather than imported because runopen never mints one —
+// it names the workflow only to refuse it (see Promote).
+const twinWorkflow = "twin"
+
 // ErrNotCapture is returned when the slug names a run that is not an
 // in-progress capture (idea or intent) — either a staged workflow, or
 // a capture that has already been promoted/closed. Defence in depth:
@@ -134,6 +139,17 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 	if opts.Workflow == dash.IdeaWorkflow {
 		return Promoted{}, errors.New("runopen: cannot promote an idea into another idea run")
 	}
+	// A twin run is never minted here. Its slug is harness-dated
+	// (reflect-YYYY-MM-DD), it takes no seed doc, and it is subject to a
+	// one-pass-in-flight rule — all of which live in the reflect mint
+	// core, which resolves a twin destination by minting *or* mapping onto
+	// the open pass. Promote can only mint, so routing a twin destination
+	// through it would open a second pass under a wrong slug with a seed
+	// nothing reads. Structural, rather than call-site discipline: the
+	// serve promote form and the CLI facades already can't reach twin.
+	if opts.Workflow == twinWorkflow {
+		return Promoted{}, errors.New("runopen: cannot promote an idea into a twin run; resolve the reflect through the reflect core")
+	}
 
 	src, seed, err := loadIdeaForPromote(root, projectID, ideaSlug)
 	if err != nil {
@@ -155,7 +171,7 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 	if err != nil {
 		return Promoted{}, err
 	}
-	markErr := markIdeaPromoted(root, src, md, stdout, stderr)
+	markErr := markIdeaPromoted(root, src, md.Project, md.ID, stdout, stderr)
 	return Promoted{Run: md, MarkErr: markErr}, nil
 }
 
@@ -185,20 +201,46 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 	return md, string(b), nil
 }
 
+// MarkPromoted marks an in-progress idea promoted onto a destination
+// run the caller already has in hand, writing the same status bump and
+// MoE-Promoted-To trailer Promote writes for a run it opened itself.
+//
+// The seam exists for destinations Promote can't mint: pulse resolving a
+// `(twin)`-tagged idea onto the project's reflect, which the reflect
+// core either minted or mapped onto. The promotion edge is the same one
+// either way, so the journal, the dash, and `moe idea reopen` read a
+// twin-tagged idea exactly like any other promoted idea.
+func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug string, stdout, stderr io.Writer) error {
+	if destProjectID == "" || destSlug == "" {
+		return errors.New("runopen: MarkPromoted requires a destination run")
+	}
+	md, err := run.Load(root, projectID, ideaSlug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IdeaWorkflow {
+		return fmt.Errorf("runopen: run %s/%s is a %s run, not an idea", projectID, ideaSlug, md.Workflow)
+	}
+	if md.Status != run.StatusInProgress {
+		return fmt.Errorf("runopen: idea %s/%s is already %s", projectID, ideaSlug, md.Status)
+	}
+	return markIdeaPromoted(root, md, destProjectID, destSlug, stdout, stderr)
+}
+
 // markIdeaPromoted bumps the source idea run's status to
 // StatusPromoted and commits the transition with a MoE-Promoted-To
 // trailer pointing at the destination run. Separate commit from the
 // destination's open: two short commits keep git history honest (one
 // event per commit).
-func markIdeaPromoted(root string, md *run.Metadata, dest *run.Metadata, stdout, stderr io.Writer) error {
+func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug string, stdout, stderr io.Writer) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, dest.Project, dest.ID) +
+	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, destProjectID, destSlug) +
 		trailers.Block{
 			Run:        md.ID,
 			Project:    md.Project,
 			Workflow:   dash.IdeaWorkflow,
-			PromotedTo: dest.Project + "/" + dest.ID,
+			PromotedTo: destProjectID + "/" + destSlug,
 		}.String()
 	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-promote",

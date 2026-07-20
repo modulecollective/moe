@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/dash"
@@ -421,5 +422,67 @@ func TestIdeaTransitionsReturnRunNotFoundForMissingRuns(t *testing.T) {
 	}
 	if err := ReopenIdea(root, "ghost", "ghost", io.Discard, io.Discard); !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("ReopenIdea: want ErrRunNotFound, got %v", err)
+	}
+}
+
+// TestPromoteRefusesTwinDestination pins the structural backstop.
+// Promote can only mint, and a twin run is never minted here — its slug
+// is harness-dated, it takes no seed, and it is subject to a
+// one-pass-in-flight rule that only the reflect core enforces. The
+// refusal lands before the idea is even loaded, so a caller that reached
+// this by accident gets an error rather than a wrong-shaped run.
+func TestPromoteRefusesTwinDestination(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+
+	_, err := Promote(root, "alpha", "my-idea", PromoteOptions{
+		Workflow:   "twin",
+		FirstStage: "vision",
+	}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("Promote(twin) = nil error, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "cannot promote an idea into a twin run") {
+		t.Fatalf("err = %v, want the twin refusal", err)
+	}
+	// Refused before touching the idea: still in progress.
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress {
+		t.Fatalf("idea status = %q, want untouched in_progress", md.Status)
+	}
+}
+
+// TestMarkPromotedWritesTheEdgeForAnUnmintedDestination: the seam pulse
+// uses when the reflect core resolved the destination — the promotion
+// edge is byte-identical to the one Promote writes for a run it opened.
+func TestMarkPromotedWritesTheEdgeForAnUnmintedDestination(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	seedRunMetadata(t, root, "alpha", "reflect-2026-05-14", "twin", run.StatusInProgress)
+
+	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", io.Discard, io.Discard); err != nil {
+		t.Fatalf("MarkPromoted: %v", err)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusPromoted {
+		t.Fatalf("idea status = %q, want promoted", md.Status)
+	}
+	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
+	for _, want := range []string{
+		"Promote idea alpha/my-idea → alpha/reflect-2026-05-14",
+		"MoE-Promoted-To: alpha/reflect-2026-05-14",
+		"MoE-Workflow: idea",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit message %q, want %q", msg, want)
+		}
+	}
+	// Second call refuses: the idea is no longer in progress.
+	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", io.Discard, io.Discard); err == nil {
+		t.Error("MarkPromoted on a promoted idea = nil error, want a refusal")
 	}
 }
