@@ -211,6 +211,116 @@ func TestSpawnSkipsSlugsAlreadyInProgress(t *testing.T) {
 	}
 }
 
+func TestSpawnPromotesTaggedIdea(t *testing.T) {
+	root := spawnFixture(t)
+	idea, err := run.New(root, "moe", run.Options{
+		ID:        "cleanup-foo",
+		Workflow:  "idea",
+		PromoteTo: "sdlc",
+		SeedDocs:  map[string]string{"idea": "# Clean up foo\n\nUse the existing helper.\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var errb bytes.Buffer
+	minted := maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{{
+		Slug: "cleanup-foo", Title: "Ignored title", Why: "clears the bar", Design: "# ignored seed\n",
+	}}, io.Discard, &errb)
+	destID := minted["cleanup-foo"]
+	if destID == "" {
+		t.Fatalf("tagged idea was not promoted; stderr=%q", errb.String())
+	}
+	source, err := run.Load(root, "moe", idea.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.Status != run.StatusPromoted {
+		t.Fatalf("idea status = %q, want promoted", source.Status)
+	}
+	dest, err := run.Load(root, "moe", destID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dest.Workflow != "sdlc" || dest.SpawnedBy != "moe/pulse-two" {
+		t.Fatalf("destination = %+v, want sdlc spawned by pulse", dest)
+	}
+	seed, err := os.ReadFile(filepath.Join(root, run.ContentPath("moe", destID, "design")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(seed), "Use the existing helper") || strings.Contains(string(seed), "ignored seed") {
+		t.Fatalf("promoted seed did not come solely from idea canvas:\n%s", seed)
+	}
+	if !strings.Contains(errb.String(), "ignoring design body") {
+		t.Fatalf("stderr=%q, want advisory for ignored design", errb.String())
+	}
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.SpawnedBy["moe/"+destID]; got != "moe/pulse-two" {
+		t.Fatalf("SpawnedBy trailer index = %q, want moe/pulse-two", got)
+	}
+}
+
+func TestSpawnDoesNotPromoteUntaggedIdea(t *testing.T) {
+	root := spawnFixture(t)
+	if _, err := run.New(root, "moe", run.Options{
+		ID: "needs-triage", Workflow: "idea", SeedDocs: map[string]string{"idea": "# Needs triage\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var errb bytes.Buffer
+	minted := maybeSpawnFixRuns(root, "moe", "pulse-two",
+		[]pulseSpawn{{Slug: "needs-triage", Title: "Needs triage"}}, io.Discard, &errb)
+	if len(minted) != 0 {
+		t.Fatalf("minted = %v, want structural refusal", minted)
+	}
+	idea, err := run.Load(root, "moe", "needs-triage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idea.Status != run.StatusInProgress {
+		t.Fatalf("untagged idea status = %q, want in_progress", idea.Status)
+	}
+	if !strings.Contains(errb.String(), "requires operator triage") {
+		t.Fatalf("stderr=%q, want untagged refusal", errb.String())
+	}
+}
+
+func TestSpawnTaggedIdeaSkipsWhenDestinationAlreadyLive(t *testing.T) {
+	root := spawnFixture(t)
+	if _, err := run.New(root, "moe", run.Options{
+		ID: "cleanup-foo", Workflow: "idea", PromoteTo: "sdlc", SeedDocs: map[string]string{"idea": "# Cleanup\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.New(root, "moe", run.Options{
+		ID: "cleanup-foo-2026-07-20", Workflow: "sdlc", SeedDocs: map[string]string{"design": "# Already queued\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var errb bytes.Buffer
+	minted := maybeSpawnFixRuns(root, "moe", "pulse-two",
+		[]pulseSpawn{{Slug: "cleanup-foo", Title: "Cleanup"}}, io.Discard, &errb)
+	if len(minted) != 0 {
+		t.Fatalf("minted = %v, want existing destination to dedupe", minted)
+	}
+	idea, err := run.Load(root, "moe", "cleanup-foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idea.Status != run.StatusInProgress {
+		t.Fatalf("idea status = %q, want untouched in_progress", idea.Status)
+	}
+	if !strings.Contains(errb.String(), "already has a live run") {
+		t.Fatalf("stderr=%q, want live-run skip", errb.String())
+	}
+}
+
 // TestSpawnSkipsSlugsAlreadyPushed: a fix pushed with `--pr` is waiting
 // on a human to merge, so whatever it fixes is still broken on the
 // default branch. Re-proposing it is the duplicate the guard exists to

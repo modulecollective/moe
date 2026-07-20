@@ -82,9 +82,11 @@ Format: - [ ] `slug` — Title. The same three load-bearing tokens as
 followups below, parsed by the same grammar: the `- [ ]` checkbox,
 the backtick-quoted `slug` (lowercase, hyphenated), and the em-dash
 `—` before a terse title. Any other shape is **rejected at close**,
-not silently dropped. Follow with an indented body (two-space
-indent) whose first paragraph is the `applies-when:` heuristic and
-whose remaining paragraphs are the lore entry prose:
+not silently dropped. Lore entries never carry the optional workflow
+tag described for followups; a tag here is rejected. Follow with an
+indented body (two-space indent) whose first paragraph is the
+`applies-when:` heuristic and whose remaining paragraphs are the lore
+entry prose:
 
   - [ ] `compose-tailscale-binds` — Reaching compose ports from the laptop
 
@@ -122,6 +124,19 @@ paragraphs (two-space indent, blank lines between paragraphs):
     Why: bar/baz both reach into foo's internals; foo.go:42 is
     the load-bearing assumption. Fix sketch: <one sentence>.
 
+When the work is mechanical, bounded, verifiable, and an agent could
+execute it without an operator decision, optionally tag the destination
+workflow in parentheses after the closing backtick:
+
+  - [ ] `cleanup-foo` (sdlc) — Clean up foo helper
+
+The tag licenses a future pulse to promote the harvested idea under its
+own slug; it does not schedule or start the work. Leave investigations,
+policy calls, speculative work, and anything needing human judgment
+untagged — untagged is the default and stays operator-triaged. Tags are
+validated at close against staged, chainable workflows; unknown or
+non-chainable tags are rejected rather than silently ignored.
+
 Content written in any other shape — plain bullets, prose, or a
 hyphen where the em-dash belongs — is **rejected at close**, not
 silently dropped: the harvest fails loud so you (or the operator)
@@ -144,7 +159,7 @@ with `<project>/`. A bare slug (the default) files against the
 current project; a prefixed slug routes the idea to the named
 project, which must already be registered:
 
-  - [ ] `claudia/inherit-nginx-identity` — Claudia should inherit the nginx identity injection
+  - [ ] `claudia/inherit-nginx-identity` (sdlc) — Claudia should inherit the nginx identity injection
 
 The line stays in *this* run's `followups.md` and is harvested at
 close like any other; only the destination changes. Provenance

@@ -186,6 +186,49 @@ func TestNewPersistsReopenOf(t *testing.T) {
 	}
 }
 
+func TestNewPersistsPromoteTo(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	md, err := New(root, "tele", Options{
+		Workflow:  "idea",
+		ID:        "cleanup-foo",
+		PromoteTo: "sdlc",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if md.PromoteTo != "sdlc" {
+		t.Fatalf("returned PromoteTo = %q, want sdlc", md.PromoteTo)
+	}
+	loaded, err := Load(root, "tele", "cleanup-foo")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.PromoteTo != "sdlc" {
+		t.Fatalf("loaded PromoteTo = %q, want sdlc", loaded.PromoteTo)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, Dir("tele", "cleanup-foo"), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"promote_to": "sdlc"`) {
+		t.Fatalf("run.json missing promote_to:\n%s", raw)
+	}
+
+	untagged, err := New(root, "tele", Options{Workflow: "idea", ID: "needs-triage"})
+	if err != nil {
+		t.Fatalf("New untagged: %v", err)
+	}
+	raw, err = os.ReadFile(filepath.Join(root, Dir("tele", untagged.ID), "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "promote_to") {
+		t.Fatalf("untagged run.json should omit promote_to:\n%s", raw)
+	}
+}
+
 // deleteRunDir removes a run dir and commits the removal, so the
 // working tree is clean again while the original `Open run` commit
 // still sits in history — the state a manual `rm -rf` + commit leaves

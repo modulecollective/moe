@@ -67,6 +67,9 @@ func parseLore(body []byte) (lines []string, todo []parsedLore, err error) {
 		return nil, nil, err
 	}
 	for _, e := range entries {
+		if e.promoteTo != "" {
+			return nil, nil, fmt.Errorf("line %d: lore entry must not carry a workflow tag", e.lineIdx+1)
+		}
 		// parseChecklist's shared regex permits a `<project>/` prefix for
 		// followups routing; a lore slug is a bare filename
 		// (lore/<slug>.md), so a `/` would write into a subdir. Reject it

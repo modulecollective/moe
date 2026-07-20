@@ -46,7 +46,8 @@ This header is auto-injected on editor pop; remove it freely.
 -->`
 
 // followupOpenRE matches an unchecked entry. Captures the indent + box
-// prefix (group 1), the slug (group 2), and the title (group 3 — may
+// prefix (group 1), the slug (group 2), the optional promotion workflow
+// (group 3), and the title (group 4 — may
 // be empty after trim, in which case parseFollowups raises a more
 // specific "title is empty" error). The em-dash separator (U+2014) is
 // the design's required form; a hyphen or `--` would be ambiguous with
@@ -58,8 +59,9 @@ This header is auto-injected on editor pop; remove it freely.
 // here can't later be rejected by run.New. A bare slug (no `/`) keeps
 // today's behaviour — the idea lands in the current project. This regex
 // is SHARED with lore via parseChecklist; lore re-narrows it by
-// rejecting any `/` (see parseLore) rather than forking a parser.
-var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`\\s+—\\s*(.*?)\\s*$")
+// rejecting any `/` or workflow tag (see parseLore) rather than
+// forking a parser.
+var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
 
 // followupCheckboxRE detects any list item that looks like a checkbox,
 // open or done. Used to flag malformed unchecked entries that don't
@@ -82,12 +84,13 @@ var followupUncheckedShapeRE = regexp.MustCompile(`^\s*-\s+\[\s\]`)
 
 // parsedFollowup is one harvest candidate plucked from followups.md.
 type parsedFollowup struct {
-	lineIdx int    // zero-based index into the raw line slice
-	rawSlug string // exactly as on the line ("claudia/foo" or "foo") — mark-rewrite + dedup key
-	project string // resolved target project: explicit prefix, else current project
-	slug    string // bare base slug handed to createIdea ("foo", pre-disambiguation)
-	title   string // title to embed in the new idea's H1
-	body    string // optional dedented body markdown; "" means no body
+	lineIdx   int    // zero-based index into the raw line slice
+	rawSlug   string // exactly as on the line ("claudia/foo" or "foo") — mark-rewrite + dedup key
+	project   string // resolved target project: explicit prefix, else current project
+	slug      string // bare base slug handed to createIdea ("foo", pre-disambiguation)
+	promoteTo string // optional workflow tag persisted on the harvested idea
+	title     string // title to embed in the new idea's H1
+	body      string // optional dedented body markdown; "" means no body
 }
 
 // parseFollowups scans body and returns the lines (split on '\n') plus
@@ -121,13 +124,23 @@ func parseFollowups(body []byte, currentProject string) (lines []string, todo []
 		if i := strings.IndexByte(e.slug, '/'); i >= 0 {
 			project, slug = e.slug[:i], e.slug[i+1:]
 		}
+		if e.promoteTo != "" {
+			wf, lookupErr := LookupWorkflow(e.promoteTo)
+			if lookupErr != nil {
+				return nil, nil, fmt.Errorf("line %d: follow-up workflow tag %q is not registered", e.lineIdx+1, e.promoteTo)
+			}
+			if !chainableWorkflow(e.promoteTo) || len(wf.Stages()) == 0 {
+				return nil, nil, fmt.Errorf("line %d: follow-up workflow tag %q is not a staged, chainable workflow", e.lineIdx+1, e.promoteTo)
+			}
+		}
 		todo = append(todo, parsedFollowup{
-			lineIdx: e.lineIdx,
-			rawSlug: e.slug,
-			project: project,
-			slug:    slug,
-			title:   e.title,
-			body:    e.body,
+			lineIdx:   e.lineIdx,
+			rawSlug:   e.slug,
+			project:   project,
+			slug:      slug,
+			promoteTo: e.promoteTo,
+			title:     e.title,
+			body:      e.body,
 		})
 	}
 	return lines, todo, nil
@@ -271,7 +284,7 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 			// Route to the entry's target project (its prefix, else the
 			// current project). openTrailers' MoE-From-Run stays pointed
 			// at the source run — that's where the followup was captured.
-			md, err := createIdea(root, fu.project, fu.slug, canvasBody, openTrailers)
+			md, err := createIdea(root, fu.project, fu.slug, canvasBody, fu.promoteTo, openTrailers)
 			if err != nil {
 				return "", err
 			}

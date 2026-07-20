@@ -219,11 +219,12 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 // loop inside runClose).
 //
 // body is the seed canvas body; an empty body falls back to "# slug\n"
-// so the canvas isn't blank. extra carries optional trailers riding
-// along on the open commit (e.g. MoE-From-Run for harvested ideas).
-// Returns the opened run's metadata so callers can see the resolved
-// slug.
-func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*run.Metadata, error) {
+// so the canvas isn't blank. promoteTo is the optional harvested
+// follow-up workflow tag persisted on the idea. extra carries optional
+// trailers riding along on the open commit (e.g. MoE-From-Run for
+// harvested ideas). Returns the opened run's metadata so callers can
+// see the resolved slug.
+func createIdea(root, projectID, slugBase, body, promoteTo string, extra trailers.Block) (*run.Metadata, error) {
 	if slugBase == "" {
 		return nil, fmt.Errorf("idea: empty slug")
 	}
@@ -233,10 +234,11 @@ func createIdea(root, projectID, slugBase, body string, extra trailers.Block) (*
 			body = fmt.Sprintf("# %s\n", candidate)
 		}
 		opts := run.Options{
-			ID:       candidate,
-			Workflow: dash.IdeaWorkflow,
-			SeedDocs: map[string]string{dash.IdeaDocID: body},
-			Trailers: extra,
+			ID:        candidate,
+			Workflow:  dash.IdeaWorkflow,
+			SeedDocs:  map[string]string{dash.IdeaDocID: body},
+			PromoteTo: promoteTo,
+			Trailers:  extra,
 			// Callers (idea new, harvest) gate on dirty state above.
 			// The harvester in particular runs while followups.md is
 			// dirty by design — let those modifications stand and

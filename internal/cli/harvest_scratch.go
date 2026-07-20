@@ -12,10 +12,11 @@ import (
 )
 
 type checklistEntry struct {
-	lineIdx int
-	slug    string
-	title   string
-	body    string
+	lineIdx   int
+	slug      string
+	promoteTo string
+	title     string
+	body      string
 }
 
 // atxHeadingRE matches a markdown ATX heading (`# ` … `###### `). A
@@ -81,7 +82,8 @@ func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []
 				return nil, nil, fmt.Errorf("line %d: malformed %s %q (expected: - [ ] `slug` — Title)", i+1, noun, line)
 			}
 			slug := m[2]
-			title := strings.TrimSpace(m[3])
+			promoteTo := m[3]
+			title := strings.TrimSpace(m[4])
 			if title == "" {
 				return nil, nil, fmt.Errorf("line %d: %s title is empty", i+1, noun)
 			}
@@ -89,7 +91,7 @@ func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []
 				return nil, nil, fmt.Errorf("line %d: %s slug %q duplicates line %d", i+1, slugNoun, slug, prev+1)
 			}
 			seen[slug] = i
-			todo = append(todo, checklistEntry{lineIdx: i, slug: slug, title: title})
+			todo = append(todo, checklistEntry{lineIdx: i, slug: slug, promoteTo: promoteTo, title: title})
 			openIdx = len(todo) - 1
 			continue
 		}

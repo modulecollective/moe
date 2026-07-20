@@ -173,11 +173,14 @@ Most of what you find is a followup: a line in a file, promoted to an
 idea, pulled when the operator decides. That is still the default and
 still where the overwhelming majority of findings belong.
 
-A `spawn` entry is different. It opens a real run. The harness mints a
-parked sdlc run per entry and seeds its design canvas with your
-`design` markdown. That is all `spawn` does — every entry parks
-standalone and unchained. Ordering them is a separate claim you make
-in `chain`, against a separate bar.
+A `spawn` entry is different. It opens a real run. For a new slug, the
+harness mints a parked sdlc run and seeds its design canvas with your
+`design` markdown. When the same slug names a harvested idea carrying a
+workflow tag, the harness promotes that idea into the tagged workflow
+instead; the idea canvas is the seed, so omit `design`. Untagged ideas
+remain flag-only and require the operator. Every result parks standalone
+and unchained. Ordering it is a separate claim you make in `chain`,
+against a separate bar.
 
     "spawn": [
       {"slug": "fix-ci-red-main",
@@ -219,6 +222,14 @@ you are hoping about. Zero is the normal number.
 The `slug` is a lowercase-kebab base (the harness dates it); `why` is
 the one line that names the evidence — the failing test, the URL, the
 contradicted line.
+
+A tagged idea that clears the same mechanical/bounded/verifiable bar is
+proposed under its existing slug. Do not invent a fresh slug or repeat
+its design: the harness promotes rather than duplicates it. The tag is
+necessary, not sufficient — you still make the scheduling judgment.
+An untagged idea stays advisory-only. Promotion is not closing an idea;
+the normal promotion transition records where the work went, so the
+backlog-hygiene rule to never close ideas still stands.
 
 ## Grooming lanes — where queued work goes and in what order
 

@@ -92,6 +92,11 @@ type Metadata struct {
 	// empty on every other path. omitempty keeps pre-existing run.json
 	// bodies unchanged.
 	ReopenOf string `json:"reopen_of,omitempty"`
+	// PromoteTo, when non-empty, names the workflow a harvested follow-up
+	// idea is licensed to become. The filing agent sets the tag; the pulse
+	// still decides whether and when to promote it. Empty ideas remain
+	// operator-triaged and cannot be machine-promoted.
+	PromoteTo string `json:"promote_to,omitempty"`
 	// SpawnedBy, when non-empty, names the run that machine-opened this
 	// run as a consequence of a terminal transition (the pulse a
 	// close/push tails, a future pulse-spawns-reflect, …). The general
@@ -184,6 +189,11 @@ type Options struct {
 	// signal for dash / journal index, the metadata field is the
 	// cheap read path. Empty on every other path.
 	ReopenOf string
+
+	// PromoteTo, when non-empty, persists the workflow tag carried by a
+	// harvested follow-up idea. It is deliberately not exposed by `idea
+	// new`: operator-authored ideas stay operator-triaged.
+	PromoteTo string
 
 	// SpawnedBy, when non-empty, names the qualified "<project>/<slug>" of
 	// the run that machine-opened this run. Persisted to Metadata.SpawnedBy.
@@ -320,6 +330,7 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		Created:   now().Local().Format("2006-01-02"),
 		Workspace: opts.Workspace,
 		ReopenOf:  opts.ReopenOf,
+		PromoteTo: opts.PromoteTo,
 		SpawnedBy: opts.SpawnedBy,
 		Documents: map[string]*Document{},
 	}

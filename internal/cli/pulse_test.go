@@ -778,3 +778,86 @@ func TestPulseSurveyDueButTwinInProgressSkips(t *testing.T) {
 		t.Fatalf("twin runs = %v, want the pre-seeded reflect-2026-05-14 untouched", tw)
 	}
 }
+
+// TestTaggedFollowupHarvestPromoteGroomAndKick is the composition
+// regression for the gap this feature closes. A real harvested followup
+// becomes a tagged idea; a real headless pulse turn (fake claude on PATH)
+// names that live idea in spawn + chain; the harness promotes it, grooms
+// it, and reaches the self-kick door. The fake refuses the destination's
+// design turn so the test stops after proving the kick was attempted —
+// stage execution itself is covered by the cascade tests.
+func TestTaggedFollowupHarvestPromoteGroomAndKick(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("MOE_AGENT", "claude")
+	t.Setenv("NO_COLOR", "1")
+
+	source, err := run.New(root, "moe", run.Options{ID: "source-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFollowups(t, root, "moe", source.ID, strings.Join([]string{
+		"- [ ] `tagged-fix` (sdlc) — Apply the mechanical fix",
+		"",
+		"  The idea canvas is the only promotion seed.",
+		"",
+	}, "\n"))
+	if err := harvestFollowups(root, "moe", source.ID, "sdlc", true); err != nil {
+		t.Fatalf("harvestFollowups: %v", err)
+	}
+	if err := run.StageAndCommit(root, "test: land harvested audit line", run.FollowupsPath("moe", source.ID)); err != nil {
+		t.Fatalf("commit harvested followup: %v", err)
+	}
+
+	fakeClaudeOnPath(t, `#!/bin/sh
+prompt=
+next=0
+for a in "$@"; do
+  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
+  case "$a" in --append-system-prompt) next=1 ;; esac
+done
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+ticks=$(printf '\140\140\140')
+case "$canvas" in
+  */documents/pulse/content.md)
+    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","reflect":{"due":false},"spawn":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}],"chain":[{"runs":["tagged-fix"],"kick":true}]}' "$ticks" > "$canvas"
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`)
+
+	var out, errb bytes.Buffer
+	defer withRideMode(rideDynamic)()
+	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, nil, &out, &errb); code != 0 {
+		t.Fatalf("pulse exit=%d stderr=%q", code, errb.String())
+	}
+
+	idea, err := run.Load(root, "moe", "tagged-fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idea.Status != run.StatusPromoted {
+		t.Fatalf("idea status=%q, want promoted", idea.Status)
+	}
+	var promoted *run.Metadata
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == "sdlc" && md.ID != source.ID {
+			promoted = md
+		}
+	}
+	if promoted == nil || promoted.SpawnedBy == "" {
+		t.Fatalf("promoted run = %+v, want machine lineage", promoted)
+	}
+	if !strings.Contains(errb.String(), "pulse: kicking moe/"+promoted.ID+" (dynamic)") {
+		t.Fatalf("pulse never reached self-kick for promoted run; stderr=%q", errb.String())
+	}
+}

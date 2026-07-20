@@ -72,6 +72,7 @@ type PromoteOptions struct {
 	FirstStage string // destination workflow's first-stage doc id (gets the seeded idea canvas)
 	Workspace  string // optional workspace binding for the destination
 	Agent      string // optional agent override persisted to run.json
+	SpawnedBy  string // optional qualified machine spawner persisted to metadata + trailer
 }
 
 // Promoted is Promote's result. Run is the destination run's
@@ -146,7 +147,8 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 		IDBase:      ideaSlug,
 		SeedDocs:    map[string]string{opts.FirstStage: seed},
 		SubjectFrom: "idea " + ideaSlug,
-		Trailers:    trailers.Block{Idea: ideaSlug},
+		SpawnedBy:   opts.SpawnedBy,
+		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy},
 	}
 
 	md, err := Open(root, projectID, runOpts, stdout, stderr)

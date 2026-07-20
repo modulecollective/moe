@@ -59,6 +59,7 @@ func TestMarkHarvested(t *testing.T) {
 		{"tab in box", "- [\t] `slug` — Title", base, "- [x] `slug-2` — Title", true},
 		{"indented", "  - [ ] `slug` — Title", base, "  - [x] `slug-2` — Title", true},
 		{"prefixed slug", "- [ ] `claudia/foo` — Title", "claudia/foo", "- [x] `claudia/foo-2` — Title", true},
+		{"workflow tag", "- [ ] `slug` (sdlc) — Title", base, "- [x] `slug-2` (sdlc) — Title", true},
 		{"non-matching line", "not a checkbox at all", base, "", false},
 		{"wrong slug", "- [ ] `other` — Title", base, "", false},
 	}
@@ -76,6 +77,65 @@ func TestMarkHarvested(t *testing.T) {
 				t.Fatalf("markHarvested(%q) = %q, want %q", tc.line, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseFollowupsWorkflowTag(t *testing.T) {
+	body := []byte("- [ ] `cleanup-foo` (sdlc) — Clean up foo\n")
+	_, todo, err := parseFollowups(body, "tele")
+	if err != nil {
+		t.Fatalf("parseFollowups: %v", err)
+	}
+	if len(todo) != 1 || todo[0].promoteTo != "sdlc" {
+		t.Fatalf("parsed followups = %+v, want promoteTo=sdlc", todo)
+	}
+}
+
+func TestParseFollowupsRejectsInvalidWorkflowTags(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tag  string
+	}{
+		{"unknown", "missing-workflow"},
+		{"non-chainable", "idea"},
+		{"no-stages", chainWorkflow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte("- [ ] `cleanup-foo` (" + tc.tag + ") — Clean up foo\n")
+			_, _, err := parseFollowups(body, "tele")
+			if err == nil || !strings.Contains(err.Error(), "line 1") {
+				t.Fatalf("tag %q error = %v, want line-numbered refusal", tc.tag, err)
+			}
+		})
+	}
+}
+
+func TestParseLoreRejectsWorkflowTag(t *testing.T) {
+	_, _, err := parseLore([]byte("- [ ] `portable-fact` (sdlc) — Portable fact\n"))
+	if err == nil || !strings.Contains(err.Error(), "must not carry a workflow tag") {
+		t.Fatalf("parseLore tagged entry error = %v, want workflow-tag refusal", err)
+	}
+}
+
+func TestSDLCClosePersistsFollowupWorkflowTag(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", "- [ ] `cleanup-foo` (sdlc) — Clean up foo\n")
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("close exit=%d stderr=%q", code, errb.String())
+	}
+	idea, err := run.Load(root, "tele", "cleanup-foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idea.PromoteTo != "sdlc" {
+		t.Fatalf("idea PromoteTo = %q, want sdlc", idea.PromoteTo)
+	}
+	if got := readFollowups(t, root, "tele", "ship-it"); !strings.Contains(got, "`cleanup-foo` (sdlc) —") {
+		t.Fatalf("audit line lost workflow tag:\n%s", got)
 	}
 }
 

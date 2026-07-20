@@ -566,9 +566,10 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 // invisible absence. The bar — mechanical, bounded, verifiable — is
 // taught in the stage fragment, where judgment belongs.
 //
-// The one mechanical guard is dedupe: an entry whose slug base already
-// names a live — in-progress or pushed — run is skipped, so a red CI
-// check that survives two pulses doesn't queue the same fix twice.
+// The one mechanical exception to dedupe is a live idea carrying a
+// harvested follow-up's workflow tag: the pulse promotes that capture
+// through the same seam as `--from-idea`. Untagged ideas remain behind a
+// structural human-triage fence. Every other live match still skips.
 //
 // Warn-only throughout, like the reflect spawn beside it: the report and
 // filings are already durable, so a failed mint is a spawn-by-hand-later,
@@ -591,7 +592,43 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 			continue
 		}
 		if slugBaseMatches(live, slug) {
-			moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
+			matches, scanErr := matchingLiveRuns(root, projectID, slug)
+			if scanErr != nil {
+				moePrintf(stderr, "pulse: spawn: scan live match for %s/%s: %v\n", projectID, slug, scanErr)
+				continue
+			}
+			if len(matches) != 1 || matches[0].Workflow != "idea" {
+				moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
+				continue
+			}
+			idea := matches[0]
+			if idea.PromoteTo == "" {
+				moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
+				continue
+			}
+			wf, lookupErr := LookupWorkflow(idea.PromoteTo)
+			if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
+				moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
+				continue
+			}
+			if strings.TrimSpace(s.Design) != "" {
+				moePrintf(stderr, "pulse: spawn: ignoring design body for tagged idea %s/%s; the idea canvas is the seed\n", projectID, idea.ID)
+			}
+			promoted, promoteErr := runopen.Promote(root, projectID, idea.ID, runopen.PromoteOptions{
+				Workflow:   idea.PromoteTo,
+				FirstStage: wf.Stages()[0],
+				SpawnedBy:  projectID + "/" + pulseSlug,
+			}, stdout, stderr)
+			if promoteErr != nil {
+				moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
+				continue
+			}
+			if promoted.MarkErr != nil {
+				moePrintf(stderr, "pulse: warning: promoted %s/%s but could not mark the idea: %v\n", projectID, promoted.Run.ID, promoted.MarkErr)
+			}
+			live = append(live, promoted.Run.ID)
+			minted[slug] = promoted.Run.ID
+			moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, idea.PromoteTo, projectID, promoted.Run.ID)
 			continue
 		}
 		title := strings.TrimSpace(s.Title)
@@ -616,6 +653,27 @@ func maybeSpawnFixRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, s
 		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
 	}
 	return minted
+}
+
+// matchingLiveRuns returns every live run derived from base. The pulse
+// only promotes when the tagged idea is the sole match: a dated live
+// destination beside it means a prior promotion already queued the work,
+// even if marking the source idea failed.
+func matchingLiveRuns(root, projectID, base string) ([]*run.Metadata, error) {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil, err
+	}
+	var matches []*run.Metadata
+	for _, md := range mds {
+		if md.Project != projectID || (md.Status != run.StatusInProgress && md.Status != run.StatusPushed) {
+			continue
+		}
+		if slugBaseMatches([]string{md.ID}, base) {
+			matches = append(matches, md)
+		}
+	}
+	return matches, nil
 }
 
 // spawnDesignSeed builds the design canvas body a spawned run opens
