@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/md"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -255,6 +256,132 @@ type runVM struct {
 	// an in-progress idea this is edit, promote, and close; for a
 	// closed idea this is reopen; other runs render no actions.
 	Actions []runAction
+	// Traces is what the run left behind outside its canvases —
+	// follow-ups, lore, and its twin note — each landed one linked to
+	// what it became. Zero value renders no sections.
+	Traces runTracesVM
+}
+
+// RunTraces is the non-canvas residue of one run, as the run page shows
+// it: the checklist entries it left in followups.md and
+// feedback/lore.md, and its feedback/twin.md note. Bodies cross the
+// seam as markdown; serve renders them, same as every other doc.
+type RunTraces struct {
+	Followups []RunTrace
+	Lore      []RunTrace
+	// TwinNote is nil when the run left no note. Reflect ingests twin
+	// feedback a file at a time, so there's one trace per run, not one
+	// per note inside the file.
+	TwinNote *TwinNoteTrace
+}
+
+// RunTrace is one checklist entry from followups.md or
+// feedback/lore.md. A harvested entry (Done) that still resolves to
+// what it became carries TargetURL; one the operator checked by hand to
+// drop it doesn't. Raw is set instead of Slug/Title when the line
+// didn't match the grammar — display is lenient where harvest is
+// strict, so a malformed file degrades to plain text rather than a 500.
+type RunTrace struct {
+	Done  bool
+	Raw   string
+	Slug  string
+	Title string
+	Body  string // markdown; the indented `Why:` block, "" when absent
+	// TargetURL is the promoted idea run (/run/<p>/<slug>) or lore entry
+	// (/lore/<slug>); "" when nothing landed or the target is gone.
+	TargetURL string
+	// TargetStatus is the target run's current status, rendered as a
+	// badge. Empty for lore, which has no lifecycle.
+	TargetStatus string
+}
+
+// TwinNoteTrace is a run's feedback/twin.md and its ingestion state.
+// Reflected with an empty ReflectRun means a pass covered the note but
+// didn't record which — the page says so without a link.
+type TwinNoteTrace struct {
+	Body       string // markdown
+	Reflected  bool
+	ReflectRun string
+}
+
+// runTracesVM is the rendered form of RunTraces.
+type runTracesVM struct {
+	Followups []runTraceVM
+	Lore      []runTraceVM
+	TwinNote  *twinNoteVM
+}
+
+type runTraceVM struct {
+	Done         bool
+	Raw          string
+	Slug         string
+	Title        string
+	BodyHTML     template.HTML
+	TargetURL    string
+	TargetStatus string
+}
+
+type twinNoteVM struct {
+	BodyHTML template.HTML
+	// Status is the chip text: "awaiting next reflect pass", "folded
+	// into the twin", or "folded in by" when ReflectRun names the pass.
+	Status     string
+	ReflectRun string
+	ReflectURL string
+}
+
+// gatherRunTraces resolves the run's non-canvas traces. No callback
+// wired, or a gather error, yields the zero value — the page renders as
+// it did before the sections existed. Same posture as gatherChainState:
+// a broken trace file must degrade its section, never the page.
+func (s *Server) gatherRunTraces(projectID, slug string) runTracesVM {
+	if s.opts.GatherRunTraces == nil {
+		return runTracesVM{}
+	}
+	traces, err := s.opts.GatherRunTraces(projectID, slug)
+	if err != nil {
+		s.logf("run traces %s/%s: %v", projectID, slug, err)
+		return runTracesVM{}
+	}
+	out := runTracesVM{
+		Followups: traceVMs(traces.Followups),
+		Lore:      traceVMs(traces.Lore),
+	}
+	if n := traces.TwinNote; n != nil {
+		vm := &twinNoteVM{
+			BodyHTML:   template.HTML(md.Render(n.Body, nil)),
+			Status:     "awaiting next reflect pass",
+			ReflectRun: n.ReflectRun,
+		}
+		switch {
+		case n.Reflected && n.ReflectRun != "":
+			vm.Status = "folded in by"
+			vm.ReflectURL = "/run/" + projectID + "/" + n.ReflectRun
+		case n.Reflected:
+			vm.Status = "folded into the twin"
+		}
+		out.TwinNote = vm
+	}
+	return out
+}
+
+func traceVMs(traces []RunTrace) []runTraceVM {
+	var out []runTraceVM
+	for _, t := range traces {
+		vm := runTraceVM{
+			Done:         t.Done,
+			Raw:          t.Raw,
+			Slug:         t.Slug,
+			Title:        t.Title,
+			TargetURL:    t.TargetURL,
+			TargetStatus: t.TargetStatus,
+		}
+		if t.Body != "" {
+			vm.BodyHTML = template.HTML(md.Render(t.Body, nil))
+		}
+		out = append(out, vm)
+	}
+	return out
 }
 
 // runAction is one peer affordance on the per-run page. Empty Method
@@ -785,6 +912,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		Slug:        slug,
 		Status:      md.Status,
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
+		Traces:      s.gatherRunTraces(projectID, slug),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
@@ -939,6 +1067,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 		vm.Status = "exited cleanly"
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
+	vm.Traces = s.gatherRunTraces(projectID, slug)
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
 	// A live-parented run is usually sdlc, but opening a chore can spawn
