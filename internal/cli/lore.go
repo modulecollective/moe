@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -18,19 +19,22 @@ import (
 // — so the second close-time editor pop is legible without re-learning
 // the shape. The only schema difference: each entry's indented body's
 // first paragraph is conventionally an `applies-when:` line; that
-// line is lifted into the promoted file's YAML frontmatter and the
-// remaining paragraphs become the entry prose.
+// line is lifted into the promoted file's YAML frontmatter. An
+// optional `supersedes:` paragraph names existing lore entries this
+// promotion replaces; the remaining paragraphs become entry prose.
 //
 //	- [ ] `compose-tailscale-binds` — Reaching compose ports from the laptop
 //
 //	  applies-when: project uses docker-compose on a fly-box reached via
 //	  tailscale, with no fly.toml services
 //
+//	  supersedes: compose-localhost-proxy, compose-localhost-proxy-2
+//
 //	  Under userspace tailscale on fly with no `fly.toml` services, …
 //
-// Promoted lore lands as lore/<resolved-slug>.md (the slug
-// auto-disambiguates against existing entries with -2, -3, …) and the
-// checklist line is rewritten to `- [x] \`resolved-slug\`` — same
+// Promoted lore lands as lore/<resolved-slug>.md (ordinary collisions
+// auto-disambiguate with -2, -3, …; supersedes may amend in place) and
+// the checklist line is rewritten to `- [x] \`resolved-slug\`` — same
 // audit-trail shape followups uses.
 
 // loreHeader is the editor-pop banner auto-injected onto
@@ -41,6 +45,8 @@ const loreHeader = `<!--
 feedback/lore.md — portable, cross-project facts captured this run.
 Save this file to promote each unchecked ` + "`- [ ]`" + ` entry into
 lore/<slug>.md at the bureaucracy root. Delete the line to skip.
+Use an indented ` + "`supersedes:`" + ` paragraph to replace or merge
+existing lore entries; the replacement is written before they are deleted.
 Lines marked ` + "`- [x]`" + ` are already promoted; leave them alone.
 This header is auto-injected on editor pop; remove it freely.
 -->`
@@ -51,8 +57,11 @@ type parsedLore struct {
 	slug        string // operator-supplied base slug (pre-disambiguation)
 	title       string // title written into the promoted file's frontmatter + H1
 	appliesWhen string // value lifted from the body's first `applies-when:` paragraph
-	body        string // dedented prose left over after the applies-when paragraph
+	supersedes  []string
+	body        string // dedented prose left over after the metadata paragraphs
 }
+
+var loreSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // parseLore scans body and returns the lines (split on '\n') plus the
 // unchecked entries to harvest. Reuses the followups parser primitives
@@ -77,12 +86,17 @@ func parseLore(body []byte) (lines []string, todo []parsedLore, err error) {
 		if strings.Contains(e.slug, "/") {
 			return nil, nil, fmt.Errorf("line %d: lore slug must not contain '/' (lore is global; no project to route to)", e.lineIdx+1)
 		}
-		appliesWhen, prose := splitAppliesWhen(e.body)
+		appliesWhen, rest := splitAppliesWhen(e.body)
+		supersedes, prose, err := splitSupersedes(rest)
+		if err != nil {
+			return nil, nil, fmt.Errorf("line %d: %w", e.lineIdx+1, err)
+		}
 		todo = append(todo, parsedLore{
 			lineIdx:     e.lineIdx,
 			slug:        e.slug,
 			title:       e.title,
 			appliesWhen: appliesWhen,
+			supersedes:  supersedes,
 			body:        prose,
 		})
 	}
@@ -99,8 +113,43 @@ func parseLore(body []byte) (lines []string, todo []parsedLore, err error) {
 // abort the entire close, and the in-prompt catalog renders
 // "(missing)" the same way so the operator sees and fixes it.
 func splitAppliesWhen(body string) (appliesWhen, rest string) {
+	appliesWhen, rest, ok := splitLoreParagraph(body, "applies-when:")
+	if !ok {
+		return "", body
+	}
+	return appliesWhen, rest
+}
+
+// splitSupersedes consumes a leading `supersedes:` paragraph and
+// validates its comma-separated lore slugs. Wrapped lines are joined
+// with spaces exactly like applies-when. A missing paragraph is a
+// no-op; a present malformed one aborts harvest before any files move.
+func splitSupersedes(body string) (supersedes []string, rest string, err error) {
+	value, rest, ok := splitLoreParagraph(body, "supersedes:")
+	if !ok {
+		return nil, body, nil
+	}
+	if value == "" {
+		return nil, "", fmt.Errorf("supersedes list is empty")
+	}
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(value, ",") {
+		slug := strings.TrimSpace(raw)
+		if slug == "" || !loreSlugRE.MatchString(slug) {
+			return nil, "", fmt.Errorf("invalid supersedes slug %q", slug)
+		}
+		if seen[slug] {
+			return nil, "", fmt.Errorf("duplicate supersedes slug %q", slug)
+		}
+		seen[slug] = true
+		supersedes = append(supersedes, slug)
+	}
+	return supersedes, rest, nil
+}
+
+func splitLoreParagraph(body, prefix string) (value, rest string, ok bool) {
 	if body == "" {
-		return "", ""
+		return "", "", false
 	}
 	bodyLines := strings.Split(body, "\n")
 	i := 0
@@ -108,10 +157,10 @@ func splitAppliesWhen(body string) (appliesWhen, rest string) {
 		i++
 	}
 	if i >= len(bodyLines) {
-		return "", ""
+		return "", "", false
 	}
-	if !strings.HasPrefix(strings.TrimSpace(bodyLines[i]), "applies-when:") {
-		return "", body
+	if !strings.HasPrefix(strings.TrimSpace(bodyLines[i]), prefix) {
+		return "", body, false
 	}
 	end := i + 1
 	for end < len(bodyLines) && bodyLines[end] != "" {
@@ -119,8 +168,8 @@ func splitAppliesWhen(body string) (appliesWhen, rest string) {
 	}
 	joined := strings.Join(bodyLines[i:end], " ")
 	joined = strings.TrimSpace(joined)
-	joined = strings.TrimPrefix(joined, "applies-when:")
-	appliesWhen = strings.TrimSpace(joined)
+	joined = strings.TrimPrefix(joined, prefix)
+	value = strings.TrimSpace(joined)
 
 	tail := bodyLines[end:]
 	for len(tail) > 0 && tail[0] == "" {
@@ -130,7 +179,7 @@ func splitAppliesWhen(body string) (appliesWhen, rest string) {
 		tail = tail[:len(tail)-1]
 	}
 	rest = strings.Join(tail, "\n")
-	return appliesWhen, rest
+	return value, rest, true
 }
 
 // renderLoreFile assembles the lore/<slug>.md body from one parsed
@@ -161,10 +210,12 @@ func renderLoreFile(title, appliesWhen, discoveredIn, prose string) string {
 }
 
 // promoteLoreEntry writes one parsed entry to lore/<resolved-slug>.md.
-// On slug collision walks -2, -3, … until a free slot is found —
-// mirrors createIdea's policy so the audit-trail line in
-// feedback/lore.md carries the resolved slug. The returned slug is
-// what gets rewritten into the `- [x]` line.
+// On an ordinary slug collision walks -2, -3, … until a free slot is
+// found. A supersede may reuse an existing destination when it names
+// that slug (an in-place amendment), or when an identical replacement
+// is already present from a partial prior attempt. The replacement is
+// always written before superseded files are deleted, leaving visible
+// junk rather than invisible absence if the operation is interrupted.
 func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, error) {
 	loreDir := wiki.LoreDir(root)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
@@ -177,16 +228,48 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		abs := filepath.Join(loreDir, slug+".md")
 		_, statErr := os.Stat(abs)
 		if errors.Is(statErr, os.ErrNotExist) {
-			if werr := os.WriteFile(abs, []byte(body), 0o644); werr != nil {
-				return "", fmt.Errorf("write %s: %w", abs, werr)
-			}
-			return slug, nil
+			break
 		}
 		if statErr != nil {
 			return "", fmt.Errorf("stat %s: %w", abs, statErr)
 		}
+		if stringSliceContains(p.supersedes, slug) {
+			break
+		}
+		if len(p.supersedes) > 0 {
+			existing, readErr := os.ReadFile(abs)
+			if readErr != nil {
+				return "", fmt.Errorf("read %s: %w", abs, readErr)
+			}
+			if string(existing) == body {
+				break
+			}
+		}
 		slug = fmt.Sprintf("%s-%d", p.slug, n)
 	}
+	abs := filepath.Join(loreDir, slug+".md")
+	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", abs, err)
+	}
+	for _, oldSlug := range p.supersedes {
+		if oldSlug == slug {
+			continue
+		}
+		oldPath := filepath.Join(loreDir, oldSlug+".md")
+		if err := os.Remove(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("delete superseded lore %s: %w", oldPath, err)
+		}
+	}
+	return slug, nil
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // harvestLore is the lore counterpart of harvestFollowups. Same flow,

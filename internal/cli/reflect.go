@@ -290,7 +290,7 @@ func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("reflect: post-flight scan: %w", err)
 	}
-	if findings.IsEmpty() {
+	if !findings.HasBlocking() {
 		return nil
 	}
 	moePrintln(stderr, "reflect: leftover hygiene findings — refusing to seal the pass.")

@@ -25,9 +25,15 @@ is what you edit.
 - **Cross-reference architecture.** If the architecture stage
   added a component, check whether its usage repeats an existing
   pattern (or implies a new one).
+- **Compress when the doc is over budget.** The kickoff's doc list
+  marks each doc's soft budget. If patterns is over it, cutting
+  entries back to their rule and a sighting or two is in scope
+  this pass even when no event touches a named shape — a
+  compression-only edit is a valid pass.
 
 If patterns hasn't moved this pass, say so. Pattern promotion is
-deliberately slow — a quiet pass is healthy.
+deliberately slow — a quiet pass is healthy, and a pass whose
+only work was compression counts.
 
 ## What not to do
 
@@ -41,6 +47,11 @@ deliberately slow — a quiet pass is healthy.
   involves lives in architecture; the ritual that exercises it
   lives in operations. Link by section heading instead of
   duplicating the rule here.
+- **Don't inline provenance narrative.** An entry keeps at most a
+  one-line trailer pointing at the run slug — "decided 2026-05;
+  see run `moe/<slug>`". How the shape earned (or lost) its name
+  lives in `history-summary.md` and the run canvas, not in
+  `patterns.md`.
 
 ## Canvas shape
 

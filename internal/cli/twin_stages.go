@@ -338,11 +338,12 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config, stubbed bool
 
 	if !findings.IsEmpty() {
 		b.WriteString("### Hygiene findings\n\n")
-		b.WriteString("Structural issues the pre-flight scan surfaced. The " +
+		b.WriteString("Structural issues and soft size warnings the pre-flight scan surfaced. The " +
 			"per-doc stages should fold relevant findings into their walks; " +
 			"the finalize stage owns inline cleanup. The engine re-scans at " +
-			"the finalize seal and refuses to ship a reflect with leftover " +
-			"findings.\n\n")
+			"the finalize seal and refuses to ship a reflect with leftover findings " +
+			"that are structural; over-budget docs remain a non-blocking " +
+			"compression nudge.\n\n")
 		b.WriteString(wiki.RenderFindings(findings))
 		b.WriteString("\n")
 	}

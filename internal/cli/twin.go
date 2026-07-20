@@ -18,13 +18,58 @@ import (
 // The structural kinship with kb lives at the wiki layer (wiki.Config
 // + ingest loop), not the workflow layer.
 
+// twinWikiIngestPrompt is the schema-config body wikiPreamble lays
+// down at the top of every reflect stage's system prompt — the one
+// block all five doc stages and finalize receive. It carries the
+// writing contract, because that contract has to reach the agent on
+// the live path: a twin doc's failure mode is not "wrong", it's
+// "bloated", and the guide that only ever licenses adding is how the
+// twin got to ~380 KB.
 const twinWikiIngestPrompt = `This is the project's closed-schema digital twin.
 Five managed docs hold the durable layer: vision, architecture,
 patterns, operations, and glossary. The doc set is fixed;
 reflect updates the contents based on observed events and clears
 structural hygiene findings. Decided edits (vision pivots,
 architectural intent) are confirmed by the operator in an
-interactive reflect session, not derived.`
+interactive reflect session, not derived.
+
+## How twin docs are written
+
+Twin docs are written for a reader who doesn't already know the
+project. **Primer-plus-reference, not changelog.** Current state
+only: durable rules, terse prose, examples in service of the rule.
+Every stage's recommended first read is this twin, so every
+kilobyte is a tax on every stage — write for the reader who has to
+pay it.
+
+**Provenance is a reference, not a retelling.** A decision keeps
+its rule plus at most a one-line trailer naming when and where —
+"decided 2026-05; see run ` + "`moe/<slug>`" + ` for the case". The
+narrative behind it lives in ` + "`history-summary.md`" + ` and the run
+canvases, both of which this bureaucracy already keeps. Do not
+inline the story a second time.
+
+**You have license to drop.** When a section describes a
+transition that has finished, delete it. When a feature was tried
+and removed, the rule it taught stays (YAGNI in this corner,
+surface area earned scrutiny, this kind of speculation didn't
+pay); the section about the removed feature does not. Extract the
+rule, drop the example. Compress over preserve.
+
+**Compression is a valid pass.** Each doc carries a soft budget,
+rendered next to it in the on-disk shape list below. A doc over budget is
+in scope for compression this pass even when no event touched it
+— a pass whose only edit was cutting a doc back is a real pass,
+not an empty one. The budgets nudge; nothing gates on them.
+
+**Single home per rule.** Each rule, principle, or named shape
+has one home. If it already lives in another managed doc, point
+there by section heading instead of restating it. Architecture
+owns shape and boundaries; patterns owns named recurring or
+refused shapes; operations owns rituals and tools; glossary is
+the index, not a second definition surface. A line that could
+plausibly live in two docs lives in one — pick by which doc the
+reader would search first.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
 // project's twin gets. Names, titles, purposes, and per-doc reflect
@@ -33,46 +78,57 @@ interactive reflect session, not derived.`
 // would: a code change here, not per-project config.
 var twinManagedDocs = []wiki.ManagedDoc{
 	{
-		Filename: "vision.md",
-		Title:    "Vision",
-		Purpose:  "What this project is trying to be — bets, problem, non-goals.",
+		Filename:     "vision.md",
+		Title:        "Vision",
+		Purpose:      "What this project is trying to be — bets, problem, non-goals.",
+		SoftBudgetKB: 8,
 		ReflectPrompt: "Compare what the project is actually doing against what " +
 			"the vision claims. Flag drift; surface gaps where recent work has " +
 			"wandered from the stated bets, problems, or non-goals. Do not " +
 			"propose a new vision — vision changes are decided edits, not " +
-			"observed ones.",
+			"observed ones. Keep current bets, not the history of how they " +
+			"were reached; compress the doc when it is over budget.",
 	},
 	{
-		Filename: "architecture.md",
-		Title:    "Architecture",
-		Purpose:  "Components, boundaries, load-bearing decisions.",
+		Filename:     "architecture.md",
+		Title:        "Architecture",
+		Purpose:      "Components, boundaries, load-bearing decisions.",
+		SoftBudgetKB: 48,
 		ReflectPrompt: "Did recent work introduce, remove, or reshape a " +
 			"component or boundary? Did a decision recorded here get " +
-			"revisited? Update the structural shape and the decisions list.",
+			"revisited? Rewrite the rule to current state and keep at most a " +
+			"one-line run reference for provenance; drop superseded narrative " +
+			"and compress the doc when it is over budget.",
 	},
 	{
-		Filename: "patterns.md",
-		Title:    "Patterns",
-		Purpose:  "Named patterns and anti-patterns; the project's prose-form eval suite.",
+		Filename:     "patterns.md",
+		Title:        "Patterns",
+		Purpose:      "Named patterns and anti-patterns; the project's prose-form eval suite.",
+		SoftBudgetKB: 32,
 		ReflectPrompt: "Did recent work repeat a shape that should be promoted " +
 			"to a named pattern (look for ~3 appearances before promoting)? " +
 			"Did it deviate from a recorded pattern in a way that's a " +
 			"deliberate choice vs. drift? Did anything get tried and " +
-			"rejected — that's a candidate anti-pattern.",
+			"rejected — that's a candidate anti-pattern. Keep the reusable " +
+			"rule, not its full origin story; compress the doc when it is " +
+			"over budget.",
 	},
 	{
-		Filename: "operations.md",
-		Title:    "Operations",
-		Purpose:  "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
+		Filename:     "operations.md",
+		Title:        "Operations",
+		Purpose:      "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
+		SoftBudgetKB: 40,
 		ReflectPrompt: "Did recent activity change a workflow, ritual, tool, " +
 			"or escalation path? Did anything documented here become no " +
 			"longer true? Update the runbook to match how the project " +
-			"actually runs.",
+			"actually runs. Delete completed transition narrative and " +
+			"compress the doc when it is over budget.",
 	},
 	{
-		Filename: "glossary.md",
-		Title:    "Glossary",
-		Purpose:  "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
+		Filename:     "glossary.md",
+		Title:        "Glossary",
+		Purpose:      "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
+		SoftBudgetKB: 12,
 		ReflectPrompt: "Walk the glossary against the other managed docs. " +
 			"Apply the inclusion bar in the kickoff conventions: a term " +
 			"earns an entry when it appears load-bearing in 2+ twin docs, " +
@@ -81,7 +137,8 @@ var twinManagedDocs = []wiki.ManagedDoc{
 			"heading, never line number — definitions live in the home " +
 			"doc, the glossary is the index. Retire entries whose term no " +
 			"longer appears elsewhere; normalize prose spellings to the " +
-			"glossary form when synonyms drift apart.",
+			"glossary form when synonyms drift apart. Compress every existing " +
+			"entry to that 1–3 sentence bar and the doc when it is over budget.",
 	},
 }
 

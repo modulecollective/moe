@@ -103,6 +103,30 @@ The operator reviews these at close; surviving unchecked entries
 become `lore/<slug>.md` files and the next stage prompt's catalog
 picks them up automatically.
 
+To merge several existing entries into one, or amend an entry in
+place, add an indented `supersedes:` paragraph after `applies-when:`.
+Its value is a comma-separated list of existing lore slugs and may
+wrap across lines:
+
+  - [ ] `stage-sandbox-caches-readonly` — Stage-sandbox tool caches are read-only
+
+    applies-when: a package or build tool fails with a read-only
+    filesystem error on its cache directory in an MoE stage sandbox
+
+    supersedes: go-build-cache-readonly-sandbox,
+    go-module-cache-readonly-sandbox, pnpm-store-readonly-sandbox,
+    uv-cache-readonly-sandbox
+
+    Put the merged fact here.
+
+The harvester writes the replacement first, then deletes the named
+entries. A missing superseded file is treated as already done so a
+partial attempt can be retried. When the new slug also appears in
+`supersedes:`, the entry is amended in place instead of becoming a
+`-2` sibling. If this section is absent from a materialized session
+skill, that session's opening binary does not support superseding lore;
+do not submit merge entries under that binary.
+
 ---
 
 ## Followups

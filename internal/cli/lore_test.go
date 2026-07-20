@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,47 @@ func TestParseLoreCapturesMultiLineAppliesWhen(t *testing.T) {
 	}
 	if todo[0].body != "The fact body." {
 		t.Errorf("body after multi-line applies-when wrong: %q", todo[0].body)
+	}
+}
+
+func TestParseLoreConsumesWrappedSupersedes(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		"- [ ] `stage-cache-readonly` — Stage caches are read-only",
+		"",
+		"  applies-when: a build tool fails on its cache",
+		"",
+		"  supersedes: go-build-cache, go-module-cache,",
+		"  pnpm-store-cache, uv-cache",
+		"",
+		"  One merged fact.",
+		"",
+	}, "\n"))
+	_, todo, err := parseLore(body)
+	if err != nil {
+		t.Fatalf("parseLore: %v", err)
+	}
+	if len(todo) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(todo))
+	}
+	want := []string{"go-build-cache", "go-module-cache", "pnpm-store-cache", "uv-cache"}
+	if strings.Join(todo[0].supersedes, ",") != strings.Join(want, ",") {
+		t.Errorf("supersedes = %v, want %v", todo[0].supersedes, want)
+	}
+	if todo[0].body != "One merged fact." {
+		t.Errorf("body after supersedes paragraph = %q", todo[0].body)
+	}
+}
+
+func TestParseLoreRejectsMalformedSupersedes(t *testing.T) {
+	for _, body := range []string{
+		"- [ ] `fact` — Fact\n\n  supersedes:\n",
+		"- [ ] `fact` — Fact\n\n  supersedes: valid, Not-A-Slug\n",
+		"- [ ] `fact` — Fact\n\n  supersedes: same, same\n",
+	} {
+		_, _, err := parseLore([]byte(body))
+		if err == nil || !strings.Contains(err.Error(), "supersedes") {
+			t.Errorf("parseLore(%q) error = %v, want supersedes validation error", body, err)
+		}
 	}
 }
 
@@ -410,6 +452,82 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 	feedback := readLoreFeedback(t, root, "tele", "ship-it")
 	if !strings.Contains(feedback, "- [x] `foo-2` — New fact") {
 		t.Fatalf("expected resolved slug in feedback/lore.md:\n%s", feedback)
+	}
+}
+
+func TestPromoteLoreEntrySupersedesAfterWritingReplacement(t *testing.T) {
+	root := t.TempDir()
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(filepath.Join(loreDir, "old-b.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "old-b.md", "keep"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "old-a.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := parsedLore{
+		slug:        "merged",
+		title:       "Merged",
+		appliesWhen: "always",
+		supersedes:  []string{"old-a", "old-b"},
+		body:        "merged body",
+	}
+
+	if _, err := promoteLoreEntry(root, "tele", "run", entry); err == nil {
+		t.Fatal("expected deletion failure for directory-shaped old-b.md")
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "merged.md")); err != nil {
+		t.Fatalf("replacement must be visible before superseded deletions finish: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "old-a.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old-a.md should have been deleted before the later failure, got %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(loreDir, "old-b.md")); err != nil {
+		t.Fatal(err)
+	}
+	slug, err := promoteLoreEntry(root, "tele", "run", entry)
+	if err != nil {
+		t.Fatalf("idempotent retry: %v", err)
+	}
+	if slug != "merged" {
+		t.Fatalf("idempotent retry resolved slug = %q, want merged", slug)
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "merged-2.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("idempotent retry should not mint merged-2.md, got %v", err)
+	}
+}
+
+func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
+	root := t.TempDir()
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "fact.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	slug, err := promoteLoreEntry(root, "tele", "run", parsedLore{
+		slug:        "fact",
+		title:       "Amended fact",
+		appliesWhen: "always",
+		supersedes:  []string{"fact", "already-gone"},
+		body:        "new body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "fact" {
+		t.Fatalf("in-place amendment resolved slug = %q, want fact", slug)
+	}
+	got := readLoreEntry(t, root, "fact")
+	if !strings.Contains(got, "# Amended fact") || !strings.Contains(got, "new body") {
+		t.Fatalf("in-place amendment did not replace fact.md:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "fact-2.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("in-place amendment should not mint fact-2.md, got %v", err)
 	}
 }
 

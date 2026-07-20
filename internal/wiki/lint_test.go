@@ -249,6 +249,41 @@ func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
 	}
 }
 
+func TestScanClosedSurfacesSoftBudgetWithoutBlocking(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\n"+strings.Repeat("x", 1024))
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.OverBudgetDocs, []string{"vision.md"}; !equalStrings(got, want) {
+		t.Errorf("OverBudgetDocs: got %v want %v", got, want)
+	}
+	if f.IsEmpty() {
+		t.Fatal("soft budget warning should render in the kickoff findings")
+	}
+	if f.HasBlocking() {
+		t.Fatal("soft budget warning must not be a blocking finding")
+	}
+	got := RenderFindings(f)
+	for _, want := range []string{
+		"Docs over their soft size budget",
+		"warning does not block finalize",
+		"- vision.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderFindings missing %q:\n%s", want, got)
+		}
+	}
+}
+
 // architectureFixture is the cited doc for the dangling-xref tests. It
 // carries the anchor shapes the real twin uses: markdown headings, a
 // backticked bold lead, a long bold lead a citation will quote only

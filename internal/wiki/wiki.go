@@ -103,4 +103,15 @@ type ManagedDoc struct {
 	// down under a doc-named subhead. Lifted from TWIN-REFACTOR's
 	// twin schema and tightened into prompt form.
 	ReflectPrompt string
+	// SoftBudgetKB is the size past which the doc is rendered with an
+	// over-budget nudge in the preamble and surfaced as an
+	// OverBudgetDocs finding. Soft: it nudges the agent to compress,
+	// it never gates a pass. Zero means "no budget declared" and
+	// suppresses both the size annotation and the finding — an
+	// open-schema or freshly-registered doc set opts in by setting it.
+	//
+	// Same disposition as loreSoftCap one file over: the only lever a
+	// prose corpus responds to is telling the writer how big it has
+	// gotten.
+	SoftBudgetKB int
 }

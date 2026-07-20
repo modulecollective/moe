@@ -48,6 +48,12 @@ A term that appears in one doc stays in that doc.
   product-level concept) gets a new entry: `### Term`, 1–3
   sentences, pointer back to the home doc by **section heading**
   (never line number).
+- **Cut bloated entries back to the bar.** An entry that has grown
+  into a multi-paragraph narrative gets compressed to 1–3
+  sentences plus its section-heading pointer. The definition lives
+  in the home doc; the glossary entry points, it does not re-tell.
+  Trimming an existing entry needs no new sighting — the bar
+  itself is the licence.
 - **Retire stale entries.** A term whose home no longer mentions
   it, or that no longer appears in 2+ docs, or that turns out to
   be an implementation seam rather than a product concept, comes
@@ -56,9 +62,14 @@ A term that appears in one doc stays in that doc.
   thing called two names in different docs), pick the glossary
   form and update the home docs to match. Cite the changes on
   your canvas.
+- **Compress when the doc is over budget.** The kickoff's doc list
+  marks each doc's soft budget. If glossary is over it, cutting it
+  back is in scope this pass even when no prior canvas turns up a
+  new or stale term — a compression-only edit is a valid pass.
 
 If glossary hasn't moved this pass, say so. Glossary is meant to
-be slow-moving — a quiet pass is the common case.
+be slow-moving — a quiet pass is the common case, and a pass whose
+only work was compression counts.
 
 ## What not to do
 
@@ -73,6 +84,10 @@ be slow-moving — a quiet pass is the common case.
 - **Don't smuggle in generic vocabulary.** "Agent" is generic
   unless your project means something specific by it (and even
   then, the inclusion bar still applies).
+- **Don't inline provenance narrative.** An entry keeps at most a
+  one-line trailer pointing at the run slug — "decided 2026-05;
+  see run `moe/<slug>`". How the term got its current sense lives
+  in `history-summary.md` and the run canvas, not in the glossary.
 
 ## Canvas shape
 

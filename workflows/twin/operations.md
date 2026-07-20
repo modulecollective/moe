@@ -23,8 +23,13 @@ actually *do*.
 - **Capture new rituals.** A practice that's emerged in recent
   work and stuck is a candidate to document — even short-form
   ("Operators run X before Y on Z days").
+- **Compress when the doc is over budget.** The kickoff's doc list
+  marks each doc's soft budget. If operations is over it, cutting
+  the runbook back is in scope this pass even when no event
+  touches a ritual — a compression-only edit is a valid pass.
 
-If operations hasn't moved this pass, say so.
+If operations hasn't moved this pass, say so. A pass whose only
+work was compression is still a pass.
 
 ## What not to do
 
@@ -36,6 +41,11 @@ If operations hasn't moved this pass, say so.
   ritual and the tool. The named shape it exercises lives in
   patterns; the boundary it touches lives in architecture. Link
   by section heading instead of repeating the rule here.
+- **Don't inline provenance narrative.** A ritual keeps at most a
+  one-line trailer pointing at the run slug — "decided 2026-05;
+  see run `moe/<slug>`". Why the runbook changed lives in
+  `history-summary.md` and the run canvas, not in
+  `operations.md`.
 
 ## Canvas shape
 

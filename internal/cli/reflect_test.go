@@ -366,6 +366,39 @@ func TestTwinPriorStageWalksLadderForward(t *testing.T) {
 	}
 }
 
+func TestTwinWikiIngestPromptCarriesCompressionContract(t *testing.T) {
+	for _, want := range []string{
+		"Primer-plus-reference, not changelog",
+		"Provenance is a reference, not a retelling",
+		"You have license to drop",
+		"Compression is a valid pass",
+		"Single home per rule",
+	} {
+		if !strings.Contains(twinWikiIngestPrompt, want) {
+			t.Errorf("twin ingest prompt missing %q:\n%s", want, twinWikiIngestPrompt)
+		}
+	}
+}
+
+func TestTwinManagedDocsCarrySoftBudgets(t *testing.T) {
+	want := map[string]int{
+		"vision.md":       8,
+		"architecture.md": 48,
+		"patterns.md":     32,
+		"operations.md":   40,
+		"glossary.md":     12,
+	}
+	for _, doc := range twinManagedDocs {
+		if got := doc.SoftBudgetKB; got != want[doc.Filename] {
+			t.Errorf("%s SoftBudgetKB = %d, want %d", doc.Filename, got, want[doc.Filename])
+		}
+		delete(want, doc.Filename)
+	}
+	if len(want) != 0 {
+		t.Errorf("managed docs missing budget declarations: %v", want)
+	}
+}
+
 // loadTwinFeedback walks runs in projectID, picks up feedback/twin.md
 // for each, and filters by the wiki checkpoint's LastIngestAt against
 // the file's latest commit time. Build a small fixture with two runs
@@ -672,6 +705,25 @@ func TestReflectPostFlightGate(t *testing.T) {
 	stderr.Reset()
 	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
 		t.Fatalf("clean wiki should pass the gate, got %v\nstderr=%s", err, stderr.String())
+	}
+}
+
+func TestReflectPostFlightGateDoesNotBlockOnSoftBudget(t *testing.T) {
+	dir := t.TempDir()
+	cfg := wiki.Config{
+		Name:       "twin",
+		ContentDir: dir,
+		Mode:       wiki.Closed,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
+		},
+	}
+	if err := writeWikiDoc(t, dir, "vision.md", "# Vision\n\n"+strings.Repeat("x", 1024)); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
+		t.Fatalf("soft budget warning should not block finalize: %v\nstderr=%s", err, stderr.String())
 	}
 }
 

@@ -50,66 +50,6 @@ func TestScanClosedSchema(t *testing.T) {
 	}
 }
 
-func TestReflectPromptSectionRefusesOpen(t *testing.T) {
-	if _, err := reflectPromptSection(Config{Mode: Open}); err == nil {
-		t.Fatal("reflectPromptSection should refuse open-schema")
-	}
-}
-
-func TestReflectPromptSectionRendersClosed(t *testing.T) {
-	got, err := reflectPromptSection(Config{
-		Mode:       Closed,
-		Name:       "twin",
-		ContentDir: "/x/projects/p/digital-twin",
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", Purpose: "north star"},
-			{Filename: "architecture.md", Title: "Architecture", Purpose: "shape"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"## Wiki: twin (closed-schema)",
-		"vision.md — Vision",
-		"Reflect pass (closed-schema)",
-		"not a veto",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
-		}
-	}
-}
-
-// The glossary inclusion bar lives in the reflect kickoff prompt, not
-// in operations.md. Pin that the convention block surfaces both the
-// 2+-doc rule and the code-seam carve-out so the agent applies the
-// rule from the prompt verbatim.
-func TestReflectPromptSectionRendersGlossaryConvention(t *testing.T) {
-	got, err := reflectPromptSection(Config{
-		Mode:       Closed,
-		Name:       "twin",
-		ContentDir: "/x/projects/p/digital-twin",
-		ManagedDocs: []ManagedDoc{
-			{Filename: "glossary.md", Title: "Glossary", Purpose: "vocabulary"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Glossary convention",
-		"alphabetical list",
-		"Inclusion bar",
-		"2+ twin docs",
-		"code seam",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
-		}
-	}
-}
-
 func TestDetectUnrecordedEditsNoCheckpoint(t *testing.T) {
 	root := newGitRepo(t)
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")

@@ -25,6 +25,8 @@ func TestMoeBureaucracySkillEmbedded(t *testing.T) {
 		"{{.TwinFeedback}}",
 		"{{.LoreFeedback}}",
 		"{{.Followups}}",
+		"supersedes:",
+		"opening binary does not support superseding lore",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("embedded skill missing %q in body", want)

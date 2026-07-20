@@ -2,6 +2,8 @@ package wiki
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -94,7 +96,11 @@ func wikiPreamble(cfg Config) string {
 		b.WriteString("- log.md — append-only changelog. Engine-managed; do not edit.\n")
 		b.WriteString("- checkpoint.json — last-ran SHAs. Engine-managed; do not edit.\n")
 		for _, d := range cfg.ManagedDocs {
-			fmt.Fprintf(&b, "- %s — %s. %s\n", d.Filename, d.Title, strings.TrimSpace(d.Purpose))
+			fmt.Fprintf(&b, "- %s — %s.", d.Filename, d.Title)
+			if purpose := strings.TrimSpace(d.Purpose); purpose != "" {
+				fmt.Fprintf(&b, " %s", purpose)
+			}
+			fmt.Fprintf(&b, "%s\n", managedDocBudgetAnnotation(cfg.ContentDir, d))
 		}
 		b.WriteString("\nNo index.md, no topics/. The doc set is fixed; cross-links\n")
 		b.WriteString("between managed docs are flat sibling refs (e.g.\n")
@@ -117,4 +123,20 @@ func wikiPreamble(cfg Config) string {
 `)
 	}
 	return b.String()
+}
+
+func managedDocBudgetAnnotation(contentDir string, d ManagedDoc) string {
+	if d.SoftBudgetKB <= 0 {
+		return ""
+	}
+	info, err := os.Stat(filepath.Join(contentDir, d.Filename))
+	if err != nil {
+		return fmt.Sprintf(" (size unavailable; soft budget %d KB)", d.SoftBudgetKB)
+	}
+	sizeKB := float64(info.Size()) / 1024
+	annotation := fmt.Sprintf(" (%.1f KB; soft budget %d KB)", sizeKB, d.SoftBudgetKB)
+	if info.Size() > int64(d.SoftBudgetKB)*1024 {
+		annotation += " ⚠ over budget — compress this pass"
+	}
+	return annotation
 }

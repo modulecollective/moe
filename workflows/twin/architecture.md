@@ -21,9 +21,14 @@ edit when reality has moved.
   reviews — interactive or headless alike — not a mid-pass handshake.
 - **Cross-reference the prior stage.** Drift the vision stage
   flagged may have an architectural shape here — name it if so.
+- **Compress when the doc is over budget.** The kickoff's doc list
+  marks each doc's soft budget. If architecture is over it,
+  cutting it back is in scope this pass even when no event touches
+  the shape — a compression-only edit is a valid pass.
 
 If nothing in this pass moves architecture, say so explicitly on
-the canvas. A quiet pass is a valid pass.
+the canvas. A quiet pass is a valid pass, and so is a pass whose
+only work was compression.
 
 ## What not to do
 
@@ -40,6 +45,10 @@ the canvas. A quiet pass is a valid pass.
   shapes; operations owns rituals and tools. If a rule already
   lives in one of those, link by section heading instead of
   rewording it here.
+- **Don't inline provenance narrative.** A decision keeps at most
+  a one-line trailer pointing at the run slug — "decided 2026-05;
+  see run `moe/<slug>`". The story of how it got made lives in
+  `history-summary.md` and the run canvas, not in architecture.
 
 ## Canvas shape
 
@@ -65,8 +74,12 @@ evidence, or a call I couldn't settle from the events)
 - **Name the boundary.** When you edit, name what boundary moved
   and why — boundaries are the load-bearing claim, not the
   component list.
-- **Walk the decisions log.** Decisions that got revisited need
-  a "decided again on date X" line, not a rewrite of the original.
+- **Walk the decisions log.** A revisited decision gets its
+  *rule* rewritten to current state, plus at most a one-line
+  trailer naming when and which run — not an accreting stack of
+  amendments. The superseded narrative folds into
+  `history-summary.md` at finalize, and then comes out of
+  architecture.
 
 ## Committing
 

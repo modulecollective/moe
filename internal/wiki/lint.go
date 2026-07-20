@@ -114,6 +114,11 @@ type Findings struct {
 	// convention (open-schema wikis cross-reference with markdown
 	// links, which BrokenLinks already covers).
 	DanglingXrefs []DanglingXref
+	// OverBudgetDocs are managed docs whose current size exceeds their
+	// declared SoftBudgetKB. Closed-schema only. This is a hygiene
+	// nudge, not a blocking structural finding: it reaches the reflect
+	// kickoff but never prevents finalize from sealing.
+	OverBudgetDocs []string
 }
 
 // DanglingXref is one quoted-heading citation that doesn't resolve.
@@ -129,7 +134,8 @@ type BrokenLink struct {
 	Target string // path the link resolves to, relative to ContentDir
 }
 
-// IsEmpty reports whether Scan found no structural issues at all.
+// IsEmpty reports whether Scan found no structural issues or soft
+// hygiene warnings at all.
 // Used to short-circuit rendering the known-issues block when the
 // wiki is clean — no point seeding the agent with an empty list.
 func (f Findings) IsEmpty() bool {
@@ -139,7 +145,21 @@ func (f Findings) IsEmpty() bool {
 		len(f.EmptyDocs) == 0 &&
 		len(f.MissingManagedDocs) == 0 &&
 		len(f.GlossaryOrphans) == 0 &&
-		len(f.DanglingXrefs) == 0
+		len(f.DanglingXrefs) == 0 &&
+		len(f.OverBudgetDocs) == 0
+}
+
+// HasBlocking reports whether f contains a structural finding that
+// must be cleared before a closed-schema reflect can seal. Soft budget
+// warnings are deliberately excluded.
+func (f Findings) HasBlocking() bool {
+	return len(f.Orphans) > 0 ||
+		len(f.MissingFromIndex) > 0 ||
+		len(f.BrokenLinks) > 0 ||
+		len(f.EmptyDocs) > 0 ||
+		len(f.MissingManagedDocs) > 0 ||
+		len(f.GlossaryOrphans) > 0 ||
+		len(f.DanglingXrefs) > 0
 }
 
 // Scan walks the wiki content directory and returns the structural
@@ -324,6 +344,13 @@ func RenderFindings(f Findings) string {
 		}
 		b.WriteString("\n")
 	}
+	if len(f.OverBudgetDocs) > 0 {
+		b.WriteString("**Docs over their soft size budget** (compression is in scope this pass; this warning does not block finalize):\n")
+		for _, d := range f.OverBudgetDocs {
+			fmt.Fprintf(&b, "- %s\n", d)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -340,14 +367,16 @@ func scanClosed(cfg Config) (Findings, error) {
 	for _, d := range cfg.ManagedDocs {
 		docs[d.Filename] = true
 		docList = append(docList, d.Filename)
-	}
-	for _, name := range docList {
-		if _, err := os.Stat(filepath.Join(cfg.ContentDir, name)); err != nil {
+		info, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename))
+		if err != nil {
 			if os.IsNotExist(err) {
-				f.MissingManagedDocs = append(f.MissingManagedDocs, name)
+				f.MissingManagedDocs = append(f.MissingManagedDocs, d.Filename)
 				continue
 			}
-			return f, fmt.Errorf("wiki: stat %s: %w", name, err)
+			return f, fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
+		}
+		if d.SoftBudgetKB > 0 && info.Size() > int64(d.SoftBudgetKB)*1024 {
+			f.OverBudgetDocs = append(f.OverBudgetDocs, d.Filename)
 		}
 	}
 
@@ -382,6 +411,7 @@ func scanClosed(cfg Config) (Findings, error) {
 	sort.Strings(f.MissingManagedDocs)
 	sort.Strings(f.EmptyDocs)
 	sort.Strings(f.GlossaryOrphans)
+	sort.Strings(f.OverBudgetDocs)
 	sort.Slice(f.BrokenLinks, func(i, j int) bool {
 		if f.BrokenLinks[i].From != f.BrokenLinks[j].From {
 			return f.BrokenLinks[i].From < f.BrokenLinks[j].From

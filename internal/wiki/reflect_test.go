@@ -212,46 +212,6 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	}
 }
 
-// reflectPromptSection carries the glossary convention and the
-// hygiene-walk framing that used to live in PlanPromptSection /
-// LintPromptSection. Pin those so a future trim doesn't silently
-// drop them.
-func TestReflectPromptSectionCarriesConventionsAndHygiene(t *testing.T) {
-	got, err := reflectPromptSection(Config{
-		Mode:        Closed,
-		Name:        "twin",
-		ContentDir:  "/x/projects/p/digital-twin",
-		ManagedDocs: []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Phrasing assertions are tolerant of the body's wrapped lines —
-	// check for tokens that survive the line wrap rather than long
-	// runs of prose.
-	for _, want := range []string{
-		"Reflect pass (closed-schema)",
-		"Glossary convention",
-		"Inclusion bar",
-		"Hygiene findings",
-		"refuses to seal",
-		"don't manufacture work",
-		"Primer-plus-reference",
-		"Single-home discipline",
-		"highest bar",
-		"not a veto",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("reflect prompt missing %q in:\n%s", want, got)
-		}
-	}
-	// The roadmap convention is gone with the roadmap doc. Pin its
-	// absence so the dropped prose can't creep back in.
-	if strings.Contains(got, "Roadmap convention") {
-		t.Errorf("reflect prompt still carries the dropped roadmap convention:\n%s", got)
-	}
-}
-
 // TestEventsSinceCheckpointClosedRunsKeyOnGitHistory pins the design
 // fix: closed-run inclusion is decided by the latest MoE-Run-trailered
 // commit's committer time, not by the run dir's filesystem mtime. Two

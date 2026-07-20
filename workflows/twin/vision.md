@@ -41,6 +41,10 @@ canvas captures your narrative for this pass.
   reversal is welcome; a half-considered one is worse than one
   round-trip through the operator. The flag is for the contested
   reversal, not a veto on every intent edit.
+- **Compress when the doc is over budget.** The kickoff's doc list
+  marks each doc's soft budget. If vision is over it, cutting it
+  back is in scope this pass even when no event touches the
+  stated bets — a compression-only edit is a valid pass.
 
 If there is no drift this pass — vision still holds — say so on
 the canvas explicitly. "No drift this pass; vision still holds"
@@ -61,6 +65,11 @@ is a valid one-line canvas. Silence is not.
   instead.
 - **Don't manufacture drift.** A quiet pass is fine. If recent
   events haven't touched what vision claims, just say so.
+- **Don't inline provenance narrative.** A stated bet keeps at
+  most a one-line trailer pointing at the run slug — "decided
+  2026-05; see run `moe/<slug>`". The story of how the bet got
+  made lives in `history-summary.md` and the run canvas, not in
+  vision.
 
 ## Canvas shape
 

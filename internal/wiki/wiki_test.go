@@ -68,6 +68,34 @@ func TestIngestPromptSectionClosedSchema(t *testing.T) {
 	}
 }
 
+func TestIngestPromptSectionRendersManagedDocSoftBudget(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"), strings.Repeat("x", 1025))
+	writeFile(t, filepath.Join(dir, "patterns.md"), "small")
+	cfg := Config{
+		Name:       "twin",
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
+			{Filename: "patterns.md", Title: "Patterns", SoftBudgetKB: 1},
+			{Filename: "operations.md", Title: "Operations"},
+		},
+	}
+	got := IngestPromptSection(cfg)
+	for _, want := range []string{
+		"vision.md — Vision. (1.0 KB; soft budget 1 KB) ⚠ over budget — compress this pass",
+		"patterns.md — Patterns. (0.0 KB; soft budget 1 KB)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("closed-schema prompt missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "operations.md — Operations. (") {
+		t.Errorf("doc without a budget should not render a size annotation:\n%s", got)
+	}
+}
+
 func TestAssertModeInvariantsOpenIsNoOp(t *testing.T) {
 	if err := assertModeInvariantsPreFinalize(Config{Mode: Open}); err != nil {
 		t.Fatalf("open-schema invariants: unexpected error %v", err)

@@ -64,6 +64,39 @@ func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
 			}
 		}
 	}
+
+	// And the reverse direction: every shipped stage fragment must name
+	// a registered stage. Without this half, a retired or renamed stage
+	// can leave dead guidance embedded in every binary indefinitely.
+	paths, err := filepath.Glob(filepath.Join("..", "..", "workflows", "*", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no embedded workflow fragments found under workflows/")
+	}
+	for _, fragmentPath := range paths {
+		stage := strings.TrimSuffix(filepath.Base(fragmentPath), ".md")
+		if stage == "oneshot" {
+			continue
+		}
+		workflow := filepath.Base(filepath.Dir(fragmentPath))
+		wf, err := LookupWorkflow(workflow)
+		if err != nil {
+			t.Errorf("embedded fragment %s names unregistered workflow %q", fragmentPath, workflow)
+			continue
+		}
+		found := false
+		for _, registered := range wf.Stages() {
+			if registered == stage {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("embedded fragment %s names unregistered stage %q for workflow %q", fragmentPath, stage, workflow)
+		}
+	}
 }
 
 // TestEmbeddedSoulIsNonEmpty catches a busted //go:embed directive on
