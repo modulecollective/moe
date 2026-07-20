@@ -322,7 +322,10 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 		return threads
 	}
 	msg := fmt.Sprintf("chain: groom %s/%s (%d added, %d removed)\n\n", projectID, pulseSlug, len(adds), len(removes)) +
-		trailers.Block{ChainedTo: adds, ChainedToRemoved: removes}.String()
+		// Groom is always the pulse acting, ride or no ride — so the
+		// consent trailer is unconditional here. It is what lets the
+		// index tell a groomed edge from an operator `chain edit` one.
+		trailers.Block{ChainedTo: adds, ChainedToRemoved: removes, Consent: currentRideMode.String()}.String()
 	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "pulse-groom",
 		Run:     projectID + "/" + pulseSlug,

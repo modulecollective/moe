@@ -348,7 +348,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		Workflow:  pulseWorkflow,
 		SeedDocs:  map[string]string{pulseDoc: pulseCanvasSkeleton},
 		SpawnedBy: spawner,
-		Trailers:  trailers.Block{SpawnedBy: spawner},
+		Trailers:  trailers.Block{SpawnedBy: spawner, Consent: spawnConsent(spawner)},
 	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
@@ -719,6 +719,7 @@ func maybeSpawnRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdo
 				Workflow:   idea.PromoteTo,
 				FirstStage: wf.Stages()[0],
 				SpawnedBy:  projectID + "/" + pulseSlug,
+				Consent:    spawnConsent(projectID + "/" + pulseSlug),
 			}, stdout, stderr)
 			if promoteErr != nil {
 				moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
@@ -741,7 +742,10 @@ func maybeSpawnRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdo
 			Workflow:  "sdlc",
 			SeedDocs:  map[string]string{"design": spawnDesignSeed(title, s)},
 			SpawnedBy: projectID + "/" + pulseSlug,
-			Trailers:  trailers.Block{SpawnedBy: projectID + "/" + pulseSlug},
+			Trailers: trailers.Block{
+				SpawnedBy: projectID + "/" + pulseSlug,
+				Consent:   spawnConsent(projectID + "/" + pulseSlug),
+			},
 		}, stdout, stderr)
 		if err != nil {
 			moePrintf(stderr, "pulse: spawn %q for %s: %v\n", slug, projectID, err)

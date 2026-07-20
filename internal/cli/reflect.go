@@ -229,7 +229,7 @@ func mintReflectRun(root, projectID, spawnedBy, agentOverride string, canonical 
 		Workflow:  "twin",
 		Agent:     agentOverride,
 		SpawnedBy: spawnedBy,
-		Trailers:  trailers.Block{SpawnedBy: spawnedBy},
+		Trailers:  trailers.Block{SpawnedBy: spawnedBy, Consent: spawnConsent(spawnedBy)},
 	}
 	var md *run.Metadata
 	err := sync.WithJournalPush(root, repolock.Options{

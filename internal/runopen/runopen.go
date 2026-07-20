@@ -78,6 +78,11 @@ type PromoteOptions struct {
 	Workspace  string // optional workspace binding for the destination
 	Agent      string // optional agent override persisted to run.json
 	SpawnedBy  string // optional qualified machine spawner persisted to metadata + trailer
+	// Consent is the MoE-Consent value for the destination's open
+	// commit. Set by machine callers alongside SpawnedBy (the two travel
+	// together — a promote the machine made); empty for the operator's
+	// `moe idea promote`, which stamps no consent trailer at all.
+	Consent string
 }
 
 // Promoted is Promote's result. Run is the destination run's
@@ -164,7 +169,7 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 		SeedDocs:    map[string]string{opts.FirstStage: seed},
 		SubjectFrom: "idea " + ideaSlug,
 		SpawnedBy:   opts.SpawnedBy,
-		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy},
+		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy, Consent: opts.Consent},
 	}
 
 	md, err := Open(root, projectID, runOpts, stdout, stderr)

@@ -448,6 +448,15 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 			return 1, false
 		}
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+		// Unlike the mint sites, push is shared between operator and
+		// machine: `moe push` / an interactive `moe sdlc push` reach here
+		// too. Stamp only when a bang answer or a chain kick handed the
+		// walk to the machine, so the trailer's "a machine shipped this"
+		// claim stays exact.
+		consent, machineWalk := consentTrailerValue()
+		if !machineWalk {
+			consent = ""
+		}
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
 			trailers.Block{
 				Run:      md.ID,
@@ -455,6 +464,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 				Workflow: md.Workflow,
 				Document: "push",
 				PR:       url,
+				Consent:  consent,
 			}.String()
 		err := sync.WithJournalPush(root, repolock.Options{
 			Purpose: "push-pr",

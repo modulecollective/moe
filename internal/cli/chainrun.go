@@ -489,7 +489,7 @@ func mintChainRun(root, projectID, base, spawnedBy, note string, stdout, stderr 
 	}
 	if spawnedBy != "" {
 		opts.SpawnedBy = spawnedBy
-		opts.Trailers = trailers.Block{SpawnedBy: spawnedBy}
+		opts.Trailers = trailers.Block{SpawnedBy: spawnedBy, Consent: spawnConsent(spawnedBy)}
 	}
 	return runopen.Open(root, projectID, opts, stdout, stderr)
 }
