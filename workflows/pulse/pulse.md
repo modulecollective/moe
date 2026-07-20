@@ -197,9 +197,15 @@ spawnable; anything else is skipped.
 **When.** Either the cycle landed a significant twin-relevant change (a
 decision, a new component, a boundary move the twin docs don't yet
 describe), or twin staleness has accumulated (many small changes and/or
-pending twin observations teed up since the last reflect). Don't ask
-when a twin run is already open — the harness refuses a second, so the
-ask is wasted — and never manufacture one to justify the turn.
+pending twin observations teed up since the last reflect). Never
+manufacture one to justify the turn.
+
+You don't have to know whether a reflect is already open. The ask is a
+*nomination*, not a create: with none open the harness mints one, and
+with one already open it maps your alias onto that run instead — so a
+`chain` group naming the alias places the open reflect exactly as it
+would a fresh one. Ask when the drift is real; the harness sorts out
+which run it lands on.
 
 **Two things behave differently from an sdlc entry.** The `slug` is a
 *local alias*, not the run's name: the harness names the reflect itself
@@ -364,12 +370,11 @@ a group carrying `"kick": true` and let it ride. The same kick bar
 applies — a reflect that would read a half-finished record is one to
 place, not to start.
 
-This is a different act from spawning one. Don't ask for a
-`"workflow": "twin"` spawn while a twin run is open — that guard stands
-and the harness would refuse the mint anyway. Riding the reflect that
-already exists is not re-asking for one, and "a reflect is already
-open" is a reason not to open a second one, never a reason to leave the
-first one sitting.
+Naming it in a group and asking for a `"workflow": "twin"` spawn are
+the same act here: with a reflect already open, a twin entry maps onto
+that run rather than minting a second, so either route places the
+reflect you already have. What is never right is treating "a reflect is
+already open" as a reason to leave the first one sitting.
 
 ## Hard don'ts
 

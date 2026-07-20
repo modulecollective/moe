@@ -154,7 +154,10 @@ where a reflect lands is now an ordering claim the agent makes in `chain`,
 priced against the same bar as everything else it queues. One grammar, one
 placement mechanism, one consent gate — and the guards that matter (one twin
 run in flight, no reflect over unrecorded twin edits) stayed exactly where they
-were, in the mint.
+were, in the mint. What changed later is only what the pulse does when the
+first guard fires: a pulse-side ask for a reflect is a nomination, so an
+already-open pass is mapped onto rather than refused, and the gate never has to
+know which case it is.
 
 ## Step 4: the fourth bang
 
