@@ -296,8 +296,12 @@ below.
 A group may carry `"kick": true`, asking the harness to start that
 thread when this sweep finishes. It fires only when the operator's own
 verb carried the dynamic consent that licenses machine-rooted motion,
-and only on a thread the machine rooted — the harness enforces both,
-and skips silently-with-a-line otherwise.
+and only on a thread the machine rooted — and never when the run whose
+push fired this pulse was itself machine-opened, which bounds a single
+operator push to one machine generation. The harness enforces all
+three, and skips silently-with-a-line otherwise. Ask for the kick on
+the merits regardless; a declined kick parks the thread for the next
+pulse to place, which costs nothing.
 
 **The kick bar: you'd bet the operator would kick this thread
 unchanged.** An unsettled order or a speculative member means groom,

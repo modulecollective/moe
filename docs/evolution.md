@@ -184,7 +184,7 @@ to twelve merges. The grant is typed, process-wide, and dies with the process.
 
 ## What carries the weight
 
-Three structural guards sit on the self-kick, and each is
+Four structural guards sit on the self-kick, and each is
 impossible-by-construction rather than restraint-by-good-manners:
 
 The ride must be **dynamic** — a fourth bang a human typed upstream. A plain
@@ -196,6 +196,15 @@ picks up its own tail growth, so nested rides can't stack.
 
 And the thread must be **machine-rooted**. The pulse curates operator chains
 but never starts them. That trigger stays where it was.
+
+The first three are per-hop, and a kicked ride's own tail push satisfies them
+afresh — it grooms, spawns, and kicks again, without bound. So the fourth is a
+depth bound: the run whose push fired the pulse must itself be
+**operator-opened**. One machine generation per fourth bang. Each `!!!!`
+licenses the machine to start something once; letting generation N license
+generation N+1 is the runaway, and a fix whose push flags more fixes is worth
+an operator glance anyway. The deferred work parks rather than dying — a parked
+thread is exactly what the next consented pulse consolidates.
 
 Underneath those, nothing that made step 2 safe was traded away. Nothing fires
 on a clock. The survey sandbox is read-only; the agent proposes JSON and the
