@@ -144,7 +144,7 @@ harness parses once your turn exits. It carries two signals:
     ## Gate
 
     ```json
-    {"status": "ok", "reflect": {"due": false}}
+    {"status": "ok"}
     ```
 
 - **`status`** — a short word (e.g. `"ok"`) that says *the survey
@@ -153,21 +153,14 @@ harness parses once your turn exits. It carries two signals:
   filling it leaves the seeded placeholder, and the run stays open on
   the dash for a human to look at. There's no ready/blocked vocabulary
   — a pulse only ever closes or lingers.
-- **`reflect`** — set `{"due": true, "why": "<one line>"}` when the
-  cycle warrants a twin reflect; omit it or set `{"due": false}`
-  otherwise. On a due verdict the harness opens a parked reflect run
-  (execution stays a human pull). The `why` is required when due and
-  rides next to the verdict on this canvas. The *criteria* for when a
-  reflect is due are in your kickoff — flag it for a real drift signal,
-  never to justify the turn.
-- **`spawn`** — an optional list of high-confidence fixes to open as
-  parked runs. Omit it entirely when nothing clears the bar, which is
+- **`spawn`** — an optional list of runs to open, parked: fixes, and
+  twin reflects. Omit it entirely when nothing clears the bar, which is
   the common case. See below.
 - **`chain`** — an optional list of groups saying what runs in what
   order. Omit it when you have no ordering conviction, which is often.
   See "Grooming lanes" below.
 
-## Spawning a fix run — the highest bar on this canvas
+## Spawning a run — the highest bar on this canvas
 
 Most of what you find is a followup: a line in a file, promoted to an
 idea, pulled when the operator decides. That is still the default and
@@ -188,6 +181,37 @@ against a separate bar.
        "why": "TestFoo failing since abc123; run <url>",
        "design": "<markdown seeding the design canvas>"}
     ]
+
+### Asking for a twin reflect
+
+An entry may set `"workflow": "twin"` to ask for a twin reflect
+instead of a fix run. Only `sdlc` (the default) and `twin` are
+spawnable; anything else is skipped.
+
+    "spawn": [
+      {"slug": "bring-the-twin-current",
+       "workflow": "twin",
+       "why": "the X/Y boundary moved and no twin doc describes it"}
+    ]
+
+**When.** Either the cycle landed a significant twin-relevant change (a
+decision, a new component, a boundary move the twin docs don't yet
+describe), or twin staleness has accumulated (many small changes and/or
+pending twin observations teed up since the last reflect). Don't ask
+when a twin run is already open — the harness refuses a second, so the
+ask is wasted — and never manufacture one to justify the turn.
+
+**Two things behave differently from an sdlc entry.** The `slug` is a
+*local alias*, not the run's name: the harness names the reflect itself
+(`reflect-YYYY-MM-DD`), and your alias exists only so a `chain` group
+below can name it. And `title`/`design` are meaningless on a reflect —
+it reads the twin, not a seed — so leave them off; they're warned and
+ignored.
+
+**Placement is yours.** A reflect reads the settled record, so if you
+propose one alongside fixes, chain it *after* the fixes it should read.
+A reflect named in no `chain` group parks standalone and unchained,
+same as any other spawn — nothing rides it until someone kicks it.
 
 **The bar: mechanical, bounded, and verifiable.** All three, not two:
 
@@ -319,19 +343,20 @@ the tail is exactly the move.
 
 An earlier sweep's twin reflect can still be sitting parked with the
 pending observations stacked behind it — your kickoff names it when so.
-Parked is where the harness leaves a reflect it had no thread to place
-it on; it is not a verdict that the reflect is done, and it does not
-make the drift it was opened for any less real. Treat it like any other
-parked machine-rooted thread: chain it behind the fixes it should read
-the settled record of, or name it in a group carrying `"kick": true`
-and let it ride. The same kick bar applies — a reflect that would read
-a half-finished record is one to place, not to start.
+Parked is where a reflect stays until someone chains or kicks it; it is
+not a verdict that the reflect is done, and it does not make the drift
+it was opened for any less real. Treat it like any other parked
+machine-rooted thread: chain it behind the fixes it should read the
+settled record of, or name it in a group carrying `"kick": true` and
+let it ride. The same kick bar applies — a reflect that would read a
+half-finished record is one to place, not to start.
 
-This is a different act from flagging one. Don't set `reflect.due` while
-a twin run is open — that guard stands and the harness would refuse the
-mint anyway. Riding the reflect that already exists is not re-flagging
-it, and "a reflect is already open" is a reason not to open a second
-one, never a reason to leave the first one sitting.
+This is a different act from spawning one. Don't ask for a
+`"workflow": "twin"` spawn while a twin run is open — that guard stands
+and the harness would refuse the mint anyway. Riding the reflect that
+already exists is not re-asking for one, and "a reflect is already
+open" is a reason not to open a second one, never a reason to leave the
+first one sitting.
 
 ## Hard don'ts
 
