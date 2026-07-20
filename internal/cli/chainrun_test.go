@@ -12,7 +12,7 @@ import (
 )
 
 // spawnFixture stands up a bureaucracy with one registered project and
-// returns its root, ready for maybeSpawnFixRuns.
+// returns its root, ready for maybeSpawnRuns.
 func spawnFixture(t *testing.T) string {
 	t.Helper()
 	root := newTestBureaucracy(t)
@@ -30,7 +30,7 @@ func spawnFixture(t *testing.T) string {
 // requests, not something grooming does on its own.
 func spawnAndHead(t *testing.T, root, projectID, pulseSlug, head string, spawns []pulseSpawn, stderr io.Writer) {
 	t.Helper()
-	minted := maybeSpawnFixRuns(root, projectID, pulseSlug, spawns, io.Discard, stderr)
+	minted := maybeSpawnRuns(root, projectID, pulseSlug, spawns, io.Discard, stderr)
 	var runs []string
 	for _, s := range spawns {
 		if _, ok := minted[s.Slug]; ok {
@@ -166,7 +166,7 @@ func TestSpawnAndGroomUnderAnExplicitHead(t *testing.T) {
 func TestSpawnAloneMintsNoHeadAndNoEdges(t *testing.T) {
 	root := spawnFixture(t)
 
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, io.Discard, io.Discard)
@@ -194,12 +194,12 @@ func TestSpawnAloneMintsNoHeadAndNoEdges(t *testing.T) {
 func TestSpawnSkipsSlugsAlreadyInProgress(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 
 	var errb bytes.Buffer
-	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, &errb)
 
@@ -224,7 +224,7 @@ func TestSpawnPromotesTaggedIdea(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{{
+	minted := maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{{
 		Slug: "cleanup-foo", Title: "Ignored title", Why: "clears the bar", Design: "# ignored seed\n",
 	}}, io.Discard, &errb)
 	destID := minted["cleanup-foo"]
@@ -273,7 +273,7 @@ func TestSpawnDoesNotPromoteUntaggedIdea(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-two",
+	minted := maybeSpawnRuns(root, "moe", "pulse-two",
 		[]pulseSpawn{{Slug: "needs-triage", Title: "Needs triage"}}, io.Discard, &errb)
 	if len(minted) != 0 {
 		t.Fatalf("minted = %v, want structural refusal", minted)
@@ -304,7 +304,7 @@ func TestSpawnTaggedIdeaSkipsWhenDestinationAlreadyLive(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-two",
+	minted := maybeSpawnRuns(root, "moe", "pulse-two",
 		[]pulseSpawn{{Slug: "cleanup-foo", Title: "Cleanup"}}, io.Discard, &errb)
 	if len(minted) != 0 {
 		t.Fatalf("minted = %v, want existing destination to dedupe", minted)
@@ -328,13 +328,13 @@ func TestSpawnTaggedIdeaSkipsWhenDestinationAlreadyLive(t *testing.T) {
 func TestSpawnSkipsSlugsAlreadyPushed(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusPushed)
 
 	var errb bytes.Buffer
-	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, &errb)
 
@@ -353,12 +353,12 @@ func TestSpawnSkipsSlugsAlreadyPushed(t *testing.T) {
 func TestSpawnRespawnsAfterMerge(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusMerged)
 
-	maybeSpawnFixRuns(root, "moe", "pulse-two", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, io.Discard)
 
@@ -431,7 +431,7 @@ func TestSpawnSkipsUnusableSlugs(t *testing.T) {
 	root := spawnFixture(t)
 
 	var errb bytes.Buffer
-	maybeSpawnFixRuns(root, "moe", "pulse-one", []pulseSpawn{
+	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "Not A Slug", Title: "Bad"},
 		{Slug: "", Title: "Also bad"},
 		{Slug: "fix-good", Title: "Good"},
@@ -451,7 +451,7 @@ func TestSpawnSkipsUnusableSlugs(t *testing.T) {
 // project that has nothing queued.
 func TestSpawnWithNoEntriesTouchesNothing(t *testing.T) {
 	root := spawnFixture(t)
-	maybeSpawnFixRuns(root, "moe", "pulse-one", nil, io.Discard, io.Discard)
+	maybeSpawnRuns(root, "moe", "pulse-one", nil, io.Discard, io.Discard)
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Fatalf("chain runs %v, want none — an empty spawn list opens nothing", got)
 	}

@@ -21,7 +21,7 @@ func groomFixture(t *testing.T, root string, slugs ...string) map[string]string 
 	for _, s := range slugs {
 		spawns = append(spawns, pulseSpawn{Slug: s, Title: s})
 	}
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-groom", spawns, io.Discard, os.Stderr)
+	minted := maybeSpawnRuns(root, "moe", "pulse-groom", spawns, io.Discard, os.Stderr)
 	if len(minted) != len(slugs) {
 		t.Fatalf("minted %v, want all of %v", minted, slugs)
 	}
@@ -437,10 +437,10 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 
 	// Mint fix-a, close it out of the live set, then mint fix-a again —
 	// the second one gets a dated slug.
-	first := maybeSpawnFixRuns(root, "moe", "pulse-one",
+	first := maybeSpawnRuns(root, "moe", "pulse-one",
 		[]pulseSpawn{{Slug: "fix-a", Title: "A"}}, io.Discard, os.Stderr)
 	setRunStatus(t, root, "moe", first["fix-a"], run.StatusMerged)
-	minted := maybeSpawnFixRuns(root, "moe", "pulse-two",
+	minted := maybeSpawnRuns(root, "moe", "pulse-two",
 		[]pulseSpawn{{Slug: "fix-a", Title: "A again"}, {Slug: "fix-b", Title: "B"}}, io.Discard, os.Stderr)
 	if minted["fix-a"] == "fix-a" {
 		t.Fatalf("second mint reused the bare slug %q — fixture assumption broken", minted["fix-a"])

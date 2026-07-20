@@ -15,7 +15,7 @@ import (
 // which runs are in-progress but never their order. So a sweep can file
 // a finding the very next chained run will fix, aim a groom group at an
 // order the chain already records, or spawn a duplicate of a queued fix
-// under a different slug — the slug-dedupe guard in maybeSpawnFixRuns
+// under a different slug — the slug-dedupe guard in maybeSpawnRuns
 // catches none of those.
 
 // chainStateBlock renders the chain-state context block, or "" when
