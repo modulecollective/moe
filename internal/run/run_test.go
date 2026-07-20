@@ -1062,3 +1062,95 @@ func TestTerminalChainParentOfOneHop(t *testing.T) {
 		t.Errorf("TerminalChainParentOf = %q, want p/b", got)
 	}
 }
+
+// TestJournalIndexConsentRoundTrip: the MoE-Consent trailer must survive
+// BuildJournalIndex's existing grep anchors. Nothing new was added to the
+// `git log --grep` set, so this asserts the load-bearing assumption that
+// every consent-stamped commit already matches one: open and push commits
+// carry MoE-Run, groom commits carry MoE-Chained-To.
+func TestJournalIndexConsentRoundTrip(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	// Oldest first: a machine-spawned run, its groomed edge, its push.
+	commit("start: a/fix",
+		"MoE-Project: a\nMoE-Run: fix\nMoE-Spawned-By: a/pulse-1\nMoE-Consent: dynamic\n")
+	commit("chain: groom a/pulse-1 (1 added, 0 removed)",
+		"MoE-Chained-To: a/head a/fix\nMoE-Consent: static\n")
+	commit("push: a/fix",
+		"MoE-Project: a\nMoE-Run: fix\nMoE-Document: push\nMoE-PR: https://example.com/pr/1\nMoE-Consent: none\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.SpawnConsent["a/fix"], "dynamic"; got != want {
+		t.Errorf("SpawnConsent[a/fix] = %q, want %q", got, want)
+	}
+	if got, want := idx.EdgeConsent["a/head a/fix"], "static"; got != want {
+		t.Errorf("EdgeConsent[a/head a/fix] = %q, want %q", got, want)
+	}
+	// "none" is a real recorded value — a machine turn with no ride in
+	// flight — so it must be present, not elided as a zero value.
+	if got, ok := idx.PushConsent["a/fix"]; !ok || got != "none" {
+		t.Errorf("PushConsent[a/fix] = %q (present=%v), want \"none\" present", got, ok)
+	}
+}
+
+// TestJournalIndexConsentAbsentForOperatorEdges: an operator `chain edit`
+// stamps no consent, and a later one re-placing an edge strips the
+// machine attribution an earlier groom had. Attribution rides the same
+// HEAD-first latest-wins decision ChainedChild does, so the operator's
+// commit — which decides the parent — is also the one that decides who
+// gets credit.
+func TestJournalIndexConsentAbsentForOperatorEdges(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	commit("chain: groom a/pulse-1 (2 added, 0 removed)",
+		"MoE-Chained-To: a/head a/groomed\nMoE-Chained-To: a/other a/moved\nMoE-Consent: static\n")
+	// The operator re-places a/other's edge onto the same child. Same
+	// edge, but a human put it there this time.
+	commit("chain: edit (1 added, 1 removed)",
+		"MoE-Chained-To-Removed: a/other a/moved\nMoE-Chained-To: a/other a/moved\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.EdgeConsent["a/head a/groomed"], "static"; got != want {
+		t.Errorf("EdgeConsent[a/head a/groomed] = %q, want %q (untouched groom keeps its attribution)", got, want)
+	}
+	if got, ok := idx.EdgeConsent["a/other a/moved"]; ok {
+		t.Errorf("EdgeConsent[a/other a/moved] = %q, want absent — an operator edit re-placed it", got)
+	}
+	// The edge itself is still live; only its attribution went away.
+	if got, want := idx.ChainedChild["a/other"], "a/moved"; got != want {
+		t.Errorf("ChainedChild[a/other] = %q, want %q", got, want)
+	}
+}
+
+// TestJournalIndexConsentUnstampedHistoryIsUnknown: commits written
+// before the trailer landed must leave every consent map empty. Absence
+// is unknown, and the UI's honesty rule depends on it never being
+// mistaken for a positive "operator did this" claim.
+func TestJournalIndexConsentUnstampedHistoryIsUnknown(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"start: a/old\n\nMoE-Project: a\nMoE-Run: old\nMoE-Spawned-By: a/pulse-0\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.SpawnedBy["a/old"], "a/pulse-0"; got != want {
+		t.Fatalf("SpawnedBy[a/old] = %q, want %q", got, want)
+	}
+	if _, ok := idx.SpawnConsent["a/old"]; ok {
+		t.Errorf("SpawnConsent[a/old] present, want absent for pre-trailer history")
+	}
+}

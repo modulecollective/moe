@@ -797,6 +797,33 @@ type JournalIndex struct {
 	// remove of the prior edge with the add of the new one, and the
 	// add is the survivor).
 	ChainedChild map[string]string
+	// SpawnConsent maps "<project>/<slug>" of a machine-opened run → the
+	// MoE-Consent value on its open commit ("none" | "static" |
+	// "dynamic"): the ride level the operator had licensed when the
+	// machine minted it. Keyed like SpawnedBy and populated from the same
+	// commits — a key here always has a SpawnedBy entry too.
+	//
+	// Absence is *unknown*, not "operator": every commit written before
+	// the trailer landed carries no consent. Readers must render absence
+	// as nothing rather than as a claim.
+	SpawnConsent map[string]string
+	// PushConsent maps "<project>/<slug>" → the MoE-Consent value on the
+	// run's push record — the consent level the ladder shipped under.
+	// Present only when a machine walk (a bang cascade, a chain kick)
+	// drove the push; an operator `moe push` stamps nothing. Same
+	// absence-is-unknown rule as SpawnConsent.
+	PushConsent map[string]string
+	// EdgeConsent maps a live chain edge — keyed "<parent> <child>" with
+	// both legs qualified, the pair shape splitChainPair reads — to the
+	// MoE-Consent value of the commit that placed it. Present only for
+	// edges a pulse groom placed and that no later commit has re-decided.
+	//
+	// Populated inside the same HEAD-first walk that decides
+	// ChainedChild, so attribution follows the identical latest-wins
+	// discipline: an edge re-placed by a later operator `chain edit`
+	// loses its machine attribution, because the operator's commit is
+	// the one that decides the parent and it carries no consent.
+	EdgeConsent map[string]string
 	// ChoreByRun maps "<project>/<slug>" to "<project>/<chore>" for
 	// runs opened by `moe chore open`.
 	ChoreByRun map[string]string
@@ -1025,7 +1052,10 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 		AdvanceTime:  make(map[WorkTurnKey]time.Time),
 		ReopenedFrom: make(map[string]string),
 		SpawnedBy:    make(map[string]string),
+		SpawnConsent: make(map[string]string),
+		PushConsent:  make(map[string]string),
 		ChainedChild: make(map[string]string),
+		EdgeConsent:  make(map[string]string),
 		ChoreByRun:   make(map[string]string),
 		ChoreTouched: make(map[string]time.Time),
 		ChoreSkipped: make(map[string]time.Time),
@@ -1057,7 +1087,7 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			subject = body[:nl]
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped string
+		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent string
 		var choreTouched []string
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
@@ -1108,6 +1138,12 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			if v, ok := strings.CutPrefix(line, "MoE-Spawned-By:"); ok {
 				if spawnedBy == "" {
 					spawnedBy = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-Consent:"); ok {
+				if consent == "" {
+					consent = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -1170,6 +1206,13 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 				continue
 			}
 			idx.ChainedChild[parent] = child
+			// Attribution rides the same decision: only the commit that
+			// wins the parent gets to say who placed the edge. An
+			// unstamped (operator) commit therefore leaves no entry, and
+			// an older groom underneath it can't re-assert one.
+			if consent != "" {
+				idx.EdgeConsent[parent+" "+child] = consent
+			}
 		}
 		for parent := range removeByParent {
 			if _, decided := idx.ChainedChild[parent]; decided {
@@ -1246,6 +1289,21 @@ func BuildJournalIndex(root string) (*JournalIndex, error) {
 			}
 			if _, ok := idx.SpawnedBy[runKey]; !ok {
 				idx.SpawnedBy[runKey] = spawnedBy
+				// Paired with the edge, not indexed independently: the
+				// consent decorates the spawn the winning commit recorded,
+				// so a later commit re-stating the spawn can't swap the
+				// level under it. Absent trailer leaves the key unset.
+				if consent != "" {
+					idx.SpawnConsent[runKey] = consent
+				}
+			}
+		}
+		// Push records are the run's own commits (MoE-Run + Document:
+		// push), so they key by runKey like the rest. Only machine-driven
+		// pushes carry consent, so a hit is the ship-under-a-ride fact.
+		if consent != "" && docID == "push" {
+			if _, ok := idx.PushConsent[runKey]; !ok {
+				idx.PushConsent[runKey] = consent
 			}
 		}
 		if chore != "" && projectID != "" {
