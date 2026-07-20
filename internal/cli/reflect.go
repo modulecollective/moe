@@ -194,23 +194,29 @@ func mintReflectRun(root, projectID, spawnedBy, agentOverride string, canonical 
 		return nil, fmt.Errorf("wiki: reflect is closed-schema only (%s is %s)", canonical.Name, canonical.Mode)
 	}
 
+	// One pass at a time: two concurrent reflects would each see the same
+	// kickoff context (events, findings, feedback) but write divergent
+	// stage commits, and the `EventsSinceCheckpoint` filter has no way to
+	// distinguish them. An already-parked auto-spawned reflect is
+	// in_progress, so this is also what pulse maps its nominations onto.
+	//
+	// Checked *before* the unrecorded-edits guard on purpose: with a pass
+	// already open, that pass is the answer whether or not the docs also
+	// carry out-of-band edits — pulse maps onto it, and the verb's "resume
+	// it" redirect is the more actionable of the two messages anyway (the
+	// open pass is where those edits get landed).
+	if existing, err := findInProgressTwinRun(root, projectID); err != nil {
+		return nil, err
+	} else if existing != "" {
+		return nil, &reflectRefusal{kind: reflectRefusalInProgress, slug: existing}
+	}
+
 	// Guardrail: managed docs touched outside a reflect pass need the
 	// operator to land them through a pass first (revert clears it). The
 	// detection error is ignored — a failed scan never blocks the mint,
 	// mirroring the pre-extraction verb.
 	if det, err := wiki.DetectUnrecordedEdits(*canonical); err == nil && len(det.UnrecordedDocs) > 0 {
 		return nil, &reflectRefusal{kind: reflectRefusalUnrecorded, det: det}
-	}
-
-	// One pass at a time: two concurrent reflects would each see the same
-	// kickoff context (events, findings, feedback) but write divergent
-	// stage commits, and the `EventsSinceCheckpoint` filter has no way to
-	// distinguish them. An already-parked auto-spawned reflect is
-	// in_progress, so this is also pulse's anti-double-open guard.
-	if existing, err := findInProgressTwinRun(root, projectID); err != nil {
-		return nil, err
-	} else if existing != "" {
-		return nil, &reflectRefusal{kind: reflectRefusalInProgress, slug: existing}
 	}
 
 	// Mint the run. workflow="twin"; the id-base "reflect" routes the
