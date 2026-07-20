@@ -138,15 +138,6 @@ in code — mechanical, bounded, verifiable — because the harness has no basis
 for judging which entries to trim, and the parked queue is itself the review
 gate.
 
-Those two channels have since collapsed into one. `reflect.due` was deleted and
-a spawn entry grew a `workflow` field (`sdlc` by default, `twin` for a
-reflect), which took the reflect's harness-fixed placement rule with it: where
-a reflect lands is now an ordering claim the agent makes in `chain`, priced
-against the same bar as everything else it queues. One grammar, one placement
-mechanism, one consent gate — and the guards that matter (one twin run in
-flight, no reflect over unrecorded twin edits) stayed exactly where they were,
-in the mint.
-
 That crossed a line vision.md had drawn, and the design said so rather than
 smuggling it. The line was redrawn as: **the pulse makes runs, but never runs
 them.** Execution stayed operator-rooted.
@@ -155,6 +146,15 @@ The rhythm this produced is worth stating plainly, because it's the whole
 argument for the design: across 2026-07-17 to 07-19, sixty-six pulse sweeps
 fired on the `moe` project. None of them were scheduled. Each one rode the tail
 of work a human had already chosen to land.
+
+The gate's two channels have since collapsed into one. `reflect.due` was
+deleted and a spawn entry grew a `workflow` field (`sdlc` by default, `twin`
+for a reflect), which took the reflect's harness-fixed placement rule with it:
+where a reflect lands is now an ordering claim the agent makes in `chain`,
+priced against the same bar as everything else it queues. One grammar, one
+placement mechanism, one consent gate — and the guards that matter (one twin
+run in flight, no reflect over unrecorded twin edits) stayed exactly where they
+were, in the mint.
 
 ## Step 4: the fourth bang
 
