@@ -59,7 +59,16 @@ type Block struct {
 	// cross-project coordination. The general run-lineage edge, mirrored
 	// into Metadata.SpawnedBy / the journal index's SpawnedBy map.
 	SpawnedBy string
-	Chore     string
+	// Consent records that a *machine* turn made this commit, and the
+	// ride-mode consent level it ran under: "none", "static" or
+	// "dynamic". Presence is the machine marker; the value is the
+	// consent. "none" therefore means "a machine turn with no ride in
+	// flight" — a bare `moe pulse` groom, a `!` single step — *not*
+	// "no consent given". An absent trailer means either an operator
+	// action or a commit written before the trailer landed; readers
+	// must not read absence as "operator" for history.
+	Consent string
+	Chore   string
 	// ChoreSkipped carries "<project>/<chore>" on the empty commit
 	// written by `moe chore skip`. Its commit time records that the
 	// chore is satisfied as of the skip, folding into the value the
@@ -98,6 +107,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)
 	write(&sb, "MoE-Spawned-By", b.SpawnedBy)
+	write(&sb, "MoE-Consent", b.Consent)
 	write(&sb, "MoE-Chore", b.Chore)
 	write(&sb, "MoE-Chore-Skipped", b.ChoreSkipped)
 	for _, v := range b.ChoreTouched {

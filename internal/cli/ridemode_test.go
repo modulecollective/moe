@@ -110,3 +110,50 @@ func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 		t.Errorf("kickoff names a ride outside one:\n%s", got)
 	}
 }
+
+// TestConsentTrailerValueTracksTheWalk: the flag the push stamp gates
+// on. currentRideMode alone can't distinguish a `!` cascade (a machine
+// walk consenting to nothing) from an operator's bare `moe push` —
+// both read rideNone — so the active bit is what keeps the MoE-Consent
+// trailer's "a machine shipped this" claim exact.
+func TestConsentTrailerValueTracksTheWalk(t *testing.T) {
+	value, active := consentTrailerValue()
+	if active {
+		t.Fatalf("a walk reads active at rest (value=%q)", value)
+	}
+	func() {
+		defer withRideMode(rideNone)()
+		value, active := consentTrailerValue()
+		if !active || value != "none" {
+			t.Errorf("inside a `!` walk: (%q, %v), want (\"none\", true)", value, active)
+		}
+	}()
+	func() {
+		defer withRideMode(rideDynamic)()
+		value, active := consentTrailerValue()
+		if !active || value != "dynamic" {
+			t.Errorf("inside a `!!!!` ride: (%q, %v), want (\"dynamic\", true)", value, active)
+		}
+	}()
+	if _, active := consentTrailerValue(); active {
+		t.Error("the active bit leaked past the restore")
+	}
+}
+
+// TestSpawnConsentPairsWithTheSpawnEdge: a mint with no spawner is the
+// operator's own `moe pulse` — no machine opened it, so nothing claims
+// one did. The trailer decorates the spawn edge; it doesn't stand alone.
+func TestSpawnConsentPairsWithTheSpawnEdge(t *testing.T) {
+	if got := spawnConsent(""); got != "" {
+		t.Errorf("spawnConsent(\"\") = %q, want empty", got)
+	}
+	if got := spawnConsent("moe/pulse-1"); got != "none" {
+		t.Errorf("spawnConsent with a spawner = %q, want \"none\"", got)
+	}
+	func() {
+		defer withRideMode(rideStatic)()
+		if got := spawnConsent("moe/pulse-1"); got != "static" {
+			t.Errorf("spawnConsent inside a static ride = %q, want \"static\"", got)
+		}
+	}()
+}

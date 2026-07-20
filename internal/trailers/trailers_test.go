@@ -24,6 +24,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		IdeaMovedFrom: "imf",
 		ReopenOf:      "ro",
 		SpawnedBy:     "sb",
+		Consent:       "dynamic",
 	}
 	want := "MoE-Run: r\n" +
 		"MoE-Project: p\n" +
@@ -38,7 +39,8 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		"MoE-Idea: i\n" +
 		"MoE-Idea-Moved-From: imf\n" +
 		"MoE-Reopen-Of: ro\n" +
-		"MoE-Spawned-By: sb\n"
+		"MoE-Spawned-By: sb\n" +
+		"MoE-Consent: dynamic\n"
 	if got := b.String(); got != want {
 		t.Fatalf("String() mismatch:\n got: %q\nwant: %q", got, want)
 	}

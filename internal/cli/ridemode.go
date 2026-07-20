@@ -62,12 +62,47 @@ func (m rideMode) String() string {
 // answer's mode into the second.
 var currentRideMode = rideNone
 
+// rideWalkActive distinguishes "a machine walk is in flight carrying
+// consent rideNone" (a `!` step, a `!!` ship) from "nobody set a mode,
+// so the zero value stands" (a bare operator `moe push`). currentRideMode
+// alone can't: both read rideNone. Every withRideMode entry point is a
+// machine-walk entry, so the flag is exactly "did a bang answer or a
+// chain kick hand this invocation to the machine".
+var rideWalkActive = false
+
 // withRideMode sets the process ride mode and returns the restore.
 // Call as `defer withRideMode(m)()` at a cascade entry point.
 func withRideMode(m rideMode) func() {
-	prev := currentRideMode
-	currentRideMode = m
-	return func() { currentRideMode = prev }
+	prevMode, prevActive := currentRideMode, rideWalkActive
+	currentRideMode, rideWalkActive = m, true
+	return func() { currentRideMode, rideWalkActive = prevMode, prevActive }
+}
+
+// consentTrailerValue reports the MoE-Consent value for a commit written
+// by this invocation, plus whether a machine walk is actually in flight.
+//
+// Emit sites that are machine by construction (a run mint that stamps
+// MoE-Spawned-By, a pulse groom) ignore the second return and always
+// stamp — the pulse acting is a machine turn whether or not the operator
+// rode anything. Sites shared with operator verbs (the push record) stamp
+// only when active is true, so `moe push` and an interactive `moe sdlc
+// push` leave no trailer.
+func consentTrailerValue() (value string, active bool) {
+	return currentRideMode.String(), rideWalkActive
+}
+
+// spawnConsent is the MoE-Consent value for the open commit of a run
+// being minted with spawnedBy. It pairs with MoE-Spawned-By rather than
+// standing alone: `spawned_by` present already means machine-opened, so
+// the consent trailer decorates that edge with the ride level instead of
+// making a second, weaker claim. An operator-typed `moe pulse` (no
+// spawner) mints with neither.
+func spawnConsent(spawnedBy string) string {
+	if spawnedBy == "" {
+		return ""
+	}
+	value, _ := consentTrailerValue()
+	return value
 }
 
 // rideModeContextLine tells a mid-ride survey which kind of ride it is
