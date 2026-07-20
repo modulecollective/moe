@@ -137,11 +137,12 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 }
 
 // defaultBranchForProject reads the project's default branch from its
-// project.json — used by attachRunWorkspace as the base for newly-
-// created run branches in a named workspace, so a workspace that
+// project.json — used by attachRunWorkspace both as the base for
+// newly-created run branches in a named workspace (so a workspace that
 // previously hosted run A's branch doesn't silently anchor run B's
-// branch to A's tip. project.Load already validates the metadata
-// shape; we just propagate the field.
+// branch to A's tip) and as the freshen target for commit-free run
+// branches in either workspace shape. project.Load already validates
+// the metadata shape; we just propagate the field.
 func defaultBranchForProject(root, projectID string) (string, error) {
 	pj, err := project.Load(root, projectID)
 	if err != nil {
