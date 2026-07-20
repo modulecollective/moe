@@ -107,7 +107,7 @@ func liveChainTail(root, key string) (string, bool) {
 
 // pulseSelfKick is the last step of a pulse: kick the threads whose
 // groom group asked for it. This is the only door to machine-rooted
-// motion, and two structural guards hold it shut everywhere else.
+// motion, and three structural guards hold it shut everywhere else.
 //
 // First, **dynamic consent upstream**. A plain push, `!!` or `!!!` tail
 // pulse grooms and parks; only a fourth bang the operator actually
