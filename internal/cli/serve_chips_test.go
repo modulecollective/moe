@@ -69,6 +69,7 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 				`action="/run/alpha/r1/advance"`,
 				`action="/run/alpha/r1/ship"`,
 				`action="/run/alpha/r1/chain"`,
+				`action="/run/alpha/r1/dynamic"`,
 			}
 			for _, chip := range chips {
 				got := strings.Contains(body, chip)

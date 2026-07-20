@@ -437,6 +437,39 @@ func TestChainPOSTSpawnsNextStageWithFlag(t *testing.T) {
 	}
 }
 
+// TestDynamicPOSTSpawnsNextStageWithFlag: the dynamic chip spawns the
+// next stage under --dynamic — the same cascade + chain ride as --chain,
+// which the machine may extend mid-run. Mirrors the ship/chain tests; the
+// trailing flag is the only difference, and dropping it would silently
+// offer a second chain that isn't dynamic.
+func TestDynamicPOSTSpawnsNextStageWithFlag(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Stage: "code",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/run/alpha/fix-it/dynamic", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	c, ok := s.children.get("alpha/fix-it")
+	if !ok {
+		t.Fatal("child not registered under run id")
+	}
+	<-c.done
+	if got := strings.Join(c.cmd.Args[1:], " "); got != "sdlc code alpha/fix-it --dynamic" {
+		t.Errorf("spawn args = %q, want %q", got, "sdlc code alpha/fix-it --dynamic")
+	}
+}
+
 // TestKickPOSTSpawnsChainKick: the kick chip spawns `moe chain kick
 // <id>` — the CLI verb, unwrapped, so its refusals stay the only
 // authority on whether this chain may ride. Unlike the cascade trio

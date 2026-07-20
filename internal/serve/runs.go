@@ -645,16 +645,18 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 }
 
 // spawnMode selects which cascade flag (if any) spawnNextStage appends
-// to `moe <workflow> <stage> <id>`. The three web chips map one-to-one onto
+// to `moe <workflow> <stage> <id>`. The four web chips map one-to-one onto
 // the modes, and each mode onto the bang vocabulary: advance (= `!`,
 // no flag), ship (= `!!`, --ship, ship this run), chain (= `!!!`,
-// --chain, ship + ride the whole chain).
+// --chain, ship + ride the whole chain), dynamic (= `!!!!`, --dynamic,
+// the same ride the machine may extend).
 type spawnMode int
 
 const (
 	spawnAdvance spawnMode = iota
 	spawnShip
 	spawnChain
+	spawnDynamic
 )
 
 // verb is the human-facing label spawnNextStage uses in log lines and
@@ -665,6 +667,8 @@ func (m spawnMode) verb() string {
 		return "ship"
 	case spawnChain:
 		return "chain"
+	case spawnDynamic:
+		return "dynamic"
 	default:
 		return "advance"
 	}
@@ -678,6 +682,8 @@ func (m spawnMode) flag() string {
 		return "--ship"
 	case spawnChain:
 		return "--chain"
+	case spawnDynamic:
+		return "--dynamic"
 	default:
 		return ""
 	}
@@ -708,6 +714,15 @@ func (s *Server) handleShip(w http.ResponseWriter, r *http.Request) {
 // lever on the page, and like ship it stays operator-triggered.
 func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnChain)
+}
+
+// handleDynamic spawns the run's next stage under --dynamic: the same
+// headless cascade + chain ride as chain, but the ride may grow while it
+// runs — tail pulses may groom onto the ridden chain's tail and kick
+// threads they root. The "dynamic" chip posts here; it gates identically
+// to ship/chain and the web still doesn't exceed the CLI.
+func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) {
+	s.spawnNextStage(w, r, spawnDynamic)
 }
 
 // handleKick rides a chain head headlessly from the browser by spawning
@@ -930,10 +945,10 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // reopen — idea has no stage verbs to derive). Every other workflow's
 // chips are composed from its registration-time serve declaration
 // (Options.WorkflowUI): cascade workflows get the "→ <stage>" /
-// "ship" / "chain" trio keyed off the re-derived next stage. Workflows
-// with a close pipeline get a close-run chip when close is the routine
-// idle-page next move; perpetual workflows keep close off the idle page
-// but still expose it while a child is live. A workflow that declared
+// "ship" / "chain" / "dynamic" quartet keyed off the re-derived next
+// stage. Workflows with a close pipeline get a close-run chip when close
+// is the routine idle-page next move; perpetual workflows keep close off
+// the idle page but still expose it while a child is live. A workflow that declared
 // nothing — or declared without cascade — renders no spawn chips: the
 // read-only page plus, where applicable, the close chip.
 //
@@ -998,11 +1013,11 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		return nil
 	}
 	var out []runAction
-	// The cascade trio chips spawn an agent, so they render only in
+	// The cascade chips spawn an agent, so they render only in
 	// insecure mode. The close-run chip below is journal-only (CloseRun
 	// runs in-process, no spawn) and stays in safe mode.
 	if !live && s.opts.Insecure && ui.Cascade {
-		// A "" or excluded next stage (sdlc's push) yields no trio:
+		// A "" or excluded next stage (sdlc's push) yields no chips:
 		// push stays terminal/CLI-only — the bang vocabulary
 		// collapses there — so a run parked right before push shows
 		// only the close chip.
@@ -1010,7 +1025,8 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			out = append(out,
 				runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
 				runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
-				runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
+				runAction{Label: "chain", Href: base + "/chain", Method: "POST"},
+				runAction{Label: "dynamic", Href: base + "/dynamic", Method: "POST"})
 		}
 	}
 	if ui.Close && (!ui.Perpetual || live) {

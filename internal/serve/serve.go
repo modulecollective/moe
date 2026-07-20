@@ -196,12 +196,12 @@ type Options struct {
 
 	// WorkflowUI returns the serve declaration a workflow made at
 	// registration time — which stage verbs serve may spawn, whether
-	// the cascade trio (advance/ship/chain) applies, whether a close
-	// pipeline exists. ok=false means the workflow declared nothing:
+	// the cascade chips (advance/ship/chain/dynamic) apply, whether a
+	// close pipeline exists. ok=false means the workflow declared nothing:
 	// its runs render read-only (canvas links, no chips) and the
 	// stage/advance routes refuse. cli/serve.go wires this to the
 	// cli-side registry so serve carries no per-workflow UI policy of
-	// its own. Absent means the advance/ship/chain and stage-spawn
+	// its own. Absent means the advance/ship/chain/dynamic and stage-spawn
 	// routes return 500; idea chips (bespoke, not stage-derived) still
 	// render.
 	WorkflowUI func(workflow string) (ui WorkflowUI, ok bool)
@@ -222,7 +222,8 @@ type WorkflowUI struct {
 	// in this set for the advance trio to render/spawn.
 	Stages []string
 	// Cascade reports that the workflow's stage verbs accept --ship /
-	// --chain — the advance/ship/chain routes and chips apply.
+	// --chain / --dynamic — the advance/ship/chain/dynamic routes and
+	// chips apply.
 	Cascade bool
 	// Perpetual reports that satisfying every stage does not make close
 	// the routine next move; the run stays open for repeat sittings.
@@ -372,10 +373,12 @@ func (s *Server) registerRoutes() {
 	// /advance spawns the next stage interactively under the serve
 	// handshake; /ship spawns it under --ship (headless cascade through
 	// push, ship this run); /chain spawns it under --chain (ship this
-	// run, then ride the whole chain).
+	// run, then ride the whole chain); /dynamic spawns it under --dynamic
+	// (the same ride, which the machine may extend mid-run).
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
 	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
 	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
+	s.router.HandleFunc("POST /run/{project}/{slug}/dynamic", s.handleDynamic)
 	s.router.HandleFunc("POST /run/{project}/{slug}/kick", s.handleKick)
 	s.router.HandleFunc("POST /run/{project}/{slug}/kick-dynamic", s.handleKickDynamic)
 	// Chore detail page + open action. A chore isn't a run, so it has

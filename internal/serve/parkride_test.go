@@ -113,7 +113,7 @@ func TestSafeModeParkedPageOffersNoRide(t *testing.T) {
 		t.Fatalf("destination page: want 200, got %d", rr2.Code)
 	}
 	body := rr2.Body.String()
-	for _, banned := range []string{"/advance", "/ship", "/chain"} {
+	for _, banned := range []string{"/advance", "/ship", "/chain", "/dynamic"} {
 		if strings.Contains(body, loc+banned) {
 			t.Errorf("safe-mode destination page must not render %q\n%s", banned, body)
 		}
