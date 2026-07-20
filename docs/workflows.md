@@ -18,10 +18,10 @@ exist to kick work back to `code` or `design`, not to decorate the ladder.
 
 ```sh
 moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain|--dynamic] <project>/<slug>
-moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
+moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
+moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
+moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
@@ -70,10 +70,9 @@ typed seed and walks away, `--from-idea --dynamic` promotes an idea and rides it
 with the machine free to grow the ride. All ride the shared `new` facade, so
 every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
 needs the workflow to have a cascade dispatcher, which it refuses to mint a run
-without). `--park`
-also reaches past `new`: `moe chore open`, `moe twin reflect`, and
-`moe sdlc reopen` — the other creators that end at the chain prompt — take it
-with the same meaning.
+without). `--park` also reaches past `new`: `moe chore open`,
+`moe twin reflect`, and `moe sdlc reopen` — the other creators that end at the
+chain prompt — take it with the same meaning.
 
 ### Cascades: the bang vocabulary
 
@@ -86,13 +85,17 @@ Every cascade is headless — the axis is *how far*, not *how*:
   auto-closes, for workflows without a push gate), then stops.
 - `!!!` is the same as `!!`, but after this run ships it **rides the whole
   chain** — cascading into the next live chained run.
+- `!!!!` is the same ride as `!!!`, but **dynamic** — the machine may extend
+  it while it runs: a tail pulse can groom new work onto the ridden tail and
+  kick threads it rooted.
 
 The cascade mode flags on `design`/`code`/`review`/`test` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
 and ships this run; `--chain` (= `!!!`) does the same and then rides the
-whole chain. The four cascade flags are mutually exclusive; `--agent` combines
+whole chain; `--dynamic` (= `!!!!`) rides it and may grow it. The five
+cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
 
@@ -101,8 +104,8 @@ kicks the run back rather than parking. Interactively the chain prompt becomes a
 kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
 blocking canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the
 run; after the fix, MoE re-offers the gate that blocked instead of walking
-forward. Headless ship cascades (`!!` / `!!!`, and serve's ship) take one
-bounded `code` kickback carrying the blocking canvas, then re-dispatch the
+forward. Headless ship cascades (`!!` / `!!!` / `!!!!`, and serve's ship) take
+one bounded `code` kickback carrying the blocking canvas, then re-dispatch the
 blocked stage and re-check its gate once — if the fix doesn't stick, it parks as
 before. `!` and `!<stage>` take no recovery turn of their own: they stop at the
 blocked gate and fall through to that same chain prompt (headless, a
