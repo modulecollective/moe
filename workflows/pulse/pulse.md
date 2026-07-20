@@ -311,6 +311,24 @@ run gets that entry dropped — so shape new threads worth naming
 instead of trying to reshape it. Inside a **dynamic** ride, extending
 the tail is exactly the move.
 
+### A parked reflect is a thread, not a finished job
+
+An earlier sweep's twin reflect can still be sitting parked with the
+pending observations stacked behind it — your kickoff names it when so.
+Parked is where the harness leaves a reflect it had no thread to place
+it on; it is not a verdict that the reflect is done, and it does not
+make the drift it was opened for any less real. Treat it like any other
+parked machine-rooted thread: chain it behind the fixes it should read
+the settled record of, or name it in a group carrying `"kick": true`
+and let it ride. The same kick bar applies — a reflect that would read
+a half-finished record is one to place, not to start.
+
+This is a different act from flagging one. Don't set `reflect.due` while
+a twin run is open — that guard stands and the harness would refuse the
+mint anyway. Riding the reflect that already exists is not re-flagging
+it, and "a reflect is already open" is a reason not to open a second
+one, never a reason to leave the first one sitting.
+
 ## Hard don'ts
 
 - No project-tree edits, no fixing findings in place (the sandbox is

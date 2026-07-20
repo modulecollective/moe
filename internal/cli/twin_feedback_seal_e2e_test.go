@@ -133,8 +133,26 @@ func TestPendingTwinObservationsCountsSealingRunsResidue(t *testing.T) {
 	root, _, _ := sealFixture(t, "reflect-run")
 
 	got := pendingTwinObservationsLine(root, "tele")
+	// Prefix, not equality: the line also names the open twin run when
+	// there is one, and this fixture's sealing run is still open. The
+	// count clause is what's pinned here.
 	want := "Twin-reflect context: 1 twin observation(s) pending since the last reflect, from reflect-run."
-	if got != want {
-		t.Errorf("pulse line =\n  %q\nwant\n  %q", got, want)
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("pulse line =\n  %q\nwant prefix\n  %q", got, want)
+	}
+}
+
+// The count alone was not enough vocabulary: a pulse read a parked
+// reflect as a finished job because nothing connected the pending
+// observations to the run they were waiting on. Name it.
+func TestPendingTwinObservationsNamesTheOpenTwinRun(t *testing.T) {
+	root, _, _ := sealFixture(t, "reflect-run")
+
+	got := pendingTwinObservationsLine(root, "tele")
+	if !strings.Contains(got, "`tele/reflect-run`") {
+		t.Errorf("pulse line should name the open twin run:\n  %q", got)
+	}
+	if !strings.Contains(got, "parked") {
+		t.Errorf("pulse line should say the run is parked until something rides it:\n  %q", got)
 	}
 }

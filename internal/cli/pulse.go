@@ -786,6 +786,13 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 // reflect checkpoint's LastIngestAt). Returns "" when the feedback read
 // fails; a project with no twin checkpoint reads as a first reflect, so
 // with no committed feedback it gets the quiet "none pending" line.
+//
+// When an open twin run already exists, the line names it. Counting the
+// observations without naming their destination is what let a pulse
+// read a parked reflect as a finished job: it had the count, it had the
+// run, and nothing connected the two to an action it could take. The
+// slug turns the count into a thread the agent can groom or kick — the
+// vocabulary the fragment teaches beside this.
 func pendingTwinObservationsLine(root, projectID string) string {
 	cfg, err := twinWikiBuilder(root, projectID)
 	if err != nil || cfg == nil {
@@ -807,8 +814,14 @@ func pendingTwinObservationsLine(root, projectID string) string {
 		seen[fb.runID] = true
 		runs = append(runs, fb.runID)
 	}
-	return fmt.Sprintf("Twin-reflect context: %d twin observation(s) pending since the last reflect, from %s.",
+	line := fmt.Sprintf("Twin-reflect context: %d twin observation(s) pending since the last reflect, from %s.",
 		len(feedback), strings.Join(runs, ", "))
+	// Read failure is silent: the count is the load-bearing half, and a
+	// scan that failed is not evidence that no twin run is open.
+	if open, err := findInProgressTwinRun(root, projectID); err == nil && open != "" {
+		line += fmt.Sprintf(" They are waiting on open twin run `%s/%s`, which stays parked until something rides it.", projectID, open)
+	}
+	return line
 }
 
 // errPulseSkipped is the sentinel openPulse's prompt builder returns
