@@ -124,25 +124,53 @@ func TestReflectStampsAtTheUnitTailWhenDynamic(t *testing.T) {
 		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
-	stampReflectOnUnit(root, "moe", "pulse-groom", reflectID, spawnerKey, io.Discard, os.Stderr)
+	got := placeReflect(root, "moe", "pulse-groom", reflectID, spawnerKey, io.Discard, os.Stderr)
 
-	if got := liveEdges(t, root)[memberKey]; got != "moe/"+reflectID {
-		t.Fatalf("unit tail %s chains to %q, want the reflect", memberKey, got)
+	if tail := liveEdges(t, root)[memberKey]; tail != "moe/"+reflectID {
+		t.Fatalf("unit tail %s chains to %q, want the reflect", memberKey, tail)
+	}
+	if got != nil {
+		t.Errorf("returned kick candidate %+v, want none — a stamped reflect rides the unit it joined", *got)
 	}
 }
 
-// TestReflectParksStandaloneOutsideADynamicRide covers the other two
-// arms: a static ride's unit is closed to machine growth, and an
-// unchained spawner gives the harness no basis for guessing which
-// parked thread deserves the reflect.
+// TestReflectSelfRootsForAKickWhenSpawnerUnchained: the gap this run
+// exists to close. Under dynamic consent with an unchained spawner
+// there is no tail to stamp onto, so the reflect comes back as its own
+// kick candidate instead of parking unridden.
+func TestReflectSelfRootsForAKickWhenSpawnerUnchained(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "spawner", "reflect-stand-in")
+	reflectKey := "moe/" + minted["reflect-stand-in"]
+
+	defer withRideMode(rideDynamic)()
+	got := placeReflect(root, "moe", "pulse-groom", minted["reflect-stand-in"],
+		"moe/"+minted["spawner"], io.Discard, os.Stderr)
+
+	if got == nil {
+		t.Fatalf("returned no kick candidate, want the reflect self-rooted")
+	}
+	if got.Root != reflectKey || !got.Kick {
+		t.Errorf("candidate = %+v, want {Root: %q, Kick: true}", *got, reflectKey)
+	}
+	for parent, child := range liveEdges(t, root) {
+		if child == reflectKey {
+			t.Fatalf("reflect chained under %s, want it self-rooted", parent)
+		}
+	}
+}
+
+// TestReflectParksStandaloneOutsideADynamicRide: a static ride's unit
+// is closed to machine growth, so the reflect neither joins it nor
+// rides — it parks, and what the operator saw at kick time is what
+// runs. Same for a static ride with nothing chained at all.
 func TestReflectParksStandaloneOutsideADynamicRide(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		mode    rideMode
 		chained bool
 	}{
-		{name: "static-ride", mode: rideStatic, chained: true},
-		{name: "unchained-spawner", mode: rideDynamic, chained: false},
+		{name: "chained-spawner", chained: true},
+		{name: "unchained-spawner", chained: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := spawnFixture(t)
@@ -155,9 +183,13 @@ func TestReflectParksStandaloneOutsideADynamicRide(t *testing.T) {
 					[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
 			}
 
-			defer withRideMode(tc.mode)()
-			stampReflectOnUnit(root, "moe", "pulse-groom", minted["reflect-stand-in"], spawnerKey, io.Discard, os.Stderr)
+			defer withRideMode(rideStatic)()
+			got := placeReflect(root, "moe", "pulse-groom", minted["reflect-stand-in"],
+				spawnerKey, io.Discard, os.Stderr)
 
+			if got != nil {
+				t.Errorf("returned kick candidate %+v, want none under a static ride", *got)
+			}
 			for parent, child := range liveEdges(t, root) {
 				if child == reflectKey {
 					t.Fatalf("reflect chained under %s, want it parked standalone", parent)

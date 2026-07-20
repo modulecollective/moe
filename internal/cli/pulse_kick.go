@@ -15,37 +15,53 @@ import (
 // auto-spawned twin reflect lands, and whether the pulse kicks anything
 // itself.
 
-// stampReflectOnUnit puts the sweep's auto-spawned twin reflect at the
-// tail of the chain the pulse fired on, so one ride drains the fixes
-// *and* brings the twin current — the reflect reads the post-fix
-// settled record rather than the record as of mid-batch.
+// placeReflect decides where the sweep's auto-spawned twin reflect
+// goes, so that under live consent one ride drains the fixes *and*
+// brings the twin current — the reflect reading the post-fix settled
+// record rather than the record as of mid-batch.
 //
-// Three conditions, all structural. The reflect has to exist; the ride
-// has to be dynamic (a static ride's unit is closed to machine growth,
-// so the reflect parks standalone as it does today); and the spawner
-// has to be a chain member (with an unchained spawner the harness has
-// no basis for guessing which parked thread deserves it). No agent-side
-// control: the reflect's slug is harness-minted, so this is a harness
-// rule, not a `chain` entry.
+// Two conditions gate the whole rule, both structural. The reflect has
+// to exist, and the ride has to be dynamic (a static ride's unit is
+// closed to machine growth, so the reflect parks standalone as it does
+// today). No agent-side control: the reflect's slug is harness-minted,
+// so this is a harness rule, not a `chain` entry.
 //
-// One accepted wrinkle: a later mid-ride append lands *behind* the
-// reflect, so it reflects the chain as of its own hop. Whatever merges
-// after it waits for the next due reflect — which is exactly the
-// cadence reflects have today.
+// A third condition picks *which* of two placements applies. With a
+// chained spawner there is a tail to stamp onto and the reflect joins
+// that unit. With an unchained spawner — the common case, since most
+// pulses fire off a standalone run's push — there is no tail to guess
+// at, so the reflect stays self-rooted and comes back as a kick
+// candidate instead: the caller appends it to pulseSelfKick's thread
+// list, last, so gate-named fix threads ride first and the reflect
+// still reads the settled post-fix record. That is the same
+// read-after-fixes ordering the tail stamp gives, and the same license
+// — a reflect stamped onto a ridden dynamic unit already rides today.
+//
+// Returns the self-rooted reflect thread in that second case, and nil
+// otherwise (stamped a tail, no reflect, or no dynamic consent).
+//
+// One accepted wrinkle on the stamped path: a later mid-ride append
+// lands *behind* the reflect, so it reflects the chain as of its own
+// hop. Whatever merges after it waits for the next due reflect — which
+// is exactly the cadence reflects have today.
 //
 // Warn-only: an unstamped reflect is still a parked reflect run, which
 // is where it would have landed before this rule existed.
-func stampReflectOnUnit(root, projectID, pulseSlug, reflectID, spawnerKey string, stdout, stderr io.Writer) {
-	if reflectID == "" || spawnerKey == "" || currentRideMode != rideDynamic {
-		return
+func placeReflect(root, projectID, pulseSlug, reflectID, spawnerKey string, stdout, stderr io.Writer) *groomedThread {
+	if reflectID == "" || currentRideMode != rideDynamic {
+		return nil
+	}
+	reflectKey := projectID + "/" + reflectID
+	selfRooted := &groomedThread{Root: reflectKey, Kick: true}
+	if spawnerKey == "" {
+		return selfRooted
 	}
 	tail, ok := liveChainTail(root, spawnerKey)
 	if !ok {
-		return
+		return selfRooted
 	}
-	reflectKey := projectID + "/" + reflectID
 	if tail == reflectKey {
-		return
+		return nil
 	}
 	msg := fmt.Sprintf("chain: chain %s after %s\n\n", reflectKey, tail) +
 		trailers.Block{
@@ -61,10 +77,16 @@ func stampReflectOnUnit(root, projectID, pulseSlug, reflectID, spawnerKey string
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 	if err != nil {
+		// Not rerouted to a self-rooted kick: this reflect belongs on the
+		// spawner's unit, and the failure is in the journal write, not in
+		// the placement. Parking it is the pre-existing fallback and the
+		// one that doesn't start a ride the failed commit was meant to
+		// order.
 		moePrintf(stderr, "pulse: chain reflect %s after %s: %v — the reflect is open but unchained\n", reflectKey, tail, err)
-		return
+		return nil
 	}
 	moePrintf(stderr, "pulse: chained twin reflect %s after %s\n", reflectKey, tail)
+	return nil
 }
 
 // liveChainTail walks forward from key to the end of its thread, over

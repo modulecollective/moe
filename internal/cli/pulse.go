@@ -386,7 +386,14 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	}
 	minted := maybeSpawnFixRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
 	threads := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
-	stampReflectOnUnit(root, projectID, md.ID, reflectID, spawner, stdout, stderr)
+	// Appended last on purpose: with no spawner tail to stamp onto, the
+	// reflect rides as its own thread, and pulseSelfKick's loop is
+	// sequential — so trailing the gate-named fix threads gives it the
+	// same read-after-fixes ordering the tail stamp gives, with no extra
+	// chain commit.
+	if reflectThread := placeReflect(root, projectID, md.ID, reflectID, spawner, stdout, stderr); reflectThread != nil {
+		threads = append(threads, *reflectThread)
+	}
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -519,7 +526,7 @@ func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
 // opening a second; out-of-band twin edits warn and skip, since the
 // operator has to clear those before any reflect can run.
 // Returns the minted run's id, or "" when nothing was minted — the
-// handle stampReflectOnUnit needs to place it at a chain's tail once
+// handle placeReflect needs to place it at a chain's tail once
 // this sweep's grooming has settled.
 func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) string {
 	canonical, err := twinWikiBuilder(root, projectID)
