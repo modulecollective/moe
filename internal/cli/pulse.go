@@ -169,10 +169,13 @@ func init() {
 // cheaper than kick-time: no session at all rather than a session that
 // can only groom and park. Growth from a machine generation's merge
 // isn't lost; it parks for the next operator-rooted merge, the same
-// posture the kick guard already took. This covers every machine
-// lineage, not just kicked rides — chore- and idea-promoted runs and
-// pulse-parked twin reflects carry SpawnedBy too, and an operator who
-// wants a sweep after one of those has `moe pulse new`.
+// posture the kick guard already took. The reach is exactly the set of
+// runs that write SpawnedBy — pulse, reflect and chain runs (see
+// nestSpawnedRuns in internal/dash) — so it covers pulse-parked twin
+// reflects as well as kicked rides. Chore- and idea-promoted runs do
+// *not* carry SpawnedBy: `moe chore` and `moe sdlc new --from-idea` are
+// operator actions, so those still tail a pulse. An operator who wants
+// a sweep after a suppressed merge has `moe pulse new`.
 // The second return is the one stderr line the caller prints when
 // lineage is what suppressed the sweep, and "" otherwise — a workflow
 // that never pulses says nothing, same as before.
