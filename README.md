@@ -158,7 +158,7 @@ and trailer conventions can change. Expect sharp edges.
 
 ## Contributing
 
-Please don't :-) Not accepting issues or PRs right now. This is one firm's internal
+Please don't contribute :-) Not accepting issues or PRs right now. This is one firm's internal
 tool, shared in case it is useful.
 
 ## License
