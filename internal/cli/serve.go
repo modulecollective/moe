@@ -107,6 +107,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		ChainMembers: func(project, runID string) ([]dash.Row, string, error) {
 			return chainMembers(root, project, runID, time.Now().UTC())
 		},
+		// Provenance crosses the seam already resolved to display strings:
+		// the walk reads the journal index *and* the spawning pulse's
+		// canvas gate, and neither belongs on serve's side.
+		RunProvenance: func(project, runID string) ([]serve.ProvHop, error) {
+			return runProvenance(root, project, runID)
+		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the
 		// followups/lore files as they sit on disk. Dispatch is by the

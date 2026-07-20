@@ -58,19 +58,27 @@ func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, stri
 	// map does: a hand-edited journal can describe a loop, and a page
 	// render is no place to hang.
 	seen := map[string]bool{head: true}
+	prev := head
 	for cur := idx.ChainedChild[head]; run.ChainChildLive(cur, byKey) && !seen[cur]; cur = idx.ChainedChild[cur] {
 		seen[cur] = true
-		if row, ok := rowByKey[cur]; ok {
-			members = append(members, row)
-			continue
+		// The edge that put this member here is the one from the run
+		// before it — the dash rows are gathered globally and carry the
+		// attribution for whatever unit they landed in, so re-derive it
+		// against this walk's parent rather than trusting the row's.
+		consent, groomed := idx.EdgeConsent[prev+" "+cur]
+		prev = cur
+		row, ok := rowByKey[cur]
+		if !ok {
+			md := byKey[cur]
+			row = dash.Row{
+				Project: md.Project,
+				Run:     md.ID,
+				Note:    md.Workflow,
+				When:    idx.LastActivity[cur],
+			}
 		}
-		md := byKey[cur]
-		members = append(members, dash.Row{
-			Project: md.Project,
-			Run:     md.ID,
-			Note:    md.Workflow,
-			When:    idx.LastActivity[cur],
-		})
+		row.EdgeAgent, row.EdgeConsent = groomed, consent
+		members = append(members, row)
 	}
 	return members, chainedUnder, nil
 }

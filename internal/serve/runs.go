@@ -246,6 +246,11 @@ type runVM struct {
 	// purpose note, so this — not the canvas — is where membership and
 	// per-member status live on the page.
 	ChainMembers []chainMemberVM
+	// Provenance is the run's origin story, newest cause first: how it
+	// was opened, by whom, under what consent, and — walking up the
+	// spawn chain — how *that* run came to be. Empty when no callback is
+	// wired or the walk failed; the section then doesn't render.
+	Provenance []ProvHop
 	// Actions is the peer-affordances block on the per-run page. For
 	// an in-progress idea this is edit, promote, and close; for a
 	// closed idea this is reopen; other runs render no actions.
@@ -274,6 +279,40 @@ type transcriptLink struct {
 	URL   string // /run/<p>/<r>/transcript/<stage>?agent=<agent>
 }
 
+// ProvHop is one line of the per-run provenance section: a single claim
+// about how some run came to be, already resolved to display strings so
+// serve does no journal reading of its own. The cli side builds these
+// (it owns the journal index and the pulse-canvas reader) and hands them
+// over through Options.RunProvenance.
+//
+// The rendered shape is "<Subject> <Verb> <Object>", with Subject empty
+// on the first hop — that hop is about the page's own run, and naming it
+// back to the reader is noise.
+type ProvHop struct {
+	// Subject is the run this hop is about, qualified "<project>/<slug>";
+	// empty on the hop describing the page's own run.
+	Subject    string
+	SubjectURL string
+	// Verb is the relationship prose: "opened by", "reopened from",
+	// "promoted from idea", "opened by operator", "shipped".
+	Verb string
+	// Object is what the verb points at, qualified; empty for terminal
+	// verbs that name nobody ("opened by operator").
+	Object    string
+	ObjectURL string
+	// Agent marks the hop as the machine's doing, and Consent is the ride
+	// level it acted under. Consent can be set while Agent is false only
+	// if a writer regresses; readers treat Agent as the marker and
+	// Consent as its detail. Empty Consent means unrecorded — the hop
+	// renders no consent word rather than guessing one.
+	Agent   bool
+	Consent string
+	// Why is the reason the spawner recorded for this run (a pulse gate's
+	// spawn entry). Empty when unrecoverable — an old pulse, an edited
+	// canvas — which degrades to a hop with no reason, never an error.
+	Why string
+}
+
 // chainMemberVM is one run in a chain head's batch, rendered with the
 // dash's own note and timestamp so the head page and the dash agree
 // about what a member's state is called.
@@ -282,6 +321,11 @@ type chainMemberVM struct {
 	URL  string // /run/<project>/<slug>
 	Note template.HTML
 	When string
+	// EdgeAgent / EdgeConsent mark the edge that placed this member here
+	// as a pulse groom's doing, and name the ride it groomed under.
+	// See dash.Row's fields of the same name — absence is unknown.
+	EdgeAgent   bool
+	EdgeConsent string
 }
 
 // chainState is the head-page slice of live chain truth, gathered once
@@ -321,13 +365,30 @@ func (s *Server) gatherChainState(md *run.Metadata, projectID, slug string, now 
 	for _, row := range rows {
 		id := row.Project + "/" + row.Run
 		out.Members = append(out.Members, chainMemberVM{
-			ID:   id,
-			URL:  "/run/" + id,
-			Note: noteHTML(row.Project, row.Note),
-			When: dash.HumanAgo(now, row.When),
+			ID:          id,
+			URL:         "/run/" + id,
+			Note:        noteHTML(row.Project, row.Note),
+			When:        dash.HumanAgo(now, row.When),
+			EdgeAgent:   row.EdgeAgent,
+			EdgeConsent: row.EdgeConsent,
 		})
 	}
 	return out
+}
+
+// gatherProvenance reads the run's origin story. A missing callback or a
+// gather error yields nothing and logs, matching fillRunRow: provenance
+// is enrichment, and a page without it is still the page.
+func (s *Server) gatherProvenance(projectID, slug string) []ProvHop {
+	if s.opts.RunProvenance == nil {
+		return nil
+	}
+	hops, err := s.opts.RunProvenance(projectID, slug)
+	if err != nil {
+		s.logf("provenance %s/%s: %v", projectID, slug, err)
+		return nil
+	}
+	return hops
 }
 
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
@@ -726,6 +787,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
+	vm.Provenance = s.gatherProvenance(projectID, slug)
 	chain := s.gatherChainState(md, projectID, slug, now)
 	vm.ChainMembers = chain.Members
 	// No live child on the read-only path (this serve isn't parenting the
@@ -878,6 +940,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	}
 	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
 	s.fillRunRow(&vm, projectID, slug, now)
+	vm.Provenance = s.gatherProvenance(projectID, slug)
 	// A live-parented run is usually sdlc, but opening a chore can spawn
 	// any configured workflow (e.g. a chore whose `workflow` is `twin`), so don't
 	// assume the workflow here — gate the action chips on the on-disk

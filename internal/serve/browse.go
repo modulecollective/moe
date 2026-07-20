@@ -217,6 +217,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		vm.bannerArtVM = newBannerArt(now, rows, histogram)
 		for _, row := range rows {
 			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: noteHTML(row.Project, row.Note), When: dash.HumanAgo(now, row.When), Depth: row.Depth, Chained: row.Chained}
+			rvm.Agent, rvm.AgentTitle = agentMark(row)
 			switch row.Bucket {
 			case dash.BucketActiveRuns:
 				vm.Active = append(vm.Active, rvm)

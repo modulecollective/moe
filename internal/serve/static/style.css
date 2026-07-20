@@ -268,6 +268,9 @@ section h2 .count {
   border: 1px solid currentColor;
 }
 .badge.live, .status.live { color: var(--live); }
+/* The machine-made marker. Accent rather than --live: it says "who",
+   not "is it running now", and the two badges can sit on one row. */
+.badge.agent { color: var(--accent); }
 .status.exited { color: var(--muted); }
 
 .empty { color: var(--muted); font-style: italic; margin: 0.5rem 0 0; }
@@ -385,10 +388,10 @@ form.new-run button:hover, form.new-run button:focus {
   line-height: 1.45;
 }
 
-/* Per-run canvases list, and the chain head's live member list —
-   same row shape, so one rule set. */
-.canvases ul, .chain-members ul { list-style: none; padding: 0; margin: 0; }
-.canvases li, .chain-members li {
+/* Per-run canvases list, the chain head's live member list, and the
+   provenance hop list — same row shape, so one rule set. */
+.canvases ul, .chain-members ul, .provenance ul { list-style: none; padding: 0; margin: 0; }
+.canvases li, .chain-members li, .provenance li {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -398,8 +401,11 @@ form.new-run button:hover, form.new-run button:focus {
   color: var(--muted);
   border-bottom: 1px solid var(--hairline);
 }
-.canvases li:last-child, .chain-members li:last-child { border-bottom: none; }
-.canvases li .slug, .chain-members li .slug { color: var(--fg); }
+.canvases li:last-child, .chain-members li:last-child, .provenance li:last-child { border-bottom: none; }
+.canvases li .slug, .chain-members li .slug, .provenance li .slug { color: var(--fg); }
+/* The recorded reason wraps onto its own full-width line under its hop. */
+.provenance .why { flex-basis: 100%; margin: 0.15rem 0 0; font-style: italic; }
+.provenance .consent { color: var(--accent); }
 
 .meta.applies-when { color: var(--muted); }
 .lore-row .note { color: var(--muted); }

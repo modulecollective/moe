@@ -41,6 +41,7 @@
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
+        {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
         {{if .Live}}<span class="badge live">live</span>{{end}}
       </li>
       {{end}}
@@ -114,6 +115,7 @@
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>
+        {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
       </li>
       {{end}}
     </ul>

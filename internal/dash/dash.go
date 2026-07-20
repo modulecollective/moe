@@ -168,6 +168,23 @@ type Row struct {
 	// stages, not a lineage ladder, so it gets its own glyph instead of
 	// borrowing Depth's.
 	Chained bool
+	// Agent is true when the run was machine-opened — it carries a
+	// MoE-Spawned-By edge. Independent of Depth: nesting disappears when
+	// the spawner is off-board (pruned, capped out of COMPLETED), but the
+	// run was still the machine's doing, and the operator's headline
+	// question is "what did the agent add". Historically sound from day
+	// one, because only machine verbs have ever written spawned_by.
+	Agent bool
+	// EdgeAgent is true when the chain edge that placed this row after
+	// its parent was written by a pulse groom rather than an operator
+	// `chain edit`; EdgeConsent carries that groom's ride level. Only
+	// meaningful on a row rendered as part of a chain (Chained, or a
+	// chain head's member list).
+	//
+	// Both are empty/false for edges older than the MoE-Consent trailer.
+	// That is *unknown*, not operator — don't render it as one.
+	EdgeAgent   bool
+	EdgeConsent string
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -259,6 +276,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 			RunningDoc: runningDoc,
 			When:       last,
 			Bucket:     b,
+			Agent:      in.Index.SpawnedBy[runKey] != "",
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -326,6 +344,15 @@ func BuildRows(in Inputs) ([]Row, error) {
 	return rows, nil
 }
 
+// edgeAttribution reports whether a pulse groom placed the parent→child
+// chain edge, and under which ride. A miss is "unknown" — the edge
+// predates the MoE-Consent trailer, or an operator placed it — and both
+// callers render it the same way: as nothing.
+func edgeAttribution(idx *run.JournalIndex, parent, child string) (bool, string) {
+	consent, ok := idx.EdgeConsent[parent+" "+child]
+	return ok, consent
+}
+
 // groupActiveChains reorders the ACTIVE bucket so each chain renders as
 // a contiguous, head-first block, marks the following members so the
 // renderer can draw a connector, and reattaches the textual
@@ -380,11 +407,13 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 			row := rowByKey[k]
 			if len(u) >= 2 && pos > 0 {
 				row.Chained = true
+				row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, u[pos-1], k)
 			}
 			if pos == 0 {
 				if p := run.TerminalChainParentOf(k, idx.ChainedChild, byKey); p != "" {
 					row.Chained = true
 					row.Note += settledChainHint(p, byKey[p])
+					row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, p, k)
 				}
 			}
 			active[i] = row

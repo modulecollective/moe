@@ -68,6 +68,35 @@ type dashRowVM struct {
 	// Chained marks an active row that follows its chain parent. It
 	// renders flush-left with a "→" connector instead of indenting.
 	Chained bool
+	// Agent marks a machine-opened run. Deliberately independent of
+	// Depth: a spawned run whose spawner isn't on the board renders
+	// top-level, and the operator still needs to see that the machine put
+	// it there. AgentTitle is the hover text, which names the ride level
+	// when the journal recorded one.
+	Agent      bool
+	AgentTitle string
+}
+
+// agentMark decides whether a row wears the `agent` badge and what its
+// hover says. One badge, two reasons: the machine *opened* the run, or
+// the machine *placed* it in its chain. A row can be both, and the
+// stronger claim — how the run came to exist at all — wins the title.
+//
+// The ride level only appears where the journal recorded one; a
+// pre-trailer edge badges (the groom is inferable from ChainedChild
+// alone once EdgeConsent has an entry, so in practice this is
+// post-landing) without inventing a consent word.
+func agentMark(r dash.Row) (bool, string) {
+	switch {
+	case r.Agent:
+		return true, "opened by the machine"
+	case r.EdgeAgent:
+		if r.EdgeConsent == "" {
+			return true, "chained here by a pulse groom"
+		}
+		return true, "chained here by a pulse groom (" + r.EdgeConsent + " ride)"
+	}
+	return false, ""
 }
 
 // bannerArtVM is the shared banner-art block both the home dash and a
@@ -144,6 +173,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			Depth:   r.Depth,
 			Chained: r.Chained,
 		}
+		row.Agent, row.AgentTitle = agentMark(r)
 		switch r.Bucket {
 		case dash.BucketActiveRuns:
 			vm.Active = append(vm.Active, row)

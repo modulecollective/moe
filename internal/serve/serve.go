@@ -128,6 +128,16 @@ type Options struct {
 	// the head page as it was: no members section, no kick chips.
 	ChainMembers func(project, run string) (members []dash.Row, chainedUnder string, err error)
 
+	// RunProvenance returns the per-run page's provenance section: how
+	// the run was opened and, walking up the MoE-Spawned-By chain, how
+	// each spawner came to be. It lives on the cli side because the walk
+	// reads the journal index *and* the spawning pulse's canvas gate for
+	// the recorded reason — both cli-owned.
+	//
+	// Absent or erroring leaves the section off the page; provenance is
+	// enrichment, not the reason the page exists.
+	RunProvenance func(project, run string) (hops []ProvHop, err error)
+
 	// Insecure enables the spawn bucket — the POSTs that run
 	// `moe <wf> <stage>` agent subprocesses (the new-run and promote
 	// forms' "& run" submits, advance/ship/chain, chain kick, chore

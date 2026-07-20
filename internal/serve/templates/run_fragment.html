@@ -21,6 +21,22 @@
   </section>
   {{end}}
 
+  {{if .Provenance}}
+  <section class="provenance">
+    <h2>provenance</h2>
+    <ul>
+      {{range .Provenance}}
+      <li>
+        {{if .Subject}}<a class="slug" href="{{.SubjectURL}}">{{.Subject}}</a> {{end}}{{.Verb}}{{if .Object}} {{if .ObjectURL}}<a class="slug" href="{{.ObjectURL}}">{{.Object}}</a>{{else}}{{.Object}}{{end}}{{end}}
+        {{if .Agent}}<span class="badge agent" title="written by a machine turn, not the operator">agent</span>{{end}}
+        {{if .Consent}}<span class="consent" title="ride mode the machine acted under">{{.Consent}}</span>{{end}}
+        {{if .Why}}<p class="why">why: {{.Why}}</p>{{end}}
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
   {{if .ChainMembers}}
   <section class="chain-members">
     <h2>chained</h2>
@@ -30,6 +46,7 @@
         <a class="slug" href="{{.URL}}">{{.ID}}</a>
         <span class="note">{{.Note}}</span>
         <span class="when">{{.When}}</span>
+        {{if .EdgeAgent}}<span class="badge agent" title="placed here by a pulse groom ({{.EdgeConsent}} ride)">agent</span>{{end}}
       </li>
       {{end}}
     </ul>
