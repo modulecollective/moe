@@ -471,8 +471,10 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		// PR skip the status flip), so a sweep fires once per opened PR.
 		// Outside the WithJournalPush closure above: firePulse takes the
 		// repolock itself.
-		if pulseFiresForWorkflow(md.Workflow) {
+		if fires, skip := pulseFiresForRun(md); fires {
 			interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+		} else if skip != "" {
+			moePrintf(stderr, "%s", skip)
 		}
 	}
 	return 0, interrupted
@@ -596,8 +598,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// repolock itself. Its "operator skipped the sweep" bool rides back
 	// out so a cascade halts instead of riding on to the next run.
 	interrupted := false
-	if pulseFiresForWorkflow(md.Workflow) {
+	if fires, skip := pulseFiresForRun(md); fires {
 		interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+	} else if skip != "" {
+		moePrintf(stderr, "%s", skip)
 	}
 	return 0, interrupted, nil
 }

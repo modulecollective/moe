@@ -109,34 +109,11 @@ func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	}
 }
 
-// TestSelfKickSkipsAtAMachineOpenedSpawner is the depth guard: one
-// machine generation per operator push. The guards above are per-hop and
-// each hop satisfies them afresh, so a kicked ride's own tail push would
-// spawn and kick again without bound. A pulse fired by a machine-opened
-// run declines.
-func TestSelfKickSkipsAtAMachineOpenedSpawner(t *testing.T) {
-	root, threadRoot, stages := selfKickFixture(t)
-	// The spawner is itself machine-opened — a generation-1 fix run whose
-	// own push fired this pulse. It is unchained, so only the depth guard
-	// can stop it.
-	spawner := "moe/" + groomFixture(t, root, "gen-one")["gen-one"]
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	pulseSelfKick(root, []groomedThread{{Root: threadRoot, Kick: true}}, spawner, io.Discard, &errb)
-
-	if len(*stages) != 0 {
-		t.Fatalf("drove %v, want nothing from a machine-opened spawner", kickStages(*stages))
-	}
-	if !strings.Contains(errb.String(), "itself machine-opened") {
-		t.Errorf("stderr = %q, want the depth skip named", errb.String())
-	}
-}
-
-// TestSelfKickRidesAtAnOperatorOpenedSpawner: the depth guard reads
-// lineage, not merely "the spawner is named". A pulse fired by a run the
-// operator opened is generation zero, and its kicks are the first
-// generation the `!!!!` licensed.
+// TestSelfKickRidesAtAnOperatorOpenedSpawner is the happy path with a
+// spawner actually named: a pulse fired by an unchained operator-opened
+// run kicks, and that kick is the one generation the `!!!!` licensed.
+// The generation bound itself now sits at fire time (pulseFiresForRun),
+// so by the time a pulse exists its spawner is already operator-rooted.
 func TestSelfKickRidesAtAnOperatorOpenedSpawner(t *testing.T) {
 	root, threadRoot, stages := selfKickFixture(t)
 	spawner, err := mintChainRun(root, "moe", "operator-push", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
@@ -153,25 +130,6 @@ func TestSelfKickRidesAtAnOperatorOpenedSpawner(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "kicking "+threadRoot) {
 		t.Errorf("stderr = %q, want the kick announced", errb.String())
-	}
-}
-
-// TestSelfKickSkipsAtAnUnreadableSpawner: a lineage read that fails
-// reads as machine-opened, the same conservative direction the
-// re-entrancy guard takes — suppress a kick rather than risk an
-// unbounded one.
-func TestSelfKickSkipsAtAnUnreadableSpawner(t *testing.T) {
-	root, threadRoot, stages := selfKickFixture(t)
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	pulseSelfKick(root, []groomedThread{{Root: threadRoot, Kick: true}}, "moe/no-such-run", io.Discard, &errb)
-
-	if len(*stages) != 0 {
-		t.Fatalf("drove %v, want nothing when the spawner's lineage is unreadable", kickStages(*stages))
-	}
-	if !strings.Contains(errb.String(), "itself machine-opened") {
-		t.Errorf("stderr = %q, want the depth skip named", errb.String())
 	}
 }
 

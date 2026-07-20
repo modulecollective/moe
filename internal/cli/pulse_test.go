@@ -395,6 +395,78 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 	}
 }
 
+// TestPulseFiresForRun is the fire-time gate in one table: the workflow
+// half (run traffic moves intent; chat/kb/pulse do not) and the lineage
+// half (a machine-opened run never tails a sweep that could only groom
+// and park). Only the second half speaks — a workflow that never pulsed
+// stays as quiet as it always was.
+func TestPulseFiresForRun(t *testing.T) {
+	cases := []struct {
+		name     string
+		md       run.Metadata
+		want     bool
+		wantSkip bool
+	}{
+		{"operator sdlc", run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, true, false},
+		{"operator twin", run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, true, false},
+		{"kicked sdlc", run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, true},
+		{"spawned twin", run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin", SpawnedBy: "moe/pulse-1"}, false, true},
+		{"chat", run.Metadata{Project: "tele", ID: "chatting", Workflow: "chat"}, false, false},
+		{"pulse never tails pulse", run.Metadata{Project: "tele", ID: "pulse-1", Workflow: pulseWorkflow, SpawnedBy: "moe/ship-it"}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fires, skip := pulseFiresForRun(&tc.md)
+			if fires != tc.want {
+				t.Errorf("fires = %v, want %v", fires, tc.want)
+			}
+			if (skip != "") != tc.wantSkip {
+				t.Errorf("skip = %q, want spoken=%v", skip, tc.wantSkip)
+			}
+			if tc.wantSkip && !strings.Contains(skip, tc.md.Project+"/"+tc.md.ID) {
+				t.Errorf("skip = %q, want the run named", skip)
+			}
+		})
+	}
+}
+
+// TestPulseDoesNotFireFromMachineOpenedClose is the gate end to end: a
+// kicked ride's own close does not spend a survey session. Before the
+// fire-time gate this minted a second-generation pulse that could only
+// decline every kick and park its growth.
+func TestPulseDoesNotFireFromMachineOpenedClose(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "kicked-fix", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "kicked-fix"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md, err := run.Load(root, "tele", "kicked-fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.SpawnedBy = "tele/pulse-2026-07-20-8"
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	// close refuses a dirty tree, so the lineage edit has to land as a
+	// commit the way a real spawn's open commit does.
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "seed machine lineage")
+	fired := stubFirePulse(t)
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/kicked-fix"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire for a machine-opened run", *fired)
+	}
+	if !strings.Contains(errb.String(), "machine-opened") {
+		t.Errorf("stderr = %q, want the suppression named", errb.String())
+	}
+}
+
 // TestPulseDoesNotFireFromChatClose: chat is not run traffic — closing a
 // chat run must not pulse. This is the workflow guard that also keeps
 // chat/kb/hooks/chores/idea and pulse itself out.

@@ -12,7 +12,7 @@ import (
 
 // pulseSelfKick is the last step of a pulse: kick the threads whose
 // groom group asked for it. This is the only door to machine-rooted
-// motion, and three structural guards hold it shut everywhere else.
+// motion, and two structural guards hold it shut everywhere else.
 //
 // First, **dynamic consent upstream**. A plain push, `!!` or `!!!` tail
 // pulse grooms and parks; only a fourth bang the operator actually
@@ -27,14 +27,12 @@ import (
 // growth on its own tail, so nested rides are impossible — again by
 // construction, not by flag-threading.
 //
-// Third, **one machine generation per operator push**. The guards above
-// are per-hop, and each hop satisfies them afresh: a kicked ride's own
-// tail push fires a pulse that grooms, spawns and kicks again, without
-// bound. So a pulse whose firing push came from a machine-opened run
-// declines all kicks. Each `!!!!` licenses the machine to start
-// something once; letting generation N license generation N+1 is the
-// runaway. The deferred work isn't lost — it parks, and a parked thread
-// is exactly what the next operator-consented pulse consolidates.
+// One machine generation per operator push is the third bound, and it
+// no longer lives here: a kicked ride's own tail push doesn't fire a
+// pulse at all, because pulseFiresForRun refuses to tail a
+// machine-opened run. So this function's spawner is always
+// operator-rooted (or empty, for a manual `moe pulse new`) and the
+// generation question is answered before a survey is ever spent.
 //
 // Kicks that do fire are themselves dynamic rides: a confident pulse
 // rooting bounded-only motion would defeat the point, and an operator
@@ -60,11 +58,6 @@ func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdo
 	}
 	if spawnerKey != "" && chainMember(root, spawnerKey) {
 		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, %s is itself chained and its ride picks up growth on its own tail\n",
-			len(wanted), spawnerKey)
-		return
-	}
-	if spawnerKey != "" && machineOpened(root, spawnerKey) {
-		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, %s is itself machine-opened; second-generation work parks for the next operator pulse\n",
 			len(wanted), spawnerKey)
 		return
 	}
@@ -100,24 +93,4 @@ func chainMember(root, key string) bool {
 		return true
 	}
 	return len(g.unit(key)) >= 2
-}
-
-// machineOpened reports whether key names a run the machine opened —
-// the depth question pulseSelfKick asks about its spawner. Lineage is
-// already durable: every machine-opened run records the run that opened
-// it, so the answer is one metadata read and no carried state.
-//
-// A read failure reads as "machine-opened", the same conservative
-// direction chainMember takes: suppress a kick rather than risk an
-// unbounded one.
-func machineOpened(root, key string) bool {
-	proj, runID, err := splitProjectRun(key)
-	if err != nil {
-		return true
-	}
-	md, err := run.Load(root, proj, runID)
-	if err != nil {
-		return true
-	}
-	return md.SpawnedBy != ""
 }

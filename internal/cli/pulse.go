@@ -152,16 +152,40 @@ func init() {
 	RegisterWorkflow(w)
 }
 
-// pulseFiresForWorkflow reports whether a terminal transition of the
-// given workflow is run traffic that should tail a pulse. sdlc and twin
-// move intent — code and the recorded canon; the rest of the
-// close-registered workflows (chat, kb, hooks, chores) and pulse itself
-// do not, which is also what makes pulse-on-pulse recursion structurally
-// impossible. Used by both the close seam and the push seam (twin has no
-// push, so at a push point the workflow is always sdlc — the guard is
-// defensive there).
-func pulseFiresForWorkflow(workflow string) bool {
-	return workflow == "sdlc" || workflow == "twin"
+// pulseFiresForRun reports whether a terminal transition of the given
+// run is traffic that should tail a pulse. Two conditions, both
+// structural.
+//
+// The workflow must move intent: sdlc and twin do — code and the
+// recorded canon — while the rest of the close-registered workflows
+// (chat, kb, hooks, chores) and pulse itself do not, which is what
+// makes pulse-on-pulse recursion impossible. Used by both the close
+// seam and the push seam (twin has no push, so at a push point the
+// workflow is always sdlc — that half of the guard is defensive there).
+//
+// And the run must be **operator-rooted**. A machine-opened run's tail
+// would spend a full survey session that is guaranteed to decline every
+// kick — the generation bound has to hold somewhere, and fire-time is
+// cheaper than kick-time: no session at all rather than a session that
+// can only groom and park. Growth from a machine generation's merge
+// isn't lost; it parks for the next operator-rooted merge, the same
+// posture the kick guard already took. This covers every machine
+// lineage, not just kicked rides — chore- and idea-promoted runs and
+// pulse-parked twin reflects carry SpawnedBy too, and an operator who
+// wants a sweep after one of those has `moe pulse new`.
+// The second return is the one stderr line the caller prints when
+// lineage is what suppressed the sweep, and "" otherwise — a workflow
+// that never pulses says nothing, same as before.
+func pulseFiresForRun(md *run.Metadata) (bool, string) {
+	if md.Workflow != "sdlc" && md.Workflow != "twin" {
+		return false, ""
+	}
+	if md.SpawnedBy != "" {
+		return false, fmt.Sprintf(
+			"pulse: skipping tail sweep — %s/%s is machine-opened; growth parks for the next operator pulse\n",
+			md.Project, md.ID)
+	}
+	return true, ""
 }
 
 // firePulse runs the pulse for a project at the tail of a run-traffic
@@ -389,7 +413,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// cleanup) so there's no parallel close path. skipEdit harvests
 	// followups.md as-is — the filings promote to ideas unreviewed;
 	// review moves to scrapping on the dash. tailPulse=false because
-	// pulse never tails pulse (pulseFiresForWorkflow excludes it — the
+	// pulse never tails pulse (pulseFiresForRun excludes it — the
 	// false just says so at the call). A close failure warns and leaves
 	// the run open, mirroring firePulse's warn-only posture: the report
 	// and filings are already durable on disk, so a failed auto-close is
@@ -419,7 +443,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 // same (subject, cleanup) the happy-path auto-close and the interrupt
 // disposal both ride, so there's no parallel close path. skipEdit
 // harvests followups.md as-is; tailPulse=false because pulse never
-// tails pulse (pulseFiresForWorkflow excludes it).
+// tails pulse (pulseFiresForRun excludes it).
 func closePulseRun(root, projectID, runID string, stdout, stderr io.Writer) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {

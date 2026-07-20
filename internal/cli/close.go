@@ -292,8 +292,10 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// non-sdlc cascade auto-close deliberately exits on the close's own
 	// code too (see cascadeFromGate's close branch). The cascade halt
 	// rides the push seam, where mergePath/openPRPath consume the bool.
-	if tailPulse && pulseFiresForWorkflow(workflow) {
+	if fires, skip := pulseFiresForRun(md); tailPulse && fires {
 		firePulse(root, projectID, runID /*spawner*/, stdout, stderr)
+	} else if tailPulse && skip != "" {
+		moePrintf(stderr, "%s", skip)
 	}
 	return nil
 }
