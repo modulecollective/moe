@@ -11,13 +11,15 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 )
 
-// noteHintRE matches a machine lineage hint's verb and target inside an
-// already-HTML-escaped note: "chained → X", "spawned → X", "promoted →
-// X". The target is a slug token ([a-z0-9][a-z0-9-]*) optionally
-// carrying one "project/" segment. Those chars survive HTML escaping
-// unchanged, so matching after escape is safe: note content can't forge
-// or break the anchor we inject.
-var noteHintRE = regexp.MustCompile(`(chained|spawned|promoted) → ([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
+// noteHintRE matches a machine lineage hint's connector and target
+// inside an already-HTML-escaped note: "chained → X", "spawned → X",
+// "promoted → X", and "chained after X" (dash.settledChainHint, which
+// spells the incoming chain edge in words rather than a "←" glyph). The
+// target is a slug token ([a-z0-9][a-z0-9-]*) optionally carrying one
+// "project/" segment. Those chars survive HTML escaping unchanged, so
+// matching after escape is safe: note content can't forge or break the
+// anchor we inject.
+var noteHintRE = regexp.MustCompile(`((?:chained|spawned|promoted) → |chained after )([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
 
 // noteHTML escapes note for HTML and wraps the target of each machine
 // lineage hint in a link to its run page. Every producer emits qualified
@@ -25,17 +27,17 @@ var noteHintRE = regexp.MustCompile(`(chained|spawned|promoted) → ([a-z0-9][a-
 // legacy value) is tolerated and qualified with the row's own project. Every producer
 // pre-checks that the target is on the board, so the /run/ link
 // resolves; a since-pruned target 404s like any stale run URL. Notes
-// without the verb-arrow pattern pass through escaped-only.
+// without a hint connector pass through escaped-only.
 func noteHTML(project, note string) template.HTML {
 	escaped := template.HTMLEscapeString(note)
 	linked := noteHintRE.ReplaceAllStringFunc(escaped, func(m string) string {
 		sub := noteHintRE.FindStringSubmatch(m)
-		verb, target := sub[1], sub[2]
+		connector, target := sub[1], sub[2]
 		href := "/run/" + target
 		if !strings.Contains(target, "/") {
 			href = "/run/" + template.HTMLEscapeString(project) + "/" + target
 		}
-		return verb + " → <a href=\"" + href + "\">" + target + "</a>"
+		return connector + "<a href=\"" + href + "\">" + target + "</a>"
 	})
 	return template.HTML(linked)
 }

@@ -25,6 +25,10 @@ func TestDashRendersLinkifiedNotes(t *testing.T) {
 			// Qualified chained target → links as-is.
 			{Project: "alpha", Run: "worker", Note: "sdlc:code · chained → beta/child-run",
 				Bucket: dash.BucketActiveRuns, When: now},
+			// Settled-chain hint (dash.settledChainHint) → target links,
+			// trailing status suffix stays plain text.
+			{Project: "moe", Run: "tail", Note: "sdlc:code · chained after moe/head-run (merged)",
+				Bucket: dash.BucketActiveRuns, When: now},
 			// Free text with HTML metachars → escaped, no anchor.
 			{Project: "moe", Run: "plain", Note: "pull: <b>rebalance</b> now",
 				Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
@@ -44,6 +48,8 @@ func TestDashRendersLinkifiedNotes(t *testing.T) {
 		`spawned → <a href="/run/moe/pulse-child">moe/pulse-child</a>`,
 		// Qualified target links as-is (not double-qualified).
 		`chained → <a href="/run/beta/child-run">beta/child-run</a>`,
+		// "chained after" links its target; " (merged)" is outside the match.
+		`chained after <a href="/run/moe/head-run">moe/head-run</a> (merged)`,
 		// Free-text HTML metachars stay escaped — no raw <b> from note text.
 		`pull: &lt;b&gt;rebalance&lt;/b&gt; now`,
 	} {

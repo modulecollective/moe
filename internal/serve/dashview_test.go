@@ -34,6 +34,24 @@ func TestNoteHTML(t *testing.T) {
 			want:    `sdlc:code · chained → <a href="/run/moe/live-child">moe/live-child</a> · spawned → <a href="/run/moe/pulse-1">pulse-1</a>`,
 		},
 		{
+			name:    "settled-chain target links and the status suffix stays plain",
+			project: "moe",
+			note:    "sdlc:code · chained after moe/head-run (merged)",
+			want:    `sdlc:code · chained after <a href="/run/moe/head-run">moe/head-run</a> (merged)`,
+		},
+		{
+			name:    "settled-chain hint co-occurs with an outgoing chain hint",
+			project: "moe",
+			note:    "sdlc:code · chained after moe/head-run (merged) · chained → moe/live-child",
+			want:    `sdlc:code · chained after <a href="/run/moe/head-run">moe/head-run</a> (merged) · chained → <a href="/run/moe/live-child">moe/live-child</a>`,
+		},
+		{
+			name:    "chained after with no valid target is left alone",
+			project: "moe",
+			note:    "sdlc:code · chained after (merged)",
+			want:    "sdlc:code · chained after (merged)",
+		},
+		{
 			name:    "free-text note without a hint passes through unlinked",
 			project: "moe",
 			note:    "pull: rebalance the active set",
