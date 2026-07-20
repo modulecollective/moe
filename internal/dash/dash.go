@@ -331,7 +331,9 @@ func BuildRows(in Inputs) ([]Row, error) {
 // renderer can draw a connector, and reattaches the textual
 // "· chained → X" hint only for edges adjacency doesn't already show
 // (a fan-in's second parent, or a child that fell out of the active
-// set). BACKLOG and COMPLETED rows keep their recency order.
+// set). A unit head whose chain parent has already settled is marked
+// too, with a "· chained after X (merged)" hint. BACKLOG and COMPLETED
+// rows keep their recency order.
 //
 // rows must already be bucket-then-recency sorted, so the ACTIVE bucket
 // is the leading run of BucketActiveRuns rows.
@@ -364,6 +366,13 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	// unit has that edge shown adjacently, so it skips the textual hint
 	// below; every other consecutive pair came from the childOf walk, so
 	// "has a successor in its unit" is exactly that set.
+	//
+	// A unit head can be Chained too, when the run that chains to it has
+	// already settled: the edge outlives its parent but the parent isn't
+	// an active row, so grouping can't show it. The arrow says "something
+	// runs before this"; the note below says what, since a bare flush
+	// arrow otherwise reads as attaching to whatever unrelated row floats
+	// above it.
 	shownEdge := make(map[string]bool)
 	i := 0
 	for _, u := range units {
@@ -371,6 +380,12 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 			row := rowByKey[k]
 			if len(u) >= 2 && pos > 0 {
 				row.Chained = true
+			}
+			if pos == 0 {
+				if p := run.TerminalChainParentOf(k, idx.ChainedChild, byKey); p != "" {
+					row.Chained = true
+					row.Note += settledChainHint(p, byKey[p])
+				}
 			}
 			active[i] = row
 			i++
@@ -768,6 +783,20 @@ func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run
 		return ""
 	}
 	return " · chained → " + childKey
+}
+
+// settledChainHint renders the note for a row whose chain parent has
+// already settled — the incoming half of chainHint, which only ever
+// names live outgoing edges.
+//
+// Words rather than a "←" glyph: the rows around it already carry "→"
+// connectors, and two arrows pointing opposite ways on the same board
+// invite reading one of them backwards.
+func settledChainHint(parentKey string, parent *run.Metadata) string {
+	if parent == nil {
+		return ""
+	}
+	return " · chained after " + parentKey + " (" + parent.Status + ")"
 }
 
 // winningRunningDoc picks the open-session doc that "wins" the row's

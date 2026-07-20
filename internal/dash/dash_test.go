@@ -140,8 +140,14 @@ func TestActiveChainHintAdjacentSuppressedFanInRetained(t *testing.T) {
 
 func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	// Parent a is merged (terminal, leaves the active set); its live child
-	// b heads its own visible chain b→c. b must render flush-left (head),
-	// not as a member.
+	// b heads its own visible unit b→c, and the unit's grouping is
+	// unaffected by a's departure.
+	//
+	// b does carry the connector, though — the assertion here used to be
+	// the reverse. A settled predecessor is still a predecessor: the thread
+	// is executing and b is what runs next, so the row says so, with the
+	// note naming the run it follows (a bare arrow would read as attaching
+	// to whatever unrelated row sits above).
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	merged := &run.Metadata{ID: "a", Project: "p", Workflow: "sdlc", Status: run.StatusMerged}
 	runs := []*run.Metadata{merged, activeRun("p", "b"), activeRun("p", "c")}
@@ -149,11 +155,17 @@ func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/b", "p/c")
-	if active[0].Chained {
-		t.Errorf("terminal-parent child p/b should be a head, not a member")
+	if !active[0].Chained {
+		t.Errorf("p/b follows a settled parent and should draw the connector")
+	}
+	if !strings.Contains(active[0].Note, "chained after p/a (merged)") {
+		t.Errorf("p/b Note = %q, want the settled-parent hint", active[0].Note)
 	}
 	if !active[1].Chained {
 		t.Errorf("p/c should be a connected member under p/b")
+	}
+	if strings.Contains(active[1].Note, "chained after") {
+		t.Errorf("p/c carries a settled-parent hint it has no claim to: %q", active[1].Note)
 	}
 }
 
@@ -540,5 +552,50 @@ func TestRenderChainedActiveRowIsFlushWithArrow(t *testing.T) {
 	}
 	if strings.Contains(out, "↳ p/next") {
 		t.Fatalf("a chained row must not borrow the lineage connector:\n%s", out)
+	}
+}
+
+// TestActiveChainHeadWithSettledParent is the incident this change
+// exists for: a two-item chain whose first item merged. The tail is the
+// next thing to run, but grouping needs both endpoints active, so it
+// collapsed to a bare orphan row. It must render with the arrow and a
+// note naming what it follows.
+func TestActiveChainHeadWithSettledParent(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	shipped := &run.Metadata{ID: "shipped", Project: "p", Workflow: "sdlc", Status: run.StatusMerged}
+	runs := []*run.Metadata{shipped, activeRun("p", "tail"), activeRun("p", "x")}
+	when := map[string]time.Time{"shipped": base, "tail": base.Add(-time.Hour), "x": base.Add(-2 * time.Hour)}
+	active := buildActive(t, runs, when, map[string]string{"p/shipped": "p/tail"})
+	assertOrder(t, active, "p/tail", "p/x")
+
+	byKey := map[string]Row{}
+	for _, r := range active {
+		byKey[r.Project+"/"+r.Run] = r
+	}
+	tail := byKey["p/tail"]
+	if !tail.Chained {
+		t.Errorf("p/tail Chained = false; a queued tail must draw the connector")
+	}
+	if !strings.Contains(tail.Note, "chained after p/shipped (merged)") {
+		t.Errorf("p/tail Note = %q, want the settled-parent hint", tail.Note)
+	}
+	if byKey["p/x"].Chained || strings.Contains(byKey["p/x"].Note, "chained after") {
+		t.Errorf("unrelated orphan p/x picked up chain marking: %+v", byKey["p/x"])
+	}
+}
+
+// TestActiveChainLiveParentStillSuppressesArrowOnHead guards the
+// regression the settled-parent branch could introduce: a head whose
+// only parent is active is a head, not a member, and must stay unmarked.
+func TestActiveChainLiveParentStillSuppressesArrowOnHead(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	runs := []*run.Metadata{activeRun("p", "a"), activeRun("p", "b")}
+	when := map[string]time.Time{"a": base, "b": base.Add(-time.Hour)}
+	active := buildActive(t, runs, when, map[string]string{"p/a": "p/b"})
+	if active[0].Chained {
+		t.Errorf("head p/a Chained = true, want false")
+	}
+	if strings.Contains(active[0].Note, "chained after") {
+		t.Errorf("head p/a Note = %q, want no settled-parent hint", active[0].Note)
 	}
 }
