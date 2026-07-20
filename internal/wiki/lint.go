@@ -139,14 +139,7 @@ type BrokenLink struct {
 // Used to short-circuit rendering the known-issues block when the
 // wiki is clean — no point seeding the agent with an empty list.
 func (f Findings) IsEmpty() bool {
-	return len(f.Orphans) == 0 &&
-		len(f.MissingFromIndex) == 0 &&
-		len(f.BrokenLinks) == 0 &&
-		len(f.EmptyDocs) == 0 &&
-		len(f.MissingManagedDocs) == 0 &&
-		len(f.GlossaryOrphans) == 0 &&
-		len(f.DanglingXrefs) == 0 &&
-		len(f.OverBudgetDocs) == 0
+	return !f.HasBlocking() && len(f.OverBudgetDocs) == 0
 }
 
 // HasBlocking reports whether f contains a structural finding that
