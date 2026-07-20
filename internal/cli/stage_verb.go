@@ -37,7 +37,7 @@ func operatorCascades(workflow string) bool {
 	return !wf.Perpetual() && !wf.MachinePaced()
 }
 
-// cascadeUnavailableReason names why a workflow can't --ship, for the
+// cascadeUnavailableReason names why a workflow can't cascade, for the
 // mint-tail preflight refusal. operatorCascades has already returned
 // false; this reports which leg failed so the operator sees a reason,
 // not a bare "can't". The no-dispatcher wording keeps the "no cascade"
@@ -51,7 +51,7 @@ func cascadeUnavailableReason(workflow string) string {
 			return workflow + " is machine-paced — moe opens and drives its runs, not you"
 		}
 	}
-	return fmt.Sprintf("workflow %q has no cascade — open without --ship and drive the stages yourself", workflow)
+	return fmt.Sprintf("workflow %q has no cascade — open without a cascade flag and drive the stages yourself", workflow)
 }
 
 // mintCascadeFlag names the flag that produced a mint verb's cascade
