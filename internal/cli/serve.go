@@ -113,6 +113,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		RunProvenance: func(project, runID string) ([]serve.ProvHop, error) {
 			return runProvenance(root, project, runID)
 		},
+		// The followup/lore checklist grammar and the reflect ingestion
+		// rule both live in cli; the run page needs to read them the way
+		// harvest and reflect do, so they cross as one gather rather than
+		// as a re-implementation on the serve side.
+		GatherRunTraces: func(project, runID string) (serve.RunTraces, error) {
+			return GatherRunTraces(root, project, runID)
+		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the
 		// followups/lore files as they sit on disk. Dispatch is by the

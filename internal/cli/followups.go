@@ -74,6 +74,14 @@ var followupCheckboxRE = regexp.MustCompile(`^\s*-\s+\[[ xX]\]`)
 // recognise them so they don't get rejected as malformed.
 var followupDoneRE = regexp.MustCompile(`^\s*-\s+\[[xX]\]`)
 
+// followupDoneCaptureRE is followupOpenRE with a checked box: same
+// groups (prefix, slug, optional workflow tag, title), same grammar.
+// The harvest path never needs it — checked lines are pass-through
+// audit trail there — but the run page has to pull the resolved slug
+// back out of them to link each promoted entry to where it landed.
+// Kept beside its sibling so the two stay one grammar.
+var followupDoneCaptureRE = regexp.MustCompile("^(\\s*-\\s+\\[[xX]\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
+
 // followupUncheckedShapeRE detects any line whose shape suggests an
 // unchecked follow-up, malformed or not. The pop-the-editor gate uses
 // this as its trigger — anything that looks like an open item is worth
