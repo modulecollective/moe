@@ -570,6 +570,14 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 	paths = append(paths, pushCanvasPath)
 
+	// Same rule as openPRPath: push is shared between operator and
+	// machine, and this merge path is the one `!!`/`!!!` cascades ship
+	// through — stamp only when a bang answer or a chain kick handed
+	// the walk to the machine.
+	consent, machineWalk := consentTrailerValue()
+	if !machineWalk {
+		consent = ""
+	}
 	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:          md.ID,
@@ -578,6 +586,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			Document:     "push",
 			Merged:       tipSHA,
 			ChoreTouched: touched,
+			Consent:      consent,
 		}.String()
 	err = sync.WithJournalPush(root, repolock.Options{
 		Purpose: "push-merge",

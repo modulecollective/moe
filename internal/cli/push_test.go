@@ -188,6 +188,11 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	if !strings.Contains(mergeBody, "MoE-Merged: "+f.tipSHA) {
 		t.Fatalf("MoE-Merged trailer missing tip SHA on HEAD~1:\n%s", mergeBody)
 	}
+	// An operator's own `moe sdlc push` is not a machine turn, so the
+	// merge record must not wear the machine marker.
+	if strings.Contains(mergeBody, "MoE-Consent") {
+		t.Fatalf("operator merge push stamped MoE-Consent:\n%s", mergeBody)
+	}
 	bumpBody := lastCommitMessage(t, f.root)
 	if !strings.Contains(bumpBody, "sync: bump project pointers") {
 		t.Fatalf("expected sync bump commit at HEAD, got:\n%s", bumpBody)
@@ -923,6 +928,36 @@ func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
 	got := readFollowups(t, f.root, f.projectID, f.runID)
 	if !strings.Contains(got, "- [x] `cleanup-foo` — Clean up foo helper") {
 		t.Fatalf("followups.md not rewritten as harvested:\n%s", got)
+	}
+}
+
+// TestCascadePushStampsConsentOnMergeRecord: the merge path is the one
+// `!!`/`!!!` cascades ship through, so it — not just the --pr record —
+// must carry MoE-Consent when a machine walk is in flight. The
+// operator-path negative lives in TestPushMergeFFAdvancesOriginAndMarksMerged.
+func TestCascadePushStampsConsentOnMergeRecord(t *testing.T) {
+	f := newPushFixture(t)
+	defer withRideMode(rideDynamic)()
+
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+	var stdout, stderr bytes.Buffer
+	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+		HeadlessRecovery: true,
+		SkipTerminalEdit: true,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runPushTypedWithOptions error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	mergeBody := gittest.Output(t, f.root, "log", "-1", "--format=%B", "HEAD~1")
+	if !strings.Contains(mergeBody, "push: "+f.projectID+"/"+f.runID+" merged") {
+		t.Fatalf("HEAD~1 is not the merge record:\n%s", mergeBody)
+	}
+	if !strings.Contains(mergeBody, "MoE-Consent: dynamic") {
+		t.Fatalf("cascade merge record missing MoE-Consent: dynamic:\n%s", mergeBody)
 	}
 }
 
