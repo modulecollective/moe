@@ -249,6 +249,169 @@ func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
 	}
 }
 
+// architectureFixture is the cited doc for the dangling-xref tests. It
+// carries the anchor shapes the real twin uses: markdown headings, a
+// backticked bold lead, a long bold lead a citation will quote only
+// the first clause of, a bold lead wrapped across source lines inside
+// a blank-line-free list, and a plain-prose lead-in that is *not* an
+// anchor.
+const architectureFixture = `# Architecture
+
+## Components
+
+- **` + "`moe intent`" + `** — the intent surface.
+- **Motion roots in operator verbs; merges are hook-gated.**
+  Everything else follows from that.
+
+Top-level command surface today:
+
+## Decisions
+
+- **Doc-wide segment resolution.** ` + "`" + `"A → B"` + "`" + ` requires both.
+- **Prefix match, not
+  substring.** Substring would silently accept an imprecise citation.
+`
+
+// The core case: a managed doc citing another by quoted heading. A
+// citation resolves when every segment names a heading or bold lead in
+// the cited doc; anything else is a pointer some rename stranded.
+func TestScanDanglingXrefs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "architecture.md"), architectureFixture)
+	writeFile(t, filepath.Join(dir, "vision.md"), `# Vision
+
+The intent surface is architecture.md "Components → `+"`moe intent`"+`"
+and it holds.
+
+The framing lives in architecture.md "The bets" — or it used to.
+
+A citation that wraps across source lines runs into architecture.md
+"Motion roots in operator verbs." and still resolves.
+
+Blank-line-free list entries anchor too: architecture.md
+"Prefix match, not substring."
+
+A path with a dead leaf: architecture.md "Components → Nonexistent lead".
+
+Quoted prose like "what's in play" names no doc, so it is not a
+citation. Neither is README.md "Anything" — not a managed doc.
+`)
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DanglingXref{
+		{From: "vision.md", Target: "architecture.md", Span: "Components → Nonexistent lead"},
+		{From: "vision.md", Target: "architecture.md", Span: "The bets"},
+	}
+	if len(f.DanglingXrefs) != len(want) {
+		t.Fatalf("DanglingXrefs: got %+v want %+v", f.DanglingXrefs, want)
+	}
+	for i := range want {
+		if f.DanglingXrefs[i] != want[i] {
+			t.Errorf("DanglingXrefs[%d]: got %+v want %+v", i, f.DanglingXrefs[i], want[i])
+		}
+	}
+}
+
+// The resolution rules in isolation, so a regression names the rule it
+// broke rather than just moving a count.
+func TestXrefResolves(t *testing.T) {
+	catalogue := xrefCatalogue(architectureFixture)
+	cases := []struct {
+		name string
+		span string
+		want bool
+	}{
+		{"plain heading", "Components", true},
+		{"backticked bold lead cited bare", "moe intent", true},
+		{"path through heading to lead", "Components → `moe intent`", true},
+		{"first clause of a long lead", "Motion roots in operator verbs.", true},
+		{"lead wrapped across source lines", "Prefix match, not substring.", true},
+		{"trailing punctuation and case folded", "COMPONENTS,", true},
+		{"prefix, not substring", "intent", false},
+		{"plain prose is not an anchor", "Top-level command surface", false},
+		{"one dead segment fails the path", "Components → Nonexistent lead", false},
+		{"unknown heading", "The bets", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := xrefResolves(tc.span, catalogue); got != tc.want {
+				t.Errorf("xrefResolves(%q) = %v, want %v", tc.span, got, tc.want)
+			}
+		})
+	}
+}
+
+// A citation into a managed doc that isn't on disk is MissingManagedDocs'
+// story, not this scan's — otherwise every pointer into the absent doc
+// piles onto the same finding.
+func TestScanDanglingXrefsSkipsAbsentTarget(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vision.md"),
+		"# Vision\n\nSee architecture.md \"Components\" for the shape.\n")
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.DanglingXrefs) != 0 {
+		t.Errorf("absent target should not produce xref findings, got %+v", f.DanglingXrefs)
+	}
+	if got, want := f.MissingManagedDocs, []string{"architecture.md"}; !equalStrings(got, want) {
+		t.Errorf("MissingManagedDocs: got %v want %v", got, want)
+	}
+}
+
+// Open-schema wikis cross-reference with markdown links, which
+// BrokenLinks covers; the quoted-heading convention is a twin
+// convention and the scan must stay off open-schema corpora.
+func TestScanDanglingXrefsClosedSchemaOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "index.md"), "# Index\n\n[DNS](topics/dns.md)\n")
+	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
+		"# DNS\n\nSee architecture.md \"Nonexistent heading\" for more.\n")
+	f, err := Scan(Config{Mode: Open, ContentDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.DanglingXrefs) != 0 {
+		t.Errorf("open-schema scan should not produce xref findings, got %+v", f.DanglingXrefs)
+	}
+}
+
+// Render path: dangling xrefs get their own labelled group, and the
+// rubric line is how a stage agent learns what fix the entry invites.
+func TestRenderFindingsIncludesDanglingXrefs(t *testing.T) {
+	got := RenderFindings(Findings{DanglingXrefs: []DanglingXref{
+		{From: "vision.md", Target: "architecture.md", Span: "The bets"},
+	}})
+	for _, want := range []string{
+		"**Dangling cross-refs**",
+		"repoint the citation or restore the heading",
+		`- vision.md: architecture.md "The bets"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 // equalStrings compares two string slices element-wise. We can't use
 // reflect.DeepEqual on []string{} vs nil cleanly; this helper treats
 // them as equal when both have the same elements in the same order.

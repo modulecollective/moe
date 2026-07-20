@@ -108,6 +108,19 @@ type Findings struct {
 	// index over the prose, not a separate definition surface — an
 	// orphan means the prose moved on without the entry.
 	GlossaryOrphans []string
+	// DanglingXrefs are citations of the form `other.md "Some heading"`
+	// whose quoted span names no heading or bold lead in the cited doc.
+	// Closed-schema only: the quoted-heading convention is a twin
+	// convention (open-schema wikis cross-reference with markdown
+	// links, which BrokenLinks already covers).
+	DanglingXrefs []DanglingXref
+}
+
+// DanglingXref is one quoted-heading citation that doesn't resolve.
+type DanglingXref struct {
+	From   string // managed doc containing the citation
+	Target string // managed doc it cites
+	Span   string // the quoted span as authored, line-unwrapped
 }
 
 // BrokenLink is one cross-link a topic doc makes that doesn't resolve.
@@ -125,7 +138,8 @@ func (f Findings) IsEmpty() bool {
 		len(f.BrokenLinks) == 0 &&
 		len(f.EmptyDocs) == 0 &&
 		len(f.MissingManagedDocs) == 0 &&
-		len(f.GlossaryOrphans) == 0
+		len(f.GlossaryOrphans) == 0 &&
+		len(f.DanglingXrefs) == 0
 }
 
 // Scan walks the wiki content directory and returns the structural
@@ -303,6 +317,13 @@ func RenderFindings(f Findings) string {
 		}
 		b.WriteString("\n")
 	}
+	if len(f.DanglingXrefs) > 0 {
+		b.WriteString("**Dangling cross-refs** (quoted heading not found in the named doc — repoint the citation or restore the heading):\n")
+		for _, x := range f.DanglingXrefs {
+			fmt.Fprintf(&b, "- %s: %s %q\n", x.From, x.Target, x.Span)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -356,6 +377,7 @@ func scanClosed(cfg Config) (Findings, error) {
 	}
 
 	f.GlossaryOrphans = scanGlossaryOrphans(cfg)
+	f.DanglingXrefs = scanDanglingXrefs(cfg)
 
 	sort.Strings(f.MissingManagedDocs)
 	sort.Strings(f.EmptyDocs)
@@ -434,6 +456,219 @@ func scanGlossaryOrphans(cfg Config) []string {
 		}
 	}
 	return orphans
+}
+
+// xrefHeadingPattern matches a markdown heading logical line; the
+// capture is the heading text with the `#` marker stripped.
+var xrefHeadingPattern = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
+
+// xrefBoldLeadPattern matches a bold lead — the `**…**` span opening a
+// logical line, optionally behind a list marker. This is the anchor
+// shape the twin's `- **Name** — prose` entries under `## Components`
+// and `## Decisions` present, and citations point at them the same way
+// they point at headings.
+var xrefBoldLeadPattern = regexp.MustCompile(`^\s*(?:[-*]\s+)?\*\*(.+?)\*\*`)
+
+// xrefPathSeparator is the segment separator inside a quoted citation
+// span (`"Components → moe pulse"`). The corpus uses U+2192
+// exclusively; an ASCII "->" reads as segment text and will flag,
+// which is the right nudge back to the convention.
+const xrefPathSeparator = "→"
+
+// scanDanglingXrefs finds citations of the form `other.md "Some
+// heading"` in managed docs whose quoted span names nothing in the
+// cited doc. Twin docs cite each other by quoted section heading
+// rather than line number, and a heading rename is the cheapest edit a
+// reflect pass makes — nothing in that pass's own diff shows the
+// pointers it stranded. This is the check that makes "a rename strands
+// no pointers" enforceable.
+//
+// Citations into a managed doc that isn't on disk are skipped:
+// MissingManagedDocs already reports that, and every citation into the
+// absent doc would otherwise pile on as noise.
+func scanDanglingXrefs(cfg Config) []DanglingXref {
+	names := make([]string, 0, len(cfg.ManagedDocs))
+	for _, d := range cfg.ManagedDocs {
+		names = append(names, d.Filename)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	bodies := map[string]string{}
+	for _, name := range names {
+		body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, name))
+		if err != nil || !ok {
+			continue
+		}
+		bodies[name] = body
+	}
+
+	catalogues := map[string][]string{}
+	for name, body := range bodies {
+		catalogues[name] = xrefCatalogue(body)
+	}
+
+	pattern := xrefCitationPattern(names)
+	var out []DanglingXref
+	for _, from := range names {
+		body, ok := bodies[from]
+		if !ok {
+			continue
+		}
+		for _, line := range logicalLines(body) {
+			for _, m := range pattern.FindAllStringSubmatch(line, -1) {
+				target, span := m[1], m[2]
+				catalogue, ok := catalogues[target]
+				if !ok {
+					continue
+				}
+				if xrefResolves(span, catalogue) {
+					continue
+				}
+				out = append(out, DanglingXref{From: from, Target: target, Span: span})
+			}
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].From != out[j].From {
+			return out[i].From < out[j].From
+		}
+		if out[i].Target != out[j].Target {
+			return out[i].Target < out[j].Target
+		}
+		return out[i].Span < out[j].Span
+	})
+	return out
+}
+
+// xrefCitationPattern builds the citation matcher: a managed-doc
+// filename immediately followed by a double-quoted span. Only the
+// quote adjacent to the doc token binds — later quotes on the same
+// logical line are left alone, because binding them to the most recent
+// doc name flags quoted prose (measured: 2 false positives against ~6
+// extra real citations, not a trade worth making).
+//
+// The alternation is built from cfg.ManagedDocs rather than hardcoded,
+// longest name first so a doc whose name is a suffix of another still
+// matches the longer one.
+func xrefCitationPattern(names []string) *regexp.Regexp {
+	sorted := append([]string(nil), names...)
+	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
+	alts := make([]string, len(sorted))
+	for i, n := range sorted {
+		alts[i] = regexp.QuoteMeta(n)
+	}
+	return regexp.MustCompile(`(?:^|[\s(])(` + strings.Join(alts, "|") + `)\s+"([^"]+)"`)
+}
+
+// xrefCatalogue collects everything in body a citation may legitimately
+// point at: markdown headings and bold leads, normalised.
+func xrefCatalogue(body string) []string {
+	var out []string
+	for _, line := range logicalLines(body) {
+		if m := xrefHeadingPattern.FindStringSubmatch(line); m != nil {
+			out = append(out, normaliseXrefText(m[1]))
+			continue
+		}
+		if m := xrefBoldLeadPattern.FindStringSubmatch(line); m != nil {
+			out = append(out, normaliseXrefText(m[1]))
+		}
+	}
+	return out
+}
+
+// xrefResolves reports whether every non-empty segment of span matches
+// some catalogue entry. Segments resolve doc-wide rather than nested
+// under the previous segment's section: the motivating failure is a
+// rename, which deletes the heading everywhere, and section-scoped
+// resolution would cost span tracking for a case that hasn't shown up.
+//
+// A segment matches exactly or as a prefix of an entry. Prefix is
+// load-bearing — citations quote the first clause of a long bold lead
+// ("The bets → Motion roots in operator verbs." against
+// `**Motion roots in operator verbs; merges are hook-gated.**`).
+// Substring would go too far: it would silently accept `intent`
+// against a `moe intent` lead, an imprecise citation the pass should
+// tighten instead.
+func xrefResolves(span string, catalogue []string) bool {
+	for _, seg := range strings.Split(span, xrefPathSeparator) {
+		norm := normaliseXrefText(seg)
+		if norm == "" {
+			continue
+		}
+		if !xrefSegmentMatches(norm, catalogue) {
+			return false
+		}
+	}
+	return true
+}
+
+func xrefSegmentMatches(seg string, catalogue []string) bool {
+	for _, entry := range catalogue {
+		if strings.HasPrefix(entry, seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// normaliseXrefText canonicalises a citation segment or catalogue entry
+// so the two compare on substance. Backticks go (a bare `internal/agent`
+// citation should match a backticked bold lead), whitespace runs
+// collapse (citations wrap across lines), trailing sentence punctuation
+// goes (a citation ending `."` should match a heading without the
+// period), and case is folded.
+func normaliseXrefText(s string) string {
+	s = strings.ReplaceAll(s, "`", "")
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.TrimRight(s, ".,;:")
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// logicalLines splits body into unwrapped logical lines: a blank line
+// ends a block, a list item or heading starts (and, for a heading,
+// also ends) its own, and any other line joins the block in progress
+// with a single space.
+//
+// Citations and bold leads both wrap across source lines, so matching
+// per physical line misses most of them. Plain paragraph-unwrap isn't
+// enough either — consecutive list items have no blank line between
+// them, so paragraph-joining merges a whole `Decisions` list into one
+// line and hides every bold lead but the first.
+func logicalLines(body string) []string {
+	var out []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimRight(raw, " \t")
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			flush()
+		case strings.HasPrefix(trimmed, "#"):
+			// Headings stand alone: an unblanked line after a heading is
+			// body text, not part of the heading.
+			flush()
+			out = append(out, line)
+		case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "):
+			flush()
+			cur.WriteString(line)
+		case cur.Len() > 0:
+			cur.WriteString(" ")
+			cur.WriteString(trimmed)
+		default:
+			cur.WriteString(line)
+		}
+	}
+	flush()
+	return out
 }
 
 // readMaybe reads path, returning ("", false, nil) when the file is

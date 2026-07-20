@@ -675,6 +675,53 @@ func TestReflectPostFlightGate(t *testing.T) {
 	}
 }
 
+// A citation stranded by a heading rename refuses the seal the same
+// way a missing doc does — this is what makes "a rename strands no
+// pointers" an enforced invariant rather than a hope. It also pins
+// findingsCount counting the new category, since the gate's exit
+// message is the only place that number surfaces.
+func TestReflectPostFlightGateCatchesDanglingXref(t *testing.T) {
+	dir := t.TempDir()
+	cfg := wiki.Config{
+		Name:       "twin",
+		ContentDir: dir,
+		Mode:       wiki.Closed,
+		ManagedDocs: []wiki.ManagedDoc{
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "patterns.md", Title: "Patterns"},
+		},
+	}
+	if err := writeWikiDoc(t, dir, "patterns.md", "# Patterns\n\n## Named patterns\n\nBody.\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWikiDoc(t, dir, "vision.md",
+		"# Vision\n\nThe shape is in patterns.md \"Renamed away\" today.\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	err := reflectPostFlightGate(&cfg, &stderr)
+	if err == nil {
+		t.Fatal("expected the gate to refuse a dangling cross-ref")
+	}
+	if !strings.Contains(err.Error(), "1 unresolved findings") {
+		t.Errorf("findingsCount should count dangling xrefs, got %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Dangling cross-refs") {
+		t.Errorf("expected the rendered block to name the category, got:\n%s", stderr.String())
+	}
+
+	// Repointing the citation at the heading that exists clears it.
+	if err := writeWikiDoc(t, dir, "vision.md",
+		"# Vision\n\nThe shape is in patterns.md \"Named patterns\" today.\n"); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
+		t.Fatalf("repointed citation should pass the gate, got %v\nstderr=%s", err, stderr.String())
+	}
+}
+
 // TestFindInProgressTwinRunDetectsExisting pins the guard
 // reflectCommand uses to refuse opening a second pass while one is
 // already in flight.

@@ -300,7 +300,8 @@ func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
 // terminal "found N unresolved findings" line.
 func findingsCount(f wiki.Findings) int {
 	return len(f.Orphans) + len(f.MissingFromIndex) + len(f.BrokenLinks) +
-		len(f.EmptyDocs) + len(f.MissingManagedDocs) + len(f.GlossaryOrphans)
+		len(f.EmptyDocs) + len(f.MissingManagedDocs) + len(f.GlossaryOrphans) +
+		len(f.DanglingXrefs)
 }
 
 // unrecordedEditsRedirect formats the one-line redirect printed when
