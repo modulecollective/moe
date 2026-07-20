@@ -488,7 +488,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	var calls int
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		calls++
-		writePulseGate(t, root, projectID, runID, `{"status": "ok", "reflect": {"due": false}}`)
+		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
 		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
 			t.Fatal(err)
