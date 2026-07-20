@@ -675,11 +675,11 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	}
 }
 
-// TestPulseSurveyDueVerdictSpawnsReflect: a filled gate flagging
-// reflect.due mints a parked twin reflect run stamped with the pulse as
-// its spawner, and the pulse still auto-closes — opening rides the pulse,
-// execution stays a human pull.
-func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
+// TestPulseSurveyTwinSpawnMintsReflect: a spawn entry asking for
+// workflow "twin" mints a parked twin reflect run stamped with the pulse
+// as its spawner, and the pulse still auto-closes — opening rides the
+// pulse, execution stays a human pull.
+func TestPulseSurveyTwinSpawnMintsReflect(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "moe")
@@ -687,7 +687,7 @@ func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "reflect": {"due": true, "why": "boundary move the twin docs miss"}}`)
+			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "boundary move the twin docs miss"}]}`)
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -745,11 +745,11 @@ func TestPulseSurveyDueVerdictSpawnsReflect(t *testing.T) {
 	}
 }
 
-// TestPulseSurveyDueButTwinInProgressSkips: a due verdict is a silent
-// no-op when a twin pass is already open (a parked prior reflect counts
-// — parked runs are in_progress). No second reflect is minted, and the
-// pulse still auto-closes.
-func TestPulseSurveyDueButTwinInProgressSkips(t *testing.T) {
+// TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress: a twin spawn entry is
+// a silent no-op when a twin pass is already open (a parked prior reflect
+// counts — parked runs are in_progress). No second reflect is minted, and
+// the pulse still auto-closes.
+func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "moe")
@@ -759,7 +759,7 @@ func TestPulseSurveyDueButTwinInProgressSkips(t *testing.T) {
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "reflect": {"due": true, "why": "drift piled up"}}`)
+			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "drift piled up"}]}`)
 		return 0
 	}
 	t.Cleanup(func() { openPulse = orig })
