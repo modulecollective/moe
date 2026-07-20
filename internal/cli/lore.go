@@ -63,6 +63,22 @@ type parsedLore struct {
 
 var loreSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// lorePartialProgressError marks a promotion failure that happened
+// after the replacement was written. The shared scratch harvester uses
+// the type to checkpoint retry state without committing ordinary
+// pre-write failures.
+type lorePartialProgressError struct {
+	err error
+}
+
+func (e *lorePartialProgressError) Error() string { return e.err.Error() }
+func (e *lorePartialProgressError) Unwrap() error { return e.err }
+
+func loreWriteErrorLeavesProgress(err error) bool {
+	var partial *lorePartialProgressError
+	return errors.As(err, &partial)
+}
+
 // parseLore scans body and returns the lines (split on '\n') plus the
 // unchecked entries to harvest. Reuses the followups parser primitives
 // (the checkbox regexes, the body dedent helper) so the only
@@ -257,7 +273,9 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		}
 		oldPath := filepath.Join(loreDir, oldSlug+".md")
 		if err := os.Remove(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("delete superseded lore %s: %w", oldPath, err)
+			return "", &lorePartialProgressError{
+				err: fmt.Errorf("delete superseded lore %s: %w", oldPath, err),
+			}
 		}
 	}
 	return slug, nil
@@ -298,11 +316,12 @@ func stringSliceContains(values []string, want string) bool {
 func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
 	relPath := run.FeedbackPath(projectID, runID, "lore")
 	spec := scratchHarvestSpec[parsedLore]{
-		relPath:         relPath,
-		header:          loreHeader,
-		progressSubject: fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
-		progressPaths:   []string{wiki.LoreDirRel},
-		writeErrPrefix:  "promote lore",
+		relPath:                  relPath,
+		header:                   loreHeader,
+		progressSubject:          fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
+		progressPaths:            []string{wiki.LoreDirRel},
+		writeErrorLeavesProgress: loreWriteErrorLeavesProgress,
+		writeErrPrefix:           "promote lore",
 		parse: func(body []byte) ([]string, []scratchItem[parsedLore], error) {
 			lines, todo, err := parseLore(body)
 			if err != nil {

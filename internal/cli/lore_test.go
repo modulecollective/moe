@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	moegit "github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -477,6 +478,11 @@ func TestPromoteLoreEntrySupersedesAfterWritingReplacement(t *testing.T) {
 
 	if _, err := promoteLoreEntry(root, "tele", "run", entry); err == nil {
 		t.Fatal("expected deletion failure for directory-shaped old-b.md")
+	} else if !loreWriteErrorLeavesProgress(err) {
+		t.Fatalf("post-write deletion error should report partial progress: %v", err)
+	}
+	if loreWriteErrorLeavesProgress(errors.New("pre-write failure")) {
+		t.Fatal("ordinary writer error must not report partial progress")
 	}
 	if _, err := os.Stat(filepath.Join(loreDir, "merged.md")); err != nil {
 		t.Fatalf("replacement must be visible before superseded deletions finish: %v", err)
@@ -528,6 +534,79 @@ func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(loreDir, "fact-2.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("in-place amendment should not mint fact-2.md, got %v", err)
+	}
+}
+
+func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(filepath.Join(loreDir, "old-b.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "old-b.md", "keep"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "old-a.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", wiki.LoreDirRel)
+	gittest.Run(t, root, "commit", "-m", "seed partial-delete lore")
+
+	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `merged` — Merged",
+		"",
+		"  applies-when: always",
+		"",
+		"  supersedes: old-a, old-b",
+		"",
+		"  merged body",
+		"",
+	}, "\n"))
+
+	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err == nil {
+		t.Fatal("expected first harvest to fail on directory-shaped old-b.md")
+	}
+	if entries, err := moegit.Status(root); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Fatalf("partial progress was not committed: %+v", entries)
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "merged.md")); err != nil {
+		t.Fatalf("replacement missing after progress commit: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(loreDir, "old-b.md")); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A", wiki.LoreDirRel)
+	gittest.Run(t, root, "commit", "-m", "remove deletion blocker")
+	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err != nil {
+		t.Fatalf("retry harvest: %v", err)
+	}
+	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `merged` — Merged") {
+		t.Fatalf("retry did not mark merged lore harvested:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(loreDir, "merged-2.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retry should reuse merged.md, got merged-2.md: %v", err)
+	}
+}
+
+func TestHarvestLoreDoesNotCommitFirstEntryPreWriteFailure(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	if err := os.WriteFile(filepath.Join(root, wiki.LoreDirRel), []byte("blocks lore dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", wiki.LoreDirRel)
+	gittest.Run(t, root, "commit", "-m", "block lore directory")
+	writeLoreFeedback(t, root, "tele", "ship-it",
+		"- [ ] `fact` — Fact\n\n  applies-when: always\n\n  body\n")
+
+	before := gittest.HeadSHA(t, root)
+	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err == nil {
+		t.Fatal("expected lore directory creation failure")
+	}
+	if after := gittest.HeadSHA(t, root); after != before {
+		t.Fatalf("pre-write failure created a progress commit:\nbefore=%s\nafter=%s", before, after)
 	}
 }
 

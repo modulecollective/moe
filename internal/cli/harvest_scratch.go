@@ -131,7 +131,11 @@ type scratchHarvestSpec[T any] struct {
 	write           func(T) (string, error)
 	progressSubject string
 	progressPaths   []string
-	writeErrPrefix  string
+	// writeErrorLeavesProgress identifies writer errors returned after
+	// an on-disk mutation. Lore promotion can fail while deleting
+	// superseded entries after it has written the replacement.
+	writeErrorLeavesProgress func(error) bool
+	writeErrPrefix           string
 }
 
 func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdit bool, spec scratchHarvestSpec[T]) error {
@@ -165,7 +169,8 @@ func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdi
 	for hi, item := range todo {
 		resolved, werr := spec.write(item.entry)
 		if werr != nil {
-			if hi > 0 {
+			leavesProgress := spec.writeErrorLeavesProgress != nil && spec.writeErrorLeavesProgress(werr)
+			if hi > 0 || leavesProgress {
 				if perr := commitScratchProgress(root, projectID, runID, workflow, spec, lines); perr != nil {
 					return fmt.Errorf("%s %s (then progress commit failed: %v): %w", spec.writeErrPrefix, item.slug, perr, werr)
 				}
