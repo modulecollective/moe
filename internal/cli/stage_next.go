@@ -927,9 +927,10 @@ type cascadeResult struct {
 // opts.Headless), so the cascade owns routing.
 //
 // At push in cascade-to-ship mode the dispatch is the merge path
-// (pushCmd.Run with no flags). `!!` and `!!!` default to fast-forward
-// merge; runPushTyped writes the merge-path push note after deterministic
-// hooks and shipping.
+// (pushFromCascade — the typed seam, not pushCmd.Run, so the tail
+// pulse's interrupt bool survives). `!!` and `!!!` default to
+// fast-forward merge; runPushTyped writes the merge-path push note
+// after deterministic hooks and shipping.
 func cascadeFromGate(startStage, destination string, oneStep bool, rideChain bool, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
 	var res cascadeResult
 	wf, err := LookupWorkflow(md.Workflow)
