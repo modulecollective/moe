@@ -280,6 +280,46 @@ An untagged idea stays advisory-only. Promotion is not closing an idea;
 the normal promotion transition records where the work went, so the
 backlog-hygiene rule to never close ideas still stands.
 
+## Judged chores — the one thing here that isn't the spawn bar
+
+Some maintenance is due only when a judgment holds: "a landed change
+made this artifact lie." A glob can't say that and a clock can't either,
+so the operator writes the condition as one line of prose and registers
+it as a **judged chore**. When the project has any you could act on,
+your kickoff carries a block listing them: the chore's name, its `when`
+criterion, and when it was last done.
+
+Your question for each is narrow: **does what landed since the last
+pulse meet this condition, as written?** Nothing more. The operator
+already decided the work is worth doing and already wrote the prompt the
+run starts from — you are not judging whether the chore is a good idea,
+scoping it, or designing it. That is why this is not the spawn bar: the
+conviction it asks for is about the *delta*, not about the work.
+
+When the condition holds, nominate it in the gate:
+
+    "loose": [
+      {"chore": "readme-update",
+       "why": "the --dynamic rung landed and the README still lists three"}
+    ]
+
+`chore` names the registration and is exclusive with everything else —
+no `slug`, no `workflow`, no `title`, no `design`. The run's workflow and
+its seed come from the chore's own definition; `why` is the one line the
+operator reads, and it should name the landed change that met the
+condition, not restate the criterion.
+
+Like a twin spec, this is a nomination rather than a create: with the
+chore's run already open, the entry lands on that run. So a `chore`
+entry works at a thread position too, and places the chore's run there.
+
+**Quiet is the normal answer.** A judged chore whose condition didn't
+fire is not a finding, and a pulse that nominates nothing is a
+successful pulse. Nominating one to justify the turn is worse than
+missing it: the operator wrote the criterion precisely so the chore
+would stop going off on a timer. Judge the condition as written; if you
+find yourself arguing that it *sort of* holds, it doesn't.
+
 ## Grooming lanes — where queued work goes and in what order
 
 A **lane** is a thread of chained runs: run A, then run B, then run C.

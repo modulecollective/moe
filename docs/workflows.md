@@ -327,16 +327,34 @@ A chore is a directory under `projects/<project>/chores/<name>/` holding a
       chore.json   # {"trigger":"go.mod","workflow":"sdlc"} -> due when merged work touches go.mod
       prompt.md                                            -> "Regenerate the dependency table; go.mod changed."
 
+    projects/my-project/chores/readme-update/
+      chore.json   # {"when":"a landed change altered user-facing behavior the README describes","cooldown":"7d"}
+      prompt.md                                            -> "Bring README.md back in line with what shipped."
+
 `chore.json` keys are all optional: `trigger` (path glob, or `*` for any merged
 project change), `cadence` and `cooldown` (duration strings like `"720h"` or
-`"30d"`), and `workflow` (the run to open; defaults to `sdlc`). `prompt.md`
-stays a markdown sibling — the opened run reads it verbatim. A chore directory
-must contain a parseable `chore.json`.
+`"30d"`), `when` (a one-line prose due-condition), and `workflow` (the run to
+open; defaults to `sdlc`). `prompt.md` stays a markdown sibling — the opened run
+reads it verbatim. A chore directory must contain a parseable `chore.json`.
 
-A chore needs a `trigger`, a `cadence`, or both. `trigger` is a path glob (or
-`*` for any merged project change); `cadence` makes it due on a clock. A chore
-goes due when its trigger matches new merged work, its cadence elapses, or its
-own definition changes — unless it is cooling down or already has an open run.
+A chore's due-ness comes from one of three families. **Trigger** is a path glob
+(or `*` for any merged project change). **Cadence** makes it due on a clock.
+Those two are mechanical, compose with each other, and go due when the glob
+matches new merged work, the clock elapses, or the chore's own definition
+changes. **Judged** (`when`) is the third: some maintenance is due only when a
+judgment holds — "a landed change made this artifact lie" — which neither a glob
+nor a clock expresses. Write that condition as one line of prose and the pulse
+survey evaluates it against what actually landed, nominating the chore when it
+holds. A judged chore is never mechanically due; `when` is exclusive with
+`trigger` and `cadence`, while `cooldown` composes with all three (on a judged
+chore it is the anti-flap on a judgment that over-fires).
+
+Every family shares the same guards: a chore never goes due while it is cooling
+down or already has an open run.
+
+Judged chores don't appear in `moe chore list` (it is due-only) or on the dash
+until their run opens — `moe chore check` is where you see the registration,
+reported as `judged` rather than due/not-due.
 
 Two command families, mirroring hooks:
 
@@ -380,10 +398,12 @@ sweep a project without shipping anything.
 
 Every pulse does three things:
 
-- **Chore auto-open (always).** Every due chore for the project gets its run
-  opened — the same seeded run `moe chore open` would mint — and nothing more.
-  No stage executes; the opened runs wait in `moe dash` like any other. This is
-  automation acting on a chore definition you authored, never a fresh decision.
+- **Chore auto-open (always).** Every *mechanically* due chore for the project
+  gets its run opened — the same seeded run `moe chore open` would mint — and
+  nothing more. No stage executes; the opened runs wait in `moe dash` like any
+  other. This is automation acting on a chore definition you authored, never a
+  fresh decision. Judged chores are not opened here: their condition is the
+  survey's to evaluate, below.
 - **PR reconcile (always).** The project's `pushed` runs are checked against
   GitHub — the same walk `moe sync` does, scoped to this project — so a PR you
   merged from your phone reads as `merged` before the survey looks at the
@@ -392,6 +412,9 @@ Every pulse does three things:
 - **The survey (every fire).** A headless, read-only agent sweep — it reads
   the journal since the last pulse, the twin, and the open backlog; files
   followups; and writes a short report ending in a machine-readable `## Gate`.
+  It also judges the project's **judged chores**: for each, does what landed
+  meet the condition the operator wrote? When it does, the gate nominates the
+  chore and the harness opens its ordinary chore run.
   The gate may also open parked runs — fix runs and twin reflects alike —
   and order queued work into chained lanes, in one grammar: a run with no
   ordering opinion goes in `loose`, a run whose position the sweep is sure

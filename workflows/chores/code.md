@@ -12,6 +12,14 @@ Definitions live under `projects/<project>/chores/<name>/`, holding a
 - `workflow`: workflow to open; defaults to `sdlc`.
 - `cooldown`: minimum duration between completed chore runs.
 - `cadence`: stale-by-time duration.
+- `when`: a one-line prose due-condition the pulse survey judges against what
+  landed. Exclusive with `trigger` and `cadence` — a chore is due mechanically
+  or by judgment, not both. `cooldown` still applies.
+
+Reach for `when` when the chore is due only if a judgment holds ("a landed
+change made this artifact lie") — a `"trigger": "*"` plus a cooldown is the
+shape that degrades into a weekly timer. Keep the criterion to one line: one
+that needs paragraphs is too vague to judge.
 
 `prompt.md` is the seed for the opened workflow's first canvas — a markdown
 sibling, read verbatim, not folded into `chore.json`.
