@@ -412,11 +412,12 @@ form.new-run button:hover, form.new-run button:focus {
 .provenance .consent { color: var(--accent); }
 
 /* Trace rows: monospace checkbox, and the indented `Why:` block folded
-   away behind a disclosure — context, not headline. */
+   away behind a disclosure — context, not headline. The twin note gets
+   the same disclosure, so the summary rule isn't scoped to `.traces`. */
 .traces li .box { font-family: var(--mono, monospace); color: var(--muted); }
 .traces li .raw { color: var(--muted); font-style: italic; }
 .traces .trace-body { flex-basis: 100%; }
-.traces .trace-body summary { color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+.trace-body summary { color: var(--muted); font-size: 0.85rem; cursor: pointer; }
 .twin-note .meta .status { margin-right: 0.4rem; }
 
 .meta.applies-when { color: var(--muted); }

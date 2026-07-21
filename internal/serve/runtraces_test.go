@@ -23,8 +23,9 @@ func tracesServer(t *testing.T, traces RunTraces, gatherErr error) *Server {
 // TestRunPageRendersTraces: the three sections a run's residue gets on
 // its page. A landed follow-up links to the idea run it became and
 // badges that run's current status ("did it land, and where is it
-// now"); a lore entry links to the promoted file; the twin note renders
-// whole with one chip naming the pass that folded it in.
+// now"); a lore entry links to the promoted file; the twin note keeps
+// its chip naming the pass that folded it in, with the note itself
+// behind the same disclosure the other two use.
 func TestRunPageRendersTraces(t *testing.T) {
 	s := tracesServer(t, RunTraces{
 		Followups: []RunTrace{
@@ -35,7 +36,8 @@ func TestRunPageRendersTraces(t *testing.T) {
 			{Done: true, Raw: "- [x] never matched the grammar"},
 		},
 		Lore: []RunTrace{
-			{Done: true, Slug: "portable-fact", Title: "A portable fact", TargetURL: "/lore/portable-fact"},
+			{Done: true, Slug: "portable-fact", Title: "A portable fact",
+				Body: "Why: it bites every project the same way.", TargetURL: "/lore/portable-fact"},
 		},
 		TwinNote: &TwinNoteTrace{
 			Body:       "architecture.md understates the serve seam.",
@@ -68,6 +70,17 @@ func TestRunPageRendersTraces(t *testing.T) {
 	// The open entry has no target, so nothing may link it.
 	if strings.Contains(body, `href="/run/alpha/still-open"`) {
 		t.Errorf("open follow-up must not link:\n%s", body)
+	}
+	// All three trace disclosures start closed — the reading pattern is
+	// scan the section, expand the one you want.
+	if strings.Contains(body, "<details class=\"trace-body\" open") {
+		t.Errorf("trace bodies must default collapsed:\n%s", body)
+	}
+	if !strings.Contains(body, `<summary>note</summary>`) {
+		t.Errorf("the twin note's body must sit behind its own disclosure:\n%s", body)
+	}
+	if strings.Count(body, `<details class="trace-body">`) != 3 {
+		t.Errorf("want a disclosure on each of the follow-up, lore, and twin bodies:\n%s", body)
 	}
 }
 

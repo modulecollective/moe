@@ -101,7 +101,7 @@
       <span class="status">{{.Status}}</span>
       {{if .ReflectURL}}<a class="slug" href="{{.ReflectURL}}">{{.ReflectRun}}</a>{{end}}
     </p>
-    <div class="doc">{{.BodyHTML}}</div>
+    <details class="trace-body"><summary>note</summary><div class="doc">{{.BodyHTML}}</div></details>
   </section>
   {{end}}
 
