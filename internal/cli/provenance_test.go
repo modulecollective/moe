@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // writePulseGateCanvas plants a survey canvas carrying a `## Gate` fence
@@ -77,6 +78,11 @@ func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 	if hops[1].Subject != "" {
 		t.Errorf("hop 1 Subject = %q, want empty — the arrow carries it from the line above", hops[1].Subject)
 	}
+	// The pulse is on disk, so its name is a link: the page it points at
+	// exists and is the next thing a reader wants.
+	if hops[1].ObjectURL != "/run/moe/pulse-2026-07-20" {
+		t.Errorf("hop 1 ObjectURL = %q, want the spawner's run page", hops[1].ObjectURL)
+	}
 	last := hops[2]
 	if last.Verb != "spawned" || last.Object != "this run" || last.ObjectURL != "" {
 		t.Errorf("last hop = %+v, want \"spawned\" an unlinked \"this run\"", last)
@@ -133,6 +139,11 @@ func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
 	if hops[0].Subject != "moe/pulse-2026-07-20" || hops[0].Verb != "" {
 		t.Errorf("root hop = %+v, want the spawner named with no origin claim", hops[0])
 	}
+	// Naming the pruned spawner is honest; linking it is not — the root
+	// line is the first thing a reader clicks, and that page is gone.
+	if hops[0].SubjectURL != "" {
+		t.Errorf("root hop SubjectURL = %q, want no link to a pruned run", hops[0].SubjectURL)
+	}
 	if hops[1].Verb != "spawned" || hops[1].Object != "this run" {
 		t.Errorf("hop 1 = %+v, want \"spawned\" \"this run\"", hops[1])
 	}
@@ -140,6 +151,63 @@ func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
 		if h.Verb == "opened by operator" || h.Subject == "operator" {
 			t.Errorf("hops = %+v, must not invent an operator for a pruned origin", hops)
 		}
+	}
+}
+
+// TestRunProvenanceUnlinksAPrunedMidChainRun: a prune in the middle of
+// the chain doesn't stop the walk — the journal still carries the spawn
+// record — so the pruned run renders as an object line. Naming it is
+// fine; linking it would put the same 404 one click deeper than the root
+// case. Its neighbours keep their links.
+func TestRunProvenanceUnlinksAPrunedMidChainRun(t *testing.T) {
+	root := spawnFixture(t)
+	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
+		t.Fatal(err)
+	}
+	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+		{Slug: "mid-chain", Title: "Fix"},
+	}, io.Discard)
+
+	var mid string
+	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
+		if strings.HasPrefix(id, "mid-chain") {
+			mid = id
+		}
+	}
+	if mid == "" {
+		t.Fatal("no spawned run to hang a child off")
+	}
+	// A run the middle one spawned in turn. The trailer is what the
+	// journal index reads, so it rides the open commit alongside the
+	// metadata field — the pairing every machine-spawn path writes.
+	if _, err := run.New(root, "moe", run.Options{
+		ID: "leaf", Workflow: "sdlc",
+		SpawnedBy: "moe/" + mid,
+		Trailers:  trailers.Block{SpawnedBy: "moe/" + mid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Prune the middle run only. Its MoE-Spawned-By trailer survives in
+	// the journal, so the walk passes straight through it up to the pulse.
+	if err := os.RemoveAll(filepath.Join(root, run.Dir("moe", mid))); err != nil {
+		t.Fatal(err)
+	}
+
+	hops, err := runProvenance(root, "moe", "leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hops) != 4 {
+		t.Fatalf("hops = %+v, want 4 (operator, pulse, pruned run, this run)", hops)
+	}
+	if hops[1].Object != "moe/pulse-2026-07-20" || hops[1].ObjectURL != "/run/moe/pulse-2026-07-20" {
+		t.Errorf("hop 1 = %+v, want the on-disk pulse still linked", hops[1])
+	}
+	if hops[2].Object != "moe/"+mid {
+		t.Fatalf("hop 2 = %+v, want the pruned run named", hops[2])
+	}
+	if hops[2].ObjectURL != "" {
+		t.Errorf("hop 2 ObjectURL = %q, want no link to a pruned run", hops[2].ObjectURL)
 	}
 }
 

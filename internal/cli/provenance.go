@@ -70,7 +70,9 @@ func (k provKind) verb() string {
 // rendered as a claim. A commit written before the MoE-Consent trailer
 // landed has unknown consent, so the hop shows no consent word; only an
 // absent spawned_by supports the positive "opened by operator" claim,
-// and only because no operator verb has ever written that field.
+// and only because no operator verb has ever written that field. A link
+// is a claim too — that the page it points at exists — so a run the
+// walk could name but not load is named without one.
 func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
@@ -90,6 +92,10 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 
 	var edges []provEdge
 	seen := map[string]bool{}
+	// Which named runs are no longer on disk. The walk already asks the
+	// question for every hop it visits and throws the answer away; keeping
+	// it costs nothing and is what decides whether a name gets a link.
+	gone := map[string]bool{}
 	cur := self
 	for hop := 0; hop < provenanceMaxHops && cur != "" && !seen[cur]; hop++ {
 		seen[cur] = true
@@ -99,6 +105,7 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 		}
 
 		md, _ := run.Load(root, curProject, curSlug)
+		gone[cur] = md == nil
 		spawner := idx.SpawnedBy[cur]
 		if md != nil && md.SpawnedBy != "" {
 			spawner = md.SpawnedBy
@@ -136,7 +143,18 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 		break
 	}
 
-	hops := provHops(edges, self)
+	// The root edge can name a source the walk never visited: a reopen or
+	// promote source, which it deliberately stops below, or the run a
+	// maxHops exit stopped short of. One load answers for it.
+	if len(edges) > 0 {
+		if src := edges[len(edges)-1].source; src != "" {
+			if _, asked := gone[src]; !asked {
+				gone[src] = !runLoads(root, src)
+			}
+		}
+	}
+
+	hops := provHops(edges, self, gone)
 	if consent, ok := idx.PushConsent[self]; ok {
 		// Newest event in the story, so it lands at the bottom — and it
 		// hangs off this run, not off the chain above it.
@@ -150,10 +168,24 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 	return hops, nil
 }
 
+// runLoads reports whether a qualified run still has metadata on disk —
+// the question the walk's own run.Load answers for every hop it visits,
+// asked here about a run it never had to visit.
+func runLoads(root, qualified string) bool {
+	projectID, slug, ok := strings.Cut(qualified, "/")
+	if !ok {
+		return false
+	}
+	md, _ := run.Load(root, projectID, slug)
+	return md != nil
+}
+
 // provHops renders the walk's edges as display lines, root first: one
 // line naming the actor or run the story starts from, then one "→ <verb>
 // <run>" line per edge, each line's elided subject being the line above.
-func provHops(edges []provEdge, self string) []serve.ProvHop {
+// A run in `gone` is named but not linked: the page it would point at
+// doesn't exist.
+func provHops(edges []provEdge, self string, gone map[string]bool) []serve.ProvHop {
 	if len(edges) == 0 {
 		return nil
 	}
@@ -172,17 +204,24 @@ func provHops(edges []provEdge, self string) []serve.ProvHop {
 		// out of story above it — the oldest run it could still name. The
 		// latter starts the chain mid-story rather than inventing an
 		// origin for a run whose own is unknown.
-		hops = append(hops, serve.ProvHop{Subject: root.source, SubjectURL: "/run/" + root.source})
+		start := serve.ProvHop{Subject: root.source}
+		if !gone[root.source] {
+			start.SubjectURL = "/run/" + root.source
+		}
+		hops = append(hops, start)
 	default:
 		hops = append(hops, serve.ProvHop{Subject: "operator"})
 	}
 	for i := len(edges) - 1; i >= 0; i-- {
 		e := edges[i]
-		object, objectURL := e.child, "/run/"+e.child
-		if e.child == self {
+		object, objectURL := e.child, ""
+		switch {
+		case e.child == self:
 			// Same rationale as the elided subject: the page naming itself
 			// back to its reader is noise.
-			object, objectURL = "this run", ""
+			object = "this run"
+		case !gone[e.child]:
+			objectURL = "/run/" + e.child
 		}
 		hops = append(hops, serve.ProvHop{
 			Verb:      e.kind.verb(),
