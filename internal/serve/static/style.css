@@ -2,32 +2,51 @@
  *
  * AstroPaper-inspired: warm restrained palette, system font for body,
  * monospace for slugs/keys/code, hairline rules between rows,
- * comfortable touch targets. The whole palette is four CSS custom
- * properties; everything else references them. The inline <head>
+ * comfortable touch targets. The whole palette is a handful of CSS
+ * custom properties; everything else references them. The inline <head>
  * script decides light vs dark before paint by reading
  * localStorage, falling back to prefers-color-scheme, so the CSS
  * only needs to define one palette per theme rather than three.
  */
 
+/* The amber is the terminal's amber: --accent and the four --art-* bands
+   are the operator's tmux palette (see internal/cliout), so a link here
+   and a caption in the CLI dash are the same colour. The art ramp is
+   visibility-monotonic — emphasis is distance from the background — so
+   the light theme takes the same four hexes with the ramp reversed:
+   heat reads as more ink on paper, less on warm black. Plasma is the one
+   exception; #ff5f00 only manages 2.97:1 on paper, so light darkens it
+   within the same hue family. */
 :root, [data-theme="light"] {
   --bg: #fdfcf8;
   --fg: #1f1f1f;
   --muted: #6c6c6c;
-  --accent: #ba8a3f;
+  --accent: #875f00;      /* 5.58:1 */
   --hairline: #e6e2d6;
   --warn: #b54343;
   --benign: #4a7a4a;
   --live: #2f7a2f;
+  --art-dim: #ffaf00;     /* 1.80:1 — chrome, recedes */
+  --art-mid: #d78700;     /* 2.78:1 — ornament weight */
+  --art-bright: #875f00;  /* 5.58:1 — live things carry the ink */
+  --art-plasma: #c14400;  /* 5.00:1 */
 }
 [data-theme="dark"] {
   --bg: #1c1c1c;
   --fg: #f0ede4;
   --muted: #9c9c9c;
-  --accent: #d8a050;
+  --accent: #d78700;      /* 5.97:1 — links sit at Mid, the terminal's
+                             body-adjacent amber; Bright is moe's own
+                             voice in the CLI and too loud for every
+                             link on a page. */
   --hairline: #2c2c2c;
   --warn: #d96a6a;
   --benign: #7eb37e;
   --live: #8fcf8f;
+  --art-dim: #875f00;     /* 2.98:1 — chrome, recedes */
+  --art-mid: #d78700;     /* 5.97:1 */
+  --art-bright: #ffaf00;  /* 9.24:1 */
+  --art-plasma: #ff5f00;  /* 5.59:1 */
 }
 
 * { box-sizing: border-box; }
@@ -81,21 +100,27 @@ a:hover, a:focus { border-bottom-style: solid; }
 }
 a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
 /* Both art blocks — the activity histogram and the factory rail — carry
-   the accent rather than --muted: they're ornament, and the terminal
-   render puts them in the theme's amber. The CLI's per-row heat gradient
-   has no cheap equivalent here (the frame swap paints textContent), so
-   the web takes a flat tint plus the shared ▓ texture. */
+   the terminal's heat ramp rather than --muted: they're ornament, and
+   the CLI render puts them in the theme's amber. Go classifies each run
+   of glyphs into a band (internal/dash) and serve bakes that into
+   .art-* spans, so the two surfaces agree on what's live, idle or
+   chrome. Only padding lands outside a span, which is what --art-mid
+   below is for. */
 .banner-art {
   margin: 0.1rem 0 0;
   padding: 0;
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--art-mid);
   font-size: inherit;
   line-height: 1.1;
   white-space: pre;
   overflow: hidden;
 }
+.banner-art .art-dim { color: var(--art-dim); }
+.banner-art .art-mid { color: var(--art-mid); }
+.banner-art .art-bright { color: var(--art-bright); }
+.banner-art .art-plasma { color: var(--art-plasma); }
 /* Animated art: JS stacks two <pre> layers in one grid cell and cross-fades
    their opacity. Both layers always hold a same-shape frame, so the cell
    size is stable. Without JS the single static <pre> renders unchanged. */
