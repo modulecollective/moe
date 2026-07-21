@@ -26,11 +26,21 @@ type Definition struct {
 	Workflow string
 	Cooldown time.Duration
 	Cadence  time.Duration
+	// When is the operator's one-line prose due-condition — the judged
+	// due-ness family. A judged chore is never mechanically due; the
+	// pulse survey evaluates this criterion against what landed and
+	// nominates the chore through the gate when it holds.
+	When     string
 	Prompt   string
 	EditedAt time.Time
 }
 
 func (d Definition) Key() string { return d.Project + "/" + d.Name }
+
+// Judged reports whether this chore's due-ness is a judgment rather than
+// a glob or a clock. Judged and mechanical are exclusive families
+// (Validate enforces it), so this is also "not mechanical".
+func (d Definition) Judged() bool { return d.When != "" }
 
 type State struct {
 	Definition       Definition
@@ -100,6 +110,7 @@ type choreJSON struct {
 	Workflow string `json:"workflow,omitempty"`
 	Cadence  string `json:"cadence,omitempty"`
 	Cooldown string `json:"cooldown,omitempty"`
+	When     string `json:"when,omitempty"`
 }
 
 func loadOne(root, projectID, name string) (Definition, error) {
@@ -114,6 +125,7 @@ func loadOne(root, projectID, name string) (Definition, error) {
 		return d, fmt.Errorf("chore %s/%s: parse chore.json: %w", projectID, name, err)
 	}
 	d.Trigger = cj.Trigger
+	d.When = strings.TrimSpace(cj.When)
 	if cj.Workflow != "" {
 		d.Workflow = cj.Workflow
 	}
@@ -145,8 +157,14 @@ func Validate(d Definition) error {
 	if d.Workflow == "" {
 		return fmt.Errorf("chore %s: workflow is empty", d.Key())
 	}
-	if d.Trigger == "" && d.Cadence == 0 {
-		return fmt.Errorf("chore %s: either trigger or cadence is required", d.Key())
+	// Judged and mechanical are exclusive families: a chore with two
+	// masters has unclear semantics (does the glob still fire while the
+	// judgment says no?) and no instance needs it. Loosen with evidence.
+	if d.When != "" && (d.Trigger != "" || d.Cadence > 0) {
+		return fmt.Errorf("chore %s: when is exclusive with trigger and cadence", d.Key())
+	}
+	if d.When == "" && d.Trigger == "" && d.Cadence == 0 {
+		return fmt.Errorf("chore %s: one of trigger, cadence, or when is required", d.Key())
 	}
 	if d.Cadence > 0 && d.Cooldown > 0 && d.Cadence < d.Cooldown {
 		return fmt.Errorf("chore %s: cadence must be >= cooldown", d.Key())
@@ -196,7 +214,11 @@ func Evaluate(d Definition, mds []*run.Metadata, idx *run.JournalIndex, now time
 			s.CooldownBlocking = true
 		}
 	}
-	if s.OpenRun == "" && !s.CooldownBlocking {
+	// A judged chore is never mechanically due — its condition is prose
+	// the pulse survey evaluates, not a glob or a clock — so it collects
+	// no reasons. Everything above still applies: the open-run guard, the
+	// cooldown, and LastCompleted are what the nomination path checks.
+	if s.OpenRun == "" && !s.CooldownBlocking && !d.Judged() {
 		if touched := idx.ChoreTouched[d.Key()]; !touched.IsZero() && (s.LastCompleted.IsZero() || touched.After(s.LastCompleted)) {
 			s.Reasons = append(s.Reasons, "changed paths")
 		}

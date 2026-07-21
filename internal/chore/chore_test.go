@@ -236,3 +236,112 @@ func TestMatchChangedPaths(t *testing.T) {
 		t.Fatalf("matches=%v want %v", got, want)
 	}
 }
+
+func TestLoadAllReadsWhenCriterion(t *testing.T) {
+	root := t.TempDir()
+	writeChore(t, root, "projects/moe/project.json", `{"id":"moe"}`)
+	writeChore(t, root, "projects/moe/chores/readme-update/chore.json",
+		`{"when":"a landed change altered user-facing behavior","cooldown":"7d"}`)
+
+	defs, err := LoadAll(root)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(defs) != 1 {
+		t.Fatalf("len(defs)=%d, want 1", len(defs))
+	}
+	if got, want := defs[0].When, "a landed change altered user-facing behavior"; got != want {
+		t.Errorf("When=%q, want %q", got, want)
+	}
+	if !defs[0].Judged() {
+		t.Error("a chore with a when criterion should read as judged")
+	}
+	// Cooldown composes with the judged family: it is the anti-flap, not
+	// a second due-ness master.
+	if got := defs[0].Cooldown; got != 7*24*time.Hour {
+		t.Errorf("Cooldown=%v, want %v", got, 7*24*time.Hour)
+	}
+}
+
+func TestValidateDueNessFamilies(t *testing.T) {
+	base := Definition{Project: "moe", Name: "x", Workflow: "sdlc"}
+	cases := []struct {
+		name    string
+		mutate  func(*Definition)
+		wantErr bool
+	}{
+		{"judged alone", func(d *Definition) { d.When = "the docs lie" }, false},
+		{"trigger alone", func(d *Definition) { d.Trigger = "*" }, false},
+		{"cadence alone", func(d *Definition) { d.Cadence = time.Hour }, false},
+		{"judged with trigger", func(d *Definition) { d.When, d.Trigger = "the docs lie", "*" }, true},
+		{"judged with cadence", func(d *Definition) { d.When, d.Cadence = "the docs lie", time.Hour }, true},
+		{"no family at all", func(d *Definition) {}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := base
+			tc.mutate(&d)
+			err := Validate(d)
+			if tc.wantErr && err == nil {
+				t.Fatalf("Validate(%+v) = nil, want an error", d)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate(%+v) = %v, want nil", d, err)
+			}
+		})
+	}
+}
+
+// TestEvaluateJudgedChoreIsNeverDue is the noise-resistance property the
+// family lives on: nothing mechanical may make a judged chore due —
+// not a `*`-shaped touch (it has no trigger to match), not its own
+// definition changing, not time passing. The pulse's judgment is the
+// only door. Everything else Evaluate computes still has to work, since
+// the nomination path reads it.
+func TestEvaluateJudgedChoreIsNeverDue(t *testing.T) {
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	def := Definition{
+		Project:  "moe",
+		Name:     "readme-update",
+		When:     "a landed change altered user-facing behavior",
+		Workflow: "sdlc",
+		Cooldown: 7 * 24 * time.Hour,
+		EditedAt: now.Add(-time.Hour),
+	}
+	idx := &run.JournalIndex{
+		ChoreTouched: map[string]time.Time{"moe/readme-update": now.Add(-time.Hour)},
+	}
+
+	state := Evaluate(def, nil, idx, now)
+	if state.Due {
+		t.Fatalf("judged chore went due mechanically: reasons=%v", state.Reasons)
+	}
+	if len(state.Reasons) != 0 {
+		t.Errorf("reasons=%v, want none", state.Reasons)
+	}
+
+	// …but the guards the nomination keeps still compute.
+	idx.ChoreSkipped = map[string]time.Time{"moe/readme-update": now.Add(-24 * time.Hour)}
+	cooling := Evaluate(def, nil, idx, now)
+	if !cooling.CooldownBlocking {
+		t.Error("a judged chore inside its cooldown must still read as cooling down")
+	}
+	if cooling.LastCompleted.IsZero() {
+		t.Error("LastCompleted must still fold in a skip for a judged chore")
+	}
+}
+
+// TestMatchChangedPathsIgnoresJudged: the merge-time path matcher walks
+// every definition, and a judged chore has no glob to match — it must
+// not fall through to some default.
+func TestMatchChangedPathsIgnoresJudged(t *testing.T) {
+	defs := []Definition{
+		{Project: "moe", Name: "judged", When: "the docs lie"},
+		{Project: "moe", Name: "any", Trigger: "*"},
+	}
+	got := MatchChangedPaths(defs, "moe", []string{"README.md"})
+	want := []string{"moe/any"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("matches=%v want %v", got, want)
+	}
+}
