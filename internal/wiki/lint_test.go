@@ -444,9 +444,9 @@ func TestXrefResolvesSectionScoped(t *testing.T) {
 	}
 }
 
-// End to end through Scan: the section move strands the pointer that
-// still names both of its segments, and it blocks finalize.
-func TestScanDanglingXrefsSectionScoped(t *testing.T) {
+// End to end through Scan: the section move strands pointers, and a
+// continuation quote is checked against the doc its line already named.
+func TestScanDanglingXrefsScopedAndContinuation(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "architecture.md"), scopedFixture)
 	writeFile(t, filepath.Join(dir, "glossary.md"), `# Glossary
@@ -454,11 +454,20 @@ func TestScanDanglingXrefsSectionScoped(t *testing.T) {
 ### internal/dash
 
 The package lives in architecture.md "Domain packages → `+"`internal/dash`"+`"
-and it holds.
+and the verb in "Components → moe pulse".
+
+### operator
+
+The word "operator" is prose, not a pointer: it precedes any citation
+on this line, so architecture.md "Components" is the only span checked.
 
 ### moe pulse
 
 Stranded by the section move: architecture.md "Components → `+"`internal/dash`"+`".
+
+### hooks
+
+A stale continuation: architecture.md "Decisions" and "The bets".
 `)
 	cfg := Config{
 		Mode:       Closed,
@@ -474,6 +483,7 @@ Stranded by the section move: architecture.md "Components → `+"`internal/dash`
 	}
 	want := []DanglingXref{
 		{From: "glossary.md", Target: "architecture.md", Span: "Components → `internal/dash`"},
+		{From: "glossary.md", Target: "architecture.md", Span: "The bets"},
 	}
 	if len(f.DanglingXrefs) != len(want) {
 		t.Fatalf("DanglingXrefs: got %+v want %+v", f.DanglingXrefs, want)

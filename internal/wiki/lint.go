@@ -506,7 +506,8 @@ const xrefPathSeparator = "→"
 // reflect pass makes — nothing in that pass's own diff shows the
 // pointers it stranded. This is the check that makes "a rename strands
 // no pointers" enforceable — for renames and for section moves alike
-// (see xrefResolves).
+// (see xrefResolves), and for continuation citations that name their
+// doc only once (see xrefCitations).
 //
 // Citations into a managed doc that isn't on disk are skipped:
 // MissingManagedDocs already reports that, and every citation into the
@@ -542,16 +543,15 @@ func scanDanglingXrefs(cfg Config) []DanglingXref {
 			continue
 		}
 		for _, line := range logicalLines(body) {
-			for _, m := range pattern.FindAllStringSubmatch(line, -1) {
-				target, span := m[1], m[2]
-				catalogue, ok := catalogues[target]
+			for _, c := range xrefCitations(pattern, line) {
+				catalogue, ok := catalogues[c.target]
 				if !ok {
 					continue
 				}
-				if xrefResolves(span, catalogue) {
+				if xrefResolves(c.span, catalogue) {
 					continue
 				}
-				out = append(out, DanglingXref{From: from, Target: target, Span: span})
+				out = append(out, DanglingXref{From: from, Target: c.target, Span: c.span})
 			}
 		}
 	}
@@ -569,11 +569,8 @@ func scanDanglingXrefs(cfg Config) []DanglingXref {
 }
 
 // xrefCitationPattern builds the citation matcher: a managed-doc
-// filename immediately followed by a double-quoted span. Only the
-// quote adjacent to the doc token binds — later quotes on the same
-// logical line are left alone, because binding them to the most recent
-// doc name flags quoted prose (measured: 2 false positives against ~6
-// extra real citations, not a trade worth making).
+// filename immediately followed by a double-quoted span. Quotes further
+// along the line are xrefCitations' problem, not this pattern's.
 //
 // The alternation is built from cfg.ManagedDocs rather than hardcoded,
 // longest name first so a doc whose name is a suffix of another still
@@ -586,6 +583,73 @@ func xrefCitationPattern(names []string) *regexp.Regexp {
 		alts[i] = regexp.QuoteMeta(n)
 	}
 	return regexp.MustCompile(`(?:^|[\s(])(` + strings.Join(alts, "|") + `)\s+"([^"]+)"`)
+}
+
+// xrefQuotedSpanPattern matches any double-quoted span on a logical
+// line. xrefCitationPattern only binds the quote adjacent to a doc
+// token; this finds the rest so continuation citations get a target.
+var xrefQuotedSpanPattern = regexp.MustCompile(`"([^"]+)"`)
+
+// xrefCitation is one quoted span bound to the doc it cites.
+type xrefCitation struct {
+	target string
+	span   string
+}
+
+// xrefCitations extracts every quoted span on line that names a managed
+// doc. A quote adjacent to a doc token binds to it directly; a later
+// quote with no doc token of its own binds to the nearest *preceding*
+// bound citation, which is how the corpus writes continuations
+// (`operations.md "Stage sandboxes" and "Hook chains"`).
+//
+// Requiring a preceding bound citation is what keeps quoted prose out.
+// An earlier attempt bound every later quote to the most recent doc
+// *name* and flagged prose; position separates the two cleanly — the
+// twin's prose quotes ("operator", "What was verified") all sit ahead
+// of any citation on their logical line, so they stay unbound and
+// unchecked. A prose quote written *after* a citation on one logical
+// line would flag; the finding lands in the reflect kickoff, where
+// rephrasing it is an inline edit.
+func xrefCitations(pattern *regexp.Regexp, line string) []xrefCitation {
+	type bound struct {
+		start, end int // byte range of the quoted span, quotes included
+		xrefCitation
+	}
+	var bounds []bound
+	for _, idx := range pattern.FindAllStringSubmatchIndex(line, -1) {
+		bounds = append(bounds, bound{
+			start:        idx[4] - 1,
+			end:          idx[5] + 1,
+			xrefCitation: xrefCitation{target: line[idx[2]:idx[3]], span: line[idx[4]:idx[5]]},
+		})
+	}
+	out := make([]xrefCitation, 0, len(bounds))
+	for _, b := range bounds {
+		out = append(out, b.xrefCitation)
+	}
+	for _, q := range xrefQuotedSpanPattern.FindAllStringSubmatchIndex(line, -1) {
+		// Both scans run left to right, so the last bound citation
+		// ending before this quote is the one it continues. A quote
+		// overlapping a citation *is* that citation, already emitted —
+		// or, on a line with unbalanced quotes, a straddling match that
+		// binds nothing.
+		prev := -1
+		overlaps := false
+		for i, b := range bounds {
+			if q[0] < b.end && b.start < q[1] {
+				overlaps = true
+				break
+			}
+			if b.end <= q[0] {
+				prev = i
+			}
+		}
+		if overlaps || prev < 0 {
+			continue
+		}
+		out = append(out, xrefCitation{target: bounds[prev].target, span: line[q[2]:q[3]]})
+	}
+	return out
 }
 
 // xrefEntry is one anchor a citation may point at — a heading or a bold
