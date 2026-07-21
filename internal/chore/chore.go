@@ -118,13 +118,13 @@ func loadOne(root, projectID, name string) (Definition, error) {
 		d.Workflow = cj.Workflow
 	}
 	if cj.Cooldown != "" {
-		d.Cooldown, err = parseDuration(cj.Cooldown)
+		d.Cooldown, err = ParseDuration(cj.Cooldown)
 		if err != nil {
 			return d, fmt.Errorf("chore %s/%s cooldown: %w", projectID, name, err)
 		}
 	}
 	if cj.Cadence != "" {
-		d.Cadence, err = parseDuration(cj.Cadence)
+		d.Cadence, err = ParseDuration(cj.Cadence)
 		if err != nil {
 			return d, fmt.Errorf("chore %s/%s cadence: %w", projectID, name, err)
 		}
@@ -233,7 +233,9 @@ func MatchChangedPaths(defs []Definition, projectID string, paths []string) []st
 	return out
 }
 
-func parseDuration(s string) (time.Duration, error) {
+// ParseDuration is time.ParseDuration plus a "d" (day) suffix, the unit
+// chore cooldowns and `moe usage --since` are both written in.
+func ParseDuration(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, "d") {
 		n, err := time.ParseDuration(strings.TrimSuffix(s, "d") + "h")
 		if err != nil {

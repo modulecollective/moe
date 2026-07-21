@@ -311,3 +311,89 @@ func parseCodexCustomOutput(s string) (string, bool) {
 	}
 	return env.Output, env.Metadata.ExitCode != 0
 }
+
+func init() {
+	RegisterUsage("codex", parseCodexUsage)
+}
+
+// codexUsageLine is the usage-bearing subset of a codex rollout line:
+// the `token_count` event_msg, plus the `turn_context` that names the
+// model.
+type codexUsageLine struct {
+	Type    string `json:"type"`
+	Payload struct {
+		Type  string `json:"type"`
+		Model string `json:"model,omitempty"`
+		Info  *struct {
+			TotalTokenUsage struct {
+				InputTokens       int64 `json:"input_tokens"`
+				CachedInputTokens int64 `json:"cached_input_tokens"`
+				OutputTokens      int64 `json:"output_tokens"`
+			} `json:"total_token_usage"`
+		} `json:"info,omitempty"`
+	} `json:"payload"`
+}
+
+// parseCodexUsage reads a codex rollout's token accounting.
+//
+// Codex reports a running `total_token_usage` on every `token_count`
+// event, so the last one is the whole rollout — that is what this takes.
+// The tempting alternative, summing each event's `last_token_usage`,
+// overshoots the reported total by 20–25% on real rollouts: codex emits
+// several token_count events per turn and the "last" delta repeats
+// across them.
+//
+// Two consequences of reading a cumulative total. Steps is the count of
+// token_count events rather than of turns, so it is not comparable with
+// the claude adapter's per-turn count — the CLI reports it per backend
+// and never sums the two into one "steps" column. And the whole total is
+// attributed to the last model `turn_context` named, since a cumulative
+// figure carries no per-model split; codex rollouts are single-model in
+// practice, and a resumed one that isn't will over-attribute to the
+// later model rather than lose the tokens.
+//
+// Codex reports cached *reads* but no cache-write bucket, so CacheWrite
+// stays zero — a gap in the source, not a claim that nothing was
+// written.
+func parseCodexUsage(r io.Reader) (Usage, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	var model string
+	var last ModelUsage
+	steps := 0
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ev codexUsageLine
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		switch {
+		case ev.Type == "turn_context":
+			if ev.Payload.Model != "" {
+				model = ev.Payload.Model
+			}
+		case ev.Type == "event_msg" && ev.Payload.Type == "token_count" && ev.Payload.Info != nil:
+			t := ev.Payload.Info.TotalTokenUsage
+			steps++
+			last = ModelUsage{
+				// input_tokens is the whole prompt; the cached share is
+				// broken out, so the uncached remainder is the difference.
+				Input:     t.InputTokens - t.CachedInputTokens,
+				CacheRead: t.CachedInputTokens,
+				Output:    t.OutputTokens,
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("transcript: scan codex jsonl for usage: %w", err)
+	}
+	out := Usage{}
+	if steps > 0 {
+		last.Steps = steps
+		out.Add(model, last)
+	}
+	return out, nil
+}

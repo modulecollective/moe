@@ -29,6 +29,14 @@ source of truth for the exact command surface; this page is a map.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
+- `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
+  every mirrored stage transcript, grouped by workflow, stage and model, with a
+  by-day breakdown. It reads state that already exists — no collection is
+  turned on and nothing is written. The `NOTIONAL` column prices those tokens
+  at API sticker rates so workflows can be compared in a common currency; under
+  a subscription it is not a bill, and a model with no price on record shows
+  its tokens with a `—`. `--since` takes `7d`/`24h`-style windows and defaults
+  to `30d`; a stage's age is its last work turn's commit time.
 - `moe where` prints the resolved bureaucracy path.
 - `moe version` prints the moe version.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.

@@ -265,3 +265,84 @@ func parseClaudeTimestamp(s string) time.Time {
 	}
 	return t
 }
+
+func init() {
+	RegisterUsage("claude", parseClaudeUsage)
+}
+
+// claudeUsageLine is the usage-bearing subset of a `thread-claude.jsonl`
+// assistant line.
+type claudeUsageLine struct {
+	Type    string `json:"type"`
+	Message *struct {
+		ID    string `json:"id,omitempty"`
+		Model string `json:"model,omitempty"`
+		Usage *struct {
+			InputTokens              int64 `json:"input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+		} `json:"usage,omitempty"`
+	} `json:"message,omitempty"`
+}
+
+// parseClaudeUsage sums the per-message `usage` blocks in a
+// `thread-claude.jsonl`.
+//
+// The load-bearing detail is the dedupe. Claude Code writes one line per
+// *content block*, not per message: an assistant turn with a thinking
+// block, some text and three tool calls lands as five lines, each
+// carrying the same `message.id` and a verbatim copy of the same `usage`
+// object. Summing lines therefore overcounts by the mean blocks-per-turn
+// — on real stage transcripts that is a factor of two or more, which is
+// enough to reverse a "which workflow costs most" comparison. Keying on
+// message.id collapses each turn back to one.
+//
+// A line with usage but no id (a shape the SDK doesn't currently write,
+// but the file is forensic and unversioned) counts once rather than
+// being dropped: under-reporting cost is the worse failure.
+func parseClaudeUsage(r io.Reader) (Usage, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	out := Usage{}
+	seen := map[string]bool{}
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ev claudeUsageLine
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type != "assistant" || ev.Message == nil || ev.Message.Usage == nil {
+			continue
+		}
+		if id := ev.Message.ID; id != "" {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+		}
+		// "<synthetic>" marks an SDK-internal placeholder the model never
+		// produced (queued-input echoes and the like). The event parser
+		// blanks its model; here it's dropped outright — a message nobody
+		// generated has no cost, and keeping it would open an
+		// unattributed model bucket in every report.
+		if ev.Message.Model == "<synthetic>" {
+			continue
+		}
+		u := ev.Message.Usage
+		out.Add(ev.Message.Model, ModelUsage{
+			Input:      u.InputTokens,
+			CacheWrite: u.CacheCreationInputTokens,
+			CacheRead:  u.CacheReadInputTokens,
+			Output:     u.OutputTokens,
+			Steps:      1,
+		})
+	}
+	if err := sc.Err(); err != nil {
+		return out, fmt.Errorf("transcript: scan claude jsonl for usage: %w", err)
+	}
+	return out, nil
+}
