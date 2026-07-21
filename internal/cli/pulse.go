@@ -444,7 +444,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// the run open, mirroring firePulse's warn-only posture: the report
 	// and filings are already durable on disk, so a failed auto-close is
 	// a close-by-hand-later, not a lost sweep.
-	if err := closePulseRun(root, projectID, md.ID, stdout, stderr); err != nil {
+	if err := closePulseRun(root, projectID, md.ID, nil /*cleanup*/, stdout, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
 	}
 
@@ -466,32 +466,102 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 }
 
 // closePulseRun closes a pulse run through the registered close — the
-// same (subject, cleanup) the happy-path auto-close and the interrupt
-// disposal both ride, so there's no parallel close path. skipEdit
-// harvests followups.md as-is; tailPulse=false because pulse never
-// tails pulse (pulseFiresForRun excludes it).
-func closePulseRun(root, projectID, runID string, stdout, stderr io.Writer) error {
+// same subject the happy-path auto-close and the interrupt disposal both
+// ride, so there's no parallel close path. skipEdit harvests
+// followups.md as-is; tailPulse=false because pulse never tails pulse
+// (pulseFiresForRun excludes it).
+//
+// cleanup is a parameter rather than the registration's own hook because
+// pulse registered nil (pulse has no workspace and no branch to tear
+// down — see the closeCommand registration above): the happy path passes
+// nil and gets exactly the registered behavior, while the disposal
+// passes the skip-note stamp so it rides the close's single lock and
+// single commit instead of taking its own.
+func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stdout, stderr io.Writer) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {
 		return fmt.Errorf("no close registration for %q", pulseWorkflow)
 	}
-	return closeRunInProcess(root, pulseWorkflow, reg.subject, reg.cleanup,
+	return closeRunInProcess(root, pulseWorkflow, reg.subject, cleanup,
 		projectID, runID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr)
 }
 
 // disposePulseRun closes a just-minted pulse run the operator Ctrl-C'd
-// before the survey could produce anything worth reviewing. The
-// skeleton canvas is non-empty so the close-time canvas gate passes, and
-// the canonical root is committed-clean at that point so the dirty-tree
-// gate passes. A disposal failure warns and leaves the run open —
-// today's worst-case outcome, minus the lock leak.
+// before the survey could produce anything worth reviewing. The skeleton
+// canvas is non-empty so the close-time canvas gate passes, and the
+// canonical root is committed-clean at that point so the dirty-tree gate
+// passes.
+//
+// The skip note rides in as the close's cleanup, which runs inside the
+// close's WithJournalPush closure — after the dirty-tree gate, before
+// the status flip — so the staged canvas lands in the *same* commit that
+// marks the run closed. That fold is the point: a stamp that lived in
+// its own lock and its own commit could fail while the close went on to
+// succeed, and the run would close with the raw skeleton and only an
+// ephemeral warn to say why. Skeleton-closed is now unreachable from any
+// stamp-capable binary, which makes it an unambiguous signature of a
+// stale one — the diagnosis this run had to reconstruct from shell
+// history.
+//
+// The trade is deliberate and reverses the stamp's original posture: a
+// failed stamp now leaves the run open on the dash's ACTIVE list instead
+// of closing it with a decoy canvas. Escalation by visibility is the
+// pulse's standard failure mode, disposal only fires on the operator's
+// own Ctrl-C, and a decoy report has cost three diagnosis cycles.
 func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
-	stampDisposedPulseCanvas(root, projectID, runID, stderr)
-	if err := closePulseRun(root, projectID, runID, stdout, stderr); err != nil {
+	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
+	canvas := filepath.Join(root, canvasRel)
+	var before []byte
+	stamp := func(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+		body, err := os.ReadFile(canvas)
+		if err != nil {
+			return fmt.Errorf("read pulse canvas: %w", err)
+		}
+		before = body
+		if err := os.WriteFile(canvas, []byte(pulseSkipNote), 0o644); err != nil {
+			return fmt.Errorf("stamp skip note: %w", err)
+		}
+		// Staging is what carries the note into the close's commit:
+		// StageAndCommit's `git commit -m` takes the whole index, so the
+		// note and the status flip are one commit.
+		return run.Stage(root, canvasRel)
+	}
+	if err := closePulseRun(root, projectID, runID, stamp, stdout, stderr); err != nil {
+		restoreDisposedPulseRun(root, projectID, runID, canvas, before)
 		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
 		return
 	}
 	moePrintf(stderr, "pulse: skipped — closed %s/%s\n", projectID, runID)
+}
+
+// restoreDisposedPulseRun puts a failed disposal's run back the way it
+// was: the canvas bytes the stamp overwrote, the status flip the close
+// wrote to run.json before its commit failed, and whatever either of
+// them left in the index. before is nil when the stamp never got as far
+// as writing.
+//
+// Repairing is not optional. The dirty-tree gate is repo-wide, so a
+// half-applied disposal left on disk wedges every later close in the
+// bureaucracy, not just this run's — and a run.json that says closed
+// over a skeleton canvas, with no commit to say why, is the exact decoy
+// the fold exists to make impossible. Best-effort throughout: the close
+// already failed, and there is no better error to report than the one
+// the caller is about to print.
+//
+// Deliberately unlocked. The close released the repolock on its way out,
+// and this only rewrites files this process itself half-wrote; the
+// index-lock retry in internal/git covers the git-level race.
+func restoreDisposedPulseRun(root, projectID, runID, canvas string, before []byte) {
+	if md, err := run.Load(root, projectID, runID); err == nil && md.Status == run.StatusClosed {
+		_ = revertTerminal(root, md, run.StatusInProgress)
+	}
+	if before != nil {
+		_ = os.WriteFile(canvas, before, 0o644)
+	}
+	// One reset over the whole run dir rather than per-path: it covers
+	// the canvas, run.json, and anything the harvest staged before the
+	// commit failed.
+	_ = git.Run(root, "reset", "-q", "--", run.Dir(projectID, runID))
 }
 
 // pulseSkipNote replaces the untouched skeleton on a disposed run's
@@ -507,49 +577,6 @@ const pulseSkipNote = `# Pulse
 Sweep skipped — the operator interrupted the pulse before the survey
 started. No report; the previous pulse's report remains the baseline.
 `
-
-// stampDisposedPulseCanvas writes pulseSkipNote over the disposed run's
-// canvas and commits it, before the close. The commit is not optional:
-// closeRunInProcess's dirty-tree gate exempts only the harvest scratch
-// paths, so an uncommitted stamp would block the disposal outright. It
-// takes its own repolock (repolock is not reentrant, and the close takes
-// one straight after) and does not push — the close's WithJournalPush
-// carries the commit, and `moe sync` catches up if the close then fails.
-//
-// Warn-only, matching the disposal's posture: any failure restores the
-// canvas as it was and closes with the skeleton — today's behavior. A
-// stamp must never be what turns a skip into a run left dangling.
-func stampDisposedPulseCanvas(root, projectID, runID string, stderr io.Writer) {
-	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
-	canvas := filepath.Join(root, canvasRel)
-	before, err := os.ReadFile(canvas)
-	if err != nil {
-		moePrintf(stderr, "pulse: stamp skip note on %s/%s: %v\n", projectID, runID, err)
-		return
-	}
-	err = repolock.With(root, repolock.Options{
-		Purpose: "pulse-dispose-stamp",
-		Run:     projectID + "/" + runID,
-	}, func() error {
-		if err := os.WriteFile(canvas, []byte(pulseSkipNote), 0o644); err != nil {
-			return err
-		}
-		msg := fmt.Sprintf("work: note %s was skipped before the survey\n\n", pulseDoc) +
-			trailers.Block{Run: runID, Project: projectID, Workflow: pulseWorkflow}.String()
-		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
-			// Leave nothing half-done for the close's dirty-tree gate to
-			// trip over — a commit that fails after its add leaves the
-			// stamp staged, and git.Status reports staged entries too.
-			_ = os.WriteFile(canvas, before, 0o644)
-			_ = git.Run(root, "reset", "-q", "--", canvasRel)
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		moePrintf(stderr, "pulse: stamp skip note on %s/%s: %v\n", projectID, runID, err)
-	}
-}
 
 // pulseGate is the machine-readable verdict the survey agent writes to
 // the canvas's `## Gate` section. A non-empty status is all the

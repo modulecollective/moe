@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,13 +139,26 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
 		t.Errorf("tree dirty after disposal (dirty=%v, err=%v); the stamp must be committed", dirty, err)
 	}
+	// The stamp rides the close's own commit. One commit is what makes
+	// "closed with the skeleton" unreachable: a separate stamp commit
+	// could fail while the close went on to succeed.
+	touched := strings.Fields(gittest.Output(t, root, "show", "--name-only", "--format=", "HEAD"))
+	canvasRel := run.ContentPath("moe", closed[0], pulseDoc)
+	runJSONRel := filepath.Join(run.Dir("moe", closed[0]), "run.json")
+	if !slices.Contains(touched, canvasRel) || !slices.Contains(touched, runJSONRel) {
+		t.Errorf("close commit touched %v, want both the skip note (%s) and the status flip (%s) in one commit",
+			touched, canvasRel, runJSONRel)
+	}
 }
 
-// TestPulseDisposeStampFailureStillCloses: the stamp is warn-only. An
-// unwritable canvas must not turn a skip into a run left dangling on the
-// dash — the disposal closes with the skeleton, as it did before the
-// stamp existed, and says so on stderr.
-func TestPulseDisposeStampFailureStillCloses(t *testing.T) {
+// TestPulseDisposeStampFailureLeavesRunOpen: a stamp that cannot be
+// written fails the whole disposal. The run stays open on the dash's
+// ACTIVE list (escalation by visibility) rather than closing with the
+// raw skeleton — a skeleton-closed pulse reads as a crashed no-op sweep,
+// and that decoy has cost three diagnosis cycles. The half-written
+// canvas is put back so the repo-wide dirty-tree gate doesn't wedge
+// every later close.
+func TestPulseDisposeStampFailureLeavesRunOpen(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the write bit")
 	}
@@ -168,19 +182,83 @@ func TestPulseDisposeStampFailureStillCloses(t *testing.T) {
 	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
-	closed := closedPulseRuns(t, root)
-	if len(closed) != 1 {
-		t.Fatalf("closed pulse runs=%v, want 1 — a failed stamp must not block the disposal", closed)
+	if closed := closedPulseRuns(t, root); len(closed) != 0 {
+		t.Fatalf("closed pulse runs=%v, want none — a failed stamp must not close the run with the skeleton", closed)
 	}
-	if canvas := readPulseCanvas(t, root, "moe", closed[0]); canvas != pulseCanvasSkeleton {
+	open := openPulseRuns(t, root, "moe")
+	if len(open) != 1 {
+		t.Fatalf("open pulse runs=%v, want the undisposed run left open for review", open)
+	}
+	if canvas := readPulseCanvas(t, root, "moe", open[0]); canvas != pulseCanvasSkeleton {
 		t.Errorf("canvas =\n%q\nwant the untouched skeleton after a failed stamp", canvas)
+	}
+	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
+		t.Errorf("tree dirty after a failed disposal (dirty=%v, err=%v); the repo-wide gate would wedge every later close", dirty, err)
 	}
 	if !strings.Contains(errb.String(), "stamp skip note") {
 		t.Errorf("stderr=%q, want a stamp-failure warning", errb.String())
 	}
-	if !strings.Contains(errb.String(), "skipped — closed") {
-		t.Errorf("stderr=%q, want the disposal to have closed the run anyway", errb.String())
+	if !strings.Contains(errb.String(), "leaving run open") {
+		t.Errorf("stderr=%q, want the disposal to have left the run open", errb.String())
 	}
+}
+
+// TestPulseDisposeCommitFailureRestoresRun: the later half of the same
+// invariant. The stamp lands and the status flips, then the close's
+// commit fails — the one window where the run could end up marked closed
+// on disk with a skeleton canvas and nothing committed to say so. The
+// disposal walks both back: status to in-progress, canvas to the
+// skeleton, index reset. The dirty-tree gate is repo-wide, so leftovers
+// here wedge every later close, not just this run's.
+func TestPulseDisposeCommitFailureRestoresRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		// Break `git commit` and nothing else: the run's own opening
+		// commit has already landed, so the scoped hooks dir only reaches
+		// the disposal's commit.
+		failCommits(t, root)
+		pi.mark()
+		return surveyOutcome{code: 1, agentStarted: false}
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	if closed := closedPulseRuns(t, root); len(closed) != 0 {
+		t.Fatalf("closed pulse runs=%v, want none — the close commit never landed", closed)
+	}
+	open := openPulseRuns(t, root, "moe")
+	if len(open) != 1 {
+		t.Fatalf("open pulse runs=%v, want the run back in progress", open)
+	}
+	if canvas := readPulseCanvas(t, root, "moe", open[0]); canvas != pulseCanvasSkeleton {
+		t.Errorf("canvas =\n%q\nwant the skeleton restored after the failed commit", canvas)
+	}
+	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
+		t.Errorf("tree dirty after a failed disposal (dirty=%v, err=%v); a staged half-disposal wedges every later close", dirty, err)
+	}
+	if !strings.Contains(errb.String(), "leaving run open") {
+		t.Errorf("stderr=%q, want the disposal to have left the run open", errb.String())
+	}
+}
+
+// failCommits points root's core.hooksPath at a pre-commit hook that
+// always refuses, so every later `git commit` under root fails while
+// every other git operation keeps working.
+func failCommits(t *testing.T, root string) {
+	t.Helper()
+	hooks := t.TempDir()
+	hook := filepath.Join(hooks, "pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Output(t, root, "config", "core.hooksPath", hooks)
 }
 
 // closedPulseRuns returns the ids of every closed pulse run under root.
