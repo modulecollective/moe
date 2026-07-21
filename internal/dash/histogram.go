@@ -31,6 +31,13 @@ const histGutter = "  "
 // index 8 a full cell.
 var barRunes = []rune(" ▁▂▃▄▅▆▇█")
 
+// barInterior replaces the full block on a cell that isn't the bar's
+// topmost non-blank cell. Caps stay crisp; bar bodies get half-tone
+// grain, so a tall day reads as a glowing column rather than a solid
+// slab. Deterministic and purely data-driven — the histogram is a
+// chart, so it never jitters the way the factory art's smoke does.
+const barInterior = '▓'
+
 // BuildActivityHistogram renders the daily run-activity chart. counts is
 // HistDays values, oldest→newest; each is the number of distinct runs
 // active that day (see run.JournalIndex.DailyRunCount). The result is
@@ -67,7 +74,15 @@ func BuildActivityHistogram(counts []int) []string {
 		b.WriteString(histGutter)
 		for _, c := range counts {
 			eighths := int(math.Round(float64(c) * float64(full) / float64(max)))
-			b.WriteRune(barRunes[clampEighth(eighths-base)])
+			// rise is this cell's slice of the bar in eighths, before
+			// clamping. A full cell is the bar's cap exactly when the bar
+			// doesn't continue into the row above — i.e. rise == 8.
+			rise := eighths - base
+			if rise > 8 {
+				b.WriteRune(barInterior)
+				continue
+			}
+			b.WriteRune(barRunes[clampEighth(rise)])
 		}
 		lines = append(lines, b.String())
 	}

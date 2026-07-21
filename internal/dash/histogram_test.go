@@ -68,7 +68,8 @@ func TestBuildActivityHistogramQuiet(t *testing.T) {
 
 // TestBuildActivityHistogramSingleSpike: one non-zero day scales to a
 // full-height bar (it's the window max), every other day stays blank,
-// and the lower rows under the spike are full while the rest are empty.
+// and the spike's own column is a crisp █ cap over ▓ interior — the
+// texture rule, which only bites on bars tall enough to span rows.
 func TestBuildActivityHistogramSingleSpike(t *testing.T) {
 	counts := make([]int, HistDays)
 	spike := 7
@@ -85,12 +86,65 @@ func TestBuildActivityHistogramSingleSpike(t *testing.T) {
 		cells = cells[utf8.RuneCountInString(histGutter):]
 		for day, c := range cells {
 			if day == spike {
-				if c != '█' {
-					t.Errorf("row %d spike cell = %q, want █ (max scales to full height)", r, c)
+				want := barInterior
+				if r == 0 {
+					want = '█' // topmost non-blank cell: the cap stays crisp
+				}
+				if c != want {
+					t.Errorf("row %d spike cell = %q, want %q", r, c, want)
 				}
 			} else if c != ' ' {
 				t.Errorf("row %d day %d = %q, want blank", r, day, c)
 			}
 		}
+	}
+}
+
+// TestBuildActivityHistogramTexture pins the cap-vs-interior rule
+// directly: a one-row bar is a lone cap with no grain beneath it, and a
+// bar that spans rows caps with a block (or a partial eighth) and fills
+// the rows below with ▓.
+func TestBuildActivityHistogramTexture(t *testing.T) {
+	counts := make([]int, HistDays)
+	counts[0] = 24 // the window max: a full HistRows-high column
+	counts[1] = 1  // 1/24 of the peak → a single eighth on the bottom row
+	counts[2] = 16 // two rows high: a cap on the middle row, grain below
+
+	lines := BuildActivityHistogram(counts)
+	cell := func(row, day int) rune {
+		cells := []rune(lines[row])[utf8.RuneCountInString(histGutter):]
+		return cells[day]
+	}
+
+	// Full-height column: crisp cap on top, grain all the way down.
+	if got := cell(0, 0); got != '█' {
+		t.Errorf("full column cap = %q, want █", got)
+	}
+	for r := 1; r < HistRows; r++ {
+		if got := cell(r, 0); got != barInterior {
+			t.Errorf("full column row %d = %q, want %q", r, got, barInterior)
+		}
+	}
+
+	// One-cell bar: a partial eighth on the baseline, blank above. A cap
+	// with nothing under it never grains.
+	if got := cell(HistRows-1, 1); got == ' ' || got == barInterior {
+		t.Errorf("one-cell bar baseline = %q, want a partial eighth", got)
+	}
+	for r := range HistRows - 1 {
+		if got := cell(r, 1); got != ' ' {
+			t.Errorf("one-cell bar row %d = %q, want blank", r, got)
+		}
+	}
+
+	// Two-row bar: blank top row, a cap in the middle, grain below.
+	if got := cell(0, 2); got != ' ' {
+		t.Errorf("two-row bar top row = %q, want blank", got)
+	}
+	if got := cell(1, 2); got != '█' {
+		t.Errorf("two-row bar cap = %q, want █", got)
+	}
+	if got := cell(2, 2); got != barInterior {
+		t.Errorf("two-row bar interior = %q, want %q", got, barInterior)
 	}
 }
