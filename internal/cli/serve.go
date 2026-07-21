@@ -166,7 +166,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		// OpenChore runs the shared chore-open pipeline and translates its
 		// internal guard errors into the sentinels serve maps to 404/409.
 		OpenChore: func(project, name string) (serve.ChoreOpen, error) {
-			res, err := openChoreInProcess(root, project, name, false, stdout, stderr)
+			res, err := openChoreInProcess(root, project, name, choreOpenNormal, stdout, stderr)
 			if err != nil {
 				var notFound *choreNotFoundError
 				var notOpenable *choreNotOpenableError

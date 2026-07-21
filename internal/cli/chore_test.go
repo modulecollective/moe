@@ -370,7 +370,7 @@ func TestAutoOpenDueChoresOpensOnlyDueOnes(t *testing.T) {
 // belt behind it), and the assertion is the outcome across both.
 func TestAutoOpenDueChoresSkipsAlreadyOpenSilently(t *testing.T) {
 	root := seedChoreRoot(t)
-	if _, err := openChoreInProcess(root, "moe", "readme-refresh", false, io.Discard, io.Discard); err != nil {
+	if _, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal, io.Discard, io.Discard); err != nil {
 		t.Fatalf("pre-open: %v", err)
 	}
 	first := choreOpenRun(t, root, "readme-refresh")

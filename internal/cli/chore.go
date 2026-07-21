@@ -111,7 +111,14 @@ func runChoreCheck(args []string, stdout, stderr io.Writer) int {
 		}
 		found = true
 		status := "not due"
-		if s.Due {
+		switch {
+		case s.Definition.Judged():
+			// A judged chore has no due/not-due answer to give — the pulse
+			// survey decides. Saying "not due" would read as a schedule that
+			// hasn't fired yet; "judged" says the registration is live and
+			// waiting on a judgment.
+			status = "judged"
+		case s.Due:
 			status = "due"
 		}
 		if s.OpenRun != "" {
@@ -185,7 +192,11 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 // "opened chore …" stdout line on success. serve takes the typed-error
 // path directly via OpenChore instead.
 func openDueChore(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*run.Metadata, int) {
-	res, err := openChoreInProcess(root, projectID, choreName, force, stdout, stderr)
+	mode := choreOpenNormal
+	if force {
+		mode = choreOpenForced
+	}
+	res, err := openChoreInProcess(root, projectID, choreName, mode, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, 1
@@ -212,6 +223,12 @@ func (e *choreNotFoundError) Error() string {
 type choreNotOpenableError struct {
 	Key    string
 	Reason string
+	// OpenRun is the run already holding this chore, when that is what
+	// forbade the open, and "" otherwise. The pulse's judged nomination
+	// maps onto it — the same shape reflectRefusal.slug carries for a
+	// reflect nomination — so a `chore` spec written at a thread position
+	// places the existing run instead of dropping.
+	OpenRun string
 }
 
 func (e *choreNotOpenableError) Error() string {
@@ -228,18 +245,32 @@ type choreOpenResult struct {
 	FirstStage string
 }
 
-// openChoreInProcess is the single chore-open pipeline shared by the CLI
-// verb and serve's OpenChore callback: gather → guard → workflow lookup
-// → runopen.Open with the Chore trailer. Guard failures come back as
-// typed errors (*choreNotFoundError / *choreNotOpenableError) so callers
-// can branch on HTTP status or print to stderr; everything else is a
-// plain error.
-//
-// force is the `--now` override: it skips the soft due-state guards
-// (cooling down, not yet due) so the operator can open a chore's run
-// early. The open-run guard is never skipped — two runs both stamping
+// choreOpenMode says which soft due-state guards an open honours. The
+// open-run guard is outside it entirely — two runs both stamping
 // MoE-Chore for one chore is broken state, not an override.
-func openChoreInProcess(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*choreOpenResult, error) {
+type choreOpenMode int
+
+const (
+	// choreOpenNormal is plain `moe chore open` (and the pulse's
+	// mechanical auto-open): the chore must be due and not cooling down.
+	choreOpenNormal choreOpenMode = iota
+	// choreOpenNominated is the pulse gate's judged nomination. The
+	// survey's judgment replaced the due check — a judged chore is never
+	// mechanically due — but the cooldown still holds, and only a judged
+	// chore is nominable: waiving `Due` on a mechanical one would let the
+	// sweep open work whose standing intent hasn't fired.
+	choreOpenNominated
+	// choreOpenForced is `--now`: the operator overrides both.
+	choreOpenForced
+)
+
+// openChoreInProcess is the single chore-open pipeline shared by the CLI
+// verb, serve's OpenChore callback, and the pulse: gather → guard →
+// workflow lookup → runopen.Open with the Chore trailer. Guard failures
+// come back as typed errors (*choreNotFoundError /
+// *choreNotOpenableError) so callers can branch on HTTP status or print
+// to stderr; everything else is a plain error.
+func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, stdout, stderr io.Writer) (*choreOpenResult, error) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		return nil, err
@@ -255,14 +286,23 @@ func openChoreInProcess(root, projectID, choreName string, force bool, stdout, s
 		return nil, &choreNotFoundError{Project: projectID, Name: choreName}
 	}
 	if state.OpenRun != "" {
-		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: fmt.Sprintf("already has open run %s/%s", projectID, state.OpenRun)}
-	}
-	if !force {
-		if state.CooldownBlocking {
-			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
+		return nil, &choreNotOpenableError{
+			Key:     state.Definition.Key(),
+			Reason:  fmt.Sprintf("already has open run %s/%s", projectID, state.OpenRun),
+			OpenRun: state.OpenRun,
 		}
+	}
+	if mode != choreOpenForced && state.CooldownBlocking {
+		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
+	}
+	switch mode {
+	case choreOpenNormal:
 		if !state.Due {
 			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is not due"}
+		}
+	case choreOpenNominated:
+		if !state.Definition.Judged() {
+			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "has no `when` criterion — only judged chores are nominable"}
 		}
 	}
 	wf, err := LookupWorkflow(state.Definition.Workflow)

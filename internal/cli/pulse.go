@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -354,7 +356,7 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 		if !s.Due {
 			continue
 		}
-		if _, err := openChoreInProcess(root, projectID, s.Definition.Name, false, stdout, stderr); err != nil {
+		if _, err := openChoreInProcess(root, projectID, s.Definition.Name, choreOpenNormal, stdout, stderr); err != nil {
 			var notOpenable *choreNotOpenableError
 			if errors.As(err, &notOpenable) {
 				// Expected: an open run already holds this chore, or it
@@ -675,12 +677,19 @@ type pulseGate struct {
 // spec is a reflect *nomination* — its real slug stays harness-minted
 // (reflect-YYYY-MM-DD), so Slug there is only the handle the dedupe and
 // the warnings read; Title and Design are meaningless and warn-ignored.
+//
+// Chore names a judged chore instead, and is exclusive with every other
+// field: the survey's claim is only "the condition the operator wrote
+// holds", and everything about the resulting run — workflow, seed,
+// cooldown — comes from the chore's own definition. Why stays the one
+// line the operator reads.
 type pulseRunSpec struct {
 	Slug     string `json:"slug"`
 	Workflow string `json:"workflow"`
 	Title    string `json:"title"`
 	Why      string `json:"why"`
 	Design   string `json:"design"`
+	Chore    string `json:"chore"`
 }
 
 // pulseThread is one entry in the gate's `threads` list: runs in
@@ -878,6 +887,10 @@ type pulseMinter struct {
 // mint opens one run for one spec and returns its id, or "" when the
 // spec was skipped.
 //
+// A `chore` spec takes its own path (nominateChore) — it opens no fresh
+// run of the survey's design, only the one the operator already
+// registered. Everything below is the fresh-run path.
+//
 // Dispatch is per-workflow. sdlc (the default) is the fix-run path.
 // twin routes through maybeSpawnReflect → mintReflectRun, the same core
 // `moe twin reflect` uses, so the closed-schema check and the
@@ -905,6 +918,11 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 	projectID, pulseSlug := m.projectID, m.pulseSlug
 	spawnedBy := projectID + "/" + pulseSlug
 
+	// A chore nomination names a registration, not a slug to mint, so it
+	// dispatches ahead of the slug validation every other shape must pass.
+	if choreName := strings.TrimSpace(s.Chore); choreName != "" {
+		return m.nominateChore(choreName, s, stdout, stderr)
+	}
 	slug := strings.TrimSpace(s.Slug)
 	if slug == "" || run.Slugify(slug) != slug {
 		moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
@@ -955,6 +973,47 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 	m.live = append(m.live, md.ID)
 	moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
 	return md.ID
+}
+
+// nominateChore opens a judged chore's run for a gate entry that says
+// the chore's condition holds. It is a nomination, not a create, the
+// same shape maybeSpawnReflect has: with the chore's run already open
+// the nomination maps onto it, so a `chore` spec written at a thread
+// position places the existing run instead of dropping.
+//
+// The opened run is an ordinary chore run — the chore's own workflow,
+// its `prompt.md` seed, the MoE-Chore trailer — so completion, cooldown
+// and the open-run guard all keep working exactly as they do for a
+// mechanical chore. What the survey replaced is only the due check;
+// choreOpenNominated keeps the cooldown and refuses a mechanical chore
+// outright.
+//
+// Warn-only throughout, like the rest of the gate: a refusal or a
+// failure drops this entry and the sweep carries on.
+func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr io.Writer) string {
+	for _, extra := range []struct{ field, value string }{
+		{"slug", s.Slug}, {"workflow", s.Workflow}, {"title", s.Title}, {"design", s.Design},
+	} {
+		if strings.TrimSpace(extra.value) != "" {
+			moePrintf(stderr, "pulse: chore: ignoring %s on chore entry %q; a chore run's shape comes from its own definition\n", extra.field, name)
+		}
+	}
+	res, err := openChoreInProcess(m.root, m.projectID, name, choreOpenNominated, stdout, stderr)
+	if err != nil {
+		var notOpenable *choreNotOpenableError
+		if errors.As(err, &notOpenable) && notOpenable.OpenRun != "" {
+			// Logged rather than silent so the sweep output stays honest
+			// about which run the nomination — and the thread position
+			// holding it — landed on.
+			moePrintf(stderr, "pulse: chore %s/%s already open as %s/%s — mapped (%s)\n",
+				m.projectID, name, m.projectID, notOpenable.OpenRun, s.Why)
+			return notOpenable.OpenRun
+		}
+		moePrintf(stderr, "pulse: chore %s/%s not opened — %v\n", m.projectID, name, err)
+		return ""
+	}
+	moePrintf(stderr, "pulse: judged chore met — opened %s/%s (%s)\n", m.projectID, res.Metadata.ID, s.Why)
+	return res.Metadata.ID
 }
 
 // promoteOrSkip handles the one live-slug match that isn't a duplicate:
@@ -1161,6 +1220,9 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	if advanced := advancedRunsBlock(sc, projectID); advanced != "" {
 		blocks = append(blocks, advanced)
 	}
+	if judged := judgedChoresBlock(sc, projectID); judged != "" {
+		blocks = append(blocks, judged)
+	}
 	// Its own block, not a tail on the chain-state one. A tail pulse
 	// fires after its spawner merged, so the ridden unit is usually
 	// below the two-active-member bar chainStateBlock renders at — and
@@ -1174,6 +1236,43 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	// opinion is formed against exactly this picture, so it is what the
 	// apply step checks itself against before restructuring anything.
 	return strings.Join(blocks, "\n\n"), sc.graph.Edges()
+}
+
+// judgedChoresBlock lists the project's judged chores the survey could
+// act on this turn — the operator's `when` criterion, and when the chore
+// was last completed. This is the whole judged-chore seam on the read
+// side: the criterion is prose the agent evaluates against the delta,
+// and the gate's `chore` spec is where the verdict goes.
+//
+// Chores that are cooling down or already have an open run are omitted:
+// the survey can't act on them, so naming them is noise. No openable
+// judged chores → no block, same as the sibling blocks. A chore-load
+// failure drops the block rather than failing the sweep.
+func judgedChoresBlock(sc *pulseScan, projectID string) string {
+	defs, err := chore.LoadAll(sc.root)
+	if err != nil {
+		return ""
+	}
+	var lines []string
+	for _, st := range chore.EvaluateAll(defs, sc.mds, sc.idx, time.Now()) {
+		d := st.Definition
+		if d.Project != projectID || !d.Judged() || st.OpenRun != "" || st.CooldownBlocking {
+			continue
+		}
+		last := "never"
+		if !st.LastCompleted.IsZero() {
+			last = st.LastCompleted.Format("2006-01-02")
+		}
+		lines = append(lines, fmt.Sprintf("- `%s` — due when: %s (last completed: %s)", d.Name, d.When, last))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Judged chores: registrations the operator authored whose due-ness is a judgment, not a glob or a clock. " +
+		"For each, ask only whether what landed since the last pulse meets the condition as written — the work itself is " +
+		"already authored, so this is not the spawn bar. When it does, nominate it in the gate with " +
+		"`{\"chore\": \"<name>\", \"why\": \"<the landed change that met it>\"}`, in `loose` or at a thread position. " +
+		"Quiet is normal.\n" + strings.Join(lines, "\n")
 }
 
 // pendingTwinObservationsLine reports how many twin observations are
