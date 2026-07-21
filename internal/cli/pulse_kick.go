@@ -27,12 +27,14 @@ import (
 // growth on its own tail, so nested rides are impossible — again by
 // construction, not by flag-threading.
 //
-// One machine generation per operator push is the third bound, and it
-// no longer lives here: a kicked ride's own tail push doesn't fire a
-// pulse at all, because pulseFiresForRun refuses to tail a
-// machine-opened run. So this function's spawner is always
-// operator-rooted (or empty, for a manual `moe pulse new`) and the
-// generation question is answered before a survey is ever spent.
+// There is deliberately no third bound on *how many* generations this
+// can run for. A kicked ride's own tail does fire a pulse, so a survey
+// can groom and kick work whose tail grooms and kicks again — the
+// machine walks until a survey finds nothing worth chaining. What holds
+// that open-ended is the two guards above plus the ladder itself: each
+// generation is real shipped work behind review and test, it shows up on
+// the dash as it lands, and a Ctrl-C halts the ride. Escalation by
+// visibility, not by counting.
 //
 // Kicks that do fire are themselves dynamic rides: a confident pulse
 // rooting bounded-only motion would defeat the point, and an operator

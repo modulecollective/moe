@@ -39,10 +39,14 @@ import (
 //     before the survey looks at its delta.
 //   - Every time: the survey — a blocking, headless stage that opens a
 //     run, sweeps, files followups, writes its report, and auto-closes
-//     itself on a clean exit. Every run-traffic event fires a fresh
-//     survey unconditionally; a failed or abandoned sweep leaves its run
+//     itself on a clean exit. A failed or abandoned sweep leaves its run
 //     open on the dash's ACTIVE list for a human to look at, but nothing
 //     blocks the next survey — visible junk over invisible absence.
+//
+// Which run-traffic events actually fire is pulseFiresForRun's call:
+// inside a ride, at the momentary tail of the chain being ridden. A
+// mid-chain hop defers to the run behind it, so a ride spends one survey
+// per generation rather than one per hop.
 //
 // `moe pulse new <project>` runs the whole pulse by hand; it is also
 // the verb an external cron would call. Cron itself stays out of moe —
@@ -181,39 +185,75 @@ func init() {
 // do not. Silent, unlike the lineage skip below: under this model a
 // quiet ship is the expected default, not a suppression worth naming.
 //
-// And the run must be **operator-rooted**. A machine-opened run's tail
-// would spend a full survey session that is guaranteed to decline every
-// kick — the generation bound has to hold somewhere, and fire-time is
-// cheaper than kick-time: no session at all rather than a session that
-// can only groom and park. Growth from a machine generation's merge
-// isn't lost; it parks for the next ride tail or a manual `moe pulse
-// new`, the same posture the kick guard already took. The reach is
-// exactly the set of runs that write SpawnedBy — pulse, reflect and
-// chain runs (see nestSpawnedRuns in internal/dash) — so it covers
-// pulse-parked twin reflects as well as kicked rides. Chore- and
-// idea-promoted runs do *not* carry SpawnedBy: `moe chore` and `moe
-// sdlc new --from-idea` are operator actions, so a ride over one of
-// those still tails a pulse. An operator who wants a sweep after a
-// suppressed merge has `moe pulse new`.
+// And the run must sit at the **momentary tail of its chain**. A ride
+// that ships four runs used to spend four surveys, each sweeping a
+// project the next hop is about to change again; deferring while a live
+// chained child is still queued collapses those into one survey per
+// generation, fired where the whole generation's work is on the record.
+// What that costs is mid-ride pickup latency — a finding after hop 1
+// waits for the generation boundary — and that is the trade the design
+// took.
 //
-// The second return is the one stderr line the caller prints when
-// lineage is what suppressed the sweep, and "" otherwise — a workflow
+// This condition replaces an earlier **operator-rooted** bound, which
+// refused any run carrying SpawnedBy. That bound had two jobs and this
+// gate covers both: attended ships never fire at all (ride consent, one
+// condition up), and pulse-on-pulse recursion stays structurally
+// impossible (the pulse workflow never clears the first condition). What
+// the bound also did — and shouldn't have — was stop growth dead after
+// one machine generation: the runs a survey grooms and kicks are exactly
+// the runs that carry SpawnedBy, so their tails could never sweep and
+// the second generation was always the last. With the bound gone, each
+// generation's tail fires its own survey and the ride ends when a survey
+// adds nothing. Termination is behavioral rather than structural, which
+// is acceptable because every generation is real shipped work behind the
+// review/test gates, visible on the dash, and one Ctrl-C halts the ride.
+//
+// The second return is the one stderr line the caller prints when a
+// queued child is what deferred the sweep, and "" otherwise — a workflow
 // that never pulses, and an invocation that never consented, say
-// nothing. Since the ride gate sits ahead of it, that line can now only
+// nothing. Since the ride gate sits ahead of it, that line can only
 // print inside a ride.
-func pulseFiresForRun(md *run.Metadata) (bool, string) {
+func pulseFiresForRun(root string, md *run.Metadata, stderr io.Writer) (bool, string) {
 	if md.Workflow != "sdlc" && md.Workflow != "twin" {
 		return false, ""
 	}
 	if currentRideMode == rideNone {
 		return false, ""
 	}
-	if md.SpawnedBy != "" {
+	if child := liveChainedChild(root, md, stderr); child != "" {
 		return false, fmt.Sprintf(
-			"pulse: skipping tail sweep — %s/%s is machine-opened; growth parks for the next operator pulse\n",
-			md.Project, md.ID)
+			"pulse: deferring tail sweep — %s/%s chains into %s; the survey fires at the chain's tail\n",
+			md.Project, md.ID, child)
 	}
 	return true, ""
+}
+
+// liveChainedChild returns the run md chains into when that child is
+// still live, and "" when md is at its chain's momentary tail (or was
+// never chained at all). The liveness rule is ChainGraph's, so a child
+// that has already merged or been closed reads as no child — which is
+// what makes the last hop of a ride the one that sweeps.
+//
+// Fails open: a scan or index error means the deferral question can't be
+// answered, and the pre-deferral behaviour — sweep — is the one that
+// loses nothing. The warning is the tell, since a bureaucracy this
+// broken will fail the survey's own reads a moment later anyway.
+func liveChainedChild(root string, md *run.Metadata, stderr io.Writer) string {
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		moePrintf(stderr, "pulse: read chain edges for %s/%s: %v — sweeping anyway\n", md.Project, md.ID, err)
+		return ""
+	}
+	mds, err := run.Scan(root)
+	if err != nil {
+		moePrintf(stderr, "pulse: scan runs for %s/%s: %v — sweeping anyway\n", md.Project, md.ID, err)
+		return ""
+	}
+	byKey := make(map[string]*run.Metadata, len(mds))
+	for _, m := range mds {
+		byKey[m.Project+"/"+m.ID] = m
+	}
+	return run.NewChainGraph(idx, byKey).Child(md.Project + "/" + md.ID)
 }
 
 // firePulse runs the pulse for a project at the tail of a run-traffic

@@ -358,13 +358,21 @@ down or not yet due — it still refuses if a run is already open.
 A pulse is a read-only sweep of one project that feeds the backlog and ranks
 what to pull from it. "Work just landed — what's next?" is a reflex worth
 automating, but only inside consent bounds: a pulse fires at the tail of the
-operator-rooted run-traffic verbs (`moe sdlc close`, `moe sdlc push`,
-`moe twin close`, and the cascades' auto-close) **and only when you handed the
-machine the wheel** — inside a ride (`!!!`/`!!!!`, their `--chain`/`--dynamic`
-twins, `moe chain kick`, and the kicks a pulse roots itself). A ship you are
-watching land is quiet: `!!`, a `!`/`!<stage>` step that lands on push, a bare
-`moe sdlc push` or close. Never on its own clock and never from `moe sync`.
-Every fire rides an action you took. Scope is always the driven run's project.
+run-traffic verbs (`moe sdlc close`, `moe sdlc push`, `moe twin close`, and the
+cascades' auto-close) **and only when you handed the machine the wheel** —
+inside a ride (`!!!`/`!!!!`, their `--chain`/`--dynamic` twins, `moe chain
+kick`, and the kicks a pulse roots itself). A ship you are watching land is
+quiet: `!!`, a `!`/`!<stage>` step that lands on push, a bare `moe sdlc push`
+or close. Never on its own clock and never from `moe sync`. Every fire rides an
+action you took. Scope is always the driven run's project.
+
+Inside a ride it also waits for the **end of the chain**: a hop that still has
+a queued chained child behind it defers, so a four-run ride spends one sweep at
+its tail rather than four. The cost is pickup latency — a finding after hop 1
+waits for the tail — and the gain is a sweep that reads the whole generation's
+work at once. When that sweep chains and kicks more work (dynamic rides only),
+that generation's own tail sweeps in turn; the ride ends when a sweep finds
+nothing worth chaining.
 
 So after an attended ship, growth parks: findings wait for the next ride's tail
 sweep, or for `moe pulse new` — the manual valve, which is also the only way to

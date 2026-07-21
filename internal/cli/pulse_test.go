@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
@@ -618,13 +619,31 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 // TestPulseFiresForRun is the fire-time gate in one table: the workflow
 // half (run traffic moves intent; chat/kb/pulse do not), the consent
 // half (only a ride's terminal transitions sweep — a `!!` ship the
-// operator is watching does not), and the lineage half (a machine-opened
-// run never tails a sweep that could only groom and park). Only the last
+// operator is watching does not), and the chain-position half (a run
+// with a live chained child defers to its chain's tail). Only the last
 // speaks: a workflow that never pulsed stays as quiet as it always was,
-// and a quiet ship is now the expected default rather than a
-// suppression. The consent case being silent *and* ahead of lineage is
-// the ordering — a `!!` ship of a machine-opened run says nothing.
+// and a quiet ship is the expected default rather than a suppression.
+// The consent case being silent *and* ahead of the deferral is the
+// ordering — a `!!` ship mid-chain says nothing.
+//
+// The row that earns its keep is "machine-opened run at a tail": under
+// the old generation bound any SpawnedBy run was refused, which is
+// exactly the set of runs a survey grooms — so growth died after one
+// generation. It fires now.
 func TestPulseFiresForRun(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	// tail: an unchained run — the shape a survey fires on. mid → tail is
+	// the live edge that defers. done-parent chains into a run that has
+	// already merged, so the edge is history and the parent reads as a
+	// tail.
+	seedRun(t, root, "tele", "tail", "sdlc", run.StatusInProgress, now, nil)
+	seedRun(t, root, "tele", "mid", "sdlc", run.StatusInProgress, now, nil)
+	seedRun(t, root, "tele", "done-child", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "tele", "done-parent", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "tele/mid", "tele/tail")
+	chainEdge(t, root, "tele/done-parent", "tele/done-child")
+
 	cases := []struct {
 		name     string
 		mode     rideMode
@@ -632,20 +651,23 @@ func TestPulseFiresForRun(t *testing.T) {
 		want     bool
 		wantSkip bool
 	}{
-		{"operator sdlc in a static ride", rideStatic, run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, true, false},
-		{"operator twin in a dynamic ride", rideDynamic, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, true, false},
-		{"operator sdlc with no ride", rideNone, run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, false, false},
-		{"operator twin with no ride", rideNone, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, false, false},
-		{"kicked sdlc", rideStatic, run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, true},
-		{"spawned twin", rideDynamic, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin", SpawnedBy: "moe/pulse-1"}, false, true},
-		{"kicked sdlc with no ride", rideNone, run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, false},
-		{"chat", rideStatic, run.Metadata{Project: "tele", ID: "chatting", Workflow: "chat"}, false, false},
-		{"pulse never tails pulse", rideDynamic, run.Metadata{Project: "tele", ID: "pulse-1", Workflow: pulseWorkflow, SpawnedBy: "moe/ship-it"}, false, false},
+		{"operator sdlc at a chain tail, static ride", rideStatic, run.Metadata{Project: "tele", ID: "tail", Workflow: "sdlc"}, true, false},
+		{"operator twin at a chain tail, dynamic ride", rideDynamic, run.Metadata{Project: "tele", ID: "tail", Workflow: "twin"}, true, false},
+		{"operator sdlc with no ride", rideNone, run.Metadata{Project: "tele", ID: "tail", Workflow: "sdlc"}, false, false},
+		{"operator twin with no ride", rideNone, run.Metadata{Project: "tele", ID: "tail", Workflow: "twin"}, false, false},
+		{"mid-chain sdlc defers to the tail", rideStatic, run.Metadata{Project: "tele", ID: "mid", Workflow: "sdlc"}, false, true},
+		{"mid-chain twin defers to the tail", rideDynamic, run.Metadata{Project: "tele", ID: "mid", Workflow: "twin"}, false, true},
+		{"mid-chain with no ride stays silent", rideNone, run.Metadata{Project: "tele", ID: "mid", Workflow: "sdlc"}, false, false},
+		{"a settled child is no child", rideStatic, run.Metadata{Project: "tele", ID: "done-parent", Workflow: "sdlc"}, true, false},
+		{"machine-opened run at a tail still fires", rideDynamic, run.Metadata{Project: "tele", ID: "tail", Workflow: "sdlc", SpawnedBy: "tele/pulse-1"}, true, false},
+		{"machine-opened run mid-chain defers", rideDynamic, run.Metadata{Project: "tele", ID: "mid", Workflow: "sdlc", SpawnedBy: "tele/pulse-1"}, false, true},
+		{"chat", rideStatic, run.Metadata{Project: "tele", ID: "tail", Workflow: "chat"}, false, false},
+		{"pulse never tails pulse", rideDynamic, run.Metadata{Project: "tele", ID: "tail", Workflow: pulseWorkflow, SpawnedBy: "tele/ship-it"}, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			defer withRideMode(tc.mode)()
-			fires, skip := pulseFiresForRun(&tc.md)
+			fires, skip := pulseFiresForRun(root, &tc.md, io.Discard)
 			if fires != tc.want {
 				t.Errorf("fires = %v, want %v", fires, tc.want)
 			}
@@ -659,18 +681,49 @@ func TestPulseFiresForRun(t *testing.T) {
 	}
 }
 
-// TestPulseDoesNotFireFromMachineOpenedClose is the gate end to end: a
-// kicked ride's own close does not spend a survey session. Before the
-// fire-time gate this minted a second-generation pulse that could only
-// decline every kick and park its growth.
-func TestPulseDoesNotFireFromMachineOpenedClose(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "kicked-fix", "sdlc", run.StatusInProgress)
+// TestPulseDefersFromMidChainClose is the deferral end to end: closing a
+// run that still has a queued chained child spends no survey session,
+// because the hop after it is about to change the project again. Before
+// this a four-run ride spent four surveys.
+func TestPulseDefersFromMidChainClose(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "hop-one", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	if err := os.MkdirAll(sandbox.Path(root, "tele", "kicked-fix"), 0o755); err != nil {
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "hop-one"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	md, err := run.Load(root, "tele", "kicked-fix")
+	trailerstest.SeedRun(t, root, "tele", "hop-two", "sdlc", run.StatusInProgress)
+	chainEdge(t, root, "tele/hop-one", "tele/hop-two")
+	// Inside a ride, which is the only place the deferral can speak — the
+	// ride gate sits ahead of it.
+	defer withRideMode(rideStatic)()
+	fired := stubFirePulse(t)
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/hop-one"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire mid-chain", *fired)
+	}
+	if !strings.Contains(errb.String(), "deferring tail sweep") {
+		t.Errorf("stderr = %q, want the deferral named", errb.String())
+	}
+}
+
+// TestPulseFiresFromMachineOpenedChainTail is the generation-bound
+// removal end to end, and the property the whole change exists for: a
+// pulse-minted run (SpawnedBy set) sitting at its chain's tail fires its
+// own survey, so the next generation of groomed work gets one. The old
+// bound refused exactly this run and growth stopped after one groom.
+func TestPulseFiresFromMachineOpenedChainTail(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "groomed-fix", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "groomed-fix"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md, err := run.Load(root, "tele", "groomed-fix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,20 +735,15 @@ func TestPulseDoesNotFireFromMachineOpenedClose(t *testing.T) {
 	// commit the way a real spawn's open commit does.
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-m", "seed machine lineage")
-	// Inside a ride, which is the only place the lineage guard can speak
-	// now — the ride gate sits ahead of it.
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideDynamic)()
 	fired := stubFirePulse(t)
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/kicked-fix"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/groomed-fix"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if len(*fired) != 0 {
-		t.Fatalf("firePulse fired %v, want no fire for a machine-opened run", *fired)
-	}
-	if !strings.Contains(errb.String(), "machine-opened") {
-		t.Errorf("stderr = %q, want the suppression named", errb.String())
+	if len(*fired) != 1 || (*fired)[0] != "tele groomed-fix" {
+		t.Fatalf("firePulse fired %v, want one fire for tele spawned by groomed-fix", *fired)
 	}
 }
 

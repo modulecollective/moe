@@ -350,12 +350,16 @@ below.
 A thread may carry `"kick": true`, asking the harness to start that
 thread when this sweep finishes. It fires only when the operator's own
 verb carried the dynamic consent that licenses machine-rooted motion,
-and only on a thread the machine rooted — and never when the run whose
-push fired this pulse was itself machine-opened, which bounds a single
-operator push to one machine generation. The harness enforces all
-three, and skips silently-with-a-line otherwise. Ask for the kick on
-the merits regardless; a declined kick parks the thread for the next
-pulse to place, which costs nothing.
+and only on a thread the machine rooted. The harness enforces both, and
+skips silently-with-a-line otherwise. Ask for the kick on the merits
+regardless; a declined kick parks the thread for the next pulse to
+place, which costs nothing.
+
+There is no cap on how many generations this can run for: a kicked
+thread's own tail fires its own sweep, which may kick again. What ends
+it is you having nothing left worth chaining — so a thin generation is
+a real answer, and manufacturing one to keep the machine busy is the
+failure mode to avoid.
 
 **The kick bar: you'd bet the operator would kick this thread
 unchanged.** An unsettled order or a speculative member means groom,

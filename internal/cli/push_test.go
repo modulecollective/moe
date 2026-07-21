@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
@@ -2560,25 +2561,19 @@ func TestPushPRPathTailsPulseOnFirstPushOnly(t *testing.T) {
 	}
 }
 
-// TestPushDoesNotTailPulseForMachineOpenedRun: the fire-time lineage
-// gate reaches the push tail too. The gate itself is unit-tested; this
-// pins that push threads the run's metadata through it at all — without
-// that, a kicked ride's own merge would spend a survey session that
-// could only groom and park.
-func TestPushDoesNotTailPulseForMachineOpenedRun(t *testing.T) {
+// TestPushDefersTailPulseMidChain: the end-of-chain deferral reaches the
+// push tail too. The gate itself is unit-tested; this pins that push
+// threads the bureaucracy root and the run's metadata through it at all
+// — without that, every hop of a ride would spend its own survey session
+// on a project the next hop is about to change again.
+func TestPushDefersTailPulseMidChain(t *testing.T) {
 	f := newPushFixture(t)
-	md := f.reloadRun()
-	md.SpawnedBy = f.projectID + "/pulse-2026-07-20-8"
-	if err := run.Save(f.root, md); err != nil {
-		t.Fatal(err)
-	}
-	// The lineage edit has to land as a commit the way a real spawn's
-	// open commit does — push's own record commit would otherwise carry
-	// the stray edit along.
+	seedRun(t, f.root, f.projectID, "hop-two", "sdlc", run.StatusInProgress, time.Now(), nil)
 	gittest.Run(t, f.root, "add", "-A")
-	gittest.Run(t, f.root, "commit", "-m", "seed machine lineage")
-	// A kicked ride is where a machine-opened run's merge actually
-	// happens, and the only place the lineage guard still speaks.
+	gittest.Run(t, f.root, "commit", "-m", "seed queued hop")
+	chainEdge(t, f.root, f.projectID+"/"+f.runID, f.projectID+"/hop-two")
+	// A ride is the only place the deferral can speak — the consent gate
+	// sits ahead of it.
 	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
@@ -2587,10 +2582,10 @@ func TestPushDoesNotTailPulseForMachineOpenedRun(t *testing.T) {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
 	if len(*fired) != 0 {
-		t.Fatalf("firePulse fired %v, want no fire for a machine-opened run", *fired)
+		t.Fatalf("firePulse fired %v, want no fire mid-chain", *fired)
 	}
-	if !strings.Contains(stderr, "machine-opened") {
-		t.Errorf("stderr = %q, want the suppression named", stderr)
+	if !strings.Contains(stderr, "deferring tail sweep") {
+		t.Errorf("stderr = %q, want the deferral named", stderr)
 	}
 }
 
