@@ -2501,12 +2501,14 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 }
 
 // TestPushMergePathTailsPulse: the fast-forward ship is run traffic, so
-// the merge path fires exactly one sweep once the merged transition is
-// durable — spawned by the run that just shipped, which is the edge the
-// dash nests the sweep under. Every other push test rides TestMain's
-// no-op firePulse, so the fire going missing here would pass CI.
+// inside a ride the merge path fires exactly one sweep once the merged
+// transition is durable — spawned by the run that just shipped, which is
+// the edge the dash nests the sweep under. Every other push test rides
+// TestMain's no-op firePulse, so the fire going missing here would pass
+// CI.
 func TestPushMergePathTailsPulse(t *testing.T) {
 	f := newPushFixture(t)
+	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
@@ -2534,6 +2536,7 @@ func TestPushPRPathTailsPulseOnFirstPushOnly(t *testing.T) {
 	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
 	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for the PR-path pulse test")
 	fakeGhExistingPR(t, existingURL)
+	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
@@ -2574,6 +2577,9 @@ func TestPushDoesNotTailPulseForMachineOpenedRun(t *testing.T) {
 	// the stray edit along.
 	gittest.Run(t, f.root, "add", "-A")
 	gittest.Run(t, f.root, "commit", "-m", "seed machine lineage")
+	// A kicked ride is where a machine-opened run's merge actually
+	// happens, and the only place the lineage guard still speaks.
+	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
@@ -2588,18 +2594,49 @@ func TestPushDoesNotTailPulseForMachineOpenedRun(t *testing.T) {
 	}
 }
 
+// TestPushDoesNotTailPulseWithoutRideConsent is the headline case: a
+// `!!` ship, or a plain `moe sdlc push`, merges without spending a
+// survey session. The operator is watching this one run land — the
+// sweep's "survey the project and grow the backlog" posture belongs to
+// the modes where the machine has the wheel. Silent, too: nothing
+// announces what didn't happen.
+func TestPushDoesNotTailPulseWithoutRideConsent(t *testing.T) {
+	f := newPushFixture(t)
+	fired := stubFirePulse(t)
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusMerged {
+		t.Fatalf("status = %s, want merged — the ship itself must be unaffected", md.Status)
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire outside a ride", *fired)
+	}
+	if strings.Contains(stderr, "pulse:") {
+		t.Errorf("stderr = %q, want silence — an unridden ship is the default, not a suppression", stderr)
+	}
+}
+
 // TestPushThreadsPulseInterruptButBareVerbExitsZero pins the two halves
 // of the skip posture at the push tail. runPushTyped hands the sweep's
 // "operator skipped" bool back so cascadeShipStep can map it to
-// exitInterrupted and halt the chain; the bare `moe sdlc push` verb
-// drops it, because the push's own durable work already succeeded.
-// Sibling of TestBareCloseExitsZeroOnPulseSkip one verb over.
+// exitInterrupted and halt the chain; the untyped `moe sdlc push`
+// command drops it, because the push's own durable work already
+// succeeded. Sibling of TestBareCloseExitsZeroOnPulseSkip one verb over.
+//
+// Both halves need a ride in flight — that is the only shape in which a
+// push tails a sweep at all. Rides reach push through the typed path, so
+// the second subtest is holding pushCmd.Run's discard honest rather than
+// describing a walk that happens today.
 func TestPushThreadsPulseInterruptButBareVerbExitsZero(t *testing.T) {
 	stubSkippedPulse := func(t *testing.T) {
 		t.Helper()
 		orig := firePulse
 		firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
 		t.Cleanup(func() { firePulse = orig })
+		t.Cleanup(withRideMode(rideStatic))
 	}
 
 	t.Run("typed", func(t *testing.T) {

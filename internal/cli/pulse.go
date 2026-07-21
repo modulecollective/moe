@@ -161,7 +161,7 @@ func init() {
 }
 
 // pulseFiresForRun reports whether a terminal transition of the given
-// run is traffic that should tail a pulse. Two conditions, both
+// run is traffic that should tail a pulse. Three conditions, all
 // structural.
 //
 // The workflow must move intent: sdlc and twin do — code and the
@@ -171,24 +171,41 @@ func init() {
 // seam and the push seam (twin has no push, so at a push point the
 // workflow is always sdlc — that half of the guard is defensive there).
 //
+// The invocation must carry **ride consent**. The pulse's posture is
+// "survey the project and grow the backlog", which is a thing to do
+// while the machine has the wheel — not while the operator is watching
+// a single run land and reaching for Ctrl-C. `!!!`/`!!!!`, their flag
+// twins `--chain`/`--dynamic`, `moe chain kick` and the kicks the pulse
+// roots itself all hand the wheel over; a `!!` ship, a `!`/`!<stage>`
+// step that lands on push, and a bare interactive `moe push` or close
+// do not. Silent, unlike the lineage skip below: under this model a
+// quiet ship is the expected default, not a suppression worth naming.
+//
 // And the run must be **operator-rooted**. A machine-opened run's tail
 // would spend a full survey session that is guaranteed to decline every
 // kick — the generation bound has to hold somewhere, and fire-time is
 // cheaper than kick-time: no session at all rather than a session that
 // can only groom and park. Growth from a machine generation's merge
-// isn't lost; it parks for the next operator-rooted merge, the same
-// posture the kick guard already took. The reach is exactly the set of
-// runs that write SpawnedBy — pulse, reflect and chain runs (see
-// nestSpawnedRuns in internal/dash) — so it covers pulse-parked twin
-// reflects as well as kicked rides. Chore- and idea-promoted runs do
-// *not* carry SpawnedBy: `moe chore` and `moe sdlc new --from-idea` are
-// operator actions, so those still tail a pulse. An operator who wants
-// a sweep after a suppressed merge has `moe pulse new`.
+// isn't lost; it parks for the next ride tail or a manual `moe pulse
+// new`, the same posture the kick guard already took. The reach is
+// exactly the set of runs that write SpawnedBy — pulse, reflect and
+// chain runs (see nestSpawnedRuns in internal/dash) — so it covers
+// pulse-parked twin reflects as well as kicked rides. Chore- and
+// idea-promoted runs do *not* carry SpawnedBy: `moe chore` and `moe
+// sdlc new --from-idea` are operator actions, so a ride over one of
+// those still tails a pulse. An operator who wants a sweep after a
+// suppressed merge has `moe pulse new`.
+//
 // The second return is the one stderr line the caller prints when
 // lineage is what suppressed the sweep, and "" otherwise — a workflow
-// that never pulses says nothing, same as before.
+// that never pulses, and an invocation that never consented, say
+// nothing. Since the ride gate sits ahead of it, that line can now only
+// print inside a ride.
 func pulseFiresForRun(md *run.Metadata) (bool, string) {
 	if md.Workflow != "sdlc" && md.Workflow != "twin" {
+		return false, ""
+	}
+	if currentRideMode == rideNone {
 		return false, ""
 	}
 	if md.SpawnedBy != "" {

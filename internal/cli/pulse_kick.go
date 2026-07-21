@@ -14,12 +14,12 @@ import (
 // groom group asked for it. This is the only door to machine-rooted
 // motion, and two structural guards hold it shut everywhere else.
 //
-// First, **dynamic consent upstream**. A plain push, `!!` or `!!!` tail
-// pulse grooms and parks; only a fourth bang the operator actually
-// typed licenses the machine to start something. That is what makes the
-// surprise ride impossible by construction rather than by restraint —
-// "I ran a plain push and my terminal is riding a thread I never saw"
-// cannot happen.
+// First, **dynamic consent upstream**. A `!!!` tail pulse — or a manual
+// `moe pulse new` — grooms and parks; only a fourth bang the operator
+// actually typed licenses the machine to start something. That is what
+// makes the surprise ride impossible by construction rather than by
+// restraint — "I ran a plain push and my terminal is riding a thread I
+// never saw" cannot happen, and a plain push no longer sweeps at all.
 //
 // Second, **re-entrancy**: a pulse-kick only roots at an unchained
 // spawner. If the run whose tail fired this pulse is itself a chain

@@ -22,8 +22,9 @@ package cli
 // commands and the chain-kick body — five plumbing seams for a value
 // that can never legitimately differ between them.
 //
-// Its only consumers are the pulse: the groom step's placement rules,
-// the self-kick gate, and the survey's chain-state context line.
+// Its only consumers are the pulse: whether a terminal transition tails
+// one at all (pulseFiresForRun), the groom step's placement rules, the
+// self-kick gate, and the survey's chain-state context line.
 // maybeRideChain, `chain edit`, kick and every other chain mechanic
 // never read it — the mode gates the pulse; the chain itself doesn't
 // care. That is also why `rideChain bool` still threads the cascade
@@ -33,7 +34,9 @@ type rideMode int
 
 const (
 	// rideNone: no ride in flight — a bare push, `!`, `!<stage>`, `!!`.
-	// Grooming is pure curation: nothing this pulse places can move
+	// No terminal transition tails a pulse at all, so the grooming rules
+	// below are reachable only through a manual `moe pulse new`, where
+	// placement is pure curation: nothing that pulse places can move
 	// until someone kicks the thread it landed on.
 	rideNone rideMode = iota
 	// rideStatic: `!!!` / `moe chain kick`. Grooming is redirected away

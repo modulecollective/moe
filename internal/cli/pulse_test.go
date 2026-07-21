@@ -383,9 +383,10 @@ func TestPulseNewExitsInterruptedOnSkip(t *testing.T) {
 	}
 }
 
-// TestBareCloseExitsZeroOnPulseSkip: the bare `moe sdlc close` verb's own
-// durable work (close committed + pushed) succeeded, so a Ctrl-C'd tail
-// pulse is a successful skip — exit 0, not 130.
+// TestBareCloseExitsZeroOnPulseSkip: the close verb's own durable work
+// (close committed + pushed) succeeded, so a Ctrl-C'd tail pulse is a
+// successful skip — exit 0, not 130. The ride mode is what makes the
+// close tail a sweep at all; outside one there is nothing to skip.
 func TestBareCloseExitsZeroOnPulseSkip(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
@@ -393,6 +394,7 @@ func TestBareCloseExitsZeroOnPulseSkip(t *testing.T) {
 	if err := os.MkdirAll(sandbox.Path(root, "tele", "ship-it"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	defer withRideMode(rideStatic)()
 	orig := firePulse
 	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
 	t.Cleanup(func() { firePulse = orig })
@@ -540,8 +542,8 @@ func openPulseRuns(t *testing.T, root, projectID string) []string {
 	return open
 }
 
-// TestPulseFiresFromSDLCClose: closing an sdlc run — run traffic — tails
-// a pulse for the run's project.
+// TestPulseFiresFromSDLCClose: closing an sdlc run inside a ride — run
+// traffic, with consent in flight — tails a pulse for the run's project.
 func TestPulseFiresFromSDLCClose(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
@@ -551,6 +553,7 @@ func TestPulseFiresFromSDLCClose(t *testing.T) {
 	if err := os.MkdirAll(sandbox.Path(root, "tele", "ship-it"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
 	var out, errb bytes.Buffer
@@ -564,13 +567,15 @@ func TestPulseFiresFromSDLCClose(t *testing.T) {
 
 // TestPulseFiresFromTwinClose: twin is the other half of "run traffic
 // moves intent" — a reflect pass rewrites the recorded canon, so its
-// close tails a sweep exactly as sdlc's does. Until now only the
-// pulseFiresForRun table said so; nothing checked that `moe twin close`
-// reaches the seam.
+// close tails a sweep exactly as sdlc's does, under exactly the same
+// ride consent (no workflow-shaped carve-out either way). Until now
+// only the pulseFiresForRun table said so; nothing checked that `moe
+// twin close` reaches the seam.
 func TestPulseFiresFromTwinClose(t *testing.T) {
 	root := seedCloseFixture(t, "moe", "reflect-2026-07-21", "twin", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
+	defer withRideMode(rideDynamic)()
 	fired := stubFirePulse(t)
 
 	var out, errb bytes.Buffer
@@ -611,26 +616,35 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 }
 
 // TestPulseFiresForRun is the fire-time gate in one table: the workflow
-// half (run traffic moves intent; chat/kb/pulse do not) and the lineage
-// half (a machine-opened run never tails a sweep that could only groom
-// and park). Only the second half speaks — a workflow that never pulsed
-// stays as quiet as it always was.
+// half (run traffic moves intent; chat/kb/pulse do not), the consent
+// half (only a ride's terminal transitions sweep — a `!!` ship the
+// operator is watching does not), and the lineage half (a machine-opened
+// run never tails a sweep that could only groom and park). Only the last
+// speaks: a workflow that never pulsed stays as quiet as it always was,
+// and a quiet ship is now the expected default rather than a
+// suppression. The consent case being silent *and* ahead of lineage is
+// the ordering — a `!!` ship of a machine-opened run says nothing.
 func TestPulseFiresForRun(t *testing.T) {
 	cases := []struct {
 		name     string
+		mode     rideMode
 		md       run.Metadata
 		want     bool
 		wantSkip bool
 	}{
-		{"operator sdlc", run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, true, false},
-		{"operator twin", run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, true, false},
-		{"kicked sdlc", run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, true},
-		{"spawned twin", run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin", SpawnedBy: "moe/pulse-1"}, false, true},
-		{"chat", run.Metadata{Project: "tele", ID: "chatting", Workflow: "chat"}, false, false},
-		{"pulse never tails pulse", run.Metadata{Project: "tele", ID: "pulse-1", Workflow: pulseWorkflow, SpawnedBy: "moe/ship-it"}, false, false},
+		{"operator sdlc in a static ride", rideStatic, run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, true, false},
+		{"operator twin in a dynamic ride", rideDynamic, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, true, false},
+		{"operator sdlc with no ride", rideNone, run.Metadata{Project: "tele", ID: "ship-it", Workflow: "sdlc"}, false, false},
+		{"operator twin with no ride", rideNone, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin"}, false, false},
+		{"kicked sdlc", rideStatic, run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, true},
+		{"spawned twin", rideDynamic, run.Metadata{Project: "tele", ID: "reflect", Workflow: "twin", SpawnedBy: "moe/pulse-1"}, false, true},
+		{"kicked sdlc with no ride", rideNone, run.Metadata{Project: "tele", ID: "fix-a", Workflow: "sdlc", SpawnedBy: "moe/pulse-1"}, false, false},
+		{"chat", rideStatic, run.Metadata{Project: "tele", ID: "chatting", Workflow: "chat"}, false, false},
+		{"pulse never tails pulse", rideDynamic, run.Metadata{Project: "tele", ID: "pulse-1", Workflow: pulseWorkflow, SpawnedBy: "moe/ship-it"}, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			defer withRideMode(tc.mode)()
 			fires, skip := pulseFiresForRun(&tc.md)
 			if fires != tc.want {
 				t.Errorf("fires = %v, want %v", fires, tc.want)
@@ -668,6 +682,9 @@ func TestPulseDoesNotFireFromMachineOpenedClose(t *testing.T) {
 	// commit the way a real spawn's open commit does.
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-m", "seed machine lineage")
+	// Inside a ride, which is the only place the lineage guard can speak
+	// now — the ride gate sits ahead of it.
+	defer withRideMode(rideStatic)()
 	fired := stubFirePulse(t)
 
 	var out, errb bytes.Buffer
@@ -679,6 +696,33 @@ func TestPulseDoesNotFireFromMachineOpenedClose(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "machine-opened") {
 		t.Errorf("stderr = %q, want the suppression named", errb.String())
+	}
+}
+
+// TestPulseDoesNotFireFromCloseWithoutRideConsent is the consent gate end
+// to end, and the case the whole change exists for: an operator-rooted
+// sdlc run closing outside any ride — an interactive `moe sdlc close`, or
+// the auto-close at the end of a `!!` walk — ships without a sweep. And
+// silently: the operator is standing right there, so a banner announcing
+// what didn't happen is noise.
+func TestPulseDoesNotFireFromCloseWithoutRideConsent(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := os.MkdirAll(sandbox.Path(root, "tele", "ship-it"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fired := stubFirePulse(t)
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire outside a ride", *fired)
+	}
+	if strings.Contains(errb.String(), "pulse:") {
+		t.Errorf("stderr = %q, want silence — an unridden ship is the default, not a suppression", errb.String())
 	}
 }
 
