@@ -20,7 +20,8 @@ feature. The bet behind that stance: agents have made careful work cheap. When a
 designed, reviewed, tested change costs one conversation and two keystrokes,
 the discipline that used to be overhead becomes the default path. What MoE
 removes is the coordination tax — opening work, handing context forward,
-checking progress, filing the lessons that should shape the next run.
+checking progress, filing the lessons that should shape the next run. MoE is
+built with MoE — every change ships through the same workflows it provides.
 
 Everything works from the CLI:
 
@@ -175,3 +176,4 @@ MIT. See [`LICENSE`](LICENSE).
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html)
 - [Chad Fowler: The Phoenix Architecture](https://aicoding.leaflet.pub/)
 - [Andrej Karpathy: LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
+- [Alasdair Monk: Quality Software](https://x.com/almonk/status/2079461952577802549)
