@@ -469,9 +469,44 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // row. Nested rows never count against CompletedCap — the cap is applied
 // over top-level rows in Render / the serve view.
 //
+// One class of child renders as flow rather than lineage: a run spawned
+// by a chain member. The tail sweep of a ride is spawned by the run it
+// fired after and reads as the next thing that happened on that chain,
+// not as something hanging off it — so it takes the flush "→" connector
+// its neighbours wear instead of the "↳" ladder. That is a Chained
+// mark, not a Depth change: the row stays inside its spawner's block, so
+// the completed cap still admits or evicts the pair together and every
+// walk that keys on Depth is untouched. Both renderers already prefer
+// Chained over Depth, so the glyph swap costs one flag.
+//
+// Only the *direct* children of a chain member splice. A reflect the
+// sweep parked hangs off the sweep, which is not on any chain, so it
+// keeps its ladder rung — and a sweep spawned outside a chain entirely
+// (a manual `moe pulse new`, an unchained ship) keeps today's fold.
+//
 // Returns a new slice: folding rows are pulled from their natural slots
 // and re-emitted under their ancestor, preserving the incoming bucket-
 // then-recency order for every unaffected row.
+// chainMembership is the set of runs that appear on a recorded chain, at
+// either end of an edge. Deliberately the raw trailer state rather than
+// run.ChainGraph's live edge set: ChainGraph drops edges to settled
+// children so a ride's ordering can't resurrect finished work, which is
+// right for every question about what runs next and wrong for the only
+// question asked here — where a finished run *sat* while the ride walked
+// it. A cleared edge ("" value) names no child and puts neither end on a
+// chain.
+func chainMembership(idx *run.JournalIndex) map[string]bool {
+	on := make(map[string]bool, len(idx.ChainedChild)*2)
+	for parent, child := range idx.ChainedChild {
+		if child == "" {
+			continue
+		}
+		on[parent] = true
+		on[child] = true
+	}
+	return on
+}
+
 func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	if idx == nil || len(idx.SpawnedBy) == 0 {
 		return rows
@@ -560,12 +595,34 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	if len(directChildren) == 0 && len(openKids) == 0 {
 		return rows
 	}
+	// splices reports whether child row ci renders as chain flow rather
+	// than lineage — its direct spawner sits on a chain. Recorded edges,
+	// not live ones: by the time a ride's tail sweep is on the board every
+	// member it rode has settled, and the live edge set drops those.
+	onChain := chainMembership(idx)
+	splices := func(ci int) bool { return onChain[idx.SpawnedBy[rows[ci].Project+"/"+rows[ci].Run]] }
 	out := make([]Row, 0, len(rows))
 	var emitSubtree func(i int, bucket Bucket, depth int)
 	emitSubtree = func(i int, bucket Bucket, depth int) {
-		for _, ci := range directChildren[i] {
+		// Spliced children lead: they read as "and then this happened",
+		// so anything else hanging off the same spawner has to come after
+		// or the arrow points at the wrong row.
+		kids := directChildren[i]
+		ordered := make([]int, 0, len(kids))
+		for _, ci := range kids {
+			if splices(ci) {
+				ordered = append(ordered, ci)
+			}
+		}
+		for _, ci := range kids {
+			if !splices(ci) {
+				ordered = append(ordered, ci)
+			}
+		}
+		for _, ci := range ordered {
 			m := rows[ci]
 			m.Depth = depth
+			m.Chained = splices(ci)
 			m.Bucket = bucket
 			m.Note += openHints(ci)
 			out = append(out, m)
