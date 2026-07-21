@@ -452,10 +452,13 @@ read-only context; do not edit those paths.
 			paths[i] = filepath.Join(project.Dir(md.Project), name)
 		}
 		out += fmt.Sprintf(`
-This turn's commit also picks up edits under %s, so what you write
-there lands with the canvas rather than dropping when the session
-worktree is pruned.
-`, strings.Join(paths, " and "))
+The exception: you may write under the paths below. This turn's
+commit also picks up edits under them, so what you write there lands
+with the canvas rather than dropping when the session worktree is
+pruned.
+
+  %s
+`, strings.Join(paths, "\n  "))
 	}
 	return out
 }
