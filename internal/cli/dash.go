@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"flag"
 	"io"
 	"math/rand"
@@ -18,14 +19,29 @@ import (
 // `watch -n 3` habit.
 const dashWatchInterval = 3 * time.Second
 
-// dashClear is cursor-home + erase-display, the clear(1) sequence.
-// \x1b[3J (wipe scrollback) is deliberately omitted — blowing away the
-// operator's history isn't ours to do. It does not preserve it either,
-// though: tmux pushes every ED-2'd frame into the scroll buffer, so a
-// long watch turns the default 2000-line history over in a couple of
-// minutes. Measured under tmux 3.5a, not assumed — this run's test
-// canvas has the numbers.
-const dashClear = "\x1b[H\x1b[2J"
+// Watch mode repaints in place rather than clearing. The clear(1)
+// sequence (`\x1b[H\x1b[2J`) it used to emit cost the operator twice:
+// tmux pushes every ED-2'd frame into pane history — ~49 lines a tick,
+// turning the default 2000-line history over in a couple of minutes —
+// and the cleared-to-drawn gap reads as a flash on every tick. Both go
+// away if nothing is ever erased ahead of the redraw:
+//
+//   - dashFramePre homes the cursor inside a synchronized-output DECSET
+//     (`?2026`), so tmux ≥3.4 applies the whole repaint atomically and
+//     terminals that don't know the mode ignore the pair.
+//   - every frame line ends with dashEraseLine (EL, erase-to-EOL) so a
+//     line that got shorter than last tick's leaves no stale tail.
+//   - dashFramePost closes with ED-0, erasing whatever the old frame
+//     had below the new one's last line, then ends the sync block.
+//
+// Measured under tmux 3.5a: zero history growth per tick, pre-watch
+// history intact. \x1b[3J (wipe scrollback) stays omitted — blowing
+// away the operator's history isn't ours to do.
+const (
+	dashFramePre  = "\x1b[?2026h\x1b[H"
+	dashFramePost = "\x1b[J\x1b[?2026l"
+	dashEraseLine = "\x1b[K"
+)
 
 func init() {
 	Register(&Command{
@@ -84,17 +100,18 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// Watch mode writes raw clear sequences and leans on every layer's
+	// Watch mode writes raw repaint sequences and leans on every layer's
 	// TTY colour gate, so a piped stdout gets an error instead of an
 	// unwatchable infinite loop.
 	if !cliout.IsTTY(stdout) {
 		moePrintln(stderr, "dash: --watch needs a terminal on stdout")
 		return 2
 	}
+	frame := eraseLineWriter{w: stdout}
 	for first := true; ; first = false {
-		// Gather before clearing: the scan is the slow part, so doing
-		// it first keeps the cleared-to-drawn gap down to the in-memory
-		// formatting and the flicker with it.
+		// Gather before repainting: the scan is the slow part, so doing
+		// it first keeps the in-place overwrite down to one burst of
+		// formatting rather than a scan-long half-drawn frame.
 		now := time.Now().UTC()
 		snap, err := GatherDashSnapshot(root, now, filter)
 		if err != nil && first {
@@ -104,26 +121,66 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		// Raw, not through cliout: a control sequence isn't moe's
-		// voice and doesn't want the amber wrap.
-		_, _ = io.WriteString(stdout, dashClear)
+		// voice and doesn't want the amber wrap. Straight to stdout,
+		// not through frame — the sequence carries no newline to erase
+		// past and EL here would clobber the line the cursor lands on.
+		_, _ = io.WriteString(stdout, dashFramePre)
 		if err != nil {
 			// A dashboard left running overnight has to survive a
 			// transient scan error (a run closed mid-scan), so the
 			// error becomes the frame and the loop continues. It goes
 			// to stdout because stdout is the frame surface — on
 			// stderr a redirect would leave the pane blank instead.
-			moePrintf(stdout, "%v\n", err)
+			// The ED-0 below erases the rest of the dashboard it
+			// replaces, so no special case is needed.
+			moePrintf(frame, "%v\n", err)
 		} else {
-			renderDashFrame(stdout, now, snap, *all)
+			renderDashFrame(frame, now, snap, *all)
 		}
+		_, _ = io.WriteString(stdout, dashFramePost)
 		time.Sleep(dashWatchInterval)
 	}
+}
+
+// eraseLineWriter splices EL (erase-to-end-of-line) in before every
+// newline it passes through, so each repainted line clears whatever the
+// previous frame left to its right. Stateless: the insertion point is
+// the newline byte itself, so a frame split across Write calls at any
+// boundary still comes out right.
+//
+// Unwrap lets cliout.IsTTY — and so cliout.Enabled, which the banner,
+// histogram and factory-art stylers all gate on — see the terminal
+// underneath instead of classifying the wrapper as a non-file writer
+// and stripping the dashboard's colour.
+type eraseLineWriter struct{ w io.Writer }
+
+func (e eraseLineWriter) Unwrap() io.Writer { return e.w }
+
+func (e eraseLineWriter) Write(p []byte) (int, error) {
+	consumed := 0
+	for consumed < len(p) {
+		i := bytes.IndexByte(p[consumed:], '\n')
+		if i < 0 {
+			n, err := e.w.Write(p[consumed:])
+			return consumed + n, err
+		}
+		if n, err := e.w.Write(p[consumed : consumed+i]); err != nil {
+			return consumed + n, err
+		}
+		if _, err := io.WriteString(e.w, dashEraseLine+"\n"); err != nil {
+			return consumed + i, err
+		}
+		consumed += i + 1
+	}
+	return consumed, nil
 }
 
 // renderDashFrame writes one full dashboard frame — banner, factory
 // art, sections — straight to stdout. Frames are never buffered:
 // cliout's colour gates only fire on a real *os.File terminal, so
 // routing a frame through a bytes.Buffer would strip every style.
+// Watch mode's eraseLineWriter is a pass-through, not a buffer, and
+// stays gate-transparent via Unwrap.
 func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool) {
 	state := dash.FactoryStateFromRows(snap.Rows)
 	// Fresh rand per frame, so the factory's smoke re-rolls each tick
