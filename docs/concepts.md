@@ -84,7 +84,9 @@ MoE's memory improves through a few explicit channels:
   `patterns`, `operations`, and `glossary` documents. When code and
   twin disagree, the twin wins until a deliberate edit updates it.
 - Lore stores portable facts that apply across projects. Agents see a compact
-  catalog and open entries only when the "applies when" hint matches.
+  catalog and open entries only when the "applies when" hint matches. Entries
+  carry provenance frontmatter: the run that discovered the fact
+  (`discovered-in`) and any runs that later amended it in place (`updated-in`).
 
 ## How Agents Are Steered
 
