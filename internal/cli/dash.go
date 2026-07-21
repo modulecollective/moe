@@ -19,8 +19,12 @@ import (
 const dashWatchInterval = 3 * time.Second
 
 // dashClear is cursor-home + erase-display, the clear(1) sequence.
-// Scrollback (\x1b[3J) is deliberately left alone so the operator keeps
-// whatever was in the pane before watch mode started.
+// \x1b[3J (wipe scrollback) is deliberately omitted — blowing away the
+// operator's history isn't ours to do. It does not preserve it either,
+// though: tmux pushes every ED-2'd frame into the scroll buffer, so a
+// long watch turns the default 2000-line history over in a couple of
+// minutes. Measured under tmux 3.5a, not assumed — this run's test
+// canvas has the numbers.
 const dashClear = "\x1b[H\x1b[2J"
 
 func init() {
