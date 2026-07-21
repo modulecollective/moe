@@ -161,8 +161,8 @@ func TestUsageUnknownModelKeepsTokensDropsDollars(t *testing.T) {
 }
 
 // TestNotionalCostArithmetic pins the price formula against a hand
-// figure: 1M cache writes at Opus 4.8's $5/MTok input rate is $5 × 1.25,
-// 1M cache reads is $5 × 0.10, and 1M output is $25.
+// figure: 1M cache writes at Opus 4.8's $5/MTok input rate is $5 × 2 (a
+// 1-hour-TTL write), 1M cache reads is $5 × 0.10, and 1M output is $25.
 func TestNotionalCostArithmetic(t *testing.T) {
 	got, ok := notionalCost("claude-opus-4-8", transcript.ModelUsage{
 		CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000,
@@ -170,7 +170,7 @@ func TestNotionalCostArithmetic(t *testing.T) {
 	if !ok {
 		t.Fatal("opus-4-8 must be in the price map")
 	}
-	want := 6.25 + 0.50 + 25.0
+	want := 10.0 + 0.50 + 25.0
 	if got < want-0.001 || got > want+0.001 {
 		t.Errorf("cost = %v, want %v", got, want)
 	}
@@ -189,6 +189,10 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 	p, ok := priceFor("claude-opus-4-8[1m]")
 	if !ok || p.input != 5 {
 		t.Errorf("priceFor(context-tagged id) = %+v ok=%v, want the opus-4-8 entry", p, ok)
+	}
+	// The codex stages run these; without an entry their rows go unpriced.
+	if p, ok := priceFor("gpt-5.6-sol"); !ok || p.input != 5 || p.output != 30 {
+		t.Errorf("priceFor(gpt-5.6-sol) = %+v ok=%v, want $5/$30", p, ok)
 	}
 }
 

@@ -54,15 +54,28 @@ var modelPrices = []modelPrice{
 	{"claude-fable-5", 10, 50},
 	{"claude-opus-4-8", 5, 25},
 	{"claude-opus-4-7", 5, 25},
+	// Sticker, deliberately: an intro $2/$10 runs through 2026-08-31, but
+	// this column is defined as notional sticker and flipping to intro
+	// now then back in September would jump comparisons 1.5× for nothing.
 	{"claude-sonnet-5", 3, 15},
 	{"claude-haiku-4-5", 1, 5},
+	// OpenAI API sticker (developers.openai.com/api/docs/pricing). The
+	// long-context surcharge above 272K input tokens isn't modeled —
+	// codex reports cumulative per-rollout totals that can't be split
+	// per request, so everything prices at the short-context rate.
+	{"gpt-5.5", 5, 30},
+	{"gpt-5.6-sol", 5, 30},
 }
 
-// Cache multipliers against the input rate: a write costs a quarter more
-// than a fresh read of the same tokens, a hit costs a tenth. Uniform
-// across the Claude family, so they live here rather than per-entry.
+// Cache multipliers against the input rate. A hit costs a tenth, which
+// holds for the OpenAI entries too (their published cached-input rate is
+// exactly 0.1× base). A write costs double, because Claude Code writes
+// its cache at the 1-hour TTL — 99.3% of cache-write tokens in this
+// bureaucracy — and a 1-hour write bills at 2× base input; a 5-minute
+// write would be 1.25×. The write multiplier is Claude-only in effect:
+// codex reports no cache-write bucket, so those rows never touch it.
 const (
-	cacheWriteMultiplier = 1.25
+	cacheWriteMultiplier = 2.0
 	cacheReadMultiplier  = 0.10
 )
 
