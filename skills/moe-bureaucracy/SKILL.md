@@ -123,9 +123,14 @@ The harvester writes the replacement first, then deletes the named
 entries. A missing superseded file is treated as already done so a
 partial attempt can be retried. When the new slug also appears in
 `supersedes:`, the entry is amended in place instead of becoming a
-`-2` sibling. If this section is absent from a materialized session
-skill, that session's opening binary does not support superseding lore;
-do not submit merge entries under that binary.
+`-2` sibling. An in-place amendment preserves the entry's original
+`discovered-in` and appends the amending run to an `updated-in`
+frontmatter list, so provenance survives the patch. If this paragraph
+does not mention `updated-in`, the opening binary rewrites
+`discovered-in` on amendment instead of preserving it. If this
+section is absent from a materialized session skill, that session's
+opening binary does not support superseding lore; do not submit merge
+entries under that binary.
 
 ---
 

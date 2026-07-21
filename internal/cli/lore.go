@@ -33,7 +33,9 @@ import (
 //	  Under userspace tailscale on fly with no `fly.toml` services, …
 //
 // Promoted lore lands as lore/<resolved-slug>.md (ordinary collisions
-// auto-disambiguate with -2, -3, …; supersedes may amend in place) and
+// auto-disambiguate with -2, -3, …; a supersede that names its own slug
+// amends in place, preserving the original `discovered-in` and
+// appending the amending run to an `updated-in` list) and
 // the checklist line is rewritten to `- [x] \`resolved-slug\`` — same
 // audit-trail shape followups uses.
 
@@ -47,6 +49,7 @@ Save this file to promote each unchecked ` + "`- [ ]`" + ` entry into
 lore/<slug>.md at the bureaucracy root. Delete the line to skip.
 Use an indented ` + "`supersedes:`" + ` paragraph to replace or merge
 existing lore entries; the replacement is written before they are deleted.
+Naming an entry's own slug amends it in place, keeping its provenance.
 Lines marked ` + "`- [x]`" + ` are already promoted; leave them alone.
 This header is auto-injected on editor pop; remove it freely.
 -->`
@@ -200,11 +203,15 @@ func splitLoreParagraph(body, prefix string) (value, rest string, ok bool) {
 
 // renderLoreFile assembles the lore/<slug>.md body from one parsed
 // entry. Output shape is fixed by design: a YAML frontmatter carrying
-// title / applies-when / discovered-in, then a markdown H1, then
-// (optionally) the prose body. Missing applies-when renders as
+// title / applies-when / discovered-in / updated-in, then a markdown
+// H1, then (optionally) the prose body. Missing applies-when renders as
 // "(missing)" so the wiki index reads it the same way it reads
-// half-written hand-authored entries.
-func renderLoreFile(title, appliesWhen, discoveredIn, prose string) string {
+// half-written hand-authored entries. discoveredIn and updatedIn are
+// omitted entirely when empty: a fresh promotion never carries
+// updated-in (byte-identical to the pre-provenance output), and an
+// amendment of a hand-authored entry that never had a discovered-in
+// preserves that absence rather than fabricating a discovery.
+func renderLoreFile(title, appliesWhen, discoveredIn, updatedIn, prose string) string {
 	if appliesWhen == "" {
 		appliesWhen = "(missing)"
 	}
@@ -212,7 +219,12 @@ func renderLoreFile(title, appliesWhen, discoveredIn, prose string) string {
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "title: %s\n", title)
 	fmt.Fprintf(&b, "applies-when: %s\n", appliesWhen)
-	fmt.Fprintf(&b, "discovered-in: %s\n", discoveredIn)
+	if discoveredIn != "" {
+		fmt.Fprintf(&b, "discovered-in: %s\n", discoveredIn)
+	}
+	if updatedIn != "" {
+		fmt.Fprintf(&b, "updated-in: %s\n", updatedIn)
+	}
 	b.WriteString("---\n\n")
 	fmt.Fprintf(&b, "# %s\n", title)
 	if prose != "" {
@@ -237,9 +249,15 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", loreDir, err)
 	}
-	discoveredIn := fmt.Sprintf("%s/runs/%s", projectID, runID)
-	body := renderLoreFile(p.title, p.appliesWhen, discoveredIn, p.body)
+	thisRun := fmt.Sprintf("%s/runs/%s", projectID, runID)
+	// freshBody is the render for every non-amendment path: fresh
+	// promotion, merge into a new slug, or the identical-replacement
+	// comparison that recovers a partial prior attempt. It carries this
+	// run as discovered-in and no updated-in — byte-identical to the
+	// pre-provenance output.
+	freshBody := renderLoreFile(p.title, p.appliesWhen, thisRun, "", p.body)
 	slug := p.slug
+	inPlace := false
 	for n := 2; ; n++ {
 		abs := filepath.Join(loreDir, slug+".md")
 		_, statErr := os.Stat(abs)
@@ -250,6 +268,7 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 			return "", fmt.Errorf("stat %s: %w", abs, statErr)
 		}
 		if stringSliceContains(p.supersedes, slug) {
+			inPlace = true
 			break
 		}
 		if len(p.supersedes) > 0 {
@@ -257,13 +276,25 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 			if readErr != nil {
 				return "", fmt.Errorf("read %s: %w", abs, readErr)
 			}
-			if string(existing) == body {
+			if string(existing) == freshBody {
 				break
 			}
 		}
 		slug = fmt.Sprintf("%s-%d", p.slug, n)
 	}
 	abs := filepath.Join(loreDir, slug+".md")
+	body := freshBody
+	if inPlace {
+		// Amending an existing entry: preserve its discovered-in
+		// verbatim (or its absence, for a hand-authored entry) and
+		// append this run to updated-in. The append is deduped so a
+		// retry over an already-patched file reproduces an identical
+		// body — the idempotency the partial-progress recovery relies on.
+		fm := wiki.LoreFrontmatter(abs)
+		discoveredIn := fm["discovered-in"]
+		updatedIn := appendUpdatedIn(fm["updated-in"], discoveredIn, thisRun)
+		body = renderLoreFile(p.title, p.appliesWhen, discoveredIn, updatedIn, p.body)
+	}
 	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", abs, err)
 	}
@@ -279,6 +310,26 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		}
 	}
 	return slug, nil
+}
+
+// appendUpdatedIn appends thisRun to the existing comma-separated
+// updated-in list, preserving chronological order. It skips the append
+// when thisRun already appears in the list (a retry) or equals
+// discoveredIn (a run patching an entry it promoted the same harvest —
+// self-citing twice would be noise). Empty entries from splitting a
+// blank list are dropped, so a fresh amendment of an entry with no
+// prior updated-in yields just thisRun.
+func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
+	var refs []string
+	for _, raw := range strings.Split(existing, ",") {
+		if ref := strings.TrimSpace(raw); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	if thisRun == discoveredIn || stringSliceContains(refs, thisRun) {
+		return strings.Join(refs, ", ")
+	}
+	return strings.Join(append(refs, thisRun), ", ")
 }
 
 func stringSliceContains(values []string, want string) bool {

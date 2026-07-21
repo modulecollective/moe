@@ -251,7 +251,7 @@ func TestParseLoreRejectsDuplicateSlug(t *testing.T) {
 // TestRenderLoreFileShape pins the on-disk shape of a promoted lore
 // entry: frontmatter / blank / H1 / blank / prose.
 func TestRenderLoreFileShape(t *testing.T) {
-	got := renderLoreFile("My Title", "applies hint", "tele/runs/foo", "Body prose line.")
+	got := renderLoreFile("My Title", "applies hint", "tele/runs/foo", "", "Body prose line.")
 	want := strings.Join([]string{
 		"---",
 		"title: My Title",
@@ -270,9 +270,53 @@ func TestRenderLoreFileShape(t *testing.T) {
 }
 
 func TestRenderLoreFileSubstitutesMissingAppliesWhen(t *testing.T) {
-	got := renderLoreFile("T", "", "p/runs/r", "prose")
+	got := renderLoreFile("T", "", "p/runs/r", "", "prose")
 	if !strings.Contains(got, "applies-when: (missing)\n") {
 		t.Errorf("expected (missing) placeholder, got:\n%s", got)
+	}
+}
+
+// TestRenderLoreFileOmitsEmptyProvenance pins the omit-when-empty rule
+// for both provenance fields: a fresh promotion (empty updated-in)
+// writes no updated-in line, and an amendment inheriting no
+// discovered-in (a hand-authored entry) writes no discovered-in line.
+func TestRenderLoreFileOmitsEmptyProvenance(t *testing.T) {
+	fresh := renderLoreFile("T", "when", "p/runs/r", "", "prose")
+	if strings.Contains(fresh, "updated-in:") {
+		t.Errorf("fresh render should omit updated-in:\n%s", fresh)
+	}
+	if !strings.Contains(fresh, "discovered-in: p/runs/r\n") {
+		t.Errorf("fresh render should keep discovered-in:\n%s", fresh)
+	}
+	amended := renderLoreFile("T", "when", "", "p/runs/later", "prose")
+	if strings.Contains(amended, "discovered-in:") {
+		t.Errorf("amend with no inherited discovered-in should omit the line:\n%s", amended)
+	}
+	if !strings.Contains(amended, "updated-in: p/runs/later\n") {
+		t.Errorf("amend should render updated-in:\n%s", amended)
+	}
+}
+
+// TestAppendUpdatedIn covers the dedup rules that make an in-place
+// amendment idempotent: append preserves order, a repeated ref is a
+// no-op, and a ref equal to discovered-in is never self-cited.
+func TestAppendUpdatedIn(t *testing.T) {
+	cases := []struct {
+		name, existing, discoveredIn, thisRun, want string
+	}{
+		{"first append", "", "a/runs/origin", "b/runs/one", "b/runs/one"},
+		{"second append", "b/runs/one", "a/runs/origin", "c/runs/two", "b/runs/one, c/runs/two"},
+		{"repeated ref is no-op", "b/runs/one", "a/runs/origin", "b/runs/one", "b/runs/one"},
+		{"equals discovered-in is no-op", "", "a/runs/origin", "a/runs/origin", ""},
+		{"equals discovered-in keeps prior list", "b/runs/one", "a/runs/origin", "a/runs/origin", "b/runs/one"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appendUpdatedIn(tc.existing, tc.discoveredIn, tc.thisRun); got != tc.want {
+				t.Errorf("appendUpdatedIn(%q, %q, %q) = %q, want %q",
+					tc.existing, tc.discoveredIn, tc.thisRun, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -504,6 +548,15 @@ func TestPromoteLoreEntrySupersedesAfterWritingReplacement(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(loreDir, "merged-2.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("idempotent retry should not mint merged-2.md, got %v", err)
 	}
+	// Merge into a fresh slug is not an in-place amendment: this run is
+	// the discovery, no updated-in inherited.
+	got := readLoreEntry(t, root, "merged")
+	if strings.Contains(got, "updated-in:") {
+		t.Fatalf("merge into a new slug should not carry updated-in:\n%s", got)
+	}
+	if !strings.Contains(got, "discovered-in: tele/runs/run") {
+		t.Fatalf("merge into a new slug should record this run as discovered-in:\n%s", got)
+	}
 }
 
 func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
@@ -534,6 +587,157 @@ func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(loreDir, "fact-2.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("in-place amendment should not mint fact-2.md, got %v", err)
+	}
+}
+
+// TestPromoteLoreEntryAmendPreservesProvenance is the core of this run:
+// amending an entry keeps its original discovered-in verbatim and
+// appends the amending run to updated-in; a second amend by a third run
+// appends a second ref in chronological order.
+func TestPromoteLoreEntryAmendPreservesProvenance(t *testing.T) {
+	root := t.TempDir()
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed as if promoted by an earlier run.
+	seed := renderLoreFile("Fact", "when X", "tele/runs/origin", "", "original body")
+	if err := os.WriteFile(filepath.Join(loreDir, "fact.md"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	slug, err := promoteLoreEntry(root, "moe", "patch-one", parsedLore{
+		slug:        "fact",
+		title:       "Fact",
+		appliesWhen: "when X, tightened",
+		supersedes:  []string{"fact"},
+		body:        "revised body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "fact" {
+		t.Fatalf("resolved slug = %q, want fact", slug)
+	}
+	got := readLoreEntry(t, root, "fact")
+	for _, want := range []string{
+		"discovered-in: tele/runs/origin",
+		"updated-in: moe/runs/patch-one",
+		"applies-when: when X, tightened",
+		"revised body",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("first amend missing %q:\n%s", want, got)
+		}
+	}
+
+	if _, err := promoteLoreEntry(root, "moe", "patch-two", parsedLore{
+		slug:        "fact",
+		title:       "Fact",
+		appliesWhen: "when X, tightened",
+		supersedes:  []string{"fact"},
+		body:        "revised again",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got = readLoreEntry(t, root, "fact")
+	if !strings.Contains(got, "discovered-in: tele/runs/origin") {
+		t.Fatalf("second amend lost discovered-in:\n%s", got)
+	}
+	if !strings.Contains(got, "updated-in: moe/runs/patch-one, moe/runs/patch-two") {
+		t.Fatalf("second amend did not append second ref in order:\n%s", got)
+	}
+}
+
+// TestPromoteLoreEntryAmendIsIdempotent pins the retry guarantee the
+// partial-progress recovery leans on: re-running the same amendment over
+// the already-patched file reproduces a byte-identical body and appends
+// no duplicate ref.
+func TestPromoteLoreEntryAmendIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := renderLoreFile("Fact", "when X", "tele/runs/origin", "", "body")
+	if err := os.WriteFile(filepath.Join(loreDir, "fact.md"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := parsedLore{
+		slug:        "fact",
+		title:       "Fact",
+		appliesWhen: "when X",
+		supersedes:  []string{"fact"},
+		body:        "patched body",
+	}
+	if _, err := promoteLoreEntry(root, "moe", "patch", entry); err != nil {
+		t.Fatal(err)
+	}
+	first := readLoreEntry(t, root, "fact")
+	if _, err := promoteLoreEntry(root, "moe", "patch", entry); err != nil {
+		t.Fatal(err)
+	}
+	second := readLoreEntry(t, root, "fact")
+	if first != second {
+		t.Fatalf("retry produced a different body:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	if n := strings.Count(second, "moe/runs/patch"); n != 1 {
+		t.Fatalf("expected exactly one updated-in ref after retry, got %d:\n%s", n, second)
+	}
+}
+
+// TestPromoteLoreEntryAmendHandAuthoredOmitsDiscoveredIn: amending an
+// entry that never carried a discovered-in (a hand-authored file)
+// preserves that absence rather than fabricating a discovery, while
+// still recording the amending run in updated-in.
+func TestPromoteLoreEntryAmendHandAuthoredOmitsDiscoveredIn(t *testing.T) {
+	root := t.TempDir()
+	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	if err := os.MkdirAll(loreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loreDir, "hand.md"),
+		[]byte("---\ntitle: Hand\napplies-when: sometimes\n---\n\n# Hand\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteLoreEntry(root, "moe", "patch", parsedLore{
+		slug:        "hand",
+		title:       "Hand",
+		appliesWhen: "sometimes",
+		supersedes:  []string{"hand"},
+		body:        "revised",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := readLoreEntry(t, root, "hand")
+	if strings.Contains(got, "discovered-in:") {
+		t.Fatalf("hand-authored amend fabricated discovered-in:\n%s", got)
+	}
+	if !strings.Contains(got, "updated-in: moe/runs/patch") {
+		t.Fatalf("hand-authored amend missing updated-in:\n%s", got)
+	}
+}
+
+// TestPromoteLoreEntryFreshOmitsUpdatedIn guards the non-patch path:
+// a fresh promotion carries this run as discovered-in and no updated-in,
+// byte-identical to the pre-provenance output.
+func TestPromoteLoreEntryFreshOmitsUpdatedIn(t *testing.T) {
+	root := t.TempDir()
+	slug, err := promoteLoreEntry(root, "moe", "fresh", parsedLore{
+		slug:        "brand-new",
+		title:       "Brand new",
+		appliesWhen: "always",
+		body:        "body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readLoreEntry(t, root, slug)
+	if strings.Contains(got, "updated-in:") {
+		t.Fatalf("fresh promotion wrote updated-in:\n%s", got)
+	}
+	if !strings.Contains(got, "discovered-in: moe/runs/fresh") {
+		t.Fatalf("fresh promotion missing discovered-in:\n%s", got)
 	}
 }
 

@@ -116,48 +116,48 @@ doing — the bodies stay on disk; this catalog is the budgeted summary.
 	return b.String()
 }
 
-// readLoreFrontmatter pulls `title:` and `applies-when:` out of a
-// lore entry's YAML frontmatter. Fail-soft: any I/O error or malformed
-// frontmatter yields ("", "") and lets the caller fall back to the
-// filename + "(missing)" placeholders — a half-written entry shouldn't
-// break every stage prompt.
+// LoreFrontmatter reads a lore entry's YAML frontmatter into a
+// key→value map. Fail-soft: any I/O error, a missing opening fence, or
+// a malformed file yields an empty (but non-nil) map, so callers can
+// index without a nil check and fall back to their own placeholders — a
+// half-written entry shouldn't break every stage prompt or a harvest.
 //
 // Stdlib only: we read just enough lines to clear the second `---`
-// fence, scan for the two keys, and stop. No YAML parser needed for a
-// fixed two-field schema.
-func readLoreFrontmatter(path string) (title, appliesWhen string) {
+// fence, collect every `key: value` pair, and stop. No YAML parser
+// needed for the flat, quoted-scalar schema lore entries carry.
+func LoreFrontmatter(path string) map[string]string {
+	out := map[string]string{}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", ""
+		return out
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	// Cap line length so a misshapen file doesn't blow the buffer.
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024)
 
-	if !sc.Scan() {
-		return "", ""
-	}
-	if strings.TrimSpace(sc.Text()) != "---" {
-		return "", ""
+	if !sc.Scan() || strings.TrimSpace(sc.Text()) != "---" {
+		return out
 	}
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.TrimSpace(line) == "---" {
 			break
 		}
-		key, val, ok := splitFrontmatterLine(line)
-		if !ok {
-			continue
-		}
-		switch key {
-		case "title":
-			title = val
-		case "applies-when":
-			appliesWhen = val
+		if key, val, ok := splitFrontmatterLine(line); ok {
+			out[key] = val
 		}
 	}
-	return title, appliesWhen
+	return out
+}
+
+// readLoreFrontmatter pulls `title:` and `applies-when:` out of a lore
+// entry's frontmatter, falling back to ("", "") for either missing key
+// so the catalog can substitute the filename + "(missing)" placeholders.
+// Thin wrapper over LoreFrontmatter.
+func readLoreFrontmatter(path string) (title, appliesWhen string) {
+	fm := LoreFrontmatter(path)
+	return fm["title"], fm["applies-when"]
 }
 
 // splitFrontmatterLine splits "key: value" into (key, value, true).
