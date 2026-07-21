@@ -98,14 +98,14 @@ func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 	}
 	func() {
 		defer withRideMode(rideDynamic)()
-		got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+		got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
 		if !strings.Contains(got, "firing inside a **dynamic** ride") {
 			t.Errorf("dynamic ride line missing from the kickoff:\n%s", got)
 		}
 	}()
 	// Outside a ride there is nothing to say, and a "nothing is riding"
 	// block would be context the agent can't act on.
-	got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+	got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
 	if strings.Contains(got, "firing inside") {
 		t.Errorf("kickoff names a ride outside one:\n%s", got)
 	}

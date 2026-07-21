@@ -201,7 +201,7 @@ func TestPulseKickoffCarriesGitHubBlock(t *testing.T) {
 		{WorkflowName: "test", Conclusion: "failure", URL: "https://x/bad"},
 	}})
 
-	got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+	got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
 	if !strings.HasPrefix(got, pulseKickoff) {
 		t.Fatal("kickoff no longer leads with the static prompt")
 	}

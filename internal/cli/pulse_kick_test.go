@@ -19,7 +19,7 @@ func selfKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult
 	root, stages, _ = kickFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 	return root, "moe/" + minted["fix-a"], groomed, stages
 }
 
@@ -107,7 +107,7 @@ func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	}
 	headKey := "moe/" + head.ID
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: head.ID, Runs: runsFrom("fix-a")}}, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: head.ID, Runs: runsFrom("fix-a")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
@@ -175,7 +175,7 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != shippedKey {
 		t.Fatalf("threads = %+v, want one rooted at the merged anchor %s", groomed.threads, shippedKey)
 	}

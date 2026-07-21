@@ -336,8 +336,14 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// a foreign spawner (cross-project coordination opens a run in one
 	// project from another); the empty guard keeps a manual `moe pulse new`
 	// from writing a dangling "<project>/".
+	//
+	// A separate name from here on: everything downstream — the groom
+	// fence, the kick's re-entrancy guard — keys on the qualified *key*,
+	// and reusing one name for both forms is how a bare slug reaches a
+	// comparison that wants a key.
+	spawnerKey := ""
 	if spawner != "" {
-		spawner = projectID + "/" + spawner
+		spawnerKey = projectID + "/" + spawner
 	}
 
 	// Checkpoint: a Ctrl-C before the run is minted skips with nothing to
@@ -351,8 +357,8 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		IDBase:    pulseWorkflow,
 		Workflow:  pulseWorkflow,
 		SeedDocs:  map[string]string{pulseDoc: pulseCanvasSkeleton},
-		SpawnedBy: spawner,
-		Trailers:  trailers.Block{SpawnedBy: spawner, Consent: spawnConsent(spawner)},
+		SpawnedBy: spawnerKey,
+		Trailers:  trailers.Block{SpawnedBy: spawnerKey, Consent: spawnConsent(spawnerKey)},
 	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
@@ -371,15 +377,15 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// abandoning a sweep is not a verb failure — and (mid-agent) it leaves
 	// the run open on the dash's ACTIVE list for the operator to inspect
 	// and close by hand. It does not block the next survey.
-	code, agentStarted := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
-	if code == exitInterrupted {
+	survey := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
+	if survey.code == exitInterrupted {
 		// The Ctrl-C may have been observed only at the agent boundary, so
 		// mark the latch to propagate the skip out and halt a cascade.
 		// Whether the run is disposed is agentStarted's call, below.
 		pi.mark()
 	}
 	switch {
-	case pi.interrupted() && !agentStarted:
+	case pi.interrupted() && !survey.agentStarted:
 		// The latch is set and the agent never started: a Ctrl-C in a
 		// millisecond gap between setup children tripped the pre-executor
 		// belt (openPulse's prompt builder returned errPulseSkipped).
@@ -400,7 +406,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		// "exit ≠ 130" threw away a completed sweep.
 		moePrintf(stderr, "pulse: interrupted — leaving %s/%s open for review\n", projectID, md.ID)
 		return 0
-	case code != 0:
+	case survey.code != 0:
 		// A failed or abandoned sweep with no interrupt — leave the run open
 		// on the dash's ACTIVE list (escalation by visibility).
 		return 0
@@ -422,7 +428,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// can only be stamped once every run in it exists, and a kick must
 	// not start until the thread it names has stopped moving.
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
-	groomed := groomChains(root, projectID, md.ID, groups, spawner, stdout, stderr)
+	groomed := groomChains(root, projectID, md.ID, groups, spawnerKey, survey.chainEdges, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -451,7 +457,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// a long time, and a sweep that has already done all its work should
 	// not sit on the dash's ACTIVE list for the duration.
 	pi.Close()
-	pulseSelfKick(root, groomed, spawner, stdout, stderr)
+	pulseSelfKick(root, groomed, spawnerKey, stdout, stderr)
 	return 0
 }
 
@@ -984,7 +990,7 @@ func slugBaseMatches(slugs []string, base string) bool {
 // as InitialPromptBuilder, so root is the session worktree
 // runStageSession hands the builder. Best-effort throughout: a gather
 // that fails drops its own block rather than failing the sweep.
-func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) string {
+func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (string, map[string]string) {
 	blocks := []string{pulseKickoff}
 	if line := pendingTwinObservationsLine(root, projectID); line != "" {
 		blocks = append(blocks, line)
@@ -997,7 +1003,7 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 		// Best-effort like each block was individually: a sweep with no
 		// context blocks is a worse sweep, not a failed one.
 		moePrintf(stderr, "pulse: kickoff: could not read runs for %s — context blocks dropped\n", projectID)
-		return strings.Join(blocks, "\n\n")
+		return strings.Join(blocks, "\n\n"), nil
 	}
 	if gh := pulseGitHubContext(sc, projectID, runID, stderr); gh != "" {
 		blocks = append(blocks, gh)
@@ -1020,7 +1026,10 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 	if ride := rideModeContextLine(); ride != "" {
 		blocks = append(blocks, ride)
 	}
-	return strings.Join(blocks, "\n\n")
+	// The chain edge set as the agent saw it. The sweep's ordering
+	// opinion is formed against exactly this picture, so it is what the
+	// apply step checks itself against before restructuring anything.
+	return strings.Join(blocks, "\n\n"), sc.graph.Edges()
 }
 
 // pendingTwinObservationsLine reports how many twin observations are
@@ -1089,19 +1098,17 @@ var errPulseSkipped = errors.New("pulse: skipped before the survey started")
 // pre-executor belt: a Ctrl-C that latched during setup returns
 // errPulseSkipped here so the agent never starts.
 //
-// The second return says whether the agent turn actually began. That is
-// the survey's disposal decision: nothing started means nothing was
-// surveyed and the just-minted run is disposed, while a started turn
-// leaves a canvas worth a human's eyes no matter how it ended.
-var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
-	agentStarted := false
-	code := runStageSession(projectID, runID, pulseDoc,
+// It reports a surveyOutcome rather than a bare exit code: the two extra
+// facts are the ones the apply step can't recover afterwards.
+var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	out := surveyOutcome{}
+	out.code = runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
 			Agent:                  agentOverride,
-			OnAgentStart:           func() { agentStarted = true },
+			OnAgentStart:           func() { out.agentStarted = true },
 			// Deferred so the twin-reflect context line renders against
 			// the session worktree, the read-only copy runStageSession
 			// hands the builder — the same deferral the twin stages use to
@@ -1110,11 +1117,28 @@ var openPulse = func(projectID, runID string, headless bool, agentOverride strin
 				if pi.interrupted() {
 					return "", errPulseSkipped
 				}
-				return pulseKickoffWithContext(workRoot, projectID, runID, stderr), nil
+				prompt, edges := pulseKickoffWithContext(workRoot, projectID, runID, stderr)
+				out.chainEdges = edges
+				return prompt, nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
 		}, stdout, stderr)
-	return code, agentStarted
+	return out
+}
+
+// surveyOutcome is what one survey turn reports back to the sweep.
+type surveyOutcome struct {
+	code int
+	// agentStarted says whether the agent turn actually began. That is
+	// the disposal decision: nothing started means nothing was surveyed
+	// and the just-minted run is disposed, while a started turn leaves a
+	// canvas worth a human's eyes no matter how it ended.
+	agentStarted bool
+	// chainEdges is the live chain edge set as the agent saw it at
+	// kickoff — the picture its ordering opinion was formed against. nil
+	// when the kickoff couldn't read it, which reads as "no snapshot" and
+	// skips the drift check rather than refusing to groom.
+	chainEdges map[string]string
 }
 
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
@@ -1184,8 +1208,8 @@ func runPulseStage(args []string, stdout, stderr io.Writer) int {
 	}
 	// Interactive reopen: the operator owns this session's Ctrl-C, so no
 	// skip latch (nil pi).
-	code, _ := openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
-	return code
+	survey := openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
+	return survey.code
 }
 
 // pulseScan is the one disk read a sweep's kickoff makes: the run scan

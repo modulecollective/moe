@@ -15,8 +15,7 @@ func init() {
 			// No skip latch on this seam: reopening a pulse stage by hand
 			// (or riding a chain into one) is not a run-traffic tail, so it
 			// has no Ctrl-C-to-skip window.
-			code, _ := openPulse(projectID, runID, headless, "", nil /*pi*/, stdout, stderr)
-			return code
+			return openPulse(projectID, runID, headless, "", nil /*pi*/, stdout, stderr).code
 		default:
 			moePrintf(stderr, "pulse: openPulseStage: unknown stage %q\n", stage)
 			return 1

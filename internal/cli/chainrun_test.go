@@ -38,7 +38,7 @@ func spawnAndHead(t *testing.T, root, projectID, pulseSlug, head string, spawns 
 		}
 	}
 	groomChains(root, projectID, pulseSlug,
-		[]groomGroup{{Head: head, Runs: runs}}, "" /*spawner*/, io.Discard, stderr)
+		[]groomGroup{{Head: head, Runs: runs}}, "" /*spawner*/, nil /*kickoff edges*/, io.Discard, stderr)
 }
 
 // runsWithWorkflow lists the project's in-progress runs for a workflow.

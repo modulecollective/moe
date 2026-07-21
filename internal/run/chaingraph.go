@@ -70,6 +70,17 @@ func NewChainGraph(idx *JournalIndex, byKey map[string]*Metadata) *ChainGraph {
 // Child returns the run key chains to, or "" for none.
 func (g *ChainGraph) Child(key string) string { return g.child[key] }
 
+// Edges returns a copy of the whole live edge set, parent → child. The
+// snapshot a caller compares a later graph against when it needs to know
+// whether the ordering moved underneath it.
+func (g *ChainGraph) Edges() map[string]string {
+	out := make(map[string]string, len(g.child))
+	for parent, child := range g.child {
+		out[parent] = child
+	}
+	return out
+}
+
 // Parents returns every run that chains to key, sorted. A child can have
 // several parents — cross-parent fan-in is allowed — so this is a list,
 // and the lowest key is the deterministic choice every walk-back makes.

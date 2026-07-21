@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -129,11 +130,16 @@ type groomSweep struct {
 // step may root. Every group arrives with its members already resolved
 // to a mint or a slug — see applyPulseGate, which opened them.
 //
+// kickoffEdges is the chain edge set the survey agent saw. If the live
+// set has moved since, the whole ordering opinion is stale and grooming
+// is skipped — see chainEdgesMoved. nil means "no snapshot" and skips
+// the check.
+//
 // Warn-only throughout, like the spawn step beside it: a group that
 // can't be resolved drops with a stderr line and the rest of the sweep
 // carries on. Grooming is an ordering opinion — losing one is a
 // re-groom next pulse, not a lost sweep.
-func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawnerKey string, stdout, stderr io.Writer) groomResult {
+func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawnerKey string, kickoffEdges map[string]string, stdout, stderr io.Writer) groomResult {
 	// spawnerChained defaults true: every early return below is a groom
 	// that produced no threads, so no kick is wanted anyway, but the
 	// conservative default is what makes that safe to say out loud.
@@ -155,12 +161,31 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 	for _, md := range mds {
 		byKey[md.Project+"/"+md.ID] = md
 	}
+	graph := run.NewChainGraph(idx, byKey)
+
+	// The one contested resource, checked optimistically. Everything else
+	// about the sweep is allowed to move underneath it — the triggering
+	// verb just wrote the journal, concurrent sweeps are deliberate, and
+	// this sweep's own spawns commit mid-apply — so a whole-state pin
+	// would be perpetually stale for benign reasons. Chain edges are
+	// different: an ordering opinion is a claim *about* them, and
+	// restamping a picture the agent never saw is how an operator's
+	// `chain edit` mid-survey gets quietly undone.
+	//
+	// The retry is structural rather than built: the next sweep re-derives
+	// the ordering for free, against the state that actually won. And
+	// spawns have already landed by now — they carry their own dedupe and
+	// need no ordering to be worth keeping.
+	if moved := chainEdgesMoved(kickoffEdges, graph.Edges()); moved != "" {
+		moePrintf(stderr, "pulse: groom: chain edges moved under this sweep (%s) — skipping groom and kick; the next pulse re-derives the order\n", moved)
+		return bail
+	}
 
 	sw := &groomSweep{
 		root:      root,
 		projectID: projectID,
 		pulseSlug: pulseSlug,
-		graph:     run.NewChainGraph(idx, byKey),
+		graph:     graph,
 		byKey:     byKey,
 		mode:      currentRideMode,
 	}
@@ -459,4 +484,43 @@ func (sw *groomSweep) lookup(slug string, admit func(*run.Metadata) bool) (strin
 		}
 	}
 	return best, best != ""
+}
+
+// chainEdgesMoved reports what changed between the edge set the survey
+// agent saw and the one at apply time, or "" when nothing did. A nil
+// `before` is "no snapshot" — the kickoff couldn't read the graph — and
+// reads as no drift, because refusing to groom on a read we never made
+// would turn one bad read into a lost sweep.
+//
+// The answer names the parents whose outgoing edge differs, sorted and
+// capped, so the warn line says what moved rather than just that
+// something did.
+func chainEdgesMoved(before, now map[string]string) string {
+	if before == nil {
+		return ""
+	}
+	changed := map[string]bool{}
+	for parent, child := range before {
+		if now[parent] != child {
+			changed[parent] = true
+		}
+	}
+	for parent, child := range now {
+		if before[parent] != child {
+			changed[parent] = true
+		}
+	}
+	if len(changed) == 0 {
+		return ""
+	}
+	parents := make([]string, 0, len(changed))
+	for p := range changed {
+		parents = append(parents, p)
+	}
+	sort.Strings(parents)
+	const cap = 3
+	if len(parents) > cap {
+		return strings.Join(parents[:cap], ", ") + fmt.Sprintf(" and %d more", len(parents)-cap)
+	}
+	return strings.Join(parents, ", ")
 }

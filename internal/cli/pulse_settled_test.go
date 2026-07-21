@@ -130,7 +130,7 @@ func TestPulseKickoffCarriesSettledBlock(t *testing.T) {
 	markBureaucracy(t, root)
 	seedRun(t, root, "moe", "settled-drop", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 
-	got := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+	got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
 	if !strings.HasPrefix(got, pulseKickoff) {
 		t.Fatal("kickoff no longer leads with the static prompt")
 	}

@@ -142,7 +142,7 @@ func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 	fixKey := "moe/" + groups[0].Runs[0].mintedID
 	reflectKey := "moe/" + groups[0].Runs[1].mintedID
 
-	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, io.Discard, os.Stderr)
+	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
 		t.Fatalf("threads = %+v, want one kick candidate", groomed.threads)
@@ -167,7 +167,7 @@ func TestSpawnTwinInLooseParks(t *testing.T) {
 	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, os.Stderr)
-	groomed := groomChains(root, "moe", "pulse-one", nil /*no groups*/, "", io.Discard, os.Stderr)
+	groomed := groomChains(root, "moe", "pulse-one", nil /*no groups*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want none — an unchained reflect is not a kick candidate", groomed.threads)
@@ -211,7 +211,7 @@ func TestSpawnTwinMapsOntoOpenReflectAndChainsIt(t *testing.T) {
 		t.Fatalf("twin runs = %v, want no second reflect minted", tw)
 	}
 
-	groomChains(root, "moe", "pulse-one", groups, "", io.Discard, &errb)
+	groomChains(root, "moe", "pulse-one", groups, "", nil /*kickoff edges*/, io.Discard, &errb)
 
 	if strings.Contains(errb.String(), "which is not a parked run") {
 		t.Errorf("stderr = %q, want no dropped member", errb.String())
