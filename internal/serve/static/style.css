@@ -80,12 +80,17 @@ a:hover, a:focus { border-bottom-style: solid; }
   border-bottom: none;
 }
 a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
+/* Both art blocks — the activity histogram and the factory rail — carry
+   the accent rather than --muted: they're ornament, and the terminal
+   render puts them in the theme's amber. The CLI's per-row heat gradient
+   has no cheap equivalent here (the frame swap paints textContent), so
+   the web takes a flat tint plus the shared ▓ texture. */
 .banner-art {
   margin: 0.1rem 0 0;
   padding: 0;
   background: transparent;
   border: none;
-  color: var(--muted);
+  color: var(--accent);
   font-size: inherit;
   line-height: 1.1;
   white-space: pre;
