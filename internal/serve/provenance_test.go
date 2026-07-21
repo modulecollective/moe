@@ -65,6 +65,30 @@ func TestRunPageRendersProvenance(t *testing.T) {
 	}
 }
 
+// TestRunPageNamesAGoneRunWithoutLinkingIt: the walk hands over an empty
+// URL for a run that no longer loads, and the template is the only thing
+// standing between that and a link to a 404. Both sides of the branch —
+// root subject and object line — are pinned here, because every test on
+// the cli side asserts hops, not markup.
+func TestRunPageNamesAGoneRunWithoutLinkingIt(t *testing.T) {
+	s := provenanceServer(t, []ProvHop{
+		{Subject: "alpha/pruned-pulse"},
+		{Verb: "spawned", Object: "alpha/pruned-mid", Agent: true},
+		{Verb: "spawned", Object: "this run", Agent: true},
+	}, nil)
+	body := getRunPage(t, s, "/run/alpha/fix-ci")
+
+	if strings.Contains(body, `href="/run/`) {
+		t.Errorf("a chain of gone runs must carry no run link\nbody:\n%s", body)
+	}
+	if !strings.Contains(body, `<span class="slug">alpha/pruned-pulse</span>`) {
+		t.Errorf("the gone root must still be named, unlinked\nbody:\n%s", body)
+	}
+	if !strings.Contains(body, "alpha/pruned-mid") {
+		t.Errorf("the gone mid-chain run must still be named\nbody:\n%s", body)
+	}
+}
+
 // TestRunPageOmitsArrowOnAOneLineStory: a plain operator-opened run has
 // no chain to draw, and an arrow pointing at nothing would be worse than
 // the prose it replaced.
