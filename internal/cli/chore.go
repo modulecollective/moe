@@ -298,7 +298,13 @@ func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, s
 	switch mode {
 	case choreOpenNormal:
 		if !state.Due {
-			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is not due"}
+			// "is not due" would misreport a judged chore as a schedule
+			// that hasn't fired — the misreading the family exists to end.
+			reason := "is not due"
+			if state.Definition.Judged() {
+				reason = "is judged — the pulse nominates it (--now overrides)"
+			}
+			return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: reason}
 		}
 	case choreOpenNominated:
 		if !state.Definition.Judged() {
