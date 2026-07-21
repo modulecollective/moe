@@ -28,11 +28,14 @@ import (
 //
 // A pulse is more than the survey. It fires at the tail of the
 // operator-rooted run-traffic verbs (sdlc close, sdlc push, twin close,
-// and the cascades' auto-close), and every fire does two things:
+// and the cascades' auto-close), and every fire does three things:
 //
 //   - Always: open every due chore's run for the project (never execute
 //     one) via openChoreInProcess. Automation acts on standing intent —
 //     a chore the operator authored — but never makes a fresh decision.
+//   - Always: reconcile the project's pushed runs against GitHub
+//     (reconcileAtPulse), so a PR merged out of band reads as `merged`
+//     before the survey looks at its delta.
 //   - Every time: the survey — a blocking, headless stage that opens a
 //     run, sweeps, files followups, writes its report, and auto-closes
 //     itself on a clean exit. Every run-traffic event fires a fresh
