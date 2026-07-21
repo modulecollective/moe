@@ -1297,6 +1297,29 @@ func TestDashRendersFactoryArt(t *testing.T) {
 	}
 }
 
+// TestDashWatchRejectsNonTTY: `--watch` against a non-terminal stdout
+// exits 2 without drawing anything. The gate is what keeps the redraw
+// loop off pipes and scripts — and, not incidentally, out of the test
+// binary, which is why this is the only unit test watch mode gets.
+func TestDashWatchRejectsNonTTY(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"dash", "--watch"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit=%d want 2 (stdout=%q stderr=%q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "needs a terminal") {
+		t.Fatalf("expected a terminal-required error on stderr, got:\n%s", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected no frame on a rejected --watch, got:\n%q", out.String())
+	}
+}
+
 // containsRunRow checks that dash output has a row for (project, run)
 // whose last tabwriter field matches stage — ignores the humanAgo
 // middle column so tests can be written without pinning wall-clock

@@ -8,10 +8,12 @@ source of truth for the exact command surface; this page is a map.
 
 ### Re-Entry And Supervision
 
-- `moe dash [--all] [--project <id>] [--workflow <name>]` prints the terminal
-  dashboard, including a CHORES bucket for due project chores and a
+- `moe dash [--all] [--project <id>] [--workflow <name>] [--watch]` prints the
+  terminal dashboard, including a CHORES bucket for due project chores and a
   daily-activity histogram of recent run activity (`--project` scopes the chart
-  to one project).
+  to one project). `--watch` redraws it in place every 3 seconds until Ctrl-C —
+  a live pane rather than a snapshot; it needs a terminal on stdout and exits 2
+  without one.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--insecure]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
