@@ -367,22 +367,34 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// abandoning a sweep is not a verb failure — and (mid-agent) it leaves
 	// the run open on the dash's ACTIVE list for the operator to inspect
 	// and close by hand. It does not block the next survey.
-	code := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
-	switch {
-	case code == exitInterrupted:
-		// Mid-agent Ctrl-C: the survey was actually running and may hold
-		// real findings, so disposing it would harvest half-written
-		// followups into ideas unreviewed. Leave the run open for review —
-		// but propagate the interrupt (mark the latch, since the Ctrl-C may
-		// have been observed only at the agent boundary) so a cascade halts.
+	code, agentStarted := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
+	if code == exitInterrupted {
+		// The Ctrl-C may have been observed only at the agent boundary, so
+		// mark the latch to propagate the skip out and halt a cascade.
+		// Whether the run is disposed is agentStarted's call, below.
 		pi.mark()
+	}
+	switch {
+	case pi.interrupted() && !agentStarted:
+		// The latch is set and the agent never started: a Ctrl-C in a
+		// millisecond gap between setup children tripped the pre-executor
+		// belt (openPulse's prompt builder returned errPulseSkipped).
+		// Nothing was surveyed, so dispose the just-minted run.
+		disposePulseRun(root, projectID, md.ID, stdout, stderr)
 		return 0
 	case pi.interrupted():
-		// The latch is set but the agent never ran to a real conclusion: a
-		// Ctrl-C in a millisecond gap between setup children tripped the
-		// pre-executor belt (openPulse's prompt builder returned
-		// errPulseSkipped, exit 1 ≠ 130). Dispose the just-minted run.
-		disposePulseRun(root, projectID, md.ID, stdout, stderr)
+		// The agent ran and the operator asked for the sweep to get out of
+		// the way. The canvas may hold real findings, so it is *not*
+		// disposed — but nor is it auto-closed, which would harvest
+		// half-reviewed followups into ideas, and no gate action fires: an
+		// interrupted sweep spawns, grooms and kicks nothing. The run
+		// lingers on the dash's ACTIVE list for a human to look at.
+		//
+		// This is deliberately keyed on the agent having started rather
+		// than on the exit code. A Ctrl-C that lands as the agent finishes
+		// cleanly still exits 0 — inferring "the agent never ran" from
+		// "exit ≠ 130" threw away a completed sweep.
+		moePrintf(stderr, "pulse: interrupted — leaving %s/%s open for review\n", projectID, md.ID)
 		return 0
 	case code != 0:
 		// A failed or abandoned sweep with no interrupt — leave the run open
@@ -942,13 +954,20 @@ var errPulseSkipped = errors.New("pulse: skipped before the survey started")
 // pulse` path, which has no skip window). The prompt builder is the
 // pre-executor belt: a Ctrl-C that latched during setup returns
 // errPulseSkipped here so the agent never starts.
-var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
-	return runStageSession(projectID, runID, pulseDoc,
+//
+// The second return says whether the agent turn actually began. That is
+// the survey's disposal decision: nothing started means nothing was
+// surveyed and the just-minted run is disposed, while a started turn
+// leaves a canvas worth a human's eyes no matter how it ended.
+var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
+	agentStarted := false
+	code := runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
 			Agent:                  agentOverride,
+			OnAgentStart:           func() { agentStarted = true },
 			// Deferred so the twin-reflect context line renders against
 			// the session worktree, the read-only copy runStageSession
 			// hands the builder — the same deferral the twin stages use to
@@ -961,6 +980,7 @@ var openPulse = func(projectID, runID string, headless bool, agentOverride strin
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
 		}, stdout, stderr)
+	return code, agentStarted
 }
 
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
@@ -1030,5 +1050,6 @@ func runPulseStage(args []string, stdout, stderr io.Writer) int {
 	}
 	// Interactive reopen: the operator owns this session's Ctrl-C, so no
 	// skip latch (nil pi).
-	return openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
+	code, _ := openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
+	return code
 }

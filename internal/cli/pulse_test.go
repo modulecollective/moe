@@ -73,9 +73,9 @@ func TestPulseSurveyLatchBeforeOpenMintsNothing(t *testing.T) {
 
 	var calls int
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		calls++
-		return 0
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -96,8 +96,8 @@ func TestPulseSurveyLatchBeforeOpenMintsNothing(t *testing.T) {
 
 // TestPulseSurveySkipDuringSetupDisposesRun: a Ctrl-C in the gap between
 // minting the run and the agent executor trips the pre-executor belt
-// (the prompt builder returns errPulseSkipped, so openPulse exits 1 ≠
-// 130). The just-minted run is disposed via the registered close, not
+// (the prompt builder returns errPulseSkipped, so the agent never
+// starts). The just-minted run is disposed via the registered close, not
 // left dangling on the dash.
 func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	root := newTestBureaucracy(t)
@@ -105,11 +105,12 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		// Model the belt: the Ctrl-C latched during setup and the
-		// bootstrap-failure path returned 1.
+		// bootstrap-failure path returned 1 without ever starting the
+		// agent.
 		pi.mark()
-		return 1
+		return 1, false
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -149,8 +150,8 @@ func TestPulseSurveyMidAgentInterruptLeavesRunOpen(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
-		return exitInterrupted
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
+		return exitInterrupted, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -163,6 +164,53 @@ func TestPulseSurveyMidAgentInterruptLeavesRunOpen(t *testing.T) {
 	}
 	if !pi.interrupted() {
 		t.Fatal("the 130 branch did not propagate the interrupt (latch not marked)")
+	}
+}
+
+// TestPulseSurveyLatchWithCleanAgentExitLeavesRunOpen pins the fix for
+// the disposition bug: a Ctrl-C that lands as the agent finishes cleanly
+// (or a backend that traps SIGINT and exits 0) latches with exit 0. The
+// old switch keyed disposal on "latch set + exit ≠ 130" and threw the
+// completed sweep away, harvesting its followups unreviewed. Disposal
+// now keys on the agent never having started, so the run survives — open
+// for review, and with no gate action fired.
+func TestPulseSurveyLatchWithCleanAgentExitLeavesRunOpen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
+		// A real sweep: it wrote a fillable gate asking for a spawn, and
+		// exited 0 — with the operator's Ctrl-C latched.
+		writePulseGate(t, root, projectID, runID,
+			`{"status": "ok", "spawn": [{"slug": "fix-a", "title": "Fix a", "why": "because"}]}`)
+		pi.mark()
+		return 0, true
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	pi := newTestPulseInterrupt(t)
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, pi, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
+		t.Fatalf("open pulse runs=%v, want exactly one — a completed sweep is never disposed", open)
+	}
+	// The interrupt means "get out of the way": no spawn, no groom, no
+	// kick, and no auto-close harvesting the filings unreviewed.
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == "sdlc" {
+			t.Fatalf("spawned %s/%s despite the interrupt", md.Project, md.ID)
+		}
+	}
+	if !strings.Contains(errb.String(), "leaving") {
+		t.Errorf("stderr=%q, want a line naming the run left open for review", errb.String())
 	}
 }
 
@@ -515,9 +563,9 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		calls++
-		return 0
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -561,7 +609,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		calls++
 		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
@@ -571,7 +619,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 		if err := os.WriteFile(fp, []byte("- [ ] `tidy-pulse` — Tidy the pulse survey\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		return 0
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -624,8 +672,8 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
-		return 0
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -671,9 +719,9 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		calls++
-		return 1
+		return 1, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -730,8 +778,8 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	orig := openPulse
 	// Stub writes nothing — the run opens with the skeleton's unparsable
 	// `## Gate` placeholder, which is exactly the no-op shape.
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
-		return 0
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -760,10 +808,10 @@ func TestPulseSurveyTwinSpawnMintsReflect(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		writePulseGate(t, root, projectID, runID,
 			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "boundary move the twin docs miss"}]}`)
-		return 0
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 
@@ -832,10 +880,10 @@ func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		writePulseGate(t, root, projectID, runID,
 			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "drift piled up"}]}`)
-		return 0
+		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
 

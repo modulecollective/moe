@@ -102,6 +102,9 @@ type stageSessionOpts struct {
 	// into the operator's live checkout. Mirrors PreFinalizeGate's
 	// (workRoot, worktreeWiki) shape and runs at the same lifecycle point.
 	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
+	// OnAgentStart, when non-nil, fires immediately before the executor
+	// is dispatched. See wikiTurnSpec.OnAgentStart.
+	OnAgentStart func()
 	// Headless drives the stage as a one-turn `claude -p` call instead
 	// of an interactive REPL. Output streams to the operator's
 	// terminal (no stdin), the workflow's oneshot.md fragment is
@@ -670,6 +673,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				NewSession:           newSession,
 				InitialPrompt:        initialPrompt,
 				InitialPromptBuilder: opts.InitialPromptBuilder,
+				OnAgentStart:         opts.OnAgentStart,
 				Headless:             opts.Headless,
 				Model:                opts.Model,
 				Agent:                agentName,
@@ -869,6 +873,14 @@ type wikiTurnSpec struct {
 	// stubbed argument carries the EnsureManagedDocs seed signal. See
 	// stageSessionOpts.InitialPromptBuilder for the why.
 	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
+	// OnAgentStart, when non-nil, is invoked immediately before the
+	// executor is dispatched — after every bootstrap step that can
+	// fail. It is the "the agent turn actually began" signal; the
+	// pulse uses it to tell a Ctrl-C that landed before the survey
+	// started (dispose the run) from one that landed during or after
+	// it (leave the run open for review), without inferring either
+	// from an exit code.
+	OnAgentStart func()
 	// Headless flips runWikiSession from the interactive REPL path
 	// (executor.Execute) to the one-shot streaming path
 	// (executor.ExecuteOneShot): no stdin, no transcript mirror, exits
@@ -1076,6 +1088,9 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	}
 	var runErr error
 	var returnedSid string
+	if spec.OnAgentStart != nil {
+		spec.OnAgentStart()
+	}
 	if spec.Headless {
 		// Hard-cap every headless turn's wall-clock. A headless stage has
 		// no operator on stdin to Ctrl-C a wedged turn, and the dominant
