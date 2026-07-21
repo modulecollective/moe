@@ -28,17 +28,17 @@ func spawnFixture(t *testing.T) string {
 // below want. Now it takes an explicit `head` group to ask for it,
 // which is the point: heads are a grouping convenience the survey
 // requests, not something grooming does on its own.
-func spawnAndHead(t *testing.T, root, projectID, pulseSlug, head string, spawns []pulseSpawn, stderr io.Writer) {
+func spawnAndHead(t *testing.T, root, projectID, pulseSlug, head string, spawns []pulseRunSpec, stderr io.Writer) {
 	t.Helper()
-	minted := maybeSpawnRuns(root, projectID, pulseSlug, spawns, io.Discard, stderr)
-	var runs []string
+	minted := mintSpecs(root, projectID, pulseSlug, spawns, io.Discard, stderr)
+	var runs []groomMember
 	for _, s := range spawns {
-		if _, ok := minted[s.Slug]; ok {
-			runs = append(runs, s.Slug)
+		if id, ok := minted[s.Slug]; ok {
+			runs = append(runs, groomMember{mintedID: id})
 		}
 	}
 	groomChains(root, projectID, pulseSlug,
-		[]pulseChainGroup{{Head: head, Runs: runs}}, minted, "" /*spawner*/, io.Discard, stderr)
+		[]groomGroup{{Head: head, Runs: runs}}, "" /*spawner*/, io.Discard, stderr)
 }
 
 // runsWithWorkflow lists the project's in-progress runs for a workflow.
@@ -64,7 +64,7 @@ func TestSpawnAndGroomUnderAnExplicitHead(t *testing.T) {
 	root := spawnFixture(t)
 
 	var errb bytes.Buffer
-	spawnAndHead(t, root, "moe", "pulse-2026-07-18", "ci-and-docs", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-2026-07-18", "ci-and-docs", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI on main", Why: "TestX failing since abc123", Design: "# Fix red CI\n\nTestX asserts a stale path.\n"},
 		{Slug: "fix-doc-drift", Title: "Fix doc drift", Why: "README names a removed flag"},
 	}, &errb)
@@ -166,7 +166,7 @@ func TestSpawnAndGroomUnderAnExplicitHead(t *testing.T) {
 func TestSpawnAloneMintsNoHeadAndNoEdges(t *testing.T) {
 	root := spawnFixture(t)
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, io.Discard, io.Discard)
@@ -194,12 +194,12 @@ func TestSpawnAloneMintsNoHeadAndNoEdges(t *testing.T) {
 func TestSpawnSkipsSlugsAlreadyInProgress(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 
 	var errb bytes.Buffer
-	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-two", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, &errb)
 
@@ -224,7 +224,7 @@ func TestSpawnPromotesTaggedIdea(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{{
+	minted := mintSpecs(root, "moe", "pulse-two", []pulseRunSpec{{
 		Slug: "cleanup-foo", Title: "Ignored title", Why: "clears the bar", Design: "# ignored seed\n",
 	}}, io.Discard, &errb)
 	destID := minted["cleanup-foo"]
@@ -273,8 +273,8 @@ func TestSpawnDoesNotPromoteUntaggedIdea(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-two",
-		[]pulseSpawn{{Slug: "needs-triage", Title: "Needs triage"}}, io.Discard, &errb)
+	minted := mintSpecs(root, "moe", "pulse-two",
+		[]pulseRunSpec{{Slug: "needs-triage", Title: "Needs triage"}}, io.Discard, &errb)
 	if len(minted) != 0 {
 		t.Fatalf("minted = %v, want structural refusal", minted)
 	}
@@ -304,8 +304,8 @@ func TestSpawnTaggedIdeaSkipsWhenDestinationAlreadyLive(t *testing.T) {
 	}
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-two",
-		[]pulseSpawn{{Slug: "cleanup-foo", Title: "Cleanup"}}, io.Discard, &errb)
+	minted := mintSpecs(root, "moe", "pulse-two",
+		[]pulseRunSpec{{Slug: "cleanup-foo", Title: "Cleanup"}}, io.Discard, &errb)
 	if len(minted) != 0 {
 		t.Fatalf("minted = %v, want existing destination to dedupe", minted)
 	}
@@ -328,13 +328,13 @@ func TestSpawnTaggedIdeaSkipsWhenDestinationAlreadyLive(t *testing.T) {
 func TestSpawnSkipsSlugsAlreadyPushed(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusPushed)
 
 	var errb bytes.Buffer
-	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-two", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, &errb)
 
@@ -353,12 +353,12 @@ func TestSpawnSkipsSlugsAlreadyPushed(t *testing.T) {
 func TestSpawnRespawnsAfterMerge(t *testing.T) {
 	root := spawnFixture(t)
 
-	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI"},
 	}, io.Discard, io.Discard)
 	setRunStatus(t, root, "moe", "fix-ci-red-main", run.StatusMerged)
 
-	maybeSpawnRuns(root, "moe", "pulse-two", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-two", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix red CI (again)"},
 	}, io.Discard, io.Discard)
 
@@ -431,7 +431,7 @@ func TestSpawnSkipsUnusableSlugs(t *testing.T) {
 	root := spawnFixture(t)
 
 	var errb bytes.Buffer
-	maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "Not A Slug", Title: "Bad"},
 		{Slug: "", Title: "Also bad"},
 		{Slug: "fix-good", Title: "Good"},
@@ -451,15 +451,18 @@ func TestSpawnSkipsUnusableSlugs(t *testing.T) {
 // project that has nothing queued.
 func TestSpawnWithNoEntriesTouchesNothing(t *testing.T) {
 	root := spawnFixture(t)
-	maybeSpawnRuns(root, "moe", "pulse-one", nil, io.Discard, io.Discard)
+	mintSpecs(root, "moe", "pulse-one", nil, io.Discard, io.Discard)
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Fatalf("chain runs %v, want none — an empty spawn list opens nothing", got)
 	}
 }
 
-// TestPulseGateParsesSpawnList pins the wire shape the stage fragment
-// teaches, end to end through the canvas reader.
-func TestPulseGateParsesSpawnList(t *testing.T) {
+// TestPulseGateParsesBothRunShapes pins the wire shape the stage
+// fragment teaches, end to end through the canvas reader: a `loose`
+// spec, and a thread whose `runs` mixes a bare slug (an existing parked
+// run) with an inline spec (a run minted at that position). The two
+// shapes in one list are what let the alias map go.
+func TestPulseGateParsesBothRunShapes(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedGitHubProject(t, root, "moe")
@@ -469,7 +472,9 @@ func TestPulseGateParsesSpawnList(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := "# Pulse\n\n## Gate\n\n```json\n" +
-		`{"status":"ok","reflect":{"due":false},"spawn":[{"slug":"fix-ci-red-main","title":"Fix red CI on main","why":"TestX failing","design":"# seed\n"}]}` +
+		`{"status":"ok",` +
+		`"loose":[{"slug":"fix-ci-red-main","title":"Fix red CI on main","why":"TestX failing","design":"# seed\n"}],` +
+		`"threads":[{"onto":"already-parked","kick":true,"runs":["tidy-1",{"slug":"reflect","workflow":"twin","why":"drift"}]}]}` +
 		"\n```\n"
 	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -479,11 +484,53 @@ func TestPulseGateParsesSpawnList(t *testing.T) {
 	if !ok {
 		t.Fatal("gate did not parse")
 	}
-	if len(gate.Spawn) != 1 {
-		t.Fatalf("spawn entries %+v, want 1", gate.Spawn)
+	if len(gate.Loose) != 1 || gate.Loose[0].Slug != "fix-ci-red-main" || gate.Loose[0].Title != "Fix red CI on main" {
+		t.Fatalf("loose = %+v, want the proposed slug and title", gate.Loose)
 	}
-	if gate.Spawn[0].Slug != "fix-ci-red-main" || gate.Spawn[0].Title != "Fix red CI on main" {
-		t.Errorf("spawn entry = %+v, want the proposed slug and title", gate.Spawn[0])
+	if len(gate.Threads) != 1 {
+		t.Fatalf("threads = %+v, want 1", gate.Threads)
+	}
+	th := gate.Threads[0]
+	if th.Onto != "already-parked" || !th.Kick {
+		t.Errorf("thread = %+v, want onto=already-parked and kick", th)
+	}
+	if len(th.Runs) != 2 {
+		t.Fatalf("thread runs = %+v, want 2", th.Runs)
+	}
+	if th.Runs[0].Existing != "tidy-1" || th.Runs[0].Spec != nil {
+		t.Errorf("runs[0] = %+v, want the string form naming tidy-1", th.Runs[0])
+	}
+	if th.Runs[1].Spec == nil || th.Runs[1].Spec.Workflow != "twin" || th.Runs[1].Existing != "" {
+		t.Errorf("runs[1] = %+v, want an inline twin spec", th.Runs[1])
+	}
+
+	// Every spec the gate proposed, whichever list it sat in.
+	specs := gate.specs()
+	if len(specs) != 2 || specs[0].Slug != "fix-ci-red-main" || specs[1].Workflow != "twin" {
+		t.Errorf("specs() = %+v, want the loose spec then the inline one", specs)
+	}
+}
+
+// TestPulseGateRejectsAMalformedThreadEntry: a `runs` entry that is
+// neither a slug nor a spec fails the whole parse, so the gate reads as
+// unfilled and the run lingers for review rather than half-applying.
+func TestPulseGateRejectsAMalformedThreadEntry(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedGitHubProject(t, root, "moe")
+
+	canvas := filepath.Join(root, run.ContentPath("moe", "pulse-x", pulseDoc))
+	if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "# Pulse\n\n## Gate\n\n```json\n" +
+		`{"status":"ok","threads":[{"runs":[["nested"]]}]}` + "\n```\n"
+	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := readPulseGate(root, "moe", "pulse-x"); ok {
+		t.Fatal("gate parsed a malformed thread entry, want a refusal")
 	}
 }
 

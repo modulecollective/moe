@@ -184,7 +184,7 @@ func TestPulseSurveyLatchWithCleanAgentExitLeavesRunOpen(t *testing.T) {
 		// A real sweep: it wrote a fillable gate asking for a spawn, and
 		// exited 0 — with the operator's Ctrl-C latched.
 		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "spawn": [{"slug": "fix-a", "title": "Fix a", "why": "because"}]}`)
+			`{"status": "ok", "loose": [{"slug": "fix-a", "title": "Fix a", "why": "because"}]}`)
 		pi.mark()
 		return 0, true
 	}
@@ -810,7 +810,7 @@ func TestPulseSurveyTwinSpawnMintsReflect(t *testing.T) {
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "boundary move the twin docs miss"}]}`)
+			`{"status": "ok", "loose": [{"slug": "reflect", "workflow": "twin", "why": "boundary move the twin docs miss"}]}`)
 		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -882,7 +882,7 @@ func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) (int, bool) {
 		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "spawn": [{"slug": "reflect", "workflow": "twin", "why": "drift piled up"}]}`)
+			`{"status": "ok", "loose": [{"slug": "reflect", "workflow": "twin", "why": "drift piled up"}]}`)
 		return 0, true
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -945,7 +945,7 @@ canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the sing
 ticks=$(printf '\140\140\140')
 case "$canvas" in
   */documents/pulse/content.md)
-    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","reflect":{"due":false},"spawn":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}],"chain":[{"runs":["tagged-fix"],"kick":true}]}' "$ticks" > "$canvas"
+    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"kick":true,"runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
     exit 0
     ;;
   *)

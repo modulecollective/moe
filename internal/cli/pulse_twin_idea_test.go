@@ -64,7 +64,7 @@ func TestTwinTaggedIdeaMintsReflectAndTakesNoSeed(t *testing.T) {
 	idea := seedTwinTaggedIdea(t, root, "moe", "bring-the-twin-current")
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "bring-the-twin-current", Why: "boundary move"},
 	}, io.Discard, &errb)
 
@@ -111,12 +111,12 @@ func TestTwinTaggedIdeaMapsOntoOpenReflect(t *testing.T) {
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 	seedTwinTaggedIdea(t, root, "moe", "bring-the-twin-current")
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "bring-the-twin-current", Why: "boundary move"},
 	}, io.Discard, io.Discard)
 
 	if got := minted["bring-the-twin-current"]; got != "reflect-2026-05-14" {
-		t.Fatalf("minted = %v, want the alias on the open reflect", minted)
+		t.Fatalf("minted = %v, want the spec on the open reflect", minted)
 	}
 	if tw := twinRuns(t, root, "moe"); len(tw) != 1 {
 		t.Fatalf("twin runs = %v, want no second reflect", tw)
@@ -140,7 +140,7 @@ func TestPulseMapsOntoOpenReflectDespiteUnrecordedEdits(t *testing.T) {
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, &errb)
 
@@ -186,7 +186,7 @@ func TestPulseUnrecordedEditsWithNoReflectStillSkips(t *testing.T) {
 	seedUnrecordedTwinEdit(t, root, "moe")
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, &errb)
 

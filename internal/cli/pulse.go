@@ -59,25 +59,29 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"\"nothing new since the last pulse\" — is a valid, successful report; never manufacture findings.\n\n" +
 	"Close the canvas with the `## Gate` section (a ```json fence). Set \"status\" to a short word (e.g. \"ok\") once the " +
 	"survey actually ran and concluded — that is what tells the harness this was a real sweep, not a crashed no-op. " +
-	"The gate may carry a `\"spawn\"` list: runs the harness should open, parked. Each entry defaults to a `sdlc` fix run — " +
-	"the bar is mechanical, bounded, and verifiable, all three, and the stage guidance holds it. An entry may instead set " +
-	"`\"workflow\": \"twin\"` to ask for a twin reflect: do that when either the cycle landed a significant twin-relevant change " +
-	"(a decision, a new component, a boundary move the twin docs don't yet describe), or twin staleness has accumulated " +
-	"(many small changes and/or pending twin observations teed up since the last reflect). Do NOT ask for a reflect when a " +
-	"twin run is already open, and never manufacture one to justify the turn. Whatever the workflow, `why` is the one line " +
-	"the operator reads next to the verdict. Omitting `spawn` is the normal outcome; a followup is the default channel for " +
-	"everything that doesn't clear the bar.\n\n" +
-	"And a `\"chain\"` list: groups of run slugs in execution order, each attached after an existing run (`\"onto\"`), under a " +
-	"freshly named head (`\"head\"`), or left to land opportunistically. A group may name runs this gate just spawned or any " +
-	"parked run in the project — naming one that is chained elsewhere moves it. This is where your ordering judgment goes; " +
-	"there is no prose ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in " +
-	"this order, unchanged? If the order is a guess, leave the runs loose. A group may add `\"kick\": true` to ask the harness " +
-	"to start that thread — highest bar on the canvas, and the harness refuses it unless the operator's own verb licensed " +
-	"machine-rooted motion. Omitting `chain` is a perfectly normal outcome. See the stage guidance."
+	"The gate opens runs and orders them in one grammar: you write each run where it goes.\n\n" +
+	"A `\"loose\"` list holds runs to open with no ordering opinion — they park standalone. Each entry is an object: " +
+	"`{\"slug\": ..., \"title\": ..., \"why\": ..., \"design\": ...}`, defaulting to a `sdlc` fix run — the bar is mechanical, " +
+	"bounded, and verifiable, all three, and the stage guidance holds it. An entry may instead set `\"workflow\": \"twin\"` to " +
+	"ask for a twin reflect: do that when either the cycle landed a significant twin-relevant change (a decision, a new " +
+	"component, a boundary move the twin docs don't yet describe), or twin staleness has accumulated (many small changes " +
+	"and/or pending twin observations teed up since the last reflect). Do NOT ask for a reflect when a twin run is already " +
+	"open, and never manufacture one to justify the turn. Whatever the workflow, `why` is the one line the operator reads " +
+	"next to the verdict.\n\n" +
+	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
+	"freshly named head (`\"head\"`), or left to land opportunistically. A thread's `\"runs\"` entry is either a **string** " +
+	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
+	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
+	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
+	"unchanged? If the order is a guess, put the runs in `loose`. A thread may add `\"kick\": true` to ask the harness to " +
+	"start it — highest bar on the canvas, and the harness refuses it unless the operator's own verb licensed machine-rooted " +
+	"motion.\n\n" +
+	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
+	"See the stage guidance."
 
 // pulseCanvasSkeleton is the fixed structural shape the survey canvas
 // opens with. The agent fills the sections in place. The gate's grammar
-// — spawn entries, chain groups, the bars each is held to — is taught
+// — loose runs, threads, the bars each is held to — is taught
 // in the stage fragment, not restated here.
 const pulseCanvasSkeleton = `# Pulse
 
@@ -99,7 +103,7 @@ const pulseCanvasSkeleton = `# Pulse
 
 ## Gate
 
-(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "spawn": [...] and "chain": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
+(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "loose": [...] and "threads": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
 `
 
 func init() {
@@ -414,14 +418,11 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		moePrintf(stderr, "pulse: %s/%s left an unfilled gate — leaving the run open for review\n", projectID, md.ID)
 		return 0
 	}
-	// Mint, then groom, then kick. The order is the design's: a group
-	// can only name runs that exist, and a kick must not start until the
-	// thread it names has stopped moving. A twin reflect is one of the
-	// things `spawn` mints, so it rides this same path — placement is a
-	// `chain` claim the agent makes, not a harness rule, and a reflect
-	// named in no group parks like any other unplaced spawn.
-	minted := maybeSpawnRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
-	groomed := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
+	// Mint, then groom, then kick. The order is the design's: the graph
+	// can only be stamped once every run in it exists, and a kick must
+	// not start until the thread it names has stopped moving.
+	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
+	groomed := groomChains(root, projectID, md.ID, groups, spawner, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -486,23 +487,33 @@ func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
 // the canvas's `## Gate` section. A non-empty status is all the
 // auto-close decision needs — a pulse has no ready/blocked advance
 // vocabulary, only close-or-linger.
+//
+// Spawning and ordering are one grammar. The gate used to split them
+// into two lists that named each other through a shared slug namespace,
+// which is why it needed aliases — and why a twin entry's agent-chosen
+// alias could silently shadow another entry, or a real parked run, and
+// order the wrong thing. A run is now written *where it goes*: inline in
+// a thread's `runs` at its position, or in `loose` when the survey has
+// no ordering opinion. Placement is positional, so nothing has to name
+// anything.
 type pulseGate struct {
 	Status string `json:"status"`
-	// Spawn carries every run the survey asks the harness to open —
-	// fixes and twin reflects alike, one grammar. The agent proposes;
-	// the harness executes — so the survey sandbox stays read-only and
-	// needs no new tools. Each entry parks unchained: ordering is a
-	// separate claim, made in Chain.
-	Spawn []pulseSpawn `json:"spawn"`
-	// Chain carries the survey's ordering opinion: groups of run slugs
-	// in execution order, each placed after an existing run, under a
-	// freshly named head, or self-rooted. See pulse_groom.go. A spawn
-	// entry named in no group parks standalone — ordering is a claim,
-	// and the lane bar prices it separately from the spawn bar.
-	Chain []pulseChainGroup `json:"chain"`
+	// Loose carries runs to open with no ordering claim attached. They
+	// park standalone and unchained — the normal outcome for work whose
+	// order the survey isn't sure of. It stays a separate key rather
+	// than folding into a self-rooted thread because "park it, I have no
+	// opinion" and "root a new thread with this" are different
+	// judgements, and the opportunistic placement must not swallow the
+	// former.
+	Loose []pulseRunSpec `json:"loose"`
+	// Threads carries the survey's ordering opinion: runs in execution
+	// order, each group placed after an existing run, under a freshly
+	// named head, or self-rooted. See pulse_groom.go. The lane bar
+	// prices this separately from the spawn bar.
+	Threads []pulseThread `json:"threads"`
 }
 
-// pulseSpawn is one run the survey asks the harness to open. Slug is
+// pulseRunSpec is one run the survey asks the harness to open. Slug is
 // the slug base (the harness dates it on collision); Title and Why are
 // what the operator reads on the chain canvas before kicking; Design
 // seeds the new run's design canvas, so the design stage starts from
@@ -510,18 +521,80 @@ type pulseGate struct {
 //
 // Workflow picks the mint path and defaults to "sdlc" when empty. The
 // allowlist is sdlc + twin: the only two workflows a pulse has a reason
-// to propose fresh (chat is perpetual, pulse would be recursion).
-// A twin entry is a reflect ask, and its Slug is a *batch-local alias*
-// rather than the run's name — the reflect's real slug stays
-// harness-minted (reflect-YYYY-MM-DD), so the alias exists only so a
-// chain group can name it. Title and Design are meaningless there and
-// are warn-ignored.
-type pulseSpawn struct {
+// to propose fresh (chat is perpetual, pulse would be recursion). A twin
+// spec is a reflect *nomination* — its real slug stays harness-minted
+// (reflect-YYYY-MM-DD), so Slug there is only the handle the dedupe and
+// the warnings read; Title and Design are meaningless and warn-ignored.
+type pulseRunSpec struct {
 	Slug     string `json:"slug"`
 	Workflow string `json:"workflow"`
 	Title    string `json:"title"`
 	Why      string `json:"why"`
 	Design   string `json:"design"`
+}
+
+// pulseThread is one entry in the gate's `threads` list: runs in
+// execution order, plus where the thread goes.
+//
+// Onto attaches the group after that run, wherever it sits. Head mints
+// a chain placeholder with that slug base and chains the group under it.
+// Neither is the opportunistic placement — after the tail of the chain
+// the pulse fired on, when there is one and the ride is dynamic;
+// otherwise a self-rooted parked thread. Onto and Head together is a
+// warn-and-skip: they are two different answers to the same question.
+//
+// Kick asks the harness to kick the thread once grooming is done. Two
+// structural conditions gate it (see pulseSelfKick); the agent's `true`
+// is a request, not an instruction.
+type pulseThread struct {
+	Onto string             `json:"onto"`
+	Head string             `json:"head"`
+	Runs []pulseThreadEntry `json:"runs"`
+	Kick bool               `json:"kick"`
+}
+
+// pulseThreadEntry is one position in a thread: a bare string naming a
+// parked run that already exists, or an object minting one right there.
+// The two shapes are the whole reason the alias map could be deleted —
+// a run that doesn't exist yet is described where it belongs rather than
+// declared elsewhere and referenced by name.
+type pulseThreadEntry struct {
+	// Existing names a parked run in the project, resolved at apply
+	// time. Set only for the string form.
+	Existing string
+	// Spec describes a run to mint at this position. Set only for the
+	// object form.
+	Spec *pulseRunSpec
+}
+
+// specs lists every run the gate asked the harness to open, in document
+// order: the loose ones, then each thread's inline mints. The reader for
+// anything that wants "what did this sweep propose" without caring where
+// it landed.
+func (g pulseGate) specs() []pulseRunSpec {
+	out := append([]pulseRunSpec(nil), g.Loose...)
+	for _, th := range g.Threads {
+		for _, entry := range th.Runs {
+			if entry.Spec != nil {
+				out = append(out, *entry.Spec)
+			}
+		}
+	}
+	return out
+}
+
+func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
+	var slug string
+	if err := json.Unmarshal(b, &slug); err == nil {
+		e.Existing, e.Spec = slug, nil
+		return nil
+	}
+	var spec pulseRunSpec
+	if err := json.Unmarshal(b, &spec); err != nil {
+		return fmt.Errorf("thread entry is neither a run slug nor a run spec: %w", err)
+	}
+	e.Existing, e.Spec = "", &spec
+	return nil
 }
 
 // readPulseGate reads the survey canvas and parses its `## Gate` JSON
@@ -555,8 +628,8 @@ func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
 // `(twin)`. Every pulse-side ask is a *nomination*, not a create: with no
 // reflect open one is minted; with one already open the mint is a noop and
 // the nomination maps to the open run's id. Chain grooming then treats a
-// mapped nomination like any other member, so a gate naming the reflect at
-// a group's tail repositions the open run instead of dropping it.
+// mapped nomination like any other member, so a gate writing a twin spec at
+// a thread's tail repositions the open run instead of dropping it.
 //
 // The one ask that resolves to nothing is unrecorded out-of-band twin
 // edits with no reflect open: there is nothing to map to and minting is
@@ -566,9 +639,7 @@ func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
 // the pulse's auto-close, since the report and filings are already durable
 // on disk.
 //
-// Returns the resolved run's id, or "" when the ask resolved to nothing —
-// the handle the alias in `minted` points at, so a chain group can name
-// the reflect.
+// Returns the resolved run's id, or "" when the ask resolved to nothing.
 func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) string {
 	canonical, err := twinWikiBuilder(root, projectID)
 	if err != nil {
@@ -587,7 +658,7 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 			if refusal.kind == reflectRefusalInProgress {
 				// The nomination resolves to the open pass. Logged rather
 				// than silent so the sweep output stays honest about which
-				// run the alias — and any chain group naming it — landed on.
+				// run the nomination — and the thread position holding it — landed on.
 				moePrintf(stderr, "pulse: reflect already open for %s — mapped to %s/%s (%s)\n", projectID, projectID, refusal.slug, why)
 				return refusal.slug
 			}
@@ -601,34 +672,77 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 	return md.ID
 }
 
-// maybeSpawnRuns mints a parked run for each entry the survey's gate
-// proposed. Minting is all it does: ordering is a separate claim the
-// gate makes in its `chain` list, priced against a higher bar, and
-// groomChains is what stamps it. A spawn entry named in no group parks
-// standalone and unchained — which is the normal outcome for work whose
-// order the survey isn't sure of, and which is equally true of a twin
-// reflect: the harness has no placement rule of its own for one.
+// applyPulseGate opens every run the gate's specs describe and hands
+// back the groom groups its threads imply. Two walks over one minter, in
+// document order — `loose` first, then each thread's `runs` — so a slug
+// proposed twice in one gate hits the dedupe rather than minting a dated
+// sibling.
 //
-// Dispatch is per-workflow. sdlc (the default) is the fix-run path
-// below. twin routes through maybeSpawnReflect → mintReflectRun, the
-// same core `moe twin reflect` uses, so the closed-schema check and the
+// A minted run travels onward as its own run id rather than as a name in
+// a shared namespace. That is the whole of the alias map's replacement:
+// the gate's two lists used to name each other by slug, so the mapping
+// had to exist, and every write into it was last-write-wins.
+//
+// Warn-only throughout: a spec that can't be minted drops with a stderr
+// line and the rest of the sweep carries on. The report and filings are
+// already durable, so a failed mint is a spawn-by-hand-later, not a lost
+// sweep.
+func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, stderr io.Writer) []groomGroup {
+	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
+	for _, spec := range gate.Loose {
+		m.mint(spec, stdout, stderr)
+	}
+	groups := make([]groomGroup, 0, len(gate.Threads))
+	for _, th := range gate.Threads {
+		grp := groomGroup{Onto: th.Onto, Head: th.Head, Kick: th.Kick}
+		for _, entry := range th.Runs {
+			if entry.Spec == nil {
+				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
+				continue
+			}
+			// Mint in place. A spec that fails leaves a hole in the order
+			// rather than shifting the rest — the warn line names it, and
+			// the runs around it keep the positions the survey gave them.
+			if id := m.mint(*entry.Spec, stdout, stderr); id != "" {
+				grp.Runs = append(grp.Runs, groomMember{mintedID: id})
+			}
+		}
+		groups = append(groups, grp)
+	}
+	return groups
+}
+
+// pulseMinter opens the runs one sweep's gate asks for. It holds the
+// live-slug dedupe set across the whole gate, scanning once on first
+// use, and claims each base it mints so a repeat proposal in the same
+// gate is a skip rather than a dated sibling.
+type pulseMinter struct {
+	root      string
+	projectID string
+	pulseSlug string
+	live      []string
+	scanned   bool
+	broken    bool
+}
+
+// mint opens one run for one spec and returns its id, or "" when the
+// spec was skipped.
+//
+// Dispatch is per-workflow. sdlc (the default) is the fix-run path.
+// twin routes through maybeSpawnReflect → mintReflectRun, the same core
+// `moe twin reflect` uses, so the closed-schema check and the
 // unrecorded-edits refusal ride along — but where the verb refuses a
 // concurrent pass, the pulse's ask is a nomination that *resolves*: mint
-// if no reflect is open, map onto the open one otherwise. Two twin
-// entries in one gate therefore land on the same run instead of the
-// second going nowhere. Anything else warns and skips.
-//
-// Returns proposed-slug → minted-run-id, so a `chain` group can name
-// this batch's own runs by the slug the survey wrote even when the
-// harness dated it on collision. For a twin entry the key is a
-// batch-local alias, since the reflect's own slug is harness-minted.
+// if no reflect is open, map onto the open one otherwise. Two twin specs
+// in one gate therefore land on the same run instead of the second going
+// nowhere. Anything else warns and skips.
 //
 // No numeric cap. The harness has no basis for judging which proposals
 // to trim, and parked is itself the review gate: spawned runs are
-// visible on the dash and prunable with `moe chain edit`.
-// Over-proposal is visible junk, which the pulse already prefers to
-// invisible absence. The bar — mechanical, bounded, verifiable — is
-// taught in the stage fragment, where judgment belongs.
+// visible on the dash and prunable with `moe chain edit`. Over-proposal
+// is visible junk, which the pulse already prefers to invisible absence.
+// The bar — mechanical, bounded, verifiable — is taught in the stage
+// fragment, where judgment belongs.
 //
 // The one mechanical exception to dedupe is a live idea carrying a
 // harvested follow-up's workflow tag: the pulse promotes that capture
@@ -637,139 +751,149 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 // reflect core, taking the promotion edge but no seed. Untagged ideas
 // remain behind a structural human-triage fence. Every other live match
 // still skips.
-//
-// Warn-only throughout, like the reflect spawn beside it: the report and
-// filings are already durable, so a failed mint is a spawn-by-hand-later,
-// not a lost sweep.
-func maybeSpawnRuns(root, projectID, pulseSlug string, spawns []pulseSpawn, stdout, stderr io.Writer) map[string]string {
-	if len(spawns) == 0 {
-		return nil
-	}
-	live, err := liveSlugs(root, projectID)
-	if err != nil {
-		moePrintf(stderr, "pulse: spawn: scan runs for %s: %v\n", projectID, err)
-		return nil
-	}
+func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
+	projectID, pulseSlug := m.projectID, m.pulseSlug
+	spawnedBy := projectID + "/" + pulseSlug
 
-	minted := map[string]string{}
-	for _, s := range spawns {
-		slug := strings.TrimSpace(s.Slug)
-		if slug == "" || run.Slugify(slug) != slug {
-			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
-			continue
-		}
-		// Dispatch on workflow before anything else: the steps below —
-		// live-slug dedupe, tagged-idea promotion — are sdlc's, and a
-		// twin entry's dedupe semantics are "one twin run in flight per
-		// project", enforced inside mintReflectRun instead.
-		switch workflow := strings.TrimSpace(s.Workflow); workflow {
-		case "", "sdlc":
-		case "twin":
-			if t := strings.TrimSpace(s.Title); t != "" {
-				moePrintf(stderr, "pulse: spawn: ignoring title on twin entry %q; the reflect's slug is harness-minted\n", slug)
-			}
-			if strings.TrimSpace(s.Design) != "" {
-				moePrintf(stderr, "pulse: spawn: ignoring design body on twin entry %q; a reflect reads the twin, not a seed\n", slug)
-			}
-			if id := maybeSpawnReflect(root, projectID, pulseSlug, s.Why, stdout, stderr); id != "" {
-				// Keyed by the agent's alias, not the minted slug: the
-				// alias is the only handle a chain group can name.
-				minted[slug] = id
-			}
-			continue
-		default:
-			moePrintf(stderr, "pulse: spawn: %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
-			continue
-		}
-		if slugBaseMatches(live, slug) {
-			matches, scanErr := matchingLiveRuns(root, projectID, slug)
-			if scanErr != nil {
-				moePrintf(stderr, "pulse: spawn: scan live match for %s/%s: %v\n", projectID, slug, scanErr)
-				continue
-			}
-			if len(matches) != 1 || matches[0].Workflow != "idea" {
-				moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
-				continue
-			}
-			idea := matches[0]
-			if idea.PromoteTo == "" {
-				moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
-				continue
-			}
-			if idea.PromoteTo == "twin" {
-				// A `(twin)` tag nominates a reflect; it does not name a
-				// destination to mint. Route it through the same resolve the
-				// gate's twin spawn entries take — mint if no pass is open,
-				// map onto the open one otherwise — and record the promotion
-				// edge onto whichever run that was. No seed doc: a reflect
-				// reads the managed docs, `feedback/twin.md` and the journal,
-				// never a promoted idea's canvas, which stays on the idea and
-				// is reachable through the MoE-Promoted-To edge.
-				id := maybeSpawnReflect(root, projectID, pulseSlug, s.Why, stdout, stderr)
-				if id == "" {
-					continue
-				}
-				if markErr := runopen.MarkPromoted(root, projectID, idea.ID, projectID, id, stdout, stderr); markErr != nil {
-					moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
-				}
-				// Keyed by the idea's slug, which is the handle the gate
-				// already knows — so a chain group naming it orders the
-				// reflect.
-				minted[slug] = id
-				moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)
-				continue
-			}
-			wf, lookupErr := LookupWorkflow(idea.PromoteTo)
-			if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
-				moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
-				continue
-			}
-			if strings.TrimSpace(s.Design) != "" {
-				moePrintf(stderr, "pulse: spawn: ignoring design body for tagged idea %s/%s; the idea canvas is the seed\n", projectID, idea.ID)
-			}
-			promoted, promoteErr := runopen.Promote(root, projectID, idea.ID, runopen.PromoteOptions{
-				Workflow:   idea.PromoteTo,
-				FirstStage: wf.Stages()[0],
-				SpawnedBy:  projectID + "/" + pulseSlug,
-				Consent:    spawnConsent(projectID + "/" + pulseSlug),
-			}, stdout, stderr)
-			if promoteErr != nil {
-				moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
-				continue
-			}
-			if promoted.MarkErr != nil {
-				moePrintf(stderr, "pulse: warning: promoted %s/%s but could not mark the idea: %v\n", projectID, promoted.Run.ID, promoted.MarkErr)
-			}
-			live = append(live, promoted.Run.ID)
-			minted[slug] = promoted.Run.ID
-			moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, idea.PromoteTo, projectID, promoted.Run.ID)
-			continue
-		}
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			title = slug
-		}
-		md, err := runopen.Open(root, projectID, run.Options{
-			IDBase:    slug,
-			Workflow:  "sdlc",
-			SeedDocs:  map[string]string{"design": spawnDesignSeed(title, s)},
-			SpawnedBy: projectID + "/" + pulseSlug,
-			Trailers: trailers.Block{
-				SpawnedBy: projectID + "/" + pulseSlug,
-				Consent:   spawnConsent(projectID + "/" + pulseSlug),
-			},
-		}, stdout, stderr)
-		if err != nil {
-			moePrintf(stderr, "pulse: spawn %q for %s: %v\n", slug, projectID, err)
-			continue
-		}
-		// Claim the base so a second entry in the same batch proposing the
-		// same slug hits the dedupe rather than minting a dated sibling.
-		live = append(live, md.ID)
-		minted[slug] = md.ID
-		moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
+	slug := strings.TrimSpace(s.Slug)
+	if slug == "" || run.Slugify(slug) != slug {
+		moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
+		return ""
 	}
-	return minted
+	// Dispatch on workflow before anything else: the steps below —
+	// live-slug dedupe, tagged-idea promotion — are sdlc's, and a twin
+	// spec's dedupe semantics are "one twin run in flight per project",
+	// enforced inside mintReflectRun instead.
+	switch workflow := strings.TrimSpace(s.Workflow); workflow {
+	case "", "sdlc":
+	case "twin":
+		if t := strings.TrimSpace(s.Title); t != "" {
+			moePrintf(stderr, "pulse: spawn: ignoring title on twin entry %q; the reflect's slug is harness-minted\n", slug)
+		}
+		if strings.TrimSpace(s.Design) != "" {
+			moePrintf(stderr, "pulse: spawn: ignoring design body on twin entry %q; a reflect reads the twin, not a seed\n", slug)
+		}
+		return maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
+	default:
+		moePrintf(stderr, "pulse: spawn: %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
+		return ""
+	}
+	if !m.ensureLive(stderr) {
+		return ""
+	}
+	if slugBaseMatches(m.live, slug) {
+		return m.promoteOrSkip(slug, s, stdout, stderr)
+	}
+	title := strings.TrimSpace(s.Title)
+	if title == "" {
+		title = slug
+	}
+	md, err := runopen.Open(m.root, projectID, run.Options{
+		IDBase:    slug,
+		Workflow:  "sdlc",
+		SeedDocs:  map[string]string{"design": spawnDesignSeed(title, s)},
+		SpawnedBy: spawnedBy,
+		Trailers: trailers.Block{
+			SpawnedBy: spawnedBy,
+			Consent:   spawnConsent(spawnedBy),
+		},
+	}, stdout, stderr)
+	if err != nil {
+		moePrintf(stderr, "pulse: spawn %q for %s: %v\n", slug, projectID, err)
+		return ""
+	}
+	m.live = append(m.live, md.ID)
+	moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
+	return md.ID
+}
+
+// promoteOrSkip handles the one live-slug match that isn't a duplicate:
+// a tagged idea, which the pulse promotes through the same seam
+// `--from-idea` uses. Everything else already has this work in flight
+// and skips.
+func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr io.Writer) string {
+	projectID, pulseSlug := m.projectID, m.pulseSlug
+	spawnedBy := projectID + "/" + pulseSlug
+
+	matches, err := matchingLiveRuns(m.root, projectID, slug)
+	if err != nil {
+		moePrintf(stderr, "pulse: spawn: scan live match for %s/%s: %v\n", projectID, slug, err)
+		return ""
+	}
+	if len(matches) != 1 || matches[0].Workflow != "idea" {
+		moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
+		return ""
+	}
+	idea := matches[0]
+	if idea.PromoteTo == "" {
+		moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
+		return ""
+	}
+	if idea.PromoteTo == "twin" {
+		// A `(twin)` tag nominates a reflect; it does not name a
+		// destination to mint. Route it through the same resolve the
+		// gate's twin specs take — mint if no pass is open, map onto the
+		// open one otherwise — and record the promotion edge onto
+		// whichever run that was. No seed doc: a reflect reads the
+		// managed docs, `feedback/twin.md` and the journal, never a
+		// promoted idea's canvas, which stays on the idea and is
+		// reachable through the MoE-Promoted-To edge.
+		id := maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
+		if id == "" {
+			return ""
+		}
+		if markErr := runopen.MarkPromoted(m.root, projectID, idea.ID, projectID, id, stdout, stderr); markErr != nil {
+			moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
+		}
+		moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)
+		return id
+	}
+	wf, lookupErr := LookupWorkflow(idea.PromoteTo)
+	if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
+		moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
+		return ""
+	}
+	if strings.TrimSpace(s.Design) != "" {
+		moePrintf(stderr, "pulse: spawn: ignoring design body for tagged idea %s/%s; the idea canvas is the seed\n", projectID, idea.ID)
+	}
+	promoted, promoteErr := runopen.Promote(m.root, projectID, idea.ID, runopen.PromoteOptions{
+		Workflow:   idea.PromoteTo,
+		FirstStage: wf.Stages()[0],
+		SpawnedBy:  spawnedBy,
+		Consent:    spawnConsent(spawnedBy),
+	}, stdout, stderr)
+	if promoteErr != nil {
+		moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
+		return ""
+	}
+	if promoted.MarkErr != nil {
+		moePrintf(stderr, "pulse: warning: promoted %s/%s but could not mark the idea: %v\n", projectID, promoted.Run.ID, promoted.MarkErr)
+	}
+	m.live = append(m.live, promoted.Run.ID)
+	moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, idea.PromoteTo, projectID, promoted.Run.ID)
+	return promoted.Run.ID
+}
+
+// ensureLive loads the dedupe set on first use, so a gate whose specs
+// are all twin nominations (or which has none at all) pays for no scan.
+// A failed scan is remembered: without the dedupe set every sdlc mint
+// would be unguarded, so the whole gate's sdlc half is refused rather
+// than re-scanning per spec.
+func (m *pulseMinter) ensureLive(stderr io.Writer) bool {
+	if m.broken {
+		return false
+	}
+	if m.scanned {
+		return true
+	}
+	live, err := liveSlugs(m.root, m.projectID)
+	if err != nil {
+		moePrintf(stderr, "pulse: spawn: scan runs for %s: %v\n", m.projectID, err)
+		m.broken = true
+		return false
+	}
+	m.live, m.scanned = live, true
+	return true
 }
 
 // matchingLiveRuns returns every live run derived from base. The pulse
@@ -797,7 +921,7 @@ func matchingLiveRuns(root, projectID, base string) ([]*run.Metadata, error) {
 // with. The survey's own markdown is the body when it wrote one;
 // otherwise the title and why are all there is, which is still a
 // better starting point than an empty canvas.
-func spawnDesignSeed(title string, s pulseSpawn) string {
+func spawnDesignSeed(title string, s pulseRunSpec) string {
 	body := strings.TrimSpace(s.Design)
 	if body != "" {
 		return body + "\n"

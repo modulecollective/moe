@@ -11,17 +11,46 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+// mintSpecs opens one run per spec through the gate's minter and returns
+// proposed-slug → minted-id.
+//
+// The harness keeps no such map — that was the alias namespace this run
+// deleted, and a minted run now travels as its own id — but a test that
+// asks for a run still needs to name what it got back, so the mapping
+// lives here where a test's own bookkeeping belongs. Specs skipped by
+// the minter are absent, which is what the dedupe assertions read.
+func mintSpecs(root, projectID, pulseSlug string, specs []pulseRunSpec, stdout, stderr io.Writer) map[string]string {
+	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
+	out := map[string]string{}
+	for _, s := range specs {
+		if id := m.mint(s, stdout, stderr); id != "" {
+			out[strings.TrimSpace(s.Slug)] = id
+		}
+	}
+	return out
+}
+
+// runsFrom builds a thread's members from bare slugs — the string form
+// of a `runs` entry, resolved against disk at apply time.
+func runsFrom(slugs ...string) []groomMember {
+	out := make([]groomMember, 0, len(slugs))
+	for _, s := range slugs {
+		out = append(out, groomMember{slug: s})
+	}
+	return out
+}
+
 // groomFixture mints n parked sdlc runs named fix-1..fix-n and returns
 // the slug→id map grooming resolves against. Deliberately mints through
 // the real spawn step, so the dating-on-collision path the resolver has
 // to see through is exercised rather than simulated.
 func groomFixture(t *testing.T, root string, slugs ...string) map[string]string {
 	t.Helper()
-	spawns := make([]pulseSpawn, 0, len(slugs))
+	spawns := make([]pulseRunSpec, 0, len(slugs))
 	for _, s := range slugs {
-		spawns = append(spawns, pulseSpawn{Slug: s, Title: s})
+		spawns = append(spawns, pulseRunSpec{Slug: s, Title: s})
 	}
-	minted := maybeSpawnRuns(root, "moe", "pulse-groom", spawns, io.Discard, os.Stderr)
+	minted := mintSpecs(root, "moe", "pulse-groom", spawns, io.Discard, os.Stderr)
 	if len(minted) != len(slugs) {
 		t.Fatalf("minted %v, want all of %v", minted, slugs)
 	}
@@ -61,8 +90,8 @@ func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b", "fix-c"}}},
-		minted, "" /*spawner*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b", "fix-c")}},
+		"" /*spawner*/, io.Discard, os.Stderr)
 
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Fatalf("chain heads %v, want none — a self-rooted thread is headless", got)
@@ -88,9 +117,9 @@ func TestGroomOntoAppendsAtATail(t *testing.T) {
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
 	groomChains(root, "moe", "pulse-groom-2",
-		[]pulseChainGroup{{Onto: "fix-b", Runs: []string{"fix-c"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-b", Runs: runsFrom("fix-c")}}, "", io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[a] != b || edges[b] != c || edges[c] != "" {
@@ -108,9 +137,9 @@ func TestGroomOntoSplicesMidChain(t *testing.T) {
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
 	groomChains(root, "moe", "pulse-groom-2",
-		[]pulseChainGroup{{Onto: "fix-a", Runs: []string{"fix-c"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-c")}}, "", io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[a] != c || edges[c] != b {
@@ -135,11 +164,11 @@ func TestGroomMoveRestitchesTheOldUnit(t *testing.T) {
 
 	// Two threads: a → b → c, and d alone.
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b", "fix-c"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b", "fix-c")}}, "", io.Discard, os.Stderr)
 
 	// Steal the middle member onto d.
 	groomChains(root, "moe", "pulse-groom-2",
-		[]pulseChainGroup{{Onto: "fix-d", Runs: []string{"fix-b"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-d", Runs: runsFrom("fix-b")}}, "", io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[d] != b {
@@ -162,8 +191,8 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Head: "perf-cleanups", Runs: []string{"fix-a", "fix-b"}}},
-		minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Head: "perf-cleanups", Runs: runsFrom("fix-a", "fix-b")}},
+		"", io.Discard, os.Stderr)
 
 	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
 	if len(heads) != 1 {
@@ -194,12 +223,12 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 // warn-only ethos. The group's runs stay where they were.
 func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
 	root := spawnFixture(t)
-	minted := groomFixture(t, root, "fix-a")
+	groomFixture(t, root, "fix-a")
 
 	var errb bytes.Buffer
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "no-such-run", Runs: []string{"fix-a"}}},
-		minted, "", io.Discard, &errb)
+		[]groomGroup{{Onto: "no-such-run", Runs: runsFrom("fix-a")}},
+		"", io.Discard, &errb)
 
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want the group skipped", groomed.threads)
@@ -216,12 +245,12 @@ func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
 // same question — skip rather than pick one.
 func TestGroomRejectsOntoAndHeadTogether(t *testing.T) {
 	root := spawnFixture(t)
-	minted := groomFixture(t, root, "fix-a", "fix-b")
+	groomFixture(t, root, "fix-a", "fix-b")
 
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "fix-a", Head: "topic", Runs: []string{"fix-b"}}},
-		minted, "", io.Discard, &errb)
+		[]groomGroup{{Onto: "fix-a", Head: "topic", Runs: runsFrom("fix-b")}},
+		"", io.Discard, &errb)
 
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Errorf("chain heads %v, want none — the group was skipped", got)
@@ -259,11 +288,11 @@ func TestGroomOpportunisticNeedsDynamic(t *testing.T) {
 			// The spawner heads a two-run thread — it is a chain member,
 			// so there is a unit tail to extend.
 			groomChains(root, "moe", "pulse-setup",
-				[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+				[]groomGroup{{Runs: runsFrom("spawner", "member")}}, "", io.Discard, os.Stderr)
 
 			defer withRideMode(tc.mode)()
 			groomChains(root, "moe", "pulse-groom",
-				[]pulseChainGroup{{Runs: []string{"fix-new"}}}, minted, spawnerKey, io.Discard, os.Stderr)
+				[]groomGroup{{Runs: runsFrom("fix-new")}}, spawnerKey, io.Discard, os.Stderr)
 
 			edges := liveEdges(t, root)
 			if tc.wantEnd == "tail" {
@@ -297,12 +326,12 @@ func TestGroomStaticRideRedirectsIntoTheRiddenUnit(t *testing.T) {
 	newKey := "moe/" + minted["fix-new"]
 
 	groomChains(root, "moe", "pulse-setup",
-		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("spawner", "member")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideStatic)()
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "member", Runs: []string{"fix-new"}}}, minted, spawnerKey, io.Discard, &errb)
+		[]groomGroup{{Onto: "member", Runs: runsFrom("fix-new")}}, spawnerKey, io.Discard, &errb)
 
 	edges := liveEdges(t, root)
 	if edges[memberKey] == newKey {
@@ -328,12 +357,12 @@ func TestGroomStaticRideFencesAMoveOut(t *testing.T) {
 	elsewhereKey := "moe/" + minted["elsewhere"]
 
 	groomChains(root, "moe", "pulse-setup",
-		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("spawner", "member")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideStatic)()
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member"}}}, minted, spawnerKey, io.Discard, &errb)
+		[]groomGroup{{Onto: "elsewhere", Runs: runsFrom("member")}}, spawnerKey, io.Discard, &errb)
 
 	edges := liveEdges(t, root)
 	if edges[spawnerKey] != memberKey {
@@ -361,12 +390,12 @@ func TestGroomStaticRideRedirectDoesNotYankMembers(t *testing.T) {
 	member2Key := "moe/" + minted["member2"]
 
 	groomChains(root, "moe", "pulse-setup",
-		[]pulseChainGroup{{Runs: []string{"spawner", "member", "member2"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("spawner", "member", "member2")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideStatic)()
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "member", Runs: []string{"member2"}}}, minted, spawnerKey, io.Discard, &errb)
+		[]groomGroup{{Onto: "member", Runs: runsFrom("member2")}}, spawnerKey, io.Discard, &errb)
 
 	edges := liveEdges(t, root)
 	if edges[spawnerKey] != memberKey || edges[memberKey] != member2Key {
@@ -387,12 +416,12 @@ func TestGroomStaticRideDropsOnlyTheRiddenEntry(t *testing.T) {
 	newKey := "moe/" + minted["fix-new"]
 
 	groomChains(root, "moe", "pulse-setup",
-		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("spawner", "member")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideStatic)()
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member", "fix-new"}}},
-		minted, spawnerKey, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "elsewhere", Runs: runsFrom("member", "fix-new")}},
+		spawnerKey, io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[elsewhereKey] != newKey {
@@ -414,11 +443,11 @@ func TestGroomDynamicRideAllowsAMoveOut(t *testing.T) {
 	elsewhereKey := "moe/" + minted["elsewhere"]
 
 	groomChains(root, "moe", "pulse-setup",
-		[]pulseChainGroup{{Runs: []string{"spawner", "member"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("spawner", "member")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "elsewhere", Runs: []string{"member"}}}, minted, spawnerKey, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "elsewhere", Runs: runsFrom("member")}}, spawnerKey, io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[elsewhereKey] != memberKey {
@@ -437,11 +466,11 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 
 	// Mint fix-a, close it out of the live set, then mint fix-a again —
 	// the second one gets a dated slug.
-	first := maybeSpawnRuns(root, "moe", "pulse-one",
-		[]pulseSpawn{{Slug: "fix-a", Title: "A"}}, io.Discard, os.Stderr)
+	first := mintSpecs(root, "moe", "pulse-one",
+		[]pulseRunSpec{{Slug: "fix-a", Title: "A"}}, io.Discard, os.Stderr)
 	setRunStatus(t, root, "moe", first["fix-a"], run.StatusMerged)
-	minted := maybeSpawnRuns(root, "moe", "pulse-two",
-		[]pulseSpawn{{Slug: "fix-a", Title: "A again"}, {Slug: "fix-b", Title: "B"}}, io.Discard, os.Stderr)
+	minted := mintSpecs(root, "moe", "pulse-two",
+		[]pulseRunSpec{{Slug: "fix-a", Title: "A again"}, {Slug: "fix-b", Title: "B"}}, io.Discard, os.Stderr)
 	if minted["fix-a"] == "fix-a" {
 		t.Fatalf("second mint reused the bare slug %q — fixture assumption broken", minted["fix-a"])
 	}
@@ -449,7 +478,7 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 	// Groom with an empty `minted` map, so resolution has to go through
 	// the on-disk lookup rather than this batch's own mints.
 	groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, nil, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges["moe/"+minted["fix-a"]] != "moe/"+minted["fix-b"] {
@@ -470,12 +499,12 @@ func TestGroomOpportunisticNeverStampsASelfEdge(t *testing.T) {
 
 	// A thread for the ride to be walking: a -> b, spawner a, tail b.
 	groomChains(root, "moe", "pulse-one",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-two",
-		[]pulseChainGroup{{Runs: []string{"fix-b"}}}, minted, a, io.Discard, &errb)
+		[]groomGroup{{Runs: runsFrom("fix-b")}}, a, io.Discard, &errb)
 
 	for parent, child := range liveEdges(t, root) {
 		if parent == child {
@@ -502,10 +531,10 @@ func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 	a, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-c"]
 
-	groomed := groomChains(root, "moe", "pulse-groom", []pulseChainGroup{
-		{Runs: []string{"fix-a", "fix-b"}, Kick: true},
-		{Onto: "fix-c", Runs: []string{"fix-a"}},
-	}, minted, "", io.Discard, os.Stderr)
+	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
+		{Runs: runsFrom("fix-a", "fix-b"), Kick: true},
+		{Onto: "fix-c", Runs: runsFrom("fix-a")},
+	}, "", io.Discard, os.Stderr)
 
 	if len(groomed.threads) != 2 {
 		t.Fatalf("threads = %+v, want two", groomed.threads)
@@ -529,13 +558,13 @@ func TestGroomReportsSpawnerChainMembership(t *testing.T) {
 	a := "moe/" + minted["fix-a"]
 
 	loose := groomChains(root, "moe", "pulse-one",
-		[]pulseChainGroup{{Runs: []string{"fix-b"}}}, minted, a, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-b")}}, a, io.Discard, os.Stderr)
 	if loose.spawnerChained {
 		t.Errorf("spawnerChained = true, want false — %s has no live edges either way", a)
 	}
 
 	joined := groomChains(root, "moe", "pulse-two",
-		[]pulseChainGroup{{Onto: "fix-a", Runs: []string{"fix-b"}}}, minted, a, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-b")}}, a, io.Discard, os.Stderr)
 	if !joined.spawnerChained {
 		t.Errorf("spawnerChained = false, want true — the sweep just chained work onto %s", a)
 	}

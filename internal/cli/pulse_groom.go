@@ -40,24 +40,40 @@ import (
 // groomAnchor), and a `runs` slug naming one of its members is dropped
 // rather than moved out (see placeGroup).
 
-// pulseChainGroup is one entry in the gate's `chain` list: a group of
-// run slugs in execution order, plus where they go.
+// groomGroup is one thread the sweep is about to stamp: its members in
+// execution order, plus where the thread goes. Built from the gate's
+// `threads` list by applyPulseGate once every run in it exists — see
+// pulseThread for what each field means to the agent writing it.
+type groomGroup struct {
+	Onto string
+	Head string
+	Runs []groomMember
+	Kick bool
+}
+
+// groomMember is one position in a groomGroup: either a run this sweep
+// just minted, which travels as its own concrete id, or a slug naming a
+// run that already existed, resolved against disk at apply time.
 //
-// Onto attaches the group after that run, wherever it sits. Head mints
-// a chain placeholder with that slug base and chains the group under
-// it. Neither is the opportunistic placement — after the tail of the
-// chain the pulse fired on, when there is one and the ride is dynamic;
-// otherwise a self-rooted parked thread. Onto and Head together is a
-// warn-and-skip: they are two different answers to the same question.
-//
-// Kick asks the harness to kick the group's thread once grooming is
-// done. Two structural conditions gate it (see pulseSelfKick); the
-// agent's `true` is a request, not an instruction.
-type pulseChainGroup struct {
-	Onto string   `json:"onto"`
-	Head string   `json:"head"`
-	Runs []string `json:"runs"`
-	Kick bool     `json:"kick"`
+// This pairing is what replaced the alias map. The old gate split
+// spawning and ordering into two lists that named each other through one
+// shared slug namespace, written last-write-wins: a twin entry's
+// agent-chosen alias could shadow an sdlc entry or a real parked run's
+// slug, and the resolver consulted the map before disk — so the wrong
+// run got ordered, silently. A minted run now carries its identity from
+// the moment it exists, and nothing has to name anything.
+type groomMember struct {
+	mintedID string
+	slug     string
+}
+
+// name is what the warn lines call this member — the id when the sweep
+// minted it, else whatever the survey wrote.
+func (m groomMember) name() string {
+	if m.mintedID != "" {
+		return m.mintedID
+	}
+	return m.slug
 }
 
 // groomedThread records where a group landed, for the kick step. Root
@@ -100,7 +116,6 @@ type groomSweep struct {
 	pulseSlug  string
 	graph      *run.ChainGraph
 	byKey      map[string]*run.Metadata
-	minted     map[string]string
 	spawnerKey string
 	// spawnerUnit is the thread the pulse fired on. Under a static ride
 	// this is the unit being walked right now, and grooming is fenced
@@ -109,17 +124,16 @@ type groomSweep struct {
 	mode        rideMode
 }
 
-// groomChains is the pulse's groom step: walk the gate's `chain` groups
+// groomChains is the pulse's groom step: walk the gate's `threads` groups
 // in order, stamp the edges they imply, and report the threads a kick
-// step may root. minted maps each proposed spawn slug to the run id the
-// harness actually opened (the slug is dated on collision), so a group
-// can name a run from this same batch.
+// step may root. Every group arrives with its members already resolved
+// to a mint or a slug — see applyPulseGate, which opened them.
 //
 // Warn-only throughout, like the spawn step beside it: a group that
 // can't be resolved drops with a stderr line and the rest of the sweep
 // carries on. Grooming is an ordering opinion — losing one is a
 // re-groom next pulse, not a lost sweep.
-func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, minted map[string]string, spawnerKey string, stdout, stderr io.Writer) groomResult {
+func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawnerKey string, stdout, stderr io.Writer) groomResult {
 	// spawnerChained defaults true: every early return below is a groom
 	// that produced no threads, so no kick is wanted anyway, but the
 	// conservative default is what makes that safe to say out loud.
@@ -148,7 +162,6 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 		pulseSlug: pulseSlug,
 		graph:     run.NewChainGraph(idx, byKey),
 		byKey:     byKey,
-		minted:    minted,
 		mode:      currentRideMode,
 	}
 	if spawnerKey != "" {
@@ -225,7 +238,7 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 // placeGroup resolves one group's members and anchor and rewrites the
 // graph. Returns the thread it landed on, and false when the group was
 // skipped.
-func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.Writer) (groomedThread, bool) {
+func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer) (groomedThread, bool) {
 	label := fmt.Sprintf("chain group %d", i+1)
 	if grp.Onto != "" && grp.Head != "" {
 		moePrintf(stderr, "pulse: groom: %s sets both `onto` and `head` — skipping\n", label)
@@ -233,11 +246,11 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 	}
 
 	var members []string
-	for _, slug := range grp.Runs {
-		key, ok := sw.resolveMember(slug)
+	for _, m := range grp.Runs {
+		key, ok := sw.resolveMember(m)
 		if !ok {
 			moePrintf(stderr, "pulse: groom: %s names %q, which is not a parked run in %s — skipping that entry\n",
-				label, slug, sw.projectID)
+				label, m.name(), sw.projectID)
 			continue
 		}
 		if sw.fenced(key) {
@@ -305,7 +318,7 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 // placements in first-match order. Returns the anchor ("" self-roots
 // the group), the minted head key if one was minted, and false when the
 // group should be skipped entirely.
-func (sw *groomSweep) groomAnchor(label string, grp pulseChainGroup, members []string, stdout, stderr io.Writer) (anchor, headKey string, ok bool) {
+func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string, stdout, stderr io.Writer) (anchor, headKey string, ok bool) {
 	switch {
 	case grp.Onto != "":
 		key, found := sw.resolveAnchor(grp.Onto)
@@ -390,18 +403,19 @@ func (sw *groomSweep) fenced(key string) bool {
 	return sw.mode == rideStatic && sw.spawnerUnit[key]
 }
 
-// resolveMember maps a `runs` slug to a run key. This batch's own mints
-// win first (the harness may have dated the slug), then any parked —
-// in-progress — chainable run in the project, loose or already chained,
-// machine- or operator-authored. Members must be parked: a merged run
-// has nothing left to execute, so ordering it is meaningless.
-func (sw *groomSweep) resolveMember(slug string) (string, bool) {
-	slug = strings.TrimSpace(slug)
+// resolveMember maps one thread position to a run key. A run this sweep
+// minted needs no lookup at all — it carries its own id. Anything else
+// is a slug naming a parked — in-progress — chainable run in the
+// project, loose or already chained, machine- or operator-authored.
+// Members must be parked: a merged run has nothing left to execute, so
+// ordering it is meaningless.
+func (sw *groomSweep) resolveMember(m groomMember) (string, bool) {
+	if m.mintedID != "" {
+		return sw.projectID + "/" + m.mintedID, true
+	}
+	slug := strings.TrimSpace(m.slug)
 	if slug == "" {
 		return "", false
-	}
-	if id, ok := sw.minted[slug]; ok {
-		return sw.projectID + "/" + id, true
 	}
 	return sw.lookup(slug, func(md *run.Metadata) bool {
 		return md.Status == run.StatusInProgress && chainableWorkflow(md.Workflow)
@@ -416,9 +430,6 @@ func (sw *groomSweep) resolveAnchor(slug string) (string, bool) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		return "", false
-	}
-	if id, ok := sw.minted[slug]; ok {
-		return sw.projectID + "/" + id, true
 	}
 	return sw.lookup(slug, func(md *run.Metadata) bool {
 		return chainableWorkflow(md.Workflow)

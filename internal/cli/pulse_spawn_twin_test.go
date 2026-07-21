@@ -22,41 +22,41 @@ func twinSpawnFixture(t *testing.T) string {
 	return root
 }
 
-// TestSpawnTwinMintsUnderTheAgentsAlias: a twin entry's slug is a
-// batch-local alias, not the run's name. The reflect's real slug stays
-// harness-minted (reflect-YYYY-MM-DD); the alias exists only so a chain
-// group can name it.
-func TestSpawnTwinMintsUnderTheAgentsAlias(t *testing.T) {
+// TestSpawnTwinMintsAHarnessNamedReflect: a twin spec's slug is not the
+// run's name — the reflect's real slug stays harness-minted
+// (reflect-YYYY-MM-DD). Nothing has to name it: a twin spec is written
+// where the reflect goes, so the slug is only a handle for the warnings.
+func TestSpawnTwinMintsAHarnessNamedReflect(t *testing.T) {
 	root := twinSpawnFixture(t)
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "bring-the-twin-current", Workflow: "twin", Why: "boundary move the twin docs miss"},
 	}, io.Discard, os.Stderr)
 
 	id, ok := minted["bring-the-twin-current"]
 	if !ok {
-		t.Fatalf("minted = %v, want the alias keyed to the reflect", minted)
+		t.Fatalf("minted = %v, want the spec to resolve to a reflect", minted)
 	}
 	if !strings.HasPrefix(id, "reflect") {
-		t.Errorf("minted id %q, want the harness-minted reflect slug, not the alias", id)
+		t.Errorf("minted id %q, want the harness-minted reflect slug, not the proposed one", id)
 	}
 	tw := twinRuns(t, root, "moe")
 	if len(tw) != 1 {
 		t.Fatalf("twin runs = %v, want exactly one reflect", tw)
 	}
 	if _, ok := tw[id]; !ok {
-		t.Errorf("twin runs = %v, want the id the alias points at (%s)", tw, id)
+		t.Errorf("twin runs = %v, want the id the spec resolved to (%s)", tw, id)
 	}
 }
 
-// TestSpawnTwoTwinEntriesMintOne: two asks, one run — but both aliases
-// resolve. The first mints; the second finds that run in flight and
-// *maps* onto it rather than resolving to nothing, so a chain group
-// naming either alias still orders the reflect.
+// TestSpawnTwoTwinEntriesMintOne: two asks, one run — and both specs
+// resolve to it. The first mints; the second finds that run in flight
+// and *maps* onto it rather than resolving to nothing, so either thread
+// position still orders the reflect.
 func TestSpawnTwoTwinEntriesMintOne(t *testing.T) {
 	root := twinSpawnFixture(t)
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-a", Workflow: "twin", Why: "first"},
 		{Slug: "twin-b", Workflow: "twin", Why: "second"},
 	}, io.Discard, io.Discard)
@@ -66,13 +66,13 @@ func TestSpawnTwoTwinEntriesMintOne(t *testing.T) {
 		t.Fatalf("twin runs = %v, want exactly one — the second ask maps, it does not mint", tw)
 	}
 	if minted["twin-a"] == "" || minted["twin-b"] == "" {
-		t.Fatalf("minted = %v, want both aliases to resolve", minted)
+		t.Fatalf("minted = %v, want both specs to resolve", minted)
 	}
 	if minted["twin-a"] != minted["twin-b"] {
-		t.Errorf("minted = %v, want both aliases on the one reflect", minted)
+		t.Errorf("minted = %v, want both specs on the one reflect", minted)
 	}
 	if _, ok := tw[minted["twin-b"]]; !ok {
-		t.Errorf("twin runs = %v, want the mapped alias to name the open reflect (%s)", tw, minted["twin-b"])
+		t.Errorf("twin runs = %v, want the mapped spec to name the open reflect (%s)", tw, minted["twin-b"])
 	}
 }
 
@@ -83,7 +83,7 @@ func TestSpawnTwinWarnsAndIgnoresTitleAndDesign(t *testing.T) {
 	root := twinSpawnFixture(t)
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift", Title: "Refresh the twin", Design: "# not a seed\n"},
 	}, io.Discard, &errb)
 
@@ -104,7 +104,7 @@ func TestSpawnUnsupportedWorkflowSkips(t *testing.T) {
 	root := twinSpawnFixture(t)
 
 	var errb bytes.Buffer
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "recurse", Workflow: "pulse", Why: "no"},
 		{Slug: "chatty", Workflow: "chat", Why: "also no"},
 	}, io.Discard, &errb)
@@ -118,29 +118,37 @@ func TestSpawnUnsupportedWorkflowSkips(t *testing.T) {
 }
 
 // TestSpawnTwinChainsAndKicksLikeAnyThread: the uniformity this run
-// buys. A group naming the twin alias grooms the reflect into the thread
-// and hands it back as an ordinary kick candidate — no reflect-specific
-// placement, no reflect-specific consent path.
+// buys. A twin spec written at a thread position grooms the reflect into
+// the thread and hands it back as an ordinary kick candidate — no
+// reflect-specific placement, no reflect-specific consent path, and no
+// alias for the thread to name it by — the spec is the position.
 func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 	root := twinSpawnFixture(t)
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
-		{Slug: "fix-a", Title: "Fix A", Why: "red check"},
-		{Slug: "bring-the-twin-current", Workflow: "twin", Why: "boundary move"},
-	}, io.Discard, os.Stderr)
-
 	defer withRideMode(rideDynamic)()
-	groomed := groomChains(root, "moe", "pulse-one",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "bring-the-twin-current"}, Kick: true}},
-		minted, "" /*spawner*/, io.Discard, os.Stderr)
+	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
+		Status: "ok",
+		Threads: []pulseThread{{
+			Kick: true,
+			Runs: []pulseThreadEntry{
+				{Spec: &pulseRunSpec{Slug: "fix-a", Title: "Fix A", Why: "red check"}},
+				{Spec: &pulseRunSpec{Slug: "bring-the-twin-current", Workflow: "twin", Why: "boundary move"}},
+			},
+		}},
+	}, io.Discard, os.Stderr)
+	if len(groups) != 1 || len(groups[0].Runs) != 2 {
+		t.Fatalf("groups = %+v, want one thread of two minted runs", groups)
+	}
+	fixKey := "moe/" + groups[0].Runs[0].mintedID
+	reflectKey := "moe/" + groups[0].Runs[1].mintedID
+
+	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, io.Discard, os.Stderr)
 
 	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
 		t.Fatalf("threads = %+v, want one kick candidate", groomed.threads)
 	}
-	fixKey := "moe/" + minted["fix-a"]
-	reflectKey := "moe/" + minted["bring-the-twin-current"]
 	if groomed.threads[0].Root != fixKey {
-		t.Errorf("thread root = %q, want the group's first run %q", groomed.threads[0].Root, fixKey)
+		t.Errorf("thread root = %q, want the thread's first run %q", groomed.threads[0].Root, fixKey)
 	}
 	if got := liveEdges(t, root)[fixKey]; got != reflectKey {
 		t.Errorf("%s chains to %q, want the reflect %q — the agent's ordering claim, not a harness rule",
@@ -148,18 +156,18 @@ func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 	}
 }
 
-// TestSpawnTwinNamedInNoGroupParks: the behavior change this run
-// accepts. With placeReflect gone, a reflect the survey didn't chain
-// parks standalone and unridden, exactly like an sdlc spawn named in no
-// group. Riding it is an ordering claim the agent has to make.
-func TestSpawnTwinNamedInNoGroupParks(t *testing.T) {
+// TestSpawnTwinInLooseParks: the behavior change this run
+// accepts. With placeReflect gone, a reflect the survey put in `loose`
+// parks standalone and unridden, exactly like an sdlc spec there.
+// Riding it is an ordering claim the agent has to make.
+func TestSpawnTwinInLooseParks(t *testing.T) {
 	root := twinSpawnFixture(t)
 
 	defer withRideMode(rideDynamic)()
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, os.Stderr)
-	groomed := groomChains(root, "moe", "pulse-one", nil /*no groups*/, minted, "", io.Discard, os.Stderr)
+	groomed := groomChains(root, "moe", "pulse-one", nil /*no groups*/, "", io.Discard, os.Stderr)
 
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want none — an unchained reflect is not a kick candidate", groomed.threads)
@@ -172,42 +180,80 @@ func TestSpawnTwinNamedInNoGroupParks(t *testing.T) {
 	}
 }
 
-// TestSpawnTwinMapsOntoOpenReflectAndChainsIt: the defect this run
-// fixes. With a reflect already parked the nomination maps onto it
-// instead of resolving to nothing, so the chain group orders the open
-// reflect in position rather than silently shedding the member.
+// TestSpawnTwinMapsOntoOpenReflectAndChainsIt: with a reflect already
+// parked the nomination maps onto it instead of resolving to nothing, so
+// the thread orders the open reflect in position rather than silently
+// shedding the member. A twin spec sits mid-thread here, which is the
+// whole point of the positional grammar — the reflect never needed a
+// name for the ordering to reach it.
 func TestSpawnTwinMapsOntoOpenReflectAndChainsIt(t *testing.T) {
 	root := twinSpawnFixture(t)
 	// A reflect already parked — the nomination maps onto this run.
 	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
 
-	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
-		{Slug: "fix-a", Title: "Fix A", Why: "red check"},
-		{Slug: "fix-b", Title: "Fix B", Why: "stale doc"},
-		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
+	var errb bytes.Buffer
+	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
+		Status: "ok",
+		Threads: []pulseThread{{Runs: []pulseThreadEntry{
+			{Spec: &pulseRunSpec{Slug: "fix-a", Title: "Fix A", Why: "red check"}},
+			{Spec: &pulseRunSpec{Slug: "twin-refresh", Workflow: "twin", Why: "drift"}},
+			{Spec: &pulseRunSpec{Slug: "fix-b", Title: "Fix B", Why: "stale doc"}},
+		}}},
 	}, io.Discard, io.Discard)
 
-	if got := minted["twin-refresh"]; got != "reflect-2026-05-14" {
-		t.Fatalf("minted[twin-refresh] = %q, want the open reflect", got)
+	if len(groups) != 1 || len(groups[0].Runs) != 3 {
+		t.Fatalf("groups = %+v, want one thread of three", groups)
+	}
+	if got := groups[0].Runs[1].mintedID; got != "reflect-2026-05-14" {
+		t.Fatalf("mid-thread twin spec resolved to %q, want the open reflect", got)
 	}
 	if tw := twinRuns(t, root, "moe"); len(tw) != 1 {
 		t.Fatalf("twin runs = %v, want no second reflect minted", tw)
 	}
 
-	var errb bytes.Buffer
-	groomChains(root, "moe", "pulse-one",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "twin-refresh", "fix-b"}}},
-		minted, "", io.Discard, &errb)
+	groomChains(root, "moe", "pulse-one", groups, "", io.Discard, &errb)
 
 	if strings.Contains(errb.String(), "which is not a parked run") {
 		t.Errorf("stderr = %q, want no dropped member", errb.String())
 	}
-	// The reflect sits in the position the group named, mid-thread.
+	// The reflect sits in the position the thread gave it, mid-thread.
 	edges := liveEdges(t, root)
-	if got := edges["moe/"+minted["fix-a"]]; got != "moe/reflect-2026-05-14" {
+	if got := edges["moe/"+groups[0].Runs[0].mintedID]; got != "moe/reflect-2026-05-14" {
 		t.Errorf("fix-a chains to %q, want the mapped reflect", got)
 	}
-	if got := edges["moe/reflect-2026-05-14"]; got != "moe/"+minted["fix-b"] {
+	if got := edges["moe/reflect-2026-05-14"]; got != "moe/"+groups[0].Runs[2].mintedID {
 		t.Errorf("reflect chains to %q, want fix-b", got)
+	}
+}
+
+// TestApplyGateSkipsADuplicateSlugAcrossSpecs: the dedupe that used to
+// be a side effect of the alias map's last-write-wins is now the
+// minter's own live-slug claim. Two specs proposing one slug in a single
+// gate mint one run; the second warns and leaves a hole in its thread
+// rather than minting a dated sibling.
+func TestApplyGateSkipsADuplicateSlugAcrossSpecs(t *testing.T) {
+	root := twinSpawnFixture(t)
+
+	var errb bytes.Buffer
+	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
+		Status: "ok",
+		Loose:  []pulseRunSpec{{Slug: "fix-a", Title: "Fix A", Why: "red check"}},
+		Threads: []pulseThread{{Runs: []pulseThreadEntry{
+			{Spec: &pulseRunSpec{Slug: "fix-a", Title: "Fix A again", Why: "same thing"}},
+			{Spec: &pulseRunSpec{Slug: "fix-b", Title: "Fix B", Why: "stale doc"}},
+		}}},
+	}, io.Discard, &errb)
+
+	if got := runsWithWorkflow(t, root, "moe", "sdlc"); len(got) != 2 {
+		t.Fatalf("sdlc runs = %v, want exactly fix-a and fix-b", got)
+	}
+	if !strings.Contains(errb.String(), `already has a live run for "fix-a"`) {
+		t.Errorf("stderr = %q, want the duplicate slug warned", errb.String())
+	}
+	if len(groups) != 1 || len(groups[0].Runs) != 1 {
+		t.Fatalf("groups = %+v, want the thread carrying only fix-b", groups)
+	}
+	if got := groups[0].Runs[0].mintedID; !strings.HasPrefix(got, "fix-b") {
+		t.Errorf("thread member = %q, want fix-b", got)
 	}
 }

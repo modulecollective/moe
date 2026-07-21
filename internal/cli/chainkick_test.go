@@ -49,7 +49,7 @@ func kickStages(invs []openSdlcStageInvocation) []string {
 func TestChainKickChainRunHeadClosesAndRides(t *testing.T) {
 	root, stages, pushes := kickFixture(t)
 
-	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseRunSpec{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, os.Stderr)
@@ -255,7 +255,7 @@ func TestChainKickStalledRideExitsNonZero(t *testing.T) {
 	stages := stubOpenSdlcStage(t, map[string]int{"design": 1})
 	pushes := stubPushFromCascade(t, 0, nil)
 
-	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseRunSpec{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, os.Stderr)

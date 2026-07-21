@@ -128,8 +128,9 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 
 // spawnWhy recovers the reason a spawner recorded for the run it opened.
 // Today that means a pulse: its survey canvas's `## Gate` fence carries
-// one entry per spawn, each with the `why` the operator would otherwise
-// have to reconstruct from the journal.
+// one spec per run it asked for — loose, or inline at a thread position
+// — each with the `why` the operator would otherwise have to reconstruct
+// from the journal.
 //
 // Returns "" for every shape that can't answer — a non-pulse spawner, a
 // closed pulse whose canvas was edited, a gate that predates the field,
@@ -143,20 +144,21 @@ func spawnWhy(root, spawner, childSlug string) string {
 	if !ok {
 		return ""
 	}
-	for _, s := range gate.Spawn {
+	specs := gate.specs()
+	for _, s := range specs {
 		if s.Slug == "" {
 			continue
 		}
 		// The harness dates a slug on collision ("foo" → "foo-2026-07-20"),
 		// so an exact match is the common case and a dated suffix is the
-		// collision case. A `twin` entry's slug is a batch-local alias for
-		// a harness-minted `reflect-YYYY-MM-DD`, which matches neither —
-		// hence the workflow-keyed fallback below.
+		// collision case. A `twin` spec asks for a harness-minted
+		// `reflect-YYYY-MM-DD`, which matches neither — hence the
+		// workflow-keyed fallback below.
 		if s.Slug == childSlug || strings.HasPrefix(childSlug, s.Slug+"-") {
 			return strings.TrimSpace(s.Why)
 		}
 	}
-	for _, s := range gate.Spawn {
+	for _, s := range specs {
 		if s.Workflow == "twin" && strings.HasPrefix(childSlug, "reflect") {
 			return strings.TrimSpace(s.Why)
 		}

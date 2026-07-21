@@ -19,7 +19,7 @@ func selfKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult
 	root, stages, _ = kickFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", io.Discard, os.Stderr)
 	return root, "moe/" + minted["fix-a"], groomed, stages
 }
 
@@ -98,7 +98,7 @@ func TestSelfKickSkipsAtAChainedSpawner(t *testing.T) {
 // chains but never starts them. That trigger stays with the operator.
 func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	root, stages, _ := kickFixture(t)
-	minted := groomFixture(t, root, "fix-a")
+	groomFixture(t, root, "fix-a")
 
 	// An operator-minted head (no SpawnedBy) with the fix behind it.
 	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
@@ -107,7 +107,7 @@ func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	}
 	headKey := "moe/" + head.ID
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: head.ID, Runs: []string{"fix-a"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: head.ID, Runs: runsFrom("fix-a")}}, "", io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
@@ -175,7 +175,7 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]pulseChainGroup{{Onto: "shipped", Runs: []string{"fix-a"}}}, minted, "", io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, "", io.Discard, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != shippedKey {
 		t.Fatalf("threads = %+v, want one rooted at the merged anchor %s", groomed.threads, shippedKey)
 	}

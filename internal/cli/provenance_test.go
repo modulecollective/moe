@@ -39,8 +39,8 @@ func writePulseGateCanvas(t *testing.T, root, projectID, pulseSlug, gateJSON str
 func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 	root := spawnFixture(t)
 	writePulseGateCanvas(t, root, "moe", "pulse-2026-07-20",
-		`{"status":"ok","spawn":[{"slug":"fix-ci-red-main","title":"Fix CI","why":"TestX failing since abc123"}]}`)
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseSpawn{
+		`{"status":"ok","loose":[{"slug":"fix-ci-red-main","title":"Fix CI","why":"TestX failing since abc123"}]}`)
+	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix CI", Why: "TestX failing since abc123"},
 	}, os.Stderr)
 
@@ -89,7 +89,7 @@ func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 func TestRunProvenanceDegradesWithNoGateCanvas(t *testing.T) {
 	root := spawnFixture(t)
 	// No writePulseGateCanvas call: the spawner has no canvas at all.
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
 		{Slug: "fix-orphaned", Title: "Fix"},
 	}, io.Discard)
 

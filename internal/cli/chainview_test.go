@@ -16,7 +16,7 @@ import (
 // returning (head, first, second).
 func chainBatch(t *testing.T, root string) (string, string, string) {
 	t.Helper()
-	spawnAndHead(t, root, "moe", "pulse-2026-07-19", "batch", []pulseSpawn{
+	spawnAndHead(t, root, "moe", "pulse-2026-07-19", "batch", []pulseRunSpec{
 		{Slug: "fix-one", Title: "One"},
 		{Slug: "fix-two", Title: "Two"},
 	}, os.Stderr)
