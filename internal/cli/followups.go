@@ -396,17 +396,26 @@ func launchEditorOrFail(path string) error {
 // close handler uses this to tolerate local edits to the harvest
 // scratch files — followups.md and feedback/lore.md — while still
 // refusing on anything else dirty.
+//
+// An exceptRel with a trailing slash is a directory prefix: `lore/`
+// exempts every promoted lore entry under it. Close needs that because
+// harvest writes lore/<slug>.md as untracked files, and git.Status
+// reports them individually.
 func dirtyOutsidePaths(root string, exceptRels ...string) (bool, error) {
 	entries, err := git.Status(root)
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
 	}
-	allowed := make(map[string]struct{}, len(exceptRels))
-	for _, p := range exceptRels {
-		allowed[p] = struct{}{}
+	allowed := func(p string) bool {
+		for _, ex := range exceptRels {
+			if p == ex || (strings.HasSuffix(ex, "/") && strings.HasPrefix(p, ex)) {
+				return true
+			}
+		}
+		return false
 	}
 	for _, e := range entries {
-		if _, ok := allowed[e.Path]; ok {
+		if allowed(e.Path) {
 			continue
 		}
 		return true, nil
