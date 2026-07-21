@@ -370,8 +370,8 @@ func notionalDollars(model string, u transcript.ModelUsage) string {
 	return fmt.Sprintf("$%.2f", cost)
 }
 
-// humanTokens renders a token count at three significant figures with a
-// K/M suffix — 12.4M reads at a glance where 12437291 does not.
+// humanTokens renders a token count compactly with a K/M suffix —
+// 12.4M reads at a glance where 12437291 does not.
 func humanTokens(n int64) string {
 	switch {
 	case n >= 1_000_000:
