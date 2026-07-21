@@ -48,6 +48,8 @@
 
     // Match the server render exactly (trailing newline) so the two layers
     // are the same height and the grid cell doesn't jump when they swap.
+    // Frame lines are server-baked span markup, so layers take innerHTML:
+    // the bands are classified once in Go, never re-derived here.
     function paint(frame) { return frame.join('\n') + '\n'; }
 
     // Stack two <pre> layers in one grid cell and cross-fade their opacity.
@@ -57,7 +59,7 @@
     stack.appendChild(art);
     var back = art.cloneNode(false);
     back.removeAttribute('id'); // one #factory-art is enough; back is a layer
-    back.textContent = paint(frames[0]);
+    back.innerHTML = paint(frames[0]);
     back.style.opacity = '0';
     stack.appendChild(back);
 
@@ -66,7 +68,7 @@
     setInterval(function () {
       i = (i + 1) % frames.length;
       var hidden = layers[1];
-      hidden.textContent = paint(frames[i]);
+      hidden.innerHTML = paint(frames[i]);
       layers[0].style.opacity = '0';
       hidden.style.opacity = '1';
       layers.reverse();

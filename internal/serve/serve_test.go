@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -219,9 +221,26 @@ func TestNewDashVMCarriesRowDepth(t *testing.T) {
 	}
 }
 
+// artTagRE matches the band spans serve wraps art glyphs in.
+var artTagRE = regexp.MustCompile(`</?span[^>]*>`)
+
+// artText strips a rendered art line back to the glyphs underneath, so a
+// test can assert on the text without pinning where the bands split it.
+func artText(s string) string { return html.UnescapeString(artTagRE.ReplaceAllString(s, "")) }
+
+// joinArt flattens a rendered art block to one string.
+func joinArt(lines []template.HTML) string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = string(l)
+	}
+	return strings.Join(out, "\n")
+}
+
 // TestNewDashVMBakesFactoryFrames: the VM carries factoryFrameCount
-// frames as marshalled JSON, and FactoryArt (the no-JS <pre> fallback)
-// is exactly frame[0].
+// frames as marshalled JSON, each line pre-rendered as band markup so
+// the client's swap only writes innerHTML, and FactoryArt (the no-JS
+// <pre> fallback) is exactly frame[0].
 func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 	now := time.Now().UTC()
 	rows := []dash.Row{
@@ -236,8 +255,56 @@ func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 	if len(frames) != factoryFrameCount {
 		t.Fatalf("frame count = %d, want %d", len(frames), factoryFrameCount)
 	}
-	if strings.Join(vm.FactoryArt, "\n") != strings.Join(frames[0], "\n") {
+	if joinArt(vm.FactoryArt) != strings.Join(frames[0], "\n") {
 		t.Fatalf("FactoryArt must equal frame[0]:\n art=%q\n f0 =%q", vm.FactoryArt, frames[0])
+	}
+	for i, f := range frames {
+		if !strings.Contains(strings.Join(f, "\n"), `<span class="art-`) {
+			t.Errorf("frame %d carries no band markup: %q", i, f)
+		}
+	}
+}
+
+// TestBannerArtCarriesBands: the rail's bands reach the page as classes
+// pointing at the --art-* custom properties. A live run puts a bright
+// station over plasma exhaust on a dim rail, which is the whole ramp in
+// one render.
+func TestBannerArtCarriesBands(t *testing.T) {
+	now := time.Now().UTC()
+	rows := []dash.Row{
+		{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, Stage: "code", RunningDoc: "code", When: now},
+		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
+	}
+	counts := make([]int, dash.HistDays)
+	counts[0] = 9
+	vm := newDashVM(now, rows, 1, 1, counts, false)
+
+	art := joinArt(vm.FactoryArt)
+	for _, class := range []string{"art-dim", "art-mid", "art-bright", "art-plasma"} {
+		if !strings.Contains(art, `<span class="`+class+`">`) {
+			t.Errorf("factory art missing %s span: %q", class, art)
+		}
+	}
+	if !strings.Contains(joinArt(vm.Histogram), `<span class="art-plasma">`) {
+		t.Errorf("histogram peak missing its plasma cap: %q", vm.Histogram)
+	}
+}
+
+// TestArtHTMLEscapes: art glyphs are builder-owned, but they are written
+// into the page as HTML now — so span text goes through the escaper and
+// nothing in a line can open a tag.
+func TestArtHTMLEscapes(t *testing.T) {
+	got := string(artHTML([]dash.Span{
+		{Text: "<b>&", Band: dash.BandBright},
+		{Text: " ", Band: dash.BandNone},
+		{Text: `"x"`, Band: dash.BandNone},
+	}))
+	const want = `<span class="art-bright">&lt;b&gt;&amp;</span> &#34;x&#34;`
+	if got != want {
+		t.Errorf("artHTML = %q, want %q", got, want)
+	}
+	if artText(got) != `<b>& "x"` {
+		t.Errorf("artHTML text = %q, want the original glyphs", artText(got))
 	}
 }
 
@@ -289,12 +356,12 @@ func TestNewDashVMCarriesHistogram(t *testing.T) {
 	if len(vm.Histogram) != dash.HistRows+2 {
 		t.Fatalf("histogram line count = %d, want %d", len(vm.Histogram), dash.HistRows+2)
 	}
-	if !strings.Contains(vm.Histogram[dash.HistRows+1], "peak 9 runs/day") {
-		t.Errorf("histogram caption missing peak: %q", vm.Histogram[dash.HistRows+1])
+	if caption := artText(string(vm.Histogram[dash.HistRows+1])); !strings.Contains(caption, "peak 9 runs/day") {
+		t.Errorf("histogram caption missing peak: %q", caption)
 	}
 
 	quiet := newDashVM(now, nil, 1, 1, make([]int, dash.HistDays), false)
-	if len(quiet.Histogram) != 1 || !strings.Contains(quiet.Histogram[0], "(quiet)") {
+	if len(quiet.Histogram) != 1 || !strings.Contains(artText(string(quiet.Histogram[0])), "(quiet)") {
 		t.Errorf("cold histogram = %q, want single (quiet) line", quiet.Histogram)
 	}
 }
@@ -315,7 +382,7 @@ func TestDashRendersHistogram(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "activity · last 60 days") {
+	if !strings.Contains(artText(rr.Body.String()), "activity · last 60 days") {
 		t.Fatalf("dash body missing histogram caption\n%s", rr.Body.String())
 	}
 }

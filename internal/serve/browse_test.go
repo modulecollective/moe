@@ -134,9 +134,18 @@ func TestProjectHubRendersBannerArt(t *testing.T) {
 	mustContain(t, hub,
 		`class="banner-art"`,                  // histogram <pre>
 		`class="banner-art" id="factory-art"`, // factory rail with the JS hook
-		"activity · last 60 days",             // the histogram caption
-		"peak 7 runs/day",                     // scaled to the project's window
+		`<span class="art-mid">`,              // glyphs banded, not flat-tinted
 	)
+	// The caption's words land in separate band spans; strip the markup to
+	// assert the text a reader sees.
+	for _, want := range []string{
+		"activity · last 60 days", // the histogram caption
+		"peak 7 runs/day",         // scaled to the project's window
+	} {
+		if !strings.Contains(artText(hub.Body.String()), want) {
+			t.Errorf("hub art missing %q\n%s", want, hub.Body.String())
+		}
+	}
 	if gotProject != "alpha" {
 		t.Errorf("GatherDash got projectID %q, want \"alpha\"", gotProject)
 	}

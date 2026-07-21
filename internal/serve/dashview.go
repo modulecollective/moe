@@ -114,20 +114,71 @@ type bannerArtVM struct {
 	// under its banner — backlog feed, station glyphs for active runs,
 	// completed-output dots. One-line empty state, three lines populated.
 	// It is frame[0] of the frames below: the server-rendered, no-JS fallback.
-	FactoryArt []string
+	FactoryArt []template.HTML
 	// Histogram is the daily run-activity chart drawn between the banner
 	// and the factory art — HistRows bar rows, a blank spacer, then a
 	// caption, or a single "(quiet)" line in the cold state. Static text (a
 	// per-render snapshot), so unlike the factory frames it carries no JS
 	// animation.
-	Histogram []string
+	Histogram []template.HTML
 	// FactoryFramesJSON is json.Marshal of all factory-art frames, embedded
 	// in the page so the client can cross-fade through them without an XHR.
 	// It is template.JS, not string: html/template treats <script> content
 	// as a JS value context and would string-wrap a plain string (breaking
 	// JSON.parse), so the pre-marshalled JSON is emitted verbatim. Safe to do
-	// so because json.Marshal escapes <,>,& — no </script> breakout possible.
+	// so because json.Marshal escapes <,>,& — which is also what keeps the
+	// frames' own span markup from closing the script element early.
 	FactoryFramesJSON template.JS
+}
+
+// artClass is the web half of the band mapping: one CSS class per band,
+// each pointing at an --art-* custom property. BandNone is the padding
+// between glyphs and stays bare — a class per space would triple the
+// markup for no paint.
+func artClass(b dash.Band) string {
+	switch b {
+	case dash.BandDim:
+		return "art-dim"
+	case dash.BandMid:
+		return "art-mid"
+	case dash.BandBright:
+		return "art-bright"
+	case dash.BandPlasma:
+		return "art-plasma"
+	}
+	return ""
+}
+
+// artHTML renders one art line's spans as markup. Span text is escaped
+// even though the glyph set is entirely builder-owned (no user content
+// reaches an art line) — the art is written into the page as HTML now,
+// so the escape is what keeps that true if a builder ever grows a glyph
+// with meaning in HTML.
+func artHTML(spans []dash.Span) template.HTML {
+	var b strings.Builder
+	for _, sp := range spans {
+		class := artClass(sp.Band)
+		if class != "" {
+			b.WriteString(`<span class="`)
+			b.WriteString(class)
+			b.WriteString(`">`)
+		}
+		template.HTMLEscape(&b, []byte(sp.Text))
+		if class != "" {
+			b.WriteString(`</span>`)
+		}
+	}
+	return template.HTML(b.String())
+}
+
+// artLines renders a whole art block — one HTML string per line, ready
+// for the <pre> and for the frames JSON.
+func artLines(spans [][]dash.Span) []template.HTML {
+	out := make([]template.HTML, len(spans))
+	for i, line := range spans {
+		out[i] = artHTML(line)
+	}
+	return out
 }
 
 // newBannerArt builds the banner-art block from the (already
@@ -138,10 +189,16 @@ func newBannerArt(now time.Time, rows []dash.Row, histogram []int) bannerArtVM {
 	state := dash.FactoryStateFromRows(rows)
 	r := rand.New(rand.NewSource(now.UnixNano()))
 	frames := dash.BuildFactoryFrames(state, dash.ArtWidth, factoryFrameCount, r)
-	framesJSON, _ := json.Marshal(frames) // [][]string never fails to marshal
+	// Bake each frame's markup server-side. The swap JS then just writes
+	// innerHTML — classification lives in dash, in one language.
+	painted := make([][]template.HTML, len(frames))
+	for i, f := range frames {
+		painted[i] = artLines(dash.FactorySpans(f))
+	}
+	framesJSON, _ := json.Marshal(painted) // strings never fail to marshal
 	return bannerArtVM{
-		FactoryArt:        frames[0],
-		Histogram:         dash.BuildActivityHistogram(histogram),
+		FactoryArt:        painted[0],
+		Histogram:         artLines(dash.HistogramSpans(dash.BuildActivityHistogram(histogram))),
 		FactoryFramesJSON: template.JS(framesJSON),
 	}
 }
