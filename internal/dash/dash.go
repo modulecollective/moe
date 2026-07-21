@@ -1012,13 +1012,23 @@ func rowPrefix(r Row) string {
 // histogram is the pre-rendered activity chart (dash.BuildActivityHistogram
 // output); Render prints it between the upstream banner and the factory
 // art, keeping the package pure over its inputs.
+//
+// Both art blocks arrive as plain runes (the same lines the web dash
+// serves) and get their terminal colour here, behind the same TTY /
+// NO_COLOR gate cliout.Printf uses — see style.go.
 func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
+	art := BuildFactoryArt(state, ArtWidth, r)
+	if cliout.Enabled(w) {
+		histogram = styleHistogramANSI(histogram)
+		art = styleFactoryANSI(art)
+	}
+
 	fmt.Fprintln(w)
 	for _, line := range histogram {
 		fmt.Fprintln(w, line)
 	}
 	fmt.Fprintln(w)
-	for _, line := range BuildFactoryArt(state, ArtWidth, r) {
+	for _, line := range art {
 		fmt.Fprintln(w, line)
 	}
 	fmt.Fprintln(w)
