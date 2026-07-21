@@ -25,14 +25,14 @@
   <section class="provenance">
     <h2>provenance</h2>
     <ul>
-      {{range .Provenance}}
+      {{range $i, $hop := .Provenance}}{{with $hop}}
       <li>
-        {{if .Subject}}<a class="slug" href="{{.SubjectURL}}">{{.Subject}}</a> {{end}}{{.Verb}}{{if .Object}} {{if .ObjectURL}}<a class="slug" href="{{.ObjectURL}}">{{.Object}}</a>{{else}}{{.Object}}{{end}}{{end}}
+        {{if $i}}<span class="arrow" aria-hidden="true">&rarr;</span> {{end}}{{if .Subject}}{{if .SubjectURL}}<a class="slug" href="{{.SubjectURL}}">{{.Subject}}</a>{{else}}<span class="slug">{{.Subject}}</span>{{end}} {{end}}{{.Verb}}{{if .Object}} {{if .ObjectURL}}<a class="slug" href="{{.ObjectURL}}">{{.Object}}</a>{{else}}{{.Object}}{{end}}{{end}}
         {{if .Agent}}<span class="badge agent" title="written by a machine turn, not the operator">agent</span>{{end}}
         {{if .Consent}}<span class="consent" title="ride mode the machine acted under">{{.Consent}}</span>{{end}}
         {{if .Why}}<p class="why">why: {{.Why}}</p>{{end}}
       </li>
-      {{end}}
+      {{end}}{{end}}
     </ul>
   </section>
   {{end}}

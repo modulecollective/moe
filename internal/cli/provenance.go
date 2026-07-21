@@ -14,14 +14,54 @@ import (
 // catches a pathologically long legitimate chain.
 const provenanceMaxHops = 10
 
+// provEdge is one step of the upward walk, held in the direction the
+// data is stored: `child` came from `source` by `kind`. Display inverts
+// this — see the emit loop in runProvenance — so the walk and the render
+// don't have to agree on direction.
+type provEdge struct {
+	child   string // qualified run this edge explains
+	kind    provKind
+	source  string // qualified run or idea; empty for provOperator
+	agent   bool
+	consent string
+	why     string
+}
+
+type provKind int
+
+const (
+	provSpawn provKind = iota
+	provReopen
+	provPromote
+	provOperator
+)
+
+// verb is how the edge reads downward, from source to child. The walk
+// finds edges child-first ("opened by"); the page reads them root-first,
+// so every verb here points the other way.
+func (k provKind) verb() string {
+	switch k {
+	case provReopen:
+		return "reopened as"
+	case provPromote:
+		return "promoted to"
+	case provOperator:
+		return "opened"
+	default:
+		return "spawned"
+	}
+}
+
 // runProvenance answers "how did this run come to be, and did a human
-// consent to it?" as a list of display-ready hops, newest cause first.
+// consent to it?" as a list of display-ready hops, root first: the
+// oldest actor at the top, each later hop a step down the chain toward
+// this run, and the machine-walk ship — the newest event of all — last.
 //
-// The walk is: describe how this run opened, then — if the machine
-// spawned it — describe how its spawner opened, and so on up. Everything
-// it reads is already on disk: run.json's spawned_by, the journal
-// index's spawn/consent/promote maps, and the spawning pulse's canvas
-// gate for the reason it recorded.
+// The walk itself goes the other way: describe how this run opened,
+// then — if the machine spawned it — describe how its spawner opened,
+// and so on up. Everything it reads is already on disk: run.json's
+// spawned_by, the journal index's spawn/consent/promote maps, and the
+// spawning pulse's canvas gate for the reason it recorded.
 //
 // Nothing here fails a page. A run whose spawner has been pruned, a
 // pulse whose canvas gate was edited into unparseability, an idea that
@@ -46,17 +86,9 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 		}
 	}
 
-	var hops []serve.ProvHop
 	self := projectID + "/" + slug
-	if consent, ok := idx.PushConsent[self]; ok {
-		hops = append(hops, serve.ProvHop{
-			Verb:    "shipped by",
-			Object:  "a machine walk",
-			Agent:   true,
-			Consent: consent,
-		})
-	}
 
+	var edges []provEdge
 	seen := map[string]bool{}
 	cur := self
 	for hop := 0; hop < provenanceMaxHops && cur != "" && !seen[cur]; hop++ {
@@ -64,12 +96,6 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 		curProject, curSlug, ok := strings.Cut(cur, "/")
 		if !ok {
 			break
-		}
-		// Subject is elided on the first hop: it describes the page's own
-		// run, and naming it back to the reader is noise.
-		subject, subjectURL := cur, "/run/"+cur
-		if hop == 0 {
-			subject, subjectURL = "", ""
 		}
 
 		md, _ := run.Load(root, curProject, curSlug)
@@ -80,50 +106,94 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 
 		switch {
 		case spawner != "":
-			hops = append(hops, serve.ProvHop{
-				Subject:    subject,
-				SubjectURL: subjectURL,
-				Verb:       "opened by",
-				Object:     spawner,
-				ObjectURL:  "/run/" + spawner,
+			edges = append(edges, provEdge{
+				child: cur, kind: provSpawn, source: spawner,
 				// spawned_by is machine-only by construction — no operator
 				// verb has ever written it — so the marker is sound for the
 				// whole history, even where the consent level isn't.
-				Agent:   true,
-				Consent: idx.SpawnConsent[cur],
-				Why:     spawnWhy(root, spawner, curSlug),
+				agent:   true,
+				consent: idx.SpawnConsent[cur],
+				why:     spawnWhy(root, spawner, curSlug),
 			})
 			cur = spawner
 			continue
 		case md != nil && md.ReopenOf != "":
-			hops = append(hops, serve.ProvHop{
-				Subject:    subject,
-				SubjectURL: subjectURL,
-				Verb:       "reopened from",
-				Object:     curProject + "/" + md.ReopenOf,
-				ObjectURL:  "/run/" + curProject + "/" + md.ReopenOf,
+			edges = append(edges, provEdge{
+				child: cur, kind: provReopen, source: curProject + "/" + md.ReopenOf,
 			})
 		case promotedFrom[cur] != "":
-			hops = append(hops, serve.ProvHop{
-				Subject:    subject,
-				SubjectURL: subjectURL,
-				Verb:       "promoted from idea",
-				Object:     promotedFrom[cur],
-				ObjectURL:  "/run/" + promotedFrom[cur],
+			edges = append(edges, provEdge{
+				child: cur, kind: provPromote, source: promotedFrom[cur],
 			})
-		default:
-			hops = append(hops, serve.ProvHop{
-				Subject:    subject,
-				SubjectURL: subjectURL,
-				Verb:       "opened by operator",
-			})
+		case md != nil:
+			edges = append(edges, provEdge{child: cur, kind: provOperator})
 		}
-		// Reopen and promote name a source but not a *cause the machine
-		// chose*, so the walk stops there rather than re-telling the
-		// source run's own story on this page.
+		// No arm matched: the run is gone and the journal knows nothing
+		// about its opening, so the chain simply starts below it. Reopen
+		// and promote name a source but not a *cause the machine chose*,
+		// so the walk stops there rather than re-telling the source run's
+		// own story on this page.
 		break
 	}
+
+	hops := provHops(edges, self)
+	if consent, ok := idx.PushConsent[self]; ok {
+		// Newest event in the story, so it lands at the bottom — and it
+		// hangs off this run, not off the chain above it.
+		hops = append(hops, serve.ProvHop{
+			Verb:    "shipped by",
+			Object:  "a machine walk",
+			Agent:   true,
+			Consent: consent,
+		})
+	}
 	return hops, nil
+}
+
+// provHops renders the walk's edges as display lines, root first: one
+// line naming the actor or run the story starts from, then one "→ <verb>
+// <run>" line per edge, each line's elided subject being the line above.
+func provHops(edges []provEdge, self string) []serve.ProvHop {
+	if len(edges) == 0 {
+		return nil
+	}
+	root := edges[len(edges)-1]
+	// A plain operator-opened run is a one-line story. Rendering it as
+	// "operator / → opened this run" spends two lines and an arrow to say
+	// what one line already said.
+	if len(edges) == 1 && root.kind == provOperator {
+		return []serve.ProvHop{{Verb: "opened by operator"}}
+	}
+
+	var hops []serve.ProvHop
+	switch {
+	case root.source != "":
+		// Either the source of a reopen/promote, or — when the walk ran
+		// out of story above it — the oldest run it could still name. The
+		// latter starts the chain mid-story rather than inventing an
+		// origin for a run whose own is unknown.
+		hops = append(hops, serve.ProvHop{Subject: root.source, SubjectURL: "/run/" + root.source})
+	default:
+		hops = append(hops, serve.ProvHop{Subject: "operator"})
+	}
+	for i := len(edges) - 1; i >= 0; i-- {
+		e := edges[i]
+		object, objectURL := e.child, "/run/"+e.child
+		if e.child == self {
+			// Same rationale as the elided subject: the page naming itself
+			// back to its reader is noise.
+			object, objectURL = "this run", ""
+		}
+		hops = append(hops, serve.ProvHop{
+			Verb:      e.kind.verb(),
+			Object:    object,
+			ObjectURL: objectURL,
+			Agent:     e.agent,
+			Consent:   e.consent,
+			Why:       e.why,
+		})
+	}
+	return hops
 }
 
 // spawnWhy recovers the reason a spawner recorded for the run it opened.

@@ -247,10 +247,11 @@ type runVM struct {
 	// purpose note, so this — not the canvas — is where membership and
 	// per-member status live on the page.
 	ChainMembers []chainMemberVM
-	// Provenance is the run's origin story, newest cause first: how it
-	// was opened, by whom, under what consent, and — walking up the
-	// spawn chain — how *that* run came to be. Empty when no callback is
-	// wired or the walk failed; the section then doesn't render.
+	// Provenance is the run's origin story, root first: the actor or run
+	// it descends from, then a step per hop down the spawn chain — by
+	// whom, under what consent — ending at this run. Empty when no
+	// callback is wired or the walk failed; the section then doesn't
+	// render.
 	Provenance []ProvHop
 	// Actions is the peer-affordances block on the per-run page. For
 	// an in-progress idea this is edit, promote, and close; for a
@@ -412,18 +413,22 @@ type transcriptLink struct {
 // (it owns the journal index and the pulse-canvas reader) and hands them
 // over through Options.RunProvenance.
 //
-// The rendered shape is "<Subject> <Verb> <Object>", with Subject empty
-// on the first hop — that hop is about the page's own run, and naming it
-// back to the reader is noise.
+// The rendered shape is "<Subject> <Verb> <Object>". Hops come root
+// first and the page draws every one after the first with a leading
+// arrow, so all but the first carry an empty Subject: it is always the
+// hop above, and the arrow already says so.
 type ProvHop struct {
-	// Subject is the run this hop is about, qualified "<project>/<slug>";
-	// empty on the hop describing the page's own run.
+	// Subject is who the story starts from — "operator", or the run or
+	// idea the chain descends from, qualified "<project>/<slug>". Set on
+	// the first hop only.
 	Subject    string
 	SubjectURL string
-	// Verb is the relationship prose: "opened by", "reopened from",
-	// "promoted from idea", "opened by operator", "shipped".
+	// Verb is the relationship prose, read downward: "opened", "spawned",
+	// "promoted to", "reopened as", "shipped by" — plus "opened by
+	// operator" for the one-line story that needs no chain.
 	Verb string
-	// Object is what the verb points at, qualified; empty for terminal
+	// Object is what the verb points at, qualified; "this run" (unlinked)
+	// on the hop that lands on the page's own run, and empty for terminal
 	// verbs that name nobody ("opened by operator").
 	Object    string
 	ObjectURL string

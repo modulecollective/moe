@@ -404,8 +404,11 @@ form.new-run button:hover, form.new-run button:focus {
 }
 .canvases li:last-child, .chain-members li:last-child, .provenance li:last-child, .traces li:last-child { border-bottom: none; }
 .canvases li .slug, .chain-members li .slug, .provenance li .slug, .traces li .slug { color: var(--fg); }
-/* The recorded reason wraps onto its own full-width line under its hop. */
-.provenance .why { flex-basis: 100%; margin: 0.15rem 0 0; font-style: italic; }
+/* The descent arrow that joins each hop to the one above it. */
+.provenance .arrow { color: var(--muted); }
+/* The recorded reason wraps onto its own full-width line, indented past
+   its hop's arrow so it reads as that hop's footnote. */
+.provenance .why { flex-basis: 100%; margin: 0.15rem 0 0 1.1rem; font-style: italic; }
 .provenance .consent { color: var(--accent); }
 
 /* Trace rows: monospace checkbox, and the indented `Why:` block folded

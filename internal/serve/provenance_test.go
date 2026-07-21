@@ -21,36 +21,62 @@ func provenanceServer(t *testing.T, hops []ProvHop, gatherErr error) *Server {
 	})
 }
 
-// TestRunPageRendersProvenance: the origin story reaches the page —
-// spawner linked, `agent` badge on the machine hop, ride level, and the
-// recorded reason.
+// TestRunPageRendersProvenance: the origin story reaches the page as a
+// descent chain — root actor on top, an arrow per step down, spawner
+// linked, `agent` badge on the machine hop, ride level, recorded reason.
 func TestRunPageRendersProvenance(t *testing.T) {
 	s := provenanceServer(t, []ProvHop{
+		{Subject: "operator"},
 		{
-			Verb: "opened by", Object: "alpha/pulse-2026-07-20",
+			Verb: "opened", Object: "alpha/pulse-2026-07-20",
 			ObjectURL: "/run/alpha/pulse-2026-07-20",
-			Agent:     true, Consent: "dynamic",
-			Why: "reflect flagged due",
 		},
 		{
-			Subject: "alpha/pulse-2026-07-20", SubjectURL: "/run/alpha/pulse-2026-07-20",
-			Verb: "opened by operator",
+			Verb: "spawned", Object: "this run",
+			Agent: true, Consent: "dynamic",
+			Why: "reflect flagged due",
 		},
 	}, nil)
 	body := getRunPage(t, s, "/run/alpha/fix-ci")
 
 	for _, want := range []string{
 		`<h2>provenance</h2>`,
-		`opened by`,
+		`operator`,
+		`opened`,
 		`href="/run/alpha/pulse-2026-07-20"`,
+		`spawned`,
 		`class="badge agent"`,
 		`>dynamic<`,
 		`why: reflect flagged due`,
-		`opened by operator`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("run page missing %q\nbody:\n%s", want, body)
 		}
+	}
+	// One arrow per hop below the root: the root actor is where the story
+	// starts, so it must not point at anything above it.
+	if got := strings.Count(body, `class="arrow"`); got != 2 {
+		t.Errorf("arrow count = %d, want 2 — one per hop below the root\nbody:\n%s", got, body)
+	}
+	// "this run" is the page itself; linking it back to the reader is the
+	// noise the elided subject already avoids.
+	if strings.Contains(body, `>this run</a>`) {
+		t.Errorf("the terminal hop must not link to the page it's on\nbody:\n%s", body)
+	}
+}
+
+// TestRunPageOmitsArrowOnAOneLineStory: a plain operator-opened run has
+// no chain to draw, and an arrow pointing at nothing would be worse than
+// the prose it replaced.
+func TestRunPageOmitsArrowOnAOneLineStory(t *testing.T) {
+	s := provenanceServer(t, []ProvHop{{Verb: "opened by operator"}}, nil)
+	body := getRunPage(t, s, "/run/alpha/fix-ci")
+
+	if !strings.Contains(body, "opened by operator") {
+		t.Errorf("the one-hop story must still render\nbody:\n%s", body)
+	}
+	if strings.Contains(body, `class="arrow"`) {
+		t.Errorf("no arrow theater for a one-hop story\nbody:\n%s", body)
 	}
 }
 

@@ -38,6 +38,11 @@ func writePulseGateCanvas(t *testing.T, root, projectID, pulseSlug, gateJSON str
 // session.
 func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 	root := spawnFixture(t)
+	// The pulse is a real run an operator opened — the top of the chain
+	// the page is meant to draw.
+	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
+		t.Fatal(err)
+	}
 	writePulseGateCanvas(t, root, "moe", "pulse-2026-07-20",
 		`{"status":"ok","loose":[{"slug":"fix-ci-red-main","title":"Fix CI","why":"TestX failing since abc123"}]}`)
 	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
@@ -58,27 +63,83 @@ func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hops) == 0 {
-		t.Fatal("no provenance hops for a machine-spawned run")
+	// Root first: the operator who opened the pulse, the pulse opening,
+	// then the spawn that landed on this run.
+	if len(hops) != 3 {
+		t.Fatalf("hops = %+v, want 3 (root actor, pulse, this run)", hops)
 	}
-	first := hops[0]
-	if first.Subject != "" {
-		t.Errorf("first hop Subject = %q, want empty — it describes the page's own run", first.Subject)
+	if hops[0].Subject != "operator" || hops[0].Verb != "" {
+		t.Errorf("root hop = %+v, want the bare actor \"operator\"", hops[0])
 	}
-	if first.Verb != "opened by" || first.Object != "moe/pulse-2026-07-20" {
-		t.Errorf("first hop = %q %q, want \"opened by\" moe/pulse-2026-07-20", first.Verb, first.Object)
+	if hops[1].Verb != "opened" || hops[1].Object != "moe/pulse-2026-07-20" {
+		t.Errorf("hop 1 = %q %q, want \"opened\" moe/pulse-2026-07-20", hops[1].Verb, hops[1].Object)
 	}
-	if !first.Agent {
+	if hops[1].Subject != "" {
+		t.Errorf("hop 1 Subject = %q, want empty — the arrow carries it from the line above", hops[1].Subject)
+	}
+	last := hops[2]
+	if last.Verb != "spawned" || last.Object != "this run" || last.ObjectURL != "" {
+		t.Errorf("last hop = %+v, want \"spawned\" an unlinked \"this run\"", last)
+	}
+	if !last.Agent {
 		t.Error("a spawned run's opening hop must be marked agent")
 	}
 	// The fixture never enters withRideMode, so the recorded consent is
 	// the bare "none" — a machine turn with no ride in flight. Present,
 	// not absent: that distinction is the trailer's whole job.
-	if first.Consent != "none" {
-		t.Errorf("first hop Consent = %q, want \"none\"", first.Consent)
+	if last.Consent != "none" {
+		t.Errorf("spawn hop Consent = %q, want \"none\"", last.Consent)
 	}
-	if first.Why != "TestX failing since abc123" {
-		t.Errorf("first hop Why = %q, want the gate's recorded reason", first.Why)
+	if last.Why != "TestX failing since abc123" {
+		t.Errorf("spawn hop Why = %q, want the gate's recorded reason", last.Why)
+	}
+}
+
+// TestRunProvenanceDeadEndChainStartsMidStory: a spawner whose own
+// origin nobody recorded gets no invented root actor. The chain names
+// the oldest run it can still stand behind and starts there — the
+// honesty rule again, this time by saying less.
+func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
+	root := spawnFixture(t)
+	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
+		t.Fatal(err)
+	}
+	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+		{Slug: "orphan-chain", Title: "Fix"},
+	}, io.Discard)
+
+	var child string
+	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
+		if strings.HasPrefix(id, "orphan-chain") {
+			child = id
+		}
+	}
+	if child == "" {
+		t.Fatal("no spawned run to walk")
+	}
+	// Prune the spawner: its run.json is how the walk would learn that
+	// an operator opened it, and nothing else records that.
+	if err := os.RemoveAll(filepath.Join(root, run.Dir("moe", "pulse-2026-07-20"))); err != nil {
+		t.Fatal(err)
+	}
+
+	hops, err := runProvenance(root, "moe", child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hops) != 2 {
+		t.Fatalf("hops = %+v, want 2 (the named spawner, then this run)", hops)
+	}
+	if hops[0].Subject != "moe/pulse-2026-07-20" || hops[0].Verb != "" {
+		t.Errorf("root hop = %+v, want the spawner named with no origin claim", hops[0])
+	}
+	if hops[1].Verb != "spawned" || hops[1].Object != "this run" {
+		t.Errorf("hop 1 = %+v, want \"spawned\" \"this run\"", hops[1])
+	}
+	for _, h := range hops {
+		if h.Verb == "opened by operator" || h.Subject == "operator" {
+			t.Errorf("hops = %+v, must not invent an operator for a pruned origin", hops)
+		}
 	}
 }
 
@@ -110,11 +171,12 @@ func TestRunProvenanceDegradesWithNoGateCanvas(t *testing.T) {
 	if len(hops) == 0 {
 		t.Fatal("the spawn hop must survive a missing gate")
 	}
-	if hops[0].Object != "moe/pulse-2026-07-20" || !hops[0].Agent {
-		t.Errorf("hop = %+v, want the spawner still named and marked agent", hops[0])
+	spawn := hops[len(hops)-1]
+	if spawn.Verb != "spawned" || spawn.Object != "this run" || !spawn.Agent {
+		t.Errorf("hop = %+v, want the spawn still landed on this run and marked agent", spawn)
 	}
-	if hops[0].Why != "" {
-		t.Errorf("hop Why = %q, want empty — the reason is unrecoverable", hops[0].Why)
+	if spawn.Why != "" {
+		t.Errorf("hop Why = %q, want empty — the reason is unrecoverable", spawn.Why)
 	}
 }
 
