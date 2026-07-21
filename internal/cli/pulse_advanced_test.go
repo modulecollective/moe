@@ -31,7 +31,7 @@ func TestAdvancedRunsBlockListsAdvancedRun(t *testing.T) {
 		map[string]string{"design": "# Evolve the ladder\n\nbody\n"})
 	advanceAt(t, root, "moe", "evolution", "design", now.Add(-3*time.Hour))
 
-	got := advancedRunsBlock(root, "moe")
+	got := advancedRunsBlock(mustPulseScan(t, root), "moe")
 	for _, want := range []string{"`evolution` (sdlc)", "waiting at **code**", "Evolve the ladder"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("block missing %q:\n%s", want, got)
@@ -49,7 +49,7 @@ func TestAdvancedRunsBlockSkipsUnadvancedRun(t *testing.T) {
 	seedRun(t, root, "moe", "in-flight", "sdlc", run.StatusInProgress, now, nil)
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "in-flight", "sdlc", "design", now.Add(-time.Hour))
 
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("a run with no advance marker must not be eligible:\n%s", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "picked-up", "sdlc", run.StatusInProgress, now, nil)
 	advanceAt(t, root, "moe", "picked-up", "design", now.Add(-2*time.Hour))
-	if got := advancedRunsBlock(root, "moe"); !strings.Contains(got, "picked-up") {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); !strings.Contains(got, "picked-up") {
 		t.Fatalf("precondition: run should be eligible before its code session starts:\n%s", got)
 	}
 
@@ -88,7 +88,7 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("a run whose successor session already started must leave pickup range:\n%s", got)
 	}
 }
@@ -106,7 +106,7 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "picked-up-live", "sdlc", run.StatusInProgress, now, nil)
 	advanceAt(t, root, "moe", "picked-up-live", "design", now.Add(-2*time.Hour))
-	if got := advancedRunsBlock(root, "moe"); !strings.Contains(got, "picked-up-live") {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); !strings.Contains(got, "picked-up-live") {
 		t.Fatalf("precondition: run should be eligible before its code session opens:\n%s", got)
 	}
 
@@ -114,7 +114,7 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("a run with a live code session must not be groomed underneath:\n%s", got)
 	}
 
@@ -129,7 +129,7 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := advancedRunsBlock(pulseSess.WorktreePath, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, pulseSess.WorktreePath), "moe"); got != "" {
 		t.Errorf("guard must hold when the block renders from the pulse's worktree:\n%s", got)
 	}
 }
@@ -145,7 +145,7 @@ func TestAdvancedRunsBlockSkipsReopenedStage(t *testing.T) {
 	advanceAt(t, root, "moe", "reopened", "design", now.Add(-5*time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "reopened", "sdlc", "design", now.Add(-time.Hour))
 
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("a re-opened stage out-dates its marker:\n%s", got)
 	}
 }
@@ -159,7 +159,7 @@ func TestAdvancedRunsBlockSkipsTerminalRun(t *testing.T) {
 	seedRun(t, root, "moe", "shipped", "sdlc", run.StatusMerged, now, nil)
 	advanceAt(t, root, "moe", "shipped", "design", now.Add(-4*time.Hour))
 
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("a merged run must not read as advanced-and-waiting:\n%s", got)
 	}
 }
@@ -177,7 +177,7 @@ func TestAdvancedRunsBlockOrdersOldestFirst(t *testing.T) {
 	advanceAt(t, root, "moe", "stranded", "design", now.Add(-72*time.Hour))
 	advanceAt(t, root, "other", "foreign", "design", now.Add(-time.Hour))
 
-	got := advancedRunsBlock(root, "moe")
+	got := advancedRunsBlock(mustPulseScan(t, root), "moe")
 	si, ri := strings.Index(got, "`stranded`"), strings.Index(got, "`recent`")
 	if si < 0 || ri < 0 || si > ri {
 		t.Errorf("expected the older marker first:\n%s", got)
@@ -193,7 +193,7 @@ func TestAdvancedRunsBlockOrdersOldestFirst(t *testing.T) {
 func TestAdvancedRunsBlockEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
-	if got := advancedRunsBlock(root, "moe"); got != "" {
+	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("expected no block, got:\n%s", got)
 	}
 }

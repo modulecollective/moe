@@ -8,7 +8,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
-	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -41,23 +40,16 @@ type advancedRun struct {
 
 // advancedRunsBlock renders the advanced-runs context block, or "" when
 // no run in the project is waiting on an advance marker. Best-effort
-// like its siblings in pulseKickoffWithContext: a failed scan or index
-// drops the block rather than failing the sweep.
+// like its siblings in pulseKickoffWithContext: a block that finds
+// nothing renders nothing rather than failing the sweep.
 //
 // No age window and no cap, unlike settledRunsBlock: an advanced run is
 // a live obligation that does not expire, and the list is bounded by
 // how many runs the operator has personally clicked forward. Oldest
 // marker first — the longest-stranded run is the one most worth a
 // thread.
-func advancedRunsBlock(root, projectID string) string {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return ""
-	}
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		return ""
-	}
+func advancedRunsBlock(sc *pulseScan, projectID string) string {
+	root, mds, idx := sc.root, sc.mds, sc.idx
 	var rows []advancedRun
 	for _, md := range mds {
 		if md.Project != projectID {

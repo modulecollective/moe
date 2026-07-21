@@ -32,7 +32,7 @@ func TestChainStateBlockRendersUnits(t *testing.T) {
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, now, nil)
 	chainEdge(t, root, "moe/chain-batch", "moe/fix-red-ci")
 
-	got := chainStateBlock(root, "moe")
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
 	want := "- `chain-batch` (chain) — chain-batch → `fix-red-ci` (sdlc) — Fix red CI on main"
 	if !strings.Contains(got, want) {
 		t.Errorf("block missing unit line %q:\n%s", want, got)
@@ -58,7 +58,7 @@ func TestChainStateBlockCrossProject(t *testing.T) {
 	chainEdge(t, root, "moe/mine", "other/theirs")
 	chainEdge(t, root, "other/far-head", "other/far-tail")
 
-	got := chainStateBlock(root, "moe")
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
 	if !strings.Contains(got, "`mine` (sdlc)") {
 		t.Errorf("block missing this project's member bare:\n%s", got)
 	}
@@ -78,7 +78,7 @@ func TestChainStateBlockEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 
-	if got := chainStateBlock(root, "moe"); got != "" {
+	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("chainStateBlock with nothing chained = %q, want \"\"", got)
 	}
 }
@@ -98,7 +98,7 @@ func TestChainStateBlockKeepsTailOfShippedChain(t *testing.T) {
 		map[string]string{"design": "# Prefer reflect at end of chain\n\nbody\n"})
 	chainEdge(t, root, "moe/shipped-head", "moe/queued-tail")
 
-	got := chainStateBlock(root, "moe")
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
 	want := "- `shipped-head` (sdlc, merged) → `queued-tail` (sdlc) — Prefer reflect at end of chain"
 	if !strings.Contains(got, want) {
 		t.Errorf("block missing the settled-head line %q:\n%s", want, got)
@@ -120,7 +120,7 @@ func TestChainStateBlockOrphanStillDropped(t *testing.T) {
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, now, nil)
 	chainEdge(t, root, "moe/shipped-head", "moe/queued-tail")
 
-	got := chainStateBlock(root, "moe")
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
 	if strings.Contains(got, "lone-run") {
 		t.Errorf("block lists the orphan `lone-run`:\n%s", got)
 	}
@@ -137,7 +137,7 @@ func TestChainStateBlockSettledParentCrossProject(t *testing.T) {
 	seedRun(t, root, "moe", "my-tail", "sdlc", run.StatusInProgress, now, nil)
 	chainEdge(t, root, "other/their-head", "moe/my-tail")
 
-	got := chainStateBlock(root, "moe")
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
 	if !strings.Contains(got, "`other/their-head` (sdlc, merged) →") {
 		t.Errorf("settled foreign head not rendered qualified:\n%s", got)
 	}
@@ -154,7 +154,7 @@ func TestChainStateBlockSettledParentOnlyForeignTail(t *testing.T) {
 	seedRun(t, root, "other", "their-tail", "sdlc", run.StatusInProgress, now, nil)
 	chainEdge(t, root, "moe/my-head", "other/their-tail")
 
-	if got := chainStateBlock(root, "moe"); got != "" {
+	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("block rendered a unit with no active member in this project:\n%s", got)
 	}
 }

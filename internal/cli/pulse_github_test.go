@@ -160,7 +160,7 @@ func TestPulseGitHubContextDropsBlockWhenGHFails(t *testing.T) {
 	stubGH(t, map[string]any{}) // every verb errors
 
 	var errb bytes.Buffer
-	if got := pulseGitHubContext(root, "moe", "pulse-x", &errb); got != "" {
+	if got := pulseGitHubContext(mustPulseScan(t, root), "moe", "pulse-x", &errb); got != "" {
 		t.Fatalf("block rendered despite both gathers failing:\n%s", got)
 	}
 	if !strings.Contains(errb.String(), "github context") {
@@ -179,7 +179,7 @@ func TestPulseGitHubContextRendersIndependentHalves(t *testing.T) {
 	}})
 
 	var errb bytes.Buffer
-	got := pulseGitHubContext(root, "moe", "pulse-x", &errb)
+	got := pulseGitHubContext(mustPulseScan(t, root), "moe", "pulse-x", &errb)
 	if !strings.Contains(got, "https://x/bad") {
 		t.Fatalf("CI half missing though its gather succeeded:\n%s", got)
 	}

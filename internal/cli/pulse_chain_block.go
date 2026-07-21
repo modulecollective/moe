@@ -13,15 +13,15 @@ import (
 // trailers, whose effective state needs the BuildJournalIndex replay no
 // surveying agent can cheaply or safely do by hand, and run.json shows
 // which runs are in-progress but never their order. So a sweep can file
-// a finding the very next chained run will fix, aim a groom group at an
+// a finding the very next chained run will fix, aim a thread at an
 // order the chain already records, or spawn a duplicate of a queued fix
-// under a different slug — the slug-dedupe guard in maybeSpawnRuns
+// under a different slug — the slug-dedupe guard in pulseMinter.mint
 // catches none of those.
 
 // chainStateBlock renders the chain-state context block, or "" when
 // nothing is sequenced. Best-effort like its siblings in
-// pulseKickoffWithContext: a failed scan or index drops the block
-// rather than failing the sweep.
+// pulseKickoffWithContext: the sweep's shared scan is best-effort and
+// a failure drops the block rather than failing the sweep.
 //
 // Selection reuses activeChainItems — the same grouping the dash and
 // the chain editor render, so the three views cannot drift — then keeps
@@ -38,19 +38,8 @@ import (
 // moment its first item ships — and the sweep would then read the queued
 // tail as unordered, which is exactly backwards: it is the next thing to
 // run. Pure orphans (no settled parent either) stay dropped.
-func chainStateBlock(root, projectID string) string {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return ""
-	}
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		return ""
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, md := range mds {
-		byKey[md.Project+"/"+md.ID] = md
-	}
+func chainStateBlock(sc *pulseScan, projectID string) string {
+	root, mds, idx, byKey := sc.root, sc.mds, sc.idx, sc.byKey
 
 	label := func(md *run.Metadata) (string, bool) {
 		if md.Project != projectID {
@@ -59,7 +48,7 @@ func chainStateBlock(root, projectID string) string {
 		return md.ID, true
 	}
 
-	graph := run.NewChainGraph(idx, byKey)
+	graph := sc.graph
 	var lines []string
 	for _, unit := range activeChainItems(graph, mds, idx) {
 		// A settled predecessor of the unit head is the whole reason a

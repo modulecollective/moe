@@ -64,7 +64,7 @@ func TestSettledRunsBlockSelection(t *testing.T) {
 	seedRun(t, root, "moe", "an-idea", "idea", run.StatusPromoted, now, nil)
 	seedRun(t, root, "other", "foreign-close", "sdlc", run.StatusClosed, now, nil)
 
-	got := settledRunsBlock(root, "moe")
+	got := settledRunsBlock(mustPulseScan(t, root), "moe")
 	for _, want := range []string{
 		"`settled-drop` (sdlc, closed) — Tail pulses re-exec the installed binary",
 		"`landed-fix` (sdlc, merged) — landed-fix",
@@ -91,7 +91,7 @@ func TestSettledRunsBlockEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)
 	seedRun(t, root, "moe", "still-open", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 
-	if got := settledRunsBlock(root, "moe"); got != "" {
+	if got := settledRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("block rendered with nothing settled:\n%s", got)
 	}
 }
@@ -103,7 +103,7 @@ func TestSettledRunsBlockTitleFallsBackToDesign(t *testing.T) {
 	seedRun(t, root, "moe", "spawned-fix", "sdlc", run.StatusClosed, time.Now().Local(),
 		map[string]string{"design": "intro line\n\n# Stop chains refiling one observation\n"})
 
-	got := settledRunsBlock(root, "moe")
+	got := settledRunsBlock(mustPulseScan(t, root), "moe")
 	if !strings.Contains(got, "— Stop chains refiling one observation") {
 		t.Errorf("design H1 not used as the title:\n%s", got)
 	}
@@ -117,7 +117,7 @@ func TestSettledRunsBlockCapped(t *testing.T) {
 	for i := range settledRunsCap + 5 {
 		seedRun(t, root, "moe", "closed-"+string(rune('a'+i)), "sdlc", run.StatusClosed, now, nil)
 	}
-	got := settledRunsBlock(root, "moe")
+	got := settledRunsBlock(mustPulseScan(t, root), "moe")
 	if n := strings.Count(got, "(sdlc, closed)"); n != settledRunsCap {
 		t.Errorf("block has %d rows, want the cap of %d", n, settledRunsCap)
 	}
@@ -137,4 +137,16 @@ func TestPulseKickoffCarriesSettledBlock(t *testing.T) {
 	if !strings.Contains(got, "Recently settled runs") || !strings.Contains(got, "settled-drop") {
 		t.Errorf("settled-runs block missing from the kickoff:\n%s", got)
 	}
+}
+
+// mustPulseScan builds the one-per-sweep scan the context blocks read
+// from. The blocks take it rather than a root so a sweep pays for one
+// read instead of five.
+func mustPulseScan(t *testing.T, root string) *pulseScan {
+	t.Helper()
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatalf("newPulseScan(%q) failed", root)
+	}
+	return sc
 }

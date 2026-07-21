@@ -93,7 +93,7 @@ func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 	markBureaucracy(t, root)
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 
-	if got := chainStateBlock(root, "moe"); got != "" {
+	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Fatalf("fixture wants no chain block, got %q", got)
 	}
 	func() {

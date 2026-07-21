@@ -62,11 +62,8 @@ type settledRun struct {
 // timestamp. A long-lived run closed yesterday won't list. Walking the
 // journal for close/merge commits would be exact and costs a git call
 // per pulse; the proxy covers the failure actually observed.
-func settledRunsBlock(root, projectID string) string {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return ""
-	}
+func settledRunsBlock(sc *pulseScan, projectID string) string {
+	root, mds := sc.root, sc.mds
 	cutoff := time.Now().Local().Add(-settledRunsWindow)
 
 	var rows []settledRun

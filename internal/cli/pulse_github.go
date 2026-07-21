@@ -13,7 +13,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/push"
-	"github.com/modulecollective/moe/internal/run"
 )
 
 // GitHub awareness for the pulse. The journal only sees what moved
@@ -154,8 +153,8 @@ func gatherCIStatus(repo, branch string) ([]ghCIRun, error) {
 //
 // currentRunID is the survey's own run, excluded from the "since last
 // pulse" bound — it is already open by the time the kickoff is built.
-func pulseGitHubContext(root, projectID, currentRunID string, stderr io.Writer) string {
-	pj, err := project.Load(root, projectID)
+func pulseGitHubContext(sc *pulseScan, projectID, currentRunID string, stderr io.Writer) string {
+	pj, err := project.Load(sc.root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: github context: load project %s: %v\n", projectID, err)
 		return ""
@@ -166,7 +165,7 @@ func pulseGitHubContext(root, projectID, currentRunID string, stderr io.Writer) 
 		return ""
 	}
 
-	since := lastPulseAt(root, projectID, currentRunID, stderr)
+	since := lastPulseAt(sc, projectID, currentRunID)
 
 	var sections []string
 	if prs, err := gatherMergedPRs(repo, since); err != nil {
@@ -250,20 +249,10 @@ func renderCIStatus(branch string, runs []ghCIRun) string {
 // lastPulseAt is the time bound the merged-PR gather filters against:
 // the last journal activity on the most recent prior pulse run for this
 // project. Returns the zero time when there is no prior pulse (a first
-// sweep) or the journal can't be read — both mean "no bound", which the
-// renderer states as "recently" rather than pretending to a window it
-// doesn't have.
-func lastPulseAt(root, projectID, currentRunID string, stderr io.Writer) time.Time {
-	mds, err := run.Scan(root)
-	if err != nil {
-		moePrintf(stderr, "pulse: github context: scan runs: %v\n", err)
-		return time.Time{}
-	}
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		moePrintf(stderr, "pulse: github context: build journal index: %v\n", err)
-		return time.Time{}
-	}
+// sweep), which means "no bound" — the renderer states that as
+// "recently" rather than pretending to a window it doesn't have.
+func lastPulseAt(sc *pulseScan, projectID, currentRunID string) time.Time {
+	mds, idx := sc.mds, sc.idx
 	var latest time.Time
 	for _, md := range mds {
 		if md.Workflow != pulseWorkflow || md.Project != projectID || md.ID == currentRunID {

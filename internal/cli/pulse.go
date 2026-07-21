@@ -989,16 +989,26 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) st
 	if line := pendingTwinObservationsLine(root, projectID); line != "" {
 		blocks = append(blocks, line)
 	}
-	if gh := pulseGitHubContext(root, projectID, runID, stderr); gh != "" {
+	// Four of the five blocks want the same two reads. Doing them once
+	// here is not just cheaper — it means the blocks describe one
+	// consistent moment rather than four successive ones.
+	sc, ok := newPulseScan(root)
+	if !ok {
+		// Best-effort like each block was individually: a sweep with no
+		// context blocks is a worse sweep, not a failed one.
+		moePrintf(stderr, "pulse: kickoff: could not read runs for %s — context blocks dropped\n", projectID)
+		return strings.Join(blocks, "\n\n")
+	}
+	if gh := pulseGitHubContext(sc, projectID, runID, stderr); gh != "" {
 		blocks = append(blocks, gh)
 	}
-	if settled := settledRunsBlock(root, projectID); settled != "" {
+	if settled := settledRunsBlock(sc, projectID); settled != "" {
 		blocks = append(blocks, settled)
 	}
-	if chains := chainStateBlock(root, projectID); chains != "" {
+	if chains := chainStateBlock(sc, projectID); chains != "" {
 		blocks = append(blocks, chains)
 	}
-	if advanced := advancedRunsBlock(root, projectID); advanced != "" {
+	if advanced := advancedRunsBlock(sc, projectID); advanced != "" {
 		blocks = append(blocks, advanced)
 	}
 	// Its own block, not a tail on the chain-state one. A tail pulse
@@ -1176,4 +1186,40 @@ func runPulseStage(args []string, stdout, stderr io.Writer) int {
 	// skip latch (nil pi).
 	code, _ := openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
 	return code
+}
+
+// pulseScan is the one disk read a sweep's kickoff makes: the run scan
+// and the journal index, plus the by-key map and chain graph derived
+// from them.
+//
+// Four of the five context blocks want some of this, and each used to
+// take its own copy — five scans and four index builds per sweep, each
+// describing a slightly different moment. One read is cheaper and, more
+// to the point, coherent: the blocks the agent reads all describe the
+// same instant.
+type pulseScan struct {
+	root  string
+	mds   []*run.Metadata
+	idx   *run.JournalIndex
+	byKey map[string]*run.Metadata
+	graph *run.ChainGraph
+}
+
+// newPulseScan reads the runs and the journal. ok is false when either
+// read fails; the caller drops its blocks rather than failing the sweep,
+// which is what each block did on its own.
+func newPulseScan(root string) (*pulseScan, bool) {
+	mds, err := run.Scan(root)
+	if err != nil {
+		return nil, false
+	}
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		return nil, false
+	}
+	byKey := make(map[string]*run.Metadata, len(mds))
+	for _, md := range mds {
+		byKey[md.Project+"/"+md.ID] = md
+	}
+	return &pulseScan{root: root, mds: mds, idx: idx, byKey: byKey, graph: run.NewChainGraph(idx, byKey)}, true
 }
