@@ -34,9 +34,11 @@ const dashWatchInterval = 3 * time.Second
 //   - dashFramePost closes with ED-0, erasing whatever the old frame
 //     had below the new one's last line, then ends the sync block.
 //
-// Measured under tmux 3.5a: zero history growth per tick, pre-watch
-// history intact. \x1b[3J (wipe scrollback) stays omitted — blowing
-// away the operator's history isn't ours to do.
+// Measured under tmux 3.5a: zero history growth per tick and pre-watch
+// history intact, as long as the frame fits the pane. A frame taller
+// than the pane still scrolls at the bottom edge and feeds history —
+// measured at half ED-2's rate, not zero. \x1b[3J (wipe scrollback)
+// stays omitted — blowing away the operator's history isn't ours to do.
 const (
 	dashFramePre  = "\x1b[?2026h\x1b[H"
 	dashFramePost = "\x1b[J\x1b[?2026l"
