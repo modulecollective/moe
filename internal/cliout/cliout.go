@@ -56,6 +56,11 @@ func Enabled(w io.Writer) bool {
 // ignored: callers using this for layout decisions (banner.IndentStderr)
 // want the operator's terminal indented even when colour is suppressed.
 //
+// A writer that wraps the terminal (dash's watch-mode EL injector) is
+// followed through `Unwrap() io.Writer` — the errors.Unwrap idiom —
+// before the assertion, so decorating stdout doesn't silently strip
+// every style down-stack.
+//
 // The /dev/null guard mirrors stdinIsTerminal in internal/cli/init.go,
 // where it was load-bearing: an exec.Command-spawned `moe init` gets
 // stdin=/dev/null by default on Unix, ModeCharDevice matches, and the
@@ -64,6 +69,13 @@ func Enabled(w io.Writer) bool {
 // but the predicate reads as a general "is this a real terminal?"
 // question and the next caller shouldn't have to relearn the lesson.
 func IsTTY(w io.Writer) bool {
+	for {
+		u, ok := w.(interface{ Unwrap() io.Writer })
+		if !ok {
+			break
+		}
+		w = u.Unwrap()
+	}
 	f, ok := w.(*os.File)
 	if !ok {
 		return false
