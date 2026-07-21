@@ -1188,3 +1188,86 @@ exit 0
 		}
 	}
 }
+
+// TestReconcileAtPulseStaysDiskOnlyWhenNothingMoved: the pulse's
+// reconcile wrapper pushes the journal only when something actually
+// moved. The common case is a project with nothing pushed, which must
+// stay a disk-only scan — a network leg on every fire, for every
+// project, is what the conditional exists to avoid.
+func TestReconcileAtPulseStaysDiskOnlyWhenNothingMoved(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusMerged) // not pushed: nothing to reconcile
+	origin := initBureaucracyOriginAt(t, f.root)
+	// Local work origin has not seen, so "origin unchanged" is a real
+	// assertion rather than a tautology.
+	gittest.Run(t, f.root, "commit", "--allow-empty", "-m", "local work the pulse must not push")
+	before := gittest.Output(t, origin, "rev-parse", "main")
+
+	var stdout, stderr bytes.Buffer
+	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
+
+	if after := gittest.Output(t, origin, "rev-parse", "main"); after != before {
+		t.Fatalf("origin/main advanced to %s (was %s); AutoPush must not run when nothing moved", after, before)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want silence on a clean disk-only scan", stderr.String())
+	}
+}
+
+// TestReconcileAtPulsePushesJournalWhenSomethingMoved: a PR merged out
+// of band flips the run before the survey reads its delta, and the
+// transition commit races to origin — the conditional AutoPush's other
+// leg.
+func TestReconcileAtPulsePushesJournalWhenSomethingMoved(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	fakeGh(t, map[string]string{
+		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
+	})
+	origin := initBureaucracyOriginAt(t, f.root)
+	before := gittest.Output(t, origin, "rev-parse", "main")
+
+	var stdout, stderr bytes.Buffer
+	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
+
+	if md := f.reload(); md.Status != run.StatusMerged {
+		t.Fatalf("status = %s, want merged; stderr=%q", md.Status, stderr.String())
+	}
+	after := gittest.Output(t, origin, "rev-parse", "main")
+	if after == before {
+		t.Fatal("origin/main unchanged; the transition commit never raced to origin")
+	}
+	if local := gittest.Output(t, f.root, "rev-parse", "HEAD"); after != local {
+		t.Fatalf("origin/main = %s, want the local HEAD %s", after, local)
+	}
+}
+
+// TestReconcileAtPulseWarnsAndContinuesOnFailure: everything in the
+// pulse is warn-only. A reconcile that blows up (here: a run.json the
+// scan can't parse) must name itself on stderr and return — the sweep,
+// and the verb that triggered it, carry on.
+func TestReconcileAtPulseWarnsAndContinuesOnFailure(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "runs", f.runID, "run.json"), "{not json\n")
+
+	var stdout, stderr bytes.Buffer
+	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
+
+	if !strings.Contains(stderr.String(), "pulse: reconcile pushed runs for "+f.projectID+":") {
+		t.Fatalf("stderr = %q, want the reconcile failure warned and named", stderr.String())
+	}
+}
+
+// TestReconcileAtPulseSkipsWhenInterrupted: a Ctrl-C during chore
+// auto-open skips the network walk too — the operator asked for the
+// sweep to get out of the way. The seeded run is pushed with no MoE-PR
+// trailer, so a walk that started would print its skip line; silence is
+// the evidence it never did.
+func TestReconcileAtPulseSkipsWhenInterrupted(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "no-pr-trailer", "sdlc", run.StatusPushed)
+
+	var stdout, stderr bytes.Buffer
+	reconcileAtPulse(root, "tele", latchedPulseInterrupt(t), &stdout, &stderr)
+
+	if stderr.Len() != 0 || stdout.Len() != 0 {
+		t.Fatalf("reconcile ran despite the latch: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}

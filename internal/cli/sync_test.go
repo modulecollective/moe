@@ -363,11 +363,20 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 // lives under t.TempDir() so cleanup is automatic.
 func (f *syncFixture) initBureaucracyOrigin() {
 	f.t.Helper()
-	bare := filepath.Join(f.t.TempDir(), "bureaucracy.git")
-	gittest.Run(f.t, "", "init", "--bare", "-b", "main", bare)
-	gittest.Run(f.t, f.root, "remote", "add", "origin", bare)
-	gittest.Run(f.t, f.root, "push", "-u", "origin", "main")
-	f.origin = bare
+	f.origin = initBureaucracyOriginAt(f.t, f.root)
+}
+
+// initBureaucracyOriginAt is the fixture-free form, for tests that build
+// their bureaucracy some other way and still need an upstream — the
+// pulse's reconcile step, whose whole question is whether the journal
+// push fired. Returns the bare repo's path.
+func initBureaucracyOriginAt(t *testing.T, root string) string {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "bureaucracy.git")
+	gittest.Run(t, "", "init", "--bare", "-b", "main", bare)
+	gittest.Run(t, root, "remote", "add", "origin", bare)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+	return bare
 }
 
 // advanceBureaucracyOrigin commits to the bare bureaucracy remote

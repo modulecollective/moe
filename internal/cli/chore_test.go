@@ -316,3 +316,131 @@ func TestRunChoreOpenParkExcludesEveryCascadeRung(t *testing.T) {
 		})
 	}
 }
+
+// The pulse's chore step is the "automation acts on standing intent"
+// half of a sweep: it opens every due chore's run and executes none.
+// These ride seedChoreRoot and the real openChoreInProcess — the same
+// pipeline `moe chore open` drives.
+
+// addCoolingChore writes a second chore into a seeded chore root and
+// stamps a recent completion, so its cooldown blocks and it evaluates
+// not-due — the same shape seedChoreRootWith gives the first chore.
+// Committed because the run-open below refuses a dirty tree.
+func addCoolingChore(t *testing.T, root, name string) {
+	t.Helper()
+	dir := filepath.Join(root, "projects", "moe", "chores", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "chore.json"), []byte(`{"trigger":"docs/**","cooldown":"720h"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "seed a second, cooling chore")
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chore skip\n\nMoE-Chore-Skipped: moe/"+name+"\n")
+}
+
+// TestAutoOpenDueChoresOpensOnlyDueOnes: the step's whole job. A due
+// chore gets its run; a not-due sibling does not — the sweep never
+// force-opens, which is what keeps `--now` an operator gesture.
+func TestAutoOpenDueChoresOpensOnlyDueOnes(t *testing.T) {
+	root := seedChoreRoot(t)
+	addCoolingChore(t, root, "docs-sweep")
+	if choreDue(t, root, "docs-sweep") {
+		t.Fatal("precondition: the cooling chore should not be due")
+	}
+
+	var stdout, stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+
+	if open := choreOpenRun(t, root, "readme-refresh"); open == "" {
+		t.Error("the due chore should have an open run after the sweep's chore step")
+	}
+	if open := choreOpenRun(t, root, "docs-sweep"); open != "" {
+		t.Errorf("not-due chore opened run %q; automation acts on standing intent, not on every chore", open)
+	}
+}
+
+// TestAutoOpenDueChoresSkipsAlreadyOpenSilently: the anti-pile-up
+// invariant. A chore already holding a run must be a silent skip on
+// every subsequent sweep — no second run, no warn line. Two guards sit
+// in front of it (an open run clears every due reason, so the not-due
+// continue fires first; openChoreInProcess's own open-run refusal is the
+// belt behind it), and the assertion is the outcome across both.
+func TestAutoOpenDueChoresSkipsAlreadyOpenSilently(t *testing.T) {
+	root := seedChoreRoot(t)
+	if _, err := openChoreInProcess(root, "moe", "readme-refresh", false, io.Discard, io.Discard); err != nil {
+		t.Fatalf("pre-open: %v", err)
+	}
+	first := choreOpenRun(t, root, "readme-refresh")
+	if first == "" {
+		t.Fatal("pre-open produced no run")
+	}
+
+	var stdout, stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+
+	if got := choreOpenRun(t, root, "readme-refresh"); got != first {
+		t.Errorf("open run = %q, want the pre-existing %q — the sweep must not pile a second run on", got, first)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want silence: an already-open chore is expected, not a warning", stderr.String())
+	}
+}
+
+// TestAutoOpenDueChoresSkipsWhenInterrupted: the step's Ctrl-C
+// checkpoint sits inside the loop, so a latch set before the sweep opens
+// nothing at all.
+func TestAutoOpenDueChoresSkipsWhenInterrupted(t *testing.T) {
+	root := seedChoreRoot(t)
+
+	var stdout, stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", latchedPulseInterrupt(t), &stdout, &stderr)
+
+	if open := choreOpenRun(t, root, "readme-refresh"); open != "" {
+		t.Errorf("chore opened run %q despite the latch", open)
+	}
+}
+
+// TestAutoOpenDueChoresWarnsOnUnreadableStates: a chore pile-up must
+// never derail the sweep or the verb that triggered it. An unparseable
+// chore definition warns and returns rather than propagating.
+func TestAutoOpenDueChoresWarnsOnUnreadableStates(t *testing.T) {
+	root := seedChoreRoot(t)
+	writeFile(t, filepath.Join(root, "projects", "moe", "chores", "readme-refresh", "chore.json"), "{not json\n")
+
+	var stdout, stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+
+	if !strings.Contains(stderr.String(), "pulse: read chore states for moe:") {
+		t.Fatalf("stderr = %q, want the chore-state read failure warned and named", stderr.String())
+	}
+}
+
+// TestPulseNewOpensDueChoresBeforeTheSurvey is the wiring check on
+// runPulse itself: every other `pulse new` test stubs above the chore
+// step, so nothing today would fail if the sweep stopped calling it. The
+// assertion reads the chore's run from inside the survey stub — the
+// ordering ("open every due chore's run, then sweep") is what lets the
+// survey see the runs it just caused.
+func TestPulseNewOpensDueChoresBeforeTheSurvey(t *testing.T) {
+	seedChoreRoot(t) // sets MOE_HOME; the verb finds the root itself
+	t.Setenv("NO_COLOR", "1")
+
+	openAtSurvey := ""
+	orig := runPulseSurvey
+	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		openAtSurvey = choreOpenRun(t, root, "readme-refresh")
+		return 0
+	}
+	t.Cleanup(func() { runPulseSurvey = orig })
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"pulse", "new", "moe"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if openAtSurvey == "" {
+		t.Fatal("the due chore's run was not open by the time the survey ran; runPulse skipped its chore step")
+	}
+}
