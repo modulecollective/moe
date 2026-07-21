@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -530,6 +531,48 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 	wantSummary := "cascade moe/reflect-2026-05-17: vision ok · architecture ok · patterns ok · operations ok · glossary ok · finalize ok · close ok — shipped"
 	if got := renderCascadeSummary("moe/reflect-2026-05-17", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
+	}
+}
+
+// TestCascadeTwinAutoCloseTailsPulse is the wiring the stubbed sibling
+// above can't see. TestCascadeFromGateTwinYoloAutoCloses swaps the group's
+// close command for a recorder, so the close's own pulse tail never runs
+// — and nothing today would fail if the cascade started calling
+// closeRunInProcess with tailPulse=false the way serve deliberately does.
+// Same shape, but with the real close and a full close fixture: the
+// cascade's auto-close must fire exactly one sweep, spawned by the run
+// it just closed.
+func TestCascadeTwinAutoCloseTailsPulse(t *testing.T) {
+	root := seedCloseFixture(t, "moe", "reflect-2026-05-17", "twin", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubOpenTwinStage(t, nil)
+	md, err := run.Load(root, "moe", "reflect-2026-05-17")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The finalize gate reads this canvas, and the real close refuses a
+	// dirty tree — so unlike the stubbed sibling it has to be committed.
+	writeSatisfiedTwinFinalizeCanvas(t, root, md)
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "work: finalize canvas for the cascade close")
+	fired := stubFirePulse(t)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("twin !! cascade must ship via close: %+v", res)
+	}
+	if reloaded, err := run.Load(root, "moe", "reflect-2026-05-17"); err != nil {
+		t.Fatal(err)
+	} else if reloaded.Status != run.StatusClosed {
+		t.Fatalf("run status = %q, want closed — the cascade's close did not land", reloaded.Status)
+	}
+	if len(*fired) != 1 || (*fired)[0] != "moe reflect-2026-05-17" {
+		t.Fatalf("firePulse fired %v, want one fire for moe spawned by reflect-2026-05-17", *fired)
 	}
 }
 
