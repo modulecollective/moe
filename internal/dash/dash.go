@@ -1170,7 +1170,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
-			slug := nestPrefix(r.Depth) + r.Project + "/" + r.Run
+			slug := rowPrefix(r) + r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()

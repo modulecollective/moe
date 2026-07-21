@@ -569,3 +569,27 @@ func TestSweepOffChainKeepsTheLadder(t *testing.T) {
 		t.Errorf("sweep prefix = %q, want the nesting connector", got)
 	}
 }
+
+// TestRenderCompletedSweepDrawsChainFlow guards the render path, not the
+// helper: a spliced tail sweep lands in COMPLETED, and that section drew
+// its connector straight from Depth until this test caught it — so a
+// sweep marked Chained still rendered the "↳" ladder on the CLI while
+// the serve template already showed chain flow. Its lineage sibling in
+// the same block keeps the ladder, which is what makes the glyph carry
+// information rather than decorate every nested row.
+func TestRenderCompletedSweepDrawsChainFlow(t *testing.T) {
+	rows := []Row{
+		{Project: "p", Run: "hop-two", Note: "sdlc: merged", Bucket: BucketCompletedRuns},
+		{Project: "p", Run: "pulse-1", Note: "pulse: closed", Bucket: BucketCompletedRuns, Depth: 1, Chained: true},
+		{Project: "p", Run: "reflect-1", Note: "twin: closed", Bucket: BucketCompletedRuns, Depth: 2},
+	}
+	var buf bytes.Buffer
+	Render(&buf, time.Now().UTC(), nil, rows, 1, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	out := buf.String()
+	if !strings.Contains(out, "\n  → p/pulse-1") {
+		t.Fatalf("a chained completed row should render the flush chain arrow:\n%s", out)
+	}
+	if !strings.Contains(out, "\n    ↳ p/reflect-1") {
+		t.Fatalf("an unchained completed child keeps the ladder at its depth:\n%s", out)
+	}
+}
