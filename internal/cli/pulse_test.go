@@ -921,11 +921,13 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	}
 }
 
-// TestPulseSurveyRecordsSpawner: a survey fired with a spawner slug
-// threads it onto the pulse run's MoE-Spawned-By edge — both the run.json
-// metadata field and the greppable journal index, the two the dash reads
-// to nest the pulse under its parent.
-func TestPulseSurveyRecordsSpawner(t *testing.T) {
+// TestPulseSurveyOpensTopLevel: a survey fired at a run's tail records no
+// lineage edge back to it. The pulse is the fencepost between two
+// generations — the terminal event of the chain behind it and the root of
+// the one ahead — so nesting it under its trigger would grow one
+// ever-deepening lineage tree instead. Asserted on both carriers of the
+// edge, the run.json field and the greppable journal index.
+func TestPulseSurveyOpensTopLevel(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "moe")
@@ -948,8 +950,8 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	for _, md := range mds {
 		if md.Workflow == pulseWorkflow && md.Project == "moe" {
 			pulseID = md.ID
-			if md.SpawnedBy != "moe/ship-it" {
-				t.Fatalf("pulse run SpawnedBy = %q, want moe/ship-it (qualified spawner)", md.SpawnedBy)
+			if md.SpawnedBy != "" {
+				t.Fatalf("pulse run SpawnedBy = %q, want empty — the sweep is top-level", md.SpawnedBy)
 			}
 		}
 	}
@@ -960,8 +962,8 @@ func TestPulseSurveyRecordsSpawner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := idx.SpawnedBy["moe/"+pulseID]; got != "moe/ship-it" {
-		t.Fatalf("index SpawnedBy[moe/%s] = %q, want moe/ship-it (MoE-Spawned-By trailer missing?)", pulseID, got)
+	if got := idx.SpawnedBy["moe/"+pulseID]; got != "" {
+		t.Fatalf("index SpawnedBy[moe/%s] = %q, want no MoE-Spawned-By trailer on the open commit", pulseID, got)
 	}
 }
 

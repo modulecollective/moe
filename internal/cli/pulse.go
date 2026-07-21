@@ -259,10 +259,11 @@ func liveChainedChild(root string, md *run.Metadata, stderr io.Writer) string {
 }
 
 // firePulse runs the pulse for a project at the tail of a run-traffic
-// verb. spawner is the triggering run's slug, threaded onto the survey
-// run's MoE-Spawned-By edge so the dash can nest the pulse under it. It
-// is a var so the close/push wiring can be observed in tests without
-// running the survey's agent turn.
+// verb. spawner is the triggering run's slug — threaded in-process to
+// the groom fence and the kick's re-entrancy guard, and recorded nowhere
+// (see pulseSurvey: the sweep opens top-level). It is a var so the
+// close/push wiring can be observed in tests without running the
+// survey's agent turn.
 //
 // Warn-only by construction: the transition that triggered the pulse
 // has already committed and pushed by the time this runs, so a pulse
@@ -391,19 +392,25 @@ func init() {
 }
 
 func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
-	// spawner threads the triggering run onto the survey's MoE-Spawned-By
-	// edge (empty on a manual `moe pulse new`, so it renders un-nested).
-	// Both the metadata field and the trailer are set, mirroring how
-	// `moe sdlc reopen` pairs Options.ReopenOf with Trailers.ReopenOf.
-	// Qualify the spawner to "<project>/<slug>" so the lineage edge can name
-	// a foreign spawner (cross-project coordination opens a run in one
-	// project from another); the empty guard keeps a manual `moe pulse new`
-	// from writing a dangling "<project>/".
+	// The survey run itself is top-level: no MoE-Spawned-By edge back to
+	// the run whose tail fired it. A pulse closes one generation and roots
+	// the next, so nesting it under its trigger would chain every
+	// generation into one ever-deepening lineage tree (gen-N tail → pulse →
+	// its spawns → gen-N+1 tail → pulse → …) rather than reading as the
+	// fencepost between two chains. Runs the pulse *mints* still carry
+	// SpawnedBy = <this pulse> and fold under it — that edge is load-bearing
+	// for pulseSelfKick's machine-rooted guard. What the trigger loses is
+	// only presentation: the sweep's own canvas names what landed, and its
+	// open commit sits beside the triggering merge in the journal.
 	//
-	// A separate name from here on: everything downstream — the groom
-	// fence, the kick's re-entrancy guard — keys on the qualified *key*,
-	// and reusing one name for both forms is how a bare slug reaches a
-	// comparison that wants a key.
+	// The spawner is still threaded in-process, qualified to
+	// "<project>/<slug>" so it can name a foreign run (cross-project
+	// coordination opens a run in one project from another); the empty
+	// guard keeps a manual `moe pulse new` from building a dangling
+	// "<project>/". Everything downstream — the groom fence, the kick's
+	// re-entrancy guard — keys on that qualified *key*, and the separate
+	// name is what keeps a bare slug from reaching a comparison that wants
+	// a key.
 	spawnerKey := ""
 	if spawner != "" {
 		spawnerKey = projectID + "/" + spawner
@@ -417,11 +424,9 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	}
 
 	md, err := runopen.Open(root, projectID, run.Options{
-		IDBase:    pulseWorkflow,
-		Workflow:  pulseWorkflow,
-		SeedDocs:  map[string]string{pulseDoc: pulseCanvasSkeleton},
-		SpawnedBy: spawnerKey,
-		Trailers:  trailers.Block{SpawnedBy: spawnerKey, Consent: spawnConsent(spawnerKey)},
+		IDBase:   pulseWorkflow,
+		Workflow: pulseWorkflow,
+		SeedDocs: map[string]string{pulseDoc: pulseCanvasSkeleton},
 	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
