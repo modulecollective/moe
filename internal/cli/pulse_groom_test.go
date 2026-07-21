@@ -60,7 +60,7 @@ func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
 	root := spawnFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 
-	threads := groomChains(root, "moe", "pulse-groom",
+	groomed := groomChains(root, "moe", "pulse-groom",
 		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b", "fix-c"}}},
 		minted, "" /*spawner*/, io.Discard, os.Stderr)
 
@@ -75,8 +75,8 @@ func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
 	if edges[c] != "" {
 		t.Errorf("tail %s chains to %q, want nothing", c, edges[c])
 	}
-	if len(threads) != 1 || threads[0].Root != a {
-		t.Fatalf("threads = %+v, want one rooted at %s", threads, a)
+	if len(groomed.threads) != 1 || groomed.threads[0].Root != a {
+		t.Fatalf("threads = %+v, want one rooted at %s", groomed.threads, a)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 	root := spawnFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 
-	threads := groomChains(root, "moe", "pulse-groom",
+	groomed := groomChains(root, "moe", "pulse-groom",
 		[]pulseChainGroup{{Head: "perf-cleanups", Runs: []string{"fix-a", "fix-b"}}},
 		minted, "", io.Discard, os.Stderr)
 
@@ -177,8 +177,8 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 	if edges[headKey] != "moe/"+minted["fix-a"] {
 		t.Fatalf("edges = %v, want the head chained to the first member", edges)
 	}
-	if len(threads) != 1 || threads[0].Root != headKey {
-		t.Fatalf("threads = %+v, want one rooted at the minted head", threads)
+	if len(groomed.threads) != 1 || groomed.threads[0].Root != headKey {
+		t.Fatalf("threads = %+v, want one rooted at the minted head", groomed.threads)
 	}
 	canvas, err := os.ReadFile(filepath.Join(root, run.ContentPath("moe", heads[0], chainDoc)))
 	if err != nil {
@@ -197,12 +197,12 @@ func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
 	minted := groomFixture(t, root, "fix-a")
 
 	var errb bytes.Buffer
-	threads := groomChains(root, "moe", "pulse-groom",
+	groomed := groomChains(root, "moe", "pulse-groom",
 		[]pulseChainGroup{{Onto: "no-such-run", Runs: []string{"fix-a"}}},
 		minted, "", io.Discard, &errb)
 
-	if len(threads) != 0 {
-		t.Fatalf("threads = %+v, want the group skipped", threads)
+	if len(groomed.threads) != 0 {
+		t.Fatalf("threads = %+v, want the group skipped", groomed.threads)
 	}
 	if len(liveEdges(t, root)) != 0 {
 		t.Fatalf("edges = %v, want none stamped", liveEdges(t, root))
@@ -454,5 +454,89 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 	edges := liveEdges(t, root)
 	if edges["moe/"+minted["fix-a"]] != "moe/"+minted["fix-b"] {
 		t.Fatalf("edges = %v, want the dated %s chained to %s", edges, minted["fix-a"], minted["fix-b"])
+	}
+}
+
+// TestGroomOpportunisticNeverStampsASelfEdge: a dynamic ride whose group
+// names the very run the opportunistic placement would attach after. The
+// `onto` branch has always guarded the anchor against the group's own
+// members; this branch did not, so the tail got chained to itself — a
+// durable `X -> X` edge that every walker afterwards reads as a
+// one-run cycle.
+func TestGroomOpportunisticNeverStampsASelfEdge(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	a, b := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"]
+
+	// A thread for the ride to be walking: a -> b, spawner a, tail b.
+	groomChains(root, "moe", "pulse-one",
+		[]pulseChainGroup{{Runs: []string{"fix-a", "fix-b"}}}, minted, "", io.Discard, os.Stderr)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-two",
+		[]pulseChainGroup{{Runs: []string{"fix-b"}}}, minted, a, io.Discard, &errb)
+
+	for parent, child := range liveEdges(t, root) {
+		if parent == child {
+			t.Fatalf("stamped a self-edge on %s; edges = %v", parent, liveEdges(t, root))
+		}
+	}
+	if !strings.Contains(errb.String(), "self-rooting instead") {
+		t.Errorf("stderr = %q, want the redirect named", errb.String())
+	}
+	// Redirected, not dropped: b left the ride and self-roots.
+	if edges := liveEdges(t, root); edges[a] == b {
+		t.Errorf("edges = %v, want %s detached from the ride", edges, b)
+	}
+}
+
+// TestGroomKickRootFollowsALaterGroupsMove: thread roots are derived from
+// the final graph, not captured mid-walk. Group 1 self-roots a thread and
+// asks for a kick; group 2 then moves that thread's first run under
+// another anchor. The recorded root has to be the anchor's thread head —
+// a root captured at group 1's time would name a run that no longer heads
+// anything, and the kick would silently park.
+func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
+	a, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-c"]
+
+	groomed := groomChains(root, "moe", "pulse-groom", []pulseChainGroup{
+		{Runs: []string{"fix-a", "fix-b"}, Kick: true},
+		{Onto: "fix-c", Runs: []string{"fix-a"}},
+	}, minted, "", io.Discard, os.Stderr)
+
+	if len(groomed.threads) != 2 {
+		t.Fatalf("threads = %+v, want two", groomed.threads)
+	}
+	if groomed.threads[0].Root == a {
+		t.Fatalf("thread root is still %s, captured before group 2 moved it", a)
+	}
+	if groomed.threads[0].Root != c {
+		t.Errorf("thread root = %q, want %q — the head of the thread fix-a ended up in",
+			groomed.threads[0].Root, c)
+	}
+}
+
+// TestGroomReportsSpawnerChainMembership: the re-entrancy answer the kick
+// step keys on comes off the groom's own final graph rather than a second
+// read of the journal. Post-groom membership is the pinned policy: a
+// sweep that chains work onto its own spawner suppresses its other kicks.
+func TestGroomReportsSpawnerChainMembership(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	a := "moe/" + minted["fix-a"]
+
+	loose := groomChains(root, "moe", "pulse-one",
+		[]pulseChainGroup{{Runs: []string{"fix-b"}}}, minted, a, io.Discard, os.Stderr)
+	if loose.spawnerChained {
+		t.Errorf("spawnerChained = true, want false — %s has no live edges either way", a)
+	}
+
+	joined := groomChains(root, "moe", "pulse-two",
+		[]pulseChainGroup{{Onto: "fix-a", Runs: []string{"fix-b"}}}, minted, a, io.Discard, os.Stderr)
+	if !joined.spawnerChained {
+		t.Errorf("spawnerChained = false, want true — the sweep just chained work onto %s", a)
 	}
 }

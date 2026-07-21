@@ -42,9 +42,15 @@ import (
 // chains but never starts them; that trigger stays with the operator.
 //
 // Every skip is one stderr line, warn-only ethos.
-func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdout, stderr io.Writer) {
+//
+// Every fact this step keys on comes out of the groom's final in-memory
+// graph (see groomResult) — thread roots, the spawner's chain
+// membership, and whether a root is still kickable. Re-reading the
+// journal here would answer the same questions a second time against a
+// state the sweep had already moved.
+func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) {
 	var wanted []groomedThread
-	for _, th := range threads {
+	for _, th := range groomed.threads {
 		if th.Kick && th.Root != "" {
 			wanted = append(wanted, th)
 		}
@@ -56,7 +62,7 @@ func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdo
 		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, this verb carried no dynamic consent (`!!!!` or --dynamic)\n", len(wanted))
 		return
 	}
-	if spawnerKey != "" && chainMember(root, spawnerKey) {
+	if spawnerKey != "" && groomed.spawnerChained {
 		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, %s is itself chained and its ride picks up growth on its own tail\n",
 			len(wanted), spawnerKey)
 		return
@@ -67,9 +73,15 @@ func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdo
 			moePrintf(stderr, "pulse: kick: malformed thread root %q: %v\n", th.Root, err)
 			continue
 		}
-		md, err := run.Load(root, proj, runID)
-		if err != nil {
-			moePrintf(stderr, "pulse: kick: load %s: %v\n", th.Root, err)
+		// A group can be groomed onto a thread whose head has already
+		// shipped — `onto` admits a settled anchor on purpose, that being
+		// the queue-jump case — and the root then walks back to a merged
+		// run. Kicking one would ride a finished thread from its finished
+		// end. ChainChildLive is the same terminal-or-missing test every
+		// other edge reader applies.
+		md := groomed.byKey[th.Root]
+		if md == nil || !run.ChainChildLive(th.Root, groomed.byKey) {
+			moePrintf(stderr, "pulse: kick: %s heads a thread that has already settled — skipping\n", th.Root)
 			continue
 		}
 		if md.SpawnedBy == "" {
@@ -81,16 +93,4 @@ func pulseSelfKick(root string, threads []groomedThread, spawnerKey string, stdo
 			moePrintf(stderr, "pulse: kick %s exited %d\n", th.Root, code)
 		}
 	}
-}
-
-// chainMember reports whether key sits in a chain of two or more live
-// runs — the re-entrancy question pulseSelfKick asks about its spawner.
-// A read failure reads as "member", which is the conservative answer:
-// it suppresses a kick rather than risking a nested ride.
-func chainMember(root, key string) bool {
-	g, ok := loadChainGraph(root)
-	if !ok {
-		return true
-	}
-	return len(g.unit(key)) >= 2
 }

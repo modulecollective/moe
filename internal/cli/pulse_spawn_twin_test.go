@@ -130,17 +130,17 @@ func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 	}, io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
-	threads := groomChains(root, "moe", "pulse-one",
+	groomed := groomChains(root, "moe", "pulse-one",
 		[]pulseChainGroup{{Runs: []string{"fix-a", "bring-the-twin-current"}, Kick: true}},
 		minted, "" /*spawner*/, io.Discard, os.Stderr)
 
-	if len(threads) != 1 || !threads[0].Kick {
-		t.Fatalf("threads = %+v, want one kick candidate", threads)
+	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
+		t.Fatalf("threads = %+v, want one kick candidate", groomed.threads)
 	}
 	fixKey := "moe/" + minted["fix-a"]
 	reflectKey := "moe/" + minted["bring-the-twin-current"]
-	if threads[0].Root != fixKey {
-		t.Errorf("thread root = %q, want the group's first run %q", threads[0].Root, fixKey)
+	if groomed.threads[0].Root != fixKey {
+		t.Errorf("thread root = %q, want the group's first run %q", groomed.threads[0].Root, fixKey)
 	}
 	if got := liveEdges(t, root)[fixKey]; got != reflectKey {
 		t.Errorf("%s chains to %q, want the reflect %q — the agent's ordering claim, not a harness rule",
@@ -159,10 +159,10 @@ func TestSpawnTwinNamedInNoGroupParks(t *testing.T) {
 	minted := maybeSpawnRuns(root, "moe", "pulse-one", []pulseSpawn{
 		{Slug: "twin-refresh", Workflow: "twin", Why: "drift"},
 	}, io.Discard, os.Stderr)
-	threads := groomChains(root, "moe", "pulse-one", nil /*no groups*/, minted, "", io.Discard, os.Stderr)
+	groomed := groomChains(root, "moe", "pulse-one", nil /*no groups*/, minted, "", io.Discard, os.Stderr)
 
-	if len(threads) != 0 {
-		t.Fatalf("threads = %+v, want none — an unchained reflect is not a kick candidate", threads)
+	if len(groomed.threads) != 0 {
+		t.Fatalf("threads = %+v, want none — an unchained reflect is not a kick candidate", groomed.threads)
 	}
 	reflectKey := "moe/" + minted["twin-refresh"]
 	for parent, child := range liveEdges(t, root) {

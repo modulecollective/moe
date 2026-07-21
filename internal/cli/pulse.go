@@ -421,7 +421,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// `chain` claim the agent makes, not a harness rule, and a reflect
 	// named in no group parks like any other unplaced spawn.
 	minted := maybeSpawnRuns(root, projectID, md.ID, gate.Spawn, stdout, stderr)
-	threads := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
+	groomed := groomChains(root, projectID, md.ID, gate.Chain, minted, spawner, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next run-traffic event can
 	// fire a fresh survey. Route through the registered close (subject +
@@ -450,7 +450,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// a long time, and a sweep that has already done all its work should
 	// not sit on the dash's ACTIVE list for the duration.
 	pi.Close()
-	pulseSelfKick(root, threads, spawner, stdout, stderr)
+	pulseSelfKick(root, groomed, spawner, stdout, stderr)
 	return 0
 }
 

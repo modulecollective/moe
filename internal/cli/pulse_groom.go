@@ -236,11 +236,34 @@ func loadChainGraph(root string) (*chainGraph, bool) {
 }
 
 // groomedThread records where a group landed, for the kick step. Root
-// is the thread's kickable handle: the minted head when the group asked
-// for one, else the group's first member.
+// is the thread's kickable handle, and it is derived from the *final*
+// graph after every group has been placed — see groomChains. Handle is
+// the run the root is walked back from: the minted head when the group
+// asked for one, else the group's first member.
 type groomedThread struct {
-	Root string
-	Kick bool
+	Handle string
+	Root   string
+	Kick   bool
+}
+
+// groomResult is what the groom step hands the kick step. The whole
+// point is that the kick reads nothing from disk: every question it asks
+// — where does this thread start, is that run kickable, is the spawner
+// itself chained — is answered from the same final in-memory graph the
+// sweep just stamped. A second read would be a second answer, and the
+// window between them is exactly where a stale kick root came from.
+type groomResult struct {
+	threads []groomedThread
+	// byKey is the sweep's run metadata, including any chain head this
+	// sweep minted mid-walk.
+	byKey map[string]*run.Metadata
+	// spawnerChained is the re-entrancy answer pulseSelfKick needs:
+	// whether the triggering run sits in a live unit of two or more.
+	// Read off the final graph, so it is post-groom membership — the
+	// conservative choice, pinned in the audit's Decisions. Defaults to
+	// true so a groom that never got far enough to build a graph
+	// suppresses a kick rather than risking a nested ride.
+	spawnerChained bool
 }
 
 // groomSweep carries the one-sweep state the group walk threads: the
@@ -271,19 +294,23 @@ type groomSweep struct {
 // can't be resolved drops with a stderr line and the rest of the sweep
 // carries on. Grooming is an ordering opinion — losing one is a
 // re-groom next pulse, not a lost sweep.
-func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, minted map[string]string, spawnerKey string, stdout, stderr io.Writer) []groomedThread {
+func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, minted map[string]string, spawnerKey string, stdout, stderr io.Writer) groomResult {
+	// spawnerChained defaults true: every early return below is a groom
+	// that produced no threads, so no kick is wanted anyway, but the
+	// conservative default is what makes that safe to say out loud.
+	bail := groomResult{spawnerChained: true}
 	if len(groups) == 0 {
-		return nil
+		return bail
 	}
 	mds, err := run.Scan(root)
 	if err != nil {
 		moePrintf(stderr, "pulse: groom: scan runs for %s: %v\n", projectID, err)
-		return nil
+		return bail
 	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		moePrintf(stderr, "pulse: groom: build index for %s: %v\n", projectID, err)
-		return nil
+		return bail
 	}
 	byKey := make(map[string]*run.Metadata, len(mds))
 	for _, md := range mds {
@@ -317,9 +344,34 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 		}
 	}
 
+	// The final graph is the plan, and everything downstream reads *from*
+	// it rather than re-deriving its own answer. Two steps, in order:
+	// validate it, then derive from it.
+	//
+	// Validation is one rule — no self-edges. Every branch that could
+	// write one already guards against it, so this is the belt: a durable
+	// `X → X` edge is not a bad ordering opinion, it is a corrupt graph,
+	// and it outlives the sweep that wrote it.
+	sw.graph.dropSelfEdges(stderr)
+
+	// Roots last, from the final graph. A group's root is not knowable
+	// while the walk is still running: a later group may move the run an
+	// earlier group's root was walked back from, and a root captured
+	// mid-mutation names a thread that no longer starts there — the kick
+	// then silently parks.
+	for i := range threads {
+		threads[i].Root = sw.graph.threadRoot(threads[i].Handle)
+	}
+
+	result := groomResult{
+		threads:        threads,
+		byKey:          sw.byKey,
+		spawnerChained: spawnerKey != "" && len(sw.graph.unit(spawnerKey)) >= 2,
+	}
+
 	adds, removes := sw.graph.diff()
 	if len(adds) == 0 && len(removes) == 0 {
-		return threads
+		return result
 	}
 	msg := fmt.Sprintf("chain: groom %s/%s (%d added, %d removed)\n\n", projectID, pulseSlug, len(adds), len(removes)) +
 		// Groom is always the pulse acting, ride or no ride — so the
@@ -336,10 +388,25 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 	})
 	if err != nil {
 		moePrintf(stderr, "pulse: groom: stamp edges for %s: %v — the runs are open but ungroomed\n", projectID, err)
-		return nil
+		return bail
 	}
 	moePrintf(stderr, "pulse: groomed %d chain edge(s) for %s\n", len(adds), projectID)
-	return threads
+	return result
+}
+
+// dropSelfEdges is the plan's one validation: an edge from a run to
+// itself is dropped before the graph is stamped. Nothing should be able
+// to write one — every branch that sets a child guards the anchor
+// against the group's own members — but a self-edge is durable, survives
+// the sweep, and reads as a one-run cycle to every walker afterwards, so
+// it is worth a belt that costs one pass.
+func (g *chainGraph) dropSelfEdges(stderr io.Writer) {
+	for parent, child := range g.child {
+		if parent == child {
+			moePrintf(stderr, "pulse: groom: dropping a self-edge on %s before stamping\n", parent)
+			g.clearChild(parent)
+		}
+	}
 }
 
 // placeGroup resolves one group's members and anchor and rewrites the
@@ -409,17 +476,16 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 		sw.graph.setChild(last, after)
 	}
 
-	rootKey := headKey
-	if rootKey == "" {
-		if anchor == "" {
-			rootKey = members[0]
-		} else {
-			// The thread already had a root; the kickable handle is
-			// whatever heads the unit this group joined.
-			rootKey = sw.graph.threadRoot(anchor)
-		}
+	// The handle, not the root: a minted head if the group asked for one,
+	// else the group's own first member. Both are runs this group put
+	// somewhere; whatever heads the thread they end up in is derived once
+	// the whole walk is done. Deriving it here would read the graph
+	// mid-mutation.
+	handle := headKey
+	if handle == "" {
+		handle = members[0]
 	}
-	return groomedThread{Root: rootKey, Kick: grp.Kick}, true
+	return groomedThread{Handle: handle, Kick: grp.Kick}, true
 }
 
 // threadRoot walks back to the head of key's thread — the run a kick
@@ -489,7 +555,18 @@ func (sw *groomSweep) groomAnchor(label string, grp pulseChainGroup, members []s
 		// bang; without it the group self-roots as a parked thread the
 		// operator (or a later pulse) can pick up.
 		if sw.mode == rideDynamic && len(sw.spawnerUnit) > 0 {
-			return sw.graph.tailFrom(sw.spawnerKey), "", true
+			tail := sw.graph.tailFrom(sw.spawnerKey)
+			if indexOfString(members, tail) >= 0 {
+				// The same anchor-in-members contradiction `onto` refuses,
+				// except the harness picked this anchor, not the agent — so
+				// the group is redirected rather than dropped, matching the
+				// fence branch above. Attaching a group after a run it
+				// contains stamps a durable `X → X` edge.
+				moePrintf(stderr, "pulse: groom: %s would land after %s, which is one of its own runs — self-rooting instead\n",
+					label, tail)
+				return "", "", true
+			}
+			return tail, "", true
 		}
 		return "", "", true
 	}
