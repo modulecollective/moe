@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -81,4 +82,44 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 func revertTerminal(root string, md *run.Metadata, priorStatus string) error {
 	md.Status = priorStatus
 	return run.Save(root, md)
+}
+
+// commitTerminal commits the status flip enterTerminal wrote, and on
+// failure walks the flip back so the run stays open and the tree stays
+// retryable. Without it, a failed close commit leaves run.json saying
+// closed with nothing committed: the dash reads the run as closed, and
+// the repo-wide dirty-tree gate wedges every later close in the
+// bureaucracy.
+//
+// Rolling back inside the commit failure is always safe — the flip is
+// only durable once this commit lands, so there is no state where a
+// revert here erases a real close.
+//
+// What survives the rollback is deliberate, and mirrors what mergePath
+// already leaves behind on an ff-push failure: the harvest's committed
+// idea runs stay (harvest is idempotent — `[x]` lines skip on retry),
+// and the followups.md / feedback/lore.md rewrites plus any promoted
+// lore/<slug>.md files stay in the worktree, uncommitted. Those
+// rewrites record which entries already fanned out, and the close gate
+// exempts exactly those paths, so this run's own retry sails through.
+//
+// The reset is scoped to the pathspecs rather than a bare `git reset`:
+// sync's reconcile doesn't run behind close's clean-tree gate, so an
+// unscoped reset there would unstage unrelated operator state. The run
+// dir joins the pathspec so anything a cleanup hook staged outside
+// enterTerminal's paths (pulse's disposal stamp stages the canvas) is
+// covered too.
+//
+// Rollback is best-effort and silent: the caller is already printing
+// the commit error this returns unwrapped, and terminal.go has no
+// writer in reach to warn on.
+func commitTerminal(root string, md *run.Metadata, priorStatus, msg string, paths []string) error {
+	err := run.StageAndCommit(root, msg, paths...)
+	if err == nil {
+		return nil
+	}
+	_ = revertTerminal(root, md, priorStatus)
+	_ = git.Run(root, append([]string{"reset", "-q", "--"},
+		append(append([]string{}, paths...), run.Dir(md.Project, md.ID))...)...)
+	return err
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // isCaptureWorkflow reports whether a workflow is one of the cheap
@@ -173,10 +174,18 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// expected — that's where stage-time captures land — so the
 	// clean-tree gate ignores changes on those paths. Anything else dirty
 	// stays a refusal.
+	//
+	// lore/ is exempt for the same reason one level out: it's harvest
+	// *output*, and enterTerminal stages it into this very close commit.
+	// The exemption list is exactly the set of paths the close is about
+	// to commit anyway, so exempting them widens nothing. Without lore/
+	// on the list, a close whose commit failed can't be retried — the
+	// rollback leaves the promoted lore/<slug>.md untracked, and the run
+	// trips its own gate.
 	if !isCaptureWorkflow(workflow) {
 		followupsRel := run.FollowupsPath(projectID, runID)
 		loreRel := run.FeedbackPath(projectID, runID, "lore")
-		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel)
+		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, wiki.LoreDirRel+"/")
 		if derr != nil {
 			return derr
 		}
@@ -265,7 +274,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		if err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, paths...)
+		return commitTerminal(root, md, run.StatusInProgress, msg, paths)
 	}); err != nil {
 		return err
 	}

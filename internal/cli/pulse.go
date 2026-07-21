@@ -592,10 +592,11 @@ func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
 }
 
 // restoreDisposedPulseRun puts a failed disposal's run back the way it
-// was: the canvas bytes the stamp overwrote, the status flip the close
-// wrote to run.json before its commit failed, and whatever either of
-// them left in the index. before is nil when the stamp never got as far
-// as writing.
+// was: the canvas bytes the stamp overwrote, and whatever the stamp or
+// the close left in the index. before is nil when the stamp never got
+// as far as writing. The status flip needs no repair here — a failed
+// close commit walks its own flip back (commitTerminal), so the run
+// comes back from closePulseRun already open.
 //
 // Repairing is not optional. The dirty-tree gate is repo-wide, so a
 // half-applied disposal left on disk wedges every later close in the
@@ -609,9 +610,6 @@ func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
 // and this only rewrites files this process itself half-wrote; the
 // index-lock retry in internal/git covers the git-level race.
 func restoreDisposedPulseRun(root, projectID, runID, canvas string, before []byte) {
-	if md, err := run.Load(root, projectID, runID); err == nil && md.Status == run.StatusClosed {
-		_ = revertTerminal(root, md, run.StatusInProgress)
-	}
 	if before != nil {
 		_ = os.WriteFile(canvas, before, 0o644)
 	}

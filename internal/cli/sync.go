@@ -246,6 +246,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 // reconcile can continue with other runs and the next `moe sync`
 // retries. Returns (true, nil) when the transition committed.
 func finalizePushedRun(root string, md *run.Metadata, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
+	priorStatus := md.Status
 	paths, err := enterTerminal(root, md, status, true)
 	if err != nil {
 		moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", md.Project, md.ID, err)
@@ -262,7 +263,7 @@ func finalizePushedRun(root string, md *run.Metadata, status string, extra trail
 	extra.Document = "push"
 	msg := fmt.Sprintf("sync: %s/%s %s\n\n", md.Project, md.ID, strings.ToLower(status)) +
 		extra.String()
-	if err := run.StageAndCommit(root, msg, paths...); err != nil {
+	if err := commitTerminal(root, md, priorStatus, msg, paths); err != nil {
 		return false, fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), md.Project, md.ID, err)
 	}
 	return true, nil
