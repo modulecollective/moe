@@ -359,9 +359,16 @@ A pulse is a read-only sweep of one project that feeds the backlog and ranks
 what to pull from it. "Work just landed — what's next?" is a reflex worth
 automating, but only inside consent bounds: a pulse fires at the tail of the
 operator-rooted run-traffic verbs (`moe sdlc close`, `moe sdlc push`,
-`moe twin close`, and the cascades' auto-close), never on its own clock and
-never from `moe sync`. Every fire rides an action you took. Scope is always the
-driven run's project.
+`moe twin close`, and the cascades' auto-close) **and only when you handed the
+machine the wheel** — inside a ride (`!!!`/`!!!!`, their `--chain`/`--dynamic`
+twins, `moe chain kick`, and the kicks a pulse roots itself). A ship you are
+watching land is quiet: `!!`, a `!`/`!<stage>` step that lands on push, a bare
+`moe sdlc push` or close. Never on its own clock and never from `moe sync`.
+Every fire rides an action you took. Scope is always the driven run's project.
+
+So after an attended ship, growth parks: findings wait for the next ride's tail
+sweep, or for `moe pulse new` — the manual valve, which is also the only way to
+sweep a project without shipping anything.
 
 Every pulse does three things:
 
