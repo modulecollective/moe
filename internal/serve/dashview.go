@@ -55,6 +55,11 @@ type dashRowVM struct {
 	Run     string
 	Note    template.HTML // escaped note with lineage targets linkified (noteHTML)
 	When    string        // dash.HumanAgo output
+	// URL is where the row's slug links. Runs, ideas and intents go to
+	// /run/; a due chore isn't a run yet and goes to /chore/. The backlog
+	// section renders both kinds, so it links through this rather than
+	// building the path itself.
+	URL string
 	// Live is true when the row's run is currently parented by this
 	// serve process — the per-run page has buttons. Only meaningful
 	// for active rows; backlog/completed always render Live=false.
@@ -147,7 +152,6 @@ func newBannerArt(now time.Time, rows []dash.Row, histogram []int) bannerArtVM {
 type dashVM struct {
 	bannerArtVM
 	Active         []dashRowVM
-	Chores         []dashRowVM
 	Intents        []dashRowVM
 	Backlog        []dashRowVM
 	Completed      []dashRowVM
@@ -155,6 +159,15 @@ type dashVM struct {
 	ProjectCount   int
 	ActiveProjects int
 	ShowAll        bool
+}
+
+// rowURL is where a dash row's slug links. Only a chore row differs: it
+// is a registration, not a run, and has its own /chore/ page.
+func rowURL(r dash.Row) string {
+	if r.Bucket == dash.BucketChores {
+		return "/chore/" + r.Project + "/" + r.Run
+	}
+	return "/run/" + r.Project + "/" + r.Run
 }
 
 func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {
@@ -170,6 +183,7 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			Run:     r.Run,
 			Note:    noteHTML(r.Project, r.Note),
 			When:    dash.HumanAgo(now, r.When),
+			URL:     rowURL(r),
 			Depth:   r.Depth,
 			Chained: r.Chained,
 		}
@@ -177,11 +191,12 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		switch r.Bucket {
 		case dash.BucketActiveRuns:
 			vm.Active = append(vm.Active, row)
-		case dash.BucketChores:
-			vm.Chores = append(vm.Chores, row)
 		case dash.BucketIntents:
 			vm.Intents = append(vm.Intents, row)
-		case dash.BucketBacklog:
+		case dash.BucketChores, dash.BucketBacklog:
+			// Chores head the backlog rather than holding a section of
+			// their own — the same fold the CLI dash does, and BuildRows
+			// has already ordered them ahead of the idea rows.
 			vm.Backlog = append(vm.Backlog, row)
 		case dash.BucketCompletedRuns:
 			vm.Completed = append(vm.Completed, row)

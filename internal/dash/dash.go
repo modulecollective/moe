@@ -136,12 +136,18 @@ func CompletedCutoff(n int, showAll bool, isNested func(i int) bool) int {
 type Bucket int
 
 const (
-	BucketActiveRuns    Bucket = iota // in-progress runs with a next stage
-	BucketChores                      // due project chores, before they become runs
-	BucketIntents                     // open intents: operator-authored standing direction, above the backlog
-	BucketBacklog                     // captured ideas, not yet promoted to a run
-	BucketCompletedRuns               // pushed or terminal runs, shown as "done"
-	BucketNone                        // not placed in any section (idea with an unrecognised status; in-progress non-idea run with no next-stage decision)
+	BucketActiveRuns Bucket = iota // in-progress runs with a next stage
+	BucketIntents                  // open intents: operator-authored standing direction, above the backlog
+	// BucketChores is due project chores, before they become runs. It has
+	// no section of its own: a due chore is pending, unopened work, so it
+	// renders at the head of BACKLOG and counts in that total — which is
+	// why it sorts immediately ahead of BucketBacklog. The bucket survives
+	// as the row's *identity*: chore rows link to /chore/ rather than
+	// /run/, and the per-project chore count reads it.
+	BucketChores
+	BucketBacklog       // captured ideas, not yet promoted to a run
+	BucketCompletedRuns // pushed or terminal runs, shown as "done"
+	BucketNone          // not placed in any section (idea with an unrecognised status; in-progress non-idea run with no next-stage decision)
 )
 
 // Row is one entry in the dashboard. Kept flat so tabwriter can
@@ -288,34 +294,10 @@ func BuildRows(in Inputs) ([]Row, error) {
 	groupActiveChains(rows, in.Index, byRunKey)
 	rows = nestSpawnedRuns(rows, in.Index)
 	rows = nestPromotedIdeas(rows, in.Index)
-	var choreRows []Row
-	for _, c := range in.Chores {
-		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
-			continue
-		}
-		choreRows = append(choreRows, Row{
-			Project: c.Project,
-			Run:     c.Name,
-			Note:    c.Reason,
-			When:    c.When,
-			Bucket:  BucketChores,
-		})
-	}
-	sort.SliceStable(choreRows, func(i, j int) bool {
-		return choreRows[i].When.After(choreRows[j].When)
-	})
-	if len(choreRows) > 0 {
-		insert := 0
-		for insert < len(rows) && rows[insert].Bucket == BucketActiveRuns {
-			insert++
-		}
-		rows = append(rows[:insert], append(choreRows, rows[insert:]...)...)
-	}
-
 	// Intents ride in from Inputs (not classify — they carry a title read
-	// off-disk and never join the run board). Splice them after the
-	// ACTIVE/CHORES prefix so INTENTS sits directly above BACKLOG, sorted
-	// by project then slug for a stable render.
+	// off-disk and never join the run board). Splice them after the ACTIVE
+	// prefix so INTENTS sits directly above the backlog, sorted by project
+	// then slug for a stable render.
 	var intentRows []Row
 	for _, it := range in.Intents {
 		if in.ProjectFilter != "" && it.Project != in.ProjectFilter {
@@ -336,10 +318,36 @@ func BuildRows(in Inputs) ([]Row, error) {
 	})
 	if len(intentRows) > 0 {
 		insert := 0
-		for insert < len(rows) && (rows[insert].Bucket == BucketActiveRuns || rows[insert].Bucket == BucketChores) {
+		for insert < len(rows) && rows[insert].Bucket == BucketActiveRuns {
 			insert++
 		}
 		rows = append(rows[:insert], append(intentRows, rows[insert:]...)...)
+	}
+
+	// Due chores head the backlog: they splice after the ACTIVE/INTENTS
+	// prefix, immediately ahead of the idea rows they render beside.
+	var choreRows []Row
+	for _, c := range in.Chores {
+		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
+			continue
+		}
+		choreRows = append(choreRows, Row{
+			Project: c.Project,
+			Run:     c.Name,
+			Note:    c.Reason,
+			When:    c.When,
+			Bucket:  BucketChores,
+		})
+	}
+	sort.SliceStable(choreRows, func(i, j int) bool {
+		return choreRows[i].When.After(choreRows[j].When)
+	})
+	if len(choreRows) > 0 {
+		insert := 0
+		for insert < len(rows) && (rows[insert].Bucket == BucketActiveRuns || rows[insert].Bucket == BucketIntents) {
+			insert++
+		}
+		rows = append(rows[:insert], append(choreRows, rows[insert:]...)...)
 	}
 	return rows, nil
 }
@@ -1017,9 +1025,10 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 				Stage:      r.Stage,
 				RunningDoc: r.RunningDoc,
 			})
-		case BucketChores:
-			// Chores are pre-run work and don't drive a station glyph.
-		case BucketBacklog:
+		case BucketChores, BucketBacklog:
+			// Chores drive no station glyph — they're pre-run work — but
+			// they are backlog: the crates count what the BACKLOG heading
+			// counts.
 			state.BacklogCount++
 		case BucketCompletedRuns:
 			state.CompletedCount++
@@ -1090,16 +1099,17 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	}
 	fmt.Fprintln(w)
 
-	var active, chores, intents, backlog, completed []Row
+	var active, intents, backlog, completed []Row
 	for _, r := range rows {
 		switch r.Bucket {
 		case BucketActiveRuns:
 			active = append(active, r)
-		case BucketChores:
-			chores = append(chores, r)
 		case BucketIntents:
 			intents = append(intents, r)
-		case BucketBacklog:
+		case BucketChores, BucketBacklog:
+			// Chores head the backlog rather than holding a section of
+			// their own. BuildRows already splices them ahead of the idea
+			// rows, so appending in row order is the whole ordering.
 			backlog = append(backlog, r)
 		case BucketCompletedRuns:
 			completed = append(completed, r)
@@ -1114,18 +1124,6 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 		for _, r := range active {
 			slug := rowPrefix(r) + r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
-		}
-		tw.Flush()
-	}
-	fmt.Fprintln(w)
-
-	cliout.Printf(w, "CHORES (%d)\n", len(chores))
-	if len(chores) == 0 {
-		fmt.Fprintln(w, "  (none)")
-	} else {
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, r := range chores {
-			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
 		}
 		tw.Flush()
 	}
