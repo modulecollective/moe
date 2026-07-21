@@ -481,9 +481,10 @@ func scanGlossaryOrphans(cfg Config) []string {
 	return orphans
 }
 
-// xrefHeadingPattern matches a markdown heading logical line; the
-// capture is the heading text with the `#` marker stripped.
-var xrefHeadingPattern = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
+// xrefHeadingPattern matches a markdown heading logical line. The first
+// capture is the `#` run (its length is the heading's nesting level),
+// the second is the heading text.
+var xrefHeadingPattern = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
 
 // xrefBoldLeadPattern matches a bold lead — the `**…**` span opening a
 // logical line, optionally behind a list marker. This is the anchor
@@ -504,7 +505,8 @@ const xrefPathSeparator = "→"
 // rather than line number, and a heading rename is the cheapest edit a
 // reflect pass makes — nothing in that pass's own diff shows the
 // pointers it stranded. This is the check that makes "a rename strands
-// no pointers" enforceable.
+// no pointers" enforceable — for renames and for section moves alike
+// (see xrefResolves).
 //
 // Citations into a managed doc that isn't on disk are skipped:
 // MissingManagedDocs already reports that, and every citation into the
@@ -527,7 +529,7 @@ func scanDanglingXrefs(cfg Config) []DanglingXref {
 		bodies[name] = body
 	}
 
-	catalogues := map[string][]string{}
+	catalogues := map[string][]xrefEntry{}
 	for name, body := range bodies {
 		catalogues[name] = xrefCatalogue(body)
 	}
@@ -586,27 +588,49 @@ func xrefCitationPattern(names []string) *regexp.Regexp {
 	return regexp.MustCompile(`(?:^|[\s(])(` + strings.Join(alts, "|") + `)\s+"([^"]+)"`)
 }
 
+// xrefEntry is one anchor a citation may point at — a heading or a bold
+// lead — with the nesting level that decides what sits inside it.
+type xrefEntry struct {
+	text  string
+	level int
+}
+
+// boldLeadBase is the level floor for bold leads: deeper than any
+// heading (h1–h6), so every lead nests inside the section it appears
+// under. A lead's own level adds its leading indent, which makes a
+// sub-bullet lead (`  - **moe sdlc reopen …**`) nest inside its parent
+// bullet without parsing list structure.
+const boldLeadBase = 10
+
 // xrefCatalogue collects everything in body a citation may legitimately
-// point at: markdown headings and bold leads, normalised.
-func xrefCatalogue(body string) []string {
-	var out []string
+// point at: markdown headings and bold leads, normalised, in document
+// order and carrying their nesting level.
+func xrefCatalogue(body string) []xrefEntry {
+	var out []xrefEntry
 	for _, line := range logicalLines(body) {
 		if m := xrefHeadingPattern.FindStringSubmatch(line); m != nil {
-			out = append(out, normaliseXrefText(m[1]))
+			out = append(out, xrefEntry{text: normaliseXrefText(m[2]), level: len(m[1])})
 			continue
 		}
 		if m := xrefBoldLeadPattern.FindStringSubmatch(line); m != nil {
-			out = append(out, normaliseXrefText(m[1]))
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			out = append(out, xrefEntry{text: normaliseXrefText(m[1]), level: boldLeadBase + indent})
 		}
 	}
 	return out
 }
 
-// xrefResolves reports whether every non-empty segment of span matches
-// some catalogue entry. Segments resolve doc-wide rather than nested
-// under the previous segment's section: the motivating failure is a
-// rename, which deletes the heading everywhere, and section-scoped
-// resolution would cost span tracking for a case that hasn't shown up.
+// xrefResolves reports whether span names a real path through
+// catalogue: the first segment resolves doc-wide, and each later
+// segment must name an entry *inside* the previous segment's section.
+//
+// Section scoping is what catches the failure this check exists for. A
+// reflect pass moved architecture.md's `internal/…` package leads out
+// of `## Components` into a new `## Domain packages`; both sections
+// survived, so twelve glossary pointers reading "Components →
+// internal/dash" still resolved segment-by-segment against a doc where
+// no such path existed. Doc-wide resolution was deferred as a case that
+// hadn't shown up; it showed up.
 //
 // A segment matches exactly or as a prefix of an entry. Prefix is
 // load-bearing — citations quote the first clause of a long bold lead
@@ -615,22 +639,38 @@ func xrefCatalogue(body string) []string {
 // Substring would go too far: it would silently accept `intent`
 // against a `moe intent` lead, an imprecise citation the pass should
 // tighten instead.
-func xrefResolves(span string, catalogue []string) bool {
+func xrefResolves(span string, catalogue []xrefEntry) bool {
+	var segs []string
 	for _, seg := range strings.Split(span, xrefPathSeparator) {
-		norm := normaliseXrefText(seg)
-		if norm == "" {
-			continue
-		}
-		if !xrefSegmentMatches(norm, catalogue) {
-			return false
+		if norm := normaliseXrefText(seg); norm != "" {
+			segs = append(segs, norm)
 		}
 	}
-	return true
+	return xrefMatch(segs, catalogue, 0, len(catalogue))
 }
 
-func xrefSegmentMatches(seg string, catalogue []string) bool {
-	for _, entry := range catalogue {
-		if strings.HasPrefix(entry, seg) {
+// xrefMatch resolves segs against catalogue[lo:hi], recursing into the
+// section each candidate opens. It backtracks: a segment's text can
+// name entries in several sections (two sections can carry the same
+// bold lead), and the span resolves if *any* chain of matches nests all
+// the way down.
+//
+// An entry's section runs from just past the entry to the next entry at
+// an equal-or-shallower level — the same rule for headings and leads,
+// since leads sit below every heading by construction.
+func xrefMatch(segs []string, catalogue []xrefEntry, lo, hi int) bool {
+	if len(segs) == 0 {
+		return true
+	}
+	for i := lo; i < hi; i++ {
+		if !strings.HasPrefix(catalogue[i].text, segs[0]) {
+			continue
+		}
+		end := i + 1
+		for end < hi && catalogue[end].level > catalogue[i].level {
+			end++
+		}
+		if xrefMatch(segs[1:], catalogue, i+1, end) {
 			return true
 		}
 	}

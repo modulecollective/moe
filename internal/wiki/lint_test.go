@@ -302,7 +302,7 @@ Top-level command surface today:
 
 ## Decisions
 
-- **Doc-wide segment resolution.** ` + "`" + `"A → B"` + "`" + ` requires both.
+- **Section-scoped segment resolution.** ` + "`" + `"A → B"` + "`" + ` needs B under A.
 - **Prefix match, not
   substring.** Substring would silently accept an imprecise citation.
 `
@@ -383,6 +383,108 @@ func TestXrefResolves(t *testing.T) {
 				t.Errorf("xrefResolves(%q) = %v, want %v", tc.span, got, tc.want)
 			}
 		})
+	}
+}
+
+// scopedFixture reproduces the incident this check was hardened for: a
+// reflect pass moved the `internal/…` package leads out of
+// `## Components` into a new `## Domain packages`, and both sections
+// survived. Every segment of a stale "Components → internal/dash"
+// pointer still names something in the doc — only the nesting is gone.
+//
+// It also carries a lead text that appears under two sections (so a
+// scoped match has to backtrack), a sub-bullet that nests by indent
+// alone, and a long lead a citation quotes only the first clause of.
+const scopedFixture = `# Architecture
+
+## Components
+
+- **moe pulse** — the dashboard verb.
+  - **moe pulse --watch** — the live variant.
+- **Shared surface** — the Components one.
+
+## Domain packages
+
+- **` + "`internal/dash`" + `** — dashboard rendering.
+- **Shared surface** — the Domain packages one, same text.
+  - **Nested only here** — the sub-bullet that makes backtracking matter.
+
+## Decisions
+
+- **Hooks gate merges; the operator never rebases by hand.**
+  Everything else follows from that.
+`
+
+// Section scoping in isolation: a segment must name an entry inside the
+// previous segment's section, and the search backtracks across every
+// section a segment could name.
+func TestXrefResolvesSectionScoped(t *testing.T) {
+	catalogue := xrefCatalogue(scopedFixture)
+	cases := []struct {
+		name string
+		span string
+		want bool
+	}{
+		{"the stranded pointer: lead moved to another section", "Components → `internal/dash`", false},
+		{"same lead cited under its new section", "Domain packages → `internal/dash`", true},
+		{"sub-bullet nests inside its parent bullet by indent", "Components → moe pulse → moe pulse --watch", true},
+		{"duplicate lead text resolves under either section", "Components → Shared surface", true},
+		{"backtracks past a first match with an empty section", "Shared surface → Nested only here", true},
+		{"nesting is not transitive across sections", "Components → Shared surface → Nested only here", false},
+		{"first clause of a long lead, in scope", "Decisions → Hooks gate merges.", true},
+		{"single segment still resolves doc-wide", "Nested only here", true},
+		{"dead leaf inside a live section", "Domain packages → Nonexistent", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := xrefResolves(tc.span, catalogue); got != tc.want {
+				t.Errorf("xrefResolves(%q) = %v, want %v", tc.span, got, tc.want)
+			}
+		})
+	}
+}
+
+// End to end through Scan: the section move strands the pointer that
+// still names both of its segments, and it blocks finalize.
+func TestScanDanglingXrefsSectionScoped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "architecture.md"), scopedFixture)
+	writeFile(t, filepath.Join(dir, "glossary.md"), `# Glossary
+
+### internal/dash
+
+The package lives in architecture.md "Domain packages → `+"`internal/dash`"+`"
+and it holds.
+
+### moe pulse
+
+Stranded by the section move: architecture.md "Components → `+"`internal/dash`"+`".
+`)
+	cfg := Config{
+		Mode:       Closed,
+		ContentDir: dir,
+		ManagedDocs: []ManagedDoc{
+			{Filename: "glossary.md", Title: "Glossary"},
+			{Filename: "architecture.md", Title: "Architecture"},
+		},
+	}
+	f, err := Scan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DanglingXref{
+		{From: "glossary.md", Target: "architecture.md", Span: "Components → `internal/dash`"},
+	}
+	if len(f.DanglingXrefs) != len(want) {
+		t.Fatalf("DanglingXrefs: got %+v want %+v", f.DanglingXrefs, want)
+	}
+	for i := range want {
+		if f.DanglingXrefs[i] != want[i] {
+			t.Errorf("DanglingXrefs[%d]: got %+v want %+v", i, f.DanglingXrefs[i], want[i])
+		}
+	}
+	if !f.HasBlocking() {
+		t.Error("a stranded pointer must block finalize")
 	}
 }
 
