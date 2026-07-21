@@ -14,8 +14,12 @@ coverage.*
 .vscode/
 *.swp
 
-# Agent / dev-env runtime drop site
+# Agent / dev-env runtime drop sites — .moe/ from moe's dev-env,
+# .claude from the Claude Code harness (sandbox write tracking,
+# settings, and materialized skills). .claude is matched without a
+# trailing slash for the same device-vs-directory reason as below.
 .moe/
+.claude
 
 # Agent run artifacts — written into the repo root by the MoE
 # workflow; not part of the published surface.
