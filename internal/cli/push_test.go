@@ -2499,3 +2499,136 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 		t.Fatalf("no scripts to run, but saw pre-push section header in output:\n%s\n%s", stdout, stderr)
 	}
 }
+
+// TestPushMergePathTailsPulse: the fast-forward ship is run traffic, so
+// the merge path fires exactly one sweep once the merged transition is
+// durable — spawned by the run that just shipped, which is the edge the
+// dash nests the sweep under. Every other push test rides TestMain's
+// no-op firePulse, so the fire going missing here would pass CI.
+func TestPushMergePathTailsPulse(t *testing.T) {
+	f := newPushFixture(t)
+	fired := stubFirePulse(t)
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	want := f.projectID + " " + f.runID
+	if len(*fired) != 1 || (*fired)[0] != want {
+		t.Fatalf("firePulse fired %v, want exactly one fire %q", *fired, want)
+	}
+}
+
+// TestPushPRPathTailsPulseOnFirstPushOnly: the PR path's fire sits
+// inside the `md.Status != StatusPushed` block, so a genuine first push
+// sweeps and a re-run that only refreshes the branch does not. That
+// placement is the invariant — moved out of the block, every `--pr`
+// re-run would spend a survey session.
+func TestPushPRPathTailsPulseOnFirstPushOnly(t *testing.T) {
+	f := newPushFixture(t)
+	const fakeRemote = "https://github.com/owner/repo.git"
+	const existingURL = "https://github.com/owner/repo/pull/77"
+	addInsteadOfRewrite(t, fakeRemote, f.origin)
+	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
+		`{"id":"`+f.projectID+`","submodule":"projects/`+f.projectID+`/src","remote":"`+fakeRemote+`","default_branch":"main"}`+"\n")
+	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
+	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for the PR-path pulse test")
+	fakeGhExistingPR(t, existingURL)
+	fired := stubFirePulse(t)
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("first push: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	want := f.projectID + " " + f.runID
+	if len(*fired) != 1 || (*fired)[0] != want {
+		t.Fatalf("first push fired %v, want exactly one fire %q", *fired, want)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusPushed {
+		t.Fatalf("status after first push: want pushed, got %s", md.Status)
+	}
+
+	stdout, stderr, code = f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("re-push: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if len(*fired) != 1 {
+		t.Fatalf("re-push fired again (%v); a branch refresh to an already-recorded PR must not sweep", *fired)
+	}
+}
+
+// TestPushDoesNotTailPulseForMachineOpenedRun: the fire-time lineage
+// gate reaches the push tail too. The gate itself is unit-tested; this
+// pins that push threads the run's metadata through it at all — without
+// that, a kicked ride's own merge would spend a survey session that
+// could only groom and park.
+func TestPushDoesNotTailPulseForMachineOpenedRun(t *testing.T) {
+	f := newPushFixture(t)
+	md := f.reloadRun()
+	md.SpawnedBy = f.projectID + "/pulse-2026-07-20-8"
+	if err := run.Save(f.root, md); err != nil {
+		t.Fatal(err)
+	}
+	// The lineage edit has to land as a commit the way a real spawn's
+	// open commit does — push's own record commit would otherwise carry
+	// the stray edit along.
+	gittest.Run(t, f.root, "add", "-A")
+	gittest.Run(t, f.root, "commit", "-m", "seed machine lineage")
+	fired := stubFirePulse(t)
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("firePulse fired %v, want no fire for a machine-opened run", *fired)
+	}
+	if !strings.Contains(stderr, "machine-opened") {
+		t.Errorf("stderr = %q, want the suppression named", stderr)
+	}
+}
+
+// TestPushThreadsPulseInterruptButBareVerbExitsZero pins the two halves
+// of the skip posture at the push tail. runPushTyped hands the sweep's
+// "operator skipped" bool back so cascadeShipStep can map it to
+// exitInterrupted and halt the chain; the bare `moe sdlc push` verb
+// drops it, because the push's own durable work already succeeded.
+// Sibling of TestBareCloseExitsZeroOnPulseSkip one verb over.
+func TestPushThreadsPulseInterruptButBareVerbExitsZero(t *testing.T) {
+	stubSkippedPulse := func(t *testing.T) {
+		t.Helper()
+		orig := firePulse
+		firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
+		t.Cleanup(func() { firePulse = orig })
+	}
+
+	t.Run("typed", func(t *testing.T) {
+		f := newPushFixture(t)
+		stubSkippedPulse(t)
+		t.Setenv("MOE_HOME", f.root)
+		t.Setenv("NO_COLOR", "1")
+
+		var stdout, stderr bytes.Buffer
+		code, interrupted, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
+		if err != nil {
+			t.Fatalf("runPushTyped: %v; stderr=%s", err, stderr.String())
+		}
+		if code != 0 {
+			t.Fatalf("exit=%d, want 0; stderr=%s", code, stderr.String())
+		}
+		if !interrupted {
+			t.Fatal("runPushTyped dropped the tail pulse's interrupt; the cascade would ride on to the next run")
+		}
+	})
+
+	t.Run("bare verb", func(t *testing.T) {
+		f := newPushFixture(t)
+		stubSkippedPulse(t)
+
+		stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+		if code != 0 {
+			t.Fatalf("bare push exit=%d, want 0 (a skipped tail pulse is not a push failure)\nstdout=%s\nstderr=%s",
+				code, stdout, stderr)
+		}
+	})
+}
