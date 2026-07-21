@@ -59,14 +59,15 @@ func chainStateBlock(root, projectID string) string {
 		return md.ID, true
 	}
 
+	graph := run.NewChainGraph(idx, byKey)
 	var lines []string
-	for _, unit := range activeChainItems(mds, idx, byKey) {
+	for _, unit := range activeChainItems(graph, mds, idx) {
 		// A settled predecessor of the unit head is the whole reason a
 		// one-member unit can still be a thread: the run ahead of it
 		// shipped, the edge stayed, and this is the item it feeds.
 		var prefix string
 		if len(unit) > 0 {
-			if p := run.TerminalChainParentOf(unit[0].Key, idx.ChainedChild, byKey); p != "" {
+			if p := graph.TerminalParentOf(unit[0].Key); p != "" {
 				if pmd := byKey[p]; pmd != nil {
 					plabel, _ := label(pmd)
 					prefix = fmt.Sprintf("`%s` (%s, %s) → ", plabel, pmd.Workflow, pmd.Status)

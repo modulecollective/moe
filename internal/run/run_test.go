@@ -1041,8 +1041,8 @@ func TestTerminalChainParentOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := TerminalChainParentOf("p/tail", tc.edges, byKey); got != tc.want {
-				t.Errorf("TerminalChainParentOf = %q, want %q", got, tc.want)
+			if got := NewChainGraph(&JournalIndex{ChainedChild: tc.edges}, byKey).TerminalParentOf("p/tail"); got != tc.want {
+				t.Errorf("TerminalParentOf = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -1058,8 +1058,8 @@ func TestTerminalChainParentOfOneHop(t *testing.T) {
 		"p/c": {Project: "p", ID: "c", Status: StatusInProgress},
 	}
 	edges := map[string]string{"p/a": "p/b", "p/b": "p/c"}
-	if got := TerminalChainParentOf("p/c", edges, byKey); got != "p/b" {
-		t.Errorf("TerminalChainParentOf = %q, want p/b", got)
+	if got := NewChainGraph(&JournalIndex{ChainedChild: edges}, byKey).TerminalParentOf("p/c"); got != "p/b" {
+		t.Errorf("TerminalParentOf = %q, want p/b", got)
 	}
 }
 

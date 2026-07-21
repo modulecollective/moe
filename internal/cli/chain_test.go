@@ -227,14 +227,14 @@ func TestChainAnnotationOrphanVsChainedTo(t *testing.T) {
 		"p/b": {ID: "b", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress},
 	}
 	chainedChild := map[string]string{"p/a": "p/b"}
-	chainedFrom := invertEffectiveChain(chainedChild, byKey)
-	if got := chainAnnotation("p/a", chainedChild, chainedFrom, byKey); got != "chains-to p/b" {
+	graph := run.NewChainGraph(&run.JournalIndex{ChainedChild: chainedChild}, byKey)
+	if got := chainAnnotation(graph, "p/a"); got != "chains-to p/b" {
 		t.Errorf("p/a annotation = %q, want \"chains-to p/b\"", got)
 	}
-	if got := chainAnnotation("p/b", chainedChild, chainedFrom, byKey); got != "chained-from p/a" {
+	if got := chainAnnotation(graph, "p/b"); got != "chained-from p/a" {
 		t.Errorf("p/b annotation = %q, want \"chained-from p/a\"", got)
 	}
-	if got := chainAnnotation("p/c", chainedChild, chainedFrom, byKey); got != "orphan" {
+	if got := chainAnnotation(graph, "p/c"); got != "orphan" {
 		t.Errorf("p/c annotation = %q, want \"orphan\" (no edges)", got)
 	}
 }
@@ -248,14 +248,14 @@ func TestChainAnnotationSuppressesTerminalEdges(t *testing.T) {
 		"p/b": {ID: "b", Project: "p", Workflow: "sdlc", Status: run.StatusClosed},
 	}
 	chainedChild := map[string]string{"p/a": "p/b"}
-	chainedFrom := invertEffectiveChain(chainedChild, byKey)
-	if got := chainAnnotation("p/a", chainedChild, chainedFrom, byKey); got != "orphan" {
+	graph := run.NewChainGraph(&run.JournalIndex{ChainedChild: chainedChild}, byKey)
+	if got := chainAnnotation(graph, "p/a"); got != "orphan" {
 		t.Errorf("p/a annotation = %q, want \"orphan\" (child terminal)", got)
 	}
-	// The inverted map must also drop the edge so p/b doesn't
-	// claim a chained-from parent the read side would hide.
-	if _, ok := chainedFrom["p/b"]; ok {
-		t.Errorf("invertEffectiveChain should drop edges into terminal children: got %v", chainedFrom)
+	// The graph must also drop the edge so p/b doesn't claim a
+	// chained-from parent the read side would hide.
+	if ps := graph.Parents("p/b"); len(ps) != 0 {
+		t.Errorf("the graph should drop edges into terminal children: got %v", ps)
 	}
 }
 
@@ -760,7 +760,7 @@ func TestActiveChainItemsMembership(t *testing.T) {
 	}
 	idx := &run.JournalIndex{LastActivity: when, ChainedChild: map[string]string{}}
 
-	blocks := activeChainItems(mds, idx, byKey)
+	blocks := activeChainItems(run.NewChainGraph(idx, byKey), mds, idx)
 	got := map[string]bool{}
 	for _, block := range blocks {
 		for _, it := range block {
@@ -802,7 +802,7 @@ func TestChainEditTwinEdgeSurvivesSave(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	body := renderChainEditFile(activeChainItems(mds, idx, byKey))
+	body := renderChainEditFile(activeChainItems(run.NewChainGraph(idx, byKey), mds, idx))
 	parsed, err := parseChainEditFile(body)
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
@@ -846,7 +846,7 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	blocks := activeChainItems(mds, idx, byKey)
+	blocks := activeChainItems(run.NewChainGraph(idx, byKey), mds, idx)
 	// The blocks are the dash units: the 3-run chain, the orphan, then
 	// the 2-run chain. The blank lines the render writes between these
 	// are the chain boundaries.
@@ -928,7 +928,7 @@ func TestChainEditRoundTripIsNoOp(t *testing.T) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	body := renderChainEditFile(activeChainItems(mds, idx, byKey))
+	body := renderChainEditFile(activeChainItems(run.NewChainGraph(idx, byKey), mds, idx))
 	parsed, err := parseChainEditFile(body)
 	if err != nil {
 		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
@@ -953,8 +953,8 @@ func TestChainAnnotationMultipleParentsFanIn(t *testing.T) {
 		"p/c": {ID: "c", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress},
 	}
 	chainedChild := map[string]string{"p/a": "p/c", "p/b": "p/c"}
-	chainedFrom := invertEffectiveChain(chainedChild, byKey)
-	if got := chainAnnotation("p/c", chainedChild, chainedFrom, byKey); got != "chained-from p/a, p/b" {
+	graph := run.NewChainGraph(&run.JournalIndex{ChainedChild: chainedChild}, byKey)
+	if got := chainAnnotation(graph, "p/c"); got != "chained-from p/a, p/b" {
 		t.Errorf("p/c annotation = %q, want \"chained-from p/a, p/b\"", got)
 	}
 }

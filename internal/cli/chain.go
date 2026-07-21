@@ -132,7 +132,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
-	items := activeChainItems(mds, idx, byKey)
+	items := activeChainItems(run.NewChainGraph(idx, byKey), mds, idx)
 	if len(items) == 0 {
 		moePrintln(stderr, "chain edit: no active chainable runs")
 		return 0
@@ -325,8 +325,7 @@ func chainableWorkflow(workflow string) bool {
 // Each returned block is one chain unit (an orphan, or a head→tail
 // chain); renderChainEditFile emits a blank line between blocks so the
 // editor's blank lines are the chain boundaries.
-func activeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[string]*run.Metadata) [][]chainItem {
-	chainedFrom := invertEffectiveChain(idx.ChainedChild, byKey)
+func activeChainItems(graph *run.ChainGraph, mds []*run.Metadata, idx *run.JournalIndex) [][]chainItem {
 	itemByKey := map[string]chainItem{}
 	for _, md := range mds {
 		if !chainableWorkflow(md.Workflow) || md.Status != run.StatusInProgress {
@@ -336,7 +335,7 @@ func activeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[stri
 		itemByKey[key] = chainItem{
 			Key:  key,
 			When: idx.LastActivity[key],
-			Anno: chainAnnotation(key, idx.ChainedChild, chainedFrom, byKey),
+			Anno: chainAnnotation(graph, key),
 		}
 	}
 	// Feed the shared grouper in newest-first order (Key tiebreak keeps
@@ -352,7 +351,7 @@ func activeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[stri
 		}
 		return order[i].When.After(order[j].When)
 	})
-	units := run.OrderChainUnits(order, idx, byKey)
+	units := graph.Units(order)
 	out := make([][]chainItem, 0, len(units))
 	for _, u := range units {
 		block := make([]chainItem, 0, len(u))
@@ -364,36 +363,18 @@ func activeChainItems(mds []*run.Metadata, idx *run.JournalIndex, byKey map[stri
 	return out
 }
 
-// invertEffectiveChain maps child key → list of parent keys for every
-// live, unresolved edge. "Effective" filters out edges whose child is
-// terminal or no longer on disk, matching Decision 1's read-side rule.
-// A child can have multiple parents (cross-parent fan-in is allowed)
-// so values are lists, sorted for deterministic output.
-func invertEffectiveChain(chainedChild map[string]string, byKey map[string]*run.Metadata) map[string][]string {
-	out := map[string][]string{}
-	for parent, child := range chainedChild {
-		if !run.ChainChildLive(child, byKey) {
-			continue
-		}
-		out[child] = append(out[child], parent)
-	}
-	for k := range out {
-		sort.Strings(out[k])
-	}
-	return out
-}
-
 // chainAnnotation builds the per-line comment for the editor view.
 // One of: "orphan", "chains-to X", "chained-from Y[, Z]",
 // "chains-to X, chained-from Y". Cross-references that point at
 // terminal or missing runs are suppressed — the editor should not
-// advertise stale state.
-func chainAnnotation(key string, chainedChild map[string]string, chainedFrom map[string][]string, byKey map[string]*run.Metadata) string {
+// advertise stale state — which is exactly the edge set run.ChainGraph
+// holds, so both directions are a plain lookup.
+func chainAnnotation(graph *run.ChainGraph, key string) string {
 	var parts []string
-	if child, ok := chainedChild[key]; ok && run.ChainChildLive(child, byKey) {
+	if child := graph.Child(key); child != "" {
 		parts = append(parts, "chains-to "+child)
 	}
-	if parents := chainedFrom[key]; len(parents) > 0 {
+	if parents := graph.Parents(key); len(parents) > 0 {
 		parts = append(parts, "chained-from "+strings.Join(parents, ", "))
 	}
 	if len(parts) == 0 {

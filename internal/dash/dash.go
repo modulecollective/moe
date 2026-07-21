@@ -375,7 +375,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	active := rows[:n]
 	keyOf := func(r Row) string { return r.Project + "/" + r.Run }
 
-	// The unit ordering is shared with `chain edit` via run.OrderChainUnits
+	// The unit ordering is shared with `chain edit` via run.ChainGraph
 	// — active rows arrive recency-sorted, so the items feed it in order.
 	items := make([]run.ChainOrderItem, n)
 	rowByKey := make(map[string]Row, n)
@@ -384,7 +384,8 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 		items[i] = run.ChainOrderItem{Key: k, When: r.When}
 		rowByKey[k] = r
 	}
-	units := run.OrderChainUnits(items, idx, byKey)
+	graph := run.NewChainGraph(idx, byKey)
+	units := graph.Units(items)
 
 	// Emit units head-first. A run past the head of a multi-run unit is
 	// marked Chained, so the renderer draws a flush "→" connector — the
@@ -410,7 +411,7 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 				row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, u[pos-1], k)
 			}
 			if pos == 0 {
-				if p := run.TerminalChainParentOf(k, idx.ChainedChild, byKey); p != "" {
+				if p := graph.TerminalParentOf(k); p != "" {
 					row.Chained = true
 					row.Note += settledChainHint(p, byKey[p])
 					row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, p, k)

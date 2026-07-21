@@ -41,8 +41,9 @@ func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, stri
 		byKey[md.Project+"/"+md.ID] = md
 	}
 
+	graph := run.NewChainGraph(idx, byKey)
 	head := projectID + "/" + slug
-	chainedUnder := liveChainParentOf(head, idx.ChainedChild, byKey)
+	chainedUnder := graph.LiveParentOf(head)
 
 	snap, err := GatherDashSnapshot(root, now, DashFilter{})
 	if err != nil {
@@ -54,19 +55,16 @@ func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, stri
 	}
 
 	var members []dash.Row
-	// seen cycle-guards the walk the same way OrderChainUnits' consumed
-	// map does: a hand-edited journal can describe a loop, and a page
-	// render is no place to hang.
-	seen := map[string]bool{head: true}
-	prev := head
-	for cur := idx.ChainedChild[head]; run.ChainChildLive(cur, byKey) && !seen[cur]; cur = idx.ChainedChild[cur] {
-		seen[cur] = true
+	// The graph's forward walk is the one the ride takes, cycle belt and
+	// liveness rule included; the head itself is thread[0] and isn't a
+	// member of its own batch.
+	thread := graph.Thread(head)
+	for i, cur := range thread[1:] {
 		// The edge that put this member here is the one from the run
 		// before it — the dash rows are gathered globally and carry the
 		// attribution for whatever unit they landed in, so re-derive it
 		// against this walk's parent rather than trusting the row's.
-		consent, groomed := idx.EdgeConsent[prev+" "+cur]
-		prev = cur
+		consent, groomed := idx.EdgeConsent[thread[i]+" "+cur]
 		row, ok := rowByKey[cur]
 		if !ok {
 			md := byKey[cur]

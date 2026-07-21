@@ -584,7 +584,7 @@ func TestChainEditOffersMintedHeads(t *testing.T) {
 	}
 
 	var offered []string
-	for _, block := range activeChainItems(mds, idx, byKey) {
+	for _, block := range activeChainItems(run.NewChainGraph(idx, byKey), mds, idx) {
 		for _, it := range block {
 			offered = append(offered, it.Key)
 		}

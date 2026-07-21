@@ -351,31 +351,8 @@ func liveChainParent(root string, md *run.Metadata) (string, bool, error) {
 	for _, m := range mds {
 		byKey[m.Project+"/"+m.ID] = m
 	}
-	parent := liveChainParentOf(md.Project+"/"+md.ID, idx.ChainedChild, byKey)
+	parent := run.NewChainGraph(idx, byKey).LiveParentOf(md.Project + "/" + md.ID)
 	return parent, parent != "", nil
-}
-
-// liveChainParentOf is the pure lookup behind liveChainParent: the
-// in-progress run that chains to key, or "" for none. Fan-in is
-// allowed, so the lowest key wins for a deterministic answer; the
-// caller names a head either way. Split out so the serve head page can
-// ask the same question off an index it has already built rather than
-// replaying the journal a second time.
-func liveChainParentOf(key string, chainedChild map[string]string, byKey map[string]*run.Metadata) string {
-	var best string
-	for parent, child := range chainedChild {
-		if child != key {
-			continue
-		}
-		pmd, ok := byKey[parent]
-		if !ok || pmd.Status != run.StatusInProgress {
-			continue
-		}
-		if best == "" || parent < best {
-			best = parent
-		}
-	}
-	return best
 }
 
 // runChainNote edits a chain head's purpose note — the one thing the

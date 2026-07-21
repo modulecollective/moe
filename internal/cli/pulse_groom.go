@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -61,180 +60,6 @@ type pulseChainGroup struct {
 	Kick bool     `json:"kick"`
 }
 
-// chainGraph is the live edge set, in memory, so a groom sweep can
-// place, splice and move against a consistent picture and emit one
-// commit at the end. Mutating a map and diffing it at the end is what
-// makes "move a run out of one chain and into another" a single
-// operation with the old unit restitched, rather than a bespoke
-// unchain-then-rechain path beside `moe chain edit`'s.
-//
-// Only edges whose child is live are loaded (run.ChainChildLive — the
-// same read-side rule every other edge reader applies), and only
-// parents grooming actually wrote are diffed. An edge this sweep never
-// touched can therefore never be cleared as a side effect, which is the
-// difference between a groom step and a `chain clear`.
-type chainGraph struct {
-	child   map[string]string
-	parents map[string][]string
-	orig    map[string]string
-	touched map[string]bool
-}
-
-func newChainGraph(idx *run.JournalIndex, byKey map[string]*run.Metadata) *chainGraph {
-	g := &chainGraph{
-		child:   map[string]string{},
-		parents: map[string][]string{},
-		orig:    map[string]string{},
-		touched: map[string]bool{},
-	}
-	for parent, child := range idx.ChainedChild {
-		if child == "" || !run.ChainChildLive(child, byKey) {
-			continue
-		}
-		if _, ok := byKey[parent]; !ok {
-			continue
-		}
-		g.child[parent] = child
-		g.orig[parent] = child
-		g.parents[child] = append(g.parents[child], parent)
-	}
-	for k := range g.parents {
-		sort.Strings(g.parents[k])
-	}
-	return g
-}
-
-func (g *chainGraph) clearChild(parent string) {
-	old, ok := g.child[parent]
-	if !ok || old == "" {
-		return
-	}
-	delete(g.child, parent)
-	g.parents[old] = dropString(g.parents[old], parent)
-	g.touched[parent] = true
-}
-
-func (g *chainGraph) setChild(parent, child string) {
-	g.clearChild(parent)
-	g.child[parent] = child
-	g.parents[child] = append(g.parents[child], parent)
-	sort.Strings(g.parents[child])
-	g.touched[parent] = true
-}
-
-// detach lifts r out of its current position and restitches the hole:
-// every run that chained to r now chains to whatever r chained to. This
-// is the unchain-and-splice authority `moe chain edit` already has,
-// expressed as one call so a move never leaves the old unit broken in
-// half.
-func (g *chainGraph) detach(r string) {
-	after := g.child[r]
-	before := append([]string(nil), g.parents[r]...)
-	g.clearChild(r)
-	for _, p := range before {
-		if after != "" {
-			g.setChild(p, after)
-		} else {
-			g.clearChild(p)
-		}
-	}
-}
-
-// tailFrom walks forward from a run to the end of its thread. The seen
-// set is a cycle belt: chain edges are operator- and agent-writable and
-// a loop would otherwise hang the sweep.
-func (g *chainGraph) tailFrom(from string) string {
-	seen := map[string]bool{from: true}
-	cur := from
-	for {
-		next := g.child[cur]
-		if next == "" || seen[next] {
-			return cur
-		}
-		seen[next] = true
-		cur = next
-	}
-}
-
-// unit returns every member of the thread key belongs to: walk back to
-// a root through the lowest-keyed parent (the deterministic choice
-// liveChainParentOf already makes for fan-in), then forward.
-func (g *chainGraph) unit(key string) map[string]bool {
-	if key == "" {
-		return nil
-	}
-	seen := map[string]bool{key: true}
-	root := key
-	for {
-		ps := g.parents[root]
-		if len(ps) == 0 || seen[ps[0]] {
-			break
-		}
-		root = ps[0]
-		seen[root] = true
-	}
-	members := map[string]bool{}
-	for cur := root; cur != ""; cur = g.child[cur] {
-		if members[cur] {
-			break
-		}
-		members[cur] = true
-	}
-	return members
-}
-
-// diff renders the touched parents as chain trailers. Sorted by parent
-// so commit bodies and tests are deterministic, matching diffChainEdit.
-func (g *chainGraph) diff() (adds, removes []string) {
-	parents := make([]string, 0, len(g.touched))
-	for p := range g.touched {
-		parents = append(parents, p)
-	}
-	sort.Strings(parents)
-	for _, p := range parents {
-		before, now := g.orig[p], g.child[p]
-		if before == now {
-			continue
-		}
-		if before != "" {
-			removes = append(removes, p+" "+before)
-		}
-		if now != "" {
-			adds = append(adds, p+" "+now)
-		}
-	}
-	return adds, removes
-}
-
-func dropString(xs []string, want string) []string {
-	var out []string
-	for _, x := range xs {
-		if x != want {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
-// loadChainGraph builds the live edge graph off the journal. ok is
-// false when the read fails; every caller treats that as "can't tell"
-// and takes its conservative branch.
-func loadChainGraph(root string) (*chainGraph, bool) {
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		return nil, false
-	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		return nil, false
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, md := range mds {
-		byKey[md.Project+"/"+md.ID] = md
-	}
-	return newChainGraph(idx, byKey), true
-}
-
 // groomedThread records where a group landed, for the kick step. Root
 // is the thread's kickable handle, and it is derived from the *final*
 // graph after every group has been placed — see groomChains. Handle is
@@ -273,7 +98,7 @@ type groomSweep struct {
 	root       string
 	projectID  string
 	pulseSlug  string
-	graph      *chainGraph
+	graph      *run.ChainGraph
 	byKey      map[string]*run.Metadata
 	minted     map[string]string
 	spawnerKey string
@@ -321,14 +146,14 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 		root:      root,
 		projectID: projectID,
 		pulseSlug: pulseSlug,
-		graph:     newChainGraph(idx, byKey),
+		graph:     run.NewChainGraph(idx, byKey),
 		byKey:     byKey,
 		minted:    minted,
 		mode:      currentRideMode,
 	}
 	if spawnerKey != "" {
 		sw.spawnerKey = spawnerKey
-		sw.spawnerUnit = sw.graph.unit(spawnerKey)
+		sw.spawnerUnit = sw.graph.Unit(spawnerKey)
 		if len(sw.spawnerUnit) < 2 {
 			// A run with no live edges either way is not a chain member;
 			// there is no unit to extend and none to fence off.
@@ -352,7 +177,10 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 	// write one already guards against it, so this is the belt: a durable
 	// `X → X` edge is not a bad ordering opinion, it is a corrupt graph,
 	// and it outlives the sweep that wrote it.
-	sw.graph.dropSelfEdges(stderr)
+	for _, parent := range sw.graph.SelfEdges() {
+		moePrintf(stderr, "pulse: groom: dropping a self-edge on %s before stamping\n", parent)
+		sw.graph.ClearChild(parent)
+	}
 
 	// Roots last, from the final graph. A group's root is not knowable
 	// while the walk is still running: a later group may move the run an
@@ -360,16 +188,16 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 	// mid-mutation names a thread that no longer starts there — the kick
 	// then silently parks.
 	for i := range threads {
-		threads[i].Root = sw.graph.threadRoot(threads[i].Handle)
+		threads[i].Root = sw.graph.Root(threads[i].Handle)
 	}
 
 	result := groomResult{
 		threads:        threads,
 		byKey:          sw.byKey,
-		spawnerChained: spawnerKey != "" && len(sw.graph.unit(spawnerKey)) >= 2,
+		spawnerChained: spawnerKey != "" && len(sw.graph.Unit(spawnerKey)) >= 2,
 	}
 
-	adds, removes := sw.graph.diff()
+	adds, removes := sw.graph.Diff()
 	if len(adds) == 0 && len(removes) == 0 {
 		return result
 	}
@@ -392,21 +220,6 @@ func groomChains(root, projectID, pulseSlug string, groups []pulseChainGroup, mi
 	}
 	moePrintf(stderr, "pulse: groomed %d chain edge(s) for %s\n", len(adds), projectID)
 	return result
-}
-
-// dropSelfEdges is the plan's one validation: an edge from a run to
-// itself is dropped before the graph is stamped. Nothing should be able
-// to write one — every branch that sets a child guards the anchor
-// against the group's own members — but a self-edge is durable, survives
-// the sweep, and reads as a one-run cycle to every walker afterwards, so
-// it is worth a belt that costs one pass.
-func (g *chainGraph) dropSelfEdges(stderr io.Writer) {
-	for parent, child := range g.child {
-		if parent == child {
-			moePrintf(stderr, "pulse: groom: dropping a self-edge on %s before stamping\n", parent)
-			g.clearChild(parent)
-		}
-	}
 }
 
 // placeGroup resolves one group's members and anchor and rewrites the
@@ -456,16 +269,16 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 	// the new order is stamped or a member's stale outgoing edge would
 	// survive as a fork.
 	for _, m := range members {
-		sw.graph.detach(m)
+		sw.graph.Detach(m)
 	}
 
 	after := ""
 	if anchor != "" {
-		after = sw.graph.child[anchor]
-		sw.graph.setChild(anchor, members[0])
+		after = sw.graph.Child(anchor)
+		sw.graph.SetChild(anchor, members[0])
 	}
 	for j := 0; j+1 < len(members); j++ {
-		sw.graph.setChild(members[j], members[j+1])
+		sw.graph.SetChild(members[j], members[j+1])
 	}
 	last := members[len(members)-1]
 	if after != "" && after != last {
@@ -473,7 +286,7 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 		// between them rather than at the end. Mid-ride, this is the
 		// queue jump — work placed after an already-merged member runs
 		// before the hop that was next.
-		sw.graph.setChild(last, after)
+		sw.graph.SetChild(last, after)
 	}
 
 	// The handle, not the root: a minted head if the group asked for one,
@@ -486,21 +299,6 @@ func (sw *groomSweep) placeGroup(i int, grp pulseChainGroup, stdout, stderr io.W
 		handle = members[0]
 	}
 	return groomedThread{Handle: handle, Kick: grp.Kick}, true
-}
-
-// threadRoot walks back to the head of key's thread — the run a kick
-// would name.
-func (g *chainGraph) threadRoot(key string) string {
-	seen := map[string]bool{key: true}
-	root := key
-	for {
-		ps := g.parents[root]
-		if len(ps) == 0 || seen[ps[0]] {
-			return root
-		}
-		root = ps[0]
-		seen[root] = true
-	}
 }
 
 // groomAnchor picks the run a group attaches after, applying the three
@@ -555,7 +353,7 @@ func (sw *groomSweep) groomAnchor(label string, grp pulseChainGroup, members []s
 		// bang; without it the group self-roots as a parked thread the
 		// operator (or a later pulse) can pick up.
 		if sw.mode == rideDynamic && len(sw.spawnerUnit) > 0 {
-			tail := sw.graph.tailFrom(sw.spawnerKey)
+			tail := sw.graph.Tail(sw.spawnerKey)
 			if indexOfString(members, tail) >= 0 {
 				// The same anchor-in-members contradiction `onto` refuses,
 				// except the harness picked this anchor, not the agent — so
