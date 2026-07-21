@@ -2,10 +2,6 @@ package cli
 
 import (
 	"io"
-	"path/filepath"
-
-	"github.com/modulecollective/moe/internal/project"
-	"github.com/modulecollective/moe/internal/run"
 )
 
 const choresWorkflow = "chores"
@@ -58,10 +54,6 @@ func openChoresCode(projectID, runID string, headless bool, agentOverride string
 		InitialPrompt:   "Read the canvas and the project's chores/ directory. Edit definitions under projects/<project>/chores/<name>/ and use `moe chore check` as the dry-run loop.",
 		Headless:        headless,
 		Agent:           agentOverride,
-		ExtraStagePaths: choresStageDir,
+		ExtraStagePaths: stageProjectDirs,
 	}, stdout, stderr)
-}
-
-func choresStageDir(workRoot string, md *run.Metadata) ([]string, error) {
-	return []string{filepath.Join(project.Dir(md.Project), "chores")}, nil
 }

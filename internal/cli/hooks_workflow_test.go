@@ -178,18 +178,3 @@ func TestHooksCodeKickoffOmitsWorkspaceWhenUnset(t *testing.T) {
 		t.Errorf("kickoff should not mention workspace when unset:\n%s", got)
 	}
 }
-
-// TestHooksStageHooksDirReturnsProjectHooks: the ExtraStagePaths
-// callback returns projects/<p>/hooks so commitTurn stages the agent's
-// hook edits alongside the canvas. Without this the per-turn commit
-// would carry only the canvas and the hook edits would silently drop.
-func TestHooksStageHooksDirReturnsProjectHooks(t *testing.T) {
-	md := &run.Metadata{Project: "tele", ID: "x"}
-	paths, err := hooksStageHooksDir("/tmp/whatever", md)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(paths) != 1 || paths[0] != "projects/tele/hooks" {
-		t.Fatalf("got %v, want [projects/tele/hooks]", paths)
-	}
-}

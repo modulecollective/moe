@@ -21,6 +21,10 @@ import (
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
 
+// sdlcWorkflow is the workflow ID stamped on run.json for lifecycle
+// runs. Sibling of hooksWorkflow / choresWorkflow.
+const sdlcWorkflow = "sdlc"
+
 // sdlcCloseSubject is the commit-subject template for closing an sdlc
 // run (a fmt.Sprintf string taking projectID, runID). Shared by the
 // `moe sdlc close` verb and `moe serve`'s in-process CloseRun callback
@@ -225,6 +229,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
 			Agent:                  agentOverride,
+			ExtraStagePaths:        stageProjectDirs,
 		}, stdout, stderr)
 }
 
@@ -246,7 +251,12 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 		return 1
 	}
 	return runStageSession(projectID, runID, "code",
-		stageSessionOpts{NeedsSandbox: true, Headless: headless, Agent: agentOverride}, stdout, stderr)
+		stageSessionOpts{
+			NeedsSandbox:    true,
+			Headless:        headless,
+			Agent:           agentOverride,
+			ExtraStagePaths: stageProjectDirs,
+		}, stdout, stderr)
 }
 
 // openSdlcReview is the Go-level seam behind `moe sdlc review`. Same
@@ -272,6 +282,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 			Headless:               headless,
 			CanvasSkeleton:         reviewCanvasSkeleton,
 			Agent:                  agentOverride,
+			ExtraStagePaths:        stageProjectDirs,
 		}, stdout, stderr)
 }
 
@@ -290,10 +301,11 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 	}
 	return runStageSession(projectID, runID, "test",
 		stageSessionOpts{
-			NeedsSandbox:   true,
-			Headless:       headless,
-			CanvasSkeleton: testCanvasSkeleton,
-			Agent:          agentOverride,
+			NeedsSandbox:    true,
+			Headless:        headless,
+			CanvasSkeleton:  testCanvasSkeleton,
+			Agent:           agentOverride,
+			ExtraStagePaths: stageProjectDirs,
 		}, stdout, stderr)
 }
 

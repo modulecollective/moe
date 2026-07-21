@@ -3,9 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 
-	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
 )
@@ -91,7 +89,7 @@ func openHooksCode(projectID, runID string, headless bool, agentOverride string,
 		InitialPrompt:   kickoff,
 		Headless:        headless,
 		Agent:           agentOverride,
-		ExtraStagePaths: hooksStageHooksDir,
+		ExtraStagePaths: stageProjectDirs,
 	}, stdout, stderr)
 }
 
@@ -125,13 +123,4 @@ func buildHooksCodeKickoff(projectID, runID string) (string, error) {
 			"the operator wants `moe hook fire` to read edits from. If they ask "+
 			"where to fire from, point them there.",
 		md.Workspace, wsPath), nil
-}
-
-// hooksStageHooksDir tells commitTurn to also stage the project's
-// hooks/ directory. The agent's edits live there, not in the canvas
-// dir, so without this they'd silently drop on commit — commitTurn
-// only stages docDir + runJSON by default.
-func hooksStageHooksDir(workRoot string, md *run.Metadata) ([]string, error) {
-	hooksRel := filepath.Join(project.Dir(md.Project), "hooks")
-	return []string{hooksRel}, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -437,6 +438,24 @@ absolute bureaucracy paths named in this prompt. Run metadata, prior
 canvases, digital-twin docs, and other bureaucracy paths are
 read-only context; do not edit those paths.
 `, clonePath)
+	}
+
+	// Names the project dirs that ride the turn commit. Without it the
+	// read-only-context sentence above reads as covering the whole
+	// bureaucracy, and a stage that writes a hook or a chore has no way
+	// to know it landed. Rendered from projectCommitDirs so the prompt
+	// can't drift from what stageProjectDirs actually stages; empty for
+	// the workflows that stage neither, so most turns pay nothing.
+	if dirs := projectCommitDirs(md.Workflow); len(dirs) > 0 {
+		paths := make([]string, len(dirs))
+		for i, name := range dirs {
+			paths[i] = filepath.Join(project.Dir(md.Project), name)
+		}
+		out += fmt.Sprintf(`
+This turn's commit also picks up edits under %s, so what you write
+there lands with the canvas rather than dropping when the session
+worktree is pruned.
+`, strings.Join(paths, " and "))
 	}
 	return out
 }

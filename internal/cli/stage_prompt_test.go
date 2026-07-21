@@ -752,3 +752,44 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 			projIdx, priorIdx)
 	}
 }
+
+// TestOperationalCoreNamesProjectCommitDirs: the read-only-context
+// sentence tells the agent every bureaucracy path outside the run is
+// off-limits, so the dirs that *do* ride the turn commit need naming —
+// otherwise a stage that writes a chore assumes it dropped. Rendered
+// from projectCommitDirs, so it appears exactly where staging does.
+func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
+	root := newTestBureaucracy(t)
+	cases := []struct {
+		workflow string
+		docID    string
+		want     []string
+		absent   bool
+	}{
+		{workflow: sdlcWorkflow, docID: "code",
+			want: []string{"projects/tele/hooks", "projects/tele/chores"}},
+		{workflow: choresWorkflow, docID: "code",
+			want: []string{"projects/tele/chores"}},
+		// Twin stages write the twin through the reflect pass, not a
+		// stage commit — no carve-out sentence.
+		{workflow: "twin", docID: "vision", absent: true},
+	}
+	for _, tc := range cases {
+		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: tc.workflow}
+		got, err := buildSystemPrompt(root, md, tc.docID, "", false, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.absent {
+			if strings.Contains(got, "commit also picks up edits under") {
+				t.Errorf("workflow %q should not advertise extra commit dirs:\n%s", tc.workflow, got)
+			}
+			continue
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(got, want) {
+				t.Errorf("workflow %q prompt missing %q:\n%s", tc.workflow, want, got)
+			}
+		}
+	}
+}

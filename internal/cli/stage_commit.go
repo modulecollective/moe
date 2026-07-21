@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -178,6 +179,55 @@ func stageableFollowups(root string, md *run.Metadata) (string, bool) {
 		return "", false
 	}
 	return rel, true
+}
+
+// projectCommitDirs names the directories under projects/<p>/ whose
+// edits ride a workflow's per-turn stage commit alongside the canvas.
+//
+// The hooks and chores workflows each own their own directory. sdlc
+// gets both: a stage that authors a hook or a chore as a side
+// deliverable of its main change would otherwise leave the file
+// untracked, and it dies with the pruned session worktree while the
+// canvas claims it landed. The dedicated workflows keep their value —
+// the `moe chore check` dry-run loop, the hook-fire workspace binding,
+// the tailored kickoff — but not exclusive write authority.
+//
+// Deliberately not a sweep of projects/<p>/: digital-twin/ is
+// reflect-mediated (sdlc writes feedback/twin.md, never the twin
+// itself), knowledge/ belongs to the kb workflow, and src/ is the
+// submodule pointer. Extending this whitelist is a one-line change if
+// a future artifact class needs it.
+//
+// Also the single source of truth for the prompt sentence that tells
+// the agent these dirs are writable — see operationalCore.
+func projectCommitDirs(workflow string) []string {
+	switch workflow {
+	case sdlcWorkflow:
+		return []string{"hooks", "chores"}
+	case hooksWorkflow:
+		return []string{"hooks"}
+	case choresWorkflow:
+		return []string{"chores"}
+	}
+	return nil
+}
+
+// stageProjectDirs is the ExtraStagePaths callback shared by the sdlc,
+// hooks, and chores workflows. It resolves projectCommitDirs against
+// the run's project and drops the ones that don't exist in the session
+// worktree — `git add --` fails on a pathspec matching nothing, and
+// most projects lack one or both dirs. Same conditional-stage shape as
+// stageableFollowups.
+func stageProjectDirs(workRoot string, md *run.Metadata) ([]string, error) {
+	var out []string
+	for _, name := range projectCommitDirs(md.Workflow) {
+		rel := filepath.Join(project.Dir(md.Project), name)
+		if _, err := os.Stat(filepath.Join(workRoot, rel)); err != nil {
+			continue
+		}
+		out = append(out, rel)
+	}
+	return out, nil
 }
 
 // stageableFeedback returns every feedback/<recipient>.md path
