@@ -320,7 +320,7 @@ func chainableWorkflow(workflow string) bool {
 // by its most-recent member — so the operator reads the editor the way
 // they read the dash and can fold a run into an existing chain instead
 // of rebuilding from scratch. The grouping is shared with the dash via
-// run.OrderChainUnits.
+// run.ChainGraph.Units.
 //
 // Each returned block is one chain unit (an orphan, or a head→tail
 // chain); renderChainEditFile emits a blank line between blocks so the

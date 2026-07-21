@@ -71,7 +71,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
 	// bureaucracy.conf rides along here: markBureaucracy only writes the
 	// marker, and run.New refuses a dirty tree — so any test that chains
-	// push into a run-opening path (runopen.Open, maybeSpawnRuns)
+	// push into a run-opening path (runopen.Open, pulseMinter.mint)
 	// would fail on the stray marker instead of on the behaviour it tests.
 	gittest.Run(t, root, "add", "bureaucracy.conf", ".gitmodules", subPath,
 		filepath.Join("projects", projectID, "project.json"))

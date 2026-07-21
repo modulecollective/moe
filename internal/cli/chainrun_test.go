@@ -12,7 +12,7 @@ import (
 )
 
 // spawnFixture stands up a bureaucracy with one registered project and
-// returns its root, ready for maybeSpawnRuns.
+// returns its root, ready for the gate minter.
 func spawnFixture(t *testing.T) string {
 	t.Helper()
 	root := newTestBureaucracy(t)
