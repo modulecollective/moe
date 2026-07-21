@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -537,8 +538,10 @@ func stampDisposedPulseCanvas(root, projectID, runID string, stderr io.Writer) {
 			trailers.Block{Run: runID, Project: projectID, Workflow: pulseWorkflow}.String()
 		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
 			// Leave nothing half-done for the close's dirty-tree gate to
-			// trip over.
+			// trip over — a commit that fails after its add leaves the
+			// stamp staged, and git.Status reports staged entries too.
 			_ = os.WriteFile(canvas, before, 0o644)
+			_ = git.Run(root, "reset", "-q", "--", canvasRel)
 			return err
 		}
 		return nil
