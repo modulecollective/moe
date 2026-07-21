@@ -42,7 +42,14 @@ type choreVM struct {
 	Trigger  string
 	Cadence  string
 	Cooldown string
-	Prompt   string
+	// When is the judged family's prose due-condition, empty for a
+	// mechanical chore. Judged mirrors it as the flag the page branches
+	// on: a judged chore has no due/not-due answer to render — the pulse
+	// survey decides — so "not due" would misreport it as a schedule
+	// that simply hasn't fired.
+	When   string
+	Judged bool
+	Prompt string
 
 	Due           bool
 	Reasons       string
@@ -83,6 +90,8 @@ func newChoreVM(now time.Time, st chore.State, insecure bool) choreVM {
 		Trigger:       d.Trigger,
 		Cadence:       humanChoreInterval(d.Cadence),
 		Cooldown:      humanChoreInterval(d.Cooldown),
+		When:          d.When,
+		Judged:        d.Judged(),
 		Prompt:        d.Prompt,
 		Due:           st.Due,
 		Reasons:       st.ReasonString(),
@@ -98,13 +107,17 @@ func newChoreVM(now time.Time, st chore.State, insecure bool) choreVM {
 		vm.NextEligible = st.NextEligible.Format("2006-01-02 15:04 MST")
 	}
 	// Mirror the dash/CLI precedence for why a chore can't open: an open
-	// run wins, then cooldown, then plain not-due.
+	// run wins, then cooldown, then plain not-due — except a judged chore,
+	// which is never mechanically due and waits on the pulse's judgment
+	// (or the operator's own `moe chore open --now`).
 	if !vm.Openable {
 		switch {
 		case st.OpenRun != "":
 			vm.BlockReason = "open run " + st.OpenRun
 		case st.CooldownBlocking:
 			vm.BlockReason = "cooling down until " + vm.NextEligible
+		case vm.Judged:
+			vm.BlockReason = "judged — the pulse decides"
 		default:
 			vm.BlockReason = "not due"
 		}

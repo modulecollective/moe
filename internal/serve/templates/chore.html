@@ -46,12 +46,16 @@
     <section class="canvases">
       <h2>schedule</h2>
       <ul>
+        {{if .Judged}}
+        <li><span class="slug">when</span> <span class="when">{{.When}}</span></li>
+        {{else}}
         <li><span class="slug">trigger</span> <span class="when">{{if .Trigger}}{{.Trigger}}{{else}}—{{end}}</span></li>
         <li><span class="slug">cadence</span> <span class="when">{{.Cadence}}</span></li>
+        {{end}}
         <li><span class="slug">cooldown</span> <span class="when">{{.Cooldown}}</span></li>
         <li><span class="slug">last completed</span> <span class="when">{{.LastCompleted}}</span></li>
         {{if .NextEligible}}<li><span class="slug">next eligible</span> <span class="when">{{.NextEligible}}</span></li>{{end}}
-        <li><span class="slug">due</span> <span class="when">{{if .Due}}yes — {{.Reasons}}{{else}}no{{end}}</span></li>
+        <li><span class="slug">due</span> <span class="when">{{if .Judged}}judged — the pulse decides{{else if .Due}}yes — {{.Reasons}}{{else}}no{{end}}</span></li>
       </ul>
     </section>
 
