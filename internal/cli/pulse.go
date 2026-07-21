@@ -485,11 +485,67 @@ func closePulseRun(root, projectID, runID string, stdout, stderr io.Writer) erro
 // gate passes. A disposal failure warns and leaves the run open —
 // today's worst-case outcome, minus the lock leak.
 func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
+	stampDisposedPulseCanvas(root, projectID, runID, stderr)
 	if err := closePulseRun(root, projectID, runID, stdout, stderr); err != nil {
 		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
 		return
 	}
 	moePrintf(stderr, "pulse: skipped — closed %s/%s\n", projectID, runID)
+}
+
+// pulseSkipNote replaces the untouched skeleton on a disposed run's
+// canvas. Closed with the skeleton, the run is indistinguishable on disk
+// from a crashed no-op sweep — which is what the `## Gate` check exists
+// to leave open — so the next survey reads it as a live bug and files
+// against it. (That misread has already cost an idea, a promotion and a
+// design turn.) The note says what happened, so the artifact stops being
+// a decoy and the "read the previous pulse report" baseline knows to
+// fall back a report.
+const pulseSkipNote = `# Pulse
+
+Sweep skipped — the operator interrupted the pulse before the survey
+started. No report; the previous pulse's report remains the baseline.
+`
+
+// stampDisposedPulseCanvas writes pulseSkipNote over the disposed run's
+// canvas and commits it, before the close. The commit is not optional:
+// closeRunInProcess's dirty-tree gate exempts only the harvest scratch
+// paths, so an uncommitted stamp would block the disposal outright. It
+// takes its own repolock (repolock is not reentrant, and the close takes
+// one straight after) and does not push — the close's WithJournalPush
+// carries the commit, and `moe sync` catches up if the close then fails.
+//
+// Warn-only, matching the disposal's posture: any failure restores the
+// canvas as it was and closes with the skeleton — today's behavior. A
+// stamp must never be what turns a skip into a run left dangling.
+func stampDisposedPulseCanvas(root, projectID, runID string, stderr io.Writer) {
+	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
+	canvas := filepath.Join(root, canvasRel)
+	before, err := os.ReadFile(canvas)
+	if err != nil {
+		moePrintf(stderr, "pulse: stamp skip note on %s/%s: %v\n", projectID, runID, err)
+		return
+	}
+	err = repolock.With(root, repolock.Options{
+		Purpose: "pulse-dispose-stamp",
+		Run:     projectID + "/" + runID,
+	}, func() error {
+		if err := os.WriteFile(canvas, []byte(pulseSkipNote), 0o644); err != nil {
+			return err
+		}
+		msg := fmt.Sprintf("work: note %s was skipped before the survey\n\n", pulseDoc) +
+			trailers.Block{Run: runID, Project: projectID, Workflow: pulseWorkflow}.String()
+		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
+			// Leave nothing half-done for the close's dirty-tree gate to
+			// trip over.
+			_ = os.WriteFile(canvas, before, 0o644)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		moePrintf(stderr, "pulse: stamp skip note on %s/%s: %v\n", projectID, runID, err)
+	}
 }
 
 // pulseGate is the machine-readable verdict the survey agent writes to

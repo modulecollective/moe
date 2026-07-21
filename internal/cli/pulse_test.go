@@ -121,22 +121,91 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
 		t.Fatalf("pulse runs %v left open; the skip should have disposed the run", open)
 	}
-	var closed int
-	mds, err := run.Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, md := range mds {
-		if md.Workflow == pulseWorkflow && md.Status == run.StatusClosed {
-			closed++
-		}
-	}
-	if closed != 1 {
-		t.Fatalf("closed pulse runs=%d, want 1 (disposed via the registered close)", closed)
+	closed := closedPulseRuns(t, root)
+	if len(closed) != 1 {
+		t.Fatalf("closed pulse runs=%v, want 1 (disposed via the registered close)", closed)
 	}
 	if !strings.Contains(errb.String(), "skipped — closed") {
 		t.Errorf("stderr=%q, want a 'skipped — closed' disposal line", errb.String())
 	}
+	// The closed canvas must say it was skipped. Left as the skeleton it
+	// is indistinguishable from a crashed no-op sweep, and the next
+	// survey reads it as a live bug.
+	canvas := readPulseCanvas(t, root, "moe", closed[0])
+	if canvas != pulseSkipNote {
+		t.Errorf("disposed canvas =\n%q\nwant the skip note:\n%q", canvas, pulseSkipNote)
+	}
+	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
+		t.Errorf("tree dirty after disposal (dirty=%v, err=%v); the stamp must be committed", dirty, err)
+	}
+}
+
+// TestPulseDisposeStampFailureStillCloses: the stamp is warn-only. An
+// unwritable canvas must not turn a skip into a run left dangling on the
+// dash — the disposal closes with the skeleton, as it did before the
+// stamp existed, and says so on stderr.
+func TestPulseDisposeStampFailureStillCloses(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the write bit")
+	}
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		// Wedge the canvas open-for-write before the disposal reaches it.
+		docDir := filepath.Join(root, run.DocDir(projectID, runID, pulseDoc))
+		if err := os.Chmod(filepath.Join(docDir, "content.md"), 0o444); err != nil {
+			t.Error(err)
+		}
+		pi.mark()
+		return surveyOutcome{code: 1, agentStarted: false}
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	closed := closedPulseRuns(t, root)
+	if len(closed) != 1 {
+		t.Fatalf("closed pulse runs=%v, want 1 — a failed stamp must not block the disposal", closed)
+	}
+	if canvas := readPulseCanvas(t, root, "moe", closed[0]); canvas != pulseCanvasSkeleton {
+		t.Errorf("canvas =\n%q\nwant the untouched skeleton after a failed stamp", canvas)
+	}
+	if !strings.Contains(errb.String(), "stamp skip note") {
+		t.Errorf("stderr=%q, want a stamp-failure warning", errb.String())
+	}
+	if !strings.Contains(errb.String(), "skipped — closed") {
+		t.Errorf("stderr=%q, want the disposal to have closed the run anyway", errb.String())
+	}
+}
+
+// closedPulseRuns returns the ids of every closed pulse run under root.
+func closedPulseRuns(t *testing.T, root string) []string {
+	t.Helper()
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, md := range mds {
+		if md.Workflow == pulseWorkflow && md.Status == run.StatusClosed {
+			ids = append(ids, md.ID)
+		}
+	}
+	return ids
+}
+
+func readPulseCanvas(t *testing.T, root, projectID, runID string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(projectID, runID, pulseDoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
 
 // TestPulseSurveyMidAgentInterruptLeavesRunOpen: a Ctrl-C that reaches
