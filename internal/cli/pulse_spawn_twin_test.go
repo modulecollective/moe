@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -46,6 +47,58 @@ func TestSpawnTwinMintsAHarnessNamedReflect(t *testing.T) {
 	}
 	if _, ok := tw[id]; !ok {
 		t.Errorf("twin runs = %v, want the id the spec resolved to (%s)", tw, id)
+	}
+}
+
+// TestSpawnTwinWithoutASlugStillMints is the regression for the trap that
+// killed pulse-2026-07-21-15: the gate's one kicked thread held
+// `{"workflow": "twin", "why": ...}` with no slug, slug validation ran
+// ahead of the workflow dispatch, and the entry was skipped — so the
+// thread resolved to zero members, the groom placed nothing, and the kick
+// had nothing to start. The slug is documented as a meaningless handle on
+// this path, so omitting it must not cost the reflect, the thread, or the
+// generation behind it.
+func TestSpawnTwinWithoutASlugStillMints(t *testing.T) {
+	root := twinSpawnFixture(t)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
+		Status: "ok",
+		Threads: []pulseThread{{
+			Kick: true,
+			Runs: []pulseThreadEntry{{Spec: &pulseRunSpec{Workflow: "twin", Why: "six observations stacked"}}},
+		}},
+	}, io.Discard, &errb)
+
+	if strings.Contains(errb.String(), "unusable slug") {
+		t.Errorf("stderr = %q, want no slug complaint on a twin entry", errb.String())
+	}
+	if len(groups) != 1 || len(groups[0].Runs) != 1 {
+		t.Fatalf("groups = %+v, want one thread carrying the reflect", groups)
+	}
+	reflectID := groups[0].Runs[0].mintedID
+	if !strings.HasPrefix(reflectID, "reflect") {
+		t.Fatalf("thread member = %q, want the harness-minted reflect", reflectID)
+	}
+
+	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, nil /*kickoff edges*/, io.Discard, &errb)
+
+	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
+		t.Fatalf("threads = %+v, want the thread groomed and asking for a kick", groomed.threads)
+	}
+	reflectKey := "moe/" + reflectID
+	if groomed.threads[0].Root != reflectKey {
+		t.Errorf("thread root = %q, want the reflect %q", groomed.threads[0].Root, reflectKey)
+	}
+	// pulseSelfKick refuses an operator-rooted thread, so the reflect
+	// carrying its spawner is what makes this thread kickable at all.
+	md, err := run.Load(root, "moe", reflectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.SpawnedBy != "moe/pulse-one" {
+		t.Errorf("reflect SpawnedBy = %q, want the minting pulse — an operator-rooted thread is never kicked", md.SpawnedBy)
 	}
 }
 

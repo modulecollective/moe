@@ -675,8 +675,9 @@ type pulseGate struct {
 // allowlist is sdlc + twin: the only two workflows a pulse has a reason
 // to propose fresh (chat is perpetual, pulse would be recursion). A twin
 // spec is a reflect *nomination* — its real slug stays harness-minted
-// (reflect-YYYY-MM-DD), so Slug there is only the handle the dedupe and
-// the warnings read; Title and Design are meaningless and warn-ignored.
+// (reflect-YYYY-MM-DD) and nothing dedupes on Slug there, so it is
+// optional and only ever read back in a warn line; Title and Design are
+// meaningless and warn-ignored.
 //
 // Chore names a judged chore instead, and is exclusive with every other
 // field: the survey's claim is only "the condition the operator wrote
@@ -919,31 +920,41 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 	spawnedBy := projectID + "/" + pulseSlug
 
 	// A chore nomination names a registration, not a slug to mint, so it
-	// dispatches ahead of the slug validation every other shape must pass.
+	// dispatches ahead of the slug validation the sdlc path applies.
 	if choreName := strings.TrimSpace(s.Chore); choreName != "" {
 		return m.nominateChore(choreName, s, stdout, stderr)
 	}
 	slug := strings.TrimSpace(s.Slug)
-	if slug == "" || run.Slugify(slug) != slug {
-		moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
-		return ""
-	}
-	// Dispatch on workflow before anything else: the steps below —
-	// live-slug dedupe, tagged-idea promotion — are sdlc's, and a twin
-	// spec's dedupe semantics are "one twin run in flight per project",
-	// enforced inside mintReflectRun instead.
+	// Dispatch on workflow before anything else — including the slug
+	// check, the same way a chore entry dispatches ahead of it. The steps
+	// below (slug validation, live-slug dedupe, tagged-idea promotion) are
+	// all sdlc's: they name the run being minted. A twin spec names
+	// nothing — the reflect's slug is harness-minted and its dedupe
+	// semantics are "one twin run in flight per project", enforced inside
+	// mintReflectRun — so requiring a slug there was a trap that dropped
+	// whole threads over a field the fragment itself calls meaningless.
 	switch workflow := strings.TrimSpace(s.Workflow); workflow {
 	case "", "sdlc":
+		if slug == "" || run.Slugify(slug) != slug {
+			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
+			return ""
+		}
 	case "twin":
+		// Slug is optional here and purely a handle for these warn lines,
+		// so they name the entry only when there is something to name it by.
+		entry := "twin entry"
+		if slug != "" {
+			entry = fmt.Sprintf("twin entry %q", slug)
+		}
 		if t := strings.TrimSpace(s.Title); t != "" {
-			moePrintf(stderr, "pulse: spawn: ignoring title on twin entry %q; the reflect's slug is harness-minted\n", slug)
+			moePrintf(stderr, "pulse: spawn: ignoring title on %s; the reflect's slug is harness-minted\n", entry)
 		}
 		if strings.TrimSpace(s.Design) != "" {
-			moePrintf(stderr, "pulse: spawn: ignoring design body on twin entry %q; a reflect reads the twin, not a seed\n", slug)
+			moePrintf(stderr, "pulse: spawn: ignoring design body on %s; a reflect reads the twin, not a seed\n", entry)
 		}
 		return maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
 	default:
-		moePrintf(stderr, "pulse: spawn: %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
+		moePrintf(stderr, "pulse: spawn: entry %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
 		return ""
 	}
 	if !m.ensureLive(stderr) {

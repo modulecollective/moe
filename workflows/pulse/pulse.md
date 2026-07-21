@@ -198,8 +198,7 @@ of a fix run. Only `sdlc` (the default) and `twin` are spawnable;
 anything else is skipped.
 
     "loose": [
-      {"slug": "bring-the-twin-current",
-       "workflow": "twin",
+      {"workflow": "twin",
        "why": "the X/Y boundary moved and no twin doc describes it"}
     ]
 
@@ -216,11 +215,11 @@ written at a thread's tail places the open reflect exactly as it would
 a fresh one. Ask when the drift is real; the harness sorts out which
 run it lands on.
 
-**Two things behave differently from an sdlc spec.** The `slug` is not
-the run's name — the harness names the reflect itself
-(`reflect-YYYY-MM-DD`) — so it is only a handle for the warnings. And
-`title`/`design` are meaningless on a reflect: it reads the twin, not a
-seed, so leave them off; they're warned and ignored.
+**A twin spec carries almost nothing.** `workflow` and `why`, and that
+is the whole shape. The harness names the reflect itself
+(`reflect-YYYY-MM-DD`), so a `slug` names nothing and is better left
+off. `title`/`design` are meaningless on a reflect too — it reads the
+twin, not a seed — and are warned and ignored.
 
 **Placement is yours, and the tail is the default.** A reflect sweeps
 the settled record of everything that ran before it, so all things
