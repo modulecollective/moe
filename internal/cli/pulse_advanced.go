@@ -8,6 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -28,6 +29,43 @@ import (
 // latter. So an `a` that is the last event of the day waits for the
 // next pulse fired off some other run's traffic. Accepted: pickup is
 // not meant to be immediate.
+
+// operatorAdvancedStage reports the stage md is parked at *with the
+// operator's recorded permission to continue*, and the marker's time.
+// Two facts, both on disk: an `advance:` marker AdvancedTo still
+// honours, and no live session at the stage it points to.
+//
+// The live half of the double-run guard is the second check.
+// AdvancedTo's run.json check only sees a session that already merged
+// back to main: commitSessionStart writes run.json on the session
+// branch, so for the whole duration of an open stage run.Scan reads no
+// session id at all — the exact window the guard exists to close. The
+// branch is the signal that works here, and it is the *only* one that
+// does: advancedRunsBlock renders against the pulse's own session
+// worktree (InitialPromptBuilder hands the builder a workRoot), where
+// session.List resolves its worktree paths against the wrong directory
+// and finds nothing. Refs live in the common dir, so HasRef reads true
+// from any worktree, and Close/Abandon both delete the branch.
+//
+// Two callers, and the pair is load-bearing for both: the block below
+// tells the survey which runs are worth grooming, and pulseSelfKick
+// takes the same answer as license to *start* one. Same disk facts,
+// same staleness rule, one place.
+func operatorAdvancedStage(root string, md *run.Metadata, idx *run.JournalIndex) (string, time.Time, bool) {
+	var zero time.Time
+	w, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return "", zero, false
+	}
+	stage, marked, err := w.AdvancedTo(root, md, idx)
+	if err != nil || stage == "" {
+		return "", zero, false
+	}
+	if git.HasRef(root, "refs/heads/"+session.BranchName(md.Project, md.ID, stage)) {
+		return "", zero, false
+	}
+	return stage, marked, true
+}
 
 // advancedRun is one row of the block.
 type advancedRun struct {
@@ -55,27 +93,8 @@ func advancedRunsBlock(sc *pulseScan, projectID string) string {
 		if md.Project != projectID {
 			continue
 		}
-		w, err := LookupWorkflow(md.Workflow)
-		if err != nil {
-			continue
-		}
-		stage, marked, err := w.AdvancedTo(root, md, idx)
-		if err != nil || stage == "" {
-			continue
-		}
-		// The live half of the double-run guard. AdvancedTo's run.json
-		// check only sees a session that already merged back to main:
-		// commitSessionStart writes run.json on the session branch, so
-		// for the whole duration of an open stage run.Scan reads no
-		// session id at all — the exact window the guard exists to
-		// close. The branch is the signal that works here, and it is
-		// the *only* one that does: this block renders against the
-		// pulse's own session worktree (InitialPromptBuilder hands the
-		// builder a workRoot), where session.List resolves its worktree
-		// paths against the wrong directory and finds nothing. Refs
-		// live in the common dir, so HasRef reads true from any
-		// worktree, and Close/Abandon both delete the branch.
-		if git.HasRef(root, "refs/heads/"+session.BranchName(md.Project, md.ID, stage)) {
+		stage, marked, ok := operatorAdvancedStage(root, md, idx)
+		if !ok {
 			continue
 		}
 		rows = append(rows, advancedRun{
@@ -108,6 +127,8 @@ func advancedRunsBlock(sc *pulseScan, projectID string) string {
 		"That marker is consent to carry the run forward, which is more than a machine-spawned fix run has: " +
 		"an advanced run clears the lane bar's ordering question on its own, so grooming one onto a thread " +
 		"(`chain`, `onto` an existing lane or its own group) is the normal move, not a stretch. Nothing here " +
-		"has a session yet — it is waiting for someone to kick it. Grooming it is not kicking it.")
+		"has a session yet — it is waiting for someone to kick it. Grooming one is not kicking it, but a " +
+		"thread rooted at one of these may carry `\"kick\": true` like any other — the marker is the consent " +
+		"that admits it, and the kick bar is unchanged.")
 	return sb.String()
 }
