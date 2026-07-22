@@ -311,6 +311,9 @@ condition, not restate the criterion.
 Like a twin spec, this is a nomination rather than a create: with the
 chore's run already open, the entry lands on that run. So a `chore`
 entry works at a thread position too, and places the chore's run there.
+A thread rooted at a chore run may carry `"kick": true` like any other —
+the operator wrote the prompt, so the design is settled by construction
+and the kick bar is the only question left.
 
 **Quiet is the normal answer.** A judged chore whose condition didn't
 fire is not a finding, and a pulse that nominates nothing is a
@@ -396,8 +399,14 @@ below.
 A thread may carry `"kick": true`, asking the harness to start that
 thread when this sweep finishes. It fires only when the operator's own
 verb carried the dynamic consent that licenses machine-rooted motion,
-and only on a thread whose root the machine minted or the operator
-advanced. The harness enforces both, and skips silently-with-a-line
+and only on a thread whose root has **a settled design**: machine-baked
+(the run was spawned by another run), chore-authored (its seed is the
+chore's own `prompt.md`), or past its first stage (the operator
+advanced it, or real downstream work has landed). A root still sitting
+at its first stage with nothing but a seed — a promoted sketch, a
+design that closed without an advance, a hand-composed chain head —
+stays with the operator. A root someone has a session open on is held
+too. The harness enforces all of it, and skips silently-with-a-line
 otherwise. Ask for the kick on the merits regardless; a declined kick
 parks the thread for the next pulse to place, which costs nothing.
 
