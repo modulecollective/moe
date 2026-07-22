@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -874,7 +875,65 @@ type WorkTurnKey struct {
 // and run.json lands on main as part of the opening commit, so any
 // MoE-Run-tagged commit dash cares about is reachable from HEAD.
 // Mirrors the scope LastActivityMap walked.
+//
+// Memoized per root on HEAD — see journalMemo. **The returned index is
+// shared between callers and must be treated as read-only.** Nothing
+// outside this file writes to its maps today; a caller that starts
+// would corrupt every other holder of the same HEAD.
 func BuildJournalIndex(root string) (*JournalIndex, error) {
+	head, err := git.HEAD(root)
+	if err != nil {
+		// No readable HEAD (unborn branch, not a repo) — nothing to key
+		// on. Fall through to the walk, which fails the way callers
+		// already handle.
+		return buildJournalIndex(root)
+	}
+	journalMemo.Lock()
+	defer journalMemo.Unlock()
+	if e, ok := journalMemo.entries[root]; ok && e.head == head {
+		return e.idx, nil
+	}
+	idx, err := buildJournalIndex(root)
+	if err != nil {
+		return nil, err
+	}
+	if journalMemo.entries == nil {
+		journalMemo.entries = make(map[string]journalMemoEntry, 1)
+	}
+	journalMemo.entries[root] = journalMemoEntry{head: head, idx: idx}
+	return idx, nil
+}
+
+// journalMemo caches the last-built index per bureaucracy root. The
+// index is a pure function of the commit graph reachable from HEAD, so
+// while HEAD holds still every rebuild produces a byte-identical
+// result: `moe serve` rebuilds it on every hit between commits, and a
+// single run page builds it two or three times (row gather, provenance,
+// chain head). The ~2ms `git rev-parse HEAD` revalidation replaces a
+// ~155ms `git log` walk; a new commit misses and rebuilds in full, so
+// there is no staleness window.
+//
+// Keyed by root with HEAD *inside* the value, not by the (root, HEAD)
+// pair: a new commit replaces the entry, so the superseded index is
+// collected and a process holds exactly one live index per root. Pair
+// keying would strand a dead index per commit. No eviction beyond that
+// — a real process works one root.
+//
+// The lock is held across the rebuild, so two concurrent misses cost
+// one walk rather than two; the loser waits out the build instead of
+// duplicating it. At single-operator scale that trade is free.
+var journalMemo struct {
+	sync.Mutex
+	entries map[string]journalMemoEntry
+}
+
+type journalMemoEntry struct {
+	head string
+	idx  *JournalIndex
+}
+
+// buildJournalIndex is the uncached walk BuildJournalIndex memoizes.
+func buildJournalIndex(root string) (*JournalIndex, error) {
 	// Two --grep patterns are OR'd by default. The widening pulls in
 	// chain-edit / chain-clear commits, which carry no MoE-Run trailer
 	// (one edit touches several parents — no single canonical run to

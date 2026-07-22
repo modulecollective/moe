@@ -434,6 +434,62 @@ func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {
 	}
 }
 
+// TestJournalIndexMemoizedOnHEAD pins the memo's three-part contract:
+// while HEAD holds still a second call is served from cache, a new
+// commit invalidates it and the rebuild sees the new trailer, and two
+// roots never share an entry. Pointer identity is the observable — a
+// rebuild allocates a fresh index, so `==` distinguishes hit from miss
+// without exporting cache internals.
+func TestJournalIndexMemoizedOnHEAD(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.Commit(t, root, "Open run x/alpha\n\nMoE-Project: x\nMoE-Run: alpha\n")
+
+	first, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	again, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex (same HEAD): %v", err)
+	}
+	if again != first {
+		t.Error("same HEAD should serve the cached index, got a rebuild")
+	}
+	if _, ok := first.LastActivity["x/beta"]; ok {
+		t.Fatal("beta is not committed yet — bad fixture")
+	}
+
+	gittest.Commit(t, root, "Open run x/beta\n\nMoE-Project: x\nMoE-Run: beta\n")
+	after, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex (new HEAD): %v", err)
+	}
+	if after == first {
+		t.Fatal("a new commit must invalidate the memo")
+	}
+	if _, ok := after.LastActivity["x/beta"]; !ok {
+		t.Error("rebuilt index is missing the run committed after the first build")
+	}
+
+	// A second bureaucracy gets its own entry rather than the first
+	// root's index.
+	other := newTestRoot(t)
+	gittest.Commit(t, other, "Open run y/gamma\n\nMoE-Project: y\nMoE-Run: gamma\n")
+	otherIdx, err := BuildJournalIndex(other)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex (other root): %v", err)
+	}
+	if otherIdx == after {
+		t.Fatal("a distinct root must not share the first root's index")
+	}
+	if _, ok := otherIdx.LastActivity["y/gamma"]; !ok {
+		t.Error("second root's index is missing its own run")
+	}
+	if _, ok := otherIdx.LastActivity["x/alpha"]; ok {
+		t.Error("second root's index leaked the first root's runs")
+	}
+}
+
 // TestJournalIndexDailyRunCount pins the histogram metric: a day's
 // count is the number of *distinct* run slugs that committed that UTC
 // day, so a run committing twice in a day counts once and two runs the
