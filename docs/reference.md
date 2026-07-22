@@ -91,22 +91,13 @@ follow-ups a re-run regenerated after the run was already closed.
 
 ## Codex Setup
 
-If you use the `codex` backend interactively, add this profile to
-`~/.codex/config.toml`:
-
-```toml
-[permissions.workspace-git.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-
-[permissions.workspace-git.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-```
-
-MoE selects it with `-c default_permissions=workspace-git`. Without the profile,
-interactive Codex sessions can fail when Git needs to write
-`<clone>/.git/index.lock`.
+The `codex` backend needs no setup in `~/.codex/config.toml`. MoE defines its
+own sandbox permissions profile (`moe-workspace-git`) inline on every Codex
+turn and selects it — read-only root, writable tmp, and writable `.` plus
+`.git` on the working directory and each `--add-dir` root. Codex's stock
+`workspace-write` mode leaves `.git` read-only, which fails a `git commit`
+inside the per-run clone; shipping the profile with MoE keeps that from
+depending on operator config.
 
 Separately, MoE pins `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true` for every
 Codex turn (interactive and headless): Codex never has a TTY for an editor, so a

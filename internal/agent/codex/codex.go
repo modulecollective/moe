@@ -20,10 +20,10 @@
 //     so a non-`never` policy in `~/.codex/config.toml` can't abort the
 //     turn at the approval gate (the symptom: "patch rejected:
 //     writing outside of the project; rejected by user approval
-//     settings"). The sandbox stays on — `workspace-write` plus the
-//     bureaucracy-root `--add-dir` is still what bounds writes; this
-//     change only removes the human-in-the-loop expectation that the
-//     one-shot path can't satisfy. On interactive `codex` and on `codex
+//     settings"). The sandbox stays on — the permissions profile in
+//     commonArgs plus the `--add-dir` set is still what bounds writes;
+//     this change only removes the human-in-the-loop expectation that
+//     the one-shot path can't satisfy. On interactive `codex` and on `codex
 //     resume`, we pass `--ask-for-approval never` so MoE-managed
 //     interactive Codex has the same approval posture while keeping the
 //     same sandbox boundary.
@@ -438,12 +438,36 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 	return cmdArgs
 }
 
+// gitWritableProfile is the permissions profile MoE defines and selects
+// for every codex turn. It reproduces what `--sandbox workspace-write`
+// grants (root read, tmpdir + /tmp write, cwd and every `--add-dir`
+// root writable) and adds the one thing that mode withholds: `.git`
+// write inside those roots.
+//
+// Defined inline rather than referenced from the operator's
+// `~/.codex/config.toml` because a profile MoE depends on but doesn't
+// ship can silently stop existing — an earlier `workspace-git` profile
+// sat in the operator's config looking correct for weeks while codex
+// ignored it, and nothing surfaced that until a stage couldn't commit.
+//
+// `":slash_tmp" = "write"` is load-bearing: without it the profile-only
+// shape sets `exclude_slash_tmp`, which would take away the `/tmp`
+// surface `--sandbox workspace-write` gives today (dev-env scratch
+// dirs, tools that hardcode /tmp).
+const (
+	gitWritableProfileName = "moe-workspace-git"
+	gitWritableProfile     = `permissions.` + gitWritableProfileName + `.filesystem={ ` +
+		`":root" = "read", ":tmpdir" = "write", ":slash_tmp" = "write", ` +
+		`":project_roots" = { "." = "write", ".git" = "write" }, ` +
+		`":workspace_roots" = { "." = "write", ".git" = "write" } }`
+)
+
 // commonArgs builds the codex flag set shared across exec / interactive
-// / resume: developer-instructions injection, sandbox mode, and the
-// per-stage clone add-dir.
+// / resume: developer-instructions injection, the sandbox permissions
+// profile, and the per-stage clone add-dir.
 //
 // cwd-inversion shape: every stage runs cwd = bureaucracy worktree,
-// which `--sandbox workspace-write` makes writable automatically — no
+// which the profile's writable workspace root covers automatically — no
 // explicit `--add-dir <root>` needed. Code-bearing stages reach the
 // project clone via add-dir while cwd sits on the bureaucracy worktree;
 // AGENTS.md discovery walks from cwd up to the git root, so
@@ -455,21 +479,21 @@ func commonArgs(clonePath, systemPrompt string) []string {
 	args := []string{
 		"-c", "developer_instructions=" + tomlMultilineBasic(systemPrompt),
 	}
-	// Sandbox: workspace-write keeps writes scoped to cwd + the
-	// explicit add-dir set. read-only would block the canvas write
-	// every stage needs.
-	args = append(args, "--sandbox", "workspace-write")
-	// Interactive codex applies a stricter sandbox than `codex exec`
-	// for the project's `.git/` subtree — even with `--add-dir <clone>`,
-	// writes to `<clone>/.git/index.lock` fail EROFS during commit
-	// (verified across approval form, trust state, and stripped user
-	// config — the divergence is internal to codex). Selecting the
-	// `workspace-git` permissions profile re-grants `.git` writes
-	// inside project roots. The profile lives in the operator's
-	// `~/.codex/config.toml`; see docs/reference.md §"Codex Setup".
-	// `codex exec` doesn't need the override, but applying it
-	// uniformly keeps the operator-side config single-shape.
-	args = append(args, "-c", "default_permissions=workspace-git")
+	// No `--sandbox workspace-write` here, deliberately. On codex
+	// 0.144.x the explicit flag overrides `default_permissions`, so the
+	// profile below would be parsed, reported in the rollout, and then
+	// ignored — `.git` stayed read-only on every workspace root. What
+	// let commits through at all was a codex carveout that lifts `.git`
+	// protection only when *every* segment of the shell chain is a
+	// mutating git command: `git add && git commit` landed, while
+	// `git status && git add && git commit` (or any `git diff`, or a
+	// `gofmt` prefix) hit EROFS. That is the whole "intermittency" —
+	// it tracked whether the model happened to prepend a status check.
+	// Selecting the profile alone drops the flag override and makes
+	// `.git` genuinely writable, chain shape irrelevant. The sandbox
+	// stays on: the profile bounds writes exactly as before.
+	args = append(args, "-c", gitWritableProfile)
+	args = append(args, "-c", "default_permissions="+gitWritableProfileName)
 	if clonePath != "" {
 		args = append(args, "--add-dir", clonePath)
 	}

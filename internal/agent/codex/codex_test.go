@@ -147,8 +147,9 @@ func TestDiscoverSessionIDPicksNewestSinceTurnStart(t *testing.T) {
 // interactive-path shape: every AddDirs entry becomes a `--add-dir <dir>`
 // pair, the pairs land after commonArgs (which adds the clone path
 // add-dir) and before `--ask-for-approval`, and on first-turn we don't
-// prepend `resume`. cwd = bureaucracy root, so workspace-write makes
-// the canvas writable without an explicit `--add-dir <root>`.
+// prepend `resume`. cwd = bureaucracy root, so the permissions profile's
+// writable workspace root makes the canvas writable without an explicit
+// `--add-dir <root>`.
 func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 	args := executeArgs(agent.Request{
 		Root:          "/bureaucracy",
@@ -164,7 +165,7 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		"--add-dir /tmp/moe-home",
 		"--add-dir /tmp/moe-devtmp",
 		"--ask-for-approval never",
-		"-c default_permissions=workspace-git",
+		"-c default_permissions=moe-workspace-git",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("args missing %q: %s", want, got)
@@ -287,15 +288,45 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 	if !containsPair(args, "-c", "approval_policy=never") {
 		t.Errorf("args missing `-c approval_policy=never` pair: %v", args)
 	}
-	// Sandbox stays on — pinning approval doesn't lift the sandbox.
-	if !containsPair(args, "--sandbox", "workspace-write") {
-		t.Errorf("args missing `--sandbox workspace-write` pair: %v", args)
+	// Sandbox stays on — pinning approval doesn't lift it. The bound is
+	// the permissions profile, not `--sandbox`.
+	assertGitWritableProfile(t, args)
+}
+
+// assertGitWritableProfile pins the sandbox shape both argv paths must
+// carry: MoE defines its own permissions profile inline and selects it,
+// and must *not* pass `--sandbox` — on codex 0.144.x the explicit flag
+// overrides `default_permissions`, silently reinstating a read-only
+// `.git` on every workspace root and putting commits back at the mercy
+// of the all-mutating-git-chain carveout.
+func assertGitWritableProfile(t *testing.T, args []string) {
+	t.Helper()
+	if indexOf(args, "--sandbox") >= 0 {
+		t.Errorf("`--sandbox` overrides default_permissions and must not be passed: %v", args)
 	}
-	// The workspace-git permissions profile must select even on the
-	// exec path — applied uniformly so the operator's config has a
-	// single shape.
-	if !containsPair(args, "-c", "default_permissions=workspace-git") {
-		t.Errorf("args missing `-c default_permissions=workspace-git` pair: %v", args)
+	if !containsPair(args, "-c", "default_permissions=moe-workspace-git") {
+		t.Errorf("args missing `-c default_permissions=moe-workspace-git` pair: %v", args)
+	}
+	// The profile is defined by MoE, not borrowed from the operator's
+	// ~/.codex/config.toml, and grants `.git` write on both root kinds.
+	profile := ""
+	for i, a := range args {
+		if a == "-c" && i+1 < len(args) && strings.HasPrefix(args[i+1], "permissions.moe-workspace-git.") {
+			profile = args[i+1]
+		}
+	}
+	if profile == "" {
+		t.Fatalf("args do not define the moe-workspace-git profile inline: %v", args)
+	}
+	for _, want := range []string{
+		`":root" = "read"`,
+		`":slash_tmp" = "write"`, // without it codex sets exclude_slash_tmp
+		`":project_roots" = { "." = "write", ".git" = "write" }`,
+		`":workspace_roots" = { "." = "write", ".git" = "write" }`,
+	} {
+		if !strings.Contains(profile, want) {
+			t.Errorf("profile missing %s: %s", want, profile)
+		}
 	}
 }
 
@@ -316,16 +347,11 @@ func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 	if !strings.Contains(got, "--ask-for-approval never") {
 		t.Errorf("interactive path lost --ask-for-approval never: %s", got)
 	}
-	if !containsPair(args, "--sandbox", "workspace-write") {
-		t.Errorf("interactive path lost `--sandbox workspace-write`: %v", args)
-	}
-	// Sandbox-loosening fix for interactive codex: the workspace-git
-	// permissions profile must be selected so `.git/index.lock` writes
-	// during commit don't EROFS. Without this, the agent can edit but
-	// can't `git commit` inside the per-run clone.
-	if !containsPair(args, "-c", "default_permissions=workspace-git") {
-		t.Errorf("interactive path missing `-c default_permissions=workspace-git`: %v", args)
-	}
+	// Sandbox-loosening fix for codex: the profile must be selected so
+	// `.git/index.lock` writes during commit don't EROFS regardless of
+	// the shell chain the agent builds. Without it the agent can edit
+	// but a status-prefixed `git commit` chain fails inside the clone.
+	assertGitWritableProfile(t, args)
 	if strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Errorf("interactive path should keep sandbox enabled: %s", got)
 	}
