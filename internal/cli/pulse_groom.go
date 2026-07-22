@@ -99,6 +99,12 @@ type groomResult struct {
 	// byKey is the sweep's run metadata, including any chain head this
 	// sweep minted mid-walk.
 	byKey map[string]*run.Metadata
+	// idx is the journal the sweep read to build its graph, carried so
+	// the kick's advance-marker check reads the same snapshot rather
+	// than forking a second index. It predates any run this sweep
+	// minted, which costs nothing: a run minted seconds ago has no
+	// advance marker to find.
+	idx *run.JournalIndex
 	// spawnerChained is the re-entrancy answer pulseSelfKick needs:
 	// whether the triggering run sits in a live unit of two or more.
 	// Read off the final graph, so it is post-groom membership — the
@@ -232,6 +238,7 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 	result := groomResult{
 		threads:        threads,
 		byKey:          sw.byKey,
+		idx:            idx,
 		spawnerChained: spawnerKey != "" && len(sw.graph.Unit(spawnerKey)) >= 2,
 	}
 

@@ -6,8 +6,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // selfKickFixture stands up a project with a machine-rooted, self-rooted
@@ -116,8 +119,106 @@ func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an operator-rooted thread", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "operator-rooted") {
-		t.Errorf("stderr = %q, want the machine-rooted guard named", errb.String())
+	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
+		t.Errorf("stderr = %q, want the consent guard named", errb.String())
+	}
+}
+
+// advancedKickFixture reproduces the 2026-07-22 incident's shape: an
+// operator-opened sdlc run (no SpawnedBy) that the operator advanced
+// past design and left, groomed as a self-rooted one-run thread asking
+// for a kick. Returns its thread root.
+//
+// Seeded rather than driven through `moe sdlc`: the block's own tests
+// establish that this journal shape is what `a` at a chain prompt
+// leaves, and a real stage run needs an agent session.
+func advancedKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult, stages *[]openSdlcStageInvocation) {
+	t.Helper()
+	root, stages, _ = kickFixture(t)
+	now := time.Now().Local()
+	seedRun(t, root, "moe", "advanced-run", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Widen the kick admit\n\nbody\n"})
+	advanceAt(t, root, "moe", "advanced-run", "design", now.Add(-2*time.Hour))
+
+	groomed = groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("advanced-run"), Kick: true}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	if len(groomed.threads) != 1 || groomed.threads[0].Root != "moe/advanced-run" {
+		t.Fatalf("threads = %+v, want one self-rooted at moe/advanced-run", groomed.threads)
+	}
+	return root, "moe/advanced-run", groomed, stages
+}
+
+// TestSelfKickRidesAnOperatorAdvancedRoot is the incident. A run the
+// operator personally clicked forward at the design chain prompt was
+// the only work a dynamic generation found ready, and the machine-rooted
+// admit refused it — the most-consented parked work was the one class
+// the pulse could never start. The marker is consent on disk, so it
+// admits, and the ride resumes at the stage the run is waiting at.
+func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
+	root, threadRoot, groomed, stages := advancedKickFixture(t)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Kick: true}), "", io.Discard, &errb)
+
+	// Mid-ladder pickup: design is already satisfied by the marker, so
+	// the ride starts at code rather than re-opening the stage the
+	// operator finished.
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:code" {
+		t.Fatalf("drove %v, want the ride to start at code; stderr=%q", got, errb.String())
+	}
+	if !strings.Contains(errb.String(), "kicking "+threadRoot) {
+		t.Errorf("stderr = %q, want the kick announced", errb.String())
+	}
+}
+
+// TestSelfKickSkipsAnAdvancedRootWithALiveSession: the double-run guard
+// the kick borrows from the advanced-runs block. The operator is
+// working the very stage the kick would open, and a session branch is
+// the only signal that says so while that stage is still running.
+func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
+	root, threadRoot, groomed, stages := advancedKickFixture(t)
+	if _, err := session.Open(root, "moe", "advanced-run", "code"); err != nil {
+		t.Fatal(err)
+	}
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Kick: true}), "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing while the operator has the stage open", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
+		t.Errorf("stderr = %q, want the consent guard named", errb.String())
+	}
+}
+
+// TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit: the staleness rule
+// the admit inherits from AdvancedTo for free. A re-edit of the stage
+// the operator advanced past lands a newer work-turn that out-dates the
+// marker, and the run reads as operator-rooted again — which is right,
+// because the consent was for a canvas that has since moved.
+func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
+	root, threadRoot, groomed, stages := advancedKickFixture(t)
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "advanced-run", "sdlc", "design", time.Now().Local())
+	// The groom's snapshot predates the re-edit, so re-read the journal
+	// the way the next sweep would.
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groomed.idx = idx
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Kick: true}), "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing on an out-dated marker", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
+		t.Errorf("stderr = %q, want the consent guard named", errb.String())
 	}
 }
 

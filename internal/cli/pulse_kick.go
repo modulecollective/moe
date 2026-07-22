@@ -40,8 +40,19 @@ import (
 // rooting bounded-only motion would defeat the point, and an operator
 // who wants bounded keeps `!!!`.
 //
-// And the thread must be **machine-rooted**. The pulse curates operator
-// chains but never starts them; that trigger stays with the operator.
+// And the thread's root must carry **consent recorded on disk**: either
+// the machine minted it (SpawnedBy), or the operator advanced it — they
+// sat at a chain prompt and hit `a`, which is the strongest recorded
+// "carry this forward" short of a kick. Keying on SpawnedBy alone made
+// a machine-spawned fix run kickable and an operator-advanced run never
+// kickable, which is the ordering backwards: on 2026-07-22 a dynamic
+// ride ended with a design-complete, operator-advanced run stranded as
+// the only work in its generation.
+//
+// What stays with the operator is everything with no run-now fact on
+// disk: a promoted-but-unstarted run, a hand-minted chain composed over
+// an afternoon. Those have `!` and `!!!`. The admit is structural
+// either way — a disk fact, not the agent's manners.
 //
 // Every skip is one stderr line, warn-only ethos.
 //
@@ -49,7 +60,9 @@ import (
 // graph (see groomResult) — thread roots, the spawner's chain
 // membership, and whether a root is still kickable. Re-reading the
 // journal here would answer the same questions a second time against a
-// state the sweep had already moved.
+// state the sweep had already moved. The one live read is the advanced
+// root's session branch, and that is the point: it asks whether the
+// operator has the stage open *right now*, which no snapshot can say.
 func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) {
 	var wanted []groomedThread
 	for _, th := range groomed.threads {
@@ -87,8 +100,10 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 			continue
 		}
 		if md.SpawnedBy == "" {
-			moePrintf(stderr, "pulse: kick: %s is operator-rooted — the pulse curates those, it doesn't start them\n", th.Root)
-			continue
+			if _, _, advanced := operatorAdvancedStage(root, md, groomed.idx); !advanced {
+				moePrintf(stderr, "pulse: kick: %s is operator-rooted and not advanced — the operator holds the trigger\n", th.Root)
+				continue
+			}
 		}
 		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", th.Root)
 		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {

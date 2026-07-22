@@ -396,10 +396,10 @@ below.
 A thread may carry `"kick": true`, asking the harness to start that
 thread when this sweep finishes. It fires only when the operator's own
 verb carried the dynamic consent that licenses machine-rooted motion,
-and only on a thread the machine rooted. The harness enforces both, and
-skips silently-with-a-line otherwise. Ask for the kick on the merits
-regardless; a declined kick parks the thread for the next pulse to
-place, which costs nothing.
+and only on a thread whose root the machine minted or the operator
+advanced. The harness enforces both, and skips silently-with-a-line
+otherwise. Ask for the kick on the merits regardless; a declined kick
+parks the thread for the next pulse to place, which costs nothing.
 
 There is no cap on how many generations this can run for: a kicked
 thread's own tail fires its own sweep, which may kick again. What ends
