@@ -1,0 +1,1 @@
+<div class="completed-chunk" data-next="{{.Next}}" data-shown="{{len .Rows}}" data-total="{{.Total}}" data-count="{{if lt (len .Rows) .Total}}({{len .Rows}} of {{.Total}}){{else}}({{.Total}}){{end}}">{{template "completedrows" .Rows}}</div>

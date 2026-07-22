@@ -160,10 +160,10 @@ func TestDashRouteWithoutGatherReturns500(t *testing.T) {
 	}
 }
 
-func TestDashShowAllStripsCap(t *testing.T) {
-	now := time.Now().UTC()
-	rows := []dash.Row{}
-	for i := 0; i < dash.CompletedCap+5; i++ {
+// completedRows builds n top-level completed rows, newest first.
+func completedRows(now time.Time, n int) []dash.Row {
+	rows := make([]dash.Row, 0, n)
+	for i := range n {
 		rows = append(rows, dash.Row{
 			Project: "p",
 			Run:     fmt.Sprintf("r%d", i),
@@ -171,31 +171,190 @@ func TestDashShowAllStripsCap(t *testing.T) {
 			When:    now,
 		})
 	}
-	gather := func(string) ([]dash.Row, int, int, []int, error) {
-		return rows, 1, 0, nil, nil
+	return rows
+}
+
+// serverWithRows stands a test server over a fixed row snapshot, with a
+// projects/p directory so the hub route resolves too.
+func serverWithRows(t *testing.T, rows []dash.Row) *Server {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, project.Dir("p")), 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
 	}
-	s := newTestServer(t, Options{
-		Addr:       "127.0.0.1:0",
-		Root:       t.TempDir(),
-		GatherDash: gather,
+	return newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
+			return rows, 1, 0, nil, nil
+		},
 	})
+}
 
-	// Default: capped at CompletedCap, header says "(cap of total)".
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	body := rr.Body.String()
-	wantCap := fmt.Sprintf("(%d of %d)", dash.CompletedCap, len(rows))
-	if !strings.Contains(body, wantCap) {
-		t.Errorf("default render missing %q\n%s", wantCap, body)
+// getOK fetches url and returns the body, failing on any non-200.
+func getOK(t *testing.T, s *Server, url string) string {
+	t.Helper()
+	rr := get(t, s, url)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d, body=%s", url, rr.Code, rr.Body.String())
+	}
+	return rr.Body.String()
+}
+
+// countRows counts rendered completed rows by their slug links. Every
+// row in these fixtures is under project p, so the anchor prefix is a
+// clean row marker.
+func countRows(body string) int {
+	return strings.Count(body, `class="slug" href="/run/p/`)
+}
+
+// TestDashCompletedPaging walks the whole show-more contract on the
+// home dash: the default cap, the link it draws, what a click asks for
+// next, and the point at which the link goes away.
+func TestDashCompletedPaging(t *testing.T) {
+	now := time.Now().UTC()
+	total := dash.CompletedCap + dash.CompletedStep + 3
+	s := serverWithRows(t, completedRows(now, total))
+
+	// Default page: CompletedCap rows, header and link both saying
+	// "N of M", link asking for one step more.
+	body := getOK(t, s, "/")
+	if n := countRows(body); n != dash.CompletedCap {
+		t.Errorf("default row count = %d, want %d", n, dash.CompletedCap)
+	}
+	want := fmt.Sprintf("(%d of %d)", dash.CompletedCap, total)
+	if strings.Count(body, want) != 2 { // section header + link label
+		t.Errorf("default render missing header/link %q\n%s", want, body)
+	}
+	wantHref := fmt.Sprintf(`href="?completed=%d#completed"`, dash.CompletedCap+dash.CompletedStep)
+	if !strings.Contains(body, wantHref) {
+		t.Errorf("show-more link missing %s\n%s", wantHref, body)
 	}
 
-	// ?all=1: uncapped, header says total only.
-	rr2 := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr2, httptest.NewRequest("GET", "/?all=1", nil))
-	body2 := rr2.Body.String()
-	wantAll := fmt.Sprintf("(%d)", len(rows))
-	if !strings.Contains(body2, wantAll) {
-		t.Errorf("all=1 render missing %q\n%s", wantAll, body2)
+	// Following that link shows a step more and offers the next step.
+	body = getOK(t, s, fmt.Sprintf("/?completed=%d", dash.CompletedCap+dash.CompletedStep))
+	if n, want := countRows(body), dash.CompletedCap+dash.CompletedStep; n != want {
+		t.Errorf("stepped row count = %d, want %d", n, want)
+	}
+	wantHref = fmt.Sprintf(`href="?completed=%d#completed"`, dash.CompletedCap+2*dash.CompletedStep)
+	if !strings.Contains(body, wantHref) {
+		t.Errorf("stepped link missing %s\n%s", wantHref, body)
+	}
+
+	// A cap at or past the total shows everything and drops the link.
+	body = getOK(t, s, fmt.Sprintf("/?completed=%d", total))
+	if n := countRows(body); n != total {
+		t.Errorf("full row count = %d, want %d", n, total)
+	}
+	// The enhancement script still names the id; it's the anchor that
+	// must be gone.
+	if strings.Contains(body, `<a class="show-more"`) {
+		t.Errorf("show-more link survived a full page\n%s", body)
+	}
+	if want := fmt.Sprintf("(%d)", total); !strings.Contains(body, want) {
+		t.Errorf("full render header missing %q", want)
+	}
+}
+
+// TestDashCompletedCapIgnoresJunk: a garbled or hostile ?completed=
+// falls back to the default cap rather than erroring or emptying the
+// section, and the retired ?all=1 no longer lifts anything.
+func TestDashCompletedCapIgnoresJunk(t *testing.T) {
+	now := time.Now().UTC()
+	total := dash.CompletedCap + 5
+	s := serverWithRows(t, completedRows(now, total))
+
+	for _, url := range []string{"/?completed=", "/?completed=abc", "/?completed=0", "/?completed=-4", "/?all=1"} {
+		if n := countRows(getOK(t, s, url)); n != dash.CompletedCap {
+			t.Errorf("GET %s row count = %d, want the default %d", url, n, dash.CompletedCap)
+		}
+	}
+}
+
+// TestDashCompletedCapCountsTopLevelOnly: a spawned child rides in with
+// its parent, so a cap of N admits N parents plus however many
+// descendants they drag along.
+func TestDashCompletedCapCountsTopLevelOnly(t *testing.T) {
+	now := time.Now().UTC()
+	var rows []dash.Row
+	for i := range 8 {
+		rows = append(rows,
+			dash.Row{Project: "p", Run: fmt.Sprintf("r%d", i), Bucket: dash.BucketCompletedRuns, When: now},
+			dash.Row{Project: "p", Run: fmt.Sprintf("r%d-child", i), Bucket: dash.BucketCompletedRuns, When: now, Depth: 1},
+		)
+	}
+	s := serverWithRows(t, rows)
+
+	body := getOK(t, s, "/?completed=3")
+	if n := countRows(body); n != 6 {
+		t.Errorf("row count = %d, want 6 (3 parents + 3 children)", n)
+	}
+	// The header counts rendered rows against all rows, children included.
+	if want := fmt.Sprintf("(6 of %d)", len(rows)); !strings.Contains(body, want) {
+		t.Errorf("header missing %q\n%s", want, body)
+	}
+	// Next cap steps the top-level count, not the rendered row count.
+	if want := fmt.Sprintf(`href="?completed=%d#completed"`, 3+dash.CompletedStep); !strings.Contains(body, want) {
+		t.Errorf("next link missing %s\n%s", want, body)
+	}
+}
+
+// TestCompletedFragmentIsRowsOnly: ?fragment=1 returns the chunk the
+// show-more JS swaps in — the rows and the metadata it rewrites the
+// link from — with none of the page around them.
+func TestCompletedFragmentIsRowsOnly(t *testing.T) {
+	now := time.Now().UTC()
+	total := dash.CompletedCap + 10
+	s := serverWithRows(t, completedRows(now, total))
+
+	for _, url := range []string{"/?completed=7&fragment=1", "/projects/p?completed=7&fragment=1"} {
+		body := getOK(t, s, url)
+		if strings.Contains(body, "<html") || strings.Contains(body, "dash-section") {
+			t.Errorf("GET %s returned a full page, not a fragment\n%s", url, body)
+		}
+		if n := countRows(body); n != 7 {
+			t.Errorf("GET %s row count = %d, want 7", url, n)
+		}
+		for _, want := range []string{
+			fmt.Sprintf(`data-next="%d"`, 7+dash.CompletedStep),
+			`data-shown="7"`,
+			fmt.Sprintf(`data-total="%d"`, total),
+			fmt.Sprintf(`data-count="(7 of %d)"`, total),
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("GET %s chunk missing %s\n%s", url, want, body)
+			}
+		}
+	}
+
+	// At the end of the list the chunk reports no next cap, which is how
+	// the JS knows to retire the link.
+	body := getOK(t, s, fmt.Sprintf("/?completed=%d&fragment=1", total))
+	if !strings.Contains(body, `data-next="0"`) {
+		t.Errorf("exhausted chunk missing data-next=\"0\"\n%s", body)
+	}
+}
+
+// TestProjectHubCompletedIsCapped: the hub used to render every
+// completed run in the project. It now caps and pages like the dash,
+// through the same query param.
+func TestProjectHubCompletedIsCapped(t *testing.T) {
+	now := time.Now().UTC()
+	total := dash.CompletedCap + 20
+	s := serverWithRows(t, completedRows(now, total))
+
+	body := getOK(t, s, "/projects/p")
+	if n := countRows(body); n != dash.CompletedCap {
+		t.Errorf("hub row count = %d, want %d", n, dash.CompletedCap)
+	}
+	wantHref := fmt.Sprintf(`href="?completed=%d#completed"`, dash.CompletedCap+dash.CompletedStep)
+	if !strings.Contains(body, wantHref) {
+		t.Errorf("hub show-more link missing %s\n%s", wantHref, body)
+	}
+
+	// The link is relative, so it resolves against /projects/p.
+	if n := countRows(getOK(t, s, "/projects/p?completed=12")); n != 12 {
+		t.Errorf("hub stepped row count = %d, want 12", n)
 	}
 }
 
@@ -207,7 +366,7 @@ func TestNewDashVMCarriesRowDepth(t *testing.T) {
 		{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
 		{Project: "p", Run: "solo", Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
 	}
-	vm := newDashVM(now, rows, 1, 1, nil, false)
+	vm := newDashVM(now, rows, 1, 1, nil, dash.CompletedCap)
 	if len(vm.Active) != 4 {
 		t.Fatalf("active len = %d, want 4", len(vm.Active))
 	}
@@ -247,7 +406,7 @@ func TestNewDashVMBakesFactoryFrames(t *testing.T) {
 		{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now},
 		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
 	}
-	vm := newDashVM(now, rows, 1, 1, nil, false)
+	vm := newDashVM(now, rows, 1, 1, nil, dash.CompletedCap)
 	var frames [][]string
 	if err := json.Unmarshal([]byte(vm.FactoryFramesJSON), &frames); err != nil {
 		t.Fatalf("FactoryFramesJSON is not valid JSON: %v", err)
@@ -277,7 +436,7 @@ func TestBannerArtCarriesBands(t *testing.T) {
 	}
 	counts := make([]int, dash.HistDays)
 	counts[0] = 9
-	vm := newDashVM(now, rows, 1, 1, counts, false)
+	vm := newDashVM(now, rows, 1, 1, counts, dash.CompletedCap)
 
 	art := joinArt(vm.FactoryArt)
 	for _, class := range []string{"art-dim", "art-mid", "art-bright", "art-plasma"} {
@@ -352,7 +511,7 @@ func TestNewDashVMCarriesHistogram(t *testing.T) {
 	counts := make([]int, dash.HistDays)
 	counts[dash.HistDays-1] = 9
 
-	vm := newDashVM(now, nil, 1, 1, counts, false)
+	vm := newDashVM(now, nil, 1, 1, counts, dash.CompletedCap)
 	if len(vm.Histogram) != dash.HistRows+2 {
 		t.Fatalf("histogram line count = %d, want %d", len(vm.Histogram), dash.HistRows+2)
 	}
@@ -360,7 +519,7 @@ func TestNewDashVMCarriesHistogram(t *testing.T) {
 		t.Errorf("histogram caption missing peak: %q", caption)
 	}
 
-	quiet := newDashVM(now, nil, 1, 1, make([]int, dash.HistDays), false)
+	quiet := newDashVM(now, nil, 1, 1, make([]int, dash.HistDays), dash.CompletedCap)
 	if len(quiet.Histogram) != 1 || !strings.Contains(artText(string(quiet.Histogram[0])), "(quiet)") {
 		t.Errorf("cold histogram = %q, want single (quiet) line", quiet.Histogram)
 	}

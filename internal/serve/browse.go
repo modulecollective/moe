@@ -177,7 +177,7 @@ type hubVM struct {
 	Active       []dashRowVM
 	Intents      []dashRowVM
 	Backlog      []dashRowVM
-	Completed    []dashRowVM
+	Completed    completedVM
 	HasKnowledge bool
 	TopicCount   int
 	Twin         []twinDocVM
@@ -190,7 +190,9 @@ type twinDocVM struct {
 
 // handleProjectHub aggregates everything under one project: runs and
 // chores (filtered from GatherDash — no re-gather), a link to the
-// knowledge page, and the twin docs with git provenance.
+// knowledge page, and the twin docs with git provenance. COMPLETED
+// pages exactly as the home dash does, through the same ?completed=N
+// and ?fragment=1 query params.
 func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	if !slugRe.MatchString(projectID) {
@@ -214,6 +216,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		// belongs here — no re-filter — and the factory art + histogram
 		// reflect this project alone.
 		vm.bannerArtVM = newBannerArt(now, rows, histogram)
+		var completed []dashRowVM
 		for _, row := range rows {
 			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: noteHTML(row.Project, row.Note), When: dash.HumanAgo(now, row.When), URL: rowURL(row), Depth: row.Depth, Chained: row.Chained}
 			rvm.Agent, rvm.AgentTitle = agentMark(row)
@@ -227,9 +230,18 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 				// dash and the CLI.
 				vm.Backlog = append(vm.Backlog, rvm)
 			case dash.BucketCompletedRuns:
-				vm.Completed = append(vm.Completed, rvm)
+				completed = append(completed, rvm)
 			}
 		}
+		vm.Completed = newCompletedVM(completed, completedCap(r))
+	}
+
+	if r.URL.Query().Get("fragment") != "" {
+		// A show-more fetch wants the COMPLETED rows and nothing else —
+		// return before stat-ing the knowledge and twin files the full
+		// page needs.
+		s.render(w, r, "completed_chunk.html", vm.Completed)
+		return
 	}
 
 	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID), nil)

@@ -203,19 +203,45 @@ func newBannerArt(now time.Time, rows []dash.Row, histogram []int) bannerArtVM {
 	}
 }
 
+// completedVM is one COMPLETED section: the rows that fit the requested
+// cap, plus what the "show more" link needs to draw itself. The home
+// dash and a project hub each hold one and the fragment response *is*
+// one, so all three paths render the section from the same partial.
+type completedVM struct {
+	Rows  []dashRowVM
+	Total int // pre-cap row count; lets the header show "N of M"
+	// Next is the cap the "show more" link asks for. Zero when every row
+	// is already shown, which is also how the templates decide whether to
+	// draw the link at all.
+	Next int
+}
+
+// newCompletedVM caps rows at the newest topCap top-level runs (nested
+// descendants ride in with their parent — dash.CompletedCutoff owns that
+// rule) and works out what the next click should ask for.
+func newCompletedVM(rows []dashRowVM, topCap int) completedVM {
+	cut := dash.CompletedCutoff(len(rows), topCap, func(i int) bool { return rows[i].Depth > 0 })
+	vm := completedVM{Rows: rows[:cut], Total: len(rows)}
+	if cut < len(rows) {
+		// A short cut means the walk stopped on the (topCap+1)th
+		// top-level row, so exactly topCap of them are on screen — no
+		// need to recount before stepping.
+		vm.Next = topCap + dash.CompletedStep
+	}
+	return vm
+}
+
 // dashVM is the data the dash template renders against. Same three
-// buckets as the CLI dash; COMPLETED is pre-capped by CompletedCap
-// unless showAll is set so the template doesn't need slice math.
+// buckets as the CLI dash; COMPLETED arrives pre-capped so the template
+// needs no slice math.
 type dashVM struct {
 	bannerArtVM
 	Active         []dashRowVM
 	Intents        []dashRowVM
 	Backlog        []dashRowVM
-	Completed      []dashRowVM
-	CompletedTotal int // pre-cap count; lets the header show "N of M"
+	Completed      completedVM
 	ProjectCount   int
 	ActiveProjects int
-	ShowAll        bool
 }
 
 // rowURL is where a dash row's slug links. Only a chore row differs: it
@@ -227,13 +253,13 @@ func rowURL(r dash.Row) string {
 	return "/run/" + r.Project + "/" + r.Run
 }
 
-func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, showAll bool) dashVM {
+func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, topCap int) dashVM {
 	vm := dashVM{
 		bannerArtVM:    newBannerArt(now, rows, histogram),
 		ProjectCount:   projectCount,
 		ActiveProjects: activeProjects,
-		ShowAll:        showAll,
 	}
+	var completed []dashRowVM
 	for _, r := range rows {
 		row := dashRowVM{
 			Project: r.Project,
@@ -256,12 +282,9 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 			// has already ordered them ahead of the idea rows.
 			vm.Backlog = append(vm.Backlog, row)
 		case dash.BucketCompletedRuns:
-			vm.Completed = append(vm.Completed, row)
+			completed = append(completed, row)
 		}
 	}
-	vm.CompletedTotal = len(vm.Completed)
-	// Cap over top-level rows: a spawned descendant rides in with its
-	// parent and never counts against the cap (same rule as the CLI dash).
-	vm.Completed = vm.Completed[:dash.CompletedCutoff(len(vm.Completed), showAll, func(i int) bool { return vm.Completed[i].Depth > 0 })]
+	vm.Completed = newCompletedVM(completed, topCap)
 	return vm
 }

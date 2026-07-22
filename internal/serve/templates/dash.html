@@ -81,35 +81,10 @@
     {{else}}<p class="empty">(none)</p>{{end}}
   </section>
 
-  <section class="dash-section">
-    <h2>
-      <span>completed
-        <span class="count">
-        {{if and (not .ShowAll) (gt .CompletedTotal (len .Completed))}}
-          ({{len .Completed}} of {{.CompletedTotal}})
-        {{else}}
-          ({{.CompletedTotal}})
-        {{end}}
-        </span>
-      </span>
-    </h2>
-    {{if .Completed}}
-    <ul class="rows">
-      {{range .Completed}}
-      <li class="row{{if .Chained}} chained{{else if .Depth}} nested depth{{.Depth}}{{end}}">
-        <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
-        <span class="when">{{.When}}</span>
-        <span class="note">{{.Note}}</span>
-        {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
-      </li>
-      {{end}}
-    </ul>
-    {{else}}<p class="empty">(none)</p>{{end}}
-  </section>
+  {{template "completedsection" .Completed}}
 
   <footer class="page-footer">
     <p>{{.ProjectCount}} project{{if ne .ProjectCount 1}}s{{end}} registered · {{.ActiveProjects}} with active runs</p>
-    {{if not .ShowAll}}<p><a href="?all=1">show all</a></p>{{end}}
   </footer>
 </main>
 <script>
@@ -121,5 +96,6 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
   localStorage.setItem('moe-theme', next);
 });
 </script>
+{{template "completedjs" .}}
 </body>
 </html>

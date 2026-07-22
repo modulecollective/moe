@@ -305,6 +305,24 @@ section h2 .count {
 
 .empty { color: var(--muted); font-style: italic; margin: 0.5rem 0 0; }
 
+/* The COMPLETED section's paging control. Same chip as the transcript's
+   load-earlier (.t-earlier), including the spent state it takes on once
+   every run is on screen. */
+.show-more {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+.show-more:hover, .show-more:focus { border-color: var(--muted); }
+.show-more.inert {
+  color: var(--muted);
+  cursor: default;
+  font-style: italic;
+}
+
 /* Per-run page action list (edit, promote, …) */
 section.actions {
   display: flex;

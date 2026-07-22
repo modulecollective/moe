@@ -77,6 +77,76 @@
   </script>
 {{end}}
 
+{{define "completedrows"}}
+  {{range .}}
+  <li class="row{{if .Chained}} chained{{else if .Depth}} nested depth{{.Depth}}{{end}}">
+    <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
+    <span class="when">{{.When}}</span>
+    <span class="note">{{.Note}}</span>
+    {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
+  </li>
+  {{end}}
+{{end}}
+
+{{define "completedsection"}}
+  <section class="dash-section" id="completed">
+    <h2>
+      <span>completed
+        <span class="count" id="completed-count">{{if lt (len .Rows) .Total}}({{len .Rows}} of {{.Total}}){{else}}({{.Total}}){{end}}</span>
+      </span>
+    </h2>
+    {{if .Rows}}
+    <ul class="rows" id="completed-rows">
+      {{template "completedrows" .Rows}}
+    </ul>
+    {{if .Next}}
+    <p><a class="show-more" id="completed-more" href="?completed={{.Next}}#completed" data-next="{{.Next}}">show more ({{len .Rows}} of {{.Total}})</a></p>
+    {{end}}
+    {{else}}<p class="empty">(none)</p>{{end}}
+  </section>
+{{end}}
+
+{{define "completedjs"}}
+<script>
+// Show-more: fetch the completed list at the next cap and swap it in,
+// then rewrite the link for the click after. Same shape as the
+// transcript's load-earlier, except this replaces the list rather than
+// appending to it — completed rows shift as runs finish, so a cursor
+// could drift; re-rendering at a bigger cap can't. Progressive
+// enhancement: with JS off the same <a href> loads the fuller page.
+// The fetch URL is rebuilt from data-next rather than taken from href,
+// which carries a #completed hash that '&fragment=1' would land inside.
+(function () {
+  var btn = document.getElementById('completed-more');
+  var list = document.getElementById('completed-rows');
+  if (!btn || !list) return;
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    fetch('?completed=' + btn.dataset.next + '&fragment=1').then(function (r) {
+      return r.text();
+    }).then(function (html) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var chunk = tmp.querySelector('.completed-chunk');
+      if (!chunk) return;
+      list.innerHTML = chunk.innerHTML;
+      var count = document.getElementById('completed-count');
+      if (count) count.textContent = chunk.dataset.count;
+      if (chunk.dataset.next === '0') {
+        btn.textContent = 'all ' + chunk.dataset.total + ' shown';
+        btn.classList.add('inert');
+        btn.removeAttribute('href');
+      } else {
+        btn.dataset.next = chunk.dataset.next;
+        btn.setAttribute('href', '?completed=' + chunk.dataset.next + '#completed');
+        btn.textContent = 'show more (' + chunk.dataset.shown + ' of ' + chunk.dataset.total + ')';
+      }
+    });
+  });
+})();
+</script>
+{{end}}
+
 {{define "themejs"}}
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {

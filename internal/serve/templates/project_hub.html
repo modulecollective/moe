@@ -86,22 +86,9 @@
     {{else}}<p class="empty">(none)</p>{{end}}
   </section>
 
-  <section class="dash-section">
-    <h2><span>completed <span class="count">({{len .Completed}})</span></span></h2>
-    {{if .Completed}}
-    <ul class="rows">
-      {{range .Completed}}
-      <li class="row{{if .Chained}} chained{{else if .Depth}} nested depth{{.Depth}}{{end}}">
-        <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
-        <span class="when">{{.When}}</span>
-        <span class="note">{{.Note}}</span>
-        {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
-      </li>
-      {{end}}
-    </ul>
-    {{else}}<p class="empty">(none)</p>{{end}}
-  </section>
+  {{template "completedsection" .Completed}}
 </main>
 {{template "themejs" .}}
+{{template "completedjs" .}}
 </body>
 </html>

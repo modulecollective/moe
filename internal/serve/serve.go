@@ -439,9 +439,28 @@ func (s *Server) handleNewIdea(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// completedCap reads the ?completed=N page size a "show more" click
+// asks for. Absent, unparseable or below one falls back to the default
+// cap — a mangled URL should still render a page rather than an error.
+// There is no upper clamp: a cap past the row count just shows every
+// row, which is the same page ?all=1 used to serve.
+func completedCap(r *http.Request) int {
+	q := r.URL.Query().Get("completed")
+	if q == "" {
+		return dash.CompletedCap
+	}
+	n, err := strconv.Atoi(q)
+	if err != nil || n < 1 {
+		return dash.CompletedCap
+	}
+	return n
+}
+
 // handleDash renders the home page. Pulls dash data through the
 // Options.GatherDash callback so this package stays workflow-
-// registry-free.
+// registry-free. ?completed=N sets how many top-level completed runs
+// to show; ?completed=N&fragment=1 returns just those rows, for the
+// show-more JS to swap in place.
 func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -451,14 +470,17 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dash not configured (Options.GatherDash is nil)", http.StatusInternalServerError)
 		return
 	}
-	showAll := r.URL.Query().Get("all") != ""
 	rows, projectCount, activeProjects, histogram, err := s.opts.GatherDash("")
 	if err != nil {
 		s.logf("dash gather: %v", err)
 		http.Error(w, "dash error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, histogram, showAll)
+	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, histogram, completedCap(r))
+	if r.URL.Query().Get("fragment") != "" {
+		s.render(w, r, "completed_chunk.html", vm.Completed)
+		return
+	}
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path
