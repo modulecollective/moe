@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -189,6 +190,14 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// run is archived. Mirror today's "existing PR" idempotency.
 	switch md.Status {
 	case run.StatusMerged:
+		// A merge whose record commit failed lands here too: run.json
+		// says merged, but nothing was committed, so `already merged`
+		// would be a lie with no SHA to print. mergePath leaves the
+		// built record behind for exactly this — finish it instead.
+		if pending, ok := loadMergeRecordPending(root, md, stderr); ok {
+			code, interrupted := resumeMergeRecord(root, md, pending, stdout, stderr)
+			return code, interrupted, nil
+		}
 		if sha := push.MergedSHA(root, md.Project, md.ID); sha != "" {
 			moePrintf(stdout, "already merged at %s\n", git.ShortSHA(sha))
 		} else {
@@ -609,7 +618,27 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return nil
 	})
 	if err != nil {
+		// The ff-push already landed, so the flip to merged is true and
+		// must not be rolled back — what's missing is only the local
+		// record. Persist it: the message can't be rebuilt on a later
+		// run (the ff-push collapsed the chore diff, and the clone the
+		// tip came from was just released), so a re-run has to read it
+		// back rather than re-derive it.
 		moePrintf(stderr, "commit merge record: %v\n", err)
+		pending := &pendingMergeRecord{Msg: msg, Paths: paths, Tip: tipSHA}
+		if werr := saveMergeRecordPending(root, md, pending); werr != nil {
+			// A disk that can't hold a small JSON file wasn't going to
+			// hold the commit either — hand over the manual clean-up
+			// rather than build a second detection mechanism for it.
+			moePrintf(stderr, "warning: save %s: %v\n", mergeRecordPendingName, werr)
+			moePrintf(stderr, "       the merge landed on origin/%s; only the local record commit is missing, and\n"+
+				"       it could not be saved for retry — commit %s and lore/ by hand to clear the tree\n",
+				pj.DefaultBranch, run.Dir(md.Project, md.ID))
+			return 1, false, nil
+		}
+		moePrintf(stderr, "       the merge landed on origin/%s; only the local record commit is missing —\n"+
+			"       re-run `moe %s push %s/%s` to retry it\n",
+			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
 		return 1, false, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
@@ -624,6 +653,107 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "%s", skip)
 	}
 	return 0, interrupted, nil
+}
+
+// mergeRecordPendingName is the untracked marker mergePath leaves in
+// the run dir when the ff-merge landed on origin but the record commit
+// failed. Deliberately not gitignored: it shows up in `git status` as
+// the honest marker of owed work, and — with the staged-but-uncommitted
+// record paths beside it — wedges the repo's dirty-tree gates until the
+// resume runs.
+const mergeRecordPendingName = "merge-record.pending"
+
+// pendingMergeRecord is everything the resume needs to make the commit
+// mergePath couldn't. Msg carries the trailers verbatim (MoE-Merged,
+// MoE-Chore-Touched and MoE-Consent are all unrecoverable once the
+// ff-push has moved origin's default), Paths the exact pathspecs, and
+// Tip the SHA for the success print.
+type pendingMergeRecord struct {
+	Msg   string   `json:"msg"`
+	Paths []string `json:"paths"`
+	Tip   string   `json:"tip"`
+}
+
+func mergeRecordPendingPath(root string, md *run.Metadata) string {
+	return filepath.Join(root, run.Dir(md.Project, md.ID), mergeRecordPendingName)
+}
+
+func saveMergeRecordPending(root string, md *run.Metadata, p *pendingMergeRecord) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(mergeRecordPendingPath(root, md), append(data, '\n'), 0o644)
+}
+
+// loadMergeRecordPending reads the marker back. An absent file is the
+// overwhelmingly common case — a normally-merged run — so it reports
+// no-pending silently; an unreadable or malformed one warns, because
+// the marker is only ever written when the disk is already misbehaving
+// and silently swallowing owed work is how a strand becomes permanent.
+// Either way the caller falls through to the plain merged print.
+func loadMergeRecordPending(root string, md *run.Metadata, stderr io.Writer) (*pendingMergeRecord, bool) {
+	path := mergeRecordPendingPath(root, md)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			moePrintf(stderr, "warning: read %s: %v\n", mergeRecordPendingName, err)
+		}
+		return nil, false
+	}
+	var p pendingMergeRecord
+	if err := json.Unmarshal(data, &p); err != nil || p.Msg == "" {
+		moePrintf(stderr, "warning: %s is unreadable — commit %s and lore/ by hand to clear the tree\n",
+			filepath.Join(run.Dir(md.Project, md.ID), mergeRecordPendingName), run.Dir(md.Project, md.ID))
+		return nil, false
+	}
+	return &p, true
+}
+
+// resumeMergeRecord finishes a merge whose record commit failed: it
+// makes the commit from the persisted record and runs the tail the
+// original closure never reached. Rolling forward is the only honest
+// move here — the ff-push landed, so the run really is merged.
+//
+// Two things it deliberately does not repeat from mergePath's closure.
+// releaseRunWorkspace already ran on the first attempt, and
+// workspace.Release drops the claim with no ownership check — by now
+// another run may hold it. And ErrNothingToCommit is success, not
+// failure: it means the operator committed the staged record by hand.
+func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecord, stdout, stderr io.Writer) (int, bool) {
+	err := sync.WithJournalPush(root, repolock.Options{
+		Purpose: "push-merge",
+		Run:     md.Project + "/" + md.ID,
+	}, stdout, stderr, func() error {
+		if err := run.StageAndCommit(root, pending.Msg, pending.Paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+			return err
+		}
+		if err := sync.BumpOne(root, md.Project, stdout, stderr); err != nil {
+			moePrintf(stderr, "warning: auto-bump project pointer: %v\n", err)
+		}
+		return nil
+	})
+	if err != nil {
+		// The marker stays put, so the next re-run is the next retry.
+		moePrintf(stderr, "commit merge record: %v\n", err)
+		moePrintf(stderr, "       the record is still pending — re-run `moe %s push %s/%s` once the commit can land\n",
+			md.Workflow, md.Project, md.ID)
+		return 1, false
+	}
+	if err := os.Remove(mergeRecordPendingPath(root, md)); err != nil && !os.IsNotExist(err) {
+		moePrintf(stderr, "warning: remove %s: %v\n", mergeRecordPendingName, err)
+	}
+	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(pending.Tip))
+	// The stranded ship never reached its sweep, so this is still the
+	// one advisory sweep per merged ship — same gate, same interrupt
+	// bool riding back out to halt a cascade.
+	interrupted := false
+	if fires, skip := pulseFiresForRun(root, md, stderr); fires {
+		interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+	} else if skip != "" {
+		moePrintf(stderr, "%s", skip)
+	}
+	return 0, interrupted
 }
 
 // writeMechanicalPushNote leaves an explicit push canvas for the
