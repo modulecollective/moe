@@ -20,8 +20,10 @@ feature. The bet behind that stance: agents have made careful work cheap. When a
 designed, reviewed, tested change costs one conversation and two keystrokes,
 the discipline that used to be overhead becomes the default path. What MoE
 removes is the coordination tax — opening work, handing context forward,
-checking progress, filing the lessons that should shape the next run. MoE is
-built with MoE — every change ships through the same workflows it provides.
+checking progress, filing the lessons that should shape the next run.
+
+MoE is built with MoE — every change ships through the same workflows it
+provides.
 
 Everything works from the CLI:
 
