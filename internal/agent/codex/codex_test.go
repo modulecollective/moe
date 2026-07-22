@@ -322,12 +322,17 @@ func assertGitWritableProfile(t *testing.T, args []string) {
 		`":root" = "read"`,
 		`":tmpdir" = "write"`,
 		`":slash_tmp" = "write"`, // without it codex sets exclude_slash_tmp
-		`":project_roots" = { "." = "write", ".git" = "write" }`,
 		`":workspace_roots" = { "." = "write", ".git" = "write" }`,
 	} {
 		if !strings.Contains(profile, want) {
 			t.Errorf("profile missing %s: %s", want, profile)
 		}
+	}
+	// codex 0.144.6 doesn't recognize `:project_roots` and warns about it
+	// twice per interactive turn. `:workspace_roots` already covers cwd
+	// and every --add-dir, so re-adding it buys noise and nothing else.
+	if strings.Contains(profile, ":project_roots") {
+		t.Errorf("profile must not carry the unrecognized `:project_roots` key: %s", profile)
 	}
 }
 

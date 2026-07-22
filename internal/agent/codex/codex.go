@@ -454,11 +454,20 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 // shape sets `exclude_slash_tmp`, which would take away the `/tmp`
 // surface `--sandbox workspace-write` gives today (dev-env scratch
 // dirs, tools that hardcode /tmp).
+//
+// There is deliberately no `":project_roots"` entry. The operator-config
+// profile this replaces carried one, but codex 0.144.6 doesn't know the
+// name — selecting a profile containing it prints "Configured filesystem
+// path `:project_roots` is not recognized by this version of Codex and
+// will be ignored" twice on every interactive turn. It was never doing
+// anything: `:workspace_roots` covers cwd plus every `--add-dir`, which
+// is MoE's entire geometry. The warning only surfaced once the profile
+// started being applied at all — `--sandbox` used to override it before
+// codex got as far as validating it.
 const (
 	gitWritableProfileName = "moe-workspace-git"
 	gitWritableProfile     = `permissions.` + gitWritableProfileName + `.filesystem={ ` +
 		`":root" = "read", ":tmpdir" = "write", ":slash_tmp" = "write", ` +
-		`":project_roots" = { "." = "write", ".git" = "write" }, ` +
 		`":workspace_roots" = { "." = "write", ".git" = "write" } }`
 )
 
