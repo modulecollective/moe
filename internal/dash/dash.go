@@ -102,7 +102,7 @@ const CompletedCap = 5
 
 // CompletedCutoff returns how many leading completed rows to render so
 // that the newest CompletedCap top-level rows are shown, each dragging
-// its nested descendants (spawned pulses) along for free. Nested rows
+// its nested descendants (spawned runs) along for free. Nested rows
 // never count against the cap, so a parent and its subtree are
 // admitted or evicted as a unit. Returns n unchanged when showAll is
 // set or the top-level count is already within the cap.
@@ -444,9 +444,11 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 
 // nestSpawnedRuns threads every completed machine-spawned run (one whose
 // SpawnedBy resolves to another dashboard row) under its spawner, so a
-// tailed pulse renders as lineage on the run that triggered it rather
-// than as a standalone completed row that eats a history slot. General
-// on the edge, not gated on workflow — pulse is just its first consumer.
+// run the pulse minted renders as lineage on the sweep that spawned it
+// rather than as a standalone completed row that eats a history slot.
+// General on the edge, not gated on workflow. (Survey runs themselves
+// open top-level — see pulseSurvey — so a sweep folds nowhere; sweeps
+// recorded before that change still carry the edge and keep folding.)
 //
 // A folding row attaches to the nearest top-level ancestor, not just its
 // direct spawner: the SpawnedBy chain is walked upward past ancestors
@@ -459,11 +461,11 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // the parent's bucket so a still-active parent and its already-closed
 // pulse render in one section.
 //
-// Only completed rows fold. A spawned run that is still open — a broken
-// sweep left open by design so a human escalates to it (a pulse no longer
-// blocks on it; it just sits visible) — classifies into BucketActiveRuns
-// and stays a top-level ACTIVE row; folding it under a (completed or
-// pushed) parent would hide the very thing the operator is meant to see.
+// Only completed rows fold. A spawned run that is still open — say a
+// run the sweep kicked whose ride is still walking it — classifies into
+// BucketActiveRuns and stays a top-level ACTIVE row; folding it under a
+// (completed or pushed) parent would hide the very thing the operator is
+// meant to see.
 // But every on-board spawn edge renders either way: an open child's
 // direct spawner gains the same " · spawned → <project>/<slug>" hint on
 // its own row (one per open child, newest-first) while the child runs,
@@ -478,8 +480,10 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 // over top-level rows in Render / the serve view.
 //
 // One class of child renders as flow rather than lineage: a run spawned
-// by a chain member. The tail sweep of a ride is spawned by the run it
-// fired after and reads as the next thing that happened on that chain,
+// by a chain member. Only historically recorded sweeps hit this path —
+// pulseSurvey no longer stamps the edge — but those carry exactly it: a
+// tail sweep spawned by the run it fired after reads as the next thing
+// that happened on that chain,
 // not as something hanging off it — so it takes the flush "→" connector
 // its neighbours wear instead of the "↳" ladder. That is a Chained
 // mark, not a Depth change: the row stays inside its spawner's block, so
