@@ -26,9 +26,10 @@ import (
 // Two measures, because the question has two shapes. **Notional API
 // dollars** is a comparability unit — under a Max plan the marginal cost
 // of a run is zero until a window bites, but "the pulse costs as much as
-// six flagship sdlc runs" is only sayable in a common currency. **Tokens
-// per day** is the thing that actually trips limits. Neither is a bill;
-// the header says so and the column is labelled notional.
+// six flagship sdlc runs" is only sayable in a common currency. **Raw
+// tokens in the selected window** are the thing that actually trips
+// limits. Neither measure is a bill; the header says so and the dollar
+// column is labelled notional.
 
 // Model prices in US dollars per million tokens, API sticker rates.
 //
@@ -113,6 +114,16 @@ type usageRow struct {
 	usage    transcript.ModelUsage
 }
 
+// runUsageRow is every accepted transcript bucket for one qualified run.
+type runUsageRow struct {
+	key      string
+	workflow string
+	stages   map[string]bool
+	usage    transcript.ModelUsage
+	dollars  float64
+	unpriced int64
+}
+
 func init() {
 	Register(&Command{
 		Name:    "usage",
@@ -130,8 +141,10 @@ func runUsage(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "usage: moe usage [--project <id>] [--since <dur>]")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Sums the token usage recorded in every mirrored stage transcript,")
-		moePrintln(stderr, "grouped by workflow, stage and model, with notional API-sticker")
-		moePrintln(stderr, "dollars alongside. Notional is a comparability unit, not a bill.")
+		moePrintln(stderr, "with workflow/stage/model, selected rolling-window, per-run, and")
+		moePrintln(stderr, "by-day views. Notional dollars are a comparability unit, not a bill.")
+		moePrintln(stderr, "Each whole stage is dated by its last work turn, falling back to run")
+		moePrintln(stderr, "activity; untimed transcripts stay in totals and are marked.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -157,7 +170,8 @@ func runUsage(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	report, err := gatherUsage(root, *projectF, time.Now().Add(-window), stderr)
+	now := time.Now()
+	report, err := gatherUsage(root, *projectF, now.Add(-window), stderr)
 	if err != nil {
 		moePrintf(stderr, "moe usage: %v\n", err)
 		return 1
@@ -166,16 +180,19 @@ func runUsage(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// usageReport is everything the render needs: the per-bucket rows, the
-// per-day totals, and the tokens that carried no price.
+// usageReport is everything the render needs: the per-bucket and per-run
+// rows, the per-day totals, and the usage that cannot be fully attributed.
 type usageReport struct {
 	rows        []usageRow
+	byRun       []runUsageRow
 	byDay       map[string]transcript.ModelUsage
 	dayDollars  map[string]float64
+	dayUnpriced map[string]int64
 	total       transcript.ModelUsage
 	dollars     float64
 	unpriced    map[string]int64
 	transcripts int
+	untimed     int
 }
 
 // gatherUsage walks every run's mirrored transcripts and buckets their
@@ -193,9 +210,10 @@ type usageReport struct {
 // under-report, and the window is a lens rather than a ledger.
 func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer) (usageReport, error) {
 	rep := usageReport{
-		byDay:      map[string]transcript.ModelUsage{},
-		dayDollars: map[string]float64{},
-		unpriced:   map[string]int64{},
+		byDay:       map[string]transcript.ModelUsage{},
+		dayDollars:  map[string]float64{},
+		dayUnpriced: map[string]int64{},
+		unpriced:    map[string]int64{},
 	}
 	mds, err := run.Scan(root)
 	if err != nil {
@@ -206,6 +224,7 @@ func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer)
 		return rep, fmt.Errorf("build journal index: %w", err)
 	}
 	byBucket := map[string]*usageRow{}
+	byRun := map[string]*runUsageRow{}
 	for _, md := range mds {
 		if projectFilter != "" && md.Project != projectFilter {
 			continue
@@ -226,6 +245,15 @@ func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer)
 					continue
 				}
 				rep.transcripts++
+				if when.IsZero() {
+					rep.untimed++
+				}
+				runRow := byRun[runKey]
+				if runRow == nil {
+					runRow = &runUsageRow{key: runKey, workflow: md.Workflow, stages: map[string]bool{}}
+					byRun[runKey] = runRow
+				}
+				runRow.stages[stage] = true
 				for model, mu := range u {
 					key := md.Workflow + "\x00" + stage + "\x00" + model
 					row := byBucket[key]
@@ -237,15 +265,22 @@ func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer)
 					row.usage = mergeModelUsage(row.usage, mu)
 
 					rep.total = mergeModelUsage(rep.total, mu)
+					runRow.usage = mergeModelUsage(runRow.usage, mu)
 					cost, priced := notionalCost(model, mu)
 					rep.dollars += cost
-					if tokens := mu.Input + mu.CacheWrite + mu.CacheRead + mu.Output; !priced && tokens > 0 {
+					runRow.dollars += cost
+					tokens := totalTokens(mu)
+					if !priced && tokens > 0 {
 						rep.unpriced[model] += tokens
+						runRow.unpriced += tokens
 					}
 					if !when.IsZero() {
 						day := when.Local().Format("2006-01-02")
 						rep.byDay[day] = mergeModelUsage(rep.byDay[day], mu)
 						rep.dayDollars[day] += cost
+						if !priced {
+							rep.dayUnpriced[day] += tokens
+						}
 					}
 				}
 			}
@@ -253,6 +288,9 @@ func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer)
 	}
 	for _, row := range byBucket {
 		rep.rows = append(rep.rows, *row)
+	}
+	for _, row := range byRun {
+		rep.byRun = append(rep.byRun, *row)
 	}
 	// Most expensive first: the report exists to name the biggest line
 	// item, so it should be the first line read. Unpriced buckets sort by
@@ -265,6 +303,16 @@ func gatherUsage(root, projectFilter string, cutoff time.Time, stderr io.Writer)
 		}
 		return rep.rows[i].usage.Output > rep.rows[j].usage.Output
 	})
+	sort.Slice(rep.byRun, func(i, j int) bool {
+		if rep.byRun[i].dollars != rep.byRun[j].dollars {
+			return rep.byRun[i].dollars > rep.byRun[j].dollars
+		}
+		ti, tj := totalTokens(rep.byRun[i].usage), totalTokens(rep.byRun[j].usage)
+		if ti != tj {
+			return ti > tj
+		}
+		return rep.byRun[i].key < rep.byRun[j].key
+	})
 	return rep, nil
 }
 
@@ -275,6 +323,14 @@ func mergeModelUsage(a, b transcript.ModelUsage) transcript.ModelUsage {
 	a.Output += b.Output
 	a.Steps += b.Steps
 	return a
+}
+
+func inputTokens(u transcript.ModelUsage) int64 {
+	return u.Input + u.CacheWrite + u.CacheRead
+}
+
+func totalTokens(u transcript.ModelUsage) int64 {
+	return inputTokens(u) + u.Output
 }
 
 // stageDocsOnDisk lists the document ids a run has directories for,
@@ -334,10 +390,31 @@ func renderUsage(w io.Writer, rep usageReport, projectFilter, since string) {
 			humanTokens(r.usage.CacheWrite), humanTokens(r.usage.CacheRead),
 			humanTokens(r.usage.Output), notionalDollars(r.model, r.usage))
 	}
-	fmt.Fprintf(tw, "\t\tTOTAL\t\t%d\t%s\t%s\t%s\t$%.2f\n",
+	fmt.Fprintf(tw, "\t\tTOTAL\t\t%d\t%s\t%s\t%s\t%s\n",
 		rep.total.Steps, humanTokens(rep.total.CacheWrite), humanTokens(rep.total.CacheRead),
-		humanTokens(rep.total.Output), rep.dollars)
+		humanTokens(rep.total.Output), totalNotional(rep.dollars, rep.total, unpricedTokens(rep.unpriced)))
 	tw.Flush()
+
+	moePrintln(w, "")
+	moePrintln(w, "CURRENT ROLLING WINDOW")
+	ww := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(ww, "LAST\tSTEPS\tINPUT\tOUTPUT\tTOTAL\tNOTIONAL")
+	fmt.Fprintf(ww, "%s\t%d\t%s\t%s\t%s\t%s\n", since, rep.total.Steps,
+		humanTokens(inputTokens(rep.total)), humanTokens(rep.total.Output), humanTokens(totalTokens(rep.total)),
+		totalNotional(rep.dollars, rep.total, unpricedTokens(rep.unpriced)))
+	ww.Flush()
+
+	moePrintln(w, "")
+	moePrintf(w, "BY RUN (within last %s)\n", since)
+	rw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(rw, "RUN\tWORKFLOW\tSTAGES\tSTEPS\tINPUT\tOUTPUT\tTOTAL\tNOTIONAL")
+	for _, r := range rep.byRun {
+		fmt.Fprintf(rw, "%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n",
+			r.key, r.workflow, len(r.stages), r.usage.Steps, humanTokens(inputTokens(r.usage)),
+			humanTokens(r.usage.Output), humanTokens(totalTokens(r.usage)),
+			totalNotional(r.dollars, r.usage, r.unpriced))
+	}
+	rw.Flush()
 
 	if len(rep.byDay) > 0 {
 		moePrintln(w, "")
@@ -350,8 +427,9 @@ func renderUsage(w io.Writer, rep usageReport, projectFilter, since string) {
 		dw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, d := range days {
 			u := rep.byDay[d]
-			fmt.Fprintf(dw, "%s\t%d steps\t%s in\t%s out\t$%.2f\n",
-				d, u.Steps, humanTokens(u.Input+u.CacheWrite+u.CacheRead), humanTokens(u.Output), rep.dayDollars[d])
+			fmt.Fprintf(dw, "%s\t%d steps\t%s in\t%s out\t%s\n",
+				d, u.Steps, humanTokens(inputTokens(u)), humanTokens(u.Output),
+				totalNotional(rep.dayDollars[d], u, rep.dayUnpriced[d]))
 		}
 		dw.Flush()
 	}
@@ -367,6 +445,13 @@ func renderUsage(w io.Writer, rep usageReport, projectFilter, since string) {
 			moePrintf(w, "no price on record for %s (%s tokens uncounted in the notional column)\n",
 				m, humanTokens(rep.unpriced[m]))
 		}
+		if hasPartialNotional(rep.total, unpricedTokens(rep.unpriced)) {
+			moePrintln(w, "* starred totals exclude tokens from models with no price on record")
+		}
+	}
+	if rep.untimed > 0 {
+		moePrintln(w, "")
+		moePrintf(w, "%d untimed transcript(s) included in aggregate, current-window, and per-run totals; omitted from BY DAY\n", rep.untimed)
 	}
 	moePrintln(w, "")
 	moePrintln(w, "Notional dollars are API sticker prices, for comparing workflows — not a bill.")
@@ -381,6 +466,30 @@ func notionalDollars(model string, u transcript.ModelUsage) string {
 		return "—"
 	}
 	return fmt.Sprintf("$%.2f", cost)
+}
+
+func unpricedTokens(models map[string]int64) int64 {
+	var total int64
+	for _, tokens := range models {
+		total += tokens
+	}
+	return total
+}
+
+func hasPartialNotional(u transcript.ModelUsage, unpriced int64) bool {
+	return unpriced > 0 && unpriced < totalTokens(u)
+}
+
+// totalNotional renders an aggregate cost without implying that a partial
+// price is complete. A dash means every token in the aggregate is unpriced.
+func totalNotional(dollars float64, u transcript.ModelUsage, unpriced int64) string {
+	if totalTokens(u) > 0 && unpriced == totalTokens(u) {
+		return "—"
+	}
+	if hasPartialNotional(u, unpriced) {
+		return fmt.Sprintf("$%.2f*", dollars)
+	}
+	return fmt.Sprintf("$%.2f", dollars)
 }
 
 // humanTokens renders a token count compactly with a K/M suffix —

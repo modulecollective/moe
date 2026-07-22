@@ -18,6 +18,10 @@ import (
 // with the `work: update <doc>` trailer the journal index reads for the
 // stage's timestamp.
 func seedThread(t *testing.T, root, projectID, runID, stage, agent, body string) {
+	seedThreadAt(t, root, projectID, runID, stage, agent, body, time.Time{})
+}
+
+func seedThreadAt(t *testing.T, root, projectID, runID, stage, agent, body string, when time.Time) {
 	t.Helper()
 	rel := run.ThreadPathFor(agent, projectID, runID, stage)
 	abs := filepath.Join(root, rel)
@@ -28,8 +32,14 @@ func seedThread(t *testing.T, root, projectID, runID, stage, agent, body string)
 		t.Fatal(err)
 	}
 	gittest.Run(t, root, "add", "-A")
-	gittest.Run(t, root, "commit", "-m",
-		"work: update "+stage+"\n\nMoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Document: "+stage+"\n")
+	args := []string{"commit", "-m",
+		"work: update " + stage + "\n\nMoE-Run: " + runID + "\nMoE-Project: " + projectID + "\nMoE-Document: " + stage + "\n"}
+	if when.IsZero() {
+		gittest.Run(t, root, args...)
+		return
+	}
+	date := when.Format(time.RFC3339)
+	gittest.RunWithEnv(t, root, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, args...)
 }
 
 // claudeTurn is one assistant turn's worth of thread-claude.jsonl,
@@ -41,6 +51,12 @@ func claudeTurn(id, model string, cacheWrite, cacheRead, output int) string {
 			`"usage":{"input_tokens":1,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d,"output_tokens":%d}}}`,
 		id, model, cacheWrite, cacheRead, output)
 	return line + "\n" + line + "\n"
+}
+
+func codexTurn(model string, input, cached, output int) string {
+	return fmt.Sprintf(`{"type":"turn_context","payload":{"model":%q}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d}}}}
+`, model, input, cached, output)
 }
 
 // TestUsageBucketsByWorkflowStageModel is the aggregator end to end over
@@ -128,6 +144,69 @@ func TestUsageProjectFilter(t *testing.T) {
 	}
 }
 
+func TestUsageByRunGroupsQualifiedRunsAndConservesTotals(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "alpha", "shared", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "beta", "shared", "twin", run.StatusClosed, now, nil)
+	seedRun(t, root, "gamma", "small", "sdlc", run.StatusMerged, now, nil)
+	gittest.Commit(t, root, "seed runs")
+	seedThread(t, root, "alpha", "shared", "design", "claude",
+		claudeTurn("a1", "claude-fable-5", 100, 200, 300)+
+			claudeTurn("a2", "claude-opus-4-8", 10, 20, 30))
+	seedThread(t, root, "alpha", "shared", "design", "codex",
+		codexTurn("gpt-5.6-sol", 100, 80, 10))
+	seedThread(t, root, "alpha", "shared", "code", "claude",
+		claudeTurn("a3", "claude-fable-5", 40, 50, 60))
+	seedThread(t, root, "beta", "shared", "design", "claude",
+		claudeTurn("b1", "claude-fable-5", 5, 6, 7))
+	seedThread(t, root, "gamma", "small", "design", "claude",
+		claudeTurn("g1", "claude-fable-5", 5, 6, 7))
+
+	rep, err := gatherUsage(root, "", now.Add(-24*time.Hour), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("gatherUsage: %v", err)
+	}
+	if len(rep.byRun) != 3 {
+		t.Fatalf("byRun = %+v, want three qualified runs", rep.byRun)
+	}
+	if rep.byRun[0].key != "alpha/shared" || len(rep.byRun[0].stages) != 2 || rep.byRun[0].usage.Steps != 4 {
+		t.Errorf("first run = %+v, want alpha/shared merged across two stages, backends, and models", rep.byRun[0])
+	}
+	if rep.byRun[1].key != "beta/shared" || rep.byRun[2].key != "gamma/small" {
+		t.Errorf("tie order = %q, %q, want qualified-key order", rep.byRun[1].key, rep.byRun[2].key)
+	}
+	var sum transcript.ModelUsage
+	for _, row := range rep.byRun {
+		sum = mergeModelUsage(sum, row.usage)
+	}
+	if sum != rep.total {
+		t.Errorf("sum of run usage = %+v, aggregate = %+v", sum, rep.total)
+	}
+}
+
+func TestUsageCutoffKeepsOnlyInWindowStagesInRunView(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "tele", "split", "sdlc", run.StatusMerged, now, nil)
+	gittest.Commit(t, root, "seed run")
+	seedThreadAt(t, root, "tele", "split", "design", "claude",
+		claudeTurn("old", "claude-fable-5", 1, 2, 300), now.Add(-48*time.Hour))
+	seedThreadAt(t, root, "tele", "split", "code", "claude",
+		claudeTurn("new", "claude-fable-5", 1, 2, 30), now.Add(-time.Hour))
+
+	rep, err := gatherUsage(root, "", now.Add(-24*time.Hour), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("gatherUsage: %v", err)
+	}
+	if rep.transcripts != 1 || len(rep.byRun) != 1 {
+		t.Fatalf("report = %+v, want one in-window transcript and run", rep)
+	}
+	if got := rep.byRun[0]; len(got.stages) != 1 || !got.stages["code"] || got.usage.Output != 30 {
+		t.Errorf("run row = %+v, want only the in-window code stage", got)
+	}
+}
+
 // TestUsageUnknownModelKeepsTokensDropsDollars: a model with no price on
 // record still contributes its tokens; only the dollar column abstains.
 // Inventing a rate would be worse than admitting the gap.
@@ -157,6 +236,58 @@ func TestUsageUnknownModelKeepsTokensDropsDollars(t *testing.T) {
 	renderUsage(&buf, rep, "", "30d")
 	if !strings.Contains(buf.String(), "no price on record for some-unlisted-model") {
 		t.Errorf("render = %q, want the missing price surfaced", buf.String())
+	}
+	if !strings.Contains(buf.String(), "—") || strings.Contains(buf.String(), "$0.00*") {
+		t.Errorf("render = %q, want wholly unpriced totals rendered as a dash", buf.String())
+	}
+}
+
+func TestUsageMixedPriceTotalsAreStarredAcrossViews(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "tele", "mixed", "sdlc", run.StatusMerged, now, nil)
+	gittest.Commit(t, root, "seed run")
+	seedThread(t, root, "tele", "mixed", "design", "claude",
+		claudeTurn("priced", "claude-fable-5", 0, 0, 1_000_000)+
+			claudeTurn("unknown", "some-unlisted-model", 0, 0, 1_000_000))
+
+	rep, err := gatherUsage(root, "", now.Add(-24*time.Hour), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("gatherUsage: %v", err)
+	}
+	var buf bytes.Buffer
+	renderUsage(&buf, rep, "", "24h")
+	got := buf.String()
+	if count := strings.Count(got, "$50.00*"); count < 4 {
+		t.Errorf("render = %q, want starred aggregate, window, run, and day totals", got)
+	}
+	if !strings.Contains(got, "* starred totals exclude tokens from models with no price on record") {
+		t.Errorf("render = %q, want the star explained", got)
+	}
+}
+
+func TestUsageUntimedTranscriptStaysOutOfByDay(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "tele", "untimed", "sdlc", run.StatusMerged, now,
+		map[string]string{"design": ""})
+	rel := run.ThreadPathFor("claude", "tele", "untimed", "design")
+	abs := filepath.Join(root, rel)
+	if err := os.WriteFile(abs, []byte(claudeTurn("u1", "claude-fable-5", 1, 2, 3)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := gatherUsage(root, "", now.Add(365*24*time.Hour), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("gatherUsage: %v", err)
+	}
+	if rep.transcripts != 1 || rep.untimed != 1 || len(rep.byRun) != 1 || len(rep.byDay) != 0 {
+		t.Errorf("report = %+v, want untimed usage in totals/run but not by-day", rep)
+	}
+	var buf bytes.Buffer
+	renderUsage(&buf, rep, "", "30d")
+	if !strings.Contains(buf.String(), "1 untimed transcript(s) included") {
+		t.Errorf("render = %q, want untimed attribution note", buf.String())
 	}
 }
 
