@@ -320,6 +320,7 @@ func assertGitWritableProfile(t *testing.T, args []string) {
 	}
 	for _, want := range []string{
 		`":root" = "read"`,
+		`":tmpdir" = "write"`,
 		`":slash_tmp" = "write"`, // without it codex sets exclude_slash_tmp
 		`":project_roots" = { "." = "write", ".git" = "write" }`,
 		`":workspace_roots" = { "." = "write", ".git" = "write" }`,
