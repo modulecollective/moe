@@ -155,7 +155,8 @@ func TestSelfKickSkipsASeedOnlyOperatorRoot(t *testing.T) {
 // consent to proceed" — now that the admit no longer names the advance
 // marker. The design turn landed and the operator declined the chain
 // prompt without hitting `a`, so the run still reads as waiting at
-// design, and past-first holds it for free.
+// design, and past-first holds it for free. The skip line says so: this
+// run's design *did* run, which is the half "only a seed" got wrong.
 func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
 	root, stages, _ := kickFixture(t)
 	seedRun(t, root, "moe", "design-done", "sdlc", run.StatusInProgress, time.Now().Local(),
@@ -171,8 +172,8 @@ func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a design that merely closed", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
-		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	if !strings.Contains(errb.String(), "waiting at its first stage with its turn closed but not advanced") {
+		t.Errorf("stderr = %q, want the hold to name the closed turn, not a seed", errb.String())
 	}
 }
 
@@ -347,7 +348,8 @@ func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 // stage the operator advanced past lands a newer work-turn that
 // out-dates the marker, so the run reads as waiting at design again —
 // which is right, because the consent was for a canvas that has since
-// moved.
+// moved. Two turns have landed at design here, so the skip line reports
+// the turn, not a seed.
 func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 	root, threadRoot, groomed, stages := advancedKickFixture(t)
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "advanced-run", "sdlc", "design", time.Now().Local())
@@ -366,8 +368,8 @@ func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an out-dated marker", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
-		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	if !strings.Contains(errb.String(), "waiting at its first stage with its turn closed but not advanced") {
+		t.Errorf("stderr = %q, want the hold to name the closed turn, not a seed", errb.String())
 	}
 }
 

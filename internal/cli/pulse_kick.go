@@ -52,11 +52,14 @@ import (
 // admit asks is whether the design is settled and whether anyone is
 // inside the run — see rootDesignSettled and openSessionStage.
 //
-// What stays with the operator is a root sitting at its first stage
-// with only a seed: a promoted sketch, a run whose design closed
-// without the operator advancing it, a reopened run, a hand-minted
-// chain composed over an afternoon. Those have `!` and `!!!`. The kick
-// bar still decides *whether to ask* — this is only the floor under it.
+// What stays with the operator is a root sitting at its first stage,
+// in either of two shapes, and the skip line names which: nothing has
+// run there yet — a promoted sketch, a hand-minted chain head composed
+// over an afternoon — or the turn closed and nobody advanced it, which
+// is the reopened run and the re-edit that out-dated its advance
+// marker. Both are held; only one of them means the design never ran.
+// Those have `!` and `!!!`. The kick bar still decides *whether to
+// ask* — this is only the floor under it.
 //
 // Every skip is one stderr line, warn-only ethos.
 //
@@ -103,8 +106,12 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 			moePrintf(stderr, "pulse: kick: %s heads a thread that has already settled — skipping\n", th.Root)
 			continue
 		}
-		if !rootDesignSettled(root, md, groomed.idx) {
-			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with only a seed — the operator holds the trigger\n", th.Root)
+		if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
+			held := "only a seed"
+			if turnClosed {
+				held = "its turn closed but not advanced"
+			}
+			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with %s — the operator holds the trigger\n", th.Root, held)
 			continue
 		}
 		if stage := openSessionStage(root, md); stage != "" {
@@ -148,26 +155,44 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 // already fallen to the settled-thread guard above, and a live one owes
 // its ride only its members, which is chainKickRun's nothing-pending
 // branch to say.
-func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) bool {
+//
+// turnClosed is the caller's reporting bit and only means anything when
+// settled is false: it says a first-stage work-turn has landed, so the
+// hold is "worked, not advanced" rather than "never worked". It lives
+// here because the first stage it asks about is the one the past-first
+// comparison just resolved; deriving it at the call site would look the
+// workflow up a second time to answer half a question.
+func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) (settled, turnClosed bool) {
 	if md.SpawnedBy != "" {
-		return true
+		return true, false
 	}
 	if idx != nil && idx.ChoreByRun[md.Project+"/"+md.ID] != "" {
-		return true
+		return true, false
 	}
 	w, err := LookupWorkflow(md.Workflow)
 	if err != nil {
-		return false
+		return false, false
 	}
 	stages := w.Stages()
 	if len(stages) == 0 {
-		return false
+		return false, false
 	}
 	stage, _, err := w.NextWithIndex(root, md, idx)
 	if err != nil {
-		return false
+		return false, false
 	}
-	return stage != stages[0]
+	if stage != stages[0] {
+		return true, false
+	}
+	// Held at the first stage: a turn that landed and wasn't advanced
+	// (no marker, a marker a re-edit out-dated, a failed gate) reads
+	// differently to the operator than a stage nothing has run at. Same
+	// workTurnTime stageSatisfied just consulted.
+	when, err := workTurnTime(root, md.Project, md.ID, stages[0], idx)
+	if err != nil {
+		return false, false
+	}
+	return false, !when.IsZero()
 }
 
 // openSessionStage returns the stage md has a live session branch at,
