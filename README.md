@@ -153,6 +153,10 @@ full treatment.
   agents are steered.
 - [docs/reference.md](docs/reference.md) — the command catalog, Codex setup,
   shell completion, hooks/dev-env/secrets, and cleanup and recovery.
+- [docs/evolution.md](docs/evolution.md) — how MoE moved from supervised
+  sessions to work that finds, orders, and starts itself.
+- [docs/un-changelist.md](docs/un-changelist.md) — what removed experiments
+  taught MoE about services, workflows, queues, memory, and trust.
 
 ## Status
 
