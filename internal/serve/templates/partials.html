@@ -122,6 +122,11 @@
   if (!btn || !list) return;
   btn.addEventListener('click', function (e) {
     e.preventDefault();
+    // A spent chip keeps its listener. Without this the stale data-next
+    // refetches the whole list — a quarter-megabyte no-op on the real
+    // board. The server only draws the link with a non-zero next cap, so
+    // '0' means spent and nothing else.
+    if (btn.dataset.next === '0') return;
     fetch('?completed=' + btn.dataset.next + '&fragment=1').then(function (r) {
       return r.text();
     }).then(function (html) {
@@ -133,6 +138,7 @@
       var count = document.getElementById('completed-count');
       if (count) count.textContent = chunk.dataset.count;
       if (chunk.dataset.next === '0') {
+        btn.dataset.next = '0';
         btn.textContent = 'all ' + chunk.dataset.total + ' shown';
         btn.classList.add('inert');
         btn.removeAttribute('href');
