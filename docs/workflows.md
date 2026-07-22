@@ -155,7 +155,7 @@ and keep as many live at once as you have topics.
 moe chain new moe/perf-cleanups     # mint a head to collect under
 moe chain note moe/perf-cleanups    # why this batch exists
 moe chain edit                      # move runs beneath it
-moe chain kick moe/perf-cleanups    # ride the batch headlessly
+moe chain kick [--dynamic] moe/perf-cleanups # ride it statically or dynamically
 moe chain close moe/perf-cleanups   # drop the head without riding
 ```
 
@@ -175,6 +175,9 @@ ordinary run works too — it ships first, then rides its children — and a run
 with no children is a chain of one, so kick is also how you fire a single parked
 run headlessly. Kick refuses a run that is itself chained under another; kick
 the head instead.
+
+Pass `--dynamic` for programmatic `!!!!`: a bare kick runs the visible chain
+statically, while a dynamic kick permits tail pulses to grow the ride.
 
 Kick exits non-zero if any run in the chain stalls — the stalled stage's own
 exit code, with a `chain ride into <run> exited N` line on stderr naming where.
@@ -373,8 +376,8 @@ down or not yet due — it still refuses if a run is already open.
 
 ## Pulse
 
-A pulse is a read-only sweep of one project that feeds the backlog and ranks
-what to pull from it. "Work just landed — what's next?" is a reflex worth
+A pulse is a read-only sweep of one project that feeds the backlog and grooms
+queued work into lanes. "Work just landed — what's next?" is a reflex worth
 automating, but only inside consent bounds: a pulse fires at the tail of the
 run-traffic verbs (`moe sdlc close`, `moe sdlc push`, `moe twin close`, and the
 cascades' auto-close) **and only when you handed the machine the wheel** —
@@ -443,32 +446,23 @@ the journal never saw) and the latest CI verdict per workflow on the default
 branch. It's what makes "what landed" honest when work reaches the repo without
 going through a run.
 
-### Proposed fix runs
+### Proposed work and grooming
 
-Most of what a survey finds becomes a followup. Occasionally it finds something
-mechanical, bounded, and verifiable — a red check on the default branch with a
-named failing test, documentation the code plainly contradicts — and proposes it
-as a **fix run**. The harness opens each proposal as a parked `sdlc` run and
-seeds its design canvas from the proposal. A batch of two or more is chained
-under a freshly minted **chain run** — a placeholder head that holds still while
-the runs behind it ship; a lone proposal just parks on its own.
+Most of what a survey finds becomes a followup. When it finds work that is
+mechanical, bounded, and verifiable — a red check with a named failing test,
+documentation the code plainly contradicts — it may open or nominate an
+ordinary `sdlc`, `twin`, or chore run. It can place new and existing queued
+runs into ordinary chain threads, leave them loose when it has no ordering
+opinion, or add a chain head when a stable name helps tell the thread's story.
+A head is a naming convenience, not a container every batch receives.
 
-```sh
-moe chain edit                     # reorder or prune the batch (heads are offered)
-moe chain kick <project>/<run>     # ride the batch headlessly from its head
-```
-
-The chain is the review gate. Spawned runs park at `design` and nothing executes
-until you kick — that trigger is yours, exactly like every other cascade. Each
-survey mints its own head and never appends to an existing chain, so a batch can
-never land behind a head you are already riding, and machine proposals never
-land in a chain you curated by hand. Fold two batches together with `moe chain
-edit` when you want one. Prune freely: an over-full batch is junk you can
-delete, which the pulse prefers to a finding that silently went missing.
-
-This is the one place MoE opens a run from a fresh machine judgment rather than
-from standing intent you authored. It is bounded by that parked-until-kicked
-rule: the pulse *makes* runs, it never *runs* them.
+Grooming changes recorded placement, not execution. On a static ride (`!!!` or
+bare `moe chain kick`), newly placed work parks for a later ride. Only a
+`!!!!`/`--dynamic` ride lets a thread ask to be kicked. Even then, the harness
+holds a root that has only a seed or a live session; a machine-baked,
+chore-authored, or past-first-stage root has a settled design and is ready to
+start. A fired kick is itself dynamic, so its tail may sweep, groom, and kick
+again. The ride ends when a survey adds nothing, with no generation cap.
 
 ## Twin
 

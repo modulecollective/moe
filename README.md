@@ -52,11 +52,12 @@ wrote, each turn committed to the journal.
 
 The bangs are the lever for how far a run travels without you: `!` runs just
 the next stage and parks at the gate, `!<stage>` runs up to a named gate, `!!`
-ships this run, and `!!!` ships it and rides on into the next queued run. The
-full vocabulary — every stage spelled out, chains, and the matching CLI flags
-— is in [docs/workflows.md](docs/workflows.md#sdlc).
+ships this run, `!!!` ships it and rides on into the next queued run, and
+`!!!!` makes that ride dynamic so tail pulses may extend it and start ready
+threads. The full vocabulary — every stage spelled out, chains, and the
+matching CLI flags — is in [docs/workflows.md](docs/workflows.md#sdlc).
 
-That last bang is where the economics turn: shape a few runs during the day,
+`!!!` is where the economics turn: shape a few runs during the day,
 `moe chain edit` them into a sequence, and fire `!!!` once as you step away.
 The chain then codes, reviews, tests, and ships on capacity your flat-rate dev
 subscription already pays for while you sleep — each run still gated,
@@ -118,9 +119,9 @@ moe project add <repo-url>
 The default backend is `claude`. To prefer Codex for new runs, set
 `MOE_AGENT=codex` or pass `--agent codex` when opening a run or a stage
 (a model-stylesheet `agent:` rule outranks `MOE_AGENT` for the stages it
-matches);
-interactive Codex needs a one-time permissions profile described in
-[docs/reference.md](docs/reference.md#codex-setup). `moe dash` is the terminal
+matches). Codex needs no permissions-profile setup because MoE supplies it.
+See [docs/reference.md](docs/reference.md#codex-setup) for the sandbox details.
+`moe dash` is the terminal
 home screen for re-entry, and `moe serve` is the same dashboard as a local web
 UI. `moe help` and per-command usage are the source of truth for the exact
 command surface.

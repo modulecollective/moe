@@ -9,7 +9,7 @@ source of truth for the exact command surface; this page is a map.
 ### Re-Entry And Supervision
 
 - `moe dash [--all] [--project <id>] [--workflow <name>] [--watch]` prints the
-  terminal dashboard, including a CHORES bucket for due project chores and a
+  terminal dashboard, with due project chores at the head of BACKLOG and a
   daily-activity histogram of recent run activity (`--project` scopes the chart
   to one project). `--watch` redraws it in place every 3 seconds until Ctrl-C —
   a live pane rather than a snapshot; it needs a terminal on stdout and exits 2
@@ -65,7 +65,9 @@ source of truth for the exact command surface; this page is a map.
   lines to record a run chain in the bureaucracy journal.
 - `moe chain note <project>/<run>` edits a head's purpose note: why the batch
   exists. Membership isn't written there — it renders live from the edges.
-- `moe chain kick <project>/<run>` rides a chain headlessly from the named head.
+- `moe chain kick [--dynamic] <project>/<run>` rides a chain headlessly from
+  the named head; bare kick is static, while `--dynamic` permits tail pulses to
+  extend the ride.
 - `moe chain close [--no-edit] <project>/<run>` drops a head without riding it.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
 - `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any
@@ -80,6 +82,8 @@ source of truth for the exact command surface; this page is a map.
 - `moe kb new|research|summarize|close|harvest|cat|log|lint` drives project
   knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
+- `moe intent new|edit|close|list|cat` manages operator-authored standing
+  direction.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
   maintains recorded intent.
 - `moe hooks new|code|close|harvest|cat|log` edits project hook scripts through a
