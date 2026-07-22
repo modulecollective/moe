@@ -578,7 +578,7 @@ func loadPRRecordPending(root string, md *run.Metadata, stderr io.Writer) (*pend
 	return &p, true
 }
 
-func removePRRecordPending(root string, md *run.Metadata) error {
+var removePRRecordPending = func(root string, md *run.Metadata) error {
 	err := os.Remove(prRecordPendingPath(root, md))
 	if os.IsNotExist(err) {
 		return nil
@@ -609,7 +609,11 @@ func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, std
 		return 1, false
 	}
 	if err := removePRRecordPending(root, md); err != nil {
-		moePrintf(stderr, "warning: remove %s: %v\n", prRecordPendingName, err)
+		moePrintf(stderr, "remove %s: %v\n", prRecordPendingName, err)
+		moePrintf(stderr, "       the PR record is committed; cleanup is still pending —\n"+
+			"       re-run `moe %s push --pr %s/%s` to retry it\n",
+			md.Workflow, md.Project, md.ID)
+		return 1, false
 	}
 	moePrintf(stdout, "recorded PR: %s\n", pending.URL)
 

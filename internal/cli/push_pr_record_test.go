@@ -273,6 +273,58 @@ func TestPushPRRecordResumeAcceptsHandCommit(t *testing.T) {
 	}
 }
 
+func TestPushPRRecordRemovalFailureDefersPulseUntilCleanup(t *testing.T) {
+	f := newPRRecordFixture(t)
+	lift, _ := strandPRRecord(t, f)
+	lift()
+	defer withRideMode(rideStatic)()
+	fired := stubFirePulse(t)
+
+	origRemove := removePRRecordPending
+	removeCalls := 0
+	removePRRecordPending = func(root string, md *run.Metadata) error {
+		removeCalls++
+		if removeCalls == 1 {
+			return fmt.Errorf("injected removal failure")
+		}
+		return origRemove(root, md)
+	}
+	t.Cleanup(func() { removePRRecordPending = origRemove })
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code == 0 {
+		t.Fatalf("resume with removal failure unexpectedly succeeded\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+	if strings.Contains(stdout, "recorded PR:") {
+		t.Fatalf("resume announced success before marker cleanup:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "remove "+prRecordPendingName+": injected removal failure") ||
+		!strings.Contains(stderr, "cleanup is still pending") {
+		t.Fatalf("resume stderr missing cleanup failure and retry:\n%s", stderr)
+	}
+	if !prPendingExists(f.pushFixture) {
+		t.Fatalf("failed cleanup removed %s", prRecordPendingName)
+	}
+	if len(*fired) != 0 {
+		t.Fatalf("failed cleanup fired pulse: %v", *fired)
+	}
+
+	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("cleanup retry: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "recorded PR: "+f.url) {
+		t.Fatalf("cleanup retry stdout missing URL:\n%s", stdout)
+	}
+	if prPendingExists(f.pushFixture) {
+		t.Fatalf("cleanup retry left %s", prRecordPendingName)
+	}
+	wantFire := f.projectID + " " + f.runID
+	if len(*fired) != 1 || (*fired)[0] != wantFire {
+		t.Fatalf("cleanup retries fired %v, want exactly one %q", *fired, wantFire)
+	}
+}
+
 func TestPushPRRecordResumeThreadsPulseInterrupt(t *testing.T) {
 	f := newPRRecordFixture(t)
 	lift, _ := strandPRRecord(t, f)
