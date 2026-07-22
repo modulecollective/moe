@@ -118,7 +118,9 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 // reconciles to merged/closed via `moe sync`.
 //
 // Idempotent on terminal runs: rerunning after a merged/closed run is
-// a no-op that prints the terminal state and exits 0.
+// a no-op that prints the terminal state and exits 0 — unless the
+// merge's record commit was stranded, in which case the re-run
+// finishes it (resumeMergeRecord) before settling into that no-op.
 //
 // Returns (exitCode, error). The exit code is what `moe sdlc push`
 // hands back to the shell: 0 on a real ship; 0 on a recovery session
