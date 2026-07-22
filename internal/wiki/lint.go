@@ -569,8 +569,31 @@ func scanDanglingXrefs(cfg Config) []DanglingXref {
 }
 
 // xrefCitationPattern builds the citation matcher: a managed-doc
-// filename immediately followed by a double-quoted span. Quotes further
-// along the line are xrefCitations' problem, not this pattern's.
+// filename, then the first double-quoted span reachable across a short,
+// punctuation-free run. Quotes further along the line are xrefCitations'
+// problem, not this pattern's.
+//
+// The run is what lets the twin's possessive citations bind —
+// `[architecture](architecture.md)'s "Components"`, sometimes with a
+// backticked component name interposed. Everything excluded from it
+// earns its place:
+//
+//   - `"` is structural. With quotes out of the run the pattern can
+//     never skip one to reach a later quote, so it always binds the
+//     first quote after the token.
+//   - `.` is the sentence boundary, and does double duty: since every
+//     managed name ends in `.md`, it also stops the run crossing a
+//     second doc token, so `glossary.md entry for operations.md "X"`
+//     binds to operations.md.
+//   - `,;:!?—` are clause breaks. A quote past one of them is prose,
+//     not the mention's span.
+//   - `()` mean the mention ended in a parenthetical; the one
+//     legitimate `)` is the link close, which the explicit `\)?` takes.
+//   - `→` only ever appears inside a quoted span, and `*` bounds an
+//     emphasised anchor reference that must not reach past itself.
+//
+// The {0,48} bound is a backstop, sized off the longest separator the
+// corpus writes (41 bytes) with headroom; the exclusions are the guard.
 //
 // The alternation is built from cfg.ManagedDocs rather than hardcoded,
 // longest name first so a doc whose name is a suffix of another still
@@ -582,11 +605,11 @@ func xrefCitationPattern(names []string) *regexp.Regexp {
 	for i, n := range sorted {
 		alts[i] = regexp.QuoteMeta(n)
 	}
-	return regexp.MustCompile(`(?:^|[\s(])(` + strings.Join(alts, "|") + `)\s+"([^"]+)"`)
+	return regexp.MustCompile(`(?:^|[\s(])(` + strings.Join(alts, "|") + `)\)?[^".,;:!?()—→*]{0,48}\s"([^"]+)"`)
 }
 
 // xrefQuotedSpanPattern matches any double-quoted span on a logical
-// line. xrefCitationPattern only binds the quote adjacent to a doc
+// line. xrefCitationPattern only binds the first quote after a doc
 // token; this finds the rest so continuation citations get a target.
 var xrefQuotedSpanPattern = regexp.MustCompile(`"([^"]+)"`)
 
@@ -597,7 +620,7 @@ type xrefCitation struct {
 }
 
 // xrefCitations extracts every quoted span on line that names a managed
-// doc. A quote adjacent to a doc token binds to it directly; a later
+// doc. The first quote after a doc token binds to it directly; a later
 // quote with no doc token of its own binds to the nearest *preceding*
 // bound citation, which is how the corpus writes continuations
 // (`operations.md "Stage sandboxes" and "Hook chains"`).

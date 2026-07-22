@@ -330,6 +330,27 @@ A path with a dead leaf: architecture.md "Components → Nonexistent lead".
 
 Quoted prose like "what's in play" names no doc, so it is not a
 citation. Neither is README.md "Anything" — not a managed doc.
+
+The non-glossary docs cite possessively: [architecture](architecture.md)'s
+"Components" is the shape the pre-scan was blind to.
+
+With a backticked component interposed: [architecture](architecture.md)'s
+`+"`moe intent`"+` decision "Components" still binds.
+
+And with plain words after it too: [architecture](architecture.md)'s
+`+"`moe intent`"+` component and its decision "Decisions" binds.
+
+The possessive form strands like any other: [architecture](architecture.md)'s
+"Rejected alternatives" names nothing.
+
+A clause break ends the mention: [architecture](architecture.md)'s framing,
+and quite separately "Nowhere at all" is prose.
+
+So does a sentence boundary. The shape lives in architecture.md. The
+"quoted prose" that opens the next sentence is not a citation.
+
+Two doc tokens on one line bind the quote to the nearer: the vision.md
+entry for architecture.md "Components" is architecture's, not vision's.
 `)
 	cfg := Config{
 		Mode:       Closed,
@@ -345,6 +366,7 @@ citation. Neither is README.md "Anything" — not a managed doc.
 	}
 	want := []DanglingXref{
 		{From: "vision.md", Target: "architecture.md", Span: "Components → Nonexistent lead"},
+		{From: "vision.md", Target: "architecture.md", Span: "Rejected alternatives"},
 		{From: "vision.md", Target: "architecture.md", Span: "The bets"},
 	}
 	if len(f.DanglingXrefs) != len(want) {
@@ -468,6 +490,11 @@ Stranded by the section move: architecture.md "Components → `+"`internal/dash`
 ### hooks
 
 A stale continuation: architecture.md "Decisions" and "The bets".
+
+### possessive continuation
+
+A possessive citation anchors continuations too:
+[architecture](architecture.md)'s "Decisions" and "Gone entirely".
 `)
 	cfg := Config{
 		Mode:       Closed,
@@ -483,6 +510,7 @@ A stale continuation: architecture.md "Decisions" and "The bets".
 	}
 	want := []DanglingXref{
 		{From: "glossary.md", Target: "architecture.md", Span: "Components → `internal/dash`"},
+		{From: "glossary.md", Target: "architecture.md", Span: "Gone entirely"},
 		{From: "glossary.md", Target: "architecture.md", Span: "The bets"},
 	}
 	if len(f.DanglingXrefs) != len(want) {
