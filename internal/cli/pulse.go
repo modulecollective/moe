@@ -400,7 +400,7 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// its spawns → gen-N+1 tail → pulse → …) rather than reading as the
 	// fencepost between two chains. Runs the pulse *mints* still carry
 	// SpawnedBy = <this pulse> and fold under it — that edge is load-bearing
-	// for pulseSelfKick's machine-rooted guard. What the trigger loses is
+	// for pulseSelfKick's consent-on-disk admit. What the trigger loses is
 	// only presentation: the sweep's own canvas names what landed, and its
 	// open commit sits beside the triggering merge in the journal.
 	//
