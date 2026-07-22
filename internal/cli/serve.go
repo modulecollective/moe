@@ -59,17 +59,42 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	srv, err := serve.New(serve.Options{
-		Addr:   *addr,
-		Port:   *port,
+	opts := serveOptions(root, stdout, stderr)
+	opts.Addr = *addr
+	opts.Port = *port
+	// Flag or a non-empty env var enables the spawn bucket; the env
+	// var lets a daemonized cloud-box `moe serve` opt in without
+	// threading a flag through its unit/launcher. Non-empty enables,
+	// mirroring how MOE_SERVE_NOTIFY_URL is read just below.
+	opts.Insecure = *insecure || os.Getenv("MOE_SERVE_INSECURE") != ""
+	opts.NotifyURL = os.Getenv("MOE_SERVE_NOTIFY_URL")
+
+	srv, err := serve.New(opts)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	moePrintf(stdout, "moe serve: http://%s/\n", srv.Addr())
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := srv.ListenAndServe(ctx); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// serveOptions wires the cli side of the serve seam: every callback
+// serve.Options carries, closed over the bureaucracy root. Listener and
+// security fields (Addr, Port, Insecure, NotifyURL) are the caller's to
+// set — they come from flags and env in runServe, and from the test
+// directly in tests.
+func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
+	return serve.Options{
 		Root:   root,
 		Logger: stderr,
-		// Flag or a non-empty env var enables the spawn bucket; the env
-		// var lets a daemonized cloud-box `moe serve` opt in without
-		// threading a flag through its unit/launcher. Non-empty enables,
-		// mirroring how MOE_SERVE_NOTIFY_URL is read just below.
-		Insecure:  *insecure || os.Getenv("MOE_SERVE_INSECURE") != "",
-		NotifyURL: os.Getenv("MOE_SERVE_NOTIFY_URL"),
 		GatherDash: func(projectID string) ([]dash.Row, int, int, []int, error) {
 			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{ProjectFilter: projectID})
 			if err != nil {
@@ -185,19 +210,5 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				FirstStage: res.FirstStage,
 			}, nil
 		},
-	})
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
 	}
-
-	moePrintf(stdout, "moe serve: http://%s/\n", srv.Addr())
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := srv.ListenAndServe(ctx); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	return 0
 }
