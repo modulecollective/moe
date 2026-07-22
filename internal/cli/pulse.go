@@ -85,7 +85,8 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
 	"unchanged? If the order is a guess, put the runs in `loose`. A thread may add `\"kick\": true` to ask the harness to " +
 	"start it — highest bar on the canvas, and the harness refuses it unless the operator's own verb licensed machine-rooted " +
-	"motion.\n\n" +
+	"motion. Inside a dynamic ride the kicked thread is where next work goes: a single-run thread makes no ordering claim, " +
+	"so work you'd have the machine start goes there rather than in `loose`, which parks until a human picks it up.\n\n" +
 	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
 	"See the stage guidance."
 

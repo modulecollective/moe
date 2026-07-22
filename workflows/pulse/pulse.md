@@ -360,6 +360,13 @@ If the order is a guess, don't chain it — put the runs in `loose` and let
 the operator sequence them. Ordering something wrongly costs more than
 not ordering it, because a chain is what gets executed as-is.
 
+**A thread of one run has no order to get wrong.** The ordering
+conviction the bar asks for is conviction about *sequence*, and a
+single-run thread makes no sequence claim — so it is held to the spawn
+bar and nothing more. Don't read the lane bar as a reason to send a
+lone run to `loose`: `loose` is for work you can't order *or wouldn't
+start yet*, not for work you simply had nothing to order it against.
+
 Placement is judgment, not a rule. Work that continues a thread goes
 `onto` that thread — even an operator-minted one. A big standalone fix
 takes no placement. Prefer extending an existing thread to forking a
@@ -399,6 +406,16 @@ thread's own tail fires its own sweep, which may kick again. What ends
 it is you having nothing left worth chaining — so a thin generation is
 a real answer, and manufacturing one to keep the machine busy is the
 failure mode to avoid.
+
+**Inside a dynamic ride, the kicked thread is where next work goes.**
+That is the whole idiom, and it is easy to miss when the cycle's work
+has all merged and there is no order left to claim: a lone fix run
+written to `loose` parks and waits for a human, which under a dynamic
+ride means the generation you just surveyed ends with nobody picking
+up what you found. If there is work you'd have the machine do next,
+write it in the thread carrying `"kick": true` — one run is a thread.
+The bar doesn't move: it is still the spawn bar and still the kick
+bar, and work that fails either belongs in `loose` or in a followup.
 
 **The kick bar: you'd bet the operator would kick this thread
 unchanged.** An unsettled order or a speculative member means groom,
