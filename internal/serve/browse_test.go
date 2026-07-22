@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 // writeFile creates parent dirs and writes a browse-corpus file under
@@ -159,6 +161,24 @@ func TestProjectHubUnknownProject404(t *testing.T) {
 	}
 }
 
+func TestProjectHubListsTwinDocsWithoutGitProvenance(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	writeFile(t, root, "projects/alpha/digital-twin/architecture.md", "# Architecture\n")
+
+	oldHook := git.Hook
+	t.Cleanup(func() { git.Hook = oldHook })
+	var gitCalls int
+	git.Hook = func(string, []string, time.Duration, error) { gitCalls++ }
+
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	hub := get(t, s, "/projects/alpha")
+	mustContain(t, hub, `<a class="slug" href="/projects/alpha/twin/architecture">architecture</a>`)
+	if gitCalls != 0 {
+		t.Fatalf("project hub made %d git calls, want none", gitCalls)
+	}
+}
+
 func TestKnowledgeIndexRewritesTopicLinks(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
@@ -201,10 +221,16 @@ func TestTwinDocRenders(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
 	writeFile(t, root, "projects/alpha/digital-twin/patterns.md", "# Patterns\n\nnamed patterns.\n")
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed twin\n\nMoE-Project: alpha\nMoE-Run: shape-twin")
 
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	rr := get(t, s, "/projects/alpha/twin/patterns")
-	mustContain(t, rr, "<h1>Patterns</h1>", "<p>named patterns.</p>")
+	mustContain(t, rr,
+		"<h1>Patterns</h1>",
+		"<p>named patterns.</p>",
+		`<a href="/run/alpha/shape-twin">alpha/shape-twin</a>`,
+	)
 }
 
 func TestBrowseMissingDocIs404(t *testing.T) {

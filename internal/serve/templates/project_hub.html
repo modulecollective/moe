@@ -22,7 +22,6 @@
       {{range .Twin}}
       <li class="row">
         <a class="slug" href="/projects/{{$.Project}}/twin/{{.Name}}">{{.Name}}</a>
-        <span class="note">{{if .Meta.Updated}}updated {{.Meta.Updated}}{{end}}{{if .Meta.RunLink}} · <a href="{{.Meta.RunLink}}">{{.Meta.Run}}</a>{{end}}</span>
       </li>
       {{end}}
     </ul>

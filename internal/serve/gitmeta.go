@@ -22,8 +22,8 @@ type fileMeta struct {
 
 // gatherFileMeta derives provenance for rel (a path relative to the
 // bureaucracy root) from git history. Up to three git subprocesses per
-// call — keep it off index pages (see the design's N+1 caution); it
-// belongs on hub/detail pages where the file count is a couple dozen.
+// call — keep it off hub and index pages (see the design's N+1 caution);
+// it belongs on detail pages where the reader is inspecting one file.
 func (s *Server) gatherFileMeta(now time.Time, rel string) fileMeta {
 	var m fileMeta
 	if out, err := git.Output(s.opts.Root, "log", "-1", "--format=%aI", "--", rel); err == nil {

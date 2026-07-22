@@ -185,12 +185,11 @@ type hubVM struct {
 
 type twinDocVM struct {
 	Name string // slug for the link
-	Meta fileMeta
 }
 
 // handleProjectHub aggregates everything under one project: runs and
 // chores (filtered from GatherDash — no re-gather), a link to the
-// knowledge page, and the twin docs with git provenance. COMPLETED
+// knowledge page, and the twin docs. COMPLETED
 // pages exactly as the home dash does, through the same ?completed=N
 // and ?fragment=1 query params.
 func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
@@ -252,8 +251,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	twinDir := wiki.TwinDir(s.opts.Root, projectID)
 	for _, name := range listMarkdown(twinDir, twinEngineFiles) {
 		slug := strings.TrimSuffix(name, ".md")
-		rel := relTo(s.opts.Root, filepath.Join(twinDir, name))
-		vm.Twin = append(vm.Twin, twinDocVM{Name: slug, Meta: s.gatherFileMeta(now, rel)})
+		vm.Twin = append(vm.Twin, twinDocVM{Name: slug})
 	}
 	s.render(w, r, "project_hub.html", vm)
 }
