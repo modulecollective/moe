@@ -97,9 +97,12 @@ func TestSelfKickSkipsAtAChainedSpawner(t *testing.T) {
 	}
 }
 
-// TestSelfKickSkipsAnOperatorRootedThread: the pulse curates operator
-// chains but never starts them. That trigger stays with the operator.
-func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
+// TestSelfKickSkipsAHandMintedChainHead: the operator composes a chain
+// head over an afternoon and hangs work off it. The `chain` workflow's
+// ladder is empty by design, so a hand-minted head is never past its
+// first stage and carries no machine or chore seed — it stays with the
+// operator.
+func TestSelfKickSkipsAHandMintedChainHead(t *testing.T) {
 	root, stages, _ := kickFixture(t)
 	groomFixture(t, root, "fix-a")
 
@@ -119,8 +122,151 @@ func TestSelfKickSkipsAnOperatorRootedThread(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an operator-rooted thread", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
-		t.Errorf("stderr = %q, want the consent guard named", errb.String())
+	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
+		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	}
+}
+
+// TestSelfKickSkipsASeedOnlyOperatorRoot is the boundary the operator
+// drew: a promoted sketch sitting at design with nothing but its seed
+// is not a settled design, so the machine does not start it. This is
+// the class the readiness admit deliberately keeps holding.
+func TestSelfKickSkipsASeedOnlyOperatorRoot(t *testing.T) {
+	root, stages, _ := kickFixture(t)
+	seedRun(t, root, "moe", "promoted-sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# A thought I had\n\nseed\n"})
+	groomed := groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("promoted-sketch"), Kick: true}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/promoted-sketch", Kick: true}), "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing on a seed-only root", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
+		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	}
+}
+
+// TestSelfKickSkipsADesignClosedButNotAdvancedRoot pins the boundary
+// AdvancedTo's comment records — "a canvas merely complete is not
+// consent to proceed" — now that the admit no longer names the advance
+// marker. The design turn landed and the operator declined the chain
+// prompt without hitting `a`, so the run still reads as waiting at
+// design, and past-first holds it for free.
+func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
+	root, stages, _ := kickFixture(t)
+	seedRun(t, root, "moe", "design-done", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# Worked, then parked\n\nbody\n"})
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "design-done", "sdlc", "design", time.Now().Local())
+	groomed := groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("design-done"), Kick: true}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/design-done", Kick: true}), "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing on a design that merely closed", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
+		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	}
+}
+
+// TestSelfKickRidesARootParkedByDownstreamWork is the one genuinely new
+// admitted class: nobody clicked `a` and no machine minted it, but
+// design and code turns have both landed, so the run is unambiguously
+// past its first stage. Real downstream work is a settled design.
+func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
+	root, stages, _ := kickFixture(t)
+	now := time.Now().Local()
+	seedRun(t, root, "moe", "mid-ladder", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Half built\n\nbody\n", "code": "# The diff\n\nbody\n"})
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "design", now.Add(-2*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "code", now.Add(-time.Hour))
+	groomed := groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("mid-ladder"), Kick: true}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/mid-ladder", Kick: true}), "", io.Discard, &errb)
+
+	// Next parks at the last stage worked (code has no successor turn and
+	// no marker), so the ride resumes there rather than at design.
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "mid-ladder:code" {
+		t.Fatalf("drove %v, want the ride to resume at code; stderr=%q", got, errb.String())
+	}
+}
+
+// choreKickFixture reproduces the 2026-07-22 *evening* incident: a
+// dynamic tail pulse nominated a judged chore, openChoreInProcess
+// opened its run with the MoE-Chore trailer and — alone among
+// machine-open paths — no SpawnedBy, and the groom rooted a thread at
+// that fresh run. Seeded rather than driven through the chore pipeline
+// so the fixture is the *shape* the kick reads: run.json with the
+// chore's seed canvas, plus the open commit's chore trailer.
+func choreKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult, stages *[]openSdlcStageInvocation) {
+	t.Helper()
+	root, stages, _ = kickFixture(t)
+	seedRun(t, root, "moe", "readme-update-2026-07-22", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# Update the README\n\nthe chore's own prompt\n"})
+	trailerstest.CommitTrailer(t, root, "Open run moe/readme-update-2026-07-22",
+		"MoE-Run: readme-update-2026-07-22\nMoE-Project: moe\nMoE-Workflow: sdlc\nMoE-Chore: moe/readme-update",
+		time.Time{})
+
+	groomed = groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("readme-update-2026-07-22"), Kick: true}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	if groomed.idx.ChoreByRun["moe/readme-update-2026-07-22"] == "" {
+		t.Fatal("precondition: the groom's index should carry the chore edge the open commit recorded")
+	}
+	return root, "moe/readme-update-2026-07-22", groomed, stages
+}
+
+// TestSelfKickRidesAChoreRootedThread is the incident this run opened
+// on. The chore's prompt.md is operator-authored standing intent — a
+// settled design by construction — so the fresh run it seeds is
+// kickable even though nothing about its lineage says so. Under the
+// old lineage admit this generation stranded, taking a reflect
+// carrying four merged runs' twin observations with it.
+func TestSelfKickRidesAChoreRootedThread(t *testing.T) {
+	root, threadRoot, groomed, stages := choreKickFixture(t)
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Kick: true}), "", io.Discard, &errb)
+
+	// A chore run is fresh, so the ride starts at its first stage.
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "readme-update-2026-07-22:design" {
+		t.Fatalf("drove %v, want the ride to start at design; stderr=%q", got, errb.String())
+	}
+	if !strings.Contains(errb.String(), "kicking "+threadRoot) {
+		t.Errorf("stderr = %q, want the kick announced", errb.String())
+	}
+}
+
+// TestSelfKickSkipsAChoreRootWithALiveSession: the occupancy check is
+// not welded to the advanced leg any more — a settled design says the
+// run is ready, and this says nobody is already inside it. A chore run
+// the operator picked up by hand is held, and the skip line names the
+// stage so the operator can see which session to finish or abandon.
+func TestSelfKickSkipsAChoreRootWithALiveSession(t *testing.T) {
+	root, threadRoot, groomed, stages := choreKickFixture(t)
+	if _, err := session.Open(root, "moe", "readme-update-2026-07-22", "design"); err != nil {
+		t.Fatal(err)
+	}
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Kick: true}), "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing while a session is open", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "live session at design") {
+		t.Errorf("stderr = %q, want the occupancy skip to name the stage", errb.String())
 	}
 }
 
@@ -148,12 +294,14 @@ func advancedKickFixture(t *testing.T) (root, threadRoot string, groomed groomRe
 	return root, "moe/advanced-run", groomed, stages
 }
 
-// TestSelfKickRidesAnOperatorAdvancedRoot is the incident. A run the
-// operator personally clicked forward at the design chain prompt was
-// the only work a dynamic generation found ready, and the machine-rooted
-// admit refused it — the most-consented parked work was the one class
-// the pulse could never start. The marker is consent on disk, so it
-// admits, and the ride resumes at the stage the run is waiting at.
+// TestSelfKickRidesAnOperatorAdvancedRoot is the morning incident. A
+// run the operator personally clicked forward at the design chain
+// prompt was the only work a dynamic generation found ready, and the
+// machine-rooted admit refused it — the most-consented parked work was
+// the one class the pulse could never start. The marker satisfies the
+// design stage, so the run reads as past its first stage, and the ride
+// resumes at the stage it is waiting at. No advance-marker special case
+// on the kick side: this arrives through stageSatisfied.
 func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
 	root, threadRoot, groomed, stages := advancedKickFixture(t)
 
@@ -172,10 +320,10 @@ func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
 	}
 }
 
-// TestSelfKickSkipsAnAdvancedRootWithALiveSession: the double-run guard
-// the kick borrows from the advanced-runs block. The operator is
-// working the very stage the kick would open, and a session branch is
-// the only signal that says so while that stage is still running.
+// TestSelfKickSkipsAnAdvancedRootWithALiveSession: the double-run
+// guard. The operator is working the very stage the kick would open,
+// and a session branch is the only signal that says so while that stage
+// is still running.
 func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 	root, threadRoot, groomed, stages := advancedKickFixture(t)
 	if _, err := session.Open(root, "moe", "advanced-run", "code"); err != nil {
@@ -189,16 +337,17 @@ func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing while the operator has the stage open", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
-		t.Errorf("stderr = %q, want the consent guard named", errb.String())
+	if !strings.Contains(errb.String(), "live session at code") {
+		t.Errorf("stderr = %q, want the occupancy skip to name the stage", errb.String())
 	}
 }
 
 // TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit: the staleness rule
-// the admit inherits from AdvancedTo for free. A re-edit of the stage
-// the operator advanced past lands a newer work-turn that out-dates the
-// marker, and the run reads as operator-rooted again — which is right,
-// because the consent was for a canvas that has since moved.
+// the admit inherits from stageSatisfied for free. A re-edit of the
+// stage the operator advanced past lands a newer work-turn that
+// out-dates the marker, so the run reads as waiting at design again —
+// which is right, because the consent was for a canvas that has since
+// moved.
 func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 	root, threadRoot, groomed, stages := advancedKickFixture(t)
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "advanced-run", "sdlc", "design", time.Now().Local())
@@ -217,8 +366,8 @@ func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an out-dated marker", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "operator-rooted and not advanced") {
-		t.Errorf("stderr = %q, want the consent guard named", errb.String())
+	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
+		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
 	}
 }
 

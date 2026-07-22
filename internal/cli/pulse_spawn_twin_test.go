@@ -91,14 +91,16 @@ func TestSpawnTwinWithoutASlugStillMints(t *testing.T) {
 	if groomed.threads[0].Root != reflectKey {
 		t.Errorf("thread root = %q, want the reflect %q", groomed.threads[0].Root, reflectKey)
 	}
-	// pulseSelfKick refuses an operator-rooted thread, so the reflect
-	// carrying its spawner is what makes this thread kickable at all.
+	// A freshly minted reflect has no work-turns, so the spawn edge is
+	// the only leg of pulseSelfKick's settled-design admit it can pass —
+	// the machine baked this run's design, and that edge is what makes
+	// the thread kickable at all.
 	md, err := run.Load(root, "moe", reflectID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if md.SpawnedBy != "moe/pulse-one" {
-		t.Errorf("reflect SpawnedBy = %q, want the minting pulse — an operator-rooted thread is never kicked", md.SpawnedBy)
+		t.Errorf("reflect SpawnedBy = %q, want the minting pulse — without it a seed-only root is never kicked", md.SpawnedBy)
 	}
 }
 

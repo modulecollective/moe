@@ -3,7 +3,9 @@ package cli
 import (
 	"io"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 )
 
 // The harness-owned step that follows grooming: whether the pulse kicks
@@ -40,19 +42,21 @@ import (
 // rooting bounded-only motion would defeat the point, and an operator
 // who wants bounded keeps `!!!`.
 //
-// And the thread's root must carry **consent recorded on disk**: either
-// the machine minted it (SpawnedBy), or the operator advanced it — they
-// sat at a chain prompt and hit `a`, which is the strongest recorded
-// "carry this forward" short of a kick. Keying on SpawnedBy alone made
-// a machine-spawned fix run kickable and an operator-advanced run never
-// kickable, which is the ordering backwards: on 2026-07-22 a dynamic
-// ride ended with a design-complete, operator-advanced run stranded as
-// the only work in its generation.
+// And the thread's root must have **a settled design** — a disk fact
+// about the work, not about who opened it. Lineage was the wrong proxy
+// and said so twice in two days: keying on SpawnedBy alone stranded an
+// operator-advanced run on 2026-07-22, and widening to "or advanced"
+// stranded a pulse-nominated judged chore the same evening (chore opens
+// are the one machine path that mints no SpawnedBy). Both runs were
+// ready; neither had the lineage the guard wanted. So the question the
+// admit asks is whether the design is settled and whether anyone is
+// inside the run — see rootDesignSettled and openSessionStage.
 //
-// What stays with the operator is everything with no run-now fact on
-// disk: a promoted-but-unstarted run, a hand-minted chain composed over
-// an afternoon. Those have `!` and `!!!`. The admit is structural
-// either way — a disk fact, not the agent's manners.
+// What stays with the operator is a root sitting at its first stage
+// with only a seed: a promoted sketch, a run whose design closed
+// without the operator advancing it, a reopened run, a hand-minted
+// chain composed over an afternoon. Those have `!` and `!!!`. The kick
+// bar still decides *whether to ask* — this is only the floor under it.
 //
 // Every skip is one stderr line, warn-only ethos.
 //
@@ -60,9 +64,9 @@ import (
 // graph (see groomResult) — thread roots, the spawner's chain
 // membership, and whether a root is still kickable. Re-reading the
 // journal here would answer the same questions a second time against a
-// state the sweep had already moved. The one live read is the advanced
-// root's session branch, and that is the point: it asks whether the
-// operator has the stage open *right now*, which no snapshot can say.
+// state the sweep had already moved. The one live read is the root's
+// session branches, and that is the point: it asks whether the operator
+// has a stage open *right now*, which no snapshot can say.
 func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) {
 	var wanted []groomedThread
 	for _, th := range groomed.threads {
@@ -99,15 +103,97 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 			moePrintf(stderr, "pulse: kick: %s heads a thread that has already settled — skipping\n", th.Root)
 			continue
 		}
-		if md.SpawnedBy == "" {
-			if _, _, advanced := operatorAdvancedStage(root, md, groomed.idx); !advanced {
-				moePrintf(stderr, "pulse: kick: %s is operator-rooted and not advanced — the operator holds the trigger\n", th.Root)
-				continue
-			}
+		if !rootDesignSettled(root, md, groomed.idx) {
+			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with only a seed — the operator holds the trigger\n", th.Root)
+			continue
+		}
+		if stage := openSessionStage(root, md); stage != "" {
+			moePrintf(stderr, "pulse: kick: %s has a live session at %s — skipping\n", th.Root, stage)
+			continue
 		}
 		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", th.Root)
 		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {
 			moePrintf(stderr, "pulse: kick %s exited %d\n", th.Root, code)
 		}
 	}
+}
+
+// rootDesignSettled reports whether md's design is settled — the one
+// structural readiness fact the kick admits on. "Parked at code, human
+// runs are good to go" passes; an operator-promoted sketch still
+// waiting at design with only its seed does not. Three legs, any of:
+//
+//   - **Past its first stage.** Mechanically (stageSatisfied) that
+//     needs a first-stage work-turn *and* either an advance marker at
+//     least as recent as it, or a downstream stage's turn. So this leg
+//     is exactly "the operator advanced it, or real downstream work
+//     exists" — and a run whose design merely closed still reads as
+//     waiting at design, which preserves AdvancedTo's "a canvas merely
+//     complete is not consent to proceed" by mechanism rather than by a
+//     kick-side special case. The staleness rule (a marker out-dated by
+//     a re-edit) is inherited the same way.
+//   - **Machine-minted** (SpawnedBy) — the seed is a design baked by
+//     the spawning run.
+//   - **Chore-rooted** — the seed is the chore's operator-authored
+//     prompt.md, so standing intent is a settled design by
+//     construction. Its own leg because openChoreInProcess is the one
+//     machine-open path that stamps no SpawnedBy, and it can't be made
+//     to: autoOpenDueChores runs before the pulse run is minted, and a
+//     nomination landing on an already-open chore run inherits the old
+//     open commit.
+//
+// An empty ladder (the `chain` workflow's placeholder head) is never
+// past-first. A root with nothing left to run is past-first by the same
+// comparison and reports its own reason downstream — a terminal one has
+// already fallen to the settled-thread guard above, and a live one owes
+// its ride only its members, which is chainKickRun's nothing-pending
+// branch to say.
+func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) bool {
+	if md.SpawnedBy != "" {
+		return true
+	}
+	if idx != nil && idx.ChoreByRun[md.Project+"/"+md.ID] != "" {
+		return true
+	}
+	w, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return false
+	}
+	stages := w.Stages()
+	if len(stages) == 0 {
+		return false
+	}
+	stage, _, err := w.NextWithIndex(root, md, idx)
+	if err != nil {
+		return false
+	}
+	return stage != stages[0]
+}
+
+// openSessionStage returns the stage md has a live session branch at,
+// or "" for none. This is the occupancy check: a settled design says
+// the run is ready, and this says nobody is already inside it.
+//
+// Branches are the only signal that works. run.json's session id
+// reaches main only when the turn commits (commitSessionStart writes it
+// on the session branch), so a mid-session run reads as having no
+// session at all — the exact window the check exists to close. Refs
+// live in the common dir, so HasRef reads true from any worktree, and
+// Close/Abandon both delete the branch.
+//
+// A run that died mid-stage keeps its branch, and this cannot tell that
+// leftover from an operator's live session — so such a root is held,
+// one skip line per sweep, until the session is resumed or abandoned.
+// Conservative on purpose; the line is the recovery signpost.
+func openSessionStage(root string, md *run.Metadata) string {
+	w, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return ""
+	}
+	for _, stage := range w.Stages() {
+		if git.HasRef(root, "refs/heads/"+session.BranchName(md.Project, md.ID, stage)) {
+			return stage
+		}
+	}
+	return ""
 }

@@ -100,10 +100,13 @@ type groomResult struct {
 	// sweep minted mid-walk.
 	byKey map[string]*run.Metadata
 	// idx is the journal the sweep read to build its graph, carried so
-	// the kick's advance-marker check reads the same snapshot rather
-	// than forking a second index. It predates any run this sweep
-	// minted, which costs nothing: a run minted seconds ago has no
-	// advance marker to find.
+	// the kick's readiness check (stage satisfaction, the chore map)
+	// reads the same snapshot rather than forking a second index. It
+	// predates only the chain heads the groom mints mid-walk, which
+	// costs nothing: a run minted seconds ago has no work-turn or
+	// advance marker to find. The gate's own spawns and chore
+	// nominations land *before* this is built, which is what lets the
+	// kick's chore leg see a chore run this same sweep opened.
 	idx *run.JournalIndex
 	// spawnerChained is the re-entrancy answer pulseSelfKick needs:
 	// whether the triggering run sits in a live unit of two or more.

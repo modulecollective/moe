@@ -47,10 +47,11 @@ import (
 // and finds nothing. Refs live in the common dir, so HasRef reads true
 // from any worktree, and Close/Abandon both delete the branch.
 //
-// Two callers, and the pair is load-bearing for both: the block below
-// tells the survey which runs are worth grooming, and pulseSelfKick
-// takes the same answer as license to *start* one. Same disk facts,
-// same staleness rule, one place.
+// One caller: the block below, telling the survey which runs are worth
+// grooming. pulseSelfKick used to take the same answer as license to
+// *start* one; it now admits on a settled design (rootDesignSettled),
+// which subsumes this shape — a valid marker satisfies the stage, so an
+// advanced run reads as past its first stage.
 func operatorAdvancedStage(root string, md *run.Metadata, idx *run.JournalIndex) (string, time.Time, bool) {
 	var zero time.Time
 	w, err := LookupWorkflow(md.Workflow)
