@@ -187,6 +187,17 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 1, false, nil
 	}
 
+	// A failed PR-record commit happens after GitHub accepted the PR and
+	// run.json flipped to pushed. Finish that exact owed commit before
+	// route selection or any sandbox / GitHub work, preserving the consent
+	// trailer from the walk that actually shipped it.
+	if md.Status == run.StatusPushed {
+		if pending, ok := loadPRRecordPending(root, md, stderr); ok {
+			code, interrupted := resumePRRecord(root, md, pending, stdout, stderr)
+			return code, interrupted, nil
+		}
+	}
+
 	// Terminal statuses short-circuit before touching the sandbox — the
 	// clone is expected to be gone for `merged`, and for `closed` the
 	// run is archived. Mirror today's "existing PR" idempotency.
@@ -450,24 +461,32 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		moePrintf(stdout, "opened PR: %s\n", url)
 	}
 
-	// Only the first push flips status and records the MoE-PR trailer.
-	// Re-runs just pushed branch updates to an already-recorded PR.
+	// Status is only a projection; the scoped MoE-PR trailer says whether
+	// the first push is durable. A pushed run with no trailer is an older
+	// stranded record and must roll forward instead of being mistaken for
+	// an ordinary branch refresh.
 	interrupted := false
-	if md.Status != run.StatusPushed {
+	firstPush := md.Status != run.StatusPushed
+	if firstPush {
 		md.Status = run.StatusPushed
 		if err := run.Save(root, md); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1, false
 		}
+	}
+	if push.TrailerValue(root, md.Project, md.ID, "MoE-PR") == "" {
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 		// Unlike the mint sites, push is shared between operator and
 		// machine: `moe push` / an interactive `moe sdlc push` reach here
 		// too. Stamp only when a bang answer or a chain kick handed the
-		// walk to the machine, so the trailer's "a machine shipped this"
-		// claim stays exact.
-		consent, machineWalk := consentTrailerValue()
-		if !machineWalk {
-			consent = ""
+		// walk to the machine on the genuine first push. A markerless
+		// legacy repair cannot recover the original walk, so absence stays
+		// the honest "unknown" rather than attributing the later retry.
+		consent := ""
+		if firstPush {
+			if value, machineWalk := consentTrailerValue(); machineWalk {
+				consent = value
+			}
 		}
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
 			trailers.Block{
@@ -486,11 +505,20 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		})
 		if err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
+			if werr := savePRRecordPending(root, md, &pendingPRRecord{Msg: msg, URL: url}); werr != nil {
+				moePrintf(stderr, "warning: save %s: %v\n", prRecordPendingName, werr)
+			}
+			moePrintf(stderr, "       the PR exists; only the local push record is missing —\n"+
+				"       re-run `moe %s push --pr %s/%s` to retry it\n",
+				md.Workflow, md.Project, md.ID)
 			return 1, false
 		}
+		if err := removePRRecordPending(root, md); err != nil {
+			moePrintf(stderr, "warning: remove %s: %v\n", prRecordPendingName, err)
+		}
 		// PR opened and the transition is durable — tail a pulse. Only
-		// the genuine first push reaches here (re-pushes to an existing
-		// PR skip the status flip), so a sweep fires once per opened PR.
+		// the first durable record reaches here (ordinary re-pushes already
+		// have a trailer), so a sweep fires once per opened PR.
 		// Outside the WithJournalPush closure above: firePulse takes the
 		// repolock itself.
 		if fires, skip := pulseFiresForRun(root, md, stderr); fires {
@@ -498,6 +526,98 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		} else if skip != "" {
 			moePrintf(stderr, "%s", skip)
 		}
+	}
+	return 0, interrupted
+}
+
+// prRecordPendingName is the untracked marker openPRPath leaves when
+// GitHub has the PR and run.json says pushed, but the journal commit did
+// not land. Deliberately not gitignored: it keeps the owed work visible
+// and trips the existing dirty-tree gates until a retry finishes it.
+const prRecordPendingName = "pr-record.pending"
+
+// pendingPRRecord preserves the inputs a later invocation cannot infer
+// faithfully. In particular, Msg carries MoE-Consent from the shipping
+// walk verbatim; URL is retained for the recovery success print.
+type pendingPRRecord struct {
+	Msg string `json:"msg"`
+	URL string `json:"url"`
+}
+
+func prRecordPendingPath(root string, md *run.Metadata) string {
+	return filepath.Join(root, run.Dir(md.Project, md.ID), prRecordPendingName)
+}
+
+func savePRRecordPending(root string, md *run.Metadata, p *pendingPRRecord) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(prRecordPendingPath(root, md), append(data, '\n'), 0o644)
+}
+
+// loadPRRecordPending reports a missing marker silently. An unreadable
+// marker warns and lets an explicit --pr retry fall through to the
+// trailer-based reconstruction in openPRPath; that may lose consent
+// attribution, but it does not strand the run permanently.
+func loadPRRecordPending(root string, md *run.Metadata, stderr io.Writer) (*pendingPRRecord, bool) {
+	path := prRecordPendingPath(root, md)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			moePrintf(stderr, "warning: read %s: %v\n", prRecordPendingName, err)
+		}
+		return nil, false
+	}
+	var p pendingPRRecord
+	if err := json.Unmarshal(data, &p); err != nil || p.Msg == "" || p.URL == "" {
+		moePrintf(stderr, "warning: %s is unreadable — rebuilding the push record may lose its consent attribution\n",
+			filepath.Join(run.Dir(md.Project, md.ID), prRecordPendingName))
+		return nil, false
+	}
+	return &p, true
+}
+
+func removePRRecordPending(root string, md *run.Metadata) error {
+	err := os.Remove(prRecordPendingPath(root, md))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// resumePRRecord commits the exact record a prior PR ship left pending.
+// It intentionally runs before project loading, hooks, synthesis, branch
+// push, and GitHub calls. ErrNothingToCommit means an operator already
+// landed the staged record by hand, which is successful recovery.
+func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, stdout, stderr io.Writer) (int, bool) {
+	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	err := sync.WithJournalPush(root, repolock.Options{
+		Purpose: "push-pr",
+		Run:     md.Project + "/" + md.ID,
+	}, stdout, stderr, func() error {
+		if err := run.StageAndCommit(root, pending.Msg, runJSON); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		moePrintf(stderr, "commit push record: %v\n", err)
+		moePrintf(stderr, "       the PR exists; only the local push record is missing —\n"+
+			"       re-run `moe %s push --pr %s/%s` to retry it\n",
+			md.Workflow, md.Project, md.ID)
+		return 1, false
+	}
+	if err := removePRRecordPending(root, md); err != nil {
+		moePrintf(stderr, "warning: remove %s: %v\n", prRecordPendingName, err)
+	}
+	moePrintf(stdout, "recorded PR: %s\n", pending.URL)
+
+	interrupted := false
+	if fires, skip := pulseFiresForRun(root, md, stderr); fires {
+		interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+	} else if skip != "" {
+		moePrintf(stderr, "%s", skip)
 	}
 	return 0, interrupted
 }
