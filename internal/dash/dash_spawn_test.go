@@ -457,13 +457,22 @@ func TestCompletedCutoffCountsTopLevelOnly(t *testing.T) {
 	}
 	isNested := func(i int) bool { return nested[i] }
 
-	if got := CompletedCutoff(len(nested), true /*showAll*/, isNested); got != len(nested) {
-		t.Fatalf("showAll cutoff = %d, want %d (no cap)", got, len(nested))
+	if got := CompletedCutoff(len(nested), -1 /*unlimited*/, isNested); got != len(nested) {
+		t.Fatalf("unlimited cutoff = %d, want %d (no cap)", got, len(nested))
 	}
 	// The (cap+1)th parent sits at index 2*CompletedCap; the cut drops it
 	// and its child, keeping the first CompletedCap parents + their kids.
-	if got := CompletedCutoff(len(nested), false, isNested); got != 2*CompletedCap {
+	if got := CompletedCutoff(len(nested), CompletedCap, isNested); got != 2*CompletedCap {
 		t.Fatalf("cutoff = %d, want %d (cap parents + their children, evicting the extra parent)", got, 2*CompletedCap)
+	}
+	// An arbitrary cap — what a ?completed=N click asks for — cuts at the
+	// same boundary one parent earlier, child included.
+	if got := CompletedCutoff(len(nested), CompletedCap-1, isNested); got != 2*(CompletedCap-1) {
+		t.Fatalf("cutoff at cap-1 = %d, want %d", got, 2*(CompletedCap-1))
+	}
+	// A cap past the row count shows everything rather than over-reading.
+	if got := CompletedCutoff(len(nested), 1000, isNested); got != len(nested) {
+		t.Fatalf("oversized cutoff = %d, want %d", got, len(nested))
 	}
 }
 

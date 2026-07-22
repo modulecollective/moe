@@ -100,20 +100,27 @@ const ChainWorkflow = "chain"
 // archive.
 const CompletedCap = 5
 
+// CompletedStep is how many more top-level completed runs each "show
+// more" click on the web dash asks for. Fixed rather than doubling:
+// the operator knows what the next click costs. It lives here beside
+// the cap it extends even though only the web dash pages — the two
+// numbers are one decision.
+const CompletedStep = 25
+
 // CompletedCutoff returns how many leading completed rows to render so
-// that the newest CompletedCap top-level rows are shown, each dragging
-// its nested descendants (spawned runs) along for free. Nested rows
-// never count against the cap, so a parent and its subtree are
-// admitted or evicted as a unit. Returns n unchanged when showAll is
-// set or the top-level count is already within the cap.
+// that the newest topCap top-level rows are shown, each dragging its
+// nested descendants (spawned runs) along for free. Nested rows never
+// count against the cap, so a parent and its subtree are admitted or
+// evicted as a unit. A negative topCap means unlimited; n comes back
+// unchanged there and whenever the top-level count already fits.
 //
 // Shared by the CLI Render and the serve dash view so the terminal and
 // the web page cap identically — the completed slice each holds is
 // parent-then-descendants contiguous (BuildRows nests them), so counting
 // top-level rows is the same walk on both. isNested reports whether
 // row i renders under a parent.
-func CompletedCutoff(n int, showAll bool, isNested func(i int) bool) int {
-	if showAll {
+func CompletedCutoff(n, topCap int, isNested func(i int) bool) int {
+	if topCap < 0 {
 		return n
 	}
 	tops := 0
@@ -121,7 +128,7 @@ func CompletedCutoff(n int, showAll bool, isNested func(i int) bool) int {
 		if isNested(i) {
 			continue
 		}
-		if tops == CompletedCap {
+		if tops == topCap {
 			return i
 		}
 		tops++
@@ -1161,7 +1168,13 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	}
 	fmt.Fprintln(w)
 
-	shown := completed[:CompletedCutoff(len(completed), showAll, func(i int) bool { return completed[i].Depth > 0 })]
+	// The terminal dash pages by scrollback, so it has only the two
+	// stops the --all flag names: the default cap, or everything.
+	topCap := CompletedCap
+	if showAll {
+		topCap = -1
+	}
+	shown := completed[:CompletedCutoff(len(completed), topCap, func(i int) bool { return completed[i].Depth > 0 })]
 	if len(shown) < len(completed) {
 		cliout.Printf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
 	} else {
