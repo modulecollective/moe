@@ -172,7 +172,7 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 		}
 	}
 	// cwd-inversion: no explicit `--add-dir /bureaucracy` — cwd handles
-	// it via workspace-write.
+	// it via the profile's writable workspace root.
 	if strings.Contains(got, "--add-dir /bureaucracy ") || strings.HasSuffix(got, "--add-dir /bureaucracy") {
 		t.Errorf("args should not include redundant --add-dir for bureaucracy root: %s", got)
 	}
