@@ -1370,6 +1370,11 @@ func TestWriteWatchViewportClipsByDisplayCells(t *testing.T) {
 		{name: "cjk does not split", in: "a界b", columns: 3, want: "a"},
 		{name: "emoji", in: "a😀b", columns: 4, want: "a😀"},
 		{name: "supplemental emoji", in: "a🀄b", columns: 4, want: "a🀄"},
+		{name: "emoji presentation", in: "x❤️y", columns: 4, want: "x❤️"},
+		{name: "emoji presentation does not split", in: "❤️x", columns: 2, want: ""},
+		{name: "text presentation stays narrow", in: "x❤︎y", columns: 4, want: "x❤︎y"},
+		{name: "keycap with variation selector", in: "x1️⃣y", columns: 4, want: "x1️⃣"},
+		{name: "keycap without variation selector", in: "x1⃣y", columns: 4, want: "x1⃣"},
 		{
 			name:    "ansi is zero width and reset survives",
 			in:      cliout.Bright + "abcde" + cliout.Reset,

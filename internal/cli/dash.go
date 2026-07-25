@@ -230,8 +230,7 @@ func writeClippedTerminalLine(w io.Writer, line []byte, columns int) error {
 			break
 		}
 
-		r, size := utf8.DecodeRune(line)
-		width := terminalRuneWidth(r)
+		size, width := terminalTextUnit(line)
 		if !clipped && width > 0 && cells+width > columns {
 			clipped = true
 		}
@@ -244,6 +243,36 @@ func writeClippedTerminalLine(w io.Writer, line []byte, columns int) error {
 		line = line[size:]
 	}
 	return nil
+}
+
+func terminalTextUnit(p []byte) (size, width int) {
+	r, size := utf8.DecodeRune(p)
+	width = terminalRuneWidth(r)
+	rest := p[size:]
+
+	// Emoji presentation turns otherwise narrow symbols (for example ❤)
+	// into two-cell glyphs. Keep the selector with its base so clipping
+	// cannot emit a sequence whose width was decided only after the base.
+	if next, nextSize := utf8.DecodeRune(rest); next == '\ufe0e' || next == '\ufe0f' {
+		size += nextSize
+		rest = rest[nextSize:]
+		if next == '\ufe0f' && width == 1 {
+			width = 2
+		}
+	}
+	// Keycaps are two cells whether or not their optional emoji-presentation
+	// selector is present.
+	if isKeycapBase(r) {
+		if next, nextSize := utf8.DecodeRune(rest); next == '\u20e3' {
+			size += nextSize
+			width = 2
+		}
+	}
+	return size, width
+}
+
+func isKeycapBase(r rune) bool {
+	return r == '#' || r == '*' || r >= '0' && r <= '9'
 }
 
 func csiSequenceLen(p []byte) int {
