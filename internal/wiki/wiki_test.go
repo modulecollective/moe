@@ -80,19 +80,6 @@ func TestAssertSchemaInvariantsRefusesMissingDoc(t *testing.T) {
 	}
 }
 
-func TestAssertSchemaInvariantsBootstrapTolerantOfMissing(t *testing.T) {
-	dir := t.TempDir()
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-		},
-	}
-	if err := assertSchemaInvariantsBootstrap(cfg); err != nil {
-		t.Fatalf("bootstrap should tolerate missing docs, got %v", err)
-	}
-}
-
 func TestAssertSchemaInvariantsRefusesUnexpectedDoc(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n")

@@ -13,26 +13,9 @@ import (
 // present, no other top-level .md may exist, no topics/ subdir may
 // exist.
 //
-// The bootstrap exception is handled by the caller: runWikiSession
-// passes opts.Bootstrap=true on the first turn for a fresh wiki (when
-// the engine just wrote the stubs). On bootstrap turns the present-docs
-// check skips — the stubs are about to land in the same commit and
-// assertSchemaInvariantsPreFinalize is called pre-finalize, so the docs
-// are always on disk by then anyway, but the flag exists so callers can
-// skip the check explicitly when they know they just stubbed.
+// Bootstrap needs no exception. A fresh wiki's stubs are written before
+// finalize, so by the time this runs the docs are always on disk.
 func assertSchemaInvariantsPreFinalize(cfg Config) error {
-	return assertSchemaInvariants(cfg, false)
-}
-
-// assertSchemaInvariantsBootstrap is assertSchemaInvariantsPreFinalize
-// with the present-docs requirement relaxed: missing managed docs are
-// tolerated because the engine is about to create them in this turn.
-// Used by runWikiSession on the first turn for a fresh wiki.
-func assertSchemaInvariantsBootstrap(cfg Config) error {
-	return assertSchemaInvariants(cfg, true)
-}
-
-func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 	if len(cfg.ManagedDocs) == 0 {
 		return fmt.Errorf("wiki: engine requires ManagedDocs to be non-empty")
 	}
@@ -44,14 +27,12 @@ func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 		managed[d.Filename] = true
 	}
 
-	if !bootstrap {
-		for _, d := range cfg.ManagedDocs {
-			if _, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename)); err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("wiki: missing managed doc %s", d.Filename)
-				}
-				return fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
+	for _, d := range cfg.ManagedDocs {
+		if _, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename)); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("wiki: missing managed doc %s", d.Filename)
 			}
+			return fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
 		}
 	}
 
@@ -60,9 +41,8 @@ func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 	entries, err := os.ReadDir(cfg.ContentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Nothing on disk yet — bootstrap covers this case;
-			// non-bootstrap with a missing dir is already caught above
-			// by the per-doc stat.
+			// The per-doc stat above already proved the dir exists, so
+			// this only fires on a race with something removing it.
 			return nil
 		}
 		return fmt.Errorf("wiki: read %s: %w", cfg.ContentDir, err)
