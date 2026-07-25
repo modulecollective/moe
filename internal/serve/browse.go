@@ -173,11 +173,10 @@ type hubVM struct {
 	// bannerArtVM carries the project-scoped histogram + factory art the
 	// "bannerart" partial draws under the header, same as the home dash.
 	bannerArtVM
+	// rowBuckets is the same Active/Intents/Backlog/Completed split the
+	// home dash renders, over this project's rows alone.
+	rowBuckets
 	Project      string
-	Active       []dashRowVM
-	Intents      []dashRowVM
-	Backlog      []dashRowVM
-	Completed    completedVM
 	HasKnowledge bool
 	TopicCount   int
 	Twin         []twinDocVM
@@ -215,24 +214,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		// belongs here — no re-filter — and the factory art + histogram
 		// reflect this project alone.
 		vm.bannerArtVM = newBannerArt(now, rows, histogram)
-		var completed []dashRowVM
-		for _, row := range rows {
-			rvm := dashRowVM{Project: row.Project, Run: row.Run, Note: noteHTML(row.Project, row.Note), When: dash.HumanAgo(now, row.When), URL: rowURL(row), Depth: row.Depth, Chained: row.Chained}
-			rvm.Agent, rvm.AgentTitle = agentMark(row)
-			switch row.Bucket {
-			case dash.BucketActiveRuns:
-				vm.Active = append(vm.Active, rvm)
-			case dash.BucketIntents:
-				vm.Intents = append(vm.Intents, rvm)
-			case dash.BucketChores, dash.BucketBacklog:
-				// Chores head the backlog here too — same fold as the home
-				// dash and the CLI.
-				vm.Backlog = append(vm.Backlog, rvm)
-			case dash.BucketCompletedRuns:
-				completed = append(completed, rvm)
-			}
-		}
-		vm.Completed = newCompletedVM(completed, completedCap(r))
+		vm.rowBuckets = newRowBuckets(now, rows, completedCap(r))
 	}
 
 	if r.URL.Query().Get("fragment") != "" {

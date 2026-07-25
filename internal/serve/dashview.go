@@ -231,34 +231,21 @@ func newCompletedVM(rows []dashRowVM, topCap int) completedVM {
 	return vm
 }
 
-// dashVM is the data the dash template renders against. Same three
-// buckets as the CLI dash; COMPLETED arrives pre-capped so the template
-// needs no slice math.
-type dashVM struct {
-	bannerArtVM
-	Active         []dashRowVM
-	Intents        []dashRowVM
-	Backlog        []dashRowVM
-	Completed      completedVM
-	ProjectCount   int
-	ActiveProjects int
+// rowBuckets is the Active/Intents/Backlog/Completed split of a dash
+// snapshot, shared by the home dash and the project hub. Both embed it,
+// so `.Active` and friends resolve unchanged in Go and in the templates.
+type rowBuckets struct {
+	Active    []dashRowVM
+	Intents   []dashRowVM
+	Backlog   []dashRowVM
+	Completed completedVM
 }
 
-// rowURL is where a dash row's slug links. Only a chore row differs: it
-// is a registration, not a run, and has its own /chore/ page.
-func rowURL(r dash.Row) string {
-	if r.Bucket == dash.BucketChores {
-		return "/chore/" + r.Project + "/" + r.Run
-	}
-	return "/run/" + r.Project + "/" + r.Run
-}
-
-func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, topCap int) dashVM {
-	vm := dashVM{
-		bannerArtVM:    newBannerArt(now, rows, histogram),
-		ProjectCount:   projectCount,
-		ActiveProjects: activeProjects,
-	}
+// newRowBuckets converts each row to its view model and files it into a
+// bucket. topCap bounds the COMPLETED section — the dash and the hub
+// pass their own.
+func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
+	var out rowBuckets
 	var completed []dashRowVM
 	for _, r := range rows {
 		row := dashRowVM{
@@ -273,18 +260,46 @@ func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int,
 		row.Agent, row.AgentTitle = agentMark(r)
 		switch r.Bucket {
 		case dash.BucketActiveRuns:
-			vm.Active = append(vm.Active, row)
+			out.Active = append(out.Active, row)
 		case dash.BucketIntents:
-			vm.Intents = append(vm.Intents, row)
+			out.Intents = append(out.Intents, row)
 		case dash.BucketChores, dash.BucketBacklog:
 			// Chores head the backlog rather than holding a section of
 			// their own — the same fold the CLI dash does, and BuildRows
 			// has already ordered them ahead of the idea rows.
-			vm.Backlog = append(vm.Backlog, row)
+			out.Backlog = append(out.Backlog, row)
 		case dash.BucketCompletedRuns:
 			completed = append(completed, row)
 		}
 	}
-	vm.Completed = newCompletedVM(completed, topCap)
-	return vm
+	out.Completed = newCompletedVM(completed, topCap)
+	return out
+}
+
+// dashVM is the data the dash template renders against. Same three
+// buckets as the CLI dash; COMPLETED arrives pre-capped so the template
+// needs no slice math.
+type dashVM struct {
+	bannerArtVM
+	rowBuckets
+	ProjectCount   int
+	ActiveProjects int
+}
+
+// rowURL is where a dash row's slug links. Only a chore row differs: it
+// is a registration, not a run, and has its own /chore/ page.
+func rowURL(r dash.Row) string {
+	if r.Bucket == dash.BucketChores {
+		return "/chore/" + r.Project + "/" + r.Run
+	}
+	return "/run/" + r.Project + "/" + r.Run
+}
+
+func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, topCap int) dashVM {
+	return dashVM{
+		bannerArtVM:    newBannerArt(now, rows, histogram),
+		rowBuckets:     newRowBuckets(now, rows, topCap),
+		ProjectCount:   projectCount,
+		ActiveProjects: activeProjects,
+	}
 }
