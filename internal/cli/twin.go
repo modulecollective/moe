@@ -72,8 +72,8 @@ plausibly live in two docs lives in one — pick by which doc the
 reader would search first.`
 
 // twinManagedDocs is the hard-fixed set of managed docs every
-// project's twin gets. Names, titles, purposes, and per-doc reflect
-// prompts are project-agnostic — closed-schema means "opinions are
+// project's twin gets. Names, titles, and purposes are
+// project-agnostic — closed-schema means "opinions are
 // the product." A new doc joins the set the same way a new wiki
 // would: a code change here, not per-project config.
 var twinManagedDocs = []wiki.ManagedDoc{
@@ -82,63 +82,30 @@ var twinManagedDocs = []wiki.ManagedDoc{
 		Title:        "Vision",
 		Purpose:      "What this project is trying to be — bets, problem, non-goals.",
 		SoftBudgetKB: 8,
-		ReflectPrompt: "Compare what the project is actually doing against what " +
-			"the vision claims. Flag drift; surface gaps where recent work has " +
-			"wandered from the stated bets, problems, or non-goals. Do not " +
-			"propose a new vision — vision changes are decided edits, not " +
-			"observed ones. Keep current bets, not the history of how they " +
-			"were reached; compress the doc when it is over budget.",
 	},
 	{
 		Filename:     "architecture.md",
 		Title:        "Architecture",
 		Purpose:      "Components, boundaries, load-bearing decisions.",
 		SoftBudgetKB: 48,
-		ReflectPrompt: "Did recent work introduce, remove, or reshape a " +
-			"component or boundary? Did a decision recorded here get " +
-			"revisited? Rewrite the rule to current state and keep at most a " +
-			"one-line run reference for provenance; drop superseded narrative " +
-			"and compress the doc when it is over budget.",
 	},
 	{
 		Filename:     "patterns.md",
 		Title:        "Patterns",
 		Purpose:      "Named patterns and anti-patterns; the project's prose-form eval suite.",
 		SoftBudgetKB: 32,
-		ReflectPrompt: "Did recent work repeat a shape that should be promoted " +
-			"to a named pattern (look for ~3 appearances before promoting)? " +
-			"Did it deviate from a recorded pattern in a way that's a " +
-			"deliberate choice vs. drift? Did anything get tried and " +
-			"rejected — that's a candidate anti-pattern. Keep the reusable " +
-			"rule, not its full origin story; compress the doc when it is " +
-			"over budget.",
 	},
 	{
 		Filename:     "operations.md",
 		Title:        "Operations",
 		Purpose:      "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
 		SoftBudgetKB: 40,
-		ReflectPrompt: "Did recent activity change a workflow, ritual, tool, " +
-			"or escalation path? Did anything documented here become no " +
-			"longer true? Update the runbook to match how the project " +
-			"actually runs. Delete completed transition narrative and " +
-			"compress the doc when it is over budget.",
 	},
 	{
 		Filename:     "glossary.md",
 		Title:        "Glossary",
 		Purpose:      "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
 		SoftBudgetKB: 12,
-		ReflectPrompt: "Walk the glossary against the other managed docs. " +
-			"Apply the inclusion bar in the kickoff conventions: a term " +
-			"earns an entry when it appears load-bearing in 2+ twin docs, " +
-			"or when it names a code seam the twin discusses. Entries are " +
-			"1–3 sentences pointing back to the home doc by section " +
-			"heading, never line number — definitions live in the home " +
-			"doc, the glossary is the index. Retire entries whose term no " +
-			"longer appears elsewhere; normalize prose spellings to the " +
-			"glossary form when synonyms drift apart. Compress every existing " +
-			"entry to that 1–3 sentence bar and the doc when it is over budget.",
 	},
 }
 

@@ -51,7 +51,7 @@ type Config struct {
 // ManagedDoc names one of the wiki's hard-fixed docs. Twin's five
 // (vision / architecture / patterns / operations / glossary) live in
 // internal/cli/twin.go; the engine treats them as opaque
-// (filename, title, purpose, per-doc reflect framing).
+// (filename, title, purpose).
 type ManagedDoc struct {
 	// Filename is the path under ContentDir (e.g. "vision.md").
 	// Flat — closed-schema has no topics/ subfolder.
@@ -63,10 +63,6 @@ type ManagedDoc struct {
 	// in the closed-schema preamble so the agent knows what each
 	// managed doc is supposed to hold without reading every file.
 	Purpose string
-	// ReflectPrompt is the per-doc framing the reflect kickoff lays
-	// down under a doc-named subhead. Lifted from TWIN-REFACTOR's
-	// twin schema and tightened into prompt form.
-	ReflectPrompt string
 	// SoftBudgetKB is the size past which the doc is rendered with an
 	// over-budget nudge in the preamble and surfaced as an
 	// OverBudgetDocs finding. Soft: it nudges the agent to compress,

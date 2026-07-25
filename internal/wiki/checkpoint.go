@@ -43,8 +43,8 @@ func logPath(contentDir string) string {
 // historySummaryName is the basename of the rolling-summary doc the
 // agent maintains during reflect. Exempted from the schema
 // invariants alongside log.md — engine-aware but agent-written, so it's
-// neither a managed doc with a ReflectPrompt nor a stray .md the
-// schema-drift check should reject.
+// neither a managed doc nor a stray .md the schema-drift check should
+// reject.
 const historySummaryName = "history-summary.md"
 
 // historySummaryPath returns the absolute path to history-summary.md
