@@ -152,7 +152,7 @@ func TestSDLCCloseRefusesPushed(t *testing.T) {
 // lives in a different workflow, even if the slug matches — the slug
 // namespace is shared per project, so this is a real footgun.
 func TestSDLCCloseWorkflowMismatch(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "not-sdlc", "kb", run.StatusInProgress)
+	root := seedCloseFixture(t, "tele", "not-sdlc", "chat", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -161,7 +161,7 @@ func TestSDLCCloseWorkflowMismatch(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero on workflow mismatch, stdout=%q", out.String())
 	}
-	if !strings.Contains(errb.String(), "kb run") || !strings.Contains(errb.String(), "not sdlc") {
+	if !strings.Contains(errb.String(), "chat run") || !strings.Contains(errb.String(), "not sdlc") {
 		t.Fatalf("expected workflow-mismatch error, got: %q", errb.String())
 	}
 }
@@ -189,19 +189,19 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 	}
 }
 
-// TestKBCloseBumpsStatusAndCommits: kb close has no sandbox/branch
+// TestChatCloseBumpsStatusAndCommits: chat close has no sandbox/branch
 // cleanup step — just status flip + trailered commit. Assert both.
-func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "dead-end", "kb", run.StatusInProgress)
+func TestChatCloseBumpsStatusAndCommits(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "dead-end", "chat", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele/dead-end"}, &out, &errb)
+	code := Run([]string{"chat", "close", "--no-edit", "tele/dead-end"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "closed kb tele/dead-end") {
+	if !strings.Contains(out.String(), "closed chat tele/dead-end") {
 		t.Fatalf("missing close confirmation: %q", out.String())
 	}
 
@@ -214,13 +214,13 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "Close kb run tele/dead-end") {
+	if !strings.Contains(head, "Close chat run tele/dead-end") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{
 		"MoE-Run: dead-end",
 		"MoE-Project: tele",
-		"MoE-Workflow: kb",
+		"MoE-Workflow: chat",
 	} {
 		if !strings.Contains(head, want) {
 			t.Fatalf("commit missing trailer %q:\n%s", want, head)
@@ -228,22 +228,22 @@ func TestKBCloseBumpsStatusAndCommits(t *testing.T) {
 	}
 }
 
-// TestKBCloseLeavesUnrelatedPathsAlone: kb has no sandbox, so even if
+// TestChatCloseLeavesUnrelatedPathsAlone: chat has no sandbox, so even if
 // one exists on disk (e.g., left over from an sdlc run in the same
-// project), kb close must not touch it.
-func TestKBCloseLeavesUnrelatedPathsAlone(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "kb-run", "kb", run.StatusInProgress)
+// project), chat close must not touch it.
+func TestChatCloseLeavesUnrelatedPathsAlone(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "chat-run", "chat", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// Sibling sdlc sandbox that must survive the kb close.
+	// Sibling sdlc sandbox that must survive the chat close.
 	sibling := sandbox.Path(root, "tele", "sdlc-run")
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele/kb-run"}, &out, &errb)
+	code := Run([]string{"chat", "close", "--no-edit", "tele/chat-run"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -252,11 +252,11 @@ func TestKBCloseLeavesUnrelatedPathsAlone(t *testing.T) {
 	}
 }
 
-// TestKBCloseRefusesTerminal mirrors the sdlc refusal table for kb.
-// pushed shouldn't normally happen for kb (no push stage), but if a
+// TestChatCloseRefusesTerminal mirrors the sdlc refusal table for chat.
+// pushed shouldn't normally happen for chat (no push stage), but if a
 // run ends up in that state somehow we still refuse locally rather
 // than guess.
-func TestKBCloseRefusesTerminal(t *testing.T) {
+func TestChatCloseRefusesTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status string
@@ -265,13 +265,13 @@ func TestKBCloseRefusesTerminal(t *testing.T) {
 		{"closed", run.StatusClosed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := seedCloseFixture(t, "tele", "kb-done-"+tc.name, "kb", tc.status)
+			root := seedCloseFixture(t, "tele", "chat-done-"+tc.name, "chat", tc.status)
 			t.Setenv("MOE_HOME", root)
 			t.Setenv("NO_COLOR", "1")
 
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 			var out, errb bytes.Buffer
-			code := Run([]string{"kb", "close", "--no-edit", "tele/kb-done-" + tc.name}, &out, &errb)
+			code := Run([]string{"chat", "close", "--no-edit", "tele/chat-done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -299,13 +299,13 @@ func TestSDLCCloseRegisteredInUsage(t *testing.T) {
 	}
 }
 
-func TestKBCloseRegisteredInUsage(t *testing.T) {
+func TestChatCloseRegisteredInUsage(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := Run([]string{"kb"}, &out, &errb); code != 0 {
+	if code := Run([]string{"chat"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "close") {
-		t.Fatalf("kb usage missing 'close':\n%s", out.String())
+		t.Fatalf("chat usage missing 'close':\n%s", out.String())
 	}
 }
 
@@ -420,24 +420,24 @@ func TestSDLCCloseAllowsNeverStartedCode(t *testing.T) {
 	}
 }
 
-// TestKBCloseRefusesEmptyCanvas: the gate is shared across workflows;
-// kb gets the same refusal, with the kb-shaped reopen hint.
-func TestKBCloseRefusesEmptyCanvas(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "kb-empty", "kb", run.StatusInProgress)
-	addDocEntryAndCommit(t, root, "tele", "kb-empty", "research", "")
+// TestChatCloseRefusesEmptyCanvas: the gate is shared across workflows;
+// chat gets the same refusal, with the chat-shaped reopen hint.
+func TestChatCloseRefusesEmptyCanvas(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "chat-empty", "chat", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "chat-empty", "chat", "")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"kb", "close", "--no-edit", "tele/kb-empty"}, &out, &errb)
+	code := Run([]string{"chat", "close", "--no-edit", "tele/chat-empty"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
-	if !strings.Contains(errb.String(), "documents/research/content.md is empty") {
-		t.Fatalf("kb refusal should name research canvas: %q", errb.String())
+	if !strings.Contains(errb.String(), "documents/chat/content.md is empty") {
+		t.Fatalf("chat refusal should name the chat canvas: %q", errb.String())
 	}
-	if !strings.Contains(errb.String(), "moe kb research tele/kb-empty") {
-		t.Fatalf("kb refusal should suggest the kb verb: %q", errb.String())
+	if !strings.Contains(errb.String(), "moe chat chat tele/chat-empty") {
+		t.Fatalf("chat refusal should suggest the chat verb: %q", errb.String())
 	}
 }
 

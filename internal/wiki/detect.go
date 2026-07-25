@@ -43,9 +43,6 @@ type DetectionResult struct {
 // fresh project's first non-engine commit would be flagged before any
 // baseline exists.
 func DetectUnrecordedEdits(cfg Config) (DetectionResult, error) {
-	if cfg.Mode != Closed {
-		return DetectionResult{}, nil
-	}
 	if cfg.BureaucracyPath == "" {
 		return DetectionResult{}, fmt.Errorf("wiki: detect requires BureaucracyPath")
 	}

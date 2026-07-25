@@ -104,7 +104,7 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 	}
 	now := fctx.Now.UTC()
 
-	if err := assertModeInvariantsPreFinalize(cfg); err != nil {
+	if err := assertSchemaInvariantsPreFinalize(cfg); err != nil {
 		return FinalizeResult{}, err
 	}
 
@@ -114,17 +114,9 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 	}
 	// Filter out engine-managed files from the change set: appending
 	// to log.md ourselves shouldn't generate a "modified log.md" line
-	// in the same entry, and ditto for checkpoint.json and the
-	// .wiki-ops stash.
+	// in the same entry, and ditto for checkpoint.json.
 	changes = excludeManaged(changes, cfg.ContentDir)
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
-
-	// Harvest schema-evolution tags before deciding whether the change
-	// set is empty: a session that only manipulates the stash without
-	// touching any topic doc still degrades to no-op (the stash being
-	// truncated isn't a wiki edit), but a session that produced both
-	// content edits and tags lands them together in the log entry.
-	ops := readAndTruncateOpsStash(cfg.ContentDir)
 
 	if len(changes) == 0 {
 		return FinalizeResult{Changes: nil}, nil
@@ -148,7 +140,7 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 		return FinalizeResult{}, err
 	}
 
-	if err := appendLogEntry(cfg.ContentDir, now, fctx, changes, ops); err != nil {
+	if err := appendLogEntry(cfg.ContentDir, now, fctx, changes); err != nil {
 		return FinalizeResult{}, err
 	}
 
@@ -249,15 +241,13 @@ func relPath(bureaucracyRel, contentDir, bureaucracyPath string) (string, error)
 	return rel, nil
 }
 
-// excludeManaged drops engine-owned files (log.md, checkpoint.json,
-// .wiki-ops) from the change set so finalize doesn't list its own
-// writes as part of the ingest's diff. Anything else under ContentDir
-// is fair game.
+// excludeManaged drops engine-owned files (log.md, checkpoint.json)
+// from the change set so finalize doesn't list its own writes as part
+// of the ingest's diff. Anything else under ContentDir is fair game.
 func excludeManaged(changes []Change, contentDir string) []Change {
 	managed := map[string]bool{
 		"log.md":          true,
 		"checkpoint.json": true,
-		opsStashName:      true,
 	}
 	out := changes[:0]
 	for _, c := range changes {
@@ -270,14 +260,10 @@ func excludeManaged(changes []Change, contentDir string) []Change {
 }
 
 // appendLogEntry writes a markdown section to <ContentDir>/log.md
-// describing the ingest. The format is two stacked groups: the
-// operations the agent named via `[wiki-op]` tags (split / merge /
-// rename / retire), then the deterministic content-edit list grouped
-// by status. Either group may be empty — a session with no tags
-// renders content edits only; a session with tags but no content
-// edits doesn't reach this function (FinalizeIngest short-circuits on
-// an empty change set).
-func appendLogEntry(contentDir string, now time.Time, fctx FinalizeContext, changes []Change, ops []wikiOp) error {
+// describing the ingest: the deterministic content-edit list, grouped
+// by status. A session with no content edits doesn't reach this
+// function (FinalizeIngest short-circuits on an empty change set).
+func appendLogEntry(contentDir string, now time.Time, fctx FinalizeContext, changes []Change) error {
 	path := logPath(contentDir)
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -298,16 +284,6 @@ func appendLogEntry(contentDir string, now time.Time, fctx FinalizeContext, chan
 	fmt.Fprintf(&b, "## %s — %s\n\n", now.Format("2006-01-02"), fctx.RunID)
 	if title := strings.TrimSpace(fctx.RunTitle); title != "" {
 		fmt.Fprintf(&b, "_%s_\n\n", title)
-	}
-
-	// Operations group sits above content edits — the agent's
-	// labelled view of what they did, then the deterministic diff.
-	for _, op := range ops {
-		line := formatOpLine(op)
-		if line == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "- %s\n", line)
 	}
 
 	groups := map[ChangeStatus][]string{}

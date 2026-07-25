@@ -7,162 +7,21 @@ import (
 	"testing"
 )
 
-func TestLintPromptSectionOpenSchema(t *testing.T) {
-	cfg := Config{
-		Name:              "kb",
-		ContentDir:        "/some/path/projects/p/kb",
-		Mode:              Open,
-		IngestPrompt:      "Project's open-schema knowledge base.",
-		AllowedPrimitives: []string{"split", "merge", "rename", "retire"},
-	}
-	got := LintPromptSection(cfg)
-	for _, want := range []string{
-		"Project's open-schema knowledge base.",
-		"## Wiki: kb (open-schema)",
-		"/some/path/projects/p/kb",
-		"Lint pass (open-schema)",
-		"Structural",
-		"Semantic",
-		"[wiki-op] split",
-		"[wiki-op] retire",
-		"/some/path/projects/p/kb/.wiki-ops",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("lint prompt missing %q in:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "ingest session") {
-		t.Errorf("lint prompt leaked ingest framing:\n%s", got)
-	}
-}
-
-// Closed-schema lint folded into reflect; LintPromptSection on a
-// closed-schema config is a misregistration and panics.
-func TestLintPromptSectionPanicsOnClosed(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("LintPromptSection should panic on closed-schema")
-		}
-	}()
-	LintPromptSection(Config{Name: "twin", Mode: Closed})
-}
-
-func TestScanCleanWiki(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS basics](topics/dns-basics.md)\n- [TCP](topics/tcp.md)\n")
-	writeFile(t, filepath.Join(dir, "topics", "dns-basics.md"),
-		"# DNS basics\n\nSee also [TCP](tcp.md).\n")
-	writeFile(t, filepath.Join(dir, "topics", "tcp.md"),
-		"# TCP\n\nThree-way handshake is described elsewhere.\n")
-
-	f, err := Scan(Config{ContentDir: dir, Mode: Open})
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if !f.IsEmpty() {
-		t.Fatalf("expected clean wiki, got %+v", f)
-	}
-}
-
-func TestScanFlagsOrphanBrokenAndEmpty(t *testing.T) {
-	dir := t.TempDir()
-	// index.md links to one missing file and one real file; one
-	// topic doc is on disk but unreferenced (orphan); one topic doc
-	// is empty; one topic doc has a broken cross-link.
-	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS](topics/dns.md)\n- [Phantom](topics/missing.md)\n")
-	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
-		"# DNS\n\nSee [TCP handshake](tcp-handshake.md) for context.\n")
-	writeFile(t, filepath.Join(dir, "topics", "orphan.md"),
-		"# Orphan\n\nNobody links here.\n")
-	writeFile(t, filepath.Join(dir, "topics", "stub.md"), "# Stub\n")
-
-	f, err := Scan(Config{ContentDir: dir, Mode: Open})
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if got, want := f.Orphans, []string{"topics/orphan.md", "topics/stub.md"}; !equalStrings(got, want) {
-		t.Errorf("orphans: got %v want %v", got, want)
-	}
-	if got, want := f.MissingFromIndex, []string{"topics/missing.md"}; !equalStrings(got, want) {
-		t.Errorf("missing-from-index: got %v want %v", got, want)
-	}
-	if got, want := f.EmptyDocs, []string{"topics/stub.md"}; !equalStrings(got, want) {
-		t.Errorf("empty: got %v want %v", got, want)
-	}
-	if len(f.BrokenLinks) != 1 ||
-		f.BrokenLinks[0].From != "topics/dns.md" ||
-		f.BrokenLinks[0].Target != "topics/tcp-handshake.md" {
-		t.Errorf("broken links: %+v", f.BrokenLinks)
-	}
-}
-
-func TestScanIgnoresExternalLinksAndAnchors(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "index.md"),
-		"# kb\n\n- [DNS](topics/dns.md)\n")
-	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
-		"# DNS\n\n"+
-			"See [RFC 1035](https://example.com/rfc1035) and "+
-			"the [intro section](#intro) for context. "+
-			"Cross-link to [self](dns.md#section-2).\n")
-	f, err := Scan(Config{ContentDir: dir, Mode: Open})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.BrokenLinks) != 0 {
-		t.Errorf("external + anchor links should not flag as broken: %+v", f.BrokenLinks)
-	}
-}
-
-func TestScanMissingContentDirIsCleanFindings(t *testing.T) {
-	// A fresh-wiki lint shouldn't error — there's nothing to find.
-	dir := filepath.Join(t.TempDir(), "does-not-exist")
-	f, err := Scan(Config{ContentDir: dir, Mode: Open})
-	if err != nil {
-		t.Fatalf("Scan on missing dir: %v", err)
-	}
-	if !f.IsEmpty() {
-		t.Errorf("expected empty findings on missing dir, got %+v", f)
-	}
-}
-
-// TestScanMissingTopicsDirIsCleanFindings covers the half-built case
-// where index.md exists at the wiki root but topics/ has not been
-// created yet. Scan should treat that identically to a missing wiki
-// dir — empty findings, no error — so the operator can lint a fresh
-// corpus without seeing a phantom failure.
-func TestScanMissingTopicsDirIsCleanFindings(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "index.md"), "# kb\n\nNothing yet.\n")
-	f, err := Scan(Config{ContentDir: dir, Mode: Open})
-	if err != nil {
-		t.Fatalf("Scan with missing topics dir: %v", err)
-	}
-	if !f.IsEmpty() {
-		t.Errorf("expected empty findings with no topics dir, got %+v", f)
-	}
-}
-
 func TestRenderFindingsGroupsByCategory(t *testing.T) {
 	f := Findings{
-		Orphans:          []string{"orphan.md"},
-		MissingFromIndex: []string{"phantom.md"},
-		BrokenLinks:      []BrokenLink{{From: "a.md", Target: "b.md"}},
-		EmptyDocs:        []string{"stub.md"},
+		BrokenLinks:        []BrokenLink{{From: "a.md", Target: "b.md"}},
+		EmptyDocs:          []string{"stub.md"},
+		MissingManagedDocs: []string{"glossary.md"},
 	}
 	got := RenderFindings(f)
 	for _, want := range []string{
 		"## Structural pre-scan",
-		"**Orphaned topic docs**",
-		"- orphan.md",
-		"**Index entries pointing at missing files**",
-		"- phantom.md",
 		"**Broken cross-links**",
 		"- a.md → b.md",
 		"**Empty or stub docs**",
 		"- stub.md",
+		"**Missing managed docs**",
+		"- glossary.md",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
@@ -193,7 +52,6 @@ func TestScanGlossaryOrphans(t *testing.T) {
 			"### Wiki engine\n\nGeneric engine backing kb and twin.\n\n"+
 			"### Phantom term\n\nNobody references this in the prose.\n")
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
@@ -218,7 +76,6 @@ func TestScanGlossaryOrphansEmptyGlossary(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\nbody\n")
 	writeFile(t, filepath.Join(dir, "glossary.md"), "# Glossary\n\n")
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
@@ -253,7 +110,6 @@ func TestScanClosedSurfacesSoftBudgetWithoutBlocking(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\n"+strings.Repeat("x", 1024))
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
@@ -353,7 +209,6 @@ Two doc tokens on one line bind the quote to the nearer: the vision.md
 entry for architecture.md "Components" is architecture's, not vision's.
 `)
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
@@ -497,7 +352,6 @@ A possessive citation anchors continuations too:
 [architecture](architecture.md)'s "Decisions" and "Gone entirely".
 `)
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "glossary.md", Title: "Glossary"},
@@ -534,7 +388,6 @@ func TestScanDanglingXrefsSkipsAbsentTarget(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "vision.md"),
 		"# Vision\n\nSee architecture.md \"Components\" for the shape.\n")
 	cfg := Config{
-		Mode:       Closed,
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
@@ -550,23 +403,6 @@ func TestScanDanglingXrefsSkipsAbsentTarget(t *testing.T) {
 	}
 	if got, want := f.MissingManagedDocs, []string{"architecture.md"}; !equalStrings(got, want) {
 		t.Errorf("MissingManagedDocs: got %v want %v", got, want)
-	}
-}
-
-// Open-schema wikis cross-reference with markdown links, which
-// BrokenLinks covers; the quoted-heading convention is a twin
-// convention and the scan must stay off open-schema corpora.
-func TestScanDanglingXrefsClosedSchemaOnly(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "index.md"), "# Index\n\n[DNS](topics/dns.md)\n")
-	writeFile(t, filepath.Join(dir, "topics", "dns.md"),
-		"# DNS\n\nSee architecture.md \"Nonexistent heading\" for more.\n")
-	f, err := Scan(Config{Mode: Open, ContentDir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.DanglingXrefs) != 0 {
-		t.Errorf("open-schema scan should not produce xref findings, got %+v", f.DanglingXrefs)
 	}
 }
 
@@ -600,17 +436,6 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
-}
-
-// Defensive: if the lint preamble starts to silently drop the
-// .wiki-ops path, the agent loses its tag-emission target. Belt-and-
-// suspenders alongside the prompt-content assertions above.
-func TestLintPromptSectionMentionsStashFile(t *testing.T) {
-	cfg := Config{Name: "kb", ContentDir: "/x/y", Mode: Open}
-	got := LintPromptSection(cfg)
-	if !strings.Contains(got, opsStashPath(cfg.ContentDir)) {
-		t.Errorf("lint prompt should print %q:\n%s", opsStashPath(cfg.ContentDir), got)
-	}
 }
 
 // Sanity check the writeFile helper from wiki_test.go produces a real

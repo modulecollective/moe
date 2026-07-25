@@ -10,6 +10,9 @@
 // template.HTML. The content is the operator's own markdown, but
 // escaping is non-negotiable: a stray `<script>` in a doc must never
 // execute.
+//
+// links.go carries the package's other half: the link-topology and
+// stub-detection helpers the bureaucracy's structural scans share.
 package md
 
 import (

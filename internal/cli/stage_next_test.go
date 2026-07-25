@@ -812,7 +812,7 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 		Name: "test",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "kb", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "twin", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -828,7 +828,7 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe kb test tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture tele dns-basics", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()

@@ -15,8 +15,8 @@ import (
 // the six-stage ladder. Each managed doc gets its own stage canvas
 // under `documents/<stage>/content.md`; finalize seals the pass with
 // hygiene cleanups, the history-summary fold, and the checkpoint bump.
-// The structural kinship with kb lives at the wiki layer (wiki.Config
-// + ingest loop), not the workflow layer.
+// The wiki engine (wiki.Config + ingest loop) is the twin's alone
+// now that kb is gone.
 
 // twinWikiIngestPrompt is the schema-config body wikiPreamble lays
 // down at the top of every reflect stage's system prompt — the one
@@ -143,21 +143,17 @@ var twinManagedDocs = []wiki.ManagedDoc{
 }
 
 // twinWikiBuilder is the (root, projectID) → *wiki.Config adapter
-// the twin facades call. Closed-schema; ManagedDocs is twin's fixed
-// five; AllowedPrimitives is empty (no split / merge / rename /
-// retire on a closed-schema wiki).
+// the twin facades call. ManagedDocs is twin's fixed five.
 func twinWikiBuilder(root, projectID string) (*wiki.Config, error) {
 	contentDir := filepath.Join(root, "projects", projectID, wiki.TwinDirRel)
 	cfg := &wiki.Config{
-		Name:              "twin",
-		ContentDir:        contentDir,
-		ProjectRepoPath:   filepath.Join(root, project.SubmoduleDir(projectID)),
-		Project:           projectID,
-		BureaucracyPath:   root,
-		Mode:              wiki.Closed,
-		IngestPrompt:      twinWikiIngestPrompt,
-		AllowedPrimitives: nil,
-		ManagedDocs:       twinManagedDocs,
+		Name:            "twin",
+		ContentDir:      contentDir,
+		ProjectRepoPath: filepath.Join(root, project.SubmoduleDir(projectID)),
+		Project:         projectID,
+		BureaucracyPath: root,
+		IngestPrompt:    twinWikiIngestPrompt,
+		ManagedDocs:     twinManagedDocs,
 	}
 	return cfg, nil
 }

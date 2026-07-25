@@ -15,18 +15,15 @@ import (
 // `moe <workflow> log` renders a past stage's agent transcript
 // (thread-claude.jsonl / thread-codex.jsonl) as plain text using the
 // same renderer the post-headless auto-tail uses (internal/transcript),
-// no `--tail` cap. Seven per-workflow registrations (in idea/sdlc/kb/
-// hooks_workflow/twin/chat/chores) parse positional args
-// and delegate here; this file owns the resolver (project / @latest /
-// workflow / run / stage validation, agent disambiguation) and the
-// render to stdout. Most register a Command struct with Run: runLog(…);
-// chores registers inline with the same runLog, so the shape isn't
-// uniform across all seven.
+// no `--tail` cap. The per-workflow registrations (in idea/sdlc/twin/
+// chat/pulse) parse positional args and delegate here; this file owns
+// the resolver (project / @latest / workflow / run / stage validation,
+// agent disambiguation) and the render to stdout.
 //
 // Shape mirrors `runCat`: namespaced under each workflow group so
 // `@latest` and the stage list resolve in workflow context.
-// Single-stage workflows (idea, hooks) pass a non-empty
-// defaultStage so the operator can omit the stage argument.
+// Single-stage workflows (idea) pass a non-empty defaultStage so the
+// operator can omit the stage argument.
 //
 // A stage with both thread-claude.jsonl and thread-codex.jsonl requires
 // `--agent` to disambiguate; a stage with one file picks it implicitly.

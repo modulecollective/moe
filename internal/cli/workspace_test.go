@@ -222,7 +222,7 @@ func TestRunNewWithWorkspaceFlagRefusesIfClaimed(t *testing.T) {
 }
 
 // TestRunNewWithWorkspaceFlagRejectedOnNonSdlc confirms the flag is
-// gated to sdlc — the kb / idea workflows have no code stage
+// gated to sdlc — the twin / idea workflows have no code stage
 // to use a workspace.
 func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	root := newTestBureaucracy(t)
@@ -233,9 +233,9 @@ func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := runNew("kb", []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
+	code := runNew("twin", []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
 	if code == 0 {
-		t.Fatalf("expected non-zero on --workspace with kb, got 0; stdout=%q", out.String())
+		t.Fatalf("expected non-zero on --workspace with twin, got 0; stdout=%q", out.String())
 	}
 	if !strings.Contains(errb.String(), "--workspace") {
 		t.Fatalf("expected error to name the flag, got: %q", errb.String())

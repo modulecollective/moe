@@ -53,8 +53,8 @@ const headlessTurnTimeout = 60 * time.Minute
 
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
-// InitialPrompt. Wiki-aware ingest stages (kb summarize, future twin
-// stages) supply WikiBuilder so the engine's prompt section, per-turn
+// InitialPrompt. Wiki-aware ingest stages (the twin's six)
+// supply WikiBuilder so the engine's prompt section, per-turn
 // staging, and FinalizeIngest hook all wire up automatically.
 type stageSessionOpts struct {
 	// NeedsSandbox switches the per-run sandbox clone on. Code stages
@@ -168,8 +168,8 @@ type stageSessionOpts struct {
 	// root and the run metadata; it may write files inside the
 	// worktree (e.g. publish a synthesized artifact) and returns
 	// extra path specs (relative to workRoot) to stage in the same
-	// per-turn commit. Used by chores and hooks to stage the project's
-	// chores/ or hooks/ directory alongside the per-pass canvas, so the
+	// per-turn commit. Used by sdlc to stage the project's hooks/,
+	// chores/, and knowledge/ dirs alongside the canvas, so the
 	// edits the agent made there ride in one commit.
 	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
 	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
@@ -188,6 +188,12 @@ type stageSessionOpts struct {
 	// pass. Routed straight through to wikiTurnSpec.PreFinalizeGate;
 	// see that field for the contract.
 	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
+	// knowledgeFixTurn marks a turn the knowledge-hygiene gate itself
+	// dispatched to clear its findings. It suppresses the gate for that
+	// turn — enforceKnowledgeHygiene re-scans when the fix turn returns,
+	// so the recovery stays bounded at one attempt instead of recursing.
+	// Set only by enforceKnowledgeHygiene; never by a stage caller.
+	knowledgeFixTurn bool
 	// Agent names the backend (claude / codex) that should drive this
 	// turn. Empty falls through resolveAgentName's precedence ladder:
 	// the model stylesheet, then $MOE_AGENT, else "claude". Stage
@@ -348,7 +354,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 
 	// Materialize the project's submodule before anything else. Every
-	// stage either reads source directly (twin/kb wiki ingest), drives
+	// stage either reads source directly (twin wiki ingest), drives
 	// a sandbox clone (code/review/test), or kicks off an agent whose first
 	// action is usually a project-side read. Cold projects hit one
 	// `git submodule update --init --recursive`; warm projects pay one
@@ -409,6 +415,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// if the agent left a half-implementation behind. Empty when
 	// the stage opts out (most stages).
 	var sandboxBoundaryClone, sandboxBoundaryEntryHEAD string
+
+	// Set by the CommitStager when this turn's commit actually touched
+	// projects/<p>/knowledge/. The knowledge-hygiene gate below reads it
+	// so turns that didn't write knowledge pay nothing.
+	var knowledgeTouched bool
 
 	in := wikiSessionInputs{
 		Project:     projectID,
@@ -562,7 +573,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			}
 
 			// moe-howto is the chat workflow's idea-capture / backlog-
-			// grooming skill — chat-only by intent (sdlc / twin / kb
+			// grooming skill — chat-only by intent (sdlc and twin
 			// agents aren't here to groom the backlog, so per "tool
 			// scoping by document" they don't get it). One workflow needs
 			// it today, so a single gate beats a registry; revisit if a
@@ -728,7 +739,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						}
 						extras = append(extras, more...)
 					}
-					return commitTurn(workRoot, md, docID, extras...)
+					if err := commitTurn(workRoot, md, docID, extras...); err != nil {
+						return err
+					}
+					// HEAD is this turn's commit and the worktree is still
+					// open — the one moment the "did this turn write
+					// knowledge?" question is cheap to answer exactly.
+					knowledgeTouched = commitTouchedKnowledge(workRoot, md.Project)
+					return nil
 				},
 				PreFinalizeGate: opts.PreFinalizeGate,
 			}, nil
@@ -752,6 +770,17 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		if err := checkSandboxBoundary(sandboxBoundaryClone, sandboxBoundaryEntryHEAD, docID); err != nil {
 			moePrintf(stderr, "%s: %v\n", docID, err)
 			return 1
+		}
+	}
+	// Knowledge-hygiene gate, same slot and same reasoning as the
+	// boundary check above: after the bureaucracy commit (the agent's
+	// topic edits ride it regardless), before the cascade prompt, so a
+	// turn that broke the index can't drag the chain forward. Skipped on
+	// a fix turn — that's the gate's own recovery attempt, and it
+	// re-scans on return instead of recursing.
+	if knowledgeTouched && !opts.knowledgeFixTurn {
+		if code := enforceKnowledgeHygiene(root, md, docID, opts, stdout, stderr); code != 0 {
+			return code
 		}
 	}
 	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID)
@@ -987,7 +1016,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	}
 
 	// Wiki integration — built after BuildSpec so callers that need
-	// run metadata (e.g. the kb wiki builder reads md.Project) can
+	// run metadata (e.g. the twin wiki builder reads md.Project) can
 	// resolve it first. The canonical config's ContentDir gets
 	// rewritten to live inside the session worktree so prompt paths
 	// and engine git-status calls reference the active worktree.
@@ -1012,13 +1041,12 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 			}
 			worktreeCfg.BureaucracyPath = workRoot
 			wikiCfg = &worktreeCfg
-			// Closed-schema bootstrap: create stubs for any managed
-			// doc that doesn't yet exist. Runs before EnsureOpsStash
-			// so the rest of the turn sees a populated content dir.
-			// Open-schema is a no-op. Failures here are real I/O or
-			// config errors — bail before the executor runs so the
-			// operator sees the root cause instead of a downstream
-			// invariant breach at finalize.
+			// Bootstrap: create stubs for any managed doc that doesn't
+			// yet exist, so the rest of the turn sees a populated
+			// content dir. Failures here are real I/O or config errors
+			// — bail before the executor runs so the operator sees the
+			// root cause instead of a downstream invariant breach at
+			// finalize.
 			stubbed, err := wiki.EnsureManagedDocs(*wikiCfg)
 			if err != nil {
 				moePrintf(stderr, "wiki: %v\n", err)
@@ -1026,13 +1054,6 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 				return 1
 			}
 			docsStubbed = stubbed
-			// Seed the .wiki-ops stash so the agent has a fresh
-			// scratchpad. Failure is non-fatal — the log entry
-			// degrades to content-edit-only if the stash never
-			// materialises.
-			if err := wiki.EnsureOpsStash(wikiCfg.ContentDir); err != nil {
-				moePrintf(stderr, "wiki: %v\n", err)
-			}
 		}
 	}
 

@@ -253,7 +253,7 @@ func valueCandidates(root string, k argKind) []string {
 
 // projectRunCandidates lists every non-idea run as `project/run`. Idea
 // runs are excluded — they share the slug shape but are a different
-// token kind (completed via argIdea), and an sdlc/kb verb can't act on
+// token kind (completed via argIdea), and an sdlc verb can't act on
 // one. No status filter: cat, log, and reopen legitimately target
 // closed and merged runs, so hiding them would cost more than the noise
 // of listing them.
@@ -265,7 +265,7 @@ func projectRunCandidates(root string) []string {
 	out := make([]string, 0, len(mds))
 	for _, md := range mds {
 		// Idea and intent runs share the slug shape but are their own
-		// token kinds (argIdea / argIntent); an sdlc/kb verb can't act on
+		// token kinds (argIdea / argIntent); an sdlc verb can't act on
 		// one, so keep them out of the generic project/run set.
 		if md.Workflow == dash.IdeaWorkflow || md.Workflow == dash.IntentWorkflow {
 			continue

@@ -17,7 +17,7 @@ import (
 // run-scoped canvas grows a `cat` subcommand on its group. Skipping a
 // workflow drops the shared shape — this test is the tripwire.
 func TestCatRegisteredOnEveryWorkflow(t *testing.T) {
-	for _, wf := range []string{"idea", "sdlc", "kb", "hooks", "twin"} {
+	for _, wf := range []string{"idea", "sdlc", "twin", "chat", "pulse"} {
 		g, err := LookupGroup(wf)
 		if err != nil {
 			t.Fatalf("workflow %q not registered as a group: %v", wf, err)
@@ -104,7 +104,7 @@ func TestCatWrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"kb", "cat", "tele/fix-it", "research"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"twin", "cat", "tele/fix-it", "vision"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
 	}
@@ -166,17 +166,17 @@ func TestCatSingleStageDefaultsStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
-	trailerstest.SeedRun(t, root, "tele", "fix-hooks", "hooks", run.StatusInProgress)
-	writeContent(t, root, "tele", "fix-hooks", "code", "# hooks canvas\n")
+	trailerstest.SeedRun(t, root, "tele", "chat-1", "chat", run.StatusInProgress)
+	writeContent(t, root, "tele", "chat-1", "chat", "# chat canvas\n")
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"hooks", "cat", "tele/fix-hooks"}, &out, &errb)
+	code := Run([]string{"chat", "cat", "tele/chat-1"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if out.String() != "# hooks canvas\n" {
+	if out.String() != "# chat canvas\n" {
 		t.Fatalf("unexpected canvas dump: %q", out.String())
 	}
 }

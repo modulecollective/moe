@@ -870,7 +870,7 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 		// COMPLETED. Keep it in ACTIVE with a `· close?` action hint,
 		// same shape as the `· reopen?` hint on closed sdlc runs.
 		// Twin is the canonical case (`done → close` is the only path);
-		// sdlc-without-push and kb hit the same shape.
+		// sdlc-without-push hits the same shape.
 		return BucketActiveRuns, prefix + "done · close?", "done", ""
 	}
 	runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)

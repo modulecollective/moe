@@ -35,14 +35,10 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"twin vision", []string{"twin", "vision", "--agent=gpt", "moe/x"}},
 		{"twin architecture", []string{"twin", "architecture", "--agent=gpt", "moe/x"}},
 		{"twin finalize", []string{"twin", "finalize", "--agent=gpt", "moe/x"}},
-		{"kb research", []string{"kb", "research", "--agent=gpt", "moe/x"}},
-		{"kb summarize", []string{"kb", "summarize", "--agent=gpt", "moe/x"}},
-		{"hooks code", []string{"hooks", "code", "--agent=gpt", "moe/x"}},
 		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
 		{"pulse pulse", []string{"pulse", "pulse", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
-		{"kb lint", []string{"kb", "lint", "--agent=gpt", "moe"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

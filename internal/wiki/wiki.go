@@ -1,58 +1,31 @@
-// Package wiki is the shared engine that backs per-project wikis (kb
-// today, twin tomorrow). A wiki is (engine, schema-config,
-// content-directory, checkpoint): the engine and schema-config are
-// shared infrastructure; the content directory and checkpoint are
-// per-instance.
+// Package wiki is the engine behind the project digital twin: a
+// closed-schema wiki over a fixed doc set. A wiki is (engine, config,
+// content-directory, checkpoint) — the engine is shared infrastructure;
+// the content directory and checkpoint are per-instance.
 //
-// The engine owns the on-disk shape (index.md, log.md, checkpoint.json
-// and the invariants between them), the system-prompt section that
-// frames an ingest session, and the session-end finalization that
-// appends to log.md and writes checkpoint.json. Schema-config (open vs.
-// closed, ingest prompt body, allowed primitives) is supplied per
-// instance via Config.
+// The engine owns the on-disk shape (the managed docs, log.md,
+// checkpoint.json and the invariants between them), the system-prompt
+// section that frames an ingest session, and the session-end
+// finalization that appends to log.md and writes checkpoint.json.
 //
-// Phase 1 ships one instance — the kb open-schema config — and leaves
-// room for the twin's closed-schema config plus operations like Lint
-// and Reflect. The surface deliberately doesn't lock those in yet.
+// The engine was once generic over two schema modes — the twin's fixed
+// doc set and the kb workflow's freely-evolving one. kb is gone and the
+// open-schema half with it; a project's `knowledge/` tree is now a plain
+// doc tree that any sdlc stage may write, checked by internal/knowledge
+// rather than driven by an engine.
 package wiki
 
-// Mode picks between the two schema-evolution dispositions. Open lets
-// the agent split / merge / rename / retire topic docs as warranted.
-// Closed (twin) refuses doc-set changes that aren't explicitly
-// authorized; the finalize invariant check enforces that boundary.
-type Mode int
-
-const (
-	// Open — kb-style. Schema evolves under the operator's eye.
-	Open Mode = iota
-	// Closed — twin-style. Doc set is fixed; only authorized
-	// schema changes are permitted.
-	Closed
-)
-
-// String returns a stable, lowercase label for prompts and logs.
-func (m Mode) String() string {
-	switch m {
-	case Open:
-		return "open"
-	case Closed:
-		return "closed"
-	default:
-		return "unknown"
-	}
-}
-
-// Config is the per-instance schema-config for a wiki. One instance
-// today (kb); the twin will register a second when it lands.
+// Config is the per-instance config for a wiki. One instance today (the
+// twin), one per project.
 //
 // Paths are absolute. ContentDir points at the directory the agent
-// edits (e.g. <root>/projects/<p>/kb). ProjectRepoPath points at the
-// project's submodule checkout (<root>/projects/<p>/src) and may be
+// edits (<root>/projects/<p>/digital-twin). ProjectRepoPath points at
+// the project's submodule checkout (<root>/projects/<p>/src) and may be
 // "" if the project is registered without a submodule on disk — that
 // just means checkpoint records project_repo_sha=null.
 type Config struct {
 	// Name is the short label used in prompts and log entries
-	// (e.g. "kb").
+	// (e.g. "twin").
 	Name string
 	// ContentDir is the absolute path to the wiki's on-disk dir.
 	ContentDir string
@@ -65,27 +38,18 @@ type Config struct {
 	// BureaucracyPath is the absolute path to the bureaucracy repo
 	// root. Used to capture bureaucracy_sha at finalize time.
 	BureaucracyPath string
-	// Mode selects open- vs. closed-schema rules for the ingest
-	// prompt and finalize invariant checks.
-	Mode Mode
-	// IngestPrompt is the schema-config body that gets pasted into
-	// the system prompt above the engine's mode rules. Carries the
+	// IngestPrompt is the per-instance body that gets pasted into
+	// the system prompt above the engine's schema rules. Carries the
 	// "what is this wiki for, what's its tone" framing.
 	IngestPrompt string
-	// AllowedPrimitives lists the schema-evolution operations the
-	// agent is allowed to use. Open-schema typically lists
-	// {split, merge, rename, retire}; closed-schema is empty (or a
-	// strict subset). Surfaced verbatim in the prompt.
-	AllowedPrimitives []string
 	// ManagedDocs is the hard-fixed set of docs the engine knows
-	// about under closed-schema. Empty for open-schema (kb), required
-	// for closed-schema (twin). Order is the order the docs are
-	// rendered in preambles, kickoff prompts, and lint reports.
+	// about. Required. Order is the order the docs are rendered in
+	// preambles, kickoff prompts, and hygiene reports.
 	ManagedDocs []ManagedDoc
 }
 
-// ManagedDoc names one of a closed-schema wiki's hard-fixed docs.
-// Twin's four (vision / architecture / patterns / operations) live in
+// ManagedDoc names one of the wiki's hard-fixed docs. Twin's five
+// (vision / architecture / patterns / operations / glossary) live in
 // internal/cli/twin.go; the engine treats them as opaque
 // (filename, title, purpose, per-doc reflect framing).
 type ManagedDoc struct {

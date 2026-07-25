@@ -170,7 +170,7 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		// Same refusal the CLI's runNew makes — the binding means
 		// nothing to the other workflows and would strand the claim.
 		if !wf.Workspace {
-			fail("workspace: only sdlc and hooks accept a workspace binding")
+			fail("workspace: only sdlc accepts a workspace binding")
 			return
 		}
 	}
@@ -1320,7 +1320,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !wf.Workspace {
-			fail("workspace: only sdlc and hooks accept a workspace binding")
+			fail("workspace: only sdlc accepts a workspace binding")
 			return
 		}
 	}

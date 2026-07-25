@@ -173,7 +173,7 @@ func init() {
 //
 // The workflow must move intent: sdlc and twin do — code and the
 // recorded canon — while the rest of the close-registered workflows
-// (chat, kb, hooks, chores) and pulse itself do not, which is what
+// (chat, idea) and pulse itself do not, which is what
 // makes pulse-on-pulse recursion impossible. Used by both the close
 // seam and the push seam (twin has no push, so at a push point the
 // workflow is always sdlc — that half of the guard is defensive there).

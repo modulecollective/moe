@@ -23,7 +23,7 @@ import (
 // that sit between nothing and a full run. Ideas are just runs in a
 // dedicated single-stage workflow (dash.IdeaWorkflow, dash.IdeaDocID) so
 // the slug namespace, dash bucketing, and trailer conventions are the
-// same as sdlc/kb. The distinguishing discipline: `moe idea` verbs
+// same as sdlc. The distinguishing discipline: `moe idea` verbs
 // never launch an agent — capture stays cheap.
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
@@ -337,7 +337,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 
 // runIdeaClose is the entry point for `moe idea close`. Delegates to
 // the shared close handler in close.go; ideas keep the short `Close
-// idea <p>/<r>` subject shape that predates the shared helper (sdlc/kb
+// idea <p>/<r>` subject shape that predates the shared helper (sdlc
 // use `Close <wf> run <p>/<r>` — see design).
 func runIdeaClose(args []string, stdout, stderr io.Writer) int {
 	return runClose(dash.IdeaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)

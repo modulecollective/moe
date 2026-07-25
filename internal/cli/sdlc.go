@@ -17,12 +17,12 @@ import (
 )
 
 // The SDLC workflow owns the design→code→review→test→push lifecycle. Stages are
-// nested under `moe sdlc` so kb (and future workflows) can pick their
+// nested under `moe sdlc` so other workflows can pick their
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
 
 // sdlcWorkflow is the workflow ID stamped on run.json for lifecycle
-// runs. Sibling of hooksWorkflow / choresWorkflow.
+// runs.
 const sdlcWorkflow = "sdlc"
 
 // sdlcCloseSubject is the commit-subject template for closing an sdlc

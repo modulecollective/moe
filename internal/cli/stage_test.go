@@ -308,7 +308,6 @@ func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 	// for this test, only that the section is emitted.
 	wikiCfg := &wiki.Config{
 		Name:            "twin",
-		Mode:            wiki.Closed,
 		ContentDir:      twinDir,
 		Project:         "tele",
 		BureaucracyPath: root,
@@ -984,12 +983,11 @@ func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
 		DocID:       "design",
 		LockPurpose: "stage",
 		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			// Closed-schema with empty ManagedDocs is the cleanest
-			// trigger: bootstrap returns the error before any I/O,
-			// so the test doesn't need permission games.
+			// Empty ManagedDocs is the cleanest trigger: bootstrap
+			// returns the error before any I/O, so the test doesn't
+			// need permission games.
 			return &wiki.Config{
 				Name:            "twin",
-				Mode:            wiki.Closed,
 				ContentDir:      filepath.Join(canonicalRoot, "projects", "moe", "twin"),
 				BureaucracyPath: canonicalRoot,
 			}, nil
@@ -1058,13 +1056,14 @@ func TestRunWikiSessionBuildsInitialPromptAgainstWorktree(t *testing.T) {
 		DocID:       "vision",
 		LockPurpose: "stage",
 		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			// Open schema keeps EnsureManagedDocs a no-op, so the turn
-			// reaches the builder without managed-doc fixtures.
+			// One managed doc, no fixture on disk: EnsureManagedDocs
+			// stubs it inside the worktree and the turn reaches the
+			// builder — which is exactly the path under test.
 			return &wiki.Config{
 				Name:            "twin",
-				Mode:            wiki.Open,
 				ContentDir:      canonicalContentDir,
 				BureaucracyPath: canonicalRoot,
+				ManagedDocs:     []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
 			}, nil
 		},
 		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {

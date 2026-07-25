@@ -242,7 +242,7 @@ type NewRunWorkflow struct {
 	// run in this workflow (the registry's first ladder stage).
 	FirstStage string
 	// Workspace reports whether the workflow accepts a workspace
-	// binding (the CLI's "only sdlc and hooks accept --workspace"
+	// binding (the CLI's "only sdlc accepts --workspace"
 	// rule); the form rejects a workspace selection otherwise.
 	Workspace bool
 }

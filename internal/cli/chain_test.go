@@ -743,9 +743,6 @@ func TestActiveChainItemsMembership(t *testing.T) {
 	mds := []*run.Metadata{
 		mk("s", "sdlc", run.StatusInProgress),
 		mk("t", "twin", run.StatusInProgress),
-		mk("k", "kb", run.StatusInProgress),
-		mk("h", "hooks", run.StatusInProgress),
-		mk("c", "chores", run.StatusInProgress),
 		mk("q", chainWorkflow, run.StatusInProgress), // batch head — admitted on top of the predicate
 		mk("chat1", "chat", run.StatusInProgress),    // perpetual — excluded
 		mk("pulse1", "pulse", run.StatusInProgress),  // machine-paced — excluded
@@ -767,7 +764,7 @@ func TestActiveChainItemsMembership(t *testing.T) {
 			got[it.Key] = true
 		}
 	}
-	want := map[string]bool{"p/s": true, "p/t": true, "p/k": true, "p/h": true, "p/c": true, "p/q": true}
+	want := map[string]bool{"p/s": true, "p/t": true, "p/q": true}
 	for k := range want {
 		if !got[k] {
 			t.Errorf("chainable run %q should be offered for chaining", k)

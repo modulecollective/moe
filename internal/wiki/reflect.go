@@ -41,10 +41,6 @@ var firstReflectCommitCap = 500
 // and this block is the verbatim tail since SHA-prev. On first reflect
 // (no checkpoint) the tail is the full project history.
 func EventsSinceCheckpoint(cfg Config) (string, error) {
-	if cfg.Mode != Closed {
-		return "", fmt.Errorf("wiki: events block is closed-schema only (got %s)", cfg.Mode)
-	}
-
 	cp, ok, err := ReadCheckpoint(cfg.ContentDir)
 	if err != nil {
 		return "", err
@@ -241,12 +237,8 @@ func HistorySummaryPath(cfg Config) string {
 // ReadHistorySummary reads <ContentDir>/history-summary.md if present.
 // Returns ("", nil) when the file is absent or empty — both are normal
 // states (a fresh wiki has no summary, and the agent seeds it at the
-// end of the first reflect pass). Closed-schema only, like the rest of
-// reflect.
+// end of the first reflect pass).
 func ReadHistorySummary(cfg Config) (string, error) {
-	if cfg.Mode != Closed {
-		return "", fmt.Errorf("wiki: history summary is closed-schema only (got %s)", cfg.Mode)
-	}
 	body, err := os.ReadFile(historySummaryPath(cfg.ContentDir))
 	if err != nil {
 		if os.IsNotExist(err) {

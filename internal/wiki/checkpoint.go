@@ -24,11 +24,9 @@ type Checkpoint struct {
 	ProjectRepoSHA *string `json:"project_repo_sha"`
 }
 
-// topicsSubdir is the basename of the directory under ContentDir that
-// holds topic docs. index.md, log.md, checkpoint.json and .wiki-ops
-// stay at the top of ContentDir; per-topic *.md files live inside
-// topicsSubdir so the corpus catalog (index.md) sits clean above the
-// topic-doc dump.
+// topicsSubdir is the subdirectory name the schema invariants refuse:
+// this engine's doc set is flat and fixed, so a topics/ dir under
+// ContentDir means someone brought a different corpus shape in.
 const topicsSubdir = "topics"
 
 // checkpointPath returns the absolute path to checkpoint.json given a
@@ -37,24 +35,13 @@ func checkpointPath(contentDir string) string {
 	return filepath.Join(contentDir, "checkpoint.json")
 }
 
-// topicsDir returns the absolute path to the topics subdirectory given
-// a ContentDir.
-func topicsDir(contentDir string) string {
-	return filepath.Join(contentDir, topicsSubdir)
-}
-
 // logPath returns the absolute path to log.md given a ContentDir.
 func logPath(contentDir string) string {
 	return filepath.Join(contentDir, "log.md")
 }
 
-// indexPath returns the absolute path to index.md given a ContentDir.
-func indexPath(contentDir string) string {
-	return filepath.Join(contentDir, "index.md")
-}
-
 // historySummaryName is the basename of the rolling-summary doc the
-// agent maintains during reflect. Exempted from the closed-schema
+// agent maintains during reflect. Exempted from the schema
 // invariants alongside log.md — engine-aware but agent-written, so it's
 // neither a managed doc with a ReflectPrompt nor a stray .md the
 // schema-drift check should reject.

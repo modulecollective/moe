@@ -137,7 +137,7 @@ func TestRunNewFromIdeaSeedsFirstStageAndPromotesSource(t *testing.T) {
 	}
 }
 
-func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
+func TestRunNewFromIdeaWorksForNonSdlcFirstStage(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -149,14 +149,14 @@ func TestRunNewFromIdeaWorksForKBFirstStage(t *testing.T) {
 	captureIdea(t, "tele", "dns-basics")
 
 	var out, errb bytes.Buffer
-	code := runNew("kb", []string{"--from-idea=tele/dns-basics"}, &out, &errb)
+	code := runNew("chat", []string{"--from-idea=tele/dns-basics"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	// kb's first stage is "research"; slug date-suffixes on collision.
+	// chat's first stage is "chat"; slug date-suffixes on collision.
 	dated := "dns-basics-" + todayDateSuffix()
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "research", "content.md")); err != nil {
-		t.Fatalf("kb's first-stage doc not seeded under %s: %v", dated, err)
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", dated, "documents", "chat", "content.md")); err != nil {
+		t.Fatalf("chat's first-stage doc not seeded under %s: %v", dated, err)
 	}
 }
 
@@ -707,7 +707,7 @@ func TestRunNewShipParkMutuallyExclusive(t *testing.T) {
 // A workflow with no registered cascade dispatcher can't cascade —
 // --ship refuses at flag-parse time, before minting a run it couldn't
 // ship. Every workflow ships with a dispatcher today, so simulate the
-// gap by pulling kb's out of the registry for the duration of the test;
+// gap by pulling twin's out of the registry for the duration of the test;
 // the `new` facade is generic, so the preflight is what keeps a future
 // dispatcher-less workflow from minting a run it can't walk.
 func TestRunNewShipRefusedWithoutDispatcher(t *testing.T) {
@@ -717,12 +717,12 @@ func TestRunNewShipRefusedWithoutDispatcher(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	prev := cascadeDispatchers["kb"]
-	delete(cascadeDispatchers, "kb")
-	t.Cleanup(func() { cascadeDispatchers["kb"] = prev })
+	prev := cascadeDispatchers["twin"]
+	delete(cascadeDispatchers, "twin")
+	t.Cleanup(func() { cascadeDispatchers["twin"] = prev })
 
 	var out, errb bytes.Buffer
-	code := runNew("kb", []string{"--ship", "tele/no-cascade"}, &out, &errb)
+	code := runNew("twin", []string{"--ship", "tele/no-cascade"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}

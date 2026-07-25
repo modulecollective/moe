@@ -22,9 +22,6 @@ func TestOperatorCascadesPredicate(t *testing.T) {
 	}{
 		{"sdlc", true},
 		{"twin", true},
-		{"kb", true},
-		{"hooks", true},
-		{"chores", true},
 		{"chat", false},   // perpetual — "ship" is meaningless
 		{"pulse", false},  // machine-paced — moe drives it
 		{"idea", false},   // no cascade dispatcher
@@ -115,9 +112,8 @@ func TestStageVerbCascadeRoutesTwin(t *testing.T) {
 func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 	verbs := [][]string{
 		{"twin", "vision"},
-		{"kb", "research"},
-		{"hooks", "code"},
-		{"chores", "code"},
+		{"twin", "finalize"},
+		{"sdlc", "code"},
 	}
 	for _, v := range verbs {
 		t.Run(v[0]+"/"+v[1], func(t *testing.T) {
@@ -135,10 +131,9 @@ func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 }
 
 // TestStageVerbToNamesWorkflowLadder: a bad --to destination names the
-// verb's own workflow ladder, not sdlc's. The multi-stage case lists
-// the twin stages; the single-stage case (hooks) reports "no stage
-// follows code" since nothing succeeds the only stage. Both fire before
-// any run lookup, so no fixture is needed.
+// verb's own workflow ladder, not sdlc's; and a --to pointed at the last
+// stage of a ladder reports "no stage follows <stage>" since nothing
+// succeeds it. Both fire before any run lookup, so no fixture is needed.
 func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -157,11 +152,11 @@ func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
 	}
 
 	errb.Reset()
-	if code := Run([]string{"hooks", "code", "--to=code", "tele/ghost"}, &out, &errb); code != 2 {
-		t.Fatalf("hooks --to=code exit=%d, want 2; stderr=%q", code, errb.String())
+	if code := Run([]string{"twin", "finalize", "--to=finalize", "tele/ghost"}, &out, &errb); code != 2 {
+		t.Fatalf("twin --to=finalize exit=%d, want 2; stderr=%q", code, errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("no stage follows code")) {
-		t.Fatalf("expected no-successor branch for single-stage hooks, got: %q", errb.String())
+	if !bytes.Contains(errb.Bytes(), []byte("no stage follows finalize")) {
+		t.Fatalf("expected no-successor branch for the last stage, got: %q", errb.String())
 	}
 }
 

@@ -35,8 +35,8 @@ func TwinReferenceSection(cfg Config) string {
 
 // TwinReferenceSectionAt is the path-driven variant of
 // TwinReferenceSection. Useful for callers that don't have a wiki
-// Config in hand (e.g. stage sessions whose wiki is the kb, but who
-// still want the twin reference for context).
+// Config in hand (e.g. an sdlc stage session with no wiki of its own
+// that still wants the twin reference for context).
 func TwinReferenceSectionAt(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""

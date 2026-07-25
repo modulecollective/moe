@@ -207,10 +207,6 @@ func mintReflectRun(root, projectID, spawnedBy, agentOverride string, canonical 
 	if canonical == nil {
 		return nil, fmt.Errorf("wiki: builder returned nil config; reflect requires a registered wiki")
 	}
-	if canonical.Mode != wiki.Closed {
-		return nil, fmt.Errorf("wiki: reflect is closed-schema only (%s is %s)", canonical.Name, canonical.Mode)
-	}
-
 	// One pass at a time: two concurrent reflects would each see the same
 	// kickoff context (events, findings, feedback) but write divergent
 	// stage commits, and the `EventsSinceCheckpoint` filter has no way to
@@ -322,9 +318,8 @@ func reflectPostFlightGate(worktreeWiki *wiki.Config, stderr io.Writer) error {
 // block printed above; this is just the rolled-up number for the
 // terminal "found N unresolved findings" line.
 func findingsCount(f wiki.Findings) int {
-	return len(f.Orphans) + len(f.MissingFromIndex) + len(f.BrokenLinks) +
-		len(f.EmptyDocs) + len(f.MissingManagedDocs) + len(f.GlossaryOrphans) +
-		len(f.DanglingXrefs)
+	return len(f.BrokenLinks) + len(f.EmptyDocs) + len(f.MissingManagedDocs) +
+		len(f.GlossaryOrphans) + len(f.DanglingXrefs)
 }
 
 // unrecordedEditsRedirect formats the one-line redirect printed when

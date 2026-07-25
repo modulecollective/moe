@@ -77,7 +77,7 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -127,7 +127,7 @@ func TestEventsSinceCheckpointFirstReflectUnbounded(t *testing.T) {
 	gittest.Run(t, projectRepo, "commit", "-m", "ancient commit")
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -183,7 +183,7 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -266,7 +266,7 @@ func TestEventsSinceCheckpointClosedRunsKeyOnGitHistory(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -317,7 +317,7 @@ func TestProjectCommitsSince_StatErrorPropagates(t *testing.T) {
 	writeFile(t, blocker, "")
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -345,7 +345,7 @@ func TestProjectCommitsSince_StatNotExistStillSilent(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -390,7 +390,7 @@ func TestProjectCommitsSince_IncrementalGitFailurePropagates(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -427,7 +427,7 @@ func TestClosedRunsSince_MalformedLastIngestAtPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -451,7 +451,7 @@ func TestReadHistorySummaryMissingIsEmpty(t *testing.T) {
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Mode: Closed, ContentDir: twinDir, Project: "p"}
+	cfg := Config{ContentDir: twinDir, Project: "p"}
 	got, err := ReadHistorySummary(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +465,7 @@ func TestReadHistorySummaryReadsContent(t *testing.T) {
 	root := t.TempDir()
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	writeFile(t, historySummaryPath(twinDir), "# History\n\nThe twin was seeded in 2026-Q1.\n")
-	cfg := Config{Mode: Closed, ContentDir: twinDir, Project: "p"}
+	cfg := Config{ContentDir: twinDir, Project: "p"}
 	got, err := ReadHistorySummary(cfg)
 	if err != nil {
 		t.Fatal(err)

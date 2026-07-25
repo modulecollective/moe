@@ -21,7 +21,7 @@ type serveWorkflowDecl struct {
 	excludeStages []string
 	// newRun fronts the workflow in serve's /run/new and promote forms.
 	newRun bool
-	// workspace mirrors runNew's "only sdlc and hooks accept
+	// workspace mirrors runNew's "only sdlc accepts
 	// --workspace" rule for the new-run form's workspace dropdown.
 	workspace bool
 }

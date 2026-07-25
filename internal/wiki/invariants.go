@@ -7,51 +7,39 @@ import (
 	"strings"
 )
 
-// assertModeInvariantsPreFinalize is the guardrail the engine runs pre-finalize.
-// For open-schema wikis it's a no-op — the agent is permitted to evolve
-// the doc set freely. For closed-schema wikis (the twin) it refuses a
-// finalize that would add or remove docs the operator hasn't authorized:
-// every cfg.ManagedDocs[i].Filename must be present, no other top-level
-// .md may exist, no topics/ subdir may exist.
+// assertSchemaInvariantsPreFinalize is the guardrail the engine runs
+// pre-finalize. It refuses a finalize that would add or remove docs the
+// operator hasn't authorized: every cfg.ManagedDocs[i].Filename must be
+// present, no other top-level .md may exist, no topics/ subdir may
+// exist.
 //
 // The bootstrap exception is handled by the caller: runWikiSession
-// passes opts.Bootstrap=true on the first turn for a fresh closed-schema
-// wiki (when the engine just wrote the stubs). On bootstrap turns the
-// present-docs check skips — the stubs are about to land in the same
-// commit and assertModeInvariantsPreFinalize is called pre-finalize, so the docs
+// passes opts.Bootstrap=true on the first turn for a fresh wiki (when
+// the engine just wrote the stubs). On bootstrap turns the present-docs
+// check skips — the stubs are about to land in the same commit and
+// assertSchemaInvariantsPreFinalize is called pre-finalize, so the docs
 // are always on disk by then anyway, but the flag exists so callers can
 // skip the check explicitly when they know they just stubbed.
-func assertModeInvariantsPreFinalize(cfg Config) error {
-	return assertModeInvariants(cfg, false)
+func assertSchemaInvariantsPreFinalize(cfg Config) error {
+	return assertSchemaInvariants(cfg, false)
 }
 
-// assertModeInvariantsBootstrap is assertModeInvariantsPreFinalize with the
-// present-docs requirement relaxed: missing managed docs are tolerated
-// because the engine is about to create them in this turn. Used by
-// runWikiSession on the first turn for a fresh closed-schema wiki.
-func assertModeInvariantsBootstrap(cfg Config) error {
-	return assertModeInvariants(cfg, true)
+// assertSchemaInvariantsBootstrap is assertSchemaInvariantsPreFinalize
+// with the present-docs requirement relaxed: missing managed docs are
+// tolerated because the engine is about to create them in this turn.
+// Used by runWikiSession on the first turn for a fresh wiki.
+func assertSchemaInvariantsBootstrap(cfg Config) error {
+	return assertSchemaInvariants(cfg, true)
 }
 
-func assertModeInvariants(cfg Config, bootstrap bool) error {
-	switch cfg.Mode {
-	case Open:
-		return nil
-	case Closed:
-		return assertClosedInvariants(cfg, bootstrap)
-	default:
-		return fmt.Errorf("wiki: unknown mode %d", cfg.Mode)
-	}
-}
-
-func assertClosedInvariants(cfg Config, bootstrap bool) error {
+func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 	if len(cfg.ManagedDocs) == 0 {
-		return fmt.Errorf("wiki: closed-schema requires ManagedDocs to be non-empty")
+		return fmt.Errorf("wiki: engine requires ManagedDocs to be non-empty")
 	}
 	managed := make(map[string]bool, len(cfg.ManagedDocs))
 	for _, d := range cfg.ManagedDocs {
 		if d.Filename == "" {
-			return fmt.Errorf("wiki: closed-schema ManagedDoc has empty filename")
+			return fmt.Errorf("wiki: ManagedDoc has empty filename")
 		}
 		managed[d.Filename] = true
 	}
@@ -60,7 +48,7 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 		for _, d := range cfg.ManagedDocs {
 			if _, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename)); err != nil {
 				if os.IsNotExist(err) {
-					return fmt.Errorf("wiki: closed-schema missing managed doc %s", d.Filename)
+					return fmt.Errorf("wiki: missing managed doc %s", d.Filename)
 				}
 				return fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
 			}
@@ -83,7 +71,7 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 		name := e.Name()
 		if e.IsDir() {
 			if name == topicsSubdir {
-				return fmt.Errorf("wiki: closed-schema must not contain a %s/ subdir", topicsSubdir)
+				return fmt.Errorf("wiki: must not contain a %s/ subdir", topicsSubdir)
 			}
 			continue
 		}
@@ -102,7 +90,7 @@ func assertClosedInvariants(cfg Config, bootstrap bool) error {
 		if name == "log.md" || name == historySummaryName {
 			continue
 		}
-		return fmt.Errorf("wiki: closed-schema has unexpected top-level doc %s", name)
+		return fmt.Errorf("wiki: unexpected top-level doc %s", name)
 	}
 	return nil
 }

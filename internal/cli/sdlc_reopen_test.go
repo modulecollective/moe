@@ -230,16 +230,16 @@ func TestSDLCReopenRefusesMissingRun(t *testing.T) {
 }
 
 // TestSDLCReopenRefusesNonSDLC: reopen lives under the sdlc verb and
-// only seeds a "design" doc. A kb prior would either error at
+// only seeds a "design" doc. A twin prior would either error at
 // run.New (no design stage) or silently land in the wrong workflow.
 // Refuse early and explicitly.
 func TestSDLCReopenRefusesNonSDLC(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "kb-prior", "kb", run.StatusClosed)
+	root := seedCloseFixture(t, "tele", "twin-prior", "twin", run.StatusClosed)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "tele/kb-prior"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "tele/twin-prior"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -344,7 +344,7 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 }
 
 // TestDashClosedNonSDLCHasNoReopenMarker: reopen is an sdlc verb;
-// surfacing the marker on kb rows would advertise an action the
+// surfacing the marker on twin rows would advertise an action the
 // operator can't take.
 func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 	root := newTestBureaucracy(t)
@@ -352,17 +352,17 @@ func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	trailerstest.SeedRun(t, root, "tele", "kb-dead", "kb", run.StatusClosed)
-	trailerstest.CommitTrailer(t, root, "Close kb run tele/kb-dead",
-		"MoE-Run: kb-dead\nMoE-Project: tele\nMoE-Workflow: kb",
+	trailerstest.SeedRun(t, root, "tele", "twin-dead", "twin", run.StatusClosed)
+	trailerstest.CommitTrailer(t, root, "Close twin reflect pass tele/twin-dead",
+		"MoE-Run: twin-dead\nMoE-Project: tele\nMoE-Workflow: twin",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
 	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "kb:closed") {
-		t.Fatalf("expected kb closed row, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "twin:closed") {
+		t.Fatalf("expected twin closed row, got:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "reopen?") {
 		t.Fatalf("non-sdlc closed row should not carry the reopen marker:\n%s", out.String())

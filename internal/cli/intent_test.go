@@ -435,7 +435,7 @@ func TestIsCaptureWorkflow(t *testing.T) {
 			t.Errorf("expected %q to be a capture workflow", wf)
 		}
 	}
-	for _, wf := range []string{"sdlc", "kb", "twin", "chat", "pulse", "hooks", "chores"} {
+	for _, wf := range []string{"sdlc", "twin", "chat", "pulse"} {
 		if isCaptureWorkflow(wf) {
 			t.Errorf("expected %q not to be a capture workflow", wf)
 		}

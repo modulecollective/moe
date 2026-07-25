@@ -442,14 +442,29 @@ read-only context; do not edit those paths.
 
 	// Names the project dirs that ride the turn commit. Without it the
 	// read-only-context sentence above reads as covering the whole
-	// bureaucracy, and a stage that writes a hook or a chore has no way
-	// to know it landed. Rendered from projectCommitDirs so the prompt
-	// can't drift from what stageProjectDirs actually stages; empty for
-	// the workflows that stage neither, so most turns pay nothing.
+	// bureaucracy, and a stage that writes a hook, a chore, or a
+	// knowledge topic has no way to know it landed. Rendered from
+	// projectCommitDirs so the prompt can't drift from what
+	// stageProjectDirs actually stages; empty for the workflows that
+	// stage none, so most turns pay nothing.
+	//
+	// Each dir gets a one-line routing cue and the skill carries the
+	// rest — the same inline-the-routing / skill-for-the-how split
+	// followupsReferenceSection makes. The knowledge line is the one
+	// that has to *invite*: nothing else tells an agent that a durable
+	// domain fact it just learned has a home.
 	if dirs := projectCommitDirs(md.Workflow); len(dirs) > 0 {
+		routing := map[string]string{
+			"hooks":     "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
+			"chores":    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
+			"knowledge": "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
+		}
 		paths := make([]string, len(dirs))
 		for i, name := range dirs {
 			paths[i] = filepath.Join(project.Dir(md.Project), name)
+			if cue := routing[name]; cue != "" {
+				paths[i] += "\n      " + cue
+			}
 		}
 		out += fmt.Sprintf(`
 The exception: you may write under the paths below. This turn's
@@ -458,6 +473,19 @@ with the canvas rather than dropping when the session worktree is
 pruned.
 
   %s
+
+Write to `+"`knowledge/`"+` on your own initiative, not only when asked: a
+fact about the project's domain that a future run would want to cite
+belongs in a topic file there. Read `+"`index.md`"+` first, fold into an
+existing topic before minting a new one, and add the topic to
+`+"`index.md`"+` — the stage refuses to close on a knowledge tree with
+orphaned topics, broken links, or empty docs.
+
+Route by what the note *is*: domain reference → `+"`knowledge/`"+`; what
+this project *is* or how it works → `+"`feedback/twin.md`"+`; a portable
+fact true of other projects too → `+"`feedback/lore.md`"+`; work worth
+doing later → `+"`followups.md`"+`. Run-specific notes stay on the canvas.
+The `+"`moe-bureaucracy`"+` skill has the conventions for each.
 `, strings.Join(paths, "\n  "))
 	}
 	return out

@@ -17,7 +17,7 @@ import (
 
 // newRunCommand returns a Command suitable for registering under a
 // workflow as its `new` entry point (e.g., `moe sdlc new`,
-// `moe kb new`). The workflow name is baked into the closure
+// `moe twin new`). The workflow name is baked into the closure
 // so each facade is a thin wrapper — all the real work (slug
 // derivation, collision suffixing, git commit, next-stage hint) lives
 // in runNew.
@@ -36,7 +36,7 @@ func newRunCommand(workflowName string) *Command {
 // commits it, and prints the first stage's invocation so the operator
 // can move straight into work. The workflow is baked in via the caller
 // — there is no --workflow flag here, because the workflow is implicit
-// in which workflow the operator typed (`moe sdlc new` vs `moe kb new`).
+// in which workflow the operator typed (`moe sdlc new` vs `moe chat new`).
 //
 // Positional shape:
 //   - Normal:        `<project>/<slug>` — operator-typed slug, collisions
@@ -59,17 +59,14 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflowName+" new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fromIdea := fs.String("from-idea", "", "promote an open idea run (by `<project>/<slug>`) into a new run, seeding the first-stage doc from its canvas")
-	// --workspace means two things across workflows: sdlc binds the run
-	// to the named workspace as its working tree (claim taken at first
-	// stage attach — sdlc design under the sdlc workflow); hooks records
-	// it as a no-claim label so the operator can see "this hooks run
-	// iterates against <name>" on the dash. The flag parses on every
-	// workflow's shared `new` facade and we reject it for the other
-	// workflows below before doing any work.
-	workspaceName := fs.String("workspace", "", "(sdlc, hooks) bind the run to the named workspace at .moe/named/<project>/<name>/ — sdlc uses it as the run's working tree (claim taken at first stage attach); hooks records it as a no-claim label")
+	// --workspace binds an sdlc run to the named workspace as its working
+	// tree (claim taken at first stage attach — sdlc design). The flag
+	// parses on every workflow's shared `new` facade and we reject it for
+	// the other workflows below before doing any work.
+	workspaceName := fs.String("workspace", "", "(sdlc) bind the run to the named workspace at .moe/named/<project>/<name>/ and use it as the run's working tree; the claim is taken at first stage attach")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
 	// --park, --seed, and the cascade ladder are workflow-generic (they
-	// live on the shared new facade, so sdlc/kb/hooks all get them).
+	// live on the shared new facade, so every workflow gets them).
 	// --park opens the run and prints the next-stage hint instead of
 	// prompting to ride the chain; --seed pops $EDITOR and opens the run
 	// with the edited body as its first-stage seed.
@@ -130,8 +127,8 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *workspaceName != "" {
-		if workflowName != "sdlc" && workflowName != hooksWorkflow {
-			moePrintf(stderr, "--workspace: only sdlc and hooks accept --workspace today\n")
+		if workflowName != sdlcWorkflow {
+			moePrintf(stderr, "--workspace: only sdlc accepts --workspace today\n")
 			return 2
 		}
 		if err := workspace.ValidateName(*workspaceName); err != nil {

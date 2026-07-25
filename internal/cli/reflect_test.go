@@ -42,7 +42,6 @@ func TestReflectKickoffContextRendersAllPassSections(t *testing.T) {
 	}
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -99,7 +98,6 @@ func TestReflectKickoffContextSeedFraming(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -151,7 +149,6 @@ func TestReflectKickoffContextReferencesHistorySummaryByPath(t *testing.T) {
 	}
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -192,7 +189,6 @@ func TestBuildTwinStageKickoffRendersHandedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	worktreeCfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -223,7 +219,6 @@ func TestReflectKickoffContextRendersHygieneFindings(t *testing.T) {
 	}
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -262,7 +257,6 @@ func TestReflectKickoffContextOmitsEmptyHygieneSection(t *testing.T) {
 	}
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -434,7 +428,6 @@ func TestLoadTwinFeedbackFiltersByCheckpoint(t *testing.T) {
 	}
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -499,7 +492,6 @@ func TestLoadTwinFeedbackSurfacesSealingRunsOwnNote(t *testing.T) {
 			}
 
 			cfg := wiki.Config{
-				Mode:            wiki.Closed,
 				Name:            "twin",
 				ContentDir:      twinDir,
 				Project:         "tele",
@@ -540,7 +532,6 @@ func TestLoadTwinFeedbackNoCheckpointReturnsAll(t *testing.T) {
 	writeFeedbackAndCommit(t, root, "tele", "beta", "twin", "beta note", t0.Add(time.Hour))
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -576,7 +567,6 @@ func TestLoadTwinFeedbackIgnoresOtherProjects(t *testing.T) {
 	writeFeedbackAndCommit(t, root, "other", "theirs", "twin", "theirs note", t0)
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -613,7 +603,6 @@ func TestLoadTwinFeedbackSkipsUncommittedFiles(t *testing.T) {
 	// Note: no git add / commit — the file is on disk only.
 
 	cfg := wiki.Config{
-		Mode:            wiki.Closed,
 		Name:            "twin",
 		ContentDir:      twinDir,
 		Project:         "tele",
@@ -681,7 +670,6 @@ func TestReflectPostFlightGate(t *testing.T) {
 	cfg := wiki.Config{
 		Name:       "twin",
 		ContentDir: dir,
-		Mode:       wiki.Closed,
 		ManagedDocs: []wiki.ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
 			{Filename: "patterns.md", Title: "Patterns"},
@@ -714,7 +702,6 @@ func TestReflectPostFlightGateDoesNotBlockOnSoftBudget(t *testing.T) {
 	cfg := wiki.Config{
 		Name:       "twin",
 		ContentDir: dir,
-		Mode:       wiki.Closed,
 		ManagedDocs: []wiki.ManagedDoc{
 			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
 		},
@@ -738,7 +725,6 @@ func TestReflectPostFlightGateCatchesDanglingXref(t *testing.T) {
 	cfg := wiki.Config{
 		Name:       "twin",
 		ContentDir: dir,
-		Mode:       wiki.Closed,
 		ManagedDocs: []wiki.ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
 			{Filename: "patterns.md", Title: "Patterns"},

@@ -8,7 +8,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
-func TestScanClosedSchema(t *testing.T) {
+func TestScanManagedDocs(t *testing.T) {
 	root := newGitRepo(t)
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n\nthe bet\n")
@@ -20,7 +20,7 @@ func TestScanClosedSchema(t *testing.T) {
 		"# Operations\n\nSee [missing](missing.md) for details.\n")
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -44,10 +44,6 @@ func TestScanClosedSchema(t *testing.T) {
 	if len(f.BrokenLinks) != 1 || f.BrokenLinks[0].From != "operations.md" || f.BrokenLinks[0].Target != "missing.md" {
 		t.Errorf("BrokenLinks: got %+v", f.BrokenLinks)
 	}
-	// No orphans / index — closed-schema doesn't have the concept.
-	if len(f.Orphans) != 0 || len(f.MissingFromIndex) != 0 {
-		t.Errorf("closed-schema scan should not surface open-schema fields: %+v", f)
-	}
 }
 
 func TestDetectUnrecordedEditsNoCheckpoint(t *testing.T) {
@@ -55,7 +51,7 @@ func TestDetectUnrecordedEditsNoCheckpoint(t *testing.T) {
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -97,7 +93,7 @@ func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -146,7 +142,7 @@ func TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",
@@ -202,7 +198,7 @@ func TestDetectUnrecordedEditsIgnoresNetNoopRevert(t *testing.T) {
 	}
 
 	cfg := Config{
-		Mode:            Closed,
+
 		ContentDir:      twinDir,
 		BureaucracyPath: root,
 		Project:         "p",

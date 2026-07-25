@@ -30,9 +30,6 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 		wantChips bool
 	}{
 		{workflow: "twin", nextStage: "architecture", wantChips: true},
-		{workflow: "kb", nextStage: "summarize", wantChips: true},
-		{workflow: "hooks", nextStage: "code", wantChips: true},
-		{workflow: "chores", nextStage: "code", wantChips: true},
 		// Undeclared workflows stay read-only: no serve declaration, so
 		// no cascade chips regardless of their CLI dispatcher.
 		{workflow: "idea", nextStage: "idea", wantChips: false},

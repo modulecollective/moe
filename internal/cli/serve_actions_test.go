@@ -36,9 +36,6 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 		stages   []string
 	}{
 		{"twin", []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize"}},
-		{"kb", []string{"research", "summarize"}},
-		{"hooks", []string{"code"}},
-		{"chores", []string{"code"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.workflow, func(t *testing.T) {
@@ -87,7 +84,7 @@ func TestServeNewRunWorkflows(t *testing.T) {
 // reachable through the registry serve's CloseRun callback dispatches
 // by; idea's bespoke close stays out.
 func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
-	for _, wf := range []string{"sdlc", "kb", "chat", "twin", "hooks", "chores", "pulse"} {
+	for _, wf := range []string{"sdlc", "chat", "twin", "pulse"} {
 		if _, ok := lookupCloseRegistration(wf); !ok {
 			t.Errorf("workflow %q registered closeCommand but has no close registration", wf)
 		}

@@ -767,9 +767,16 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 		absent   bool
 	}{
 		{workflow: sdlcWorkflow, docID: "code",
-			want: []string{"projects/tele/hooks", "projects/tele/chores"}},
-		{workflow: choresWorkflow, docID: "code",
-			want: []string{"projects/tele/chores"}},
+			want: []string{
+				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
+				// The knowledge line has to invite, not just permit —
+				// nothing else tells an agent a durable domain fact has a
+				// home, or that the close gate polices the tree's shape.
+				"on your own initiative",
+				"orphaned topics, broken links, or empty docs",
+				"feedback/twin.md",
+				"feedback/lore.md",
+			}},
 		// Twin stages write the twin through the reflect pass, not a
 		// stage commit — no carve-out sentence.
 		{workflow: "twin", docID: "vision", absent: true},
