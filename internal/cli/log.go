@@ -111,12 +111,20 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
 			return 1
 		}
+		stages := wf.Stages()
 		if md.Workflow != workflow {
-			moePrintf(stderr, "moe %s log: %s is a %s run, use 'moe %s log'\n", workflow, runID, md.Workflow, md.Workflow)
-			return 1
+			if _, err := LookupWorkflow(md.Workflow); err == nil {
+				moePrintf(stderr, "moe %s log: %s is a %s run, use 'moe %s log'\n", workflow, runID, md.Workflow, md.Workflow)
+				return 1
+			}
+			// Retired workflow: no live verb owns this run, so this one
+			// renders it. The run's own metadata replaces the ladder —
+			// see runDocIDs. A transcript is JSONL on disk, so no error
+			// message could stand in for actually rendering it.
+			stages = runDocIDs(md)
 		}
-		if !stageRegistered(wf.Stages(), stage) {
-			moePrintf(stderr, "moe %s log: no such stage: %s (have: %v)\n", workflow, stage, wf.Stages())
+		if !stageRegistered(stages, stage) {
+			moePrintf(stderr, "moe %s log: no such stage: %s (have: %v)\n", workflow, stage, stages)
 			return 1
 		}
 

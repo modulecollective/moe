@@ -113,6 +113,82 @@ func TestCatWrongWorkflow(t *testing.T) {
 	}
 }
 
+// seedRetiredRun stands up a run whose workflow is no longer in the
+// registry — the kb/hooks/quick/chores runs left on disk after their
+// verbs were retired — carrying the document ids its run.json records.
+// Fails loudly if the named workflow *is* registered, so a future
+// registration can't quietly turn these tests into something else.
+func seedRetiredRun(t *testing.T, root, projectID, runID, workflow string, docs ...string) {
+	t.Helper()
+	if _, err := LookupWorkflow(workflow); err == nil {
+		t.Fatalf("seedRetiredRun: %q is registered; pick a genuinely retired workflow", workflow)
+	}
+	trailerstest.SeedRun(t, root, projectID, runID, workflow, run.StatusMerged)
+	md, err := run.Load(root, projectID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range docs {
+		md.Documents[d] = &run.Document{}
+	}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCatRetiredWorkflowServesCanvas: a run whose workflow was retired
+// has no verb of its own left to redirect to, so the verb the operator
+// typed prints its canvas rather than naming a command the binary
+// rejects.
+func TestCatRetiredWorkflowServesCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRun(t, root, "tele", "amp-code", "kb", "research", "summarize")
+	writeContent(t, root, "tele", "amp-code", "research", "# Research body\n")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "cat", "tele/amp-code", "research"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if out.String() != "# Research body\n" {
+		t.Fatalf("unexpected canvas dump: %q", out.String())
+	}
+	// stdout stays pipe-clean and stderr silent: the operator asked for
+	// content, not a note about the workflow's retirement.
+	if errb.Len() != 0 {
+		t.Fatalf("expected empty stderr, got: %q", errb.String())
+	}
+}
+
+// TestCatRetiredWorkflowUnknownStage: a wrong stage guess against a
+// retired run lists the run's own documents, not the typed verb's
+// ladder. `design` is a real sdlc stage and still errors here — the
+// run's metadata, not sdlc's, is what the retired arm validates.
+func TestCatRetiredWorkflowUnknownStage(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRun(t, root, "tele", "amp-code", "kb", "research", "summarize")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "cat", "tele/amp-code", "design"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no such stage: design (have: [research summarize])") {
+		t.Fatalf("expected the run's own stages listed, got: %q", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected empty stdout on failure, got: %q", out.String())
+	}
+}
+
 // TestCatUnknownStage: validating <stage> against the workflow's
 // registered ladder produces a stable error that names what's
 // available.

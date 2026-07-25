@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -101,9 +102,9 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 // resolveCanvasPath returns the absolute path the cat handler should
 // read for (workflow, project, run, stage). Validation order:
 // project exists → workflow registered → @latest resolved → run
-// exists → run belongs to workflow → stage in workflow's ladder.
-// Then routes between the live session's worktree (if any) and the
-// operator's bureaucracy checkout.
+// exists → run belongs to workflow (or to a retired one) → stage in
+// the ladder of record. Then routes between the live session's
+// worktree (if any) and the operator's bureaucracy checkout.
 func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, error) {
 	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
 		return "", fmt.Errorf("no such project: %s", projectID)
@@ -126,13 +127,20 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 		}
 		return "", err
 	}
-	if md.Workflow != workflow {
-		return "", fmt.Errorf("%s is a %s run, use 'moe %s cat'", runID, md.Workflow, md.Workflow)
-	}
 	// Docs() rather than Stages(): a workflow can carry a canvas that is
 	// not a ladder position (chain's is), and resolving a path is a
 	// question about documents, not about what the run owes.
 	docs := wf.Docs()
+	if md.Workflow != workflow {
+		if _, err := LookupWorkflow(md.Workflow); err == nil {
+			return "", fmt.Errorf("%s is a %s run, use 'moe %s cat'", runID, md.Workflow, md.Workflow)
+		}
+		// The run's workflow has been retired from the registry, so
+		// there is no correct command to redirect to — the verb the
+		// operator typed serves it, with the run's own metadata standing
+		// in for the ladder it can no longer be validated against.
+		docs = runDocIDs(md)
+	}
 	if !stageRegistered(docs, stage) {
 		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, docs)
 	}
@@ -142,6 +150,19 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 		return filepath.Join(sess.WorktreePath, canvasRel), nil
 	}
 	return filepath.Join(root, canvasRel), nil
+}
+
+// runDocIDs returns the document ids the run's own metadata records,
+// sorted. It is the ladder of record for a run whose workflow has been
+// retired from the registry: no live Workflow can validate its stages,
+// but run.json lists exactly the documents the run carries.
+func runDocIDs(md *run.Metadata) []string {
+	ids := make([]string, 0, len(md.Documents))
+	for id := range md.Documents {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func stageRegistered(stages []string, stage string) bool {

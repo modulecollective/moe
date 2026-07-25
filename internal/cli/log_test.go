@@ -268,6 +268,52 @@ func TestMoeLog_WrongWorkflow(t *testing.T) {
 	}
 }
 
+// TestMoeLog_RetiredWorkflowRenders: the transcript of a run whose
+// workflow was retired is JSONL on disk — no error message can stand in
+// for it, so the verb the operator typed renders it rather than naming
+// a command the binary rejects.
+func TestMoeLog_RetiredWorkflowRenders(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRun(t, root, "tele", "amp-code", "kb", "research", "summarize")
+	writeThread(t, root, "tele", "amp-code", "research", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"retired body"}}`,
+	})
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "tele/amp-code", "research"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "retired body") {
+		t.Fatalf("expected the retired run's transcript, got: %q", out.String())
+	}
+}
+
+// TestMoeLog_RetiredWorkflowNoTranscript: a retired run reaches the
+// same empty-transcript message as a live one — the retired arm swaps
+// the stage list, not the tail.
+func TestMoeLog_RetiredWorkflowNoTranscript(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRun(t, root, "tele", "amp-code", "kb", "research", "summarize")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "tele/amp-code", "summarize"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 with no transcript, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), `no transcript for stage "summarize" in run tele/amp-code`) {
+		t.Fatalf("expected no-transcript message, got: %q", errb.String())
+	}
+}
+
 // TestMoeLog_UnknownStage: stage validation against the workflow's
 // registered ladder; mirrors TestCatUnknownStage.
 func TestMoeLog_UnknownStage(t *testing.T) {
