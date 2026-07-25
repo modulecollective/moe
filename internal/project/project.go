@@ -37,7 +37,6 @@ type Metadata struct {
 	Submodule     string `json:"submodule"`
 	Remote        string `json:"remote"`
 	DefaultBranch string `json:"default_branch"`
-	DeployURL     string `json:"deploy_url,omitempty"`
 	Created       string `json:"created"`
 }
 

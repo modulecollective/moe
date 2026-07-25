@@ -67,11 +67,10 @@ func (p ghMergedPR) foreign() bool {
 
 // ghCIRun is the projection of `gh run list --branch <default>`.
 type ghCIRun struct {
-	WorkflowName string    `json:"workflowName"`
-	Conclusion   string    `json:"conclusion"`
-	Status       string    `json:"status"`
-	URL          string    `json:"url"`
-	CreatedAt    time.Time `json:"createdAt"`
+	WorkflowName string `json:"workflowName"`
+	Conclusion   string `json:"conclusion"`
+	Status       string `json:"status"`
+	URL          string `json:"url"`
 }
 
 // runGH shells out to the `gh` CLI and returns its stdout. It is a var
@@ -125,7 +124,7 @@ func gatherMergedPRs(repo string, since time.Time) ([]ghMergedPR, error) {
 func gatherCIStatus(repo, branch string) ([]ghCIRun, error) {
 	raw, err := runGH("run", "list", "--repo", repo,
 		"--branch", branch, "--limit", fmt.Sprint(ghRunLimit),
-		"--json", "workflowName,conclusion,status,url,createdAt")
+		"--json", "workflowName,conclusion,status,url")
 	if err != nil {
 		return nil, err
 	}

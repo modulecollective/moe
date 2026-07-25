@@ -43,14 +43,6 @@ func (u Usage) Add(model string, m ModelUsage) {
 	u[model] = cur
 }
 
-// Merge folds another transcript's usage into u — the aggregator's one
-// combining step, so callers don't re-spell the per-field addition.
-func (u Usage) Merge(other Usage) {
-	for model, m := range other {
-		u.Add(model, m)
-	}
-}
-
 // Total collapses every model into one bucket. Steps sums too, so a
 // mixed-model stage still reports its real step count.
 func (u Usage) Total() ModelUsage {
