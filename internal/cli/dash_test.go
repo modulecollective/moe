@@ -1363,17 +1363,17 @@ func TestWriteWatchViewportClipsByDisplayCells(t *testing.T) {
 		columns int
 		want    string
 	}{
-		{name: "ascii", in: "abcdef", columns: 4, want: "abcd"},
-		{name: "combining", in: "e\u0301x", columns: 1, want: "e\u0301"},
-		{name: "dashboard glyphs", in: "▶▂·x", columns: 3, want: "▶▂·"},
-		{name: "cjk exact", in: "a界b", columns: 3, want: "a界"},
-		{name: "cjk does not split", in: "a界b", columns: 2, want: "a"},
-		{name: "emoji", in: "a😀b", columns: 3, want: "a😀"},
-		{name: "supplemental emoji", in: "a🀄b", columns: 3, want: "a🀄"},
+		{name: "ascii", in: "abcdef", columns: 5, want: "abcd"},
+		{name: "combining", in: "e\u0301x", columns: 2, want: "e\u0301"},
+		{name: "dashboard glyphs", in: "▶▂·x", columns: 4, want: "▶▂·"},
+		{name: "cjk exact", in: "a界b", columns: 4, want: "a界"},
+		{name: "cjk does not split", in: "a界b", columns: 3, want: "a"},
+		{name: "emoji", in: "a😀b", columns: 4, want: "a😀"},
+		{name: "supplemental emoji", in: "a🀄b", columns: 4, want: "a🀄"},
 		{
 			name:    "ansi is zero width and reset survives",
 			in:      cliout.Bright + "abcde" + cliout.Reset,
-			columns: 3,
+			columns: 4,
 			want:    cliout.Bright + "abc" + cliout.Reset,
 		},
 	}
@@ -1401,19 +1401,32 @@ func TestWriteWatchViewportNarrowPaneRegression(t *testing.T) {
 		if err := writeWatchViewport(&buf, []byte(line+"\nnext\n"), 2, columns); err != nil {
 			t.Fatalf("columns %d: write viewport: %v", columns, err)
 		}
-		want := strings.Repeat("x", columns) + dashEraseLine + "\nnext" + dashEraseLine
+		want := strings.Repeat("x", columns-1) + dashEraseLine + "\nnext" + dashEraseLine
 		if buf.String() != want {
 			t.Fatalf("columns %d: got %q want %q", columns, buf.String(), want)
 		}
 	}
 }
 
-func TestWriteWatchViewportOneByOne(t *testing.T) {
+func TestWriteWatchViewportReservesRightmostColumn(t *testing.T) {
+	const columns = 80
 	var buf bytes.Buffer
-	if err := writeWatchViewport(&buf, []byte("界\nsecond\n"), 1, 1); err != nil {
+	if err := writeWatchViewport(&buf, []byte(strings.Repeat("x", columns)), 1, columns); err != nil {
 		t.Fatalf("write viewport: %v", err)
 	}
-	if got, want := buf.String(), dashEraseLine; got != want {
+	want := strings.Repeat("x", columns-1) + dashEraseLine
+	if buf.String() != want {
+		t.Fatalf("got %q want %q", buf.String(), want)
+	}
+}
+
+func TestWriteWatchViewportOneByOne(t *testing.T) {
+	var buf bytes.Buffer
+	in := cliout.Bright + "x" + cliout.Reset + "\nsecond\n"
+	if err := writeWatchViewport(&buf, []byte(in), 1, 1); err != nil {
+		t.Fatalf("write viewport: %v", err)
+	}
+	if got, want := buf.String(), cliout.Bright+cliout.Reset+dashEraseLine; got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }

@@ -37,11 +37,12 @@ const dashWatchInterval = 3 * time.Second
 //     line-end reset, then closes with ED-0, erasing whatever the old
 //     frame had below the new one's last line, and ends the sync block.
 //
-// The watch viewport clips every logical line to the terminal width and
-// every frame to its height. The bottom visible row has no newline, so
-// neither wrapping nor line advance can scroll the pane. \x1b[3J (wipe
-// scrollback) stays omitted — blowing away the operator's history isn't
-// ours to do.
+// The watch viewport clips every logical line one cell short of the
+// terminal width and every frame to its height. Reserving the rightmost
+// cell avoids arming the terminal's auto-wrap margin; the bottom visible
+// row has no newline, so neither wrapping nor line advance can scroll the
+// pane. \x1b[3J (wipe scrollback) stays omitted — blowing away the
+// operator's history isn't ours to do.
 const (
 	dashFramePre  = "\x1b[?2026h\x1b[H"
 	dashFramePost = cliout.Reset + "\x1b[J\x1b[?2026l"
@@ -179,12 +180,14 @@ func (b *ttyFrameBuffer) Unwrap() io.Writer { return b.terminal }
 
 // writeWatchViewport paints the leading terminal-sized viewport of a
 // completed dashboard frame. Each source line occupies at most one physical
-// row: printable runes are clipped by display cells, complete CSI sequences
-// pass through at zero width, and every visible row ends with EL.
+// row: printable runes are clipped one cell short of the terminal width,
+// complete CSI sequences pass through at zero width, and every visible row
+// ends with EL.
 func writeWatchViewport(w io.Writer, frame []byte, rows, columns int) error {
 	if rows <= 0 || columns <= 0 {
 		return nil
 	}
+	contentColumns := columns - 1
 
 	for row, start := 0, 0; row < rows && start < len(frame); row++ {
 		end := bytes.IndexByte(frame[start:], '\n')
@@ -194,7 +197,7 @@ func writeWatchViewport(w io.Writer, frame []byte, rows, columns int) error {
 		} else {
 			end = len(frame)
 		}
-		if err := writeClippedTerminalLine(w, frame[start:end], columns); err != nil {
+		if err := writeClippedTerminalLine(w, frame[start:end], contentColumns); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, dashEraseLine); err != nil {
