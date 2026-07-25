@@ -115,7 +115,7 @@ func FinalizeIngest(cfg Config, fctx FinalizeContext, stderr io.Writer) (Finaliz
 	// Filter out engine-managed files from the change set: appending
 	// to log.md ourselves shouldn't generate a "modified log.md" line
 	// in the same entry, and ditto for checkpoint.json.
-	changes = excludeManaged(changes, cfg.ContentDir)
+	changes = excludeManaged(changes)
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
 
 	if len(changes) == 0 {
@@ -244,7 +244,7 @@ func relPath(bureaucracyRel, contentDir, bureaucracyPath string) (string, error)
 // excludeManaged drops engine-owned files (log.md, checkpoint.json)
 // from the change set so finalize doesn't list its own writes as part
 // of the ingest's diff. Anything else under ContentDir is fair game.
-func excludeManaged(changes []Change, contentDir string) []Change {
+func excludeManaged(changes []Change) []Change {
 	managed := map[string]bool{
 		"log.md":          true,
 		"checkpoint.json": true,

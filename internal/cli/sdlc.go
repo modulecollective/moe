@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -413,29 +412,6 @@ Allowed values: "ready" or "blocked". Use "blocked" for known failures or unreso
 
 (agent fills: one row per in-place fix; empty if none)
 `
-
-// requireRun fails the stage entry point fast when the run doesn't
-// exist, before any per-turn worktree is materialised. Without this
-// check, a wrong-project typo produces an empty worktree per attempt
-// plus a confusing downstream error (a missing design canvas, or a
-// raw filesystem read error from inside the worktree). Returns the
-// process exit code: 0 means proceed, non-zero means the caller
-// already wrote the error and should bail.
-func requireRun(verb, projectID, runID string, stderr io.Writer) int {
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if _, err := run.Load(root, projectID, runID); err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s: run not found: %s/%s\n", verb, projectID, runID)
-			return 1
-		}
-		moePrintf(stderr, "%s: %v\n", verb, err)
-		return 1
-	}
-	return 0
-}
 
 // requireDesignCanvas refuses the code stage when the run's design
 // canvas is missing or empty. The fail-loud invariant the design twin
