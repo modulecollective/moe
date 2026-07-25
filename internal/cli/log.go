@@ -33,7 +33,7 @@ import (
 // runLog returns the typed Command.Run for `moe <workflow> log`.
 // defaultStage, when non-empty, is the stage used when the operator
 // omits a stage argument — picked up automatically by single-stage
-// workflows (idea, hooks). Pass "" to force the operator
+// workflows (idea, chat). Pass "" to force the operator
 // to name a stage.
 func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {

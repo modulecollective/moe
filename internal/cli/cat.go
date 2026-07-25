@@ -34,7 +34,7 @@ const latestRunSentinel = "@latest"
 // runCat returns the typed Command.Run for `moe <workflow> cat`.
 // defaultStage, when non-empty, is the stage used when the operator
 // omits a stage argument — picked up automatically by single-stage
-// workflows (idea, hooks). Pass "" to force the operator
+// workflows (idea, intent, chat). Pass "" to force the operator
 // to name a stage.
 func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {
