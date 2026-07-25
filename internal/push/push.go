@@ -53,7 +53,7 @@ func (e *RebaseConflictError) Error() string {
 // rebase, and *RebaseConflictError on a rebase conflict (the rebase
 // is aborted before returning so the clone is left clean for the
 // chain-back).
-func EnsureRebasedOntoDefault(clonePath, branch, defaultBranch string, stdout, stderr io.Writer) error {
+func EnsureRebasedOntoDefault(clonePath, branch, defaultBranch string, stdout io.Writer) error {
 	cliout.Printf(stdout, "fetching origin/%s...\n", defaultBranch)
 	if out, err := git.Combined(clonePath, "fetch", "origin", defaultBranch); err != nil {
 		return fmt.Errorf("push: fetch origin/%s: %w (%s)", defaultBranch, err, out)

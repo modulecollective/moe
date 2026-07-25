@@ -200,7 +200,7 @@ func GitlinkSHA(root, subPath string) (string, error) {
 // caught up. Refuses to touch a submodule with uncommitted changes,
 // with local commits diverged from origin, or with a detached HEAD
 // carrying commits that the tracking-branch checkout would orphan.
-func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (*Bump, error) {
+func AdvanceSubmodule(root string, e GitmoduleEntry, stdout io.Writer) (*Bump, error) {
 	subAbs := filepath.Join(root, e.Path)
 	// Cold submodule: materialize it before fetching. Without this,
 	// sync silently no-ops on projects that no one has opened a stage
@@ -319,7 +319,7 @@ func AdvanceSubmodule(root string, e GitmoduleEntry, stdout, stderr io.Writer) (
 // bureaucracy when the submodule moved. If anything was staged,
 // commits it with a message listing what advanced. Aborts on the
 // first failure without committing or mutating further submodules.
-func BumpProjectPointers(root string, stdout, stderr io.Writer) error {
+func BumpProjectPointers(root string, stdout io.Writer) error {
 	entries, err := ParseGitmodules(filepath.Join(root, ".gitmodules"))
 	if err != nil {
 		return err
@@ -330,7 +330,7 @@ func BumpProjectPointers(root string, stdout, stderr io.Writer) error {
 
 	var bumps []Bump
 	for _, e := range entries {
-		bump, err := AdvanceSubmodule(root, e, stdout, stderr)
+		bump, err := AdvanceSubmodule(root, e, stdout)
 		if err != nil {
 			return err
 		}
@@ -373,7 +373,7 @@ func BumpProjectPointers(root string, stdout, stderr io.Writer) error {
 // with the ff-push that just landed, without sweeping in unrelated
 // submodules whose dirty or diverged state could shadow the bump for
 // the project the operator actually shipped.
-func BumpOne(root, projectID string, stdout, stderr io.Writer) error {
+func BumpOne(root, projectID string, stdout io.Writer) error {
 	entries, err := ParseGitmodules(filepath.Join(root, ".gitmodules"))
 	if err != nil {
 		return err
@@ -390,7 +390,7 @@ func BumpOne(root, projectID string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	bump, err := AdvanceSubmodule(root, *entry, stdout, stderr)
+	bump, err := AdvanceSubmodule(root, *entry, stdout)
 	if err != nil {
 		return err
 	}

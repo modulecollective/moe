@@ -111,7 +111,7 @@ func doSync(root string, stdout, stderr io.Writer) error {
 	// origin, and bump the gitlink in bureaucracy if the submodule moved.
 	// Done after the pull so we're working from the latest bureaucracy state,
 	// and before the push so the bump goes out in the same round trip.
-	if err := sync.BumpProjectPointers(root, stdout, stderr); err != nil {
+	if err := sync.BumpProjectPointers(root, stdout); err != nil {
 		return err
 	}
 

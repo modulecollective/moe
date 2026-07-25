@@ -95,14 +95,14 @@ func (f *syncFixture) gitlink(subPath string) string {
 }
 
 // runBump invokes bumpProjectPointers directly against the fixture and
-// returns its stdout/stderr capture and error. We test this helper
+// returns its stdout capture and error. We test this helper
 // rather than runSync end-to-end so we don't need an upstream for the
 // bureaucracy.
-func (f *syncFixture) runBump() (string, string, error) {
+func (f *syncFixture) runBump() (string, error) {
 	f.t.Helper()
-	var stdout, stderr bytes.Buffer
-	err := sync.BumpProjectPointers(f.root, &stdout, &stderr)
-	return stdout.String(), stderr.String(), err
+	var stdout bytes.Buffer
+	err := sync.BumpProjectPointers(f.root, &stdout)
+	return stdout.String(), err
 }
 
 func TestBumpProjectPointersHappyPath(t *testing.T) {
@@ -113,9 +113,9 @@ func TestBumpProjectPointersHappyPath(t *testing.T) {
 
 	newHead := f.advanceOrigin("proj", "main", "hello\n")
 
-	out, errOut, err := f.runBump()
+	out, err := f.runBump()
 	if err != nil {
-		t.Fatalf("bump: %v\nstdout=%s\nstderr=%s", err, out, errOut)
+		t.Fatalf("bump: %v\nstdout=%s", err, out)
 	}
 
 	after := f.bureaucracyHead()
@@ -143,7 +143,7 @@ func TestBumpProjectPointersNoopWhenCaughtUp(t *testing.T) {
 	before := f.bureaucracyHead()
 	beforeLink := f.gitlink("projects/proj/src")
 
-	if _, _, err := f.runBump(); err != nil {
+	if _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
 	}
 
@@ -165,9 +165,9 @@ func TestBumpProjectPointersAbortsOnDirtySubmodule(t *testing.T) {
 	writeFile(t, filepath.Join(f.root, "projects/proj/src", "scratch.txt"), "junk\n")
 
 	before := f.bureaucracyHead()
-	out, errOut, err := f.runBump()
+	out, err := f.runBump()
 	if err == nil {
-		t.Fatalf("expected abort; stdout=%s stderr=%s", out, errOut)
+		t.Fatalf("expected abort; stdout=%s", out)
 	}
 	if !strings.Contains(err.Error(), "uncommitted changes") {
 		t.Fatalf("abort message wrong: %v", err)
@@ -194,7 +194,7 @@ func TestBumpProjectPointersAbortsOnDivergedSubmodule(t *testing.T) {
 	f.advanceOrigin("proj", "main", "remote\n")
 
 	before := f.bureaucracyHead()
-	_, _, err := f.runBump()
+	_, err := f.runBump()
 	if err == nil {
 		t.Fatal("expected abort on divergence")
 	}
@@ -221,7 +221,7 @@ func TestBumpProjectPointersAbortsOnMissingOriginBranch(t *testing.T) {
 	// establish it fresh from the (empty) remote.
 	gittest.Run(t, subAbs, "update-ref", "-d", "refs/remotes/origin/main")
 
-	_, _, err := f.runBump()
+	_, err := f.runBump()
 	if err == nil {
 		t.Fatal("expected abort when origin has no main")
 	}
@@ -246,7 +246,7 @@ func TestBumpProjectPointersAbortsOnFirstDirtyStopsSecond(t *testing.T) {
 	before := f.bureaucracyHead()
 	bbbBeforeLink := f.gitlink("projects/bbb/src")
 
-	_, _, err := f.runBump()
+	_, err := f.runBump()
 	if err == nil {
 		t.Fatal("expected abort from dirty aaa")
 	}
@@ -271,7 +271,7 @@ func TestBumpProjectPointersMultipleBumpsOneCommit(t *testing.T) {
 	betaNew := f.advanceOrigin("beta", "main", "beta\n")
 
 	before := f.bureaucracyHead()
-	if _, _, err := f.runBump(); err != nil {
+	if _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
 	}
 	after := f.bureaucracyHead()
@@ -309,7 +309,7 @@ func TestBumpProjectPointersRecoversFromDetachedHead(t *testing.T) {
 	}
 	gittest.Run(t, subAbs, "checkout", "--detach", head)
 
-	if _, _, err := f.runBump(); err != nil {
+	if _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
 	}
 	if got := f.gitlink("projects/proj/src"); got != newHead {
@@ -330,7 +330,7 @@ func TestBumpProjectPointersIgnoresUnrelatedStagedChanges(t *testing.T) {
 	writeFile(t, scratch, "operator's in-progress work\n")
 	gittest.Run(t, f.root, "add", "scratch.txt")
 
-	if _, _, err := f.runBump(); err != nil {
+	if _, err := f.runBump(); err != nil {
 		t.Fatalf("bump: %v", err)
 	}
 

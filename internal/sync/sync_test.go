@@ -179,8 +179,8 @@ func TestAdvanceSubmoduleRefusesDetachedOrphan(t *testing.T) {
 	gittest.Run(t, subAbs, "checkout", "--detach", "HEAD")
 	hotfix := gittest.WriteAndCommit(t, subAbs, "hot.txt", "fix", "hotfix while detached")
 
-	var stdout, stderr bytes.Buffer
-	bump, err := AdvanceSubmodule(root, e, &stdout, &stderr)
+	var stdout bytes.Buffer
+	bump, err := AdvanceSubmodule(root, e, &stdout)
 	if err == nil {
 		t.Fatalf("expected refusal, got bump=%+v", bump)
 	}
@@ -203,10 +203,10 @@ func TestAdvanceSubmoduleReattachesFromGitlink(t *testing.T) {
 	gittest.Run(t, subAbs, "push", "origin", "main")
 	gittest.Run(t, subAbs, "checkout", "--detach", c0)
 
-	var stdout, stderr bytes.Buffer
-	bump, err := AdvanceSubmodule(root, e, &stdout, &stderr)
+	var stdout bytes.Buffer
+	bump, err := AdvanceSubmodule(root, e, &stdout)
 	if err != nil {
-		t.Fatalf("re-attach from gitlink should succeed: %v\nstderr=%s", err, stderr.String())
+		t.Fatalf("re-attach from gitlink should succeed: %v\nstdout=%s", err, stdout.String())
 	}
 	if bump == nil || bump.ToSHA != c1 {
 		t.Fatalf("want bump to %s, got %+v", c1, bump)
@@ -228,10 +228,10 @@ func TestAdvanceSubmoduleAllowsStaleLocalBranch(t *testing.T) {
 	gittest.Run(t, subAbs, "checkout", "--detach", c1)
 	gittest.Run(t, subAbs, "branch", "-f", "main", c0) // local branch now stale
 
-	var stdout, stderr bytes.Buffer
-	bump, err := AdvanceSubmodule(root, e, &stdout, &stderr)
+	var stdout bytes.Buffer
+	bump, err := AdvanceSubmodule(root, e, &stdout)
 	if err != nil {
-		t.Fatalf("stale local branch should not refuse: %v\nstderr=%s", err, stderr.String())
+		t.Fatalf("stale local branch should not refuse: %v\nstdout=%s", err, stdout.String())
 	}
 	if bump == nil || bump.ToSHA != c1 {
 		t.Fatalf("want bump to %s, got %+v", c1, bump)

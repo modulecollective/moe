@@ -49,7 +49,7 @@ func StageEntry(w io.Writer, agent, workflow, stage, project, run string) {
 // "complete" footer would be worse than the asymmetry. A turn that
 // committed nothing is narrated by the "no document changes; nothing
 // committed" stdout line the caller prints just above.
-func StageExit(w io.Writer, workflow, stage, project, runID string) {
+func StageExit(w io.Writer, stage, project, runID string) {
 	if cliout.IsTTY(w) {
 		io.WriteString(w, titleSeq("✓", runID))
 	}

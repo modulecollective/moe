@@ -790,7 +790,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		}
 	}
 	if !opts.knowledgeFixTurn {
-		banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID)
+		banner.StageExit(stdout, docID, md.Project, md.ID)
 	}
 	if skipPostTurnPrompt(opts) {
 		// Headless ⇒ skip is structural, not a caller convention: a

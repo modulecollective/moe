@@ -24,7 +24,7 @@ func TestStageEntryGolden(t *testing.T) {
 // gradient marks framing the line.
 func TestStageExit(t *testing.T) {
 	var buf bytes.Buffer
-	StageExit(&buf, "sdlc", "design", "moe", "nice-banners")
+	StageExit(&buf, "design", "moe", "nice-banners")
 	if got, want := buf.String(), "░▒▓ design complete  ·  moe/nice-banners ▓▒░\n"; got != want {
 		t.Fatalf("StageExit =\n%q\nwant\n%q", got, want)
 	}
