@@ -474,7 +474,7 @@ func TestPulseGateParsesBothRunShapes(t *testing.T) {
 	body := "# Pulse\n\n## Gate\n\n```json\n" +
 		`{"status":"ok",` +
 		`"loose":[{"slug":"fix-ci-red-main","title":"Fix red CI on main","why":"TestX failing","design":"# seed\n"}],` +
-		`"threads":[{"onto":"already-parked","kick":true,"runs":["tidy-1",{"slug":"reflect","workflow":"twin","why":"drift"}]}]}` +
+		`"threads":[{"onto":"already-parked","park":"the ordering here is a guess","runs":["tidy-1",{"slug":"reflect","workflow":"twin","why":"drift"}]}]}` +
 		"\n```\n"
 	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -491,8 +491,8 @@ func TestPulseGateParsesBothRunShapes(t *testing.T) {
 		t.Fatalf("threads = %+v, want 1", gate.Threads)
 	}
 	th := gate.Threads[0]
-	if th.Onto != "already-parked" || !th.Kick {
-		t.Errorf("thread = %+v, want onto=already-parked and kick", th)
+	if th.Onto != "already-parked" || th.Park != "the ordering here is a guess" {
+		t.Errorf("thread = %+v, want onto=already-parked and the park reason verbatim", th)
 	}
 	if len(th.Runs) != 2 {
 		t.Fatalf("thread runs = %+v, want 2", th.Runs)

@@ -66,7 +66,6 @@ func TestSpawnTwinWithoutASlugStillMints(t *testing.T) {
 	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
 		Status: "ok",
 		Threads: []pulseThread{{
-			Kick: true,
 			Runs: []pulseThreadEntry{{Spec: &pulseRunSpec{Workflow: "twin", Why: "six observations stacked"}}},
 		}},
 	}, io.Discard, &errb)
@@ -84,8 +83,8 @@ func TestSpawnTwinWithoutASlugStillMints(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, nil /*kickoff edges*/, io.Discard, &errb)
 
-	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
-		t.Fatalf("threads = %+v, want the thread groomed and asking for a kick", groomed.threads)
+	if len(groomed.threads) != 1 || groomed.threads[0].Park != "" {
+		t.Fatalf("threads = %+v, want the thread groomed and unparked", groomed.threads)
 	}
 	reflectKey := "moe/" + reflectID
 	if groomed.threads[0].Root != reflectKey {
@@ -184,7 +183,6 @@ func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
 		Status: "ok",
 		Threads: []pulseThread{{
-			Kick: true,
 			Runs: []pulseThreadEntry{
 				{Spec: &pulseRunSpec{Slug: "fix-a", Title: "Fix A", Why: "red check"}},
 				{Spec: &pulseRunSpec{Slug: "bring-the-twin-current", Workflow: "twin", Why: "boundary move"}},
@@ -199,8 +197,8 @@ func TestSpawnTwinChainsAndKicksLikeAnyThread(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-one", groups, "" /*spawner*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
-	if len(groomed.threads) != 1 || !groomed.threads[0].Kick {
-		t.Fatalf("threads = %+v, want one kick candidate", groomed.threads)
+	if len(groomed.threads) != 1 || groomed.threads[0].Park != "" {
+		t.Fatalf("threads = %+v, want one unparked kick candidate", groomed.threads)
 	}
 	if groomed.threads[0].Root != fixKey {
 		t.Errorf("thread root = %q, want the thread's first run %q", groomed.threads[0].Root, fixKey)

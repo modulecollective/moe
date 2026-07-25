@@ -532,7 +532,7 @@ func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
 	a, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-c"]
 
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
-		{Runs: runsFrom("fix-a", "fix-b"), Kick: true},
+		{Runs: runsFrom("fix-a", "fix-b")},
 		{Onto: "fix-c", Runs: runsFrom("fix-a")},
 	}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 
@@ -590,7 +590,7 @@ func TestGroomSkipsWhenChainEdgesMovedUnderTheSweep(t *testing.T) {
 
 	var errb bytes.Buffer
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: "fix-c", Runs: runsFrom("fix-a"), Kick: true}},
+		[]groomGroup{{Onto: "fix-c", Runs: runsFrom("fix-a")}},
 		"", kickoff, io.Discard, &errb)
 
 	if len(groomed.threads) != 0 {

@@ -1170,7 +1170,26 @@ func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 // it, and reaches the self-kick door. The fake refuses the destination's
 // design turn so the test stops after proving the kick was attempted —
 // stage execution itself is covered by the cascade tests.
+//
+// It also carries the end-to-end half of the default flip, in the one
+// place a gate written by an agent reaches the kick through the whole
+// pipe. The plain gate asks for nothing and rides; the same gate plus a
+// `park` line holds, and prints the survey's sentence. This is the
+// 2026-07-25 incident's shape: that sweep groomed a thread, wrote no
+// kick field, and the ride ended in silence.
 func TestTaggedFollowupHarvestPromoteGroomAndKick(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		park string
+	}{
+		{name: "unparked"},
+		{name: "parked", park: `"park":"the reflect would read a half-finished record",`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { taggedFollowupGroomAndKick(t, tc.park) })
+	}
+}
+
+func taggedFollowupGroomAndKick(t *testing.T, park string) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "moe")
@@ -1206,7 +1225,7 @@ canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the sing
 ticks=$(printf '\140\140\140')
 case "$canvas" in
   */documents/pulse/content.md)
-    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"kick":true,"runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
+    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{`+park+`"runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
     exit 0
     ;;
   *)
@@ -1241,8 +1260,17 @@ esac
 	if promoted == nil || promoted.SpawnedBy == "" {
 		t.Fatalf("promoted run = %+v, want machine lineage", promoted)
 	}
-	if !strings.Contains(errb.String(), "pulse: kicking moe/"+promoted.ID+" (dynamic)") {
-		t.Fatalf("pulse never reached self-kick for promoted run; stderr=%q", errb.String())
+	if park == "" {
+		if !strings.Contains(errb.String(), "pulse: kicking moe/"+promoted.ID+" (dynamic)") {
+			t.Fatalf("pulse never reached self-kick for promoted run; stderr=%q", errb.String())
+		}
+		return
+	}
+	if strings.Contains(errb.String(), "pulse: kicking") {
+		t.Fatalf("pulse kicked a parked thread; stderr=%q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "moe/"+promoted.ID+" parked by the survey — the reflect would read a half-finished record") {
+		t.Fatalf("pulse never reported the park reason; stderr=%q", errb.String())
 	}
 }
 

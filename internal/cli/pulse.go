@@ -83,10 +83,12 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
 	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
 	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
-	"unchanged? If the order is a guess, put the runs in `loose`. A thread may add `\"kick\": true` to ask the harness to " +
-	"start it — highest bar on the canvas, and the harness refuses it unless the operator's own verb licensed machine-rooted " +
-	"motion. Inside a dynamic ride the kicked thread is where next work goes: a single-run thread makes no ordering claim, " +
-	"so work you'd have the machine start goes there rather than in `loose`, which parks until a human picks it up.\n\n" +
+	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic ride every thread you groom starts when the " +
+	"sweep finishes — that is what the ride is for — so the field you write is `\"park\"`: one line naming why the operator " +
+	"should look at this thread first (an ordering you wouldn't defend, a speculative member, an irreversible or " +
+	"outward-facing surface). No park means it runs. Inside a dynamic ride the thread is therefore where next work goes: a " +
+	"single-run thread makes no ordering claim, so work you'd have the machine start goes there rather than in `loose`, " +
+	"which parks until a human picks it up.\n\n" +
 	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
 	"See the stage guidance."
 
@@ -709,14 +711,18 @@ type pulseRunSpec struct {
 // otherwise a self-rooted parked thread. Onto and Head together is a
 // warn-and-skip: they are two different answers to the same question.
 //
-// Kick asks the harness to kick the thread once grooming is done. Two
-// structural conditions gate it (see pulseSelfKick); the agent's `true`
-// is a request, not an instruction.
+// Park is the survey's one-line reason the operator should look at this
+// thread before it runs. Non-empty parks the thread; absent lets it kick
+// once grooming is done, which is the default under a dynamic ride and
+// impossible without one (see pulseSelfKick). Park is the marked case
+// because the error ledger only ever ran one way — three strandings, no
+// runaway — so the field the survey has to spend a sentence on is the
+// one that stops motion, not the one that causes it.
 type pulseThread struct {
 	Onto string             `json:"onto"`
 	Head string             `json:"head"`
 	Runs []pulseThreadEntry `json:"runs"`
-	Kick bool               `json:"kick"`
+	Park string             `json:"park"`
 }
 
 // pulseThreadEntry is one position in a thread: a bare string naming a
@@ -859,7 +865,7 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 	}
 	groups := make([]groomGroup, 0, len(gate.Threads))
 	for _, th := range gate.Threads {
-		grp := groomGroup{Onto: th.Onto, Head: th.Head, Kick: th.Kick}
+		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
 		for _, entry := range th.Runs {
 			if entry.Spec == nil {
 				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})

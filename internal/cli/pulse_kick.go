@@ -12,9 +12,22 @@ import (
 // anything itself. Where a spawned run *lands* is not here — that is a
 // `chain` claim the survey makes, twin reflects included.
 
-// pulseSelfKick is the last step of a pulse: kick the threads whose
-// groom group asked for it. This is the only door to machine-rooted
-// motion, and two structural guards hold it shut everywhere else.
+// pulseSelfKick is the last step of a pulse: under a dynamic ride, start
+// every thread the sweep just groomed. This is the only door to
+// machine-rooted motion, and two structural guards hold it shut
+// everywhere else.
+//
+// Kicking is the default and *parking* is the marked case, because the
+// error ledger only ever ran one way. Three strandings in four days —
+// an operator-advanced run, a judged chore, and a six-run thread a
+// dynamic sweep groomed and silently left — and not one instance of a
+// survey starting work it shouldn't have. Two prompt fixes each closed
+// the previous miss and the drift came back, because a default that
+// needs the survey to spend confidence to cause motion drifts toward
+// stillness. So the survey no longer asks to move; it writes a `park`
+// reason when it wants the operator to look first, and the reason is
+// mandatory by shape — parking costs a generation, so it owes a
+// sentence.
 //
 // First, **dynamic consent upstream**. A `!!!` tail pulse — or a manual
 // `moe pulse new` — grooms and parks; only a fourth bang the operator
@@ -58,10 +71,15 @@ import (
 // over an afternoon — or the turn closed and nobody advanced it, which
 // is the reopened run and the re-edit that out-dated its advance
 // marker. Both are held; only one of them means the design never ran.
-// Those have `!` and `!!!`. The kick bar still decides *whether to
-// ask* — this is only the floor under it.
+// Those have `!` and `!!!`. The survey's park decides what is
+// *reasonable* to start — this is only the floor of what is safe.
 //
-// Every skip is one stderr line, warn-only ethos.
+// Under dynamic consent this step always reports: every kick, every
+// park with its reason, every harness hold, and a line for the sweep
+// that groomed nothing. It used to return before its first stderr line
+// when no thread asked, so a typed `!!!!` could end with no account of
+// why nothing started — that silence is what made the 2026-07-25 park
+// invisible. Every hold is one line, warn-only ethos.
 //
 // Every fact this step keys on comes out of the groom's final in-memory
 // graph (see groomResult) — thread roots, the spawner's chain
@@ -71,21 +89,48 @@ import (
 // session branches, and that is the point: it asks whether the operator
 // has a stage open *right now*, which no snapshot can say.
 func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) {
-	var wanted []groomedThread
+	// No dynamic consent, nothing to say. Absence of a `park` is not a
+	// request, so a static or unridden sweep parking everything it
+	// groomed is the norm it has always been — the old "N thread(s) asked
+	// for a kick" line reported a decision that no longer exists.
+	if currentRideMode != rideDynamic {
+		return
+	}
+	if len(groomed.threads) == 0 {
+		moePrintf(stderr, "pulse: kick: nothing groomed — nothing to start\n")
+		return
+	}
+	// Threads are keyed by root, and a park on any group that landed in
+	// one holds the whole thread. Two groups routinely groom into the
+	// same thread — one `onto` a run the other placed — and hand back two
+	// groomedThreads with the same root. Under the old ask-field that
+	// collision needed both groups to ask, so it stayed theoretical;
+	// kicking by default makes it ordinary, and kicking one root twice
+	// would start the ride and then start its finished remains.
+	parked := make(map[string]string, len(groomed.threads))
 	for _, th := range groomed.threads {
-		if th.Kick && th.Root != "" {
-			wanted = append(wanted, th)
+		if th.Park != "" && parked[th.Root] == "" {
+			parked[th.Root] = th.Park
 		}
+	}
+	var wanted []groomedThread
+	seen := make(map[string]bool, len(groomed.threads))
+	for _, th := range groomed.threads {
+		if seen[th.Root] {
+			continue
+		}
+		seen[th.Root] = true
+		if reason := parked[th.Root]; reason != "" {
+			moePrintf(stderr, "pulse: kick: %s parked by the survey — %s\n", th.Root, reason)
+			continue
+		}
+		wanted = append(wanted, th)
 	}
 	if len(wanted) == 0 {
 		return
 	}
-	if currentRideMode != rideDynamic {
-		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, this verb carried no dynamic consent (`!!!!` or --dynamic)\n", len(wanted))
-		return
-	}
 	if spawnerKey != "" && groomed.spawnerChained {
-		moePrintf(stderr, "pulse: %d thread(s) asked for a kick — skipping, %s is itself chained and its ride picks up growth on its own tail\n",
+		moePrintf(stderr, "pulse: kick: holding %d groomed thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
 			len(wanted), spawnerKey)
 		return
 	}

@@ -49,7 +49,7 @@ type groomGroup struct {
 	Onto string
 	Head string
 	Runs []groomMember
-	Kick bool
+	Park string
 }
 
 // groomMember is one position in a groomGroup: either a run this sweep
@@ -85,7 +85,10 @@ func (m groomMember) name() string {
 type groomedThread struct {
 	Handle string
 	Root   string
-	Kick   bool
+	// Park carries the survey's reason to hold this thread, verbatim from
+	// the gate. Empty is the common case and means "start it" — under a
+	// dynamic ride, and only there.
+	Park string
 }
 
 // groomResult is what the groom step hands the kick step. The whole
@@ -346,7 +349,7 @@ func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer
 	if handle == "" {
 		handle = members[0]
 	}
-	return groomedThread{Handle: handle, Kick: grp.Kick}, true
+	return groomedThread{Handle: handle, Park: grp.Park}, true
 }
 
 // groomAnchor picks the run a group attaches after, applying the three
