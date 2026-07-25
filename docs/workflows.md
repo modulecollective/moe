@@ -460,13 +460,15 @@ runs into ordinary chain threads, leave them loose when it has no ordering
 opinion, or add a chain head when a stable name helps tell the thread's story.
 A head is a naming convenience, not a container every batch receives.
 
-Grooming changes recorded placement, not execution. On a static ride (`!!!` or
-bare `moe chain kick`), newly placed work parks for a later ride. Only a
-`!!!!`/`--dynamic` ride lets a thread ask to be kicked. Even then, the harness
-holds a root that has only a seed or a live session; a machine-baked,
-chore-authored, or past-first-stage root has a settled design and is ready to
-start. A fired kick is itself dynamic, so its tail may sweep, groom, and kick
-again. The ride ends when a survey adds nothing, with no generation cap.
+On a static ride (`!!!` or bare `moe chain kick`), grooming changes recorded
+placement and not execution: newly placed work parks for a later ride. Under a
+`!!!!`/`--dynamic` ride, placement *is* execution — every groomed thread is
+kicked when the sweep finishes, and the survey's way out is a `"park"` line
+naming why the operator should look first. Either way the harness holds a root
+that has only a seed or a live session; a machine-baked, chore-authored, or
+past-first-stage root has a settled design and is ready to start. A fired kick
+is itself dynamic, so its tail may sweep, groom, and kick again. The ride ends
+when a survey adds nothing, with no generation cap.
 
 ## Twin
 

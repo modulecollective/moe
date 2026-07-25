@@ -119,12 +119,13 @@ func rideModeContextLine() string {
 			"right now, and the machine can neither grow nor shrink it. A placement aimed into that " +
 			"chain will be redirected to its own thread, and a group naming one of its runs will have " +
 			"that entry dropped rather than move the run out. Shape new threads worth naming instead " +
-			"of trying to reshape the one that's running, and don't ask for a kick — it will be refused."
+			"of trying to reshape the one that's running; nothing you groom starts here."
 	case rideDynamic:
 		return "This pulse is firing inside a **dynamic** ride: the operator licensed the machine to " +
-			"extend it. Work groomed onto the ridden chain's tail will run in this same ride, and a " +
-			"`\"kick\": true` group may start a thread of its own. Both are real motion with no human " +
-			"look in between — hold the ordering and kick bars accordingly."
+			"extend it. Work groomed onto the ridden chain's tail will run in this same ride, and every " +
+			"other thread you groom gets its own kick when this sweep finishes unless you park it. Both " +
+			"are real motion with no human look in between — hold the ordering bar accordingly, and " +
+			"write a `\"park\"` line for any thread the operator should see first."
 	}
 	return ""
 }

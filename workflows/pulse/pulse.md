@@ -311,9 +311,9 @@ condition, not restate the criterion.
 Like a twin spec, this is a nomination rather than a create: with the
 chore's run already open, the entry lands on that run. So a `chore`
 entry works at a thread position too, and places the chore's run there.
-A thread rooted at a chore run may carry `"kick": true` like any other —
-the operator wrote the prompt, so the design is settled by construction
-and the kick bar is the only question left.
+A thread rooted at a chore run starts like any other — the operator
+wrote the prompt, so the design is settled by construction and the only
+question left is whether you have a reason to park it.
 
 **Quiet is the normal answer.** A judged chore whose condition didn't
 fire is not a finding, and a pulse that nominates nothing is a
@@ -390,25 +390,40 @@ What you cannot infer from the marker is *urgency*, only readiness. It
 says "carry this forward", not "carry it first". Order an advanced run
 against the rest of the queue on the merits, same as anything else.
 
-**Nothing you place executes.** Chaining under a parked thread is
-curation: that thread runs when someone kicks it. The one exception is
-below.
+**Outside a dynamic ride, nothing you place executes.** Chaining under
+a parked thread is curation: that thread runs when someone kicks it.
+Inside one, placement *is* execution — see below.
 
-### Asking for a kick
+### Parking a thread
 
-A thread may carry `"kick": true`, asking the harness to start that
-thread when this sweep finishes. It fires only when the operator's own
-verb carried the dynamic consent that licenses machine-rooted motion,
-and only on a thread whose root has **a settled design**: machine-baked
-(the run was spawned by another run), chore-authored (its seed is the
-chore's own `prompt.md`), or past its first stage (the operator
-advanced it, or real downstream work has landed). A root still sitting
-at its first stage with nothing but a seed — a promoted sketch, a
-design that closed without an advance, a hand-composed chain head —
-stays with the operator. A root someone has a session open on is held
-too. The harness enforces all of it, and skips silently-with-a-line
-otherwise. Ask for the kick on the merits regardless; a declined kick
-parks the thread for the next pulse to place, which costs nothing.
+Under a dynamic ride, **every thread you groom starts when this sweep
+finishes.** You are not asking for that; it is what the ride is. Your
+judgment goes into the exception.
+
+The floor is the harness's and you do not re-derive it: it starts
+nothing without the operator's dynamic consent, nothing from a chained
+spawner, nothing whose root lacks a settled design, and nothing anyone
+has a session open on. Runs *this* sweep mints are settled by
+construction — the seed is a design you baked — so a fresh thread of
+your own spawns clears the floor on its own. When the floor holds a
+thread it says so on stderr, and the thread parks for the next pulse to
+place.
+
+**Park when you can name why the operator should look first.** Write
+the reason as one line:
+
+    {"runs": ["fix-a", "fix-b"], "park": "fix-b touches the release path"}
+
+Reasons that earn a park: an ordering you wouldn't defend, a member you
+put in on a hunch, work touching an irreversible or outward-facing
+surface. If you cannot write the sentence, there is no park — let it
+run.
+
+The asymmetry is measured, not assumed. A wrong park strands a whole
+generation until a human notices — three of those have happened, one
+of them the sweep that prompted this rewrite. A wrong kick spends a
+run that still has to clear its own review and test gates before it
+ships, and the operator can Ctrl-C the ride. Bias toward motion.
 
 There is no cap on how many generations this can run for: a kicked
 thread's own tail fires its own sweep, which may kick again. What ends
@@ -416,20 +431,14 @@ it is you having nothing left worth chaining — so a thin generation is
 a real answer, and manufacturing one to keep the machine busy is the
 failure mode to avoid.
 
-**Inside a dynamic ride, the kicked thread is where next work goes.**
-That is the whole idiom, and it is easy to miss when the cycle's work
-has all merged and there is no order left to claim: a lone fix run
-written to `loose` parks and waits for a human, which under a dynamic
-ride means the generation you just surveyed ends with nobody picking
-up what you found. If there is work you'd have the machine do next,
-write it in the thread carrying `"kick": true` — one run is a thread.
-The bar doesn't move: it is still the spawn bar and still the kick
-bar, and work that fails either belongs in `loose` or in a followup.
-
-**The kick bar: you'd bet the operator would kick this thread
-unchanged.** An unsettled order or a speculative member means groom,
-don't kick. Asking for a kick you shouldn't have is the one thing on
-this canvas that costs real time rather than a prune.
+**Inside a dynamic ride, the thread is where next work goes.** That is
+the whole idiom, and it is easy to miss when the cycle's work has all
+merged and there is no order left to claim: a lone fix run written to
+`loose` parks and waits for a human, which under a dynamic ride means
+the generation you just surveyed ends with nobody picking up what you
+found. If there is work you'd have the machine do next, write it in a
+thread — one run is a thread. The spawn bar doesn't move, and work that
+fails it belongs in `loose` or in a followup.
 
 When this pulse is firing inside a ride, your context carries a block
 saying so and naming which kind. Inside a **static** ride the machine
@@ -448,9 +457,9 @@ it was opened for any less real. Treat it like any other parked
 machine-rooted thread, and give it the same slot a fresh one would
 get: when this sweep grooms lanes, write a twin spec at the tail of the
 thread carrying the work it should read the settled record of, or in a
-thread carrying `"kick": true` and let it ride. The same kick bar
-applies — a reflect that would read a half-finished record is one to
-place, not to start.
+thread of its own and let it ride. A reflect that would read a
+half-finished record is exactly the case `"park"` is for — name that in
+the park line rather than leaving the reflect out of the order.
 
 You do not need to know which case you are in. Writing a
 `"workflow": "twin"` spec at a thread's tail places the reflect either
