@@ -1326,17 +1326,17 @@ func TestDashWatchRejectsNonTTY(t *testing.T) {
 	}
 }
 
-// TestEraseLineWriterSplicesELBeforeEveryNewline: the repaint's
+// TestWatchFrameWriterSplicesELBeforeEveryNewline: the repaint's
 // stale-tail guard. Without an EL on each line a frame line that got
 // shorter than last tick's leaves the previous frame's tail characters
 // sitting to its right, because nothing erases ahead of the redraw any
 // more.
-func TestEraseLineWriterSplicesELBeforeEveryNewline(t *testing.T) {
+func TestWatchFrameWriterSplicesELBeforeEveryNewline(t *testing.T) {
 	var buf bytes.Buffer
-	w := eraseLineWriter{w: &buf}
+	w := watchFrameWriter{w: &buf, rows: 20}
 
 	in := "alpha\nbeta\n\ntrailing-no-newline"
-	n, err := io.WriteString(w, in)
+	n, err := io.WriteString(&w, in)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -1349,21 +1349,21 @@ func TestEraseLineWriterSplicesELBeforeEveryNewline(t *testing.T) {
 	}
 }
 
-// TestEraseLineWriterSurvivesWriteBoundaries: frames arrive as many
+// TestWatchFrameWriterSurvivesWriteBoundaries: frames arrive as many
 // small writes (banner, art, each tabwriter flush), so the splice can't
 // depend on a line landing inside one Write. Chunking the same input at
 // every possible offset must produce the same bytes as writing it whole.
-func TestEraseLineWriterSurvivesWriteBoundaries(t *testing.T) {
+func TestWatchFrameWriterSurvivesWriteBoundaries(t *testing.T) {
 	in := "one\ntwo\n\nthree"
 	want := "one\x1b[K\ntwo\x1b[K\n\x1b[K\nthree"
 
 	for split := 0; split <= len(in); split++ {
 		var buf bytes.Buffer
-		w := eraseLineWriter{w: &buf}
-		if _, err := io.WriteString(w, in[:split]); err != nil {
+		w := watchFrameWriter{w: &buf, rows: 20}
+		if _, err := io.WriteString(&w, in[:split]); err != nil {
 			t.Fatalf("split %d: first write: %v", split, err)
 		}
-		if _, err := io.WriteString(w, in[split:]); err != nil {
+		if _, err := io.WriteString(&w, in[split:]); err != nil {
 			t.Fatalf("split %d: second write: %v", split, err)
 		}
 		if buf.String() != want {
@@ -1372,11 +1372,73 @@ func TestEraseLineWriterSurvivesWriteBoundaries(t *testing.T) {
 	}
 }
 
-// TestEraseLineWriterKeepsColourGate: every dash styler (banner
+// TestWatchFrameWriterClipsAtEveryWriteBoundary verifies both parts of
+// the height bound: the bottom visible row has EL but no newline, and
+// every later byte is reported consumed without reaching the terminal.
+func TestWatchFrameWriterClipsAtEveryWriteBoundary(t *testing.T) {
+	in := "one\ntwo\nthree\nfour"
+	want := "one\x1b[K\ntwo\x1b[K"
+
+	for split := 0; split <= len(in); split++ {
+		var buf bytes.Buffer
+		w := watchFrameWriter{w: &buf, rows: 2}
+		n, err := w.Write([]byte(in[:split]))
+		if err != nil {
+			t.Fatalf("split %d: first write: %v", split, err)
+		}
+		if n != split {
+			t.Fatalf("split %d: first count=%d want %d", split, n, split)
+		}
+		n, err = w.Write([]byte(in[split:]))
+		if err != nil {
+			t.Fatalf("split %d: second write: %v", split, err)
+		}
+		if n != len(in)-split {
+			t.Fatalf("split %d: second count=%d want %d", split, n, len(in)-split)
+		}
+		if buf.String() != want {
+			t.Fatalf("split %d: got %q want %q", split, buf.String(), want)
+		}
+	}
+}
+
+func TestWatchFrameWriterSmallHeights(t *testing.T) {
+	tests := []struct {
+		rows int
+		want string
+	}{
+		{rows: 1, want: "one\x1b[K"},
+		{rows: 2, want: "one\x1b[K\ntwo\x1b[K"},
+	}
+	for _, tt := range tests {
+		var buf bytes.Buffer
+		w := watchFrameWriter{w: &buf, rows: tt.rows}
+		in := "one\ntwo\nthree\n"
+		n, err := io.WriteString(&w, in)
+		if err != nil {
+			t.Fatalf("rows %d: write: %v", tt.rows, err)
+		}
+		if n != len(in) {
+			t.Fatalf("rows %d: count=%d want %d", tt.rows, n, len(in))
+		}
+		if buf.String() != tt.want {
+			t.Fatalf("rows %d: got %q want %q", tt.rows, buf.String(), tt.want)
+		}
+	}
+}
+
+func TestDashFramePostResetsStyleBeforeErase(t *testing.T) {
+	want := cliout.Reset + "\x1b[J\x1b[?2026l"
+	if dashFramePost != want {
+		t.Fatalf("dashFramePost=%q want reset + ED-0 + sync-off %q", dashFramePost, want)
+	}
+}
+
+// TestWatchFrameWriterKeepsColourGate: every dash styler (banner
 // gradient, activity histogram, factory art) gates on cliout.Enabled,
 // which asserts *os.File. Wrapping stdout for the repaint would strip
 // the whole dashboard's colour if the wrapper didn't expose Unwrap.
-func TestEraseLineWriterKeepsColourGate(t *testing.T) {
+func TestWatchFrameWriterKeepsColourGate(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	f, err := os.Open("/dev/ptmx")
 	if err != nil {
@@ -1387,8 +1449,8 @@ func TestEraseLineWriterKeepsColourGate(t *testing.T) {
 		t.Skipf("/dev/ptmx does not classify as a terminal here; nothing to unwrap to")
 	}
 
-	if !cliout.Enabled(eraseLineWriter{w: f}) {
-		t.Fatal("cliout.Enabled(eraseLineWriter{tty}) = false; the repaint wrapper would render the dashboard unstyled")
+	if !cliout.Enabled(&watchFrameWriter{w: f, rows: 24}) {
+		t.Fatal("cliout.Enabled(watchFrameWriter{tty}) = false; the repaint wrapper would render the dashboard unstyled")
 	}
 }
 

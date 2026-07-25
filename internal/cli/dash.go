@@ -31,17 +31,17 @@ const dashWatchInterval = 3 * time.Second
 //     terminals that don't know the mode ignore the pair.
 //   - every frame line ends with dashEraseLine (EL, erase-to-EOL) so a
 //     line that got shorter than last tick's leaves no stale tail.
-//   - dashFramePost closes with ED-0, erasing whatever the old frame
-//     had below the new one's last line, then ends the sync block.
+//   - dashFramePost resets SGR in case clipping swallowed a renderer's
+//     line-end reset, then closes with ED-0, erasing whatever the old
+//     frame had below the new one's last line, and ends the sync block.
 //
-// Measured under tmux 3.5a: zero history growth per tick and pre-watch
-// history intact, as long as the frame fits the pane. A frame taller
-// than the pane still scrolls at the bottom edge and feeds history —
-// measured at half ED-2's rate, not zero. \x1b[3J (wipe scrollback)
-// stays omitted — blowing away the operator's history isn't ours to do.
+// The watchFrameWriter keeps even a taller frame within the pane:
+// the bottom visible row has no newline, and later frame bytes are
+// consumed without being forwarded. \x1b[3J (wipe scrollback) stays
+// omitted — blowing away the operator's history isn't ours to do.
 const (
 	dashFramePre  = "\x1b[?2026h\x1b[H"
-	dashFramePost = "\x1b[J\x1b[?2026l"
+	dashFramePost = cliout.Reset + "\x1b[J\x1b[?2026l"
 	dashEraseLine = "\x1b[K"
 )
 
@@ -109,13 +109,28 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "dash: --watch needs a terminal on stdout")
 		return 2
 	}
-	frame := eraseLineWriter{w: stdout}
 	for first := true; ; first = false {
+		height, sizeErr := cliout.TerminalHeight(stdout)
+		if sizeErr != nil && first {
+			moePrintf(stderr, "dash: %v\n", sizeErr)
+			return 1
+		}
+
 		// Gather before repainting: the scan is the slow part, so doing
 		// it first keeps the in-place overwrite down to one burst of
 		// formatting rather than a scan-long half-drawn frame.
 		now := time.Now().UTC()
-		snap, err := GatherDashSnapshot(root, now, filter)
+		var snap DashSnapshot
+		var err error
+		if sizeErr != nil {
+			// A later sizing failure must stay bounded too. Render it
+			// as a single-row frame and retry the terminal on the next
+			// tick rather than falling back to an unbounded repaint.
+			height = 1
+			err = sizeErr
+		} else {
+			snap, err = GatherDashSnapshot(root, now, filter)
+		}
 		if err != nil && first {
 			// A typo'd invocation (or a missing bureaucracy) should
 			// fail fast, same as non-watch mode.
@@ -127,6 +142,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		// not through frame — the sequence carries no newline to erase
 		// past and EL here would clobber the line the cursor lands on.
 		_, _ = io.WriteString(stdout, dashFramePre)
+		frame := watchFrameWriter{w: stdout, rows: height}
 		if err != nil {
 			// A dashboard left running overnight has to survive a
 			// transient scan error (a run closed mid-scan), so the
@@ -135,30 +151,39 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			// stderr a redirect would leave the pane blank instead.
 			// The ED-0 below erases the rest of the dashboard it
 			// replaces, so no special case is needed.
-			moePrintf(frame, "%v\n", err)
+			moePrintf(&frame, "%v\n", err)
 		} else {
-			renderDashFrame(frame, now, snap, *all)
+			renderDashFrame(&frame, now, snap, *all)
 		}
 		_, _ = io.WriteString(stdout, dashFramePost)
 		time.Sleep(dashWatchInterval)
 	}
 }
 
-// eraseLineWriter splices EL (erase-to-end-of-line) in before every
+// watchFrameWriter splices EL (erase-to-end-of-line) in before every
 // newline it passes through, so each repainted line clears whatever the
-// previous frame left to its right. Stateless: the insertion point is
-// the newline byte itself, so a frame split across Write calls at any
-// boundary still comes out right.
+// previous frame left to its right. At the newline ending the last
+// allowed row it emits EL without the newline, then consumes all later
+// frame bytes without forwarding them. The state survives arbitrary
+// Write boundaries.
 //
 // Unwrap lets cliout.IsTTY — and so cliout.Enabled, which the banner,
 // histogram and factory-art stylers all gate on — see the terminal
 // underneath instead of classifying the wrapper as a non-file writer
 // and stripping the dashboard's colour.
-type eraseLineWriter struct{ w io.Writer }
+type watchFrameWriter struct {
+	w    io.Writer
+	rows int
+	row  int
+	full bool
+}
 
-func (e eraseLineWriter) Unwrap() io.Writer { return e.w }
+func (e watchFrameWriter) Unwrap() io.Writer { return e.w }
 
-func (e eraseLineWriter) Write(p []byte) (int, error) {
+func (e *watchFrameWriter) Write(p []byte) (int, error) {
+	if e.full {
+		return len(p), nil
+	}
 	consumed := 0
 	for consumed < len(p) {
 		i := bytes.IndexByte(p[consumed:], '\n')
@@ -169,7 +194,15 @@ func (e eraseLineWriter) Write(p []byte) (int, error) {
 		if n, err := e.w.Write(p[consumed : consumed+i]); err != nil {
 			return consumed + n, err
 		}
-		if _, err := io.WriteString(e.w, dashEraseLine+"\n"); err != nil {
+		if _, err := io.WriteString(e.w, dashEraseLine); err != nil {
+			return consumed + i, err
+		}
+		e.row++
+		if e.row == e.rows {
+			e.full = true
+			return len(p), nil
+		}
+		if _, err := io.WriteString(e.w, "\n"); err != nil {
 			return consumed + i, err
 		}
 		consumed += i + 1
@@ -181,7 +214,7 @@ func (e eraseLineWriter) Write(p []byte) (int, error) {
 // art, sections — straight to stdout. Frames are never buffered:
 // cliout's colour gates only fire on a real *os.File terminal, so
 // routing a frame through a bytes.Buffer would strip every style.
-// Watch mode's eraseLineWriter is a pass-through, not a buffer, and
+// Watch mode's watchFrameWriter is a pass-through, not a buffer, and
 // stays gate-transparent via Unwrap.
 func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool) {
 	state := dash.FactoryStateFromRows(snap.Rows)

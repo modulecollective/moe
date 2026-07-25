@@ -68,7 +68,7 @@ func Enabled(w io.Writer) bool {
 // No current caller of IsTTY has been observed pointing at /dev/null,
 // but the predicate reads as a general "is this a real terminal?"
 // question and the next caller shouldn't have to relearn the lesson.
-func IsTTY(w io.Writer) bool {
+func terminalFile(w io.Writer) (*os.File, bool) {
 	for {
 		u, ok := w.(interface{ Unwrap() io.Writer })
 		if !ok {
@@ -78,16 +78,32 @@ func IsTTY(w io.Writer) bool {
 	}
 	f, ok := w.(*os.File)
 	if !ok {
-		return false
+		return nil, false
 	}
 	st, err := f.Stat()
 	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
-		return false
+		return nil, false
 	}
 	if nullStat, err := os.Stat(os.DevNull); err == nil && os.SameFile(st, nullStat) {
-		return false
+		return nil, false
 	}
-	return true
+	return f, true
+}
+
+func IsTTY(w io.Writer) bool {
+	_, ok := terminalFile(w)
+	return ok
+}
+
+// TerminalHeight returns the current row count of the terminal behind w.
+// Decorators exposing Unwrap are followed through the same path as IsTTY,
+// so layout and styling agree about which file is the operator's terminal.
+func TerminalHeight(w io.Writer) (int, error) {
+	f, ok := terminalFile(w)
+	if !ok {
+		return 0, fmt.Errorf("terminal sizing unavailable")
+	}
+	return terminalHeight(f)
 }
 
 // Printf writes a styled line to w.

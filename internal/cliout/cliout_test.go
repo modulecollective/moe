@@ -57,3 +57,9 @@ func TestIsTTYRejectsDevNull(t *testing.T) {
 		t.Fatalf("IsTTY(%s) = true; expected false", os.DevNull)
 	}
 }
+
+func TestTerminalHeightRejectsNonTerminal(t *testing.T) {
+	if _, err := TerminalHeight(unwrapWriter{w: io.Discard}); err == nil {
+		t.Fatal("TerminalHeight(wrapped io.Discard) succeeded; expected sizing-unavailable error")
+	}
+}
