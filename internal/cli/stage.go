@@ -829,16 +829,15 @@ func serveAgentSuppress() bool {
 
 // wikiSessionInputs is everything runWikiSession needs to drive a
 // wiki-aware session through its full lifecycle: open the session
-// worktree, rewrite the wiki cfg to worktree paths, seed .wiki-ops,
+// worktree, rewrite the wiki cfg to worktree paths,
 // run the executor, finalize the wiki, commit, and close. The two
 // callbacks — WikiBuilder and BuildSpec — defer the work that depends
 // on the worktree path (or, for ingest, on the run metadata loaded
 // from inside the worktree).
 type wikiSessionInputs struct {
 	// Project / RunSlug / DocID identify the session worktree branch
-	// (`session/<project>/<runslug>/<doc>`). Stage sessions reuse the
-	// real run id; lint sessions synthesise one (e.g.
-	// "lint-2026-04-27-153022").
+	// (`session/<project>/<runslug>/<doc>`); RunSlug is the run's real
+	// id.
 	Project string
 	RunSlug string
 	DocID   string
@@ -846,18 +845,17 @@ type wikiSessionInputs struct {
 	// will dispatch to. Populated by runStageSession before
 	// runWikiSession runs so reportWikiSessionExit can attribute the
 	// "<agent> exited" line honestly. Empty falls back to "agent" in
-	// the reporter, which keeps the lint caller correct without
-	// forcing it to resolve up front.
+	// the reporter.
 	Agent string
 	// LockPurpose is the repo-lock label prefix; the helper appends
 	// "-open" / "-close" for the two short-held windows.
 	LockPurpose string
 	// WikiBuilder, if non-nil, returns the canonical wiki cfg the
 	// helper rewrites to worktree paths. Receives the canonical
-	// bureaucracy root. Stage sessions defer until BuildSpec has
-	// populated run metadata; lint sessions return the cfg directly.
+	// bureaucracy root; resolution defers until BuildSpec has
+	// populated run metadata.
 	// May return nil to opt out of the wiki integration entirely
-	// (no .wiki-ops, no FinalizeIngest, no wiki dir staging).
+	// (no FinalizeIngest, no wiki dir staging).
 	WikiBuilder func(canonicalRoot string) (*wiki.Config, error)
 	// BuildSpec resolves the per-turn parameters once the worktree is
 	// open. Errors abort with a stderr report and exit code 1.
@@ -867,26 +865,26 @@ type wikiSessionInputs struct {
 // wikiTurnSpec is the data BuildSpec hands back to runWikiSession.
 // Carries everything the executor and commit step need plus the
 // pluggable callbacks for prompt assembly and per-turn staging that
-// differ between ingest and lint.
+// differ per stage.
 type wikiTurnSpec struct {
-	// Metadata is the run state, or nil for run-less sessions (lint).
-	// Drives transcript mirroring in the executor.
+	// Metadata is the run state; nil is tolerated for test callers
+	// that build the spec directly. Drives transcript mirroring in
+	// the executor.
 	Metadata *run.Metadata
 	// DocID is which document this turn drives — for transcript
 	// path. Ignored when Metadata is nil.
 	DocID string
 	// ClonePath is the sandbox clone working directory. Empty for
-	// document-only / lint sessions.
+	// document-only sessions.
 	ClonePath string
 	// SessionCwd is the stable per-document cwd for claude turns — a
 	// path under <root>/.moe/sessions/<p>/<r>/<d>. Code-bearing stages
 	// reach the sandbox clone via --add-dir, not via cwd. Empty for
-	// run-less / lint sessions, which don't `--resume` and can keep
+	// run-less sessions, which don't `--resume` and can keep
 	// using the worktree root.
 	SessionCwd string
-	// SessionUUID is the Claude Code session id. Stage sessions reuse
-	// the per-document UUID stored in run.json; lint sessions mint a
-	// fresh one each invocation.
+	// SessionUUID is the Claude Code session id — the per-document
+	// UUID stored in run.json.
 	SessionUUID string
 	// NewSession picks --session-id (true) over --resume (false).
 	NewSession bool
@@ -959,7 +957,7 @@ type wikiTurnSpec struct {
 	// ExtraEnv is the merged dev-env exports (parsed from the
 	// project's `hooks/dev-env.d/*` setup scripts) that should ride
 	// the claude subprocess as additional KEY=VALUE entries. Empty
-	// for stages without a working tree (design, lint, etc.) or for
+	// for stages without a working tree (e.g. design) or for
 	// projects that ship no dev-env hooks. Routed unchanged to
 	// executor.Request.ExtraEnv / executor.OneShotRequest.ExtraEnv.
 	ExtraEnv []string
@@ -991,12 +989,12 @@ func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.
 
 // runWikiSession owns the full wiki-aware session lifecycle: open the
 // session worktree under the repo lock, rewrite the wiki cfg to the
-// worktree, seed .wiki-ops, ask the caller for the per-turn spec, run
+// worktree, ask the caller for the per-turn spec, run
 // the executor, finalize the wiki, commit the turn (via the caller's
 // CommitStager), and close the session worktree. Run-scoped extras
 // (run.json, EnsureDocument, sandbox, promptNextStage) layer on top
-// in runStageSession; lint sessions call the helper directly with no
-// run scaffolding. Returns the exit code to bubble up.
+// in runStageSession, its only caller. Returns the exit code to
+// bubble up.
 func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) int {
 	sess, closeSess, err := openWikiSession(root, in, stdout, stderr)
 	if err != nil {

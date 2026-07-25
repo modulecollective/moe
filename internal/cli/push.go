@@ -21,7 +21,7 @@ import (
 )
 
 // pushCommand builds the `push` facade for a workflow. Same shape as
-// lintCommand/reflectCommand — the factory closes over the workflow
+// reflectCommand — the factory closes over the workflow
 // name so the Usage closure can render a runnable banner instead of a
 // `<wf>` placeholder. runPushTyped itself stays workflow-agnostic: it
 // loads the run, reads md.Workflow, and threads it into the per-call

@@ -56,7 +56,7 @@ func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 	}
 
 	// No other top-level .md, no topics/ subdir. Engine-managed files
-	// (log.md, checkpoint.json, .wiki-ops) are exempt.
+	// (log.md, checkpoint.json) are exempt.
 	entries, err := os.ReadDir(cfg.ContentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -81,7 +81,7 @@ func assertSchemaInvariants(cfg Config, bootstrap bool) error {
 		if managed[name] {
 			continue
 		}
-		// Engine-managed files (log.md / checkpoint.json / .wiki-ops)
+		// Engine-managed files (log.md / checkpoint.json)
 		// are exempt — they're written by finalize, not by the agent.
 		// history-summary.md is engine-aware but agent-written: reflect
 		// instructs the agent to maintain it, so it sits alongside

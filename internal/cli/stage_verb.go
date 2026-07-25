@@ -182,8 +182,8 @@ type stageVerbCfg struct {
 }
 
 // runStageVerb is the shared body behind every workflow's stage verbs
-// (sdlc design/code/review/test, twin's six,
-// hooks/chores code): parse the per-stage flags, branch to interactive
+// (sdlc design/code/review/test, twin's six): parse the per-stage
+// flags, branch to interactive
 // (no cascade flag) or cascade (one of --once / --to / --ship /
 // --chain), and surface cascade-mode mutual exclusion at parse time.
 // Per-workflow variance is the two cfg hooks; the cascade flags are
