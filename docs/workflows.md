@@ -130,11 +130,11 @@ pull the trigger at 6pm and the work outlasts your attention", not "MoE runs at
 night".
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
-— every operator-cascade workflow (SDLC, twin, KB, hooks, chores) plus chain
-heads — grouped into blocks that mirror the dash's chains. A blank line is a chain
-boundary: each contiguous block of run lines becomes one linear chain (each
-line chains-to the one below it in its block; the block's last line chains-to
-nothing). The editor is WYSIWYG — the blocks you see are the chains you get.
+— every operator-cascade workflow (SDLC, twin) plus chain heads — grouped into
+blocks that mirror the dash's chains. A blank line is a chain boundary: each
+contiguous block of run lines becomes one linear chain (each line chains-to
+the one below it in its block; the block's last line chains-to nothing). The
+editor is WYSIWYG — the blocks you see are the chains you get.
 Move a line into another block to fold it into that chain, and isolate a run in
 its own block (or delete its line) to unchain it. Saving unchanged is a no-op.
 
