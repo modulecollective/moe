@@ -79,7 +79,8 @@ const indexLockSubstr = "index.lock': File exists"
 // single attempt; err is the cmd.Run error (nil on success).
 //
 // Used as a test seam (intercept calls without subprocess mocking) and
-// as the entry point for MOE_GIT_TRACE=1 once that wiring lands.
+// as the entry point for MOE_GIT_TRACE=1 (installGitTrace in
+// internal/cli, installed at cli.Run).
 // Setting Hook from multiple goroutines without external coordination
 // is the caller's problem — production callers set it once at startup.
 var Hook func(dir string, args []string, dur time.Duration, err error)

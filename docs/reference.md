@@ -307,6 +307,9 @@ to ship with any untracked file present.
   session worktrees and branches.
 - `moe clone list|gc` inspects or removes orphan per-run sandbox clones.
 - `moe workspace release` clears a stale named-workspace claim.
+- `MOE_GIT_TRACE=1` (strict `=1`) prints one line per git invocation —
+  dir, argv, duration, error — to stderr. First tool to reach for when a
+  stage open or sync stalls inside git.
 
 Stage logic can recover orphaned Claude sessions from the Claude cache or from
 mirrored transcript files when the normal close path was interrupted.
