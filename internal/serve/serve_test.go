@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -2152,6 +2153,43 @@ func TestPromoteFormRendersWorkflowSelect(t *testing.T) {
 	for _, want := range []string{
 		`<select name="workflow">`,
 		`<option value="sdlc" selected>sdlc</option>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+}
+
+// TestPromoteErrorEchoesSelections: a promote submit that fails
+// validation re-renders with the operator's workspace and agent picks
+// still selected, the way the new-run form has always behaved. Before
+// the two forms shared their field markup, promote's re-render dropped
+// both and the operator had to re-pick.
+func TestPromoteErrorEchoesSelections(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	if err := os.MkdirAll(filepath.Join(root, ".moe", "named", "alpha", "shared"), 0o755); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	form := url.Values{}
+	form.Set("workflow", "nope")
+	form.Set("workspace", "shared")
+	form.Set("agent", "codex")
+	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`unknown workflow &#34;nope&#34;`,
+		`value="shared" data-project="alpha" selected`,
+		`value="codex" selected`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)

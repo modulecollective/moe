@@ -58,30 +58,40 @@ type workspaceOption struct {
 	Label   string // "project/name"
 }
 
+// runFormVM is everything the new-run and promote forms share: the
+// dropdown content both offer and the selections both echo back on an
+// error re-render. newRunVM and promoteVM embed it, so handlers and
+// templates keep reaching .Workflows / .Workspace unchanged, and the
+// "runformfields" partial renders the trio of selects from it.
+type runFormVM struct {
+	Workspaces  []workspaceOption // every named workspace this host has on disk, across all projects
+	Agents      []string          // includes "" for "use default"
+	Workflows   []NewRunWorkflow  // selector entries; first is the default
+	ErrorBanner string            // populated on a POST validation failure
+	// Workspace, Agent, Workflow echo the operator's submitted values back
+	// into the form on an error re-render so a validation failure doesn't
+	// wipe their picks: each re-selects the matching dropdown option. On
+	// GET, Workflow is the default (new-run's form additionally pre-selects
+	// from the ?workflow= query param when present).
+	Workspace string
+	Agent     string
+	Workflow  string
+	// Insecure gates the spawning submit ("open & run" / "promote & run").
+	// Parking is journal-only and stays available in safe mode; only that
+	// button is hidden.
+	Insecure bool
+}
+
 // newRunVM backs the new-run form. Projects and workspaces are
 // gathered from disk at request time; the agent list is static and
 // the workflow list comes from Options.NewRunWorkflows.
 type newRunVM struct {
-	Projects    []string          // project IDs
-	Workspaces  []workspaceOption // every named workspace this host has on disk, across all projects
-	Agents      []string          // includes "" for "use default"
-	Workflows   []NewRunWorkflow  // selector entries; first is the default
-	ErrorBanner string            // populated on a POST validation failure (slice #4)
-	// ID, Workspace, Agent, Workflow echo the operator's submitted values
-	// back into the form on an error re-render so a validation failure
-	// doesn't wipe what they typed. ID is the raw `project/slug` text
-	// (echoed verbatim, not re-joined, so a malformed entry shows exactly
-	// as typed); Workspace/Agent/Workflow re-select the matching dropdown
-	// option. On GET, Workflow is pre-selected from the ?workflow= query
-	// param when present; unknown or absent falls back to the default.
-	ID        string
-	Workspace string
-	Agent     string
-	Workflow  string
-	// Insecure gates the "open & run" button. Opening a parked run is
-	// journal-only and stays available in safe mode; only the spawning
-	// submit is hidden.
-	Insecure bool
+	runFormVM
+	Projects []string // project IDs
+	// ID echoes the raw `project/slug` text back on an error re-render,
+	// verbatim rather than re-joined, so a malformed entry shows exactly
+	// as typed.
+	ID string
 }
 
 // newRunWorkflow resolves a submitted (or query-string) workflow name
@@ -144,11 +154,6 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 	wfName := strings.TrimSpace(r.FormValue("workflow"))
 	fail := func(msg string) { s.renderFormError(w, r, id, wsName, agentName, wfName, msg) }
 
-	wf, ok := s.newRunWorkflow(wfName)
-	if !ok {
-		fail("workflow: unknown workflow " + strconv.Quote(wfName))
-		return
-	}
 	projectID, slug, err := splitID(id)
 	if err != nil {
 		fail(err.Error())
@@ -162,17 +167,9 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error())
 		return
 	}
-	if wsName != "" {
-		if err := workspace.ValidateName(wsName); err != nil {
-			fail("workspace: " + err.Error())
-			return
-		}
-		// Same refusal the CLI's runNew makes — the binding means
-		// nothing to the other workflows and would strand the claim.
-		if !wf.Workspace {
-			fail("workspace: only sdlc accepts a workspace binding")
-			return
-		}
+	wf, ok := s.validateRunSelections(wfName, wsName, fail)
+	if !ok {
+		return
 	}
 	// Agent validity is checked by runopen.Open via run.New; we trust
 	// the hardcoded dropdown set here.
@@ -187,16 +184,49 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		fail("open: " + err.Error())
 		return
 	}
+	s.finishRunOpen(w, r, md.Project+"/"+md.ID, wf, spawn, fail)
+}
 
+// validateRunSelections resolves the submitted workflow name and vets
+// the workspace binding against it — the gate both run-opening submits
+// apply before anything is written. fail renders the caller's own form
+// with the banner; ok is false once it has fired.
+func (s *Server) validateRunSelections(wfName, wsName string, fail func(string)) (NewRunWorkflow, bool) {
+	wf, ok := s.newRunWorkflow(wfName)
+	if !ok {
+		fail("workflow: unknown workflow " + strconv.Quote(wfName))
+		return NewRunWorkflow{}, false
+	}
+	if wsName == "" {
+		return wf, true
+	}
+	if err := workspace.ValidateName(wsName); err != nil {
+		fail("workspace: " + err.Error())
+		return NewRunWorkflow{}, false
+	}
+	// Same refusal the CLI's runNew makes — the binding means nothing to
+	// the other workflows and would strand the claim.
+	if !wf.Workspace {
+		fail("workspace: only sdlc accepts a workspace binding")
+		return NewRunWorkflow{}, false
+	}
+	return wf, true
+}
+
+// finishRunOpen is the tail both run-opening submits share once the run
+// exists: spawn its first stage when the operator used the spawning
+// button, then redirect to the run's page. A spawn failure re-renders
+// the caller's form — the run is already open, so the banner is all
+// that's left to say.
+func (s *Server) finishRunOpen(w http.ResponseWriter, r *http.Request, runID string, wf NewRunWorkflow, spawn bool, fail func(string)) {
 	if spawn {
-		runID := md.Project + "/" + md.ID
 		args := []string{wf.Name, wf.FirstStage, runID}
 		if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 			fail("spawn: " + err.Error())
 			return
 		}
 	}
-	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
+	http.Redirect(w, r, "/run/"+runID, http.StatusSeeOther)
 }
 
 func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsName, agentName, wfName, msg string) {
@@ -1184,54 +1214,24 @@ func (s *Server) transcriptLinks(projectID, slug, stage string) []transcriptLink
 }
 
 // promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).
-// Workspaces is every named workspace this host knows about (cross-
-// project, mirroring /run/new); Agents includes "" for "use default";
-// Workflows mirrors the new-run form's destination selector (sdlc is
-// the only entry today; `moe sdlc new --from-idea` is the CLI face of
-// the same move). ErrorBanner is populated on POST validation failure
-// so the re-render keeps the operator's correction surface in one
-// place.
+// The destination selector it shares with the new-run form lives in the
+// embedded runFormVM (sdlc is the only workflow entry today; `moe sdlc
+// new --from-idea` is the CLI face of the same move); Project and Slug
+// name the idea being promoted.
 type promoteVM struct {
-	Project     string
-	Slug        string
-	Workspaces  []workspaceOption
-	Agents      []string
-	Workflows   []NewRunWorkflow
-	Workflow    string // selected entry, echoed on error re-render
-	ErrorBanner string
-	// Insecure gates the "promote & run" button. Parking the
-	// destination run is journal-only and stays available in safe mode;
-	// only the spawning submit is hidden.
-	Insecure bool
+	runFormVM
+	Project string
+	Slug    string
 }
 
 // gatherPromoteVM returns the dropdown content the promote page needs.
 // Pulled from disk per request, same as gatherNewRunVM.
 func (s *Server) gatherPromoteVM(projectID, slug string) (promoteVM, error) {
-	infos, err := workspace.List(s.opts.Root, "")
+	form, err := s.gatherRunFormVM()
 	if err != nil {
 		return promoteVM{}, err
 	}
-	wsOpts := make([]workspaceOption, 0, len(infos))
-	for _, info := range infos {
-		wsOpts = append(wsOpts, workspaceOption{
-			Project: info.Project,
-			Name:    info.Name,
-			Label:   info.Project + "/" + info.Name,
-		})
-	}
-	vm := promoteVM{
-		Project:    projectID,
-		Slug:       slug,
-		Workspaces: wsOpts,
-		Agents:     agentOptions,
-		Workflows:  s.opts.NewRunWorkflows,
-		Insecure:   s.opts.Insecure,
-	}
-	if len(vm.Workflows) > 0 {
-		vm.Workflow = vm.Workflows[0].Name
-	}
-	return vm, nil
+	return promoteVM{runFormVM: form, Project: projectID, Slug: slug}, nil
 }
 
 // handlePromoteForm renders the per-idea promote page (GET). 404 when
@@ -1292,7 +1292,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	wsName := strings.TrimSpace(r.FormValue("workspace"))
 	agentName := strings.TrimSpace(r.FormValue("agent"))
 	wfName := strings.TrimSpace(r.FormValue("workflow"))
-	fail := func(msg string) { s.renderPromoteError(w, r, projectID, slug, wfName, msg) }
+	fail := func(msg string) { s.renderPromoteError(w, r, projectID, slug, wfName, wsName, agentName, msg) }
 
 	md, ok := s.loadRunOr404(w, projectID, slug, "promote")
 	if !ok {
@@ -1304,20 +1304,9 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 			http.StatusConflict)
 		return
 	}
-	wf, ok := s.newRunWorkflow(wfName)
+	wf, ok := s.validateRunSelections(wfName, wsName, fail)
 	if !ok {
-		fail("workflow: unknown workflow " + strconv.Quote(wfName))
 		return
-	}
-	if wsName != "" {
-		if err := workspace.ValidateName(wsName); err != nil {
-			fail("workspace: " + err.Error())
-			return
-		}
-		if !wf.Workspace {
-			fail("workspace: only sdlc accepts a workspace binding")
-			return
-		}
 	}
 	// Agent membership rides the hardcoded dropdown set.
 
@@ -1339,18 +1328,10 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		s.logf("promote: mark idea %s/%s promoted: %v", projectID, slug, promoted.MarkErr)
 	}
 
-	if spawn {
-		destID := promoted.Run.Project + "/" + promoted.Run.ID
-		args := []string{wf.Name, wf.FirstStage, destID}
-		if _, err := s.children.spawn(destID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-			fail("spawn: " + err.Error())
-			return
-		}
-	}
-	http.Redirect(w, r, "/run/"+promoted.Run.Project+"/"+promoted.Run.ID, http.StatusSeeOther)
+	s.finishRunOpen(w, r, promoted.Run.Project+"/"+promoted.Run.ID, wf, spawn, fail)
 }
 
-func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, wfName, msg string) {
+func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, wfName, wsName, agentName, msg string) {
 	vm, err := s.gatherPromoteVM(projectID, slug)
 	if err != nil {
 		http.Error(w, msg+" (and promote form gather failed: "+err.Error()+")", http.StatusInternalServerError)
@@ -1360,6 +1341,8 @@ func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, proj
 	if wfName != "" {
 		vm.Workflow = wfName
 	}
+	vm.Workspace = wsName
+	vm.Agent = agentName
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, r, "promote.html", vm)
 }
@@ -1369,10 +1352,20 @@ func (s *Server) gatherNewRunVM() (newRunVM, error) {
 	if err != nil {
 		return newRunVM{}, err
 	}
-
-	infos, err := workspace.List(s.opts.Root, "")
+	form, err := s.gatherRunFormVM()
 	if err != nil {
 		return newRunVM{}, err
+	}
+	return newRunVM{runFormVM: form, Projects: projectIDs}, nil
+}
+
+// gatherRunFormVM reads the workspace list off disk and assembles the
+// dropdown content both run-opening forms offer, with the first
+// registered workflow pre-selected.
+func (s *Server) gatherRunFormVM() (runFormVM, error) {
+	infos, err := workspace.List(s.opts.Root, "")
+	if err != nil {
+		return runFormVM{}, err
 	}
 	wsOpts := make([]workspaceOption, 0, len(infos))
 	for _, info := range infos {
@@ -1382,9 +1375,7 @@ func (s *Server) gatherNewRunVM() (newRunVM, error) {
 			Label:   info.Project + "/" + info.Name,
 		})
 	}
-
-	vm := newRunVM{
-		Projects:   projectIDs,
+	vm := runFormVM{
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
 		Workflows:  s.opts.NewRunWorkflows,

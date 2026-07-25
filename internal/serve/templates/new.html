@@ -43,31 +43,7 @@
       </datalist>
     </label>
 
-    {{if .Workflows}}
-    <label>
-      workflow
-      <select name="workflow">
-        {{range .Workflows}}<option value="{{.Name}}"{{if eq .Name $.Workflow}} selected{{end}}>{{.Name}}</option>{{end}}
-      </select>
-    </label>
-    {{end}}
-
-    {{if .Workspaces}}
-    <label>
-      workspace <span class="hint">(optional; sdlc only)</span>
-      <select name="workspace">
-        <option value="">(none)</option>
-        {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}"{{if eq .Name $.Workspace}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select>
-    </label>
-    {{end}}
-
-    <label>
-      agent <span class="hint">(optional; resolves to default if blank)</span>
-      <select name="agent">
-        {{range .Agents}}<option value="{{.}}"{{if eq . $.Agent}} selected{{end}}>{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
-      </select>
-    </label>
+    {{template "runformfields" .}}
 
     <button type="submit">open run</button>
     {{if .Insecure}}<button type="submit" name="spawn" value="1">open &amp; run</button>{{end}}

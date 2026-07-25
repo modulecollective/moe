@@ -153,6 +153,38 @@
 </script>
 {{end}}
 
+{{/* The workflow/workspace/agent selects the new-run and promote forms
+     both carry. Dot is the page VM; the fields resolve through its
+     embedded runFormVM. Submit buttons stay per-page — their labels
+     name the verb, and only the spawning one is Insecure-gated. */}}
+{{define "runformfields"}}
+    {{if .Workflows}}
+    <label>
+      workflow
+      <select name="workflow">
+        {{range .Workflows}}<option value="{{.Name}}"{{if eq .Name $.Workflow}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+
+    {{if .Workspaces}}
+    <label>
+      workspace <span class="hint">(optional; sdlc only)</span>
+      <select name="workspace">
+        <option value="">(none)</option>
+        {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}"{{if eq .Name $.Workspace}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+
+    <label>
+      agent <span class="hint">(optional; resolves to default if blank)</span>
+      <select name="agent">
+        {{range .Agents}}<option value="{{.}}"{{if eq . $.Agent}} selected{{end}}>{{if .}}{{.}}{{else}}(default){{end}}</option>{{end}}
+      </select>
+    </label>
+{{end}}
+
 {{define "themejs"}}
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function () {
