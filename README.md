@@ -136,14 +136,16 @@ full treatment.
 | --- | --- | --- |
 | [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
 | [`chat`](docs/workflows.md#chat) | one `chat` session, resumed across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
-| [`kb`](docs/workflows.md#knowledge-base-kb) | `research` -> `summarize` | research a topic with an agent and keep the distilled article |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | operator-authored standing direction agents read but never write |
 | [`twin`](docs/workflows.md#twin) | `vision` -> ... -> `glossary` -> `finalize` | recorded project intent |
-| [`hooks`](docs/workflows.md#hooks) | `code` | project-specific hook scripts |
-| [`chores`](docs/workflows.md#chores) | `code` | recurring maintenance that surfaces as ready-to-open runs |
 | [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only sweep that fires on run traffic, feeds the backlog, and grooms queued work into lanes |
 | [`chain`](docs/workflows.md#chains) | one `chain` purpose note, no stages | a placeholder head: the batch chained behind it rides as one on `moe chain kick` |
+
+Three bureaucracy-side artifacts have no workflow of their own — project
+[hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores), and
+[knowledge topics](docs/workflows.md#knowledge). Edit them by hand, or let an
+sdlc run land them: a stage's per-turn commit picks all three up.
 
 ## Going Deeper
 

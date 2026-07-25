@@ -90,6 +90,20 @@ happening has already run the experiment. What survived these workflows was a
 smaller vocabulary tied to real habits, plus markdown guidance cheap enough to
 reshape when the habit changes.
 
+The last three went for a different reason: their deliverables were fine and
+the machinery around them was the problem. `kb` wrapped an engine — an
+evolving doc schema, a changelog, a checkpoint, a separate lint session — around
+a directory of markdown articles. Eight runs ever, dormant for two months, one
+schema operation recorded in its whole history. `hooks` and `chores` existed
+because their edits landed in the bureaucracy repo rather than in project
+source, and no other workflow was allowed to write there. Once ordinary sdlc
+stages could commit those directories, the dedicated workflows were a longer
+route to the same file. All three retired in July 2026; the articles, the hook
+scripts, the chore definitions, and the fast loops around them (`moe hook
+fire`, `moe chore check`) all stayed. What replaced them is a whitelist entry
+and one structural check that runs when a stage writes the tree. The thing
+worth keeping was the artifact, and it never needed a workflow to have one.
+
 ## A queue was the wrong answer twice
 
 The first `moe queue` was a runner. It persisted a list of pending runs and

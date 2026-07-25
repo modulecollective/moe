@@ -61,7 +61,7 @@ source of truth for the exact command surface; this page is a map.
   placeholder head to collect a batch under. `--seed` pops `$EDITOR` on its
   purpose note first.
 - `moe chain edit` opens an editor over active operator-cascade runs (SDLC,
-  twin, KB, hooks, chores) plus chain heads; reorder
+  twin) plus chain heads; reorder
   lines to record a run chain in the bureaucracy journal.
 - `moe chain note <project>/<run>` edits a head's purpose note: why the batch
   exists. Membership isn't written there — it renders live from the edges.
@@ -79,17 +79,11 @@ source of truth for the exact command surface; this page is a map.
 - `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
-- `moe kb new|research|summarize|close|harvest|cat|log|lint` drives project
-  knowledge.
 - `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
 - `moe intent new|edit|close|list|cat` manages operator-authored standing
   direction.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
   maintains recorded intent.
-- `moe hooks new|code|close|harvest|cat|log` edits project hook scripts through a
-  journaled run.
-- `moe chores new|code|close|harvest|cat|log` edits project chore definitions
-  through a journaled run.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
   backlog sweep.
 
@@ -154,7 +148,7 @@ comments. Two properties in v1:
   registry `--agent` uses.
 
 **Selectors** have two axes — workflow and stage. Because a bare stage name is
-ambiguous across workflows (`code` is a stage of both `sdlc` and `chores`),
+ambiguous across workflows (`vision` is a stage of `twin` alone, `code` of `sdlc`),
 stage-only selectors take a leading dot:
 
 | Selector      | Matches                     | Specificity |
@@ -230,6 +224,44 @@ bureaucracy:
 
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run.
+
+Hooks, chore definitions, and knowledge topics are bureaucracy-side
+artifacts: edit them by hand, or let an sdlc run land them. An sdlc stage's
+per-turn commit picks up `projects/<project>/hooks`, `chores`, and
+`knowledge`, so `moe sdlc design → code → close` is the journaled route
+with no push involved.
+
+### Chore definitions
+
+A chore lives at `projects/<project>/chores/<name>/`, holding a `chore.json` of
+scheduler scalars and a `prompt.md` seed. All `chore.json` keys are optional;
+durations are strings like `"720h"` / `"30d"`:
+
+- `trigger` — path glob, or `*` for any merged project change.
+- `workflow` — workflow to open; defaults to `sdlc`.
+- `cooldown` — minimum duration between completed chore runs.
+- `cadence` — stale-by-time duration.
+- `when` — a one-line prose due-condition the pulse survey judges against what
+  landed. Exclusive with `trigger` and `cadence`: a chore is due mechanically or
+  by judgment, not both. `cooldown` still applies.
+
+Reach for `when` when the chore is due only if a judgment holds ("a landed
+change made this artifact lie"); `"trigger": "*"` plus a cooldown degrades into
+a weekly timer. Keep the criterion to one line — one that needs paragraphs is
+too vague to judge.
+
+`prompt.md` is the seed for the opened workflow's first canvas: a markdown
+sibling read verbatim, not folded into `chore.json`. Use `moe chore check` as
+the dry-run loop rather than opening a run to test a definition.
+
+### Knowledge topics
+
+`projects/<project>/knowledge/` is a plain doc tree: `index.md` at the top as
+the catalog, one file per topic flat under `topics/`. `moe serve` browses it
+read-only. Any sdlc stage may write it, and the stage refuses to close if the
+turn's edits left the tree structurally broken — a topic missing from
+`index.md`, a broken relative link, an empty doc. Hand edits bypass the gate;
+it polices agent writers.
 
 ### Per-project dev secrets
 

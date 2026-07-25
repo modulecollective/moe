@@ -217,30 +217,31 @@ transcript is the record, read back with `moe chat log`. Grooming the idea
 backlog (`moe idea new|edit|close|reopen`) is the one state change a chat
 session makes on your behalf.
 
-## Knowledge Base (kb)
+## Knowledge
 
 Background research otherwise decays into scattered chats you re-ask every few
-weeks. kb exists to make the answer durable: research once (a vetted
-bibliography with the gaps named), distill once (a wiki article), and future
-runs read the answer as context instead of re-earning it.
+weeks. `projects/<project>/knowledge/` exists to make the answer durable:
+research once, write it down, and future runs read it as context instead of
+re-earning it.
 
-`moe kb` is the research companion: research a topic once with an agent, and
-keep the distilled answer where future runs read it.
+It's a plain doc tree — `index.md` as the catalog, one file per topic flat under
+`topics/` — with no workflow of its own. Two ways in:
 
-```sh
-moe kb new <project>/<slug>
-moe kb research <project>/<run>
-moe kb summarize <project>/<run>
-moe kb lint <project>
-```
+- **A research excursion**: an sdlc run whose design stage researches the
+  question and writes the topic files, then closes mid-ladder
+  (`moe sdlc close`). Review, test, and push are meaningless for a
+  bureaucracy-only diff.
+- **A ride-along**: any sdlc run that learned something durable about the
+  project's domain writes it up as part of the turn. Agents are told to do this
+  on their own initiative, not only when asked.
 
-`research` builds a vetted bibliography in conversation: primary sources,
-abstracts in the agent's own words, gaps named instead of papered over.
-`summarize` compresses that bibliography into a durable article in the
-project wiki, which future runs read as context. The point is to research
-once and keep the answer, instead of re-asking an agent the same background
-question every few weeks. `moe kb lint <project>` checks wiki hygiene without
-opening a run.
+Either way the stage's per-turn commit lands the edits, and the stage refuses to
+close if the turn left the tree structurally broken — a topic missing from
+`index.md`, a broken relative link, an empty doc. The agent that broke the index
+fixes it in the same turn. Hand edits bypass the gate; the tree is yours.
+
+`moe serve` browses the tree read-only, which is where most reading of it
+happens.
 
 ## Ideas
 
@@ -359,20 +360,23 @@ Judged chores don't appear in `moe chore list` (it is due-only) or on the dash
 until their run opens — `moe chore check` is where you see the registration,
 reported as `judged` rather than due/not-due.
 
-Two command families, mirroring hooks:
+The runtime, mirroring hooks:
 
 ```sh
-moe chores new|code|close <project>/<run>     # edit chore definitions (journaled)
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
 moe chore open [--now] [--park|--ship|--chain|--dynamic] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
-`moe chores …` edits definitions under `projects/<project>/chores/*` through a
-journaled run. `moe chore open` refuses if the chore isn't due, already has an
-open run, or is cooling down. Pass `--now` to open it anyway when it's cooling
-down or not yet due — it still refuses if a run is already open.
+`moe chore open` refuses if the chore isn't due, already has an open run, or is
+cooling down. Pass `--now` to open it anyway when it's cooling down or not yet
+due — it still refuses if a run is already open.
+
+Editing a definition is a plain file edit, or an sdlc run: a stage's per-turn
+commit picks up `projects/<project>/chores/`, so `moe sdlc design → code →
+close` is the journaled route. Due-ness notices either way — a definition edit
+committed by any means makes the chore due as "definition changed."
 
 ## Pulse
 
@@ -494,13 +498,15 @@ twin steers future runs.
 Some project guidance has to be deterministic rather than prose an agent
 interprets: bringing up a dev environment, tearing it down, gating a push.
 Hooks are that layer — drop-in executable scripts with no manifest, discovered
-by directory. Two loops maintain them: a journaled edit loop
-(`hooks new/code/close`) for durable changes, and a fast one-shot fire loop for
-iterating on a script until it works.
+by directory.
 
-`moe hooks new`, `moe hooks code`, and `moe hooks close` are the journaled
-loop for project hook scripts. `moe hook fire <project> <event>` is the fast
-loop: it creates a transient sandbox, runs one event's scripts once, prints
-the sandbox path, and exits. The hook events themselves (`dev-env.d`,
-`dev-env-teardown.d`, `pre-push.d`) and per-project dev secrets are covered
-in [reference.md §Hooks And Environments](reference.md#hooks-and-environments).
+`moe hook fire <project> <event>` is the iteration loop: it creates a transient
+sandbox, runs one event's scripts once, prints the sandbox path, and exits — no
+run needed to test a 30-line bash change. Landing a change is a plain file edit,
+or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
+(`moe sdlc design → code → close`) when you want the edit journaled with a
+canvas.
+
+The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`) and
+per-project dev secrets are covered in
+[reference.md §Hooks And Environments](reference.md#hooks-and-environments).

@@ -1,9 +1,9 @@
 ---
 name: moe-bureaucracy
-description: How to leave traces for downstream MoE runs — twin observations (decisions that should edit the digital twin), portable lore (facts that apply across projects), and out-of-scope followups. Use when you notice something worth recording for future runs but it's out of scope for the current canvas edit.
+description: How to write the bureaucracy's own artifacts — twin observations (decisions that should edit the digital twin), portable lore (facts that apply across projects), out-of-scope followups, project knowledge topics, and hook/chore definitions. Use when you notice something worth recording for future runs but it's out of scope for the current canvas edit, or when the work itself is authoring a knowledge topic, a hook script, or a chore.
 ---
 
-# Leaving traces for downstream MoE runs
+# Writing the bureaucracy's own artifacts
 
 You are inside a Ministry of Everything (MoE) bureaucracy session. While doing
 your stage's work, you may notice things *out of scope* for this turn but
@@ -21,6 +21,11 @@ worth recording for future runs. MoE keeps three places for this:
 - **Followups** (`followups.md`) records work that's worth doing but out of
   scope for the current canvas. The operator triages at close; survivors
   become idea runs.
+
+Two more sections at the end cover artifacts you write *as* the work rather
+than as a note about it: **Knowledge** (the project's durable domain
+reference) and **Hooks and chores** (the project's own automation). Those live
+under `projects/<project>/` and ride your stage's per-turn commit.
 
 The paths below are pre-substituted for this run. Read top-down and append to
 the first matching channel.
@@ -198,3 +203,116 @@ the note came from.
 If acting on this entry would edit a digital-twin doc, it belongs
 in `feedback/twin.md` above instead. If it's a portable fact that
 would apply to other projects, it belongs in `feedback/lore.md`.
+
+---
+
+## Knowledge
+
+`projects/<project>/knowledge/` is the project's durable domain reference: what
+you had to learn about the subject matter to do the work, written so a future
+run can cite it instead of re-deriving it. Research findings, external surveys,
+protocol and API notes, the shape of a third-party system. Not what the project
+*is* (that's the twin), not portable ops facts (that's lore), not what happened
+this run (that's your canvas).
+
+Write here on your own initiative, not only when asked.
+
+On-disk shape:
+
+- `index.md` at the top of the dir is the catalog and the authority on
+  grouping — its sections *are* the taxonomy. Bullets reference topics through
+  the subfolder: `- [DNS basics](topics/dns-basics.md)`.
+- `topics/<topic>.md`, one file per topic, flat. Cross-links between topics are
+  plain siblings (`[other](other-topic.md)`); a link back up to the catalog is
+  `../index.md`.
+
+How to write it:
+
+- **Read `index.md` first.** Skim the existing topics and form a map of what's
+  there before deciding where new material belongs.
+- **Fold into an existing topic before minting a new one.** A new source on DNS
+  caching usually deepens `dns-basics.md` more than it warrants a separate
+  `dns-caching.md`. Split only when the existing doc would lose coherence by
+  absorbing the material.
+- **Maintain `index.md` as you go.** Every topic on disk appears in the index.
+  This is enforced: a stage whose commit touched `knowledge/` and left an
+  unindexed topic, a broken relative link, or an empty doc **refuses to
+  close**, and you fix it in the same turn.
+- **Cite inline.** Attribute claims to specific sources — a URL, or a short
+  `[source: <name>]` tag. Pick one form and keep it consistent within a doc so
+  a reader can follow any claim back.
+- **Prefer primary sources**: spec pages, original papers, maintainer docs.
+  Reach for secondary sources when they add something primary ones don't.
+- **Abstract in your own words.** If you can't, you haven't read enough of the
+  source — read it or drop it. Every URL you write must resolve; never invent
+  one.
+- **Name the gaps.** "No good primary source on X" is useful to the next run.
+  Leave an explicit TODO rather than papering over thin research with a
+  confident sentence you can't support.
+- **Tight over padded.** A 400-word topic that says the thing beats a
+  2000-word one that restates it. No encyclopedia voice, no "is a term used to
+  describe" ceremony.
+- **Don't restructure because you'd have shaped it differently.** Surface a
+  proposal to the operator first.
+
+---
+
+## Hooks and chores
+
+`projects/<project>/hooks/` and `projects/<project>/chores/` are the project's
+own automation, and they are bureaucracy files rather than project source: your
+stage's per-turn commit lands them, no push involved.
+
+### Hooks
+
+Scripts under `projects/<project>/hooks/<event>.d/*`. Three events ship:
+`dev-env`, `dev-env-teardown`, `pre-push`. Scripts run lex-sorted, so two-digit
+prefixes (`10-`, `20-`, …) leave room for inserts.
+
+- Shebang first line; the file must be executable (`chmod +x`).
+- `set -euo pipefail` (or `set -eu` for `sh`). A hook that swallows a failure
+  silently is worse than one that loudly stops the chain.
+- `dev-env.d/*` emits `KEY=VALUE` on stdout, everything else on stderr.
+  `dev-env-teardown.d/*` and `pre-push.d/*` are stream-through.
+- Read the `MOE_*` env the harness exports (`MOE_PROJECT`, `MOE_RUN`,
+  `MOE_BUREAUCRACY`, `MOE_SANDBOX`, optionally `MOE_WORKSPACE`,
+  `MOE_TARGET_BRANCH`) — that's the contract. Don't reach outside it.
+- `dev-env.d/*` must not mutate tracked files in `$MOE_SANDBOX`. Setup work
+  writes to a path the script owns and emits (e.g. `MOE_DEV_TMPDIR=…`); the
+  design stage's sandbox-boundary check would false-positive on a dirty tree.
+- Self-contained. If `20-db.sh` reads a `$PORT` that `10-port.sh` set, make the
+  ordering obvious in the filename and note the dependency in a one-line
+  comment at the read site.
+
+`moe hook fire <project> <event>` mints a transient sandbox and runs one
+event's scripts once — use it instead of opening a run to test a 30-line bash
+change. It leaves the sandbox on disk and prints the path. It is
+fire-and-inspect, not a test harness: no assertions, no fixtures. Don't invent
+one. And never `chmod -x` a failing script to make a chain green — fix the
+script or the thing it caught.
+
+### Chores
+
+A chore is `projects/<project>/chores/<name>/` holding a `chore.json` of
+scheduler scalars and a `prompt.md` seed.
+
+`chore.json` — all keys optional, durations are strings like `"720h"` / `"30d"`:
+
+- `trigger`: path glob, or `*` for any merged project change.
+- `workflow`: workflow to open; defaults to `sdlc`.
+- `cooldown`: minimum duration between completed chore runs.
+- `cadence`: stale-by-time duration.
+- `when`: a one-line prose due-condition the pulse survey judges against what
+  landed. Exclusive with `trigger` and `cadence` — a chore is due mechanically
+  or by judgment, not both. `cooldown` still applies.
+
+Reach for `when` when the chore is due only if a judgment holds ("a landed
+change made this artifact lie"); a `"trigger": "*"` plus a cooldown is the
+shape that degrades into a weekly timer. Keep the criterion to one line: one
+that needs paragraphs is too vague to judge.
+
+`prompt.md` is the seed for the opened workflow's first canvas — a markdown
+sibling, read verbatim, not folded into `chore.json`.
+
+Use `moe chore check [--project <project>] [<project>/<name>]` as the dry-run
+loop. Do not open a chore run just to test a definition.
