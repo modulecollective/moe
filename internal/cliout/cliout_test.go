@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// unwrapWriter stands in for dash's watch-mode EL injector: a
-// pass-through decorator over the operator's terminal.
+// unwrapWriter stands in for a decorator over the operator's terminal.
 type unwrapWriter struct{ w io.Writer }
 
 func (u unwrapWriter) Write(p []byte) (int, error) { return u.w.Write(p) }
@@ -58,8 +57,8 @@ func TestIsTTYRejectsDevNull(t *testing.T) {
 	}
 }
 
-func TestTerminalHeightRejectsNonTerminal(t *testing.T) {
-	if _, err := TerminalHeight(unwrapWriter{w: io.Discard}); err == nil {
-		t.Fatal("TerminalHeight(wrapped io.Discard) succeeded; expected sizing-unavailable error")
+func TestTerminalSizeRejectsNonTerminal(t *testing.T) {
+	if _, _, err := TerminalSize(unwrapWriter{w: io.Discard}); err == nil {
+		t.Fatal("TerminalSize(wrapped io.Discard) succeeded; expected sizing-unavailable error")
 	}
 }

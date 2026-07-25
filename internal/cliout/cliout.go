@@ -56,7 +56,7 @@ func Enabled(w io.Writer) bool {
 // ignored: callers using this for layout decisions (banner.IndentStderr)
 // want the operator's terminal indented even when colour is suppressed.
 //
-// A writer that wraps the terminal (dash's watch-mode EL injector) is
+// A writer that wraps the terminal (dash's watch-mode frame buffer) is
 // followed through `Unwrap() io.Writer` — the errors.Unwrap idiom —
 // before the assertion, so decorating stdout doesn't silently strip
 // every style down-stack.
@@ -95,15 +95,16 @@ func IsTTY(w io.Writer) bool {
 	return ok
 }
 
-// TerminalHeight returns the current row count of the terminal behind w.
-// Decorators exposing Unwrap are followed through the same path as IsTTY,
-// so layout and styling agree about which file is the operator's terminal.
-func TerminalHeight(w io.Writer) (int, error) {
+// TerminalSize returns the current row and column counts of the terminal
+// behind w. Decorators exposing Unwrap are followed through the same path as
+// IsTTY, so layout and styling agree about which file is the operator's
+// terminal.
+func TerminalSize(w io.Writer) (rows, columns int, err error) {
 	f, ok := terminalFile(w)
 	if !ok {
-		return 0, fmt.Errorf("terminal sizing unavailable")
+		return 0, 0, fmt.Errorf("terminal sizing unavailable")
 	}
-	return terminalHeight(f)
+	return terminalSize(f)
 }
 
 // Printf writes a styled line to w.

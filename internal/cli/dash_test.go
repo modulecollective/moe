@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -1326,104 +1325,96 @@ func TestDashWatchRejectsNonTTY(t *testing.T) {
 	}
 }
 
-// TestWatchFrameWriterSplicesELBeforeEveryNewline: the repaint's
-// stale-tail guard. Without an EL on each line a frame line that got
-// shorter than last tick's leaves the previous frame's tail characters
-// sitting to its right, because nothing erases ahead of the redraw any
-// more.
-func TestWatchFrameWriterSplicesELBeforeEveryNewline(t *testing.T) {
+func TestWriteWatchViewportErasesEveryVisibleLine(t *testing.T) {
 	var buf bytes.Buffer
-	w := watchFrameWriter{w: &buf, rows: 20}
-
 	in := "alpha\nbeta\n\ntrailing-no-newline"
-	n, err := io.WriteString(&w, in)
-	if err != nil {
-		t.Fatalf("write: %v", err)
+	if err := writeWatchViewport(&buf, []byte(in), 20, 80); err != nil {
+		t.Fatalf("write viewport: %v", err)
 	}
-	if n != len(in) {
-		t.Fatalf("n=%d want %d — a short count makes io.Copy and fmt.Fprintf report ErrShortWrite", n, len(in))
-	}
-	want := "alpha\x1b[K\nbeta\x1b[K\n\x1b[K\ntrailing-no-newline"
+	want := "alpha\x1b[K\nbeta\x1b[K\n\x1b[K\ntrailing-no-newline\x1b[K"
 	if buf.String() != want {
 		t.Fatalf("got %q\nwant %q", buf.String(), want)
 	}
 }
 
-// TestWatchFrameWriterSurvivesWriteBoundaries: frames arrive as many
-// small writes (banner, art, each tabwriter flush), so the splice can't
-// depend on a line landing inside one Write. Chunking the same input at
-// every possible offset must produce the same bytes as writing it whole.
-func TestWatchFrameWriterSurvivesWriteBoundaries(t *testing.T) {
-	in := "one\ntwo\n\nthree"
-	want := "one\x1b[K\ntwo\x1b[K\n\x1b[K\nthree"
-
-	for split := 0; split <= len(in); split++ {
-		var buf bytes.Buffer
-		w := watchFrameWriter{w: &buf, rows: 20}
-		if _, err := io.WriteString(&w, in[:split]); err != nil {
-			t.Fatalf("split %d: first write: %v", split, err)
-		}
-		if _, err := io.WriteString(&w, in[split:]); err != nil {
-			t.Fatalf("split %d: second write: %v", split, err)
-		}
-		if buf.String() != want {
-			t.Fatalf("split %d: got %q want %q", split, buf.String(), want)
-		}
-	}
-}
-
-// TestWatchFrameWriterClipsAtEveryWriteBoundary verifies both parts of
-// the height bound: the bottom visible row has EL but no newline, and
-// every later byte is reported consumed without reaching the terminal.
-func TestWatchFrameWriterClipsAtEveryWriteBoundary(t *testing.T) {
+func TestWriteWatchViewportClipsHeightWithoutBottomNewline(t *testing.T) {
 	in := "one\ntwo\nthree\nfour"
 	want := "one\x1b[K\ntwo\x1b[K"
 
-	for split := 0; split <= len(in); split++ {
+	var buf bytes.Buffer
+	if err := writeWatchViewport(&buf, []byte(in), 2, 80); err != nil {
+		t.Fatalf("write viewport: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q want %q", buf.String(), want)
+	}
+	if got := strings.Count(buf.String(), "\n"); got != 1 {
+		t.Fatalf("newlines=%d want rows-1=1 in %q", got, buf.String())
+	}
+	if got := strings.Count(buf.String(), dashEraseLine); got != 2 {
+		t.Fatalf("EL count=%d want one per visible row", got)
+	}
+}
+
+func TestWriteWatchViewportClipsByDisplayCells(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		columns int
+		want    string
+	}{
+		{name: "ascii", in: "abcdef", columns: 4, want: "abcd"},
+		{name: "combining", in: "e\u0301x", columns: 1, want: "e\u0301"},
+		{name: "dashboard glyphs", in: "▶▂·x", columns: 3, want: "▶▂·"},
+		{name: "cjk exact", in: "a界b", columns: 3, want: "a界"},
+		{name: "cjk does not split", in: "a界b", columns: 2, want: "a"},
+		{name: "emoji", in: "a😀b", columns: 3, want: "a😀"},
+		{name: "supplemental emoji", in: "a🀄b", columns: 3, want: "a🀄"},
+		{
+			name:    "ansi is zero width and reset survives",
+			in:      cliout.Bright + "abcde" + cliout.Reset,
+			columns: 3,
+			want:    cliout.Bright + "abc" + cliout.Reset,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := writeWatchViewport(&buf, []byte(tt.in), 1, tt.columns); err != nil {
+				t.Fatalf("write viewport: %v", err)
+			}
+			want := tt.want + dashEraseLine
+			if buf.String() != want {
+				t.Fatalf("got %q want %q", buf.String(), want)
+			}
+			if !utf8.Valid(buf.Bytes()) {
+				t.Fatalf("viewport emitted partial UTF-8: %q", buf.Bytes())
+			}
+		})
+	}
+}
+
+func TestWriteWatchViewportNarrowPaneRegression(t *testing.T) {
+	line := strings.Repeat("x", 136)
+	for _, columns := range []int{80, 100} {
 		var buf bytes.Buffer
-		w := watchFrameWriter{w: &buf, rows: 2}
-		n, err := w.Write([]byte(in[:split]))
-		if err != nil {
-			t.Fatalf("split %d: first write: %v", split, err)
+		if err := writeWatchViewport(&buf, []byte(line+"\nnext\n"), 2, columns); err != nil {
+			t.Fatalf("columns %d: write viewport: %v", columns, err)
 		}
-		if n != split {
-			t.Fatalf("split %d: first count=%d want %d", split, n, split)
-		}
-		n, err = w.Write([]byte(in[split:]))
-		if err != nil {
-			t.Fatalf("split %d: second write: %v", split, err)
-		}
-		if n != len(in)-split {
-			t.Fatalf("split %d: second count=%d want %d", split, n, len(in)-split)
-		}
+		want := strings.Repeat("x", columns) + dashEraseLine + "\nnext" + dashEraseLine
 		if buf.String() != want {
-			t.Fatalf("split %d: got %q want %q", split, buf.String(), want)
+			t.Fatalf("columns %d: got %q want %q", columns, buf.String(), want)
 		}
 	}
 }
 
-func TestWatchFrameWriterSmallHeights(t *testing.T) {
-	tests := []struct {
-		rows int
-		want string
-	}{
-		{rows: 1, want: "one\x1b[K"},
-		{rows: 2, want: "one\x1b[K\ntwo\x1b[K"},
+func TestWriteWatchViewportOneByOne(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeWatchViewport(&buf, []byte("界\nsecond\n"), 1, 1); err != nil {
+		t.Fatalf("write viewport: %v", err)
 	}
-	for _, tt := range tests {
-		var buf bytes.Buffer
-		w := watchFrameWriter{w: &buf, rows: tt.rows}
-		in := "one\ntwo\nthree\n"
-		n, err := io.WriteString(&w, in)
-		if err != nil {
-			t.Fatalf("rows %d: write: %v", tt.rows, err)
-		}
-		if n != len(in) {
-			t.Fatalf("rows %d: count=%d want %d", tt.rows, n, len(in))
-		}
-		if buf.String() != tt.want {
-			t.Fatalf("rows %d: got %q want %q", tt.rows, buf.String(), tt.want)
-		}
+	if got, want := buf.String(), dashEraseLine; got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
@@ -1434,11 +1425,10 @@ func TestDashFramePostResetsStyleBeforeErase(t *testing.T) {
 	}
 }
 
-// TestWatchFrameWriterKeepsColourGate: every dash styler (banner
-// gradient, activity histogram, factory art) gates on cliout.Enabled,
-// which asserts *os.File. Wrapping stdout for the repaint would strip
-// the whole dashboard's colour if the wrapper didn't expose Unwrap.
-func TestWatchFrameWriterKeepsColourGate(t *testing.T) {
+// TestTTYFrameBufferKeepsColourGate: every dash styler (banner gradient,
+// activity histogram, factory art) gates on cliout.Enabled. Buffering a
+// watch frame must not make its eventual terminal destination disappear.
+func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	f, err := os.Open("/dev/ptmx")
 	if err != nil {
@@ -1449,8 +1439,9 @@ func TestWatchFrameWriterKeepsColourGate(t *testing.T) {
 		t.Skipf("/dev/ptmx does not classify as a terminal here; nothing to unwrap to")
 	}
 
-	if !cliout.Enabled(&watchFrameWriter{w: f, rows: 24}) {
-		t.Fatal("cliout.Enabled(watchFrameWriter{tty}) = false; the repaint wrapper would render the dashboard unstyled")
+	frame := ttyFrameBuffer{terminal: f}
+	if !cliout.Enabled(&frame) {
+		t.Fatal("cliout.Enabled(ttyFrameBuffer{tty}) = false; buffered watch frames would render unstyled")
 	}
 }
 
