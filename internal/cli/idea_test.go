@@ -610,7 +610,7 @@ func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
 }
 
 func TestIdeaEditRefusesNonIdeaRun(t *testing.T) {
-	// Guard that `moe idea edit` doesn't operate on an sdlc/kb
+	// Guard that `moe idea edit` doesn't operate on an sdlc/twin
 	// run even if the slug matches — the workflow check is load-bearing
 	// since ideas and other runs share one slug namespace per project.
 	root := newTestBureaucracy(t)

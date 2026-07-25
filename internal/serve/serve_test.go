@@ -1910,7 +1910,7 @@ var testNewRunWorkflows = []NewRunWorkflow{
 // cli/serve.go wires (the cli registry is unreachable from here —
 // internal/cli imports internal/serve): sdlc cascades with push
 // excluded, and this stub declares nothing else. Production also
-// declares twin/kb/hooks/chores as cascade workflows; the tests here
+// declares twin as the other cascade workflow; the tests here
 // only need one cascade workflow and one undeclared one to cover the
 // rendering branches. The stub-vs-production seam is covered
 // cli-side by TestServeRunPageChipsComposeWithRealLookup, which wires

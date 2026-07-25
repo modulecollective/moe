@@ -20,14 +20,15 @@ import (
 // `moe hook` is the cheap-fire iteration loop for project hooks. One
 // verb today: `fire`, which mints a transient sandbox and exercises
 // one event's `<event>.d/*` scripts end-to-end. No run.json, no journal
-// trailers, no dash row — pair with the `moe hooks` workflow
-// (hooks_workflow.go) when an edit should actually land in history.
+// trailers, no dash row — an edit that should land in history rides an
+// ordinary sdlc stage commit, which has write authority over
+// projects/<p>/hooks (see projectCommitDirs).
 
 func init() {
 	g := NewCommandGroup("hook", "exercise one project hook event in a transient sandbox")
 	g.Register(&Command{
 		Name:    "fire",
-		Summary: "run projects/<project>/hooks/<event>.d/* once in a fresh transient sandbox; pair with `moe hooks` for journaled edits",
+		Summary: "run projects/<project>/hooks/<event>.d/* once in a fresh transient sandbox; land edits via an sdlc run",
 		Run:     runHookFire,
 	})
 	RegisterGroup(g)

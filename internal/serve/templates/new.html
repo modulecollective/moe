@@ -54,7 +54,7 @@
 
     {{if .Workspaces}}
     <label>
-      workspace <span class="hint">(optional; sdlc/hooks only)</span>
+      workspace <span class="hint">(optional; sdlc only)</span>
       <select name="workspace">
         <option value="">(none)</option>
         {{range .Workspaces}}<option value="{{.Name}}" data-project="{{.Project}}"{{if eq .Name $.Workspace}} selected{{end}}>{{.Label}}</option>{{end}}

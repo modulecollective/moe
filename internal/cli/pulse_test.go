@@ -617,7 +617,7 @@ func TestPulseDoesNotFireFromServeClose(t *testing.T) {
 }
 
 // TestPulseFiresForRun is the fire-time gate in one table: the workflow
-// half (run traffic moves intent; chat/kb/pulse do not), the consent
+// half (run traffic moves intent; chat/pulse do not), the consent
 // half (only a ride's terminal transitions sweep — a `!!` ship the
 // operator is watching does not), and the chain-position half (a run
 // with a live chained child defers to its chain's tail). Only the last
@@ -776,7 +776,7 @@ func TestPulseDoesNotFireFromCloseWithoutRideConsent(t *testing.T) {
 
 // TestPulseDoesNotFireFromChatClose: chat is not run traffic — closing a
 // chat run must not pulse. This is the workflow guard that also keeps
-// chat/kb/hooks/chores/idea and pulse itself out.
+// chat/idea and pulse itself out.
 func TestPulseDoesNotFireFromChatClose(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "just-chatting", "chat", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
