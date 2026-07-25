@@ -523,6 +523,31 @@ func (s *Server) gatherProvenance(projectID, slug string) []ProvHop {
 	return hops
 }
 
+// loadRunOr404 loads a run's metadata for a handler whose only job on
+// failure is to say so: a missing run is a 404, anything else a logged
+// 500. verb prefixes both the 500 body and the log line ("close",
+// "promote form", …). ok is false when the response has already been
+// written, so callers just return.
+//
+// Deliberately not used by the post-mutation error switches
+// (closeCaptureRun, handleIdeaReopen, handleCaptureEditSubmit): those
+// map errors out of a mutation call and have conflict cases of their
+// own, which this would have to grow knobs for.
+func (s *Server) loadRunOr404(w http.ResponseWriter, projectID, slug, verb string) (*run.Metadata, bool) {
+	id := projectID + "/" + slug
+	md, err := run.Load(s.opts.Root, projectID, slug)
+	if err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			http.Error(w, "no such run: "+id, http.StatusNotFound)
+			return nil, false
+		}
+		s.logf("%s %s: load: %v", verb, id, err)
+		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+		return nil, false
+	}
+	return md, true
+}
+
 func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -558,14 +583,8 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("close %s: load: %v", id, err)
-		http.Error(w, "close: "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, "close")
+	if !ok {
 		return
 	}
 
@@ -772,14 +791,8 @@ func (s *Server) kickChainHead(w http.ResponseWriter, r *http.Request, dynamic b
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("kick %s: load: %v", id, err)
-		http.Error(w, "kick: "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, "kick")
+	if !ok {
 		return
 	}
 	if md.Workflow != dash.ChainWorkflow {
@@ -834,14 +847,8 @@ func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spa
 	id := projectID + "/" + slug
 	verb := mode.verb()
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("%s %s: load: %v", verb, id, err)
-		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, verb)
+	if !ok {
 		return
 	}
 	if s.opts.WorkflowUI == nil {
@@ -1236,14 +1243,8 @@ func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("promote form: load %s: %v", id, err)
-		http.Error(w, "promote form: "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, "promote form")
+	if !ok {
 		return
 	}
 	if !isPromotableIdea(md) {
@@ -1293,14 +1294,8 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 	wfName := strings.TrimSpace(r.FormValue("workflow"))
 	fail := func(msg string) { s.renderPromoteError(w, r, projectID, slug, wfName, msg) }
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("promote: load %s: %v", id, err)
-		http.Error(w, "promote: "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, "promote")
+	if !ok {
 		return
 	}
 	if !isPromotableIdea(md) {
@@ -1554,14 +1549,8 @@ func (s *Server) handleCaptureEditForm(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, err := run.Load(s.opts.Root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			http.Error(w, "no such run: "+id, http.StatusNotFound)
-			return
-		}
-		s.logf("edit form: load %s: %v", id, err)
-		http.Error(w, "edit form: "+err.Error(), http.StatusInternalServerError)
+	md, ok := s.loadRunOr404(w, projectID, slug, "edit form")
+	if !ok {
 		return
 	}
 	docID, ok := dash.CaptureDocID(md.Workflow)
