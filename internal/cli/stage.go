@@ -407,7 +407,13 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
 	agentName := stageAgentName(opts, md, sheetAgent)
 	opts.Model = stageModel(opts.Model, sheetAgent, sheetModel, agentName, stderr)
-	banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
+	// A knowledge-fix turn runs *inside* an outer stage's banner pair, so
+	// framing it as a stage of its own reads as two stages having run.
+	// The gate already announces it on one line; that line is the whole
+	// header the inner turn needs. Same guard on StageExit below.
+	if !opts.knowledgeFixTurn {
+		banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
+	}
 
 	// Sandbox-boundary snapshot, populated by BuildSpec when
 	// opts.EnforceSandboxBoundary is set. checkSandboxBoundary
@@ -783,7 +789,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return code
 		}
 	}
-	banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID)
+	if !opts.knowledgeFixTurn {
+		banner.StageExit(stdout, md.Workflow, docID, md.Project, md.ID)
+	}
 	if skipPostTurnPrompt(opts) {
 		// Headless ⇒ skip is structural, not a caller convention: a
 		// headless turn has no stdin to answer the post-turn prompt, so

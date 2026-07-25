@@ -1314,3 +1314,48 @@ func registerThrowawayWorkflow(t *testing.T, suffix string) *Workflow {
 	t.Cleanup(func() { delete(workflows, name) })
 	return wf
 }
+
+// TestKnowledgeFixTurnSuppressesStageBanners pins the one behaviour this
+// run exists for: the knowledge-hygiene gate's inner fix turn runs
+// inside the outer stage's banner pair, so it must not print a frame of
+// its own. Both turns are full successful sessions against the resume
+// fixture's fake agent, so the assertion covers the entry guard and the
+// exit guard in one pass — and the control subtest keeps the ordinary
+// path's banners pinned so the guard can't quietly swallow them.
+func TestKnowledgeFixTurnSuppressesStageBanners(t *testing.T) {
+	const entry = "▓▒░ MINISTRY OF EVERYTHING ░▒▓"
+	const exit = "░▒▓ design complete"
+
+	cases := []struct {
+		name     string
+		fake     string
+		fixTurn  bool
+		wantSeen bool
+	}{
+		{name: "ordinary turn frames itself", fake: "fake-banner-ordinary", wantSeen: true},
+		{name: "knowledge fix turn stays quiet", fake: "fake-banner-fix-turn", fixTurn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupResumeFixture(t, tc.fake)
+
+			var stdout, stderr bytes.Buffer
+			code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
+				Agent:            tc.fake,
+				Headless:         true,
+				knowledgeFixTurn: tc.fixTurn,
+			}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("design turn exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+			}
+
+			got := stdout.String()
+			for _, want := range []string{entry, exit} {
+				if strings.Contains(got, want) != tc.wantSeen {
+					t.Errorf("stdout contains %q = %v, want %v; stdout:\n%s",
+						want, !tc.wantSeen, tc.wantSeen, got)
+				}
+			}
+		})
+	}
+}
