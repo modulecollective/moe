@@ -1093,7 +1093,7 @@ func TestIdeaMoveRefusesPromotedIdea(t *testing.T) {
 }
 
 // TestIdeaMoveRefusesNonIdeaRun: a slug that names a non-idea run
-// (sdlc, kb, …) is not an idea move target, even when the slug shape
+// (sdlc, twin, …) is not an idea move target, even when the slug shape
 // matches. Guard the workflow check the same way idea edit does.
 func TestIdeaMoveRefusesNonIdeaRun(t *testing.T) {
 	root := newTestBureaucracy(t)

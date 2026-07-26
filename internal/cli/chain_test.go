@@ -728,7 +728,7 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 
 // TestActiveChainItemsMembership pins that chain-edit membership keys
 // on operatorCascades, not on workflow=="sdlc": every operator-paced
-// workflow (sdlc, twin, kb, hooks, chores) is offered, while chat
+// workflow (sdlc, twin) is offered, while chat
 // (perpetual) and pulse (machine-paced) stay out — the same predicate
 // the stage-verb flags and serve chips use. chain is the one workflow
 // admitted on top of the predicate: it has no stage ladder of its own,
