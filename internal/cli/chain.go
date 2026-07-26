@@ -365,10 +365,12 @@ func activeChainItems(graph *run.ChainGraph, mds []*run.Metadata, idx *run.Journ
 
 // chainAnnotation builds the per-line comment for the editor view.
 // One of: "orphan", "chains-to X", "chained-from Y[, Z]",
-// "chains-to X, chained-from Y". Cross-references that point at
-// terminal or missing runs are suppressed — the editor should not
-// advertise stale state — which is exactly the edge set run.ChainGraph
-// holds, so both directions are a plain lookup.
+// "chains-to X, chained-from Y". Both directions are a plain lookup
+// against run.ChainGraph, so they inherit its edge set: a "chains-to"
+// never names a terminal or missing run, but "chained-from" can name a
+// settled parent — the graph filters terminal children, not terminal
+// parents. That is the same edge the dash annotates in words, so
+// showing it here is honest about what the run follows.
 func chainAnnotation(graph *run.ChainGraph, key string) string {
 	var parts []string
 	if child := graph.Child(key); child != "" {

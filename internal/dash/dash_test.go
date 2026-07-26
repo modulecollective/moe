@@ -143,11 +143,13 @@ func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	// b heads its own visible unit b→c, and the unit's grouping is
 	// unaffected by a's departure.
 	//
-	// b does carry the connector, though — the assertion here used to be
-	// the reverse. A settled predecessor is still a predecessor: the thread
-	// is executing and b is what runs next, so the row says so, with the
-	// note naming the run it follows (a bare arrow would read as attaching
-	// to whatever unrelated row sits above).
+	// b carries the note but no connector. This assertion has flipped
+	// twice: it was no-arrow, then arrow-plus-note (a settled predecessor
+	// is still a predecessor, so say so), and now note-only. The arrow
+	// lost because it is adjacency-only — a settled parent is never the
+	// row above, so the arrow attaches b to an unrelated unit and reads
+	// as chain membership that may have been explicitly undone. The note
+	// carries the same information and names the run, so nothing is lost.
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	merged := &run.Metadata{ID: "a", Project: "p", Workflow: "sdlc", Status: run.StatusMerged}
 	runs := []*run.Metadata{merged, activeRun("p", "b"), activeRun("p", "c")}
@@ -155,8 +157,8 @@ func TestActiveTerminalParentChildIsHead(t *testing.T) {
 	chained := map[string]string{"p/a": "p/b", "p/b": "p/c"}
 	active := buildActive(t, runs, when, chained)
 	assertOrder(t, active, "p/b", "p/c")
-	if !active[0].Chained {
-		t.Errorf("p/b follows a settled parent and should draw the connector")
+	if active[0].Chained {
+		t.Errorf("p/b follows a settled parent and must not draw the connector")
 	}
 	if !strings.Contains(active[0].Note, "chained after p/a (merged)") {
 		t.Errorf("p/b Note = %q, want the settled-parent hint", active[0].Note)
@@ -603,11 +605,11 @@ func TestRenderChainedActiveRowIsFlushWithArrow(t *testing.T) {
 	}
 }
 
-// TestActiveChainHeadWithSettledParent is the incident this change
-// exists for: a two-item chain whose first item merged. The tail is the
-// next thing to run, but grouping needs both endpoints active, so it
-// collapsed to a bare orphan row. It must render with the arrow and a
-// note naming what it follows.
+// TestActiveChainHeadWithSettledParent covers a two-item chain whose
+// first item merged. The tail is the next thing to run, but grouping
+// needs both endpoints active, so it renders ungrouped: the note names
+// what it follows, and it draws no connector — the arrow means "chained
+// after the row directly above" and the merged parent is not that row.
 func TestActiveChainHeadWithSettledParent(t *testing.T) {
 	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
 	shipped := &run.Metadata{ID: "shipped", Project: "p", Workflow: "sdlc", Status: run.StatusMerged}
@@ -621,14 +623,47 @@ func TestActiveChainHeadWithSettledParent(t *testing.T) {
 		byKey[r.Project+"/"+r.Run] = r
 	}
 	tail := byKey["p/tail"]
-	if !tail.Chained {
-		t.Errorf("p/tail Chained = false; a queued tail must draw the connector")
+	if tail.Chained {
+		t.Errorf("p/tail Chained = true; a queued tail is marked in words, not with the connector")
 	}
 	if !strings.Contains(tail.Note, "chained after p/shipped (merged)") {
 		t.Errorf("p/tail Note = %q, want the settled-parent hint", tail.Note)
 	}
 	if byKey["p/x"].Chained || strings.Contains(byKey["p/x"].Note, "chained after") {
 		t.Errorf("unrelated orphan p/x picked up chain marking: %+v", byKey["p/x"])
+	}
+}
+
+// TestActiveSettledParentHeadBelowAChainTail is the incident that
+// removed the arrow: a live two-run unit with a pulled-off run sorted
+// underneath it. Both rows render flush-left, so an arrow on the lower
+// one reads as a third member of the unit above — a chain the operator
+// had explicitly detached. The unit keeps its own arrow; the pulled-off
+// run says what it follows in words.
+func TestActiveSettledParentHeadBelowAChainTail(t *testing.T) {
+	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
+	gone := &run.Metadata{ID: "gone", Project: "p", Workflow: "sdlc", Status: run.StatusMerged}
+	runs := []*run.Metadata{gone, activeRun("p", "u1"), activeRun("p", "u2"), activeRun("p", "pulled")}
+	when := map[string]time.Time{
+		"gone": base, "u1": base.Add(-time.Hour), "u2": base.Add(-2 * time.Hour),
+		"pulled": base.Add(-3 * time.Hour),
+	}
+	chained := map[string]string{"p/u1": "p/u2", "p/gone": "p/pulled"}
+	active := buildActive(t, runs, when, chained)
+	assertOrder(t, active, "p/u1", "p/u2", "p/pulled")
+
+	if active[0].Chained {
+		t.Errorf("unit head p/u1 should be unmarked")
+	}
+	if !active[1].Chained {
+		t.Errorf("p/u2 follows p/u1 adjacently and should keep its connector")
+	}
+	pulled := active[2]
+	if pulled.Chained {
+		t.Errorf("p/pulled draws a connector that reads as membership in the unit above")
+	}
+	if !strings.Contains(pulled.Note, "chained after p/gone (merged)") {
+		t.Errorf("p/pulled Note = %q, want the settled-parent hint", pulled.Note)
 	}
 }
 

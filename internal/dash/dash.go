@@ -190,9 +190,11 @@ type Row struct {
 	Agent bool
 	// EdgeAgent is true when the chain edge that placed this row after
 	// its parent was written by a pulse groom rather than an operator
-	// `chain edit`; EdgeConsent carries that groom's ride level. Only
-	// meaningful on a row rendered as part of a chain (Chained, or a
-	// chain head's member list).
+	// `chain edit`; EdgeConsent carries that groom's ride level. Set on
+	// any row that has a chain edge worth attributing: a Chained member,
+	// a chain head's member list, or a head whose parent has settled —
+	// that last one carries no arrow, but the edge is still the
+	// machine's or the operator's doing.
 	//
 	// Both are empty/false for edges older than the MoE-Consent trailer.
 	// That is *unknown*, not operator — don't render it as one.
@@ -373,9 +375,9 @@ func edgeAttribution(idx *run.JournalIndex, parent, child string) (bool, string)
 // renderer can draw a connector, and reattaches the textual
 // "· chained → X" hint only for edges adjacency doesn't already show
 // (a fan-in's second parent, or a child that fell out of the active
-// set). A unit head whose chain parent has already settled is marked
-// too, with a "· chained after X (merged)" hint. BACKLOG and COMPLETED
-// rows keep their recency order.
+// set). A unit head whose chain parent has already settled gets a
+// "· chained after X (merged)" hint and no connector. BACKLOG and
+// COMPLETED rows keep their recency order.
 //
 // rows must already be bucket-then-recency sorted, so the ACTIVE bucket
 // is the leading run of BucketActiveRuns rows.
@@ -410,12 +412,14 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 	// below; every other consecutive pair came from the childOf walk, so
 	// "has a successor in its unit" is exactly that set.
 	//
-	// A unit head can be Chained too, when the run that chains to it has
-	// already settled: the edge outlives its parent but the parent isn't
-	// an active row, so grouping can't show it. The arrow says "something
-	// runs before this"; the note below says what, since a bare flush
-	// arrow otherwise reads as attaching to whatever unrelated row floats
-	// above it.
+	// A unit head whose parent has already settled gets the note and no
+	// arrow. The edge outlives its parent and is worth naming, but the
+	// arrow is adjacency-only — it means "chained after the row directly
+	// above", and a settled parent is never that row, because it isn't
+	// an active row at all. An arrow there attaches the head to whatever
+	// unrelated unit floats above it, reading as membership in a thread
+	// the operator may have explicitly pulled it out of. Settled
+	// predecessors are words.
 	shownEdge := make(map[string]bool)
 	i := 0
 	for _, u := range units {
@@ -427,7 +431,6 @@ func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.
 			}
 			if pos == 0 {
 				if p := graph.TerminalParentOf(k); p != "" {
-					row.Chained = true
 					row.Note += settledChainHint(p, byKey[p])
 					row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, p, k)
 				}
