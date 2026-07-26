@@ -7,6 +7,6 @@ import (
 	"os"
 )
 
-func terminalSize(f *os.File) (int, int, error) {
+func terminalSize(_ *os.File) (int, int, error) {
 	return 0, 0, fmt.Errorf("terminal sizing unavailable on this platform")
 }
