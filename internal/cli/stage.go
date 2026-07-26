@@ -544,7 +544,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					// tolerates dev-env hooks that may legitimately touch
 					// the worktree (e.g. cache writes outside tracked
 					// files). Hooks are contracted to leave tracked files
-					// alone — see workflows/hooks/code.md.
+					// alone — see checkSandboxBoundary's hooks-side contract.
 					//
 					// BoundaryAllowsCommits skips the snapshot: a stage
 					// that may commit (review) leaves entryHEAD empty, and
