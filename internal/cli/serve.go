@@ -114,13 +114,7 @@ func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 			if err != nil {
 				return nil, err
 			}
-			wf, err := LookupWorkflow(md.Workflow)
-			if err != nil {
-				return nil, err
-			}
-			// Docs(), not Stages(): the run page lists the canvases a run
-			// carries, and a stageless canvas (chain's) is still one.
-			return wf.Docs(), nil
+			return docsForRun(root, md), nil
 		},
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
 			return GatherRunRow(root, project, runID, time.Now().UTC())

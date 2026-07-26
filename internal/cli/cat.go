@@ -100,18 +100,18 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 
 // resolveCanvasPath returns the absolute path the cat handler should
 // read for (workflow, project, run, stage). Validation order:
-// project exists → workflow registered → @latest resolved → run
-// exists → run belongs to workflow (or to a retired one) → stage in
-// the workflow's ladder (or, retired, in the run's documents/ dir).
+// project exists → @latest resolved → run exists → run belongs to
+// workflow (or to a retired one) → stage among the run's documents.
 // Then routes between the live session's worktree (if any) and the
 // operator's bureaucracy checkout.
+//
+// The invoked workflow is not itself looked up: every CLI caller comes
+// from a registered verb's own handler, and serve passes the run's
+// stored workflow, which is exactly what a retired run cannot resolve.
+// Gating here would only break that caller.
 func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, error) {
 	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
 		return "", fmt.Errorf("no such project: %s", projectID)
-	}
-	wf, err := LookupWorkflow(workflow)
-	if err != nil {
-		return "", err
 	}
 	if runID == latestRunSentinel {
 		resolved, err := pickLatestRun(root, workflow, projectID)
@@ -127,19 +127,16 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 		}
 		return "", err
 	}
-	// Docs() rather than Stages(): a workflow can carry a canvas that is
-	// not a ladder position (chain's is), and resolving a path is a
-	// question about documents, not about what the run owes.
-	docs := wf.Docs()
+	docs := docsForRun(root, md)
+	// A run belonging to another workflow gets named the verb that owns
+	// it — unless that workflow has been retired from the registry, in
+	// which case there is no correct command to redirect to and the verb
+	// the operator typed serves the run, against the documents on disk
+	// docsForRun has already fallen back to.
 	if md.Workflow != workflow {
 		if _, err := LookupWorkflow(md.Workflow); err == nil {
 			return "", fmt.Errorf("%s is a %s run, use 'moe %s cat'", runID, md.Workflow, md.Workflow)
 		}
-		// The run's workflow has been retired from the registry, so
-		// there is no correct command to redirect to — the verb the
-		// operator typed serves it, with the documents on disk standing
-		// in for the ladder it can no longer be validated against.
-		docs = runDocIDs(root, md)
 	}
 	if !stageRegistered(docs, stage) {
 		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, docs)
@@ -150,6 +147,20 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 		return filepath.Join(sess.WorktreePath, canvasRel), nil
 	}
 	return filepath.Join(root, canvasRel), nil
+}
+
+// docsForRun returns the document ids a run carries: its workflow's
+// Docs() while that workflow is registered, and the documents/ dirs on
+// disk once it has been retired from the registry.
+//
+// Docs() rather than Stages(): a workflow can carry a canvas that is
+// not a ladder position (chain's is), and asking what documents a run
+// carries is not asking what the run owes.
+func docsForRun(root string, md *run.Metadata) []string {
+	if wf, err := LookupWorkflow(md.Workflow); err == nil {
+		return wf.Docs()
+	}
+	return runDocIDs(root, md)
 }
 
 // runDocIDs returns the document ids a run carries on disk — the
