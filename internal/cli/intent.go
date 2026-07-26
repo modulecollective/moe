@@ -133,7 +133,7 @@ func runIntentNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	body, tmpPath, code := captureEditorBody("moe-intent-new-", fmt.Sprintf("# %s\n", slug), stdout, stderr)
+	body, tmpPath, code := captureEditorBody("moe-intent-new-", fmt.Sprintf("# %s\n", slug), stderr)
 	if code != 0 {
 		if tmpPath != "" {
 			moePrintf(stderr, "intent: your edited canvas is preserved at %s\n", tmpPath)
@@ -222,7 +222,7 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if code := launchEditor(abs, stdout, stderr); code != 0 {
+	if code := launchEditor(abs, stderr); code != 0 {
 		return code
 	}
 

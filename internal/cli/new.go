@@ -241,7 +241,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		var seedTmpPath string
 		keepSeedTmp := false
 		if *seed {
-			code := seedFirstStage(root, wf, project, slug, &openOpts, &seedTmpPath, stdout, stderr)
+			code := seedFirstStage(root, wf, project, slug, &openOpts, &seedTmpPath, stderr)
 			if code != 0 {
 				return code
 			}
@@ -321,7 +321,7 @@ func preflightWorkspaceClaim(root, projectID, name string, stderr io.Writer) int
 // happily captures a bare heading: an idea is cheap to capture and cheap
 // to close, but an accidental sdlc run is a dashboard entry that needs an
 // explicit close, so a no-op edit should mint nothing.
-func seedFirstStage(root string, wf *Workflow, project, slug string, opts *run.Options, tmpPath *string, stdout, stderr io.Writer) int {
+func seedFirstStage(root string, wf *Workflow, project, slug string, opts *run.Options, tmpPath *string, stderr io.Writer) int {
 	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
 		moePrintf(stderr, "%s new: set $EDITOR or $VISUAL — --seed needs an editor\n", wf.Name)
 		return 1
@@ -350,7 +350,7 @@ func seedFirstStage(root string, wf *Workflow, project, slug string, opts *run.O
 		return 1
 	}
 	stub := fmt.Sprintf("# %s\n", slug)
-	body, tp, code := captureEditorBody("moe-"+wf.Name+"-seed-", stub, stdout, stderr)
+	body, tp, code := captureEditorBody("moe-"+wf.Name+"-seed-", stub, stderr)
 	*tmpPath = tp
 	if code != 0 {
 		if tp != "" {

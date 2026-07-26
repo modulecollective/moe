@@ -141,7 +141,7 @@ func runChainNew(args []string, stdout, stderr io.Writer) int {
 
 	note := ""
 	if *seed {
-		if code := seedChainNote(&note, stdout, stderr); code != 0 {
+		if code := seedChainNote(&note, stderr); code != 0 {
 			return code
 		}
 	}
@@ -171,12 +171,12 @@ func runChainNew(args []string, stdout, stderr io.Writer) int {
 // unchanged-stub abort carries over — an operator who asked for the
 // editor and typed nothing meant to back out, and plain `moe chain new`
 // is right there for a head with no note.
-func seedChainNote(note *string, stdout, stderr io.Writer) int {
+func seedChainNote(note *string, stderr io.Writer) int {
 	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
 		moePrintln(stderr, "chain new: set $EDITOR or $VISUAL — --seed needs an editor")
 		return 1
 	}
-	body, tmpPath, code := captureEditorBody("moe-chain-seed-", chainCanvasSkeleton, stdout, stderr)
+	body, tmpPath, code := captureEditorBody("moe-chain-seed-", chainCanvasSkeleton, stderr)
 	if code != 0 {
 		if tmpPath != "" {
 			moePrintf(stderr, "chain new: your edited note is preserved at %s\n", tmpPath)
@@ -417,7 +417,7 @@ func runChainNote(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "chain note: canvas missing: %v\n", err)
 		return 1
 	}
-	if code := launchEditor(abs, stdout, stderr); code != 0 {
+	if code := launchEditor(abs, stderr); code != 0 {
 		return code
 	}
 

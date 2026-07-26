@@ -162,7 +162,7 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 	// text worth preserving (the editor ran); the deferred cleanup below
 	// removes it on success and keepTmp guards the post-editor failure
 	// window.
-	body, tmpPath, code := captureEditorBody("moe-idea-new-", fmt.Sprintf("# %s\n", slug), stdout, stderr)
+	body, tmpPath, code := captureEditorBody("moe-idea-new-", fmt.Sprintf("# %s\n", slug), stderr)
 	if code != 0 {
 		if tmpPath != "" {
 			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
@@ -305,7 +305,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if code := launchEditor(abs, stdout, stderr); code != 0 {
+	if code := launchEditor(abs, stderr); code != 0 {
 		return code
 	}
 
@@ -616,7 +616,7 @@ func requireCleanTree(root string) error {
 // filepath.Dir(tmpPath) once the body is committed, and keep it (naming
 // the path on stderr) if the commit fails, since the multi-minute editor
 // window makes the typed body the recoverable asset.
-func captureEditorBody(prefix, stub string, stdout, stderr io.Writer) (body, tmpPath string, code int) {
+func captureEditorBody(prefix, stub string, stderr io.Writer) (body, tmpPath string, code int) {
 	tmpDir, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		moePrintf(stderr, "tempdir: %v\n", err)
@@ -633,7 +633,7 @@ func captureEditorBody(prefix, stub string, stdout, stderr io.Writer) (body, tmp
 	}
 	// Past this point the operator may type into the file, so failures
 	// hand the path back for the caller to preserve.
-	if c := launchEditor(path, stdout, stderr); c != 0 {
+	if c := launchEditor(path, stderr); c != 0 {
 		return "", path, c
 	}
 	b, err := os.ReadFile(path)
@@ -648,7 +648,7 @@ func captureEditorBody(prefix, stub string, stdout, stderr io.Writer) (body, tmp
 // the terminal, so the operator drops straight into editing the file.
 // Callers are expected to have gated on an editor being available —
 // running with neither var set is a programmer error.
-func launchEditor(path string, stdout, stderr io.Writer) int {
+func launchEditor(path string, stderr io.Writer) int {
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
