@@ -148,22 +148,6 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	canvasRel := run.ContentPath(projectID, priorSlug, "design")
-	canvasBody, err := os.ReadFile(filepath.Join(root, canvasRel))
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		canvasBody = nil
-	case err != nil:
-		moePrintf(stderr, "sdlc reopen: read %s: %v\n", canvasRel, err)
-		return 1
-	}
-	var designSeed string
-	if len(canvasBody) == 0 {
-		designSeed = renderEmptyReopenSeed(priorSlug)
-	} else {
-		designSeed = string(canvasBody)
-	}
-
 	// Resolve workspace and agent: omitted = inherit prior; --X=NAME =
 	// override; --no-X = detach (empty). The flag pairs are mutually
 	// exclusive (checked above), so at most one branch fires per pair.
@@ -182,9 +166,51 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		agentName = *agentOverride
 	}
 
+	md, code := mintSDLCReopen("sdlc reopen", root, prior, wsName, agentName, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+	// Shared mint tail: --park prints the next-stage hint and stops, a
+	// cascade rung rides the reopened run headless from design, neither
+	// offers the chain prompt.
+	return mintTail(root, md, *park, cascade, stdout, stderr)
+}
+
+// mintSDLCReopen mints the fresh run a reopen produces: seed the design
+// canvas from the prior run's, claim the workspace, and commit the open
+// through the journal push. prior must already be validated as a
+// terminal sdlc run; wsName and agentName are the resolved
+// inherit/override/detach answers (the verb's flags decide them; the
+// interactive re-entry guard passes prior's, which is reopen's default).
+//
+// Factored out of runSDLCReopen so the guard's "reopen it as a fresh
+// run? [Y/n]" path runs the same mint rather than a parallel one —
+// there's exactly one place that knows what a reopened run looks like.
+// verb prefixes the read-error message so it names the command the
+// operator actually typed.
+//
+// Returns the new run's metadata and 0, or a non-zero exit code with
+// stderr already written.
+func mintSDLCReopen(verb, root string, prior *run.Metadata, wsName, agentName string, stdout, stderr io.Writer) (*run.Metadata, int) {
+	projectID, priorSlug := prior.Project, prior.ID
+
+	canvasRel := run.ContentPath(projectID, priorSlug, "design")
+	canvasBody, err := os.ReadFile(filepath.Join(root, canvasRel))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		canvasBody = nil
+	case err != nil:
+		moePrintf(stderr, "%s: read %s: %v\n", verb, canvasRel, err)
+		return nil, 1
+	}
+	designSeed := string(canvasBody)
+	if len(canvasBody) == 0 {
+		designSeed = renderEmptyReopenSeed(priorSlug)
+	}
+
 	if wsName != "" {
 		if code := preflightWorkspaceClaim(root, projectID, wsName, stderr); code != 0 {
-			return code
+			return nil, code
 		}
 	}
 
@@ -213,13 +239,10 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
-		return 1
+		return nil, 1
 	}
 	moePrintf(stdout, "opened run %s/%s (reopen of %s)\n", md.Project, md.ID, priorSlug)
-	// Shared mint tail: --park prints the next-stage hint and stops, a
-	// cascade rung rides the reopened run headless from design, neither
-	// offers the chain prompt.
-	return mintTail(root, md, *park, cascade, stdout, stderr)
+	return md, 0
 }
 
 // renderEmptyReopenSeed produces the design-canvas kickoff for a reopen
