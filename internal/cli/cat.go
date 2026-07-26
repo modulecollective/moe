@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -103,8 +102,9 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 // read for (workflow, project, run, stage). Validation order:
 // project exists → workflow registered → @latest resolved → run
 // exists → run belongs to workflow (or to a retired one) → stage in
-// the ladder of record. Then routes between the live session's
-// worktree (if any) and the operator's bureaucracy checkout.
+// the workflow's ladder (or, retired, in the run's documents/ dir).
+// Then routes between the live session's worktree (if any) and the
+// operator's bureaucracy checkout.
 func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, error) {
 	if _, err := os.Stat(filepath.Join(root, "projects", projectID, "project.json")); err != nil {
 		return "", fmt.Errorf("no such project: %s", projectID)
@@ -137,9 +137,9 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 		}
 		// The run's workflow has been retired from the registry, so
 		// there is no correct command to redirect to — the verb the
-		// operator typed serves it, with the run's own metadata standing
+		// operator typed serves it, with the documents on disk standing
 		// in for the ladder it can no longer be validated against.
-		docs = runDocIDs(md)
+		docs = runDocIDs(root, md)
 	}
 	if !stageRegistered(docs, stage) {
 		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, docs)
@@ -152,16 +152,32 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 	return filepath.Join(root, canvasRel), nil
 }
 
-// runDocIDs returns the document ids the run's own metadata records,
-// sorted. It is the ladder of record for a run whose workflow has been
+// runDocIDs returns the document ids a run carries on disk — the
+// subdirectory names under its documents/ dir, sorted (os.ReadDir
+// sorts). It stands in for the ladder of a run whose workflow has been
 // retired from the registry: no live Workflow can validate its stages,
-// but run.json lists exactly the documents the run carries.
-func runDocIDs(md *run.Metadata) []string {
-	ids := make([]string, 0, len(md.Documents))
-	for id := range md.Documents {
-		ids = append(ids, id)
+// and the directory is where both artifacts cat and log serve (the
+// canvas, the transcript) actually live.
+//
+// Not run.json's Documents map: that records stage sessions *opened*,
+// which only correlates with documents carried. A run seeded with
+// canvases and closed before its first stage turn has files on disk and
+// an empty map — the shape that hid the canvas of
+// moe/readme-update-chore-covers-docs-2026-06-13 behind `have: []`.
+//
+// A missing or unreadable documents/ dir returns nil: `have: []` is the
+// honest answer for a run that genuinely carries nothing.
+func runDocIDs(root string, md *run.Metadata) []string {
+	entries, err := os.ReadDir(filepath.Join(root, run.Dir(md.Project, md.ID), "documents"))
+	if err != nil {
+		return nil
 	}
-	sort.Strings(ids)
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
 	return ids
 }
 

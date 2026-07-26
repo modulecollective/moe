@@ -115,25 +115,39 @@ func TestCatWrongWorkflow(t *testing.T) {
 
 // seedRetiredRun stands up a run whose workflow is no longer in the
 // registry — the kb/hooks/quick/chores runs left on disk after their
-// verbs were retired — carrying the document ids its run.json records.
+// verbs were retired — carrying the named documents both in run.json
+// and as directories under documents/, the shape a worked run has.
 // Fails loudly if the named workflow *is* registered, so a future
 // registration can't quietly turn these tests into something else.
 func seedRetiredRun(t *testing.T, root, projectID, runID, workflow string, docs ...string) {
 	t.Helper()
-	if _, err := LookupWorkflow(workflow); err == nil {
-		t.Fatalf("seedRetiredRun: %q is registered; pick a genuinely retired workflow", workflow)
-	}
-	trailerstest.SeedRun(t, root, projectID, runID, workflow, run.StatusMerged)
+	seedRetiredRunUnrecorded(t, root, projectID, runID, workflow)
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range docs {
 		md.Documents[d] = &run.Document{}
+		if err := os.MkdirAll(filepath.Join(root, run.DocDir(projectID, runID, d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// seedRetiredRunUnrecorded stands up a retired-workflow run with an
+// empty run.json Documents map and nothing under documents/ — what
+// `run.New` leaves behind before any stage turn calls EnsureDocument.
+// Callers add the doc dirs themselves (writeContent / writeThread) to
+// build the metadata↔disk mismatch that hid a real canvas.
+func seedRetiredRunUnrecorded(t *testing.T, root, projectID, runID, workflow string) {
+	t.Helper()
+	if _, err := LookupWorkflow(workflow); err == nil {
+		t.Fatalf("seedRetiredRun: %q is registered; pick a genuinely retired workflow", workflow)
+	}
+	trailerstest.SeedRun(t, root, projectID, runID, workflow, run.StatusMerged)
 }
 
 // TestCatRetiredWorkflowServesCanvas: a run whose workflow was retired
@@ -183,6 +197,82 @@ func TestCatRetiredWorkflowUnknownStage(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "no such stage: design (have: [research summarize])") {
 		t.Fatalf("expected the run's own stages listed, got: %q", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected empty stdout on failure, got: %q", out.String())
+	}
+}
+
+// TestCatRetiredWorkflowEmptyMetadataServesCanvas: run.json records no
+// documents at all — the shape of moe/readme-update-chore-covers-docs-
+// 2026-06-13 and of every run seeded but never worked — while the
+// canvas sits on disk. The stage list comes from documents/, so the
+// canvas prints instead of dying with `no such stage: code (have: [])`.
+func TestCatRetiredWorkflowEmptyMetadataServesCanvas(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRunUnrecorded(t, root, "tele", "amp-code", "chores")
+	writeContent(t, root, "tele", "amp-code", "code", "# Code body\n")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "cat", "tele/amp-code", "code"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if out.String() != "# Code body\n" {
+		t.Fatalf("unexpected canvas dump: %q", out.String())
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("expected empty stderr, got: %q", errb.String())
+	}
+}
+
+// TestCatRetiredWorkflowEmptyMetadataUnknownStage: the same fixture
+// with a stage it doesn't carry lists what's on disk, so the operator
+// gets a usable next guess rather than an empty set.
+func TestCatRetiredWorkflowEmptyMetadataUnknownStage(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRunUnrecorded(t, root, "tele", "amp-code", "chores")
+	writeContent(t, root, "tele", "amp-code", "code", "# Code body\n")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "cat", "tele/amp-code", "design"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no such stage: design (have: [code])") {
+		t.Fatalf("expected the on-disk documents listed, got: %q", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected empty stdout on failure, got: %q", out.String())
+	}
+}
+
+// TestCatRetiredWorkflowNoDocumentsDir: a retired run with no
+// documents/ dir at all carries nothing, and `have: []` says so
+// honestly — the nil arm of runDocIDs.
+func TestCatRetiredWorkflowNoDocumentsDir(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRunUnrecorded(t, root, "tele", "amp-code", "chores")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "cat", "tele/amp-code", "code"}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("expected exit=1 on unknown stage, got %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no such stage: code (have: [])") {
+		t.Fatalf("expected an empty stage list, got: %q", errb.String())
 	}
 	if out.Len() != 0 {
 		t.Fatalf("expected empty stdout on failure, got: %q", out.String())

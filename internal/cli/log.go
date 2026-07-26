@@ -118,10 +118,10 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 				return 1
 			}
 			// Retired workflow: no live verb owns this run, so this one
-			// renders it. The run's own metadata replaces the ladder —
+			// renders it. The run's documents/ dir replaces the ladder —
 			// see runDocIDs. A transcript is JSONL on disk, so no error
 			// message could stand in for actually rendering it.
-			stages = runDocIDs(md)
+			stages = runDocIDs(root, md)
 		}
 		if !stageRegistered(stages, stage) {
 			moePrintf(stderr, "moe %s log: no such stage: %s (have: %v)\n", workflow, stage, stages)

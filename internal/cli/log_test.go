@@ -314,6 +314,31 @@ func TestMoeLog_RetiredWorkflowNoTranscript(t *testing.T) {
 	}
 }
 
+// TestMoeLog_RetiredWorkflowEmptyMetadataRenders: run.json records no
+// documents, but the transcript is on disk under documents/code/. log
+// takes its stage list from the same dir cat does, so the thread
+// renders instead of being refused as a stage that doesn't exist.
+func TestMoeLog_RetiredWorkflowEmptyMetadataRenders(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	seedRetiredRunUnrecorded(t, root, "tele", "amp-code", "chores")
+	writeThread(t, root, "tele", "amp-code", "code", "claude", []string{
+		`{"type":"user","timestamp":"2026-05-16T10:00:00Z","message":{"role":"user","content":"unrecorded body"}}`,
+	})
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "tele/amp-code", "code"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "unrecorded body") {
+		t.Fatalf("expected the retired run's transcript, got: %q", out.String())
+	}
+}
+
 // TestMoeLog_UnknownStage: stage validation against the workflow's
 // registered ladder; mirrors TestCatUnknownStage.
 func TestMoeLog_UnknownStage(t *testing.T) {
