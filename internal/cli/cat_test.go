@@ -145,7 +145,7 @@ func seedRetiredRun(t *testing.T, root, projectID, runID, workflow string, docs 
 func seedRetiredRunUnrecorded(t *testing.T, root, projectID, runID, workflow string) {
 	t.Helper()
 	if _, err := LookupWorkflow(workflow); err == nil {
-		t.Fatalf("seedRetiredRun: %q is registered; pick a genuinely retired workflow", workflow)
+		t.Fatalf("seedRetiredRunUnrecorded: %q is registered; pick a genuinely retired workflow", workflow)
 	}
 	trailerstest.SeedRun(t, root, projectID, runID, workflow, run.StatusMerged)
 }
