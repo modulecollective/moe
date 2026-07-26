@@ -38,11 +38,10 @@ const dashWatchInterval = 3 * time.Second
 //     frame had below the new one's last line, and ends the sync block.
 //
 // The watch viewport clips every logical line one cell short of the
-// terminal width and every frame to its height. Reserving the rightmost
-// cell avoids arming the terminal's auto-wrap margin; the bottom visible
-// row has no newline, so neither wrapping nor line advance can scroll the
-// pane. \x1b[3J (wipe scrollback) stays omitted — blowing away the
-// operator's history isn't ours to do.
+// terminal width and reserves the terminal's bottom row. Keeping clear of
+// both margins prevents wrapping or line advance from scrolling the pane.
+// \x1b[3J (wipe scrollback) stays omitted — blowing away the operator's
+// history isn't ours to do.
 const (
 	dashFramePre  = "\x1b[?2026h\x1b[H"
 	dashFramePost = cliout.Reset + "\x1b[J\x1b[?2026l"
@@ -113,7 +112,6 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "dash: --watch needs a terminal on stdout")
 		return 2
 	}
-	lastColumns := 0
 	for first := true; ; first = false {
 		rows, columns, sizeErr := cliout.TerminalSize(stdout)
 		if sizeErr != nil && first {
@@ -128,14 +126,11 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		var snap DashSnapshot
 		var err error
 		if sizeErr != nil {
-			// A later sizing failure must stay bounded too. Use the last
-			// known width for a single-row error and retry the terminal
-			// on the next tick rather than painting an unbounded frame.
-			rows = 1
-			columns = lastColumns
-			err = sizeErr
+			// With no trustworthy dimensions, no content row is safe.
+			// Paint only the control stream, clearing the old frame, and
+			// retry the terminal on the next tick.
+			rows, columns = 0, 0
 		} else {
-			lastColumns = columns
 			snap, err = GatherDashSnapshot(root, now, filter)
 		}
 		if err != nil && first {
@@ -150,7 +145,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		// past and EL here would clobber the line the cursor lands on.
 		_, _ = io.WriteString(stdout, dashFramePre)
 		frame := ttyFrameBuffer{terminal: stdout}
-		if err != nil {
+		if sizeErr == nil && err != nil {
 			// A dashboard left running overnight has to survive a
 			// transient scan error (a run closed mid-scan), so the
 			// error becomes the frame and the loop continues. It goes
@@ -159,7 +154,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			// The ED-0 below erases the rest of the dashboard it
 			// replaces, so no special case is needed.
 			moePrintf(&frame, "%v\n", err)
-		} else {
+		} else if sizeErr == nil {
 			renderDashFrame(&frame, now, snap, *all)
 		}
 		_ = writeWatchViewport(stdout, frame.Bytes(), rows, columns)
@@ -184,12 +179,13 @@ func (b *ttyFrameBuffer) Unwrap() io.Writer { return b.terminal }
 // complete CSI sequences pass through at zero width, and every visible row
 // ends with EL.
 func writeWatchViewport(w io.Writer, frame []byte, rows, columns int) error {
-	if rows <= 0 || columns <= 0 {
+	if rows <= 1 || columns <= 1 {
 		return nil
 	}
+	contentRows := rows - 1
 	contentColumns := columns - 1
 
-	for row, start := 0, 0; row < rows && start < len(frame); row++ {
+	for row, start := 0, 0; row < contentRows && start < len(frame); row++ {
 		end := bytes.IndexByte(frame[start:], '\n')
 		hasNewline := end >= 0
 		if hasNewline {
@@ -203,7 +199,7 @@ func writeWatchViewport(w io.Writer, frame []byte, rows, columns int) error {
 		if _, err := io.WriteString(w, dashEraseLine); err != nil {
 			return err
 		}
-		if row+1 == rows || !hasNewline {
+		if row+1 == contentRows || !hasNewline {
 			break
 		}
 		if _, err := io.WriteString(w, "\n"); err != nil {

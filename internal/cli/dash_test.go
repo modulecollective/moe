@@ -1337,22 +1337,22 @@ func TestWriteWatchViewportErasesEveryVisibleLine(t *testing.T) {
 	}
 }
 
-func TestWriteWatchViewportClipsHeightWithoutBottomNewline(t *testing.T) {
+func TestWriteWatchViewportReservesBottomRowWithoutFinalNewline(t *testing.T) {
 	in := "one\ntwo\nthree\nfour"
 	want := "one\x1b[K\ntwo\x1b[K"
 
 	var buf bytes.Buffer
-	if err := writeWatchViewport(&buf, []byte(in), 2, 80); err != nil {
+	if err := writeWatchViewport(&buf, []byte(in), 3, 80); err != nil {
 		t.Fatalf("write viewport: %v", err)
 	}
 	if buf.String() != want {
 		t.Fatalf("got %q want %q", buf.String(), want)
 	}
 	if got := strings.Count(buf.String(), "\n"); got != 1 {
-		t.Fatalf("newlines=%d want rows-1=1 in %q", got, buf.String())
+		t.Fatalf("newlines=%d want rows-2=1 in %q", got, buf.String())
 	}
 	if got := strings.Count(buf.String(), dashEraseLine); got != 2 {
-		t.Fatalf("EL count=%d want one per visible row", got)
+		t.Fatalf("EL count=%d want one per content row", got)
 	}
 }
 
@@ -1385,7 +1385,7 @@ func TestWriteWatchViewportClipsByDisplayCells(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := writeWatchViewport(&buf, []byte(tt.in), 1, tt.columns); err != nil {
+			if err := writeWatchViewport(&buf, []byte(tt.in), 2, tt.columns); err != nil {
 				t.Fatalf("write viewport: %v", err)
 			}
 			want := tt.want + dashEraseLine
@@ -1403,7 +1403,7 @@ func TestWriteWatchViewportNarrowPaneRegression(t *testing.T) {
 	line := strings.Repeat("x", 136)
 	for _, columns := range []int{80, 100} {
 		var buf bytes.Buffer
-		if err := writeWatchViewport(&buf, []byte(line+"\nnext\n"), 2, columns); err != nil {
+		if err := writeWatchViewport(&buf, []byte(line+"\nnext\n"), 3, columns); err != nil {
 			t.Fatalf("columns %d: write viewport: %v", columns, err)
 		}
 		want := strings.Repeat("x", columns-1) + dashEraseLine + "\nnext" + dashEraseLine
@@ -1416,7 +1416,7 @@ func TestWriteWatchViewportNarrowPaneRegression(t *testing.T) {
 func TestWriteWatchViewportReservesRightmostColumn(t *testing.T) {
 	const columns = 80
 	var buf bytes.Buffer
-	if err := writeWatchViewport(&buf, []byte(strings.Repeat("x", columns)), 1, columns); err != nil {
+	if err := writeWatchViewport(&buf, []byte(strings.Repeat("x", columns)), 2, columns); err != nil {
 		t.Fatalf("write viewport: %v", err)
 	}
 	want := strings.Repeat("x", columns-1) + dashEraseLine
@@ -1425,14 +1425,22 @@ func TestWriteWatchViewportReservesRightmostColumn(t *testing.T) {
 	}
 }
 
-func TestWriteWatchViewportOneByOne(t *testing.T) {
-	var buf bytes.Buffer
+func TestWriteWatchViewportNoSafeContentDimension(t *testing.T) {
 	in := cliout.Bright + "x" + cliout.Reset + "\nsecond\n"
-	if err := writeWatchViewport(&buf, []byte(in), 1, 1); err != nil {
-		t.Fatalf("write viewport: %v", err)
-	}
-	if got, want := buf.String(), cliout.Bright+cliout.Reset+dashEraseLine; got != want {
-		t.Fatalf("got %q want %q", got, want)
+	for _, size := range []struct {
+		rows, columns int
+	}{
+		{rows: 1, columns: 80},
+		{rows: 24, columns: 1},
+		{rows: 1, columns: 1},
+	} {
+		var buf bytes.Buffer
+		if err := writeWatchViewport(&buf, []byte(in), size.rows, size.columns); err != nil {
+			t.Fatalf("%dx%d: write viewport: %v", size.columns, size.rows, err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("%dx%d: got %q want no content stream", size.columns, size.rows, buf.String())
+		}
 	}
 }
 
