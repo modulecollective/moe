@@ -213,8 +213,11 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("expected merged run in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:merged") {
-		t.Fatalf("expected run row with stage 'sdlc:merged', got:\n%s", got)
+	// Unextended reopen chain, so the merged row carries the reopen hint
+	// too — the merged row is where "how do I keep going" gets answered
+	// now that re-typing the stage verb refuses.
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:merged · reopen?") {
+		t.Fatalf("expected run row with stage 'sdlc:merged · reopen?', got:\n%s", got)
 	}
 }
 
@@ -368,7 +371,7 @@ func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("stale merged run should still count in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "long-merged", "sdlc:merged") {
+	if !containsRunRow(got, "tele", "long-merged", "sdlc:merged · reopen?") {
 		t.Fatalf("expected the stale merged run row, got:\n%s", got)
 	}
 }
@@ -558,7 +561,7 @@ func TestDashCompletedCapsAtCap(t *testing.T) {
 		t.Fatalf("expected capped header %q, got:\n%s", want, got)
 	}
 	// The newest CompletedCap render; everything older is truncated.
-	if !containsRunRow(got, "tele", "done-11", "sdlc:merged") {
+	if !containsRunRow(got, "tele", "done-11", "sdlc:merged · reopen?") {
 		t.Fatalf("expected newest completed run to render, got:\n%s", got)
 	}
 	for i := 0; i < 12-dash.CompletedCap; i++ {
@@ -1485,7 +1488,10 @@ func containsRunRow(out, project, runID, stage string) bool {
 		if fields[0] != target {
 			continue
 		}
-		if fields[len(fields)-1] == stage {
+		// Suffix rather than last-field so a note carrying an action hint
+		// ("sdlc:merged · reopen?") is assertable as one string. Anchored
+		// at end-of-row either way.
+		if strings.HasSuffix(strings.Join(fields, " "), stage) {
 			return true
 		}
 	}

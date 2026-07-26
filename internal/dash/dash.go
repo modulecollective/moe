@@ -811,7 +811,16 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 		runningDoc := winningRunningDoc(openSessionDocs, "")
 		return BucketActiveRuns, prefix + note + openSessionMarker(runningDoc, ""), "awaiting merge", runningDoc
 	case run.StatusMerged:
-		return BucketCompletedRuns, prefix + "merged", "", ""
+		note := prefix + "merged"
+		// Merged sdlc runs are reopen candidates for the same reason
+		// closed ones are, and it matters more here: the merged row is
+		// where the operator looks for "how do I keep going", and the
+		// answer they used to reach for — re-typing the stage verb — is
+		// now a refusal. Same unextended-chain gate as closed rows.
+		if md.Workflow == "sdlc" && !hasBeenReopened(idx, md.Project, md.ID) {
+			note += " · reopen?"
+		}
+		return BucketCompletedRuns, note, "", ""
 	case run.StatusClosed:
 		note := prefix + "closed"
 		switch {

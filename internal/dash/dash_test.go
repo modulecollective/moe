@@ -426,6 +426,54 @@ func TestChatClosedRendersResumeInCompleted(t *testing.T) {
 	}
 }
 
+// TestMergedSDLCRendersReopenHint: a merged sdlc run whose reopen chain
+// is unextended advertises `· reopen?`. The merged row is where the
+// operator looks for "how do I keep going", and the gesture they used to
+// reach for (re-typing the stage verb) is now a refusal — so this is the
+// row that has to name the real door.
+func TestMergedSDLCRendersReopenHint(t *testing.T) {
+	md := &run.Metadata{ID: "shipped", Project: "moe", Workflow: "sdlc", Status: run.StatusMerged}
+	r := rowsByKey(t, []*run.Metadata{md}, nil, nil)["moe/shipped"]
+	if r.Bucket != BucketCompletedRuns {
+		t.Fatalf("bucket=%v want COMPLETED", r.Bucket)
+	}
+	if r.Note != "sdlc:merged · reopen?" {
+		t.Fatalf("note=%q want %q", r.Note, "sdlc:merged · reopen?")
+	}
+}
+
+// TestMergedSDLCSuppressesReopenHintOnceReopened: same gate the closed
+// rows use — a run that already has a reopen descendant isn't the one to
+// reopen again, so the hint drops.
+func TestMergedSDLCSuppressesReopenHintOnceReopened(t *testing.T) {
+	md := &run.Metadata{ID: "shipped", Project: "moe", Workflow: "sdlc", Status: run.StatusMerged}
+	rows, err := BuildRows(Inputs{
+		Now:   time.Now().UTC(),
+		Runs:  []*run.Metadata{md},
+		Index: &run.JournalIndex{ReopenedFrom: map[string]string{"moe/shipped-2026-07-25": "shipped"}},
+	})
+	if err != nil {
+		t.Fatalf("BuildRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d want 1", len(rows))
+	}
+	if rows[0].Note != "sdlc:merged" {
+		t.Fatalf("note=%q want %q", rows[0].Note, "sdlc:merged")
+	}
+}
+
+// TestMergedNonSDLCHasNoReopenHint: reopen is an sdlc verb, so marking a
+// merged run of another workflow would advertise an action the operator
+// can't take.
+func TestMergedNonSDLCHasNoReopenHint(t *testing.T) {
+	md := &run.Metadata{ID: "reflect", Project: "moe", Workflow: "twin", Status: run.StatusMerged}
+	r := rowsByKey(t, []*run.Metadata{md}, nil, nil)["moe/reflect"]
+	if r.Note != "twin:merged" {
+		t.Fatalf("note=%q want %q", r.Note, "twin:merged")
+	}
+}
+
 // chainRows builds rows for a chain head plus its children, with the
 // head's empty ladder modelled as `Done: true` (what NextWithIndex
 // returns for a stageless workflow) and children on the normal sdlc
