@@ -1474,6 +1474,64 @@ func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
 	}
 }
 
+// TestDashBannerTimestampIsLocal pins the banner's render stamp to the
+// box's wall clock. The stamp carries no zone marker, so an operator
+// reads it as local time — printing UTC made the banner wrong by the
+// offset, and late enough in the evening wrong by a whole day.
+//
+// time.Local is swapped rather than TZ set: the runtime resolves TZ
+// once, on first use, which in a test binary has long since happened.
+// Without the swap this assertion is vacuous on a UTC host, which is
+// most of them. Safe here because no test in this package is parallel.
+func TestDashBannerTimestampIsLocal(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	// An offset no host is plausibly in, and not a whole number of
+	// hours, so a UTC stamp can't slip through on coincidence.
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	time.Local = time.FixedZone("MOETEST", 7*3600+1800)
+
+	var out, errb bytes.Buffer
+	before := time.Now()
+	code := Run([]string{"dash"}, &out, &errb)
+	after := time.Now()
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	const marker = "  dash  "
+	var stamp string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.Contains(line, "MINISTRY OF EVERYTHING") {
+			continue
+		}
+		idx := strings.Index(line, marker)
+		if idx < 0 {
+			t.Fatalf("banner line has no %q marker: %q", marker, line)
+		}
+		stamp = strings.TrimSpace(line[idx+len(marker):])
+	}
+	if stamp == "" {
+		t.Fatalf("no banner line in output:\n%s", out.String())
+	}
+
+	got, err := time.ParseInLocation("2006-01-02  15:04", stamp, time.Local)
+	if err != nil {
+		t.Fatalf("banner stamp %q: %v", stamp, err)
+	}
+	// The stamp is minute-truncated, so it may trail `before` by up to
+	// a minute and still name the right moment. It must never lead the
+	// call, which is what a UTC stamp read as local would do.
+	if got.Before(before.Add(-time.Minute)) || got.After(after) {
+		t.Fatalf("banner stamp %q parsed local = %v, outside call window [%v, %v]",
+			stamp, got, before, after)
+	}
+}
+
 // containsRunRow checks that dash output has a row for (project, run)
 // whose last tabwriter field matches stage — ignores the humanAgo
 // middle column so tests can be written without pinning wall-clock

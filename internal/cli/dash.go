@@ -95,7 +95,11 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if !*watch {
-		now := time.Now().UTC()
+		// Local, not UTC: `now` is what the banner prints as a bare
+		// wall-clock stamp, and an unmarked timestamp reads as local.
+		// Everything else it feeds is zone-independent (durations) or
+		// re-anchors to UTC itself (the histogram's day keys).
+		now := time.Now()
 		snap, err := GatherDashSnapshot(root, now, filter)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
@@ -122,7 +126,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		// Gather before repainting: the scan is the slow part, so doing
 		// it first keeps the in-place overwrite down to one burst of
 		// formatting rather than a scan-long half-drawn frame.
-		now := time.Now().UTC()
+		now := time.Now()
 		var snap DashSnapshot
 		var err error
 		if sizeErr != nil {
