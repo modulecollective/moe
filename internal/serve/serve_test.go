@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
@@ -58,17 +59,26 @@ func TestDashRouteRendersBuckets(t *testing.T) {
 	}
 }
 
-func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
+// TestServePagesRenderSharedHead sweeps every full-page template — all 14
+// of them — through the shared head/themejs partials. Each fragment must
+// appear exactly once: zero means the page dropped a partial, two means it
+// re-inlined its own head on top of the shared one.
+func TestServePagesRenderSharedHead(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", "# design\n")
+	writeFile(t, root, "lore/widget-thing.md",
+		"---\ntitle: Widgets jam on Tuesdays\napplies-when: a widget is involved\n---\n\n# Widgets\n\nbody.\n")
 	now := time.Now().UTC()
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: root,
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
 			return []dash.Row{{Project: "alpha", Run: "fix-it", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil, nil
+		},
+		GatherChore: func(_, _ string) (chore.State, bool, error) {
+			return dueChoreState(), true, nil
 		},
 		ResolveCanvas: func(_, _, _ string) (string, error) {
 			return canvasPath, nil
@@ -79,13 +89,20 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 	})
 
 	for _, path := range []string{
-		"/",
-		"/run/new",
-		"/idea/new",
-		"/run/alpha/fix-it",
-		"/run/alpha/fix-it/canvas/design",
-		"/run/alpha/my-idea/promote",
-		"/run/alpha/my-idea/edit",
+		"/",                                   // dash
+		"/run/new",                            // new
+		"/idea/new",                           // new_idea
+		"/run/alpha/fix-it",                   // run
+		"/run/alpha/fix-it/canvas/design",     // canvas
+		"/run/alpha/my-idea/promote",          // promote
+		"/run/alpha/my-idea/edit",             // edit_idea
+		"/run/alpha/fix-it/transcript/design", // transcript (empty state)
+		"/chore/alpha/readme-refresh",         // chore
+		"/lore",                               // lore_index
+		"/lore/widget-thing",                  // doc
+		"/projects",                           // projects_index
+		"/projects/alpha",                     // project_hub
+		"/projects/alpha/knowledge",           // knowledge_index
 	} {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
@@ -93,16 +110,31 @@ func TestServePagesRenderThemeToggleInHeader(t *testing.T) {
 			if rr.Code != http.StatusOK {
 				t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 			}
-			assertThemeToggleInHeader(t, rr.Body.String())
+			assertSharedHead(t, rr.Body.String())
 		})
 	}
 }
 
-func assertThemeToggleInHeader(t *testing.T, body string) {
+// assertSharedHead pins one — and only one — copy of every fragment the
+// head/themejs partials contribute, plus the toggle's position in the
+// header. Literals rather than a table derived from partials.html: editing
+// a partial should force a look at this test, not silently follow it.
+func assertSharedHead(t *testing.T, body string) {
 	t.Helper()
 	button := `<button id="theme-toggle" class="theme-toggle" type="button"><span class="theme-label-dark">dark mode</span><span class="theme-label-light">light mode</span></button>`
-	if got := strings.Count(body, button); got != 1 {
-		t.Fatalf("want one text theme toggle, got %d\n%s", got, body)
+	for _, fragment := range []string{
+		`<meta charset="utf-8">`,
+		`<meta name="viewport" content="width=device-width,initial-scale=1">`,
+		`<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">`,
+		`<link rel="stylesheet" href="/static/style.css">`,
+		`localStorage.getItem('moe-theme')`, // pre-paint script, head partial
+		button,
+		`getElementById('theme-toggle').addEventListener`, // themejs partial
+		`<title>`,
+	} {
+		if got := strings.Count(body, fragment); got != 1 {
+			t.Fatalf("want exactly one %q, got %d\n%s", fragment, got, body)
+		}
 	}
 	headerEnd := strings.Index(body, "</header>")
 	buttonIdx := strings.Index(body, button)

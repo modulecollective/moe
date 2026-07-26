@@ -63,7 +63,7 @@ func TestChorePageRendersDefinitionAndOpenAffordance(t *testing.T) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-	assertThemeToggleInHeader(t, body)
+	assertSharedHead(t, body)
 }
 
 // TestChorePageRendersDisabledOpenWhenBlocked: a chore with an open run
