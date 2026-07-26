@@ -170,7 +170,9 @@ func plainRunSlug(_, _, runID string, _, _ io.Writer) (string, int) {
 // preamble (printed above the flag list), and the typed-CLI opener the
 // no-flag path falls into. The two per-workflow hooks are resolveSlug
 // (sdlc's lineage walk vs. plainRunSlug) and persistAgent (sdlc writes
-// --agent to run.json; everyone else applies it per-turn).
+// --agent to run.json; everyone else applies it per-turn). reentryGuard
+// is the third: the no-cascade-flag leg's status guard, which sdlc wires
+// to resolveSDLCReentry and every other workflow leaves nil.
 type stageVerbCfg struct {
 	workflow     string
 	verb         string
@@ -178,6 +180,7 @@ type stageVerbCfg struct {
 	usage        []string
 	open         func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int
 	resolveSlug  slugResolver
+	reentryGuard slugResolver
 	persistAgent bool
 }
 
@@ -243,6 +246,20 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	if answer != "" && !operatorCascades(cfg.workflow) {
 		moePrintf(stderr, "%s: %s\n", cfg.verb, cascadeUnavailableReason(cfg.workflow))
 		return 2
+	}
+	// Interactive (no cascade flag) leg: guard the door before anything
+	// writes. The cascade legs have their own refusal inside
+	// resolveAndGuardForCascade — a cascade must not prompt-and-mint, so
+	// the guard is deliberately not shared with them. This runs ahead of
+	// the --agent persist so a forwarded-to or freshly-minted run is the
+	// one the agent gets written to, not the terminal run the operator
+	// typed.
+	if answer == "" && cfg.reentryGuard != nil {
+		resolvedRunID, code := cfg.reentryGuard(cfg.verb, projectID, runID, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		runID = resolvedRunID
 	}
 	if cfg.persistAgent && *agentOverride != "" {
 		resolvedRunID, code := persistSDLCStageAgent(cfg.verb, cfg.stage, projectID, runID, *agentOverride, stdout, stderr)

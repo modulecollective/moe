@@ -116,7 +116,9 @@ func init() {
 
 // sdlcStageVerbCfg builds the shared stage-verb config for an sdlc
 // stage: sdlc is the one workflow with a promoted/reopened slug lineage
-// (resolveSDLCRunSlug) and the one that persists --agent to run.json.
+// (resolveSDLCRunSlug), the one that guards interactive re-entry against
+// a terminal run (resolveSDLCReentry — sdlc is where the reopen lineage
+// lives), and the one that persists --agent to run.json.
 func sdlcStageVerbCfg(stage string, usage []string, open func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int) stageVerbCfg {
 	return stageVerbCfg{
 		workflow:     "sdlc",
@@ -125,6 +127,7 @@ func sdlcStageVerbCfg(stage string, usage []string, open func(projectID, runID s
 		usage:        usage,
 		open:         open,
 		resolveSlug:  resolveSDLCRunSlug,
+		reentryGuard: resolveSDLCReentry,
 		persistAgent: true,
 	}
 }
