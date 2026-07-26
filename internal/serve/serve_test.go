@@ -7,6 +7,7 @@ import (
 	"html"
 	"html/template"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -59,10 +60,11 @@ func TestDashRouteRendersBuckets(t *testing.T) {
 	}
 }
 
-// TestServePagesRenderSharedHead sweeps every full-page template — all 14
-// of them — through the shared head/themejs partials. Each fragment must
-// appear exactly once: zero means the page dropped a partial, two means it
-// re-inlined its own head on top of the shared one.
+// TestServePagesRenderSharedHead sweeps every full-page template — the
+// count is enforced against the embedded FS below — through the shared
+// head/themejs partials. Each fragment must appear exactly once: zero
+// means the page dropped a partial, two means it re-inlined its own head
+// on top of the shared one.
 func TestServePagesRenderSharedHead(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -88,7 +90,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{
+	paths := []string{
 		"/",                                   // dash
 		"/run/new",                            // new
 		"/idea/new",                           // new_idea
@@ -103,7 +105,32 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		"/projects",                           // projects_index
 		"/projects/alpha",                     // project_hub
 		"/projects/alpha/knowledge",           // knowledge_index
-	} {
+	}
+
+	// One route per full-page template, no exceptions: a template carrying
+	// a doctype is a page, whether or not it remembered the head partial.
+	// Counting pages here — rather than head references — is what makes a
+	// page that forgot the partial entirely fail this sweep instead of
+	// slipping past it.
+	pages := 0
+	files, err := fs.Glob(assets, "templates/*.html")
+	if err != nil {
+		t.Fatalf("glob templates: %v", err)
+	}
+	for _, name := range files {
+		b, err := fs.ReadFile(assets, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if strings.Contains(strings.ToLower(string(b)), "<!doctype") {
+			pages++
+		}
+	}
+	if pages != len(paths) {
+		t.Fatalf("%d full-page templates but %d swept routes: every page template needs exactly one route in this list", pages, len(paths))
+	}
+
+	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
