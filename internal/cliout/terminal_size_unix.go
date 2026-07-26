@@ -13,7 +13,7 @@ type terminalWinsize struct {
 	row, col, xpixel, ypixel uint16
 }
 
-func terminalHeight(f *os.File) (int, error) {
+func terminalSize(f *os.File) (int, int, error) {
 	var size terminalWinsize
 	if _, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
@@ -21,10 +21,10 @@ func terminalHeight(f *os.File) (int, error) {
 		syscall.TIOCGWINSZ,
 		uintptr(unsafe.Pointer(&size)),
 	); errno != 0 {
-		return 0, fmt.Errorf("terminal sizing: %w", errno)
+		return 0, 0, fmt.Errorf("terminal sizing: %w", errno)
 	}
-	if size.row == 0 {
-		return 0, fmt.Errorf("terminal sizing: zero rows")
+	if size.row == 0 || size.col == 0 {
+		return 0, 0, fmt.Errorf("terminal sizing: invalid size %dx%d", size.col, size.row)
 	}
-	return int(size.row), nil
+	return int(size.row), int(size.col), nil
 }
