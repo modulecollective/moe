@@ -171,8 +171,11 @@ func plainRunSlug(_, _, runID string, _, _ io.Writer) (string, int) {
 // no-flag path falls into. The two per-workflow hooks are resolveSlug
 // (sdlc's lineage walk vs. plainRunSlug) and persistAgent (sdlc writes
 // --agent to run.json; everyone else applies it per-turn). reentryGuard
-// is the third: the no-cascade-flag leg's status guard, which sdlc wires
-// to resolveSDLCReentry and every other workflow leaves nil.
+// is the third: the no-cascade-flag leg's status guard — sdlc wires
+// resolveSDLCReentry (which also forwards or reopens), twin wires
+// guardTwinReentry (a plain refusal). A workflow may leave it nil, but
+// only deliberately: an unguarded interactive door walks onto terminal
+// runs, which is the bug this hook exists to fence.
 type stageVerbCfg struct {
 	workflow     string
 	verb         string

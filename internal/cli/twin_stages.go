@@ -20,8 +20,9 @@ import (
 // list of (name, Run) pairs. Routes through the shared runStageVerb
 // body so twin's six verbs carry the same cascade vocabulary
 // (--once/--to/--ship/--chain) sdlc's do — twin operatorCascades, so
-// the flags are honored. Per-turn --agent (persistAgent: false) and a
-// plain slug resolver are twin's only departures from sdlc's cfg.
+// the flags are honored. Twin's departures from sdlc's cfg: per-turn
+// --agent (persistAgent: false), a plain slug resolver (no reopen
+// lineage to walk), and its own re-entry guard.
 func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) int {
 	return func(args []string, stdout, stderr io.Writer) int {
 		return runStageVerb(stageVerbCfg{
@@ -36,9 +37,52 @@ func twinStageRun(stage string) func(args []string, stdout, stderr io.Writer) in
 			open: func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 				return openTwinStage(stage, projectID, runID, headless, agentOverride, stdout, stderr)
 			},
-			resolveSlug: plainRunSlug,
+			resolveSlug:  plainRunSlug,
+			reentryGuard: guardTwinReentry,
 		}, args, stdout, stderr)
 	}
+}
+
+// guardTwinReentry is twin's reentryGuard — the no-cascade-flag leg's
+// terminal-status fence, the sibling of sdlc's resolveSDLCReentry. The
+// cascade legs have refused terminal runs since
+// resolveAndGuardForCascade landed; without this the interactive door
+// walked straight onto a closed pass, and a twin stage is worse than
+// sdlc's case to walk onto: the stage stages the shared wiki dir and
+// edits the *live* twin docs, attributed to a pass that already sealed.
+//
+// Unlike sdlc's guard this one never prompts and never mints. sdlc's
+// forward/reopen ladder exists because sdlc has reopen lineage to
+// forward onto; twin has no reopen verb and no descendants, and a fresh
+// pass always starts at vision — so forwarding a typed mid-ladder stage
+// onto a fresh mint couldn't work anyway (requireTwinPriorCanvas would
+// refuse it). The honest gesture is a loud refusal naming the one real
+// next command.
+//
+// A run that doesn't load, or isn't a twin run, passes through:
+// requireTwinRun in the opener owns those two refusals and their
+// wording. Only a findRoot failure exits here, because findRoot has
+// already written its message and a pass-through would print it twice.
+//
+// Realistically only `closed` occurs — twin has no push and no promote
+// — but guarding the whole terminal class costs nothing and matches
+// resolveAndGuardForCascade's breadth.
+func guardTwinReentry(verb, projectID, runID string, _, stderr io.Writer) (string, int) {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return "", 1
+	}
+	md, err := run.Load(root, projectID, runID)
+	if err != nil || md.Workflow != "twin" {
+		return runID, 0
+	}
+	switch md.Status {
+	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
+		moePrintf(stderr, "%s: %s/%s is %s; a reflect pass is not reopened\n", verb, projectID, runID, md.Status)
+		moePrintf(stderr, "hint: moe twin reflect %s\n", projectID)
+		return "", 1
+	}
+	return runID, 0
 }
 
 // openTwinStage is the Go-level seam behind both the typed verb (`moe
