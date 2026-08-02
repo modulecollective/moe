@@ -218,7 +218,7 @@ func closedRunsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]string, e
 	sort.Slice(rows, func(i, j int) bool { return rows[i].when.After(rows[j].when) })
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fmt.Sprintf("%s/%s (%s)", cfg.Project, r.id, r.when.Format("2006-01-02")))
+		out = append(out, fmt.Sprintf("%s/%s (%s)", cfg.Project, r.id, r.when.UTC().Format("2006-01-02 15:04Z")))
 	}
 	return out, nil
 }

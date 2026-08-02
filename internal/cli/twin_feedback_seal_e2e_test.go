@@ -61,7 +61,7 @@ func TestReflectKickoffSurfacesSealingRunsResidue(t *testing.T) {
 	for _, want := range []string{
 		"### Workflow feedback",
 		"including the previous reflect pass's own residue",
-		"#### reflect-run (2026-05-10)",
+		"#### reflect-run (2026-05-10 12:00Z)",
 		"architecture.md's twin-feedback bullet is stale",
 	} {
 		if !strings.Contains(got, want) {

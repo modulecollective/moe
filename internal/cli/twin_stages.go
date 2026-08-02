@@ -401,7 +401,7 @@ func reflectKickoffContext(root, projectID string, cfg wiki.Config, stubbed bool
 			"real into the relevant managed doc on the appropriate " +
 			"stage, set aside what isn't.\n\n")
 		for _, fb := range feedback {
-			fmt.Fprintf(&b, "#### %s (%s)\n\n", fb.runID, fb.when.Format("2006-01-02"))
+			fmt.Fprintf(&b, "#### %s (%s)\n\n", fb.runID, fb.when.UTC().Format("2006-01-02 15:04Z"))
 			body := strings.TrimSpace(fb.body)
 			if body == "" {
 				b.WriteString("(empty feedback file)\n\n")

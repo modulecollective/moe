@@ -196,6 +196,9 @@ func TestJudgedChoresBlockListsOnlyOpenableJudgedChores(t *testing.T) {
 	if strings.Contains(block, "bump-deps") {
 		t.Errorf("block=%q, want mechanical chores left out", block)
 	}
+	if !strings.Contains(block, "(last completed: never)") {
+		t.Errorf("block=%q, want the never branch for an untouched chore", block)
+	}
 
 	// Once the chore has an open run there is nothing to nominate, and
 	// with no other judged chore the block drops entirely — same as its
@@ -210,6 +213,28 @@ func TestJudgedChoresBlockListsOnlyOpenableJudgedChores(t *testing.T) {
 	}
 	if block := judgedChoresBlock(sc, "moe"); block != "" {
 		t.Errorf("block=%q, want nothing once the chore has an open run", block)
+	}
+}
+
+// TestJudgedChoresBlockMarksLastCompletedUTC: the block is read by an
+// agent whose sense of "today" comes from its harness in local time, so
+// the instant it correlates against carries the zone it is in.
+func TestJudgedChoresBlockMarksLastCompletedUTC(t *testing.T) {
+	root := judgedChoreFixture(t)
+	// Outside the 7d cooldown, so the chore stays listed and the
+	// last-completed render is what's under test.
+	gittest.RunWithEnv(t, root,
+		[]string{"GIT_AUTHOR_DATE=2026-05-10T12:00:00Z", "GIT_COMMITTER_DATE=2026-05-10T12:00:00Z"},
+		"commit", "--allow-empty", "-m",
+		"chore: skip moe/readme-update\n\nMoE-Chore-Skipped: moe/readme-update\n")
+
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatal("newPulseScan failed")
+	}
+	block := judgedChoresBlock(sc, "moe")
+	if !strings.Contains(block, "(last completed: 2026-05-10 12:00Z)") {
+		t.Errorf("block=%q, want the completion marked UTC", block)
 	}
 }
 

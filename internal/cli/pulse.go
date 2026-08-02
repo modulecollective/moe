@@ -1282,7 +1282,7 @@ func judgedChoresBlock(sc *pulseScan, projectID string) string {
 		}
 		last := "never"
 		if !st.LastCompleted.IsZero() {
-			last = st.LastCompleted.Format("2006-01-02")
+			last = st.LastCompleted.UTC().Format("2006-01-02 15:04Z")
 		}
 		lines = append(lines, fmt.Sprintf("- `%s` — due when: %s (last completed: %s)", d.Name, d.When, last))
 	}

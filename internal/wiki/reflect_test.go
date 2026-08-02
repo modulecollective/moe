@@ -276,10 +276,10 @@ func TestEventsSinceCheckpointClosedRunsKeyOnGitHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "p/fresh-run (2026-04-15)") {
+	if !strings.Contains(got, "p/fresh-run (2026-04-15 10:00Z)") {
 		t.Errorf("expected post-checkpoint run in events block:\n%s", got)
 	}
-	if strings.Contains(got, "- fresh-run (2026-04-15)") {
+	if strings.Contains(got, "- fresh-run (2026-04-15 10:00Z)") {
 		t.Errorf("closed run should include project prefix:\n%s", got)
 	}
 	if strings.Contains(got, "old-run") {
