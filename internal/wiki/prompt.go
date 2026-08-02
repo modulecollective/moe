@@ -46,7 +46,7 @@ func wikiPreamble(cfg Config) string {
 		if purpose := strings.TrimSpace(d.Purpose); purpose != "" {
 			fmt.Fprintf(&b, " %s", purpose)
 		}
-		fmt.Fprintf(&b, "%s\n", managedDocBudgetAnnotation(cfg.ContentDir, d))
+		fmt.Fprintf(&b, "%s\n", managedDocSizeAnnotation(cfg.ContentDir, d))
 	}
 	b.WriteString("\nNo index.md, no topics/. The doc set is fixed; cross-links\n")
 	b.WriteString("between managed docs are flat sibling refs (e.g.\n")
@@ -54,18 +54,20 @@ func wikiPreamble(cfg Config) string {
 	return b.String()
 }
 
-func managedDocBudgetAnnotation(contentDir string, d ManagedDoc) string {
-	if d.SoftBudgetKB <= 0 {
-		return ""
-	}
+// managedDocSizeAnnotation renders a doc's current on-disk size for the
+// preamble's shape list. A measured size is a fact and travels to any
+// project; a declared budget is a per-corpus invention that goes stale
+// the pass after it's set. The size is the whole lever — the only thing
+// a prose corpus responds to is telling the writer how big it has
+// gotten, and the ingest prompt carries the judgement about what to do
+// with the number.
+//
+// A doc that isn't on disk yet gets no annotation: the missing-doc
+// finding already says so, and "0.0 KB" would read as a measurement.
+func managedDocSizeAnnotation(contentDir string, d ManagedDoc) string {
 	info, err := os.Stat(filepath.Join(contentDir, d.Filename))
 	if err != nil {
-		return fmt.Sprintf(" (size unavailable; soft budget %d KB)", d.SoftBudgetKB)
+		return ""
 	}
-	sizeKB := float64(info.Size()) / 1024
-	annotation := fmt.Sprintf(" (%.1f KB; soft budget %d KB)", sizeKB, d.SoftBudgetKB)
-	if info.Size() > int64(d.SoftBudgetKB)*1024 {
-		annotation += " ⚠ over budget — compress this pass"
-	}
-	return annotation
+	return fmt.Sprintf(" (%.1f KB)", float64(info.Size())/1024)
 }

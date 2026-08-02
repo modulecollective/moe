@@ -234,7 +234,7 @@ func TestReflectKickoffContextRendersHygieneFindings(t *testing.T) {
 	}
 	for _, want := range []string{
 		"### Hygiene findings",
-		"refuses to ship a reflect with leftover findings",
+		"refuses to ship a reflect with any of them left over",
 		"vision.md",
 		"architecture.md",
 	} {
@@ -372,25 +372,6 @@ func TestTwinWikiIngestPromptCarriesCompressionContract(t *testing.T) {
 		if !strings.Contains(twinWikiIngestPrompt, want) {
 			t.Errorf("twin ingest prompt missing %q:\n%s", want, twinWikiIngestPrompt)
 		}
-	}
-}
-
-func TestTwinManagedDocsCarrySoftBudgets(t *testing.T) {
-	want := map[string]int{
-		"vision.md":       9,
-		"architecture.md": 104,
-		"patterns.md":     56,
-		"operations.md":   72,
-		"glossary.md":     22,
-	}
-	for _, doc := range twinManagedDocs {
-		if got := doc.SoftBudgetKB; got != want[doc.Filename] {
-			t.Errorf("%s SoftBudgetKB = %d, want %d", doc.Filename, got, want[doc.Filename])
-		}
-		delete(want, doc.Filename)
-	}
-	if len(want) != 0 {
-		t.Errorf("managed docs missing budget declarations: %v", want)
 	}
 }
 
@@ -694,24 +675,6 @@ func TestReflectPostFlightGate(t *testing.T) {
 	stderr.Reset()
 	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
 		t.Fatalf("clean wiki should pass the gate, got %v\nstderr=%s", err, stderr.String())
-	}
-}
-
-func TestReflectPostFlightGateDoesNotBlockOnSoftBudget(t *testing.T) {
-	dir := t.TempDir()
-	cfg := wiki.Config{
-		Name:       "twin",
-		ContentDir: dir,
-		ManagedDocs: []wiki.ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
-		},
-	}
-	if err := writeWikiDoc(t, dir, "vision.md", "# Vision\n\n"+strings.Repeat("x", 1024)); err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	if err := reflectPostFlightGate(&cfg, &stderr); err != nil {
-		t.Fatalf("soft budget warning should not block finalize: %v\nstderr=%s", err, stderr.String())
 	}
 }
 

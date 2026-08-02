@@ -29,30 +29,38 @@ func TestIngestPromptSectionRendersSchemaRules(t *testing.T) {
 	}
 }
 
-func TestIngestPromptSectionRendersManagedDocSoftBudget(t *testing.T) {
+// Every doc on disk carries its measured size, and nothing else — no
+// declared budget to compare against, no over-budget marker. A doc the
+// scan hasn't seen on disk gets no annotation at all.
+func TestIngestPromptSectionRendersManagedDocSizes(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "vision.md"), strings.Repeat("x", 1025))
+	writeFile(t, filepath.Join(dir, "vision.md"), strings.Repeat("x", 1024))
 	writeFile(t, filepath.Join(dir, "patterns.md"), "small")
 	cfg := Config{
 		Name:       "twin",
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
-			{Filename: "patterns.md", Title: "Patterns", SoftBudgetKB: 1},
+			{Filename: "vision.md", Title: "Vision"},
+			{Filename: "patterns.md", Title: "Patterns"},
 			{Filename: "operations.md", Title: "Operations"},
 		},
 	}
 	got := IngestPromptSection(cfg)
 	for _, want := range []string{
-		"vision.md — Vision. (1.0 KB; soft budget 1 KB) ⚠ over budget — compress this pass",
-		"patterns.md — Patterns. (0.0 KB; soft budget 1 KB)",
+		"vision.md — Vision. (1.0 KB)",
+		"patterns.md — Patterns. (0.0 KB)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("closed-schema prompt missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "operations.md — Operations. (") {
-		t.Errorf("doc without a budget should not render a size annotation:\n%s", got)
+	if !strings.Contains(got, "operations.md — Operations.\n") {
+		t.Errorf("doc absent from disk should carry no size annotation:\n%s", got)
+	}
+	for _, banned := range []string{"budget", "⚠"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("prompt still carries %q:\n%s", banned, got)
+		}
 	}
 }
 

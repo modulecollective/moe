@@ -56,11 +56,13 @@ surface area earned scrutiny, this kind of speculation didn't
 pay); the section about the removed feature does not. Extract the
 rule, drop the example. Compress over preserve.
 
-**Compression is a valid pass.** Each doc carries a soft budget,
-rendered next to it in the on-disk shape list below. A doc over budget is
-in scope for compression this pass even when no event touched it
-— a pass whose only edit was cutting a doc back is a real pass,
-not an empty one. The budgets nudge; nothing gates on them.
+**Compression is a valid pass.** Each doc's current size is rendered
+next to it in the on-disk shape list below. There is no right size —
+only smaller while still serving the reader. Every doc is a
+compression candidate every pass, touched by events or not; the sizes
+tell you where cutting pays most. A pass whose only edit was cutting a
+doc back is a real pass, not an empty one. When you add, look for what
+the addition lets you drop.
 
 **Single home per rule.** Each rule, principle, or named shape
 has one home. If it already lives in another managed doc, point
@@ -78,34 +80,29 @@ reader would search first.`
 // would: a code change here, not per-project config.
 var twinManagedDocs = []wiki.ManagedDoc{
 	{
-		Filename:     "vision.md",
-		Title:        "Vision",
-		Purpose:      "What this project is trying to be — bets, problem, non-goals.",
-		SoftBudgetKB: 9,
+		Filename: "vision.md",
+		Title:    "Vision",
+		Purpose:  "What this project is trying to be — bets, problem, non-goals.",
 	},
 	{
-		Filename:     "architecture.md",
-		Title:        "Architecture",
-		Purpose:      "Components, boundaries, load-bearing decisions.",
-		SoftBudgetKB: 104,
+		Filename: "architecture.md",
+		Title:    "Architecture",
+		Purpose:  "Components, boundaries, load-bearing decisions.",
 	},
 	{
-		Filename:     "patterns.md",
-		Title:        "Patterns",
-		Purpose:      "Named patterns and anti-patterns; the project's prose-form eval suite.",
-		SoftBudgetKB: 56,
+		Filename: "patterns.md",
+		Title:    "Patterns",
+		Purpose:  "Named patterns and anti-patterns; the project's prose-form eval suite.",
 	},
 	{
-		Filename:     "operations.md",
-		Title:        "Operations",
-		Purpose:      "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
-		SoftBudgetKB: 72,
+		Filename: "operations.md",
+		Title:    "Operations",
+		Purpose:  "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
 	},
 	{
-		Filename:     "glossary.md",
-		Title:        "Glossary",
-		Purpose:      "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
-		SoftBudgetKB: 22,
+		Filename: "glossary.md",
+		Title:    "Glossary",
+		Purpose:  "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
 	},
 }
 

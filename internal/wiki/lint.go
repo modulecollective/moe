@@ -37,11 +37,6 @@ type Findings struct {
 	// DanglingXrefs are citations of the form `other.md "Some heading"`
 	// whose quoted span names no heading or bold lead in the cited doc.
 	DanglingXrefs []DanglingXref
-	// OverBudgetDocs are managed docs whose current size exceeds their
-	// declared SoftBudgetKB. This is a hygiene nudge, not a blocking
-	// structural finding: it reaches the reflect kickoff but never
-	// prevents finalize from sealing.
-	OverBudgetDocs []string
 }
 
 // DanglingXref is one quoted-heading citation that doesn't resolve.
@@ -57,17 +52,10 @@ type BrokenLink struct {
 	Target string // path the link resolves to, relative to ContentDir
 }
 
-// IsEmpty reports whether Scan found no structural issues or soft
-// hygiene warnings at all.
-// Used to short-circuit rendering the known-issues block when the
-// wiki is clean — no point seeding the agent with an empty list.
-func (f Findings) IsEmpty() bool {
-	return !f.HasBlocking() && len(f.OverBudgetDocs) == 0
-}
-
 // HasBlocking reports whether f contains a structural finding that
-// must be cleared before a reflect pass can seal. Soft budget warnings
-// are deliberately excluded.
+// must be cleared before a reflect pass can seal. Every finding the
+// scan produces is structural and blocking, so this doubles as the
+// "is there anything to render" predicate for the known-issues block.
 func (f Findings) HasBlocking() bool {
 	return len(f.BrokenLinks) > 0 ||
 		len(f.EmptyDocs) > 0 ||
@@ -96,16 +84,13 @@ func Scan(cfg Config) (Findings, error) {
 	for _, d := range cfg.ManagedDocs {
 		docs[d.Filename] = true
 		docList = append(docList, d.Filename)
-		info, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename))
+		_, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename))
 		if err != nil {
 			if os.IsNotExist(err) {
 				f.MissingManagedDocs = append(f.MissingManagedDocs, d.Filename)
 				continue
 			}
 			return f, fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
-		}
-		if d.SoftBudgetKB > 0 && info.Size() > int64(d.SoftBudgetKB)*1024 {
-			f.OverBudgetDocs = append(f.OverBudgetDocs, d.Filename)
 		}
 	}
 
@@ -137,7 +122,6 @@ func Scan(cfg Config) (Findings, error) {
 	sort.Strings(f.MissingManagedDocs)
 	sort.Strings(f.EmptyDocs)
 	sort.Strings(f.GlossaryOrphans)
-	sort.Strings(f.OverBudgetDocs)
 	sort.Slice(f.BrokenLinks, func(i, j int) bool {
 		if f.BrokenLinks[i].From != f.BrokenLinks[j].From {
 			return f.BrokenLinks[i].From < f.BrokenLinks[j].From
@@ -156,7 +140,7 @@ func Scan(cfg Config) (Findings, error) {
 // invite. Operator judgement decides what to act on — the renderer
 // doesn't editorialise.
 func RenderFindings(f Findings) string {
-	if f.IsEmpty() {
+	if !f.HasBlocking() {
 		return ""
 	}
 	var b strings.Builder
@@ -196,13 +180,6 @@ func RenderFindings(f Findings) string {
 		b.WriteString("**Dangling cross-refs** (quoted heading not found in the named doc — repoint the citation or restore the heading):\n")
 		for _, x := range f.DanglingXrefs {
 			fmt.Fprintf(&b, "- %s: %s %q\n", x.From, x.Target, x.Span)
-		}
-		b.WriteString("\n")
-	}
-	if len(f.OverBudgetDocs) > 0 {
-		b.WriteString("**Docs over their soft size budget** (compression is in scope this pass; this warning does not block finalize):\n")
-		for _, d := range f.OverBudgetDocs {
-			fmt.Fprintf(&b, "- %s\n", d)
 		}
 		b.WriteString("\n")
 	}

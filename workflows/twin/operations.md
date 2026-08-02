@@ -23,10 +23,10 @@ actually *do*.
 - **Capture new rituals.** A practice that's emerged in recent
   work and stuck is a candidate to document — even short-form
   ("Operators run X before Y on Z days").
-- **Compress when the doc is over budget.** The kickoff's doc list
-  marks each doc's soft budget. If operations is over it, cutting
-  the runbook back is in scope this pass even when no event
-  touches a ritual — a compression-only edit is a valid pass.
+- **Compression is always in scope.** The kickoff's doc list carries
+  each doc's current size. Cutting the runbook back is in scope this
+  pass even when no event touches a ritual — a compression-only edit
+  is a valid pass.
 
 If operations hasn't moved this pass, say so. A pass whose only
 work was compression is still a pass.

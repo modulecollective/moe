@@ -63,15 +63,4 @@ type ManagedDoc struct {
 	// in the closed-schema preamble so the agent knows what each
 	// managed doc is supposed to hold without reading every file.
 	Purpose string
-	// SoftBudgetKB is the size past which the doc is rendered with an
-	// over-budget nudge in the preamble and surfaced as an
-	// OverBudgetDocs finding. Soft: it nudges the agent to compress,
-	// it never gates a pass. Zero means "no budget declared" and
-	// suppresses both the size annotation and the finding — an
-	// open-schema or freshly-registered doc set opts in by setting it.
-	//
-	// Same disposition as loreSoftCap one file over: the only lever a
-	// prose corpus responds to is telling the writer how big it has
-	// gotten.
-	SoftBudgetKB int
 }

@@ -21,10 +21,10 @@ edit when reality has moved.
   reviews — interactive or headless alike — not a mid-pass handshake.
 - **Cross-reference the prior stage.** Drift the vision stage
   flagged may have an architectural shape here — name it if so.
-- **Compress when the doc is over budget.** The kickoff's doc list
-  marks each doc's soft budget. If architecture is over it,
-  cutting it back is in scope this pass even when no event touches
-  the shape — a compression-only edit is a valid pass.
+- **Compression is always in scope.** The kickoff's doc list carries
+  each doc's current size. Cutting architecture back is in scope this
+  pass even when no event touches the shape — a compression-only edit
+  is a valid pass.
 
 If nothing in this pass moves architecture, say so explicitly on
 the canvas. A quiet pass is a valid pass, and so is a pass whose

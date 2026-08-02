@@ -106,37 +106,27 @@ func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
 	}
 }
 
-func TestScanClosedSurfacesSoftBudgetWithoutBlocking(t *testing.T) {
+// Size is a measurement the preamble renders, never a finding. A doc
+// of any size is structurally clean, so the scan stays silent and the
+// known-issues block doesn't render at all.
+func TestScanIgnoresDocSize(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\n"+strings.Repeat("x", 1024))
+	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\n"+strings.Repeat("x", 512*1024))
 	cfg := Config{
 		ContentDir: dir,
 		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", SoftBudgetKB: 1},
+			{Filename: "vision.md", Title: "Vision"},
 		},
 	}
 	f, err := Scan(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := f.OverBudgetDocs, []string{"vision.md"}; !equalStrings(got, want) {
-		t.Errorf("OverBudgetDocs: got %v want %v", got, want)
-	}
-	if f.IsEmpty() {
-		t.Fatal("soft budget warning should render in the kickoff findings")
-	}
 	if f.HasBlocking() {
-		t.Fatal("soft budget warning must not be a blocking finding")
+		t.Fatalf("a large doc is not a structural finding: %+v", f)
 	}
-	got := RenderFindings(f)
-	for _, want := range []string{
-		"Docs over their soft size budget",
-		"warning does not block finalize",
-		"- vision.md",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("RenderFindings missing %q:\n%s", want, got)
-		}
+	if got := RenderFindings(f); got != "" {
+		t.Fatalf("clean scan should render nothing, got:\n%s", got)
 	}
 }
 

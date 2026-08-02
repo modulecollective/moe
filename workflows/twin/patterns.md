@@ -25,11 +25,10 @@ is what you edit.
 - **Cross-reference architecture.** If the architecture stage
   added a component, check whether its usage repeats an existing
   pattern (or implies a new one).
-- **Compress when the doc is over budget.** The kickoff's doc list
-  marks each doc's soft budget. If patterns is over it, cutting
-  entries back to their rule and a sighting or two is in scope
-  this pass even when no event touches a named shape — a
-  compression-only edit is a valid pass.
+- **Compression is always in scope.** The kickoff's doc list carries
+  each doc's current size. Cutting entries back to their rule and a
+  sighting or two is in scope this pass even when no event touches a
+  named shape — a compression-only edit is a valid pass.
 
 If patterns hasn't moved this pass, say so. Pattern promotion is
 deliberately slow — a quiet pass is healthy, and a pass whose

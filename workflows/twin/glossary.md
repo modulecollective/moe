@@ -62,10 +62,10 @@ A term that appears in one doc stays in that doc.
   thing called two names in different docs), pick the glossary
   form and update the home docs to match. Cite the changes on
   your canvas.
-- **Compress when the doc is over budget.** The kickoff's doc list
-  marks each doc's soft budget. If glossary is over it, cutting it
-  back is in scope this pass even when no prior canvas turns up a
-  new or stale term — a compression-only edit is a valid pass.
+- **Compression is always in scope.** The kickoff's doc list carries
+  each doc's current size. Cutting glossary back is in scope this
+  pass even when no prior canvas turns up a new or stale term — a
+  compression-only edit is a valid pass.
 
 If glossary hasn't moved this pass, say so. Glossary is meant to
 be slow-moving — a quiet pass is the common case, and a pass whose
