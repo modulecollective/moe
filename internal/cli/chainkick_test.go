@@ -182,6 +182,45 @@ func TestChainKickRegularHeadWithNothingPendingRidesButStaysOpen(t *testing.T) {
 	}
 }
 
+// TestChainKickTerminalHeadRidesChildrenWithoutCascading is the guard
+// chainKickRun's "No status refusal" comment leans on, pinned across
+// the whole terminal class rather than just the pushed case above.
+// `moe chain kick` deliberately admits a sealed head — it still heads a
+// chain of parked children — and what keeps that from cascading stages
+// onto the sealed run is Next() reporting every terminal status as
+// done. If that short-circuit ever softened, kick would become a fourth
+// unguarded door into the cascade dispatchers.
+func TestChainKickTerminalHeadRidesChildrenWithoutCascading(t *testing.T) {
+	for _, status := range []string{run.StatusMerged, run.StatusClosed, run.StatusPromoted} {
+		t.Run(status, func(t *testing.T) {
+			root, stages, _ := kickFixture(t)
+
+			if _, err := run.New(root, "moe", run.Options{ID: "head-run", Workflow: "sdlc"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run.New(root, "moe", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+				t.Fatal(err)
+			}
+			chainEdgeCommit(t, root, "moe/head-run", "moe/child-run")
+			setRunStatus(t, root, "moe", "head-run", status)
+
+			var errb bytes.Buffer
+			if code := runChainKick([]string{"moe/head-run"}, io.Discard, &errb); code != 0 {
+				t.Fatalf("chain kick exit=%d stderr=%q", code, errb.String())
+			}
+
+			for _, inv := range *stages {
+				if inv.runID != "child-run" {
+					t.Errorf("cascaded onto a %s head: %+v", status, inv)
+				}
+			}
+			if len(*stages) == 0 {
+				t.Error("no stages dispatched — the child should still have ridden")
+			}
+		})
+	}
+}
+
 // TestChainKickRefusesANonHead: with several chains per project the
 // kick always names its target, so naming a link rather than the head
 // is an operator error worth correcting by name.

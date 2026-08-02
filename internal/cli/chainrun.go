@@ -256,7 +256,10 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 	// No status refusal: a head that has already shipped still heads a
 	// chain of parked runs, and riding them is the point. Next() reports
 	// every terminal status as done, so such a head falls into the
-	// nothing-pending branch below and is left exactly as it is.
+	// nothing-pending branch below and is left exactly as it is. The
+	// cascade-entry audit confirmed this: that Next() short-circuit is
+	// the guard here, load-bearing rather than incidental, and it is
+	// pinned by TestChainKickTerminalHeadRidesChildrenWithoutCascading.
 	//
 	// Same admissible set the chain editor offers: every operator-paced
 	// workflow, plus chain heads. A run moe never lets the operator

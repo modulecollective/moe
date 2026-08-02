@@ -397,9 +397,11 @@ func dispatchCascadeForStage(cfg stageVerbCfg, projectID, runID, answer, to stri
 // metadata, the bureaucracy root, and 0 on success; a non-zero exit
 // code (with stderr already written) on refusal.
 //
-// The chain-prompt's bang dispatch enters dispatchCascade through
-// promptStageNextStage, which has already loaded md by then — so
-// these guards only need to fire on the CLI-flag-entry leg. The pushed
+// dispatchCascade re-loads and re-checks the same terminal class as a
+// backstop for every entry, so these guards are not the only thing
+// standing between a sealed run and a cascade. They stay because the
+// typed leg earns the verb-prefixed refusal ("moe sdlc code: …", not
+// "cascade: …") and refuses before resolving anything further. The pushed
 // case can only occur for a workflow with a push stage (sdlc today);
 // leaving it in the shared switch is harmless for the workflows that
 // never reach StatusPushed and keeps the guard in one place.
