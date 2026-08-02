@@ -77,13 +77,25 @@ func testStageGate(root string, md *run.Metadata) (bool, error) {
 // headings into title → body strings. Bodies retain their interior
 // newlines but lose the heading line itself. Used by testStageGate;
 // kept here so it's testable in isolation.
+//
+// First occurrence of a heading wins. The split has no fence
+// awareness, so a canvas that quotes the seeded skeleton as captured
+// evidence — a ```-fenced block carrying its own `## Gate` and
+// {"status":"blocked"} — would otherwise have the quote override the
+// real gate at the top and read as blocked. Both skeletons seed the
+// load-bearing headings first and agents fill them in place, so the
+// earliest occurrence is structurally the real one; quoted skeletons
+// only ever appear inside later evidence bodies. Fence grammar over
+// agent-authored nested quoting was considered and rejected: neither
+// strict CommonMark nor a naive toggle parses both the observed
+// 3-inside-3-backtick evidence and well-formed 4-backtick quoting.
 func parseTestCanvasSections(body string) map[string]string {
 	out := map[string]string{}
 	lines := strings.Split(body, "\n")
 	currentTitle := ""
 	var currentBody strings.Builder
 	flush := func() {
-		if currentTitle != "" {
+		if _, seen := out[currentTitle]; currentTitle != "" && !seen {
 			out[currentTitle] = currentBody.String()
 		}
 		currentBody.Reset()

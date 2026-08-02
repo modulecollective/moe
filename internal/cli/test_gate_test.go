@@ -10,8 +10,7 @@ import (
 )
 
 // TestParseTestCanvasSections splits the canvas by `## ` headings; the
-// preamble before the first H2 is discarded; later H2s with the same
-// title overwrite earlier ones (real canvases never re-use headings).
+// preamble before the first H2 is discarded.
 func TestParseTestCanvasSections(t *testing.T) {
 	body := `# Test
 
@@ -36,6 +35,82 @@ UI rendering
 	}
 	if v := strings.TrimSpace(got["Fixes applied during this stage"]); v != "(none)" {
 		t.Fatalf("fixes body = %q", v)
+	}
+}
+
+// TestParseTestCanvasSectionsFirstHeadingWins: when a heading repeats,
+// the first occurrence binds. Canvases quote the seeded skeleton as
+// captured evidence, and the quote's headings land after the real ones.
+func TestParseTestCanvasSectionsFirstHeadingWins(t *testing.T) {
+	body := "# Test\n\n## Gate\n\nreal gate\n\n## Evidence\n\nthe skeleton the agent was handed:\n\n## Gate\n\nquoted gate\n"
+	got := parseTestCanvasSections(body)
+	if v := strings.TrimSpace(got["Gate"]); v != "real gate" {
+		t.Fatalf("Gate body = %q, want the first occurrence", v)
+	}
+}
+
+// TestTestStageGateAcceptsCanvasQuotingSkeleton is the regression for
+// the phantom kickback that stranded moe/sdlc-for-b-repo-only-work: a
+// legitimately-ready canvas that quotes the seeded skeleton — headings
+// and a blocked ```json gate, nested inside its own fence — as evidence
+// of what the agent was handed. Before first-heading-wins the quoted
+// gate overrode the real one and the gate read blocked.
+func TestTestStageGateAcceptsCanvasQuotingSkeleton(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	fence := "```"
+	writeTestCanvas(t, root, md, `# Test
+
+## Gate
+
+`+fence+`json
+{"status":"ready"}
+`+fence+`
+
+## What was verified
+
+ran `+"`go test ./...`"+`
+
+## What wasn't verified
+
+nothing — automated tests cover the change
+
+## Evidence
+
+The seeded skeleton the agent was handed, captured by a fake that
+copies $CANVAS before writing it:
+
+`+fence+`
+## Gate
+
+`+fence+`json
+{"status":"blocked"}
+`+fence+`
+
+Allowed values: "ready" or "blocked".
+
+## What was verified
+
+(agent fills: what you exercised)
+`+fence+`
+
+## Fixes applied during this stage
+
+(none)
+`)
+	ok, err := testStageGate(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected gate to pass: the real gate is ready, the blocked one is quoted evidence")
+	}
+	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, "test")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, ok := stageGateStatus(string(body)); status != "ready" || !ok {
+		t.Fatalf("stageGateStatus = (%q, %v), want (\"ready\", true)", status, ok)
 	}
 }
 
