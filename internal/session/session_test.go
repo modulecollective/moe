@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -203,13 +204,7 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	}
 	// Conflict files are read before --abort discards the rebase
 	// state, so the chain-back kickoff can name them.
-	foundShared := false
-	for _, p := range rfe.Conflicts {
-		if p == "shared.txt" {
-			foundShared = true
-			break
-		}
-	}
+	foundShared := slices.Contains(rfe.Conflicts, "shared.txt")
 	if !foundShared {
 		t.Errorf("expected shared.txt in rfe.Conflicts, got %v", rfe.Conflicts)
 	}

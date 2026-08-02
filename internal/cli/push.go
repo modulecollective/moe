@@ -292,14 +292,12 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// a retry can fix.
 	for attempt := 1; ; attempt++ {
 		if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
-			var conflict *push.RebaseConflictError
-			if errors.As(err, &conflict) {
+			if conflict, ok := errors.AsType[*push.RebaseConflictError](err); ok {
 				moePrintf(stderr, "%v\n", conflict)
 				code, derr := openCodeSessionForRebaseConflict(md, conflict, opts.HeadlessRecovery, stdout, stderr)
 				return code, false, derr
 			}
-			var fail *hookFailure
-			if errors.As(err, &fail) {
+			if fail, ok := errors.AsType[*hookFailure](err); ok {
 				moePrintf(stderr, "%v\n", fail)
 				code, derr := openCodeSessionForHookFailure(md, fail, opts.HeadlessRecovery, stdout, stderr)
 				return code, false, derr

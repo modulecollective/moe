@@ -60,7 +60,7 @@ func scanChecklistDisplay(body []byte) []displayEntry {
 		bodyLines = nil
 	}
 
-	for _, line := range strings.Split(string(body), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		if followupCheckboxRE.MatchString(line) {
 			finalize()
 			done := followupDoneRE.MatchString(line)
@@ -130,7 +130,7 @@ func checkpointHistory(root, projectID string) ([]checkpointSeal, error) {
 		return nil, fmt.Errorf("git log %s: %w", rel, err)
 	}
 	var seals []checkpointSeal
-	for _, sha := range strings.Fields(out) {
+	for sha := range strings.FieldsSeq(out) {
 		blob, err := git.Output(root, "show", sha+":"+rel)
 		if err != nil {
 			continue

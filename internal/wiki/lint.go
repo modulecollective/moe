@@ -523,7 +523,7 @@ func xrefCatalogue(body string) []xrefEntry {
 // tighten instead.
 func xrefResolves(span string, catalogue []xrefEntry) bool {
 	var segs []string
-	for _, seg := range strings.Split(span, xrefPathSeparator) {
+	for seg := range strings.SplitSeq(span, xrefPathSeparator) {
 		if norm := normaliseXrefText(seg); norm != "" {
 			segs = append(segs, norm)
 		}
@@ -591,7 +591,7 @@ func logicalLines(body string) []string {
 			cur.Reset()
 		}
 	}
-	for _, raw := range strings.Split(body, "\n") {
+	for raw := range strings.SplitSeq(body, "\n") {
 		line := strings.TrimRight(raw, " \t")
 		trimmed := strings.TrimSpace(line)
 		switch {

@@ -180,8 +180,7 @@ func execShell(dir string, extraEnv []string, stderr io.Writer) int {
 	}
 	cmd.Env = env
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return exitErr.ExitCode()
 		}
 		moePrintf(stderr, "shell: launch %s: %v\n", shell, err)

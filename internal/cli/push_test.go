@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -483,13 +484,7 @@ func TestPushRebaseConflictOpensCodeSession(t *testing.T) {
 	if len(captured.Conflicts) == 0 {
 		t.Fatalf("chain-back conflict list should name at least one path; got empty")
 	}
-	foundFeature := false
-	for _, p := range captured.Conflicts {
-		if p == "feature.txt" {
-			foundFeature = true
-			break
-		}
-	}
+	foundFeature := slices.Contains(captured.Conflicts, "feature.txt")
 	if !foundFeature {
 		t.Fatalf("expected feature.txt in conflict list, got %v", captured.Conflicts)
 	}

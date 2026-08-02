@@ -98,8 +98,8 @@ func ParseGitmodules(path string) ([]GitmoduleEntry, error) {
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			flush()
 			header := strings.TrimSpace(line[1 : len(line)-1])
-			if strings.HasPrefix(header, "submodule ") {
-				name := strings.Trim(strings.TrimPrefix(header, "submodule "), "\"")
+			if after, ok := strings.CutPrefix(header, "submodule "); ok {
+				name := strings.Trim(after, "\"")
 				cur = &GitmoduleEntry{Name: name}
 			}
 			continue

@@ -361,8 +361,7 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 			continue
 		}
 		if _, err := openChoreInProcess(root, projectID, s.Definition.Name, choreOpenNormal, stdout, stderr); err != nil {
-			var notOpenable *choreNotOpenableError
-			if errors.As(err, &notOpenable) {
+			if _, ok := errors.AsType[*choreNotOpenableError](err); ok {
 				// Expected: an open run already holds this chore, or it
 				// cooled/undued between the scan and the open.
 				continue
@@ -824,8 +823,7 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 	// empty here, so no empty-guard is needed.
 	md, err := mintReflectRun(root, projectID, projectID+"/"+pulseSlug, "" /*agent*/, canonical, stdout, stderr)
 	if err != nil {
-		var refusal *reflectRefusal
-		if errors.As(err, &refusal) {
+		if refusal, ok := errors.AsType[*reflectRefusal](err); ok {
 			if refusal.kind == reflectRefusalInProgress {
 				// The nomination resolves to the open pass. Logged rather
 				// than silent so the sweep output stays honest about which

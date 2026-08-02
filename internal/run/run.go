@@ -973,23 +973,23 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 	// tally) and folded to the two DailyRunCount maps at the end — storing
 	// the counts, not the sets, keeps the index small.
 	dailyProjSlugs := make(map[string]map[string]map[string]struct{})
-	for _, record := range strings.Split(out, "\x1e") {
+	for record := range strings.SplitSeq(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
 			continue
 		}
-		nul := strings.IndexByte(record, 0)
-		if nul < 0 {
+		before, after, ok := strings.Cut(record, "\x00")
+		if !ok {
 			continue
 		}
-		epoch, err := strconv.ParseInt(record[:nul], 10, 64)
+		epoch, err := strconv.ParseInt(before, 10, 64)
 		if err != nil {
 			continue
 		}
-		body := record[nul+1:]
+		body := after
 		subject := body
-		if nl := strings.IndexByte(body, '\n'); nl >= 0 {
-			subject = body[:nl]
+		if before, _, ok := strings.Cut(body, "\n"); ok {
+			subject = before
 		}
 		slug := ""
 		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent string
@@ -1002,7 +1002,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		// invariant says there should only be one, but pick a
 		// deterministic survivor regardless.
 		var addByParent, removeByParent map[string]string
-		for _, line := range strings.Split(body, "\n") {
+		for line := range strings.SplitSeq(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
 				if slug == "" {

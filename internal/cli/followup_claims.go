@@ -84,7 +84,7 @@ func followupClaimSlugs(canvas []byte) []string {
 	}
 
 	inNewFilings := false
-	for _, line := range strings.Split(string(canvas), "\n") {
+	for line := range strings.SplitSeq(string(canvas), "\n") {
 		if strings.HasPrefix(line, "##") {
 			inNewFilings = newFilingsHeadingRE.MatchString(line)
 		}
@@ -112,7 +112,7 @@ func filedFollowupSlugs(root, projectID, runID string) map[string]bool {
 	if err != nil {
 		return filed
 	}
-	for _, line := range strings.Split(string(body), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		if m := followupFiledSlugRE.FindStringSubmatch(line); m != nil {
 			filed[m[1]] = true
 		}

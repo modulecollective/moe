@@ -246,7 +246,7 @@ func TestChoreCheckReportsJudged(t *testing.T) {
 		t.Fatalf("chore check = %d, stderr=%s", code, stderr.String())
 	}
 	var judgedLine string
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	for line := range strings.SplitSeq(stdout.String(), "\n") {
 		if strings.HasPrefix(line, "moe/readme-update\t") {
 			judgedLine = line
 		}

@@ -153,7 +153,7 @@ func writeIndented(w io.Writer, s, indent string) error {
 	// (the blank line Render writes between events) doesn't compound
 	// with an output that already ends in \n.
 	s = strings.TrimRight(s, "\n")
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if _, err := fmt.Fprintf(w, "%s%s\n", indent, line); err != nil {
 			return err
 		}

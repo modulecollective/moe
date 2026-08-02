@@ -39,7 +39,7 @@ func (s *deleteSpy) Lines() []string {
 		return nil
 	}
 	var out []string
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if line != "" {
 			out = append(out, line)
 		}

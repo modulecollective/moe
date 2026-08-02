@@ -37,7 +37,6 @@ func TestCommitWikiTurn(t *testing.T) {
 		{docID: "lint", runSlug: "lint-2026-05-10-120000", writeCanvas: false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.docID, func(t *testing.T) {
 			root := newTestBureaucracy(t)
 

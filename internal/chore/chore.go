@@ -258,8 +258,8 @@ func MatchChangedPaths(defs []Definition, projectID string, paths []string) []st
 // ParseDuration is time.ParseDuration plus a "d" (day) suffix, the unit
 // chore cooldowns and `moe usage --since` are both written in.
 func ParseDuration(s string) (time.Duration, error) {
-	if strings.HasSuffix(s, "d") {
-		n, err := time.ParseDuration(strings.TrimSuffix(s, "d") + "h")
+	if before, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := time.ParseDuration(before + "h")
 		if err != nil {
 			return 0, err
 		}

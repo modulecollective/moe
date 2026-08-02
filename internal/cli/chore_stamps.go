@@ -31,7 +31,7 @@ func changedPathsBetween(dir string, revs ...string) []string {
 		return nil
 	}
 	var paths []string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			paths = append(paths, line)

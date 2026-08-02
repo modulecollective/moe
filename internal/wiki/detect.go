@@ -122,7 +122,7 @@ func lastCommitIsTwin(cfg Config, filename string) (bool, bool, error) {
 	if strings.TrimSpace(body) == "" {
 		return false, false, nil
 	}
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		v, ok := strings.CutPrefix(strings.TrimSpace(line), "MoE-Workflow:")
 		if !ok {
 			continue

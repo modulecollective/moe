@@ -39,8 +39,7 @@ func TestConcurrentRunNewSerializes(t *testing.T) {
 	wg.Add(n)
 	ids := make([]string, n)
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
-		i := i
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			err := repolock.With(root, repolock.Options{

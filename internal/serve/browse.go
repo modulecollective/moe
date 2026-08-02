@@ -421,12 +421,12 @@ func splitFrontmatter(src string) (front map[string]string, body string) {
 		return front, src
 	}
 	rest := src[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
+	before, after0, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return front, src // unterminated → treat as body, don't eat content
 	}
-	block := rest[:end]
-	for _, line := range strings.Split(block, "\n") {
+	block := before
+	for line := range strings.SplitSeq(block, "\n") {
 		i := strings.IndexByte(line, ':')
 		if i <= 0 {
 			continue
@@ -441,7 +441,7 @@ func splitFrontmatter(src string) (front map[string]string, body string) {
 		front[key] = val
 	}
 	// Body starts after the closing fence line.
-	after := rest[end+len("\n---"):]
+	after := after0
 	after = strings.TrimPrefix(after, "\n")
 	return front, strings.TrimPrefix(after, "\n")
 }

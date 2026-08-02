@@ -271,7 +271,7 @@ func LsRemoteDefault(url string) (string, error) {
 		return "", fmt.Errorf("git ls-remote --symref %s: %w (%s)",
 			url, err, strings.TrimSpace(string(stderr)))
 	}
-	for _, line := range strings.Split(string(stdout), "\n") {
+	for line := range strings.SplitSeq(string(stdout), "\n") {
 		if !strings.HasPrefix(line, "ref: ") {
 			continue
 		}
@@ -280,8 +280,8 @@ func LsRemoteDefault(url string) (string, error) {
 			continue
 		}
 		const prefix = "refs/heads/"
-		if strings.HasPrefix(fields[1], prefix) {
-			return strings.TrimPrefix(fields[1], prefix), nil
+		if after, ok := strings.CutPrefix(fields[1], prefix); ok {
+			return after, nil
 		}
 	}
 	return "", fmt.Errorf("git ls-remote --symref %s: no symbolic HEAD in output", url)
@@ -323,8 +323,7 @@ func Status(dir string, paths ...string) ([]StatusEntry, error) {
 	}
 	stdout, stderr, err := execGit(dir, args, false, readRetryCap)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
 		}
 		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

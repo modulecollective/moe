@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -229,9 +230,7 @@ func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.W
 		if err != nil {
 			return nil, fmt.Errorf("dev-env: parse output of %s: %w", script, err)
 		}
-		for k, v := range parsed {
-			env[k] = v
-		}
+		maps.Copy(env, parsed)
 	}
 	return env, nil
 }

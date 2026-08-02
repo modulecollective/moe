@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -324,12 +325,7 @@ func hasUncheckedEntry(absPath string) bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(string(body), "\n") {
-		if followupUncheckedShapeRE.MatchString(line) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(strings.Split(string(body), "\n"), followupUncheckedShapeRE.MatchString)
 }
 
 // injectEditorPopHeader prepends headerText to absPath if the file

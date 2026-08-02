@@ -230,7 +230,7 @@ func seedGitHubProject(t *testing.T, root, projectID string) {
 
 // lineContaining returns the first line of body holding needle, or "".
 func lineContaining(body, needle string) string {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if strings.Contains(line, needle) {
 			return line
 		}

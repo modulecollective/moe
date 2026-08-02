@@ -217,7 +217,7 @@ func ensureRootGitignore(root string) error {
 // hasGitignoreLine reports whether body already contains line as a
 // standalone, uncommented entry.
 func hasGitignoreLine(body, line string) bool {
-	for _, l := range strings.Split(body, "\n") {
+	for l := range strings.SplitSeq(body, "\n") {
 		if strings.TrimSpace(l) == line {
 			return true
 		}

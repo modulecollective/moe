@@ -214,7 +214,7 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	// substring lookup can't disambiguate. Walk the lines that name
 	// each invocation and assert the -2 variant appears first.
 	var order []string
-	for _, line := range strings.Split(errb.String(), "\n") {
+	for line := range strings.SplitSeq(errb.String(), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "moe sdlc code tele/foo") {
 			continue

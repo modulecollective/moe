@@ -446,7 +446,7 @@ func parseWorktreeList(out string) []worktreeEntry {
 		}
 		cur = worktreeEntry{}
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if line == "" {
 			flush()
 			continue

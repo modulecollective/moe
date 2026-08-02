@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -138,13 +139,7 @@ func stageLocationSection(md *run.Metadata, docID string) string {
 		return ""
 	}
 	stages := wf.Stages()
-	inLadder := false
-	for _, s := range stages {
-		if s == docID {
-			inLadder = true
-			break
-		}
-	}
+	inLadder := slices.Contains(stages, docID)
 	if !inLadder {
 		return ""
 	}

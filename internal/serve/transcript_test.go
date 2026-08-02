@@ -335,11 +335,11 @@ func fillerResult(size int) (string, int) {
 	}
 	add("HEADSENTINEL")
 	half := size / 2 / 100
-	for i := 0; i < half; i++ {
+	for i := range half {
 		add(fmt.Sprintf("head filler %04d %s", i, strings.Repeat("a", 80)))
 	}
 	add("MIDSENTINEL")
-	for i := 0; i < half; i++ {
+	for i := range half {
 		add(fmt.Sprintf("tail filler %04d %s", i, strings.Repeat("b", 80)))
 	}
 	add("TAILSENTINEL")

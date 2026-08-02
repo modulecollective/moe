@@ -46,7 +46,7 @@ func TestRender_SmokeAllKinds(t *testing.T) {
 
 func TestRender_ElidesLongToolOutput(t *testing.T) {
 	var lines []string
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		lines = append(lines, "line "+string(rune('a'+(i%26))))
 	}
 	output := strings.Join(lines, "\n")

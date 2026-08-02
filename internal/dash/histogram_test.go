@@ -80,7 +80,7 @@ func TestBuildActivityHistogramSingleSpike(t *testing.T) {
 		t.Fatalf("line count = %d, want %d", len(lines), HistRows+2)
 	}
 
-	for r := 0; r < HistRows; r++ {
+	for r := range HistRows {
 		cells := []rune(lines[r])
 		// Drop the gutter to index by day.
 		cells = cells[utf8.RuneCountInString(histGutter):]

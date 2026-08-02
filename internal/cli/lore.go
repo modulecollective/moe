@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -152,7 +153,7 @@ func splitSupersedes(body string) (supersedes []string, rest string, err error) 
 		return nil, "", fmt.Errorf("supersedes list is empty")
 	}
 	seen := map[string]bool{}
-	for _, raw := range strings.Split(value, ",") {
+	for raw := range strings.SplitSeq(value, ",") {
 		slug := strings.TrimSpace(raw)
 		if slug == "" || !loreSlugRE.MatchString(slug) {
 			return nil, "", fmt.Errorf("invalid supersedes slug %q", slug)
@@ -321,7 +322,7 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 // prior updated-in yields just thisRun.
 func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
 	var refs []string
-	for _, raw := range strings.Split(existing, ",") {
+	for raw := range strings.SplitSeq(existing, ",") {
 		if ref := strings.TrimSpace(raw); ref != "" {
 			refs = append(refs, ref)
 		}
@@ -333,12 +334,7 @@ func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
 }
 
 func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 // harvestLore is the lore counterpart of harvestFollowups. Same flow,

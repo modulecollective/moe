@@ -127,7 +127,7 @@ func settledRunTitle(root string, md *run.Metadata) string {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(body), "\n") {
+		for line := range strings.SplitSeq(string(body), "\n") {
 			if h, ok := strings.CutPrefix(strings.TrimSpace(line), "# "); ok {
 				if h = strings.TrimSpace(h); h != "" {
 					return h

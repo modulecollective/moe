@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -193,12 +194,7 @@ func runDocIDs(root string, md *run.Metadata) []string {
 }
 
 func stageRegistered(stages []string, stage string) bool {
-	for _, s := range stages {
-		if s == stage {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(stages, stage)
 }
 
 // liveSessionFor returns the open session for (run, stage), or nil

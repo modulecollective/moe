@@ -321,10 +321,10 @@ func GHRepoSpec(remote string) (string, error) {
 		}
 	}
 	// HTTPS form: https://host/owner/repo
-	if idx := strings.Index(s, "://"); idx >= 0 {
-		after := s[idx+3:]
-		if slash := strings.Index(after, "/"); slash >= 0 {
-			return after[slash+1:], nil
+	if _, after, ok := strings.Cut(s, "://"); ok {
+		after := after
+		if _, after0, ok := strings.Cut(after, "/"); ok {
+			return after0, nil
 		}
 	}
 	return "", fmt.Errorf("push: cannot derive owner/repo from remote %q", remote)
@@ -383,7 +383,7 @@ func CreatePR(repo, head, base, title, bodyFile string, stderr io.Writer) (strin
 		}
 		return "", fmt.Errorf("push: gh pr create: %w", err)
 	}
-	for _, line := range strings.Split(out.String(), "\n") {
+	for line := range strings.SplitSeq(out.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "https://") {
 			return line, nil
@@ -423,13 +423,13 @@ func TrailerValue(root, projectID, runID, trailer string) string {
 		return ""
 	}
 	prefix := trailer + ":"
-	for _, body := range strings.Split(out, "\x00") {
+	for body := range strings.SplitSeq(out, "\x00") {
 		// Re-verify identity from the body before trusting the record —
 		// grep anchoring narrows the candidate set, this makes the match
 		// exact.
 		var gotRun, gotProject, value string
 		haveValue := false
-		for _, line := range strings.Split(body, "\n") {
+		for line := range strings.SplitSeq(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok && gotRun == "" {
 				gotRun = strings.TrimSpace(v)

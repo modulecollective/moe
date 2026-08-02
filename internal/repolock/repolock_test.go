@@ -124,7 +124,7 @@ func TestConcurrentTakeoverExclusivity(t *testing.T) {
 	var active, maxActive, successes int32
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		opts := opts
 		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
 		go func() {
@@ -481,12 +481,12 @@ func TestConcurrentAcquireExclusivity(t *testing.T) {
 	opts.Budget = 30 * time.Second
 	opts.BackoffCap = 5 * time.Millisecond // short holds — tight poll
 
-	var active int32
+	var active atomic.Int32
 	var maxActive int32
 	var successes int32
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		opts := opts
 		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
 		go func() {
@@ -496,7 +496,7 @@ func TestConcurrentAcquireExclusivity(t *testing.T) {
 				t.Errorf("Acquire: %v", err)
 				return
 			}
-			a := atomic.AddInt32(&active, 1)
+			a := active.Add(1)
 			for {
 				m := atomic.LoadInt32(&maxActive)
 				if a <= m || atomic.CompareAndSwapInt32(&maxActive, m, a) {
@@ -504,7 +504,7 @@ func TestConcurrentAcquireExclusivity(t *testing.T) {
 				}
 			}
 			time.Sleep(holdFor)
-			atomic.AddInt32(&active, -1)
+			active.Add(-1)
 			atomic.AddInt32(&successes, 1)
 			if err := l.Release(); err != nil {
 				t.Errorf("Release: %v", err)
@@ -633,12 +633,10 @@ func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		opts := opts
 		opts.Hostname = staticHost(fmt.Sprintf("host-%d", i))
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -655,13 +653,11 @@ func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	var reads int64
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -683,7 +679,7 @@ func TestTryCreateNoEmptyFileVisible(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	time.Sleep(150 * time.Millisecond)
 	close(stop)
@@ -744,7 +740,7 @@ func TestInstanceIDConcurrentCreate(t *testing.T) {
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			ids[i], errs[i] = instanceID(moeDir)

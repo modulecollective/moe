@@ -32,7 +32,7 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 	checkpointSHA := gittest.HeadSHA(t, projectRepo)
 
 	const commitCount = 30
-	for i := 0; i < commitCount; i++ {
+	for i := range commitCount {
 		path := filepath.Join(projectRepo, fmt.Sprintf("file-%02d.txt", i))
 		writeFile(t, path, "x\n")
 		gittest.Run(t, projectRepo, "add", filepath.Base(path))
@@ -45,7 +45,7 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 	// each as "since reflect."
 	runsRoot := filepath.Join(root, "projects", "p", "runs")
 	const runCount = 10
-	for i := 0; i < runCount; i++ {
+	for i := range runCount {
 		runID := fmt.Sprintf("run-%02d", i)
 		runDir := filepath.Join(runsRoot, runID)
 		if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -92,13 +92,13 @@ func TestEventsSinceCheckpointNoTruncation(t *testing.T) {
 		t.Errorf("events block should not truncate; got:\n%s", got)
 	}
 	// Each commit and run id should be named verbatim in the output.
-	for i := 0; i < commitCount; i++ {
+	for i := range commitCount {
 		want := fmt.Sprintf("commit %02d", i)
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in events block:\n%s", want, got)
 		}
 	}
-	for i := 0; i < runCount; i++ {
+	for i := range runCount {
 		want := fmt.Sprintf("run-%02d", i)
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in events block:\n%s", want, got)
@@ -175,7 +175,7 @@ func TestEventsSinceCheckpointFirstReflectCommitCap(t *testing.T) {
 	// outside the cap.
 	projectRepo := newGitRepo(t)
 	const content = 10
-	for i := 0; i < content; i++ {
+	for i := range content {
 		path := filepath.Join(projectRepo, fmt.Sprintf("file-%03d.txt", i))
 		writeFile(t, path, "x\n")
 		gittest.Run(t, projectRepo, "add", filepath.Base(path))

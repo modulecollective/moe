@@ -136,7 +136,7 @@ func projectCommitsSince(cfg Config, cp Checkpoint, hasCheckpoint bool) ([]strin
 		return nil, 0, fmt.Errorf("wiki: project commit log: %w", err)
 	}
 	var commits []string
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 		if line == "" {
 			continue
 		}

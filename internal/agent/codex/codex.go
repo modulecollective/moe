@@ -641,8 +641,8 @@ type codexItem struct {
 func renderCommandExecution(it *codexItem, trimRoot string) string {
 	cmd := it.Command
 	for _, prefix := range []string{`/bin/bash -lc "`, `/bin/bash -lc `, `bash -lc "`, `bash -lc `} {
-		if strings.HasPrefix(cmd, prefix) {
-			cmd = strings.TrimPrefix(cmd, prefix)
+		if after, ok := strings.CutPrefix(cmd, prefix); ok {
+			cmd = after
 			cmd = strings.TrimSuffix(cmd, `"`)
 			break
 		}

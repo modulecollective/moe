@@ -293,7 +293,7 @@ func findOrphanSessionBranches(root string) ([]string, error) {
 		return nil, fmt.Errorf("session gc: list session branches: %w", err)
 	}
 	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if line != "" {
 			branches = append(branches, line)
 		}
@@ -357,7 +357,7 @@ func branchesWithWorktrees(root string) (map[string]bool, error) {
 		return nil, fmt.Errorf("session gc: worktree list: %w", err)
 	}
 	set := make(map[string]bool)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if b, ok := strings.CutPrefix(line, "branch refs/heads/"); ok {
 			set[b] = true
 		}
@@ -375,7 +375,7 @@ func worktreePaths(root string) (map[string]bool, error) {
 		return nil, fmt.Errorf("session gc: worktree list: %w", err)
 	}
 	set := make(map[string]bool)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		p, ok := strings.CutPrefix(line, "worktree ")
 		if !ok {
 			continue

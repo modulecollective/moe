@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -102,13 +103,7 @@ func (w *Workflow) MachinePaced() bool {
 // stage. Panics if stage isn't already registered or if a gate is
 // already attached — same fail-loud contract as RegisterStage.
 func (w *Workflow) RegisterStageGate(stage string, gate StageGate) {
-	found := false
-	for _, s := range w.stageOrder {
-		if s == stage {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(w.stageOrder, stage)
 	if !found {
 		panic("cli: gate registered for unknown stage " + w.Name + " " + stage)
 	}

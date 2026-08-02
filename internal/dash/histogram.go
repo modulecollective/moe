@@ -65,7 +65,7 @@ func BuildActivityHistogram(counts []int) []string {
 	lines := make([]string, 0, HistRows+2)
 
 	full := HistRows * 8
-	for row := 0; row < HistRows; row++ {
+	for row := range HistRows {
 		// Rows emit top→bottom. base is the eighths the rows below this
 		// one already account for, so this row only draws the slice of the
 		// bar that rises into its band.

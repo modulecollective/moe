@@ -164,12 +164,12 @@ func readLoreFrontmatter(path string) (title, appliesWhen string) {
 // Strips surrounding whitespace and matched quotes around the value.
 // Returns ok=false for lines that don't look like a key/value pair.
 func splitFrontmatterLine(line string) (key, value string, ok bool) {
-	i := strings.IndexByte(line, ':')
-	if i < 0 {
+	before, after, ok := strings.Cut(line, ":")
+	if !ok {
 		return "", "", false
 	}
-	key = strings.TrimSpace(line[:i])
-	value = strings.TrimSpace(line[i+1:])
+	key = strings.TrimSpace(before)
+	value = strings.TrimSpace(after)
 	if key == "" {
 		return "", "", false
 	}

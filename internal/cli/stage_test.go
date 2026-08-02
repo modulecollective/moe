@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,13 +87,7 @@ func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
 			t.Errorf("embedded fragment %s names unregistered workflow %q", fragmentPath, workflow)
 			continue
 		}
-		found := false
-		for _, registered := range wf.Stages() {
-			if registered == stage {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(wf.Stages(), stage)
 		if !found {
 			t.Errorf("embedded fragment %s names unregistered stage %q for workflow %q", fragmentPath, stage, workflow)
 		}

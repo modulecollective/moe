@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -212,8 +213,8 @@ func provHops(edges []provEdge, self string, gone map[string]bool) []serve.ProvH
 	default:
 		hops = append(hops, serve.ProvHop{Subject: "operator"})
 	}
-	for i := len(edges) - 1; i >= 0; i-- {
-		e := edges[i]
+	for _, e := range slices.Backward(edges) {
+
 		object, objectURL := e.child, ""
 		switch {
 		case e.child == self:

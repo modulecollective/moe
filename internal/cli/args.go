@@ -20,11 +20,11 @@ func splitProjectRun(s string) (proj, run string, err error) {
 	if s == "" {
 		return "", "", fmt.Errorf("expected <project>/<run>, got empty string")
 	}
-	i := strings.IndexByte(s, '/')
-	if i < 0 {
+	before, after, ok := strings.Cut(s, "/")
+	if !ok {
 		return "", "", fmt.Errorf("expected <project>/<run>, got %q", s)
 	}
-	proj, run = s[:i], s[i+1:]
+	proj, run = before, after
 	if proj == "" || run == "" || strings.ContainsRune(proj, '/') || strings.ContainsRune(run, '/') {
 		return "", "", fmt.Errorf("expected <project>/<run>, got %q", s)
 	}

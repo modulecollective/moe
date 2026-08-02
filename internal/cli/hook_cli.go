@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -52,12 +53,7 @@ const hookFireWorkflow = "hook-fire"
 var hookFireEvents = []string{"dev-env", "dev-env-teardown", "pre-push"}
 
 func isHookFireEvent(s string) bool {
-	for _, e := range hookFireEvents {
-		if e == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(hookFireEvents, s)
 }
 
 func unknownHookFireEventMsg(event string) string {

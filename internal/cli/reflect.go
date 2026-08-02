@@ -126,8 +126,7 @@ func runReflectSession(workflow string, builder func(root, projectID string) (*w
 	// — the operator ran the verb, so the run threads no parent edge.
 	md, err := mintReflectRun(root, projectID, "" /*spawnedBy*/, *agentOverride, canonical, stdout, stderr)
 	if err != nil {
-		var refusal *reflectRefusal
-		if errors.As(err, &refusal) {
+		if refusal, ok := errors.AsType[*reflectRefusal](err); ok {
 			moePrintln(stderr, refusal.redirect(workflow, projectID))
 			return 1
 		}

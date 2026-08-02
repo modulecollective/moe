@@ -159,7 +159,7 @@ func stageGateStatus(body string) (string, bool) {
 // (i.e., a multi-line placeholder block) count as placeholders so a
 // reformatted skeleton still reads as unfilled.
 func testSectionFilled(body string) bool {
-	for _, ln := range strings.Split(body, "\n") {
+	for ln := range strings.SplitSeq(body, "\n") {
 		s := strings.TrimSpace(ln)
 		if s == "" {
 			continue

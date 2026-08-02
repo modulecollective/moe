@@ -132,10 +132,7 @@ func BuildFactoryFrames(state FactoryState, width, n int, r *rand.Rand) [][]stri
 }
 
 func emptyArt(width int) string {
-	pairs := width / 2
-	if pairs < 1 {
-		pairs = 1
-	}
+	pairs := max(width/2, 1)
 	return "  " + strings.TrimRight(strings.Repeat(emptyDot+" ", pairs), " ")
 }
 
@@ -147,10 +144,7 @@ func buildRail(state FactoryState) (string, []int) {
 	var segs []segment
 
 	if state.BacklogCount > 0 {
-		visible := state.BacklogCount
-		if visible > InputCap {
-			visible = InputCap
-		}
+		visible := min(state.BacklogCount, InputCap)
 		glyphs := make([]string, visible)
 		for i := range glyphs {
 			glyphs[i] = inputGlyph
@@ -163,11 +157,8 @@ func buildRail(state FactoryState) (string, []int) {
 		segs = append(segs, segment{text: s, stationIdx: -1})
 	}
 
-	visibleStations := len(state.ActiveStages)
-	if visibleStations > StationCap {
-		visibleStations = StationCap
-	}
-	for i := 0; i < visibleStations; i++ {
+	visibleStations := min(len(state.ActiveStages), StationCap)
+	for i := range visibleStations {
 		segs = append(segs, segment{
 			text:       "[" + glyphForStation(state.ActiveStages[i]) + "]",
 			stationIdx: i,
@@ -181,10 +172,7 @@ func buildRail(state FactoryState) (string, []int) {
 	}
 
 	if state.CompletedCount > 0 {
-		visible := state.CompletedCount
-		if visible > OutputCap {
-			visible = OutputCap
-		}
+		visible := min(state.CompletedCount, OutputCap)
 		glyphs := make([]string, visible)
 		for i := range glyphs {
 			glyphs[i] = outputGlyph

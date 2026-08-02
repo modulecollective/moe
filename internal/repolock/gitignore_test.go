@@ -38,9 +38,7 @@ func TestEnsureGitignoreNeverEmpty(t *testing.T) {
 
 		// Reader: poll the path until the writers finish. A successful
 		// read of zero bytes means the writer left the file truncated.
-		readerWg.Add(1)
-		go func() {
-			defer readerWg.Done()
+		readerWg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -52,11 +50,11 @@ func TestEnsureGitignoreNeverEmpty(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 
 		var writersWg sync.WaitGroup
 		writersWg.Add(writers)
-		for i := 0; i < writers; i++ {
+		for range writers {
 			go func() {
 				defer writersWg.Done()
 				if err := ensureGitignore(dir); err != nil {

@@ -1,6 +1,7 @@
 package run
 
 import (
+	"maps"
 	"sort"
 	"time"
 )
@@ -75,9 +76,7 @@ func (g *ChainGraph) Child(key string) string { return g.child[key] }
 // whether the ordering moved underneath it.
 func (g *ChainGraph) Edges() map[string]string {
 	out := make(map[string]string, len(g.child))
-	for parent, child := range g.child {
-		out[parent] = child
-	}
+	maps.Copy(out, g.child)
 	return out
 }
 

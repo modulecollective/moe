@@ -249,16 +249,16 @@ func summariseCodexFunctionArgs(name, argsJSON string) string {
 // file moved. Falls back to the first non-empty input line.
 func summariseCustomToolInput(input string) string {
 	for _, prefix := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: "} {
-		if i := strings.Index(input, prefix); i >= 0 {
-			rest := input[i+len(prefix):]
-			if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
-				return strings.TrimSpace(rest[:nl])
+		if _, after, ok := strings.Cut(input, prefix); ok {
+			rest := after
+			if before, _, ok := strings.Cut(rest, "\n"); ok {
+				return strings.TrimSpace(before)
 			}
 			return strings.TrimSpace(rest)
 		}
 	}
-	if nl := strings.IndexByte(input, '\n'); nl >= 0 {
-		return strings.TrimSpace(input[:nl])
+	if before, _, ok := strings.Cut(input, "\n"); ok {
+		return strings.TrimSpace(before)
 	}
 	return strings.TrimSpace(input)
 }
@@ -275,18 +275,18 @@ func parseCodexFunctionOutput(s string) (string, bool) {
 	isErr := false
 	// "Process exited with code N\n" — N != 0 marks the call as an
 	// error.
-	if i := strings.Index(s, "Process exited with code "); i >= 0 {
-		rest := s[i+len("Process exited with code "):]
-		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
-			code := strings.TrimSpace(rest[:nl])
+	if _, after, ok := strings.Cut(s, "Process exited with code "); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, "\n"); ok {
+			code := strings.TrimSpace(before)
 			if code != "0" {
 				isErr = true
 			}
 		}
 	}
 	// Trim the envelope so the operator just sees the inner output.
-	if i := strings.Index(s, "\nOutput:\n"); i >= 0 {
-		return s[i+len("\nOutput:\n"):], isErr
+	if _, after, ok := strings.Cut(s, "\nOutput:\n"); ok {
+		return after, isErr
 	}
 	return s, isErr
 }

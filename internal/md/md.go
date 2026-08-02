@@ -112,7 +112,8 @@ func Render(src string, resolve func(target string) string) string {
 				if im == nil {
 					break
 				}
-				content := im[2]
+				var content strings.Builder
+				content.WriteString(im[2])
 				i++
 				// Lazy continuation: an indented, non-blank line that
 				// can't itself interrupt a paragraph belongs to this item
@@ -130,11 +131,11 @@ func Render(src string, resolve func(target string) string) string {
 					if !strings.HasPrefix(cl, " ") && !strings.HasPrefix(cl, "\t") {
 						break
 					}
-					content += "\n" + strings.TrimSpace(cl)
+					content.WriteString("\n" + strings.TrimSpace(cl))
 					i++
 				}
 				b.WriteString("<li>")
-				b.WriteString(renderInline(content, resolve))
+				b.WriteString(renderInline(content.String(), resolve))
 				b.WriteString("</li>\n")
 			}
 			fmt.Fprintf(&b, "</%s>\n", tag)

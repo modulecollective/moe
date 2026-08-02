@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -231,12 +232,7 @@ func TestChatGroomingHomeNonChatUntouched(t *testing.T) {
 }
 
 func containsStr(haystack []string, want string) bool {
-	for _, s := range haystack {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, want)
 }
 
 func readChatCanvas(t *testing.T, root string, md *run.Metadata) string {

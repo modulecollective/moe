@@ -1218,8 +1218,7 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 			HeadlessRecovery: true,
 			SkipTerminalEdit: true,
 		}, stdout, stderr)
-		var deferred *PushDeferredError
-		if errors.As(err, &deferred) {
+		if deferred, ok := errors.AsType[*PushDeferredError](err); ok {
 			// Record the deferred step even when a retry will follow: a
 			// recover-then-ship reads honestly as two steps (`push
 			// deferred to recovery (…) · push ok`).

@@ -663,8 +663,7 @@ func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projec
 		}
 	}
 	if err := s.opts.CloseRun(projectID, slug); err != nil {
-		var notClosable *runopen.NotClosableError
-		if errors.As(err, &notClosable) {
+		if _, ok := errors.AsType[*runopen.NotClosableError](err); ok {
 			http.Error(w, "close: "+err.Error(), http.StatusConflict)
 			return
 		}

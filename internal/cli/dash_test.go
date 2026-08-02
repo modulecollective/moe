@@ -442,11 +442,11 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	// identity is visible even on the backlog rail. The idea's title
 	// already appears in the run-slug column, so the note surfaces the
 	// stage instead of repeating it.
-	captureIdx := strings.Index(got, "idea:capture")
-	if captureIdx < 0 {
+	_, after, ok := strings.Cut(got, "idea:capture")
+	if !ok {
 		t.Fatalf("backlog missing `idea:capture` stage note in:\n%s", got)
 	}
-	if strings.Index(got[captureIdx+len("idea:capture"):], "idea:capture") < 0 {
+	if strings.Index(after, "idea:capture") < 0 {
 		t.Fatalf("expected two `idea:capture` rows in backlog, got:\n%s", got)
 	}
 	// Sections render top-to-bottom: ACTIVE → BACKLOG → COMPLETED.
@@ -543,7 +543,7 @@ func TestDashCompletedCapsAtCap(t *testing.T) {
 
 	// 12 merged runs, oldest first so "newest-first" ordering pushes
 	// the newer slugs to the top of the section.
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		slug := fmt.Sprintf("done-%02d", i)
 		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
 		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
@@ -564,7 +564,7 @@ func TestDashCompletedCapsAtCap(t *testing.T) {
 	if !containsRunRow(got, "tele", "done-11", "sdlc:merged · reopen?") {
 		t.Fatalf("expected newest completed run to render, got:\n%s", got)
 	}
-	for i := 0; i < 12-dash.CompletedCap; i++ {
+	for i := range 12 - dash.CompletedCap {
 		dropped := fmt.Sprintf("done-%02d", i)
 		if strings.Contains(got, dropped) {
 			t.Fatalf("expected %q to be truncated below cap, got:\n%s", dropped, got)
@@ -824,7 +824,7 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		slug := fmt.Sprintf("done-%02d", i)
 		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
 		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
@@ -853,7 +853,7 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 	if !strings.Contains(got, "COMPLETED (12)") {
 		t.Fatalf("expected uncapped header under --all, got:\n%s", got)
 	}
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		slug := fmt.Sprintf("done-%02d", i)
 		if !strings.Contains(got, slug) {
 			t.Fatalf("expected %q to render under --all, got:\n%s", slug, got)
@@ -1031,8 +1031,8 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 	// Bracketed stations capped: exactly dash.StationCap "[" should appear
 	// before the "+2" station overflow tag.
 	stationsRegion := rail
-	if i := strings.Index(rail, "+2"); i >= 0 {
-		stationsRegion = rail[:i]
+	if before, _, ok := strings.Cut(rail, "+2"); ok {
+		stationsRegion = before
 	}
 	if got, want := strings.Count(stationsRegion, "["), dash.StationCap; got != want {
 		t.Fatalf("expected exactly %d bracketed stations before overflow, got %d in:\n%q",
@@ -1505,15 +1505,15 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 
 	const marker = "  dash  "
 	var stamp string
-	for _, line := range strings.Split(out.String(), "\n") {
+	for line := range strings.SplitSeq(out.String(), "\n") {
 		if !strings.Contains(line, "MINISTRY OF EVERYTHING") {
 			continue
 		}
-		idx := strings.Index(line, marker)
-		if idx < 0 {
+		_, after, ok := strings.Cut(line, marker)
+		if !ok {
 			t.Fatalf("banner line has no %q marker: %q", marker, line)
 		}
-		stamp = strings.TrimSpace(line[idx+len(marker):])
+		stamp = strings.TrimSpace(after)
 	}
 	if stamp == "" {
 		t.Fatalf("no banner line in output:\n%s", out.String())
@@ -1538,7 +1538,7 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 // deltas. Project and run are joined in one slash-form column now.
 func containsRunRow(out, project, runID, stage string) bool {
 	target := project + "/" + runID
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

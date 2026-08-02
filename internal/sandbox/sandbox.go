@@ -276,7 +276,7 @@ func ensureCloneExclude(clonePath string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("sandbox: read %s: %w", p, err)
 	}
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.TrimSpace(line) == ".moe/" {
 			return nil
 		}

@@ -544,17 +544,17 @@ func TestDashRendersFactoryFramesScript(t *testing.T) {
 	}
 	body := rr.Body.String()
 	const open = `<script type="application/json" id="factory-frames">`
-	i := strings.Index(body, open)
-	if i < 0 {
+	_, after, ok := strings.Cut(body, open)
+	if !ok {
 		t.Fatalf("factory-frames script missing\n%s", body)
 	}
-	rest := body[i+len(open):]
-	j := strings.Index(rest, "</script>")
-	if j < 0 {
+	rest := after
+	before0, _, ok0 := strings.Cut(rest, "</script>")
+	if !ok0 {
 		t.Fatalf("factory-frames script not closed\n%s", body)
 	}
 	var frames [][]string
-	raw := html.UnescapeString(rest[:j])
+	raw := html.UnescapeString(before0)
 	if err := json.Unmarshal([]byte(raw), &frames); err != nil {
 		t.Fatalf("embedded frames did not round-trip through the template: %v\nraw=%q", err, raw)
 	}

@@ -219,10 +219,7 @@ func waitForExit(cs []*child, grace time.Duration, ctx context.Context) []*child
 	deadline := time.Now().Add(grace)
 	var stillLive []*child
 	for _, c := range cs {
-		remaining := time.Until(deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(time.Until(deadline), 0)
 		timer := time.NewTimer(remaining)
 		select {
 		case <-c.done:

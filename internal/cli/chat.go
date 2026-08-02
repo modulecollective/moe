@@ -283,7 +283,7 @@ func chatCanvasOnOpen(workRoot string, md *run.Metadata, agentName string) error
 // preamble is written to keep any prose off a "Session "-prefixed line.
 func nextChatSessionNum(canvas string) int {
 	n := 0
-	for _, line := range strings.Split(canvas, "\n") {
+	for line := range strings.SplitSeq(canvas, "\n") {
 		if strings.HasPrefix(line, "Session ") {
 			n++
 		}

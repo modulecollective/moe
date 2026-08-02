@@ -602,7 +602,7 @@ func TestEnsureCloneExcludeAppendsToHandEdited(t *testing.T) {
 // containsExcludeLine reports whether content has `pattern` as a
 // whole exclude line (ignoring leading/trailing whitespace).
 func containsExcludeLine(content, pattern string) bool {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.TrimSpace(line) == pattern {
 			return true
 		}
@@ -614,7 +614,7 @@ func containsExcludeLine(content, pattern string) bool {
 // whole exclude line. Used by the idempotency assertion.
 func countExcludeLine(content, pattern string) int {
 	n := 0
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.TrimSpace(line) == pattern {
 			n++
 		}
