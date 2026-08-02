@@ -85,7 +85,11 @@ func testStageGate(root string, md *run.Metadata) (bool, error) {
 // real gate at the top and read as blocked. Both skeletons seed the
 // load-bearing headings first and agents fill them in place, so the
 // earliest occurrence is structurally the real one; quoted skeletons
-// only ever appear inside later evidence bodies. Fence grammar over
+// only ever appear inside later evidence bodies. The pulse skeleton
+// is the one consumer that seeds `## Gate` last; a quoted heading
+// ahead of it would bind the quote, but the skeleton's gate
+// placeholder is unfenced, so a misbind reads as unfilled and pulse's
+// auto-close fails closed — the run lingers. Fence grammar over
 // agent-authored nested quoting was considered and rejected: neither
 // strict CommonMark nor a naive toggle parses both the observed
 // 3-inside-3-backtick evidence and well-formed 4-backtick quoting.
