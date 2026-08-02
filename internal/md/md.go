@@ -131,7 +131,8 @@ func Render(src string, resolve func(target string) string) string {
 					if !strings.HasPrefix(cl, " ") && !strings.HasPrefix(cl, "\t") {
 						break
 					}
-					content.WriteString("\n" + strings.TrimSpace(cl))
+					content.WriteString("\n")
+					content.WriteString(strings.TrimSpace(cl))
 					i++
 				}
 				b.WriteString("<li>")

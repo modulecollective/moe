@@ -249,8 +249,7 @@ func summariseCodexFunctionArgs(name, argsJSON string) string {
 // file moved. Falls back to the first non-empty input line.
 func summariseCustomToolInput(input string) string {
 	for _, prefix := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: "} {
-		if _, after, ok := strings.Cut(input, prefix); ok {
-			rest := after
+		if _, rest, ok := strings.Cut(input, prefix); ok {
 			if before, _, ok := strings.Cut(rest, "\n"); ok {
 				return strings.TrimSpace(before)
 			}
@@ -275,8 +274,7 @@ func parseCodexFunctionOutput(s string) (string, bool) {
 	isErr := false
 	// "Process exited with code N\n" — N != 0 marks the call as an
 	// error.
-	if _, after, ok := strings.Cut(s, "Process exited with code "); ok {
-		rest := after
+	if _, rest, ok := strings.Cut(s, "Process exited with code "); ok {
 		if before, _, ok := strings.Cut(rest, "\n"); ok {
 			code := strings.TrimSpace(before)
 			if code != "0" {

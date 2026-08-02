@@ -322,9 +322,8 @@ func GHRepoSpec(remote string) (string, error) {
 	}
 	// HTTPS form: https://host/owner/repo
 	if _, after, ok := strings.Cut(s, "://"); ok {
-		after := after
-		if _, after0, ok := strings.Cut(after, "/"); ok {
-			return after0, nil
+		if _, path, ok := strings.Cut(after, "/"); ok {
+			return path, nil
 		}
 	}
 	return "", fmt.Errorf("push: cannot derive owner/repo from remote %q", remote)

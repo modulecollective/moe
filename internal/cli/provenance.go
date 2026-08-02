@@ -214,7 +214,6 @@ func provHops(edges []provEdge, self string, gone map[string]bool) []serve.ProvH
 		hops = append(hops, serve.ProvHop{Subject: "operator"})
 	}
 	for _, e := range slices.Backward(edges) {
-
 		object, objectURL := e.child, ""
 		switch {
 		case e.child == self:

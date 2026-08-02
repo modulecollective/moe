@@ -548,13 +548,12 @@ func TestDashRendersFactoryFramesScript(t *testing.T) {
 	if !ok {
 		t.Fatalf("factory-frames script missing\n%s", body)
 	}
-	rest := after
-	before0, _, ok0 := strings.Cut(rest, "</script>")
-	if !ok0 {
+	payload, _, ok := strings.Cut(after, "</script>")
+	if !ok {
 		t.Fatalf("factory-frames script not closed\n%s", body)
 	}
 	var frames [][]string
-	raw := html.UnescapeString(before0)
+	raw := html.UnescapeString(payload)
 	if err := json.Unmarshal([]byte(raw), &frames); err != nil {
 		t.Fatalf("embedded frames did not round-trip through the template: %v\nraw=%q", err, raw)
 	}
