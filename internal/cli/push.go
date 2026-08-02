@@ -259,6 +259,15 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		moePrintf(stderr, "%v\n", err)
 		return 1, false, nil
 	}
+	// A run whose whole deliverable landed in bureaucracy commits has
+	// nothing to ship from the sandbox. Route it to close before the
+	// nothing-to-push refusal, origin work, or the pre-push hooks —
+	// there is no tree to vet and nothing to rebase. Both flags reach
+	// here, so `--pr` on a no-ship run closes too instead of opening a
+	// PR for an empty branch.
+	if code, interrupted, handled := closeNoShipRun(root, md, pj, clonePath, branch, opts, stdout, stderr); handled {
+		return code, interrupted, nil
+	}
 	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch, md.Workflow); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, false, nil
@@ -362,6 +371,79 @@ const maxPushAttempts = 3
 // back through the hooks. Any other mergePath failure returns a nil
 // error, so the loop falls straight through to today's behavior.
 var errFFRetryable = errors.New("ff-push rejected: origin default advanced during checks")
+
+// closeNoShipRun handles a run whose test gate declared
+// `{"status":"ready","ship":"none"}` — the run's work already landed as
+// bureaucracy commits, so there is nothing for push to ship. The third
+// return is "this call owned the outcome": false means no such
+// declaration and push carries on down its normal path.
+//
+// Two keys are required, and they guard each other. The signal alone
+// would let a mis-written gate close a run that really does carry
+// commits — the cleanup deletes the sandbox clone, so that discards
+// reviewed work. Determinism alone would erase the accident detector:
+// a code stage that was meant to produce a diff and committed nothing
+// must keep hitting today's loud refusal. So the declaration only
+// closes when the branch verifiably agrees, and disagreement refuses
+// instead of picking a side.
+//
+// A commit count that can't be computed refuses too, deliberately
+// inverting CheckBranchHasCommits's fail-open stance. There, failing
+// open flows into a push whose own errors surface a moment later; here
+// it would delete a sandbox that might hold unpushed commits.
+func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, opts pushRunOptions, stdout, stderr io.Writer) (int, bool, bool) {
+	if !testGateShipNone(root, md) {
+		return 0, false, false
+	}
+
+	// A branch that was never created is the zero-commit case a fortiori
+	// — the code stage attached a sandbox and committed nothing to it.
+	if git.HasRef(clonePath, "refs/heads/"+branch) {
+		ahead, err := git.AheadOf(clonePath, pj.DefaultBranch, branch)
+		if err != nil {
+			moePrintf(stderr, "push: test gate declares `ship: none`, but %q's commit count could not be computed: %v\n", branch, err)
+			moePrintf(stderr, "       closing the run removes the sandbox clone, so this refuses rather than guess —\n"+
+				"       check `git -C %s log %s..%s` and re-run `moe %s push %s/%s`\n",
+				clonePath, pj.DefaultBranch, branch, md.Workflow, md.Project, md.ID)
+			return 1, false, true
+		}
+		if ahead > 0 {
+			moePrintf(stderr, "push: test gate declares `ship: none`, but %q has %d commit(s) ahead of %q\n", branch, ahead, pj.DefaultBranch)
+			moePrintf(stderr, "       the gate contradicts the branch — to ship them, drop `\"ship\":\"none\"` from the\n"+
+				"       test canvas's gate and re-run push; to confirm they shouldn't ship, re-run\n"+
+				"       `moe %s test %s/%s` (`git -C %s log %s..%s` lists them)\n",
+				md.Workflow, md.Project, md.ID, clonePath, pj.DefaultBranch, branch)
+			return 1, false, true
+		}
+	}
+
+	reg, ok := lookupCloseRegistration(md.Workflow)
+	if !ok {
+		moePrintf(stderr, "push: %s has no close command, so a `ship: none` run has no terminal action\n", md.Workflow)
+		return 1, false, true
+	}
+	// The workflow's own close subject, extended so the journal reads
+	// honestly at a glance: this close ended a run that shipped nothing,
+	// not one the operator abandoned.
+	subject := reg.subject + " — no ship: no project change"
+	// tailPulse=false: the pulse fires below instead, because
+	// closeRunInProcess drops its interrupt bool and this seam is where
+	// a Ctrl-C'd sweep has to halt a `!!!` ride — same as mergePath.
+	if err := closeRunInProcess(root, md.Workflow, subject, reg.cleanup, md.Project, md.ID,
+		opts.SkipTerminalEdit, false /*tailPulse*/, stdout, stderr); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1, false, true
+	}
+	moePrintf(stdout, "no project change to ship — closed %s (test gate: ship none)\n", branch)
+
+	interrupted := false
+	if fires, skip := pulseFiresForRun(root, md, stderr); fires {
+		interrupted = firePulse(root, md.Project, md.ID /*spawner*/, stdout, stderr)
+	} else if skip != "" {
+		moePrintf(stderr, "%s", skip)
+	}
+	return 0, interrupted, true
+}
 
 // init registers the rebase-onto-default check as the first pre-push
 // built-in. Built-ins run before project scripts (in pre-push.d/) so
