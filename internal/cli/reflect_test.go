@@ -916,3 +916,23 @@ func TestTwinReflectParkExcludesEveryCascadeRung(t *testing.T) {
 		})
 	}
 }
+
+// The redirect names a bare date, and a bare date reads as local. A UTC
+// checkpoint written late in the operator's evening otherwise names
+// tomorrow — the same off-by-a-day the dash banner fix removed.
+func TestUnrecordedEditsRedirectDateIsLocal(t *testing.T) {
+	fz := withFixedLocalZone(t)
+	// 21:00 UTC on the 1st is 04:30 on the 2nd in the fixed zone: the
+	// two renders disagree on the date, not just the clock.
+	since := time.Date(2026, 8, 1, 21, 0, 0, 0, time.UTC)
+	det := wiki.DetectionResult{UnrecordedDocs: []string{"vision.md"}, Since: since}
+
+	got := unrecordedEditsRedirect("twin", det)
+	want := since.In(fz).Format("2006-01-02")
+	if !strings.Contains(got, "since "+want) {
+		t.Errorf("redirect = %q, want the local date %q", got, want)
+	}
+	if strings.Contains(got, since.Format("2006-01-02")) {
+		t.Errorf("redirect still carries the UTC date: %q", got)
+	}
+}

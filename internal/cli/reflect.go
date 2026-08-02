@@ -333,7 +333,10 @@ func unrecordedEditsRedirect(workflow string, det wiki.DetectionResult) string {
 	docs := strings.Join(det.UnrecordedDocs, ", ")
 	since := "the last log entry"
 	if !det.Since.IsZero() {
-		since = det.Since.Format("2006-01-02")
+		// A bare date reads as local, so render it that way — a UTC
+		// checkpoint written in the operator's evening otherwise names
+		// tomorrow.
+		since = det.Since.Local().Format("2006-01-02")
 	}
 	return fmt.Sprintf("unrecorded edits to %s since %s — revert them, then land the change through `moe %s reflect`",
 		docs, since, workflow)
