@@ -104,7 +104,10 @@ func newChoreVM(now time.Time, st chore.State, insecure bool) choreVM {
 		vm.OpenRunURL = "/run/" + d.Project + "/" + st.OpenRun
 	}
 	if !st.NextEligible.IsZero() {
-		vm.NextEligible = st.NextEligible.Format("2006-01-02 15:04 MST")
+		// .Local() before formatting: the instant arrives UTC from the
+		// journal index, so the MST verb was honestly printing "UTC" at
+		// an operator who wanted the box's clock.
+		vm.NextEligible = st.NextEligible.Local().Format("2006-01-02 15:04 MST")
 	}
 	// Mirror the dash/CLI precedence for why a chore can't open: an open
 	// run wins, then cooldown, then plain not-due — except a judged chore,

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -442,5 +443,84 @@ func TestPulseNewOpensDueChoresBeforeTheSurvey(t *testing.T) {
 	}
 	if openAtSurvey == "" {
 		t.Fatal("the due chore's run was not open by the time the survey ran; runPulse skipped its chore step")
+	}
+}
+
+// withFixedLocalZone swaps time.Local for an implausible half-hour
+// offset with a named abbreviation, restoring it when the test ends.
+// The offset is fractional so a UTC render can't pass by coincidence,
+// and the name is one no tzdata zone carries, so its presence in output
+// proves the value went through .Local().
+//
+// time.Local is swapped rather than TZ set: the runtime resolves TZ
+// once, on first use, which in a test binary has long since happened
+// (same reasoning as TestDashBannerTimestampIsLocal). Safe here because
+// no test in this package is parallel.
+func withFixedLocalZone(t *testing.T) *time.Location {
+	t.Helper()
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	fz := time.FixedZone("MOETEST", 7*3600+1800)
+	time.Local = fz
+	return fz
+}
+
+// choreNextEligible returns the chore's cooldown expiry as the state
+// layer computes it — the instant the display sites format.
+func choreNextEligible(t *testing.T, root, name string) time.Time {
+	t.Helper()
+	states, err := gatherChoreStates(root, "moe")
+	if err != nil {
+		t.Fatalf("gatherChoreStates: %v", err)
+	}
+	for _, s := range states {
+		if s.Definition.Name == name {
+			if s.NextEligible.IsZero() {
+				t.Fatalf("chore %q has no NextEligible; fixture is not cooling down", name)
+			}
+			return s.NextEligible
+		}
+	}
+	t.Fatalf("chore %q not found in states", name)
+	return time.Time{}
+}
+
+// `chore check`'s cooldown column answers "when can this open again?".
+// It used to print a UTC RFC3339 stamp, making the operator do zone
+// arithmetic on the one line whose whole job is a glance answer.
+func TestChoreCheckCooldownStampIsLocal(t *testing.T) {
+	root := seedChoreRootWith(t, "720h")
+	fz := withFixedLocalZone(t)
+	next := choreNextEligible(t, root, "readme-refresh")
+
+	var stdout, stderr bytes.Buffer
+	if code := runChoreCheck([]string{"moe/readme-refresh"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("runChoreCheck = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	want := "cooldown until " + next.In(fz).Format("2006-01-02 15:04 MST")
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("chore check status = %q, want it to carry %q", stdout.String(), want)
+	}
+	if strings.Contains(stdout.String(), "UTC") || strings.Contains(stdout.String(), "Z\t") {
+		t.Errorf("chore check still renders a UTC stamp: %q", stdout.String())
+	}
+}
+
+// The cooldown refusal reason is read by three operator-facing surfaces
+// (`chore open` stderr, the pulse's not-opened line, serve's 409 body),
+// so it carries the same local stamp as the check column.
+func TestChoreCooldownRefusalStampIsLocal(t *testing.T) {
+	root := seedChoreRootWith(t, "720h")
+	fz := withFixedLocalZone(t)
+	next := choreNextEligible(t, root, "readme-refresh")
+
+	var stdout, stderr bytes.Buffer
+	_, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("cooling chore should refuse a normal open")
+	}
+	want := "is cooling down until " + next.In(fz).Format("2006-01-02 15:04 MST")
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("refusal = %q, want it to carry %q", err.Error(), want)
 	}
 }

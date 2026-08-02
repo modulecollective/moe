@@ -125,7 +125,10 @@ func runChoreCheck(args []string, stdout, stderr io.Writer) int {
 			status = "open: " + s.Definition.Project + "/" + s.OpenRun
 		}
 		if s.CooldownBlocking {
-			status = "cooldown until " + s.NextEligible.Format(time.RFC3339)
+			// Local and zone-marked: the operator reads this to answer
+			// "when can this open again?", and a UTC RFC3339 stamp made
+			// them do the arithmetic. Nothing parses this column.
+			status = "cooldown until " + s.NextEligible.Local().Format("2006-01-02 15:04 MST")
 		}
 		moePrintf(stdout, "%s\t%s\tworkflow=%s\treason=%s\n", s.Definition.Key(), status, s.Definition.Workflow, s.ReasonString())
 	}
@@ -293,7 +296,10 @@ func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, s
 		}
 	}
 	if mode != choreOpenForced && state.CooldownBlocking {
-		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Format(time.RFC3339)}
+		// Every consumer of this Reason is operator-read (`chore open`
+		// stderr, the pulse's not-opened line, serve's 409 body), so the
+		// stamp matches `chore check`: local, zone-marked.
+		return nil, &choreNotOpenableError{Key: state.Definition.Key(), Reason: "is cooling down until " + state.NextEligible.Local().Format("2006-01-02 15:04 MST")}
 	}
 	switch mode {
 	case choreOpenNormal:

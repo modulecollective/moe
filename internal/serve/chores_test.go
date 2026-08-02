@@ -295,3 +295,50 @@ func TestChoreSentinelsDistinct(t *testing.T) {
 		t.Fatal("chore sentinels must be distinct")
 	}
 }
+
+// The chores page already used the friendly zone-marked format but fed
+// it a UTC instant, so it honestly printed "UTC" at an operator who
+// wanted the box's clock. BlockReason reuses vm.NextEligible, so both
+// the field and the banner move together.
+//
+// time.Local is swapped rather than TZ set: the runtime resolves TZ
+// once, long before a test runs. Safe here because this test is
+// sequential and the package's only parallel file (process_linux_test)
+// resumes after the sequential tests finish.
+func TestChorePageNextEligibleIsLocal(t *testing.T) {
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	// An implausible fractional offset, so a UTC render can't pass by
+	// coincidence, and a zone name no tzdata zone carries.
+	fz := time.FixedZone("MOETEST", 7*3600+1800)
+	time.Local = fz
+
+	next := time.Date(2026, 8, 3, 14, 0, 0, 0, time.UTC)
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: t.TempDir(),
+		GatherChore: func(project, name string) (chore.State, bool, error) {
+			st := dueChoreState()
+			st.Due = false
+			st.CooldownBlocking = true
+			st.NextEligible = next
+			return st, true, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/chore/alpha/readme-refresh", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	want := next.In(fz).Format("2006-01-02 15:04 MST")
+	// Both the next-eligible row and the disabled-open banner, which
+	// reuses the same string.
+	if !strings.Contains(body, want) || !strings.Contains(body, "cooling down until "+want) {
+		t.Errorf("page missing local stamp %q\n%s", want, body)
+	}
+	if strings.Contains(body, next.Format("2006-01-02 15:04 MST")) {
+		t.Errorf("page still renders the UTC stamp\n%s", body)
+	}
+}
