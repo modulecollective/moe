@@ -377,11 +377,11 @@ func TestTwinWikiIngestPromptCarriesCompressionContract(t *testing.T) {
 
 func TestTwinManagedDocsCarrySoftBudgets(t *testing.T) {
 	want := map[string]int{
-		"vision.md":       8,
-		"architecture.md": 48,
-		"patterns.md":     32,
-		"operations.md":   40,
-		"glossary.md":     12,
+		"vision.md":       9,
+		"architecture.md": 104,
+		"patterns.md":     56,
+		"operations.md":   72,
+		"glossary.md":     22,
 	}
 	for _, doc := range twinManagedDocs {
 		if got := doc.SoftBudgetKB; got != want[doc.Filename] {

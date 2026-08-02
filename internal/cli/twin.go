@@ -81,31 +81,31 @@ var twinManagedDocs = []wiki.ManagedDoc{
 		Filename:     "vision.md",
 		Title:        "Vision",
 		Purpose:      "What this project is trying to be — bets, problem, non-goals.",
-		SoftBudgetKB: 8,
+		SoftBudgetKB: 9,
 	},
 	{
 		Filename:     "architecture.md",
 		Title:        "Architecture",
 		Purpose:      "Components, boundaries, load-bearing decisions.",
-		SoftBudgetKB: 48,
+		SoftBudgetKB: 104,
 	},
 	{
 		Filename:     "patterns.md",
 		Title:        "Patterns",
 		Purpose:      "Named patterns and anti-patterns; the project's prose-form eval suite.",
-		SoftBudgetKB: 32,
+		SoftBudgetKB: 56,
 	},
 	{
 		Filename:     "operations.md",
 		Title:        "Operations",
 		Purpose:      "How the project runs day-to-day — workflows, rituals, tools, escalation paths.",
-		SoftBudgetKB: 40,
+		SoftBudgetKB: 72,
 	},
 	{
 		Filename:     "glossary.md",
 		Title:        "Glossary",
 		Purpose:      "Project-specific vocabulary — terse pointers back to the home doc where each term is anchored.",
-		SoftBudgetKB: 12,
+		SoftBudgetKB: 22,
 	},
 }
 
