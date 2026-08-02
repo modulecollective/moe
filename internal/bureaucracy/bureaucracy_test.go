@@ -20,6 +20,26 @@ func writeMarker(t *testing.T, dir string) {
 	}
 }
 
+// isolatedTempDir returns a temp dir with no bureaucracy marker anywhere
+// on its ancestor chain, so walk-up tests can assert ErrNotFound.
+//
+// t.TempDir() honours $GOTMPDIR, which stage sandboxes point inside the
+// clone — itself under the operator's real bureaucracy — so the walk
+// finds a marker and the assertion inverts. os.MkdirTemp("", …) resolves
+// through os.TempDir() instead, which $GOTMPDIR never touches.
+func isolatedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "bureaucracy-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if root, err := walkUp(dir); err == nil {
+		t.Fatalf("test temp dir %s sits inside a bureaucracy (marker at %s); point $TMPDIR outside any bureaucracy checkout", dir, root)
+	}
+	return dir
+}
+
 func TestFindWalksUpToMarker(t *testing.T) {
 	root := t.TempDir()
 	writeMarker(t, root)
@@ -40,7 +60,7 @@ func TestFindWalksUpToMarker(t *testing.T) {
 }
 
 func TestFindReturnsNotFoundAtFilesystemRoot(t *testing.T) {
-	dir := t.TempDir() // no marker anywhere up the chain to /
+	dir := isolatedTempDir(t) // no marker anywhere up the chain to /
 	_, err := Find(dir, noEnv)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err=%v want ErrNotFound", err)
@@ -136,7 +156,7 @@ func TestFindCwdFirstFallsBackToMoeHome(t *testing.T) {
 	homeRoot := t.TempDir()
 	writeMarker(t, homeRoot)
 	// startDir has no marker on its ancestor chain.
-	startDir := t.TempDir()
+	startDir := isolatedTempDir(t)
 
 	got, ignored, err := FindCwdFirst(startDir, func(k string) string {
 		if k == EnvHome {
@@ -157,7 +177,7 @@ func TestFindCwdFirstFallsBackToMoeHome(t *testing.T) {
 }
 
 func TestFindCwdFirstNotFoundWhenNeitherResolves(t *testing.T) {
-	startDir := t.TempDir()
+	startDir := isolatedTempDir(t)
 	_, _, err := FindCwdFirst(startDir, noEnv)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err=%v want ErrNotFound", err)
@@ -165,7 +185,7 @@ func TestFindCwdFirstNotFoundWhenNeitherResolves(t *testing.T) {
 }
 
 func TestFindCwdFirstReportsMoeHomeError(t *testing.T) {
-	startDir := t.TempDir() // no marker anywhere
+	startDir := isolatedTempDir(t) // no marker anywhere
 	emptyHome := t.TempDir()
 	_, _, err := FindCwdFirst(startDir, func(k string) string {
 		if k == EnvHome {
