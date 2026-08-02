@@ -46,8 +46,8 @@ resolve their binary through `exec.LookPath` — the same seam the
 `pulse` invocations against a scratch bureaucracy run end-to-end with no
 session spent. Two gotchas: stage ladders are ordered (walk from the
 first stage), and the scratch bureaucracy needs `.claude/` and
-`.mcp.json` in `.git/info/exclude`. Full recipe: the digital twin's
-operations.md, "Driving `moe` end-to-end without an agent session".
+`.mcp.json` in `.git/info/exclude`. Full recipe: the project's
+knowledge topic `knowledge/topics/driving-moe-end-to-end.md`.
 
 In test stage, **don't** spawn `moe serve` to check rendered HTML or
 HTTP status — assert it in-process with `httptest` against
