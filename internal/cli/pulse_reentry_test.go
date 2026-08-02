@@ -10,14 +10,14 @@ import (
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
-// seedPulseRun stamps a single pulse run in the given status onto a
-// fresh bureaucracy, with MOE_HOME pointed at it.
-func seedPulseRun(t *testing.T, projectID, runID, status string) string {
+// seedDoorRun stamps a single run of the given workflow and status onto
+// a fresh bureaucracy, with MOE_HOME pointed at it.
+func seedDoorRun(t *testing.T, projectID, runID, workflow, status string) string {
 	t.Helper()
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, projectID)
-	trailerstest.SeedRun(t, root, projectID, runID, pulseWorkflow, status)
+	trailerstest.SeedRun(t, root, projectID, runID, workflow, status)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	return root
@@ -44,7 +44,7 @@ func stubOpenPulse(t *testing.T, calls *int) {
 func TestPulseStageRefusesTerminalRunAtInteractiveDoor(t *testing.T) {
 	for _, status := range []string{run.StatusClosed, run.StatusMerged, run.StatusPromoted} {
 		t.Run(status, func(t *testing.T) {
-			seedPulseRun(t, "moe", "pulse-2026-07-31", status)
+			seedDoorRun(t, "moe", "pulse-2026-07-31", pulseWorkflow, status)
 			var calls int
 			stubOpenPulse(t, &calls)
 
@@ -69,10 +69,40 @@ func TestPulseStageRefusesTerminalRunAtInteractiveDoor(t *testing.T) {
 	}
 }
 
+// TestPulseStageRefusesWrongWorkflowRun: typing an sdlc slug at the
+// pulse door used to write a survey skeleton into that run's document
+// tree (in-progress) or refuse with sweep wording that never applied
+// (terminal). The closed leg pins the ordering — workflow identity is
+// the more fundamental mismatch, so it is checked before status.
+func TestPulseStageRefusesWrongWorkflowRun(t *testing.T) {
+	for _, status := range []string{run.StatusInProgress, run.StatusClosed} {
+		t.Run(status, func(t *testing.T) {
+			seedDoorRun(t, "moe", "some-feature", sdlcWorkflow, status)
+			var calls int
+			stubOpenPulse(t, &calls)
+
+			var out, errb bytes.Buffer
+			code := Run([]string{"pulse", "pulse", "moe/some-feature"}, &out, &errb)
+			if code == 0 {
+				t.Fatalf("expected non-zero on %s sdlc run; stdout=%q", status, out.String())
+			}
+			if calls != 0 {
+				t.Fatalf("guard must refuse before the session opens; calls=%d", calls)
+			}
+			if want := "pulse pulse: moe/some-feature is a sdlc run, not pulse"; !strings.Contains(errb.String(), want) {
+				t.Fatalf("missing %q:\n%s", want, errb.String())
+			}
+			if got := errb.String(); strings.Contains(got, "a sweep is not reopened") {
+				t.Fatalf("workflow refusal must win over the terminal-sweep wording:\n%s", got)
+			}
+		})
+	}
+}
+
 // TestPulseStageOpensInProgressRun: the door's remaining real use — a
 // sweep that failed mid-flight and is still in-progress — is untouched.
 func TestPulseStageOpensInProgressRun(t *testing.T) {
-	seedPulseRun(t, "moe", "pulse-2026-07-31", run.StatusInProgress)
+	seedDoorRun(t, "moe", "pulse-2026-07-31", pulseWorkflow, run.StatusInProgress)
 	var calls int
 	stubOpenPulse(t, &calls)
 
@@ -89,7 +119,7 @@ func TestPulseStageOpensInProgressRun(t *testing.T) {
 // downstream require* that owns the not-found wording — without this the
 // operator got a raw error from inside runStageSession.
 func TestPulseStageMissingRunRefusesLoud(t *testing.T) {
-	seedPulseRun(t, "moe", "pulse-2026-07-31", run.StatusInProgress)
+	seedDoorRun(t, "moe", "pulse-2026-07-31", pulseWorkflow, run.StatusInProgress)
 	var calls int
 	stubOpenPulse(t, &calls)
 

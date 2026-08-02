@@ -1499,6 +1499,12 @@ func runPulseStage(args []string, stdout, stderr io.Writer) int {
 // pass-through would surface a raw error from deep inside
 // runStageSession.
 //
+// A non-pulse run typed here refuses on workflow before status is
+// considered: a closed sdlc run should hear that it is an sdlc run, not
+// that "a sweep is not reopened". Without the check the non-terminal
+// case passed straight through and wrote a survey skeleton into the
+// other run's document tree.
+//
 // Scoped to the operator door. openPulse stays unguarded: the headless
 // survey path opens a run minted moments earlier, and openPulseStage
 // (the cascade dispatcher) is only reachable via chain rides.
@@ -1515,6 +1521,10 @@ func guardPulseReentry(projectID, runID string, stderr io.Writer) int {
 		} else {
 			moePrintf(stderr, "%s: %v\n", verb, err)
 		}
+		return 1
+	}
+	if md.Workflow != pulseWorkflow {
+		moePrintf(stderr, "%s: %s/%s is a %s run, not %s\n", verb, projectID, runID, md.Workflow, pulseWorkflow)
 		return 1
 	}
 	switch md.Status {
