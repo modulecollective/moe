@@ -119,40 +119,33 @@ func TestLoreReferenceSectionSkipsHiddenAndDraftFiles(t *testing.T) {
 	}
 }
 
-// Past the soft cap the block still renders fully — the warning is a
-// nudge, not a gate.
-func TestLoreReferenceSectionOverCapWarning(t *testing.T) {
-	root := t.TempDir()
-	for i := range loreSoftCap + 3 {
-		writeFile(t,
-			filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
-			fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))
-	}
-	got := LoreReferenceSectionAt(root)
-	if !strings.Contains(got, fmt.Sprintf("%d lore entries (soft cap %d)", loreSoftCap+3, loreSoftCap)) {
-		t.Errorf("expected over-cap warning, got:\n%s", got)
-	}
-	// All entries still rendered.
-	for i := range loreSoftCap + 3 {
-		want := fmt.Sprintf("Entry %d", i)
-		if !strings.Contains(got, want) {
-			t.Errorf("entry %q missing from over-cap render", want)
+// The prune instruction is standing prose, not a threshold: it renders
+// at one entry and at twenty-three alike, and no count-based warning
+// fires at either size.
+func TestLoreReferenceSectionAlwaysCarriesPruneProse(t *testing.T) {
+	for _, count := range []int{1, 23} {
+		root := t.TempDir()
+		for i := range count {
+			writeFile(t,
+				filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
+				fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))
 		}
-	}
-}
-
-// At-cap (exactly loreSoftCap entries) does NOT carry the warning —
-// only `> cap` does.
-func TestLoreReferenceSectionAtCapNoWarning(t *testing.T) {
-	root := t.TempDir()
-	for i := range loreSoftCap {
-		writeFile(t,
-			filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
-			fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))
-	}
-	got := LoreReferenceSectionAt(root)
-	if strings.Contains(got, "soft cap") {
-		t.Errorf("expected no warning at exactly cap, got:\n%s", got)
+		got := LoreReferenceSectionAt(root)
+		if !strings.Contains(got, "stays small\nby prunes, not just adds") {
+			t.Errorf("%d entries: prune prose missing, got:\n%s", count, got)
+		}
+		for _, banned := range []string{"soft cap", "⚠"} {
+			if strings.Contains(got, banned) {
+				t.Errorf("%d entries: catalog still carries %q:\n%s", count, banned, got)
+			}
+		}
+		// All entries still rendered.
+		for i := range count {
+			want := fmt.Sprintf("Entry %d", i)
+			if !strings.Contains(got, want) {
+				t.Errorf("%d entries: %q missing from render", count, want)
+			}
+		}
 	}
 }
 

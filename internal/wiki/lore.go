@@ -14,11 +14,6 @@ import (
 // to any one project. Sibling of projects/ and .moe/.
 const LoreDirRel = "lore"
 
-// loreSoftCap is the per-bureaucracy count past which the injected
-// catalog carries a "consider pruning" warning. Soft — the block still
-// renders fully; the cap nudges, doesn't gate.
-const loreSoftCap = 20
-
 // LoreDir returns the absolute path to the bureaucracy's lore/ dir.
 func LoreDir(root string) string {
 	return filepath.Join(root, LoreDirRel)
@@ -108,11 +103,17 @@ doing — the bodies stay on disk; this catalog is the budgeted summary.
 		fmt.Fprintf(&b, "- [%s](%s) — %s\n",
 			e.Title, filepath.Join(dir, e.Filename), e.AppliesWhen)
 	}
-	b.WriteString("\nIf you discover a portable fact worth adding to this catalog, leave\nan entry via the `moe-bureaucracy` skill. To read prior runs' lore\nnotes or grep across other projects for a similar fact, use\n`moe-context`.\n")
-	if len(entries) > loreSoftCap {
-		fmt.Fprintf(&b, "\n> ⚠ %d lore entries (soft cap %d) — consider pruning or splitting.\n",
-			len(entries), loreSoftCap)
-	}
+	b.WriteString(`
+Every line above lands in every stage prompt, so the catalog stays small
+by prunes, not just adds: prefer folding a new fact into an existing
+entry over minting a sibling, and when an entry's applies-when no longer
+matches tasks that actually occur, file a supersedes or prune note.
+
+If you discover a portable fact worth adding to this catalog, leave
+an entry via the ` + "`moe-bureaucracy`" + ` skill. To read prior runs' lore
+notes or grep across other projects for a similar fact, use
+` + "`moe-context`" + `.
+`)
 	return b.String()
 }
 
