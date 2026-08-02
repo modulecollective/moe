@@ -107,6 +107,12 @@ failures or unresolved issues that should halt push; do not block
 merely because some surfaces are explicitly listed under `What
 wasn't verified`.
 
+When the run deliberately ships no project-repo change —
+bureaucracy-only work, so the sandbox is clean and moe/<run> has
+zero commits ahead of the default branch — write
+{"status":"ready","ship":"none"} instead; push then closes the run
+rather than refusing that there is nothing to push.
+
 ## What was verified
 (commands run, end-to-end paths driven, what passed — cite and
 quote)
