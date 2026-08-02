@@ -389,6 +389,83 @@ func TestTestStageGateMissingCanvasIsUnsatisfied(t *testing.T) {
 	}
 }
 
+// TestTestGateShipNone drives the no-ship declaration reader. The field
+// only counts on a ready gate, only for the exact value "none", and
+// every unreadable shape reports false — push treats a true here as
+// permission to close the run and delete its sandbox.
+func TestTestGateShipNone(t *testing.T) {
+	gate := func(payload string) string {
+		return "# Test\n\n## Gate\n\n```json\n" + payload + "\n```\n\n## What was verified\n\nran tests\n"
+	}
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"ready and ship none", gate(`{"status":"ready","ship":"none"}`), true},
+		{"field order and spacing", gate(`{ "ship": "none", "status": "ready" }`), true},
+		{"ready without ship", gate(`{"status":"ready"}`), false},
+		{"ready with ship push", gate(`{"status":"ready","ship":"push"}`), false},
+		{"ready with empty ship", gate(`{"status":"ready","ship":""}`), false},
+		{"blocked with ship none", gate(`{"status":"blocked","ship":"none"}`), false},
+		{"ship none without status", gate(`{"ship":"none"}`), false},
+		{"malformed json", gate(`{"status":"ready","ship":`), false},
+		{"no gate section", "# Test\n\n## What was verified\n\nran tests\n", false},
+		{"unfilled skeleton", testCanvasSkeleton, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+			writeTestCanvas(t, root, md, tc.body)
+			if got := testGateShipNone(root, md); got != tc.want {
+				t.Fatalf("testGateShipNone = %v, want %v for canvas:\n%s", got, tc.want, tc.body)
+			}
+		})
+	}
+}
+
+// TestTestGateShipNoneMissingCanvas: a run whose test stage never wrote
+// a canvas — an operator pushing straight from code — carries no
+// signal, so push keeps its existing behaviour.
+func TestTestGateShipNoneMissingCanvas(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	if testGateShipNone(root, md) {
+		t.Fatal("a missing test canvas must not read as a no-ship declaration")
+	}
+}
+
+// TestTestStageGateIgnoresShipField: the advance gate parses status only,
+// so the new field rides along without changing whether test advances.
+func TestTestStageGateIgnoresShipField(t *testing.T) {
+	root := t.TempDir()
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+	writeTestCanvas(t, root, md, `# Test
+
+## Gate
+
+`+"```json"+`
+{"status":"ready","ship":"none"}
+`+"```"+`
+
+## What was verified
+
+ran `+"`go test ./...`"+`
+
+## What wasn't verified
+
+nothing — the run ships no project change
+`)
+	ok, err := testStageGate(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected the advance gate to ignore `ship` and pass on the ready status")
+	}
+}
+
 // writeTestCanvas seeds the test stage's canvas file under root.
 func writeTestCanvas(t *testing.T, root string, md *run.Metadata, body string) {
 	t.Helper()
