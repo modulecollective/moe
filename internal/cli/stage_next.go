@@ -810,7 +810,32 @@ func promptPushCascadeShip(md *run.Metadata, rideChain bool, mode rideMode, stdo
 //
 // Returns the exit code to bubble up: the failing stage's code on a
 // cascade failure, 0 on a successful park-at-gate or ship.
+//
+// Every entry into the cascade dispatchers passes through here, so the
+// terminal-status refusal lives here rather than at each door: the md a
+// caller hands in may be a stale in-memory load (a chain prompt left
+// open in a pane while the run was scuttled, shipped, or ridden to a
+// merge from somewhere else), and a stale load is exactly how a cascade
+// ends up driving stages onto a sealed run.
 func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, stderr io.Writer) int {
+	fresh, err := run.Load(root, md.Project, md.ID)
+	if err != nil {
+		moePrintf(stderr, "cascade: %v\n", err)
+		return 1
+	}
+	switch fresh.Status {
+	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
+		moePrintf(stderr, "cascade: %s/%s is %s; nothing to cascade\n", fresh.Project, fresh.ID, fresh.Status)
+		return 1
+	case run.StatusPushed:
+		moePrintf(stderr, "cascade: %s/%s already pushed; cascade cannot drive a pushed run\n", fresh.Project, fresh.ID)
+		return 1
+	}
+	// Walk on the fresh metadata. The workflow can't have changed, but
+	// agent/workspace fields may have, and the tail's promptNextStage
+	// reads them.
+	md = fresh
+
 	// The consent level the operator just typed, held for the whole
 	// dispatch so every tail pulse under it — this run's and every run
 	// the ride reaches — reads the same mode. See ridemode.go.

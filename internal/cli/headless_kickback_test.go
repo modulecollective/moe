@@ -355,6 +355,11 @@ func TestDispatchCascadeBlockedReviewParksToPrompt(t *testing.T) {
 		t.Run(answer, func(t *testing.T) {
 			root := isolateCascadeMoeHome(t)
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+			// dispatchCascade re-loads the run before dispatching, so
+			// the fixture has to exist on disk and not just in hand.
+			if err := run.Save(root, md); err != nil {
+				t.Fatal(err)
+			}
 			writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
 
 			reviewDispatches := 0

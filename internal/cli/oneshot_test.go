@@ -325,7 +325,7 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 			t.Cleanup(func() { os.Stdin = oldStdin })
 
 			var stdout, stderr bytes.Buffer
-			if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe "+tc.workflow+" code tele fix-it", &stdout, &stderr); code != 0 {
+			if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe "+tc.workflow+" code tele fix-it", &stdout, &stderr); code != 0 {
 				t.Fatalf("promptStageNextStage exit=%d stderr=%q", code, stderr.String())
 			}
 			if !strings.Contains(stdout.String(), tc.wantLabel) {

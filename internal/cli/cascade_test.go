@@ -445,6 +445,19 @@ func stubGroupCloseCommand(t *testing.T, workflow string, exit int) *[]closeComm
 	return &captured
 }
 
+// cascadeFixtureRoot returns a bureaucracy root with md written out.
+// dispatchCascade re-loads the run it is about to drive (the guard
+// against a chain prompt answering on a stale load), so a prompt test
+// that types a bang needs its fixture on disk and not just in hand.
+func cascadeFixtureRoot(t *testing.T, md *run.Metadata) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func isolateCascadeMoeHome(t *testing.T) string {
 	t.Helper()
 	root := newTestBureaucracy(t)
@@ -822,7 +835,7 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
 	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
@@ -863,7 +876,7 @@ func TestPromptStageNextStageBangForTwin(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture moe reflect-2026-05-17", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe twin architecture moe reflect-2026-05-17", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
 	if got := stdout.String(); !strings.Contains(got, "cascade moe/reflect-2026-05-17: architecture ok") {
@@ -905,7 +918,7 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
 	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
@@ -947,7 +960,7 @@ func TestPromptStageNextStageBangBangDispatchesHeadless(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
 	if len(*captured) == 0 {
@@ -991,7 +1004,7 @@ func TestPromptStageNextStageBangBangBangDispatchesHeadless(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
 	if len(*captured) == 0 {
@@ -1028,7 +1041,7 @@ func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
 	if !strings.Contains(stderr.String(), "unknown stage") {
@@ -1062,7 +1075,7 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
 	if !strings.Contains(stdout.String(), "! = cascade one stage") {
@@ -1110,7 +1123,7 @@ func TestPromptStageNextStageNoCascadeLegendWithoutDispatcher(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe idea idea moe lingering-workflows", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe idea idea moe lingering-workflows", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d", code)
 	}
 	if strings.Contains(stdout.String(), "! = cascade") || strings.Contains(stdout.String(), "!<stage>") || strings.Contains(stdout.String(), "!! =") {
