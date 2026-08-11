@@ -175,7 +175,7 @@ func Acquire(root string, opts Options) (*Lock, error) {
 	for {
 		now := opts.Now().UTC()
 		rec := Record{
-			Owner:       ownerString(localHost),
+			Owner:       OwnerString(localHost),
 			Run:         opts.Run,
 			Purpose:     opts.Purpose,
 			AcquiredAt:  now,
@@ -626,19 +626,26 @@ func isStale(rec Record, now time.Time, localHost string) bool {
 	if now.Sub(rec.HeartbeatAt) > StaleThreshold {
 		return true
 	}
-	host, pid, ok := parseOwner(rec.Owner)
+	host, pid, ok := ParseOwner(rec.Owner)
 	if !ok {
 		return false
 	}
 	if host != localHost {
 		return false
 	}
-	return !processAlive(pid)
+	return !ProcessAlive(pid)
 }
 
-// parseOwner splits an "<host>/<pid>" owner string. Returns ok=false
+// ParseOwner splits an "<host>/<pid>" owner string. Returns ok=false
 // for malformed or non-pid owners (tests may use sentinel names).
-func parseOwner(owner string) (host string, pid int, ok bool) {
+//
+// Exported alongside OwnerString and ProcessAlive because
+// internal/session's liveness record reuses this staleness shape
+// verbatim — same owner string, same same-host-pid probe, same
+// "ambiguity reads as alive" rule. A second implementation over there
+// would be free to drift on exactly the question that decides whether a
+// live process gets reaped.
+func ParseOwner(owner string) (host string, pid int, ok bool) {
 	i := strings.LastIndex(owner, "/")
 	if i < 0 || i == len(owner)-1 {
 		return "", 0, false
@@ -650,13 +657,22 @@ func parseOwner(owner string) (host string, pid int, ok bool) {
 	return owner[:i], p, true
 }
 
-// processAlive tests whether pid exists on this host. Signal 0 is the
-// portable "is this pid a thing?" probe; no signal is delivered. Only
-// ESRCH proves the pid is gone: EPERM (different uid) means the
-// process exists but we can't signal it, and any other errno is
-// ambiguous. Treating ambiguity as alive costs at worst a wait/timeout
-// for a real dead pid; treating it as dead would steal a live lock.
-func processAlive(pid int) bool {
+// ProcessAlive tests whether pid exists on this host. Signal 0 is the
+// portable "is this pid a thing?" probe; no signal is delivered. Only a
+// gone-process error proves the pid is gone: EPERM (different uid)
+// means the process exists but we can't signal it, and any other errno
+// is ambiguous. Treating ambiguity as alive costs at worst a
+// wait/timeout for a real dead pid; treating it as dead would steal a
+// live lock — or, on internal/session's side, reap a live session.
+//
+// Two errors mean gone, and both legs are load-bearing. Raw ESRCH is
+// what a bare kill(2) returns. os.ErrProcessDone is what os.Process
+// itself reports once it knows the pid is unusable — since the pidfd
+// work landed, os.FindProcess on a dead pid hands back an
+// already-finished Process and Signal never reaches the kernel, so a
+// probe that only looked for ESRCH read *every* dead pid as alive and
+// this whole leg silently stopped firing.
+func ProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
@@ -668,13 +684,13 @@ func processAlive(pid int) bool {
 	if err == nil {
 		return true
 	}
-	return !errors.Is(err, syscall.ESRCH)
+	return !errors.Is(err, syscall.ESRCH) && !errors.Is(err, os.ErrProcessDone)
 }
 
-// ownerString is what we write as Owner in a fresh record: <host>/<pid>.
+// OwnerString is what we write as Owner in a fresh record: <host>/<pid>.
 // host is the caller's hostHandle output, supplied by Acquire so the
 // owner string and the isStale comparison stay in agreement.
-func ownerString(host string) string {
+func OwnerString(host string) string {
 	return fmt.Sprintf("%s/%d", host, os.Getpid())
 }
 

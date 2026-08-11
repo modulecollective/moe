@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -453,8 +454,8 @@ func TestProcessAliveEPERMTreatedAsAlive(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root — Signal(0) on pid 1 returns nil, not EPERM")
 	}
-	if !processAlive(1) {
-		t.Errorf("processAlive(1) = false; want true (pid 1 exists, Signal(0) returns EPERM for non-root)")
+	if !ProcessAlive(1) {
+		t.Errorf("ProcessAlive(1) = false; want true (pid 1 exists, Signal(0) returns EPERM for non-root)")
 	}
 }
 
@@ -982,7 +983,7 @@ func TestStaleSelfOwnedRecordTakenOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := Record{
-		Owner:       ownerString(hostHandle(moeDir, os.Hostname)),
+		Owner:       OwnerString(hostHandle(moeDir, os.Hostname)),
 		Purpose:     "predecessor",
 		AcquiredAt:  time.Now().UTC().Add(-time.Hour),
 		HeartbeatAt: time.Now().UTC().Add(-time.Hour),
@@ -998,5 +999,24 @@ func TestStaleSelfOwnedRecordTakenOver(t *testing.T) {
 	defer l.Release()
 	if l.record().Purpose != "takeover" {
 		t.Errorf("Purpose = %q, want %q", l.record().Purpose, "takeover")
+	}
+}
+
+// TestProcessAliveExitedPidIsDead is the other half of the EPERM guard,
+// and the one that had quietly stopped holding: os.FindProcess on a pid
+// that is gone hands back an already-finished Process, so Signal returns
+// os.ErrProcessDone rather than ESRCH. A probe that only recognised
+// ESRCH read every dead pid as alive, which turned the same-host pid leg
+// of the staleness rule into a no-op.
+//
+// The pid comes from a child we ran to completion, so it is genuinely a
+// pid this host has finished with.
+func TestProcessAliveExitedPidIsDead(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run throwaway child: %v", err)
+	}
+	if ProcessAlive(cmd.Process.Pid) {
+		t.Errorf("ProcessAlive(%d) = true for a child that has exited", cmd.Process.Pid)
 	}
 }

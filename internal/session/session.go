@@ -321,6 +321,11 @@ func Close(s *Session) error {
 		return fmt.Errorf("session close: delete branch %s: %w (%s)",
 			s.Branch, err, strings.TrimSpace(out))
 	}
+	// A clean ending, so the liveness record has nothing left to vouch
+	// for. Dropped last: a record that outlives its branch is harmless
+	// (nothing reads it without a live branch beside it), while a branch
+	// that outlives its record would read as an unclaimed orphan.
+	clearClaim(s)
 	return nil
 }
 
@@ -343,6 +348,9 @@ func Abandon(s *Session) error {
 			return fmt.Errorf("session abandon: delete branch: %w (%s)", err, strings.TrimSpace(out))
 		}
 	}
+	// The other clean ending — including the heartbeat's own reap, which
+	// routes through here. See Close.
+	clearClaim(s)
 	return nil
 }
 

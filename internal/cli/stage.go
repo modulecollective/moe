@@ -1324,7 +1324,26 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	if err != nil {
 		return nil, nil, err
 	}
+	// Claim the session for this process. The branch alone says a stage
+	// is open; the claim says who is inside it and whether they are still
+	// running, which is what lets the heartbeat's reap tell a dead robot
+	// session (retryable) from a live one or a human's (never touched).
+	//
+	// rideWalkActive is the machine mark and is exactly right here: every
+	// withRideMode entry point is a machine-walk entry, so a `!!!`
+	// cascade in a tmux pane marks itself as a robot session — and the
+	// liveness half is what keeps that same live pane from being reaped.
+	// A bare `moe sdlc code` leaves it false, and an operator session is
+	// never reapable.
+	//
+	// Best-effort: a claim that fails to write leaves the session
+	// unmarked, which reads as unknown and so is only ever surfaced.
+	release, claimErr := session.Hold(sess, rideWalkActive)
+	if claimErr != nil {
+		moePrintf(stderr, "session: could not record liveness for %s: %v\n", sess.Branch, claimErr)
+	}
 	closeSess := func(okToPush bool) error {
+		release()
 		return repolock.With(root, repolock.Options{
 			Purpose:   in.LockPurpose + "-close",
 			Run:       in.Project + "/" + in.RunSlug,
