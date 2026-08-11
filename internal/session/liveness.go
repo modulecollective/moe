@@ -157,16 +157,46 @@ func clearClaim(s *Session) {
 // shape — no claim, an operator claim, a claim owned by another host, a
 // live pid, a fresh heartbeat — returns false, and those sessions are
 // surfaced rather than touched.
-//
-// Both dead signals are required, not either. The pid probe alone
-// misfires on pid reuse; the heartbeat alone misfires on a process
-// stopped at a debugger or starved off the scheduler. Together they are
-// the "provably dead" the operator's rule asks for.
 func Reapable(s *Session, now time.Time) bool {
 	c, ok := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
 	if !ok || !c.Machine {
 		return false
 	}
+	return claimDead(c, now)
+}
+
+// Dead reports whether a session's claimant is provably gone, whoever it
+// was. Exactly Reapable without the machine bit — and the distinction is
+// the point: a dead *operator* session may never be touched, but it has
+// also stopped meaning "somebody is inside this project", which is the
+// only thing the heartbeat's stand-down asks it.
+//
+// Without that split, a Ctrl-C'd `moe pulse new` — or any operator stage
+// pane lost to a box reboot — leaves a branch nothing ever clears, and
+// every subsequent tick reads the project occupied and stands down
+// forever. Ambiguity still reads as alive here, same as everywhere else
+// on this file: no claim, another host, an unparsable owner, a live pid
+// or a fresh beat all report false and keep the project held.
+//
+// Takes path parts rather than a *Session because its caller holds
+// branch names, not sessions: the tick enumerates refs, deliberately,
+// so that an orphan branch with no worktree is still seen.
+func Dead(root, projectID, runID, docID string, now time.Time) bool {
+	c, ok := ReadClaim(root, projectID, runID, docID)
+	if !ok {
+		return false
+	}
+	return claimDead(c, now)
+}
+
+// claimDead is the "provably dead" core both predicates share: same
+// host, pid gone *and* heartbeat stale.
+//
+// Both dead signals are required, not either. The pid probe alone
+// misfires on pid reuse; the heartbeat alone misfires on a process
+// stopped at a debugger or starved off the scheduler. Together they are
+// the "provably dead" the operator's rule asks for.
+func claimDead(c Claim, now time.Time) bool {
 	host, err := os.Hostname()
 	if err != nil {
 		return false

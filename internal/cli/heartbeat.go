@@ -91,9 +91,9 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []string {
 		fmt.Fprintf(log, "heartbeat: could not read the journal — standing down this tick\n")
 		return nil
 	}
-	occupied := openSessionProjects(g.root)
-
 	now := time.Now()
+	occupied := openSessionProjects(g.root, now)
+
 	var due []string
 	for _, p := range projects {
 		if reason := g.projectDue(sc, p.ID, occupied, tick, now, log); reason != "" {
@@ -183,7 +183,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	// The stand-down. A ride mid-hop, an operator sitting in a stage and
 	// a survey mid-turn all look the same from here — a live session
 	// branch somewhere in the project — and all mean the tail-pulse path
-	// already owns the next sweep.
+	// already owns the next sweep. Live, not merely present: a branch
+	// whose claimant is provably dead has stopped owning anything, and
+	// openSessionProjects no longer counts it.
 	//
 	// Deliberately *not* also "no open pulse run", which is what the
 	// design's gate list says and what the recovery story it sits beside
@@ -361,12 +363,25 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 // Either way somebody is already inside that project and the tail-pulse
 // path owns the next sweep.
 //
+// *Live* is the load-bearing word, and it is not the branch. A branch
+// whose claimant is provably dead is a corpse the reap deliberately
+// won't clear, because an operator's session may only ever be surfaced —
+// a Ctrl-C'd `moe pulse new`, a stage pane lost to a box reboot. Counting
+// it as occupancy is what stands the project's heartbeat down forever:
+// nothing but a human running `moe session abandon` ever moves it, and
+// nothing prompts them to. So a dead claim stops vouching for occupancy
+// here while the branch, the worktree and the claim stay exactly where
+// `moe session resolve` expects them.
+//
 // One `for-each-ref` for the whole bureaucracy rather than a HasRef per
 // run per stage: the tick asks this about every project, and the refs
-// are all in one namespace. A read failure reports every project
-// occupied — standing down on an unreadable ref list is the answer that
-// loses nothing.
-func openSessionProjects(root string) map[string]bool {
+// are all in one namespace. Enumerating refs rather than session.List is
+// deliberate too — List walks `git worktree list`, so an orphan branch
+// with no worktree would vanish from the check entirely rather than
+// hold, the wrong direction for an ambiguous shape. A read failure
+// reports every project occupied — standing down on an unreadable ref
+// list is the answer that loses nothing.
+func openSessionProjects(root string, now time.Time) map[string]bool {
 	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/session/")
 	if err != nil {
 		return allProjectsOccupied(root)
@@ -378,9 +393,18 @@ func openSessionProjects(root string) map[string]bool {
 		if !ok {
 			continue
 		}
-		if p, _, found := strings.Cut(rest, "/"); found && p != "" {
-			occupied[p] = true
+		p, tail, found := strings.Cut(rest, "/")
+		if !found || p == "" {
+			continue
 		}
+		// The full triple is what keys a claim. A ref that doesn't carry
+		// one — hand-made, or a shape from some older binary — can't be
+		// probed, so it holds its project the way every session branch did
+		// before this.
+		if r, d, ok := strings.Cut(tail, "/"); ok && r != "" && d != "" && session.Dead(root, p, r, d, now) {
+			continue
+		}
+		occupied[p] = true
 	}
 	return occupied
 }

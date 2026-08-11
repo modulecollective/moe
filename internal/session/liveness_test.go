@@ -28,20 +28,13 @@ func exitedPid(t *testing.T) int {
 // already exited.
 func deadClaim(t *testing.T, s *Session, machine bool, beatAge time.Duration) {
 	t.Helper()
-	host, err := os.Hostname()
-	if err != nil {
-		t.Skip("no hostname on this box; the same-host leg can't be staged")
-	}
-	c := Claim{
+	writeClaimOrFail(t, s, Claim{
 		Branch:      s.Branch,
 		Machine:     machine,
-		Owner:       fmt.Sprintf("%s/%d", host, exitedPid(t)),
+		Owner:       fmt.Sprintf("%s/%d", hostnameOrSkip(t), exitedPid(t)),
 		StartedAt:   time.Now().Add(-time.Hour).UTC(),
 		HeartbeatAt: time.Now().Add(-beatAge).UTC(),
-	}
-	if err := writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), c); err != nil {
-		t.Fatal(err)
-	}
+	})
 }
 
 // TestHoldMarksAndClose Clears: the record's whole contract is that it
@@ -139,26 +132,20 @@ func TestReapableOnlyForProvablyDeadMachineSessions(t *testing.T) {
 		{
 			name: "claim owned by another host",
 			setup: func(t *testing.T, s *Session) {
-				c := Claim{
+				writeClaimOrFail(t, s, Claim{
 					Branch: s.Branch, Machine: true, Owner: "some-other-box/0",
 					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
-				}
-				if err := writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), c); err != nil {
-					t.Fatal(err)
-				}
+				})
 			},
 			want: false,
 		},
 		{
 			name: "unparseable owner",
 			setup: func(t *testing.T, s *Session) {
-				c := Claim{
+				writeClaimOrFail(t, s, Claim{
 					Branch: s.Branch, Machine: true, Owner: "garbage",
 					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
-				}
-				if err := writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), c); err != nil {
-					t.Fatal(err)
-				}
+				})
 			},
 			want: false,
 		},
@@ -174,5 +161,109 @@ func TestReapableOnlyForProvablyDeadMachineSessions(t *testing.T) {
 				t.Errorf("Reapable = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDeadIsReapableWithoutTheMachineBit: the one row that differs from
+// the table above is the whole reason Dead exists — a dead *operator*
+// session is not reapable and never will be, but it has also stopped
+// meaning anybody is inside the project. Every other row must answer
+// identically, because ambiguity reading as alive is what keeps a live
+// session's worktree safe.
+func TestDeadIsReapableWithoutTheMachineBit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, s *Session)
+		want  bool
+	}{
+		{
+			name:  "dead operator session — Ctrl-C'd pulse, rebooted stage pane",
+			setup: func(t *testing.T, s *Session) { deadClaim(t, s, false, 2*StaleAfter) },
+			want:  true,
+		},
+		{
+			name:  "dead machine session",
+			setup: func(t *testing.T, s *Session) { deadClaim(t, s, true, 2*StaleAfter) },
+			want:  true,
+		},
+		{
+			name:  "no claim at all — absence is unknown, and unknown reads as alive",
+			setup: func(t *testing.T, s *Session) {},
+			want:  false,
+		},
+		{
+			name:  "operator session with a fresh heartbeat",
+			setup: func(t *testing.T, s *Session) { deadClaim(t, s, false, time.Minute) },
+			want:  false,
+		},
+		{
+			name: "live operator session — somebody is sitting in the stage",
+			setup: func(t *testing.T, s *Session) {
+				release, err := Hold(s, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(release)
+			},
+			want: false,
+		},
+		{
+			name: "claim owned by another host",
+			setup: func(t *testing.T, s *Session) {
+				writeClaimOrFail(t, s, Claim{
+					Branch: s.Branch, Owner: "some-other-box/0",
+					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
+				})
+			},
+			want: false,
+		},
+		{
+			name: "unparseable owner",
+			setup: func(t *testing.T, s *Session) {
+				writeClaimOrFail(t, s, Claim{
+					Branch: s.Branch, Owner: "garbage",
+					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
+				})
+			},
+			want: false,
+		},
+		{
+			name: "never beat at all",
+			setup: func(t *testing.T, s *Session) {
+				writeClaimOrFail(t, s, Claim{
+					Branch: s.Branch,
+					Owner:  fmt.Sprintf("%s/%d", hostnameOrSkip(t), exitedPid(t)),
+				})
+			},
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestRoot(t)
+			s, err := Open(root, "moe", "r1", "design")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.setup(t, s)
+			if got := Dead(root, "moe", "r1", "design", time.Now()); got != tc.want {
+				t.Errorf("Dead = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func hostnameOrSkip(t *testing.T) string {
+	t.Helper()
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skip("no hostname on this box; the same-host leg can't be staged")
+	}
+	return host
+}
+
+func writeClaimOrFail(t *testing.T, s *Session, c Claim) {
+	t.Helper()
+	if err := writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), c); err != nil {
+		t.Fatal(err)
 	}
 }

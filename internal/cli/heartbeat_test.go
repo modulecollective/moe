@@ -235,7 +235,7 @@ func TestHeartbeatReapReArmsADeclinedBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeDeadMachineClaim(t, s)
+	writeDeadClaim(t, s, true /*machine*/)
 
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Errorf("due = %v after the reap freed the thread, want [moe] in the same tick", got)
@@ -338,6 +338,61 @@ func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
 	}
 }
 
+// TestHeartbeatSweepsPastAStrandedOperatorSession is the wedge this
+// change closes, in its everyday shape: the operator takes the widget's
+// advertised Ctrl-C out of `moe pulse new`, and the branch, worktree and
+// operator-marked claim all survive the process. The reap won't clear it
+// — a human's session may only ever be surfaced — so counting it as
+// occupancy stands this project's heartbeat down forever, silently,
+// while the operator has been told only that the run stays open for
+// review.
+//
+// Once the claim is provably dead it stops vouching for occupancy. What
+// it must *not* do is stop existing: `moe session resolve` / `abandon`
+// still expect the branch and the record exactly where they are.
+func TestHeartbeatSweepsPastAStrandedOperatorSession(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	seedRun(t, root, "moe", "pulse-ctrl-c", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
+	s, err := session.Open(root, "moe", "pulse-ctrl-c", pulseDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDeadClaim(t, s, false /*operator*/)
+
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v, want [moe] — a Ctrl-C'd pulse must not wedge the heartbeat forever", got)
+	}
+	if !git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Error("the stranded branch was cleared; an operator's session may be ignored, never touched")
+	}
+	if _, ok := session.ReadClaim(root, "moe", "pulse-ctrl-c", pulseDoc); !ok {
+		t.Error("the stranded claim was cleared; resolve/abandon still need it")
+	}
+}
+
+// TestHeartbeatStandsDownForAHeldOperatorSession is the direction where a
+// wrong answer costs something: an operator sitting in a live stage,
+// beating. Dead means provably dead, and a live pid is not it.
+func TestHeartbeatStandsDownForAHeldOperatorSession(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	seedRun(t, root, "moe", "pulse-in-flight", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
+	s, err := session.Open(root, "moe", "pulse-in-flight", pulseDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := session.Hold(s, false /*operator*/)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
+		t.Errorf("due = %v with the operator inside the project, want none", got)
+	}
+}
+
 // TestHeartbeatSweepsPastALingeringOpenSurvey is the other side, and the
 // one that keeps the loop resident. A sweep that died leaves its run
 // open on the dash's ACTIVE list forever — nothing closes it but a
@@ -389,7 +444,7 @@ func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeDeadMachineClaim(t, s)
+	writeDeadClaim(t, s, true /*machine*/)
 
 	var log bytes.Buffer
 	newHeartbeatGate(root).Due(testTick, &log)
@@ -422,15 +477,16 @@ func TestHeartbeatNeverReapsAnUnmarkedSession(t *testing.T) {
 	}
 }
 
-// writeDeadMachineClaim stages the liveness record a machine walk
-// leaves behind when its process dies mid-turn: machine-marked, owned by
-// a same-host pid that has exited, and with a heartbeat old enough to
-// have stopped vouching. Both dead signals are needed, so both are here.
+// writeDeadClaim stages the liveness record a session leaves behind when
+// its process dies mid-turn: owned by a same-host pid that has exited,
+// with a heartbeat old enough to have stopped vouching. Both dead
+// signals are needed, so both are here. machine is who was driving — a
+// walk that died, or the operator's own Ctrl-C.
 //
 // The pid comes from a child run to completion rather than an invented
 // number — it is the only way to name a pid this host is genuinely
 // finished with.
-func writeDeadMachineClaim(t *testing.T, s *session.Session) {
+func writeDeadClaim(t *testing.T, s *session.Session, machine bool) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	if err := cmd.Run(); err != nil {
@@ -442,7 +498,7 @@ func writeDeadMachineClaim(t *testing.T, s *session.Session) {
 	}
 	body, err := json.Marshal(session.Claim{
 		Branch:      s.Branch,
-		Machine:     true,
+		Machine:     machine,
 		Owner:       fmt.Sprintf("%s/%d", host, cmd.Process.Pid),
 		StartedAt:   time.Now().Add(-time.Hour).UTC(),
 		HeartbeatAt: time.Now().Add(-2 * session.StaleAfter).UTC(),
