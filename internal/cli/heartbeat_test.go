@@ -76,6 +76,19 @@ func dueProjects(t *testing.T, g *heartbeatGate) []string {
 	return got
 }
 
+// dueProjectsPastTheWindow is dueProjects with a zero-length tick, which
+// makes any commit older than *now* quiet — the same predicate a real
+// tick applies twenty minutes later. Fixtures land fresh-dated commits,
+// so a test whose shape needs an operator commit in the history needs
+// this to reach the leg it is actually about.
+func dueProjectsPastTheWindow(t *testing.T, g *heartbeatGate) []string {
+	t.Helper()
+	var log bytes.Buffer
+	got := g.Due(0, &log)
+	t.Logf("gate log:\n%s", log.String())
+	return got
+}
+
 // TestHeartbeatFirstLookIsQuiet: a serve that just armed has, correctly,
 // never looked. Seeding the cursor lazily is what keeps a restart from
 // sweeping every registered project on a board where nothing is waiting
@@ -125,6 +138,99 @@ func TestHeartbeatSweptMovesTheCursor(t *testing.T) {
 
 	if got := dueProjects(t, g); len(got) != 0 {
 		t.Errorf("due = %v after its own sweep, want none — a quiet board must cost nothing", got)
+	}
+}
+
+// sweptOverAMidSweepOperatorCommit stages the wedge: a gate that has
+// dispatched a sweep, an operator commit landing during that sweep's
+// agent turn — after its board read, so no survey ever saw it — and the
+// survey's own open/close commits on top. The caller says how the sweep
+// ended.
+//
+// Returns the gate, ready for the tick after the sweep.
+func sweptOverAMidSweepOperatorCommit(t *testing.T, root string, clean bool) *heartbeatGate {
+	t.Helper()
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	g := newHeartbeatGate(root)
+	dueProjects(t, g) // seeds the cursor
+
+	journalCommit(t, root, "moe", "machine: another merge", "MoE-Consent: dynamic")
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+
+	journalCommit(t, root, "moe", "chain: edit", "" /*operator*/)
+	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Consent: dynamic")
+	g.Swept("moe", clean)
+	return g
+}
+
+// TestHeartbeatSweepsACommitThatLandedMidSweep is the bug. A survey's
+// turn lasts minutes, so an operator commit can land after its board read
+// and before its close — below the tip Swept records, and swallowed by
+// both cursors. The moved leg never fires for it and the surveyed cursor
+// stands the parked leg down too, so a real journal move the machine
+// misreads as its own goes nowhere, silently.
+func TestHeartbeatSweepsACommitThatLandedMidSweep(t *testing.T) {
+	root := quietFixture(t)
+	g := sweptOverAMidSweepOperatorCommit(t, root, true /*clean*/)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] — a commit no survey saw must still get a sweep", got)
+	}
+
+	// The follow-up sweep's own range holds only its own commits, so it
+	// advances both cursors and the board goes quiet. Convergence is the
+	// half that keeps this from being a sweep-every-tick loop.
+	journalCommit(t, root, "moe", "open: pulse-2", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-2", "MoE-Consent: dynamic")
+	g.Swept("moe", true)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after the follow-up sweep saw it, want none", got)
+	}
+}
+
+// TestHeartbeatSweepsACommitThatLandedMidFailedSweep: the refusal applies
+// to a sweep that died too. Recording the tip on failure is deliberate —
+// a dead sweep still wrote its run-open commit and a cursor left behind it
+// would sweep straight back into the same wall unpaced — but that
+// rationale only covers the sweep's *own* commits. An operator commit in
+// the range was never anyone's to swallow, and the failure backoff still
+// paces the spawn.
+func TestHeartbeatSweepsACommitThatLandedMidFailedSweep(t *testing.T) {
+	root := quietFixture(t)
+	g := sweptOverAMidSweepOperatorCommit(t, root, false /*died*/)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v after a sweep died over an operator commit, want [moe]", got)
+	}
+}
+
+// TestHeartbeatSettlesAfterAnOperatorTriggeredSweep guards the one place
+// the range base decides between a fix and a runaway. The commits that
+// *triggered* a sweep landed before it looked, so the survey saw them —
+// walking from the tips cursor would find the triggering operator commit
+// in its own exit range, refuse to advance, re-offer, re-sweep and refuse
+// again, every tick forever. The base has to be the tip the gate
+// dispatched on.
+func TestHeartbeatSettlesAfterAnOperatorTriggeredSweep(t *testing.T) {
+	root := quietFixture(t)
+	g := newHeartbeatGate(root)
+	dueProjectsPastTheWindow(t, g) // seeds the cursor
+
+	journalCommit(t, root, "moe", "chain: edit", "" /*operator*/)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] — the operator's commit moved the journal", got)
+	}
+
+	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Consent: dynamic")
+	g.Swept("moe", true)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after the sweep that this commit triggered, want none", got)
 	}
 }
 

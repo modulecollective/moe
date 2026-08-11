@@ -32,8 +32,8 @@ import (
 
 // heartbeatGate implements serve.Heartbeat against a bureaucracy root.
 //
-// Its only state is two cursors per project, both journal shas, both
-// written when a sweep finishes:
+// Its state is two cursors per project, both journal shas, both written
+// when a sweep finishes:
 //
 //   - tips — where the journal stood when the last sweep finished, clean
 //     or not. Answers "has anything happened since I last looked".
@@ -53,16 +53,27 @@ import (
 // existing work through the parked-thread leg instead, which is the leg
 // that means something, and an empty surveyed map leaves that pickup
 // untouched.
+//
+// Alongside them, one scratch entry per in-flight sweep: dispatched
+// holds where the journal stood when the gate decided to sweep. It is
+// not a cursor — Swept consumes it — and it exists so the exit can tell
+// its own commits from an operator's landing mid-turn. See Swept.
 type heartbeatGate struct {
 	root string
 
-	mu       sync.Mutex
-	tips     map[string]string
-	surveyed map[string]string
+	mu         sync.Mutex
+	tips       map[string]string
+	surveyed   map[string]string
+	dispatched map[string]string
 }
 
 func newHeartbeatGate(root string) *heartbeatGate {
-	return &heartbeatGate{root: root, tips: map[string]string{}, surveyed: map[string]string{}}
+	return &heartbeatGate{
+		root:       root,
+		tips:       map[string]string{},
+		surveyed:   map[string]string{},
+		dispatched: map[string]string{},
+	}
 }
 
 // Due answers one tick: which projects warrant a sweep right now.
@@ -115,11 +126,43 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []string {
 // answered nothing, so the parked leg must keep offering its board —
 // that is what the failure backoff is pacing, and what keeps a dead
 // vendor night from wedging the project.
+//
+// And neither cursor moves at all when an operator commit landed inside
+// the sweep's own window. A survey's turn lasts minutes; a hand-commit
+// arriving after its board read but before this exit sits below the tip
+// recorded here, and recording it would mark as surveyed a board no
+// survey ever saw — a journal move the machine permanently misreads as
+// its own, and a silent wedge. So the exit walks the range the survey
+// could not have seen and refuses both cursors if anything in it is the
+// operator's. Next tick the moved leg fires (exit tip ≠ recorded tips),
+// the quiet window gets its ordinary say, and the follow-up sweep sees
+// the commit. Convergence is structural: that sweep's own range holds
+// only machine commits, so its exit advances and the board goes quiet.
+//
+// Refusing tips too, not just surveyed, is what makes the mid-sweep case
+// exactly equivalent to the ordinary one — with tips advanced, only the
+// parked leg would re-look, and it fires solely on a parked kickable
+// thread. A design edit on an unsettled run would still be swallowed.
+// Failed sweeps refuse on the same terms: the backoff still paces the
+// spawn, so re-offering costs a cool-off, not a loop.
 func (g *heartbeatGate) Swept(projectID string, clean bool) {
 	tip, _, _, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		return
 	}
+
+	g.mu.Lock()
+	base, dispatched := g.dispatched[projectID]
+	delete(g.dispatched, projectID)
+	g.mu.Unlock()
+
+	// No dispatched entry is unreachable through serve — every Swept
+	// follows a Due that recorded one — so falling through to the advance
+	// keeps a direct-call test fixture honest rather than silently wedged.
+	if dispatched && base != tip && operatorActedIn(g.root, projectID, base, tip) {
+		return
+	}
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tips[projectID] = tip
@@ -203,6 +246,19 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	if occupied[projectID] {
 		return ""
 	}
+
+	// This tick is going to sweep, so record where the journal stands now:
+	// it is the base of the range Swept walks to tell the survey's own
+	// commits from an operator's landing mid-turn. The dispatch tip, not
+	// the tips cursor — tips holds where the journal stood at the
+	// *previous* sweep's exit, and the commits between it and here are
+	// what triggered this sweep, which the survey does see. Walking from
+	// there would find the triggering operator commit, refuse, re-offer
+	// and re-sweep forever.
+	g.mu.Lock()
+	g.dispatched[projectID] = tip
+	g.mu.Unlock()
+
 	if moved {
 		return "the journal moved"
 	}
@@ -295,10 +351,29 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 //
 // --since filters on committer date, the same field the tip read compares
 // (%cI), so both halves of the window agree on what "younger than one
-// tick" means. Warn-only like every other read here: an unreadable log
-// reports no operator act and leaves the tip's answer standing.
+// tick" means.
 func operatorActedSince(root, projectID string, since time.Time) bool {
-	out, err := git.Output(root, "log", "--since="+since.Format(time.RFC3339), "--format=%x00%B", "--", "projects/"+projectID)
+	return operatorActed(root, projectID, "--since="+since.Format(time.RFC3339))
+}
+
+// operatorActedIn reports whether any journal commit touching the project
+// in base..tip is operator-authored. It is Swept's question — did anything
+// land inside my own sweep that the survey could not have seen.
+func operatorActedIn(root, projectID, base, tip string) bool {
+	return operatorActed(root, projectID, base+".."+tip)
+}
+
+// operatorActed walks the bodies of the project-scoped commits selected
+// by rev, whatever the caller's way of naming them.
+//
+// Warn-only like every other read in this file, and in the same direction
+// for both callers: an unreadable log reports no operator act, which
+// leaves the quiet window's tip answer standing and leaves Swept
+// advancing its cursors. Refusing on a persistent read failure would make
+// the moved leg fire — and sweep — every tick, the runaway rather than
+// the safe default.
+func operatorActed(root, projectID, rev string) bool {
+	out, err := git.Output(root, "log", rev, "--format=%x00%B", "--", "projects/"+projectID)
 	if err != nil {
 		return false
 	}
