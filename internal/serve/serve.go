@@ -16,16 +16,23 @@
 // login form. Override with --addr to bind elsewhere (for example,
 // --addr <tailnet-ip> on a kernel-mode tailscale host).
 //
-// Because reach is the only gate, the spawn bucket is opt-in. Several
-// POST routes run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary
-// code), so by default — safe mode — they refuse with 403 and the UI
-// doesn't offer them: idea capture, run close/edit/reopen, opening or
-// promoting into a *parked* run, and the read-only views work.
-// Options.Insecure (the --insecure flag or a
-// non-empty MOE_SERVE_INSECURE) re-enables the whole spawn bucket,
-// trading the safe default for serve's phone-facing "launch a run"
-// feature. That's an acknowledged choice: anything that can reach the
-// listener can then execute code.
+// Because reach is the only gate, motion is opt-in. Several POST routes
+// run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary code), so by
+// default — safe mode — they refuse with 403 and the UI doesn't offer
+// them: idea capture, run close/edit/reopen, opening or promoting into a
+// *parked* run, and the read-only views work.
+//
+// Options.Dynamic (the --dynamic flag or a non-empty MOE_SERVE_DYNAMIC)
+// arms the process. It is the standing spelling of the fourth bang, and
+// it licenses two things at once:
+//
+//   - the spawn bucket, so a phone click can launch a run. That's an
+//     acknowledged choice: anything that can reach the listener can then
+//     execute code.
+//   - the resident heartbeat (heartbeat.go), a per-project ticker that
+//     sweeps a project on its own clock when the board warrants it.
+//     Running the armed process *is* the consent act — the legible
+//     replacement for installing a crontab. Stopping it retracts.
 package serve
 
 import (
@@ -150,16 +157,30 @@ type Options struct {
 	// sections. A broken trace file degrades its section, not the page.
 	GatherRunTraces func(project, run string) (RunTraces, error)
 
-	// Insecure enables the spawn bucket — the POSTs that run
-	// `moe <wf> <stage>` agent subprocesses (the new-run and promote
-	// forms' "& run" submits, advance/ship/chain, chain kick, chore
-	// open). Off by default (safe mode): those refuse with 403 and
-	// their UI entry points don't render; the journal-write routes —
-	// including parking a run from the new-run and promote forms' bare
-	// submits — and the read-only views are unaffected. The cli wrapper
-	// sets this from the --insecure flag or a non-empty
-	// $MOE_SERVE_INSECURE.
-	Insecure bool
+	// Dynamic arms the process at the dynamic consent rung, which gates
+	// two things: the spawn bucket — the POSTs that run `moe <wf>
+	// <stage>` agent subprocesses (the new-run and promote forms' "& run"
+	// submits, advance/ship/chain, chain kick, chore open) — and the
+	// heartbeat ticker (heartbeat.go).
+	//
+	// Off by default (safe mode): those POSTs refuse with 403, their UI
+	// entry points don't render, and no tick ever fires; the
+	// journal-write routes — including parking a run from the new-run and
+	// promote forms' bare submits — and the read-only views are
+	// unaffected. The cli wrapper sets this from the --dynamic flag or a
+	// non-empty $MOE_SERVE_DYNAMIC.
+	Dynamic bool
+
+	// Heartbeat is the cli-side gate the resident ticker consults each
+	// tick: which projects warrant a sweep, plus the reap of dead machine
+	// sessions that runs ahead of it. Every question it answers needs the
+	// journal, the chain graph or the workflow registry, so it crosses
+	// the seam as a callback like everything else serve can't know.
+	//
+	// Absent — or a serve that isn't armed (see Dynamic) — means no
+	// ticker at all: the process serves HTTP and nothing looks at the
+	// board on its own.
+	Heartbeat Heartbeat
 
 	// NotifyURL is the webhook URL we POST a small JSON payload to
 	// when a serve-parented run exits. Empty disables notifications.
@@ -250,11 +271,12 @@ type NewRunWorkflow struct {
 // Server owns the HTTP listener and the registry of live PTY
 // children.
 type Server struct {
-	opts     Options
-	addr     string
-	tmpl     *template.Template
-	router   *http.ServeMux
-	children *children
+	opts      Options
+	addr      string
+	tmpl      *template.Template
+	router    *http.ServeMux
+	children  *children
+	heartbeat *heartbeat
 }
 
 //go:embed templates/*.html static/*
@@ -281,11 +303,12 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		opts:     opts,
-		addr:     addr,
-		tmpl:     tmpl,
-		router:   http.NewServeMux(),
-		children: newChildren(),
+		opts:      opts,
+		addr:      addr,
+		tmpl:      tmpl,
+		router:    http.NewServeMux(),
+		children:  newChildren(),
+		heartbeat: newHeartbeat(),
 	}
 	if opts.NotifyURL != "" {
 		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
@@ -315,8 +338,16 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("serve: listen %s: %w", s.addr, err)
 	}
 	s.logf("listening on http://%s/", s.addr)
-	if s.opts.Insecure {
-		s.logf("INSECURE: run-spawning enabled; anything that can reach http://%s/ can execute code", s.addr)
+	if s.opts.Dynamic {
+		s.logf("DYNAMIC: armed — the heartbeat may start settled work, and anything that can reach http://%s/ can execute code", s.addr)
+	}
+	// The heartbeat lives inside the listener's lifetime, not beside it:
+	// running the armed process *is* the standing consent, so the clock
+	// starts when the process starts serving and stops when ctx cancels.
+	// Its children ride the same registry, so shutdown winds them down
+	// with everything else.
+	if s.opts.Dynamic && s.opts.Heartbeat != nil {
+		go s.runHeartbeat(ctx)
 	}
 
 	errCh := make(chan error, 1)
@@ -511,18 +542,18 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 
 // spawnAllowed gates the spawn bucket — the POST routes that run agent
 // subprocesses. In safe mode (the default) it writes a 403 and returns
-// false; with Insecure set it returns true and the handler proceeds.
+// false; with Dynamic set it returns true and the handler proceeds.
 // The always-spawning handlers (advance/ship/chain, kick, chore open)
 // call it first thing; the dual-submit new-run and promote handlers
 // call it only when the spawn submit was used, before opening anything.
 // The matching UI gating (so safe mode never offers a control it would
 // refuse) lives in the view models, not here.
 func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
-	if s.opts.Insecure {
+	if s.opts.Dynamic {
 		return true
 	}
 	http.Error(w,
-		"serve is in safe mode; restart with --insecure (or set MOE_SERVE_INSECURE) to enable run-spawning actions",
+		"serve is in safe mode; restart with --dynamic (or set MOE_SERVE_DYNAMIC) to enable run-spawning actions",
 		http.StatusForbidden)
 	return false
 }

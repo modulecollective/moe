@@ -165,7 +165,7 @@ words. It's the one thing the chain edges can't tell you, and it's optional —
 at mint, and `moe chain note` writes it whenever. Membership is not written
 there. The head's run page in `moe serve` renders the batch live from the
 edges, one row per member with the dash's own status vocabulary, and offers a
-**kick** chip beside it (insecure mode only) so the dash's `parked · kick?`
+**kick** chip beside it (dynamic mode only) so the dash's `parked · kick?`
 hint has a surface in the browser.
 
 `moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
@@ -388,8 +388,10 @@ cascades' auto-close) **and only when you handed the machine the wheel** —
 inside a ride (`!!!`/`!!!!`, their `--chain`/`--dynamic` twins, `moe chain
 kick`, and the kicks a pulse roots itself). A ship you are watching land is
 quiet: `!!`, a `!`/`!<stage>` step that lands on push, a bare `moe sdlc push`
-or close. Never on its own clock and never from `moe sync`. Every fire rides an
-action you took. Scope is always the driven run's project.
+or close. Never from `moe sync`. Scope is always the driven run's project.
+
+A pulse also fires on a clock, but only one you started: `moe serve --dynamic`
+carries a resident heartbeat (see [the heartbeat](#the-heartbeat) below).
 
 Inside a ride it also waits for the **end of the chain**: a hop that still has
 a queued chained child behind it defers, so a four-run ride spends one sweep at
@@ -400,8 +402,8 @@ that generation's own tail sweeps in turn; the ride ends when a sweep finds
 nothing worth chaining.
 
 So after an attended ship, growth parks: findings wait for the next ride's tail
-sweep, or for `moe pulse new` — the manual valve, which is also the only way to
-sweep a project without shipping anything.
+sweep, for the heartbeat, or for `moe pulse new` — the manual valve, which is
+also the only way to sweep a project without shipping anything.
 
 Every pulse does three things:
 
@@ -469,6 +471,46 @@ that has only a seed or a live session; a machine-baked, chore-authored, or
 past-first-stage root has a settled design and is ready to start. A fired kick
 is itself dynamic, so its tail may sweep, groom, and kick again. The ride ends
 when a survey adds nothing, with no generation cap.
+
+Grooming may move a queued run out of one thread and into another — that is how
+stray threads consolidate. Two units are off limits. The chain a *static* ride
+is walking is fenced in both directions, because `!!!` promises that what you
+saw at kick time is what runs. And any unit under a **chain head you minted
+yourself** is fenced the same way: the head is your staging fence, so a batch
+you are composing by hand is never reshaped under you. Machine-minted heads and
+headless threads stay fully groomable. Want something held, name a head; want
+it gone, close it.
+
+### The heartbeat
+
+`moe serve --dynamic` is the standing spelling of `!!!!`. Running that process
+licenses two things: the run-spawning buttons in the web UI, and a resident
+heartbeat that looks at each project's board every twenty minutes and runs `moe
+pulse new --dynamic <project>` when it finds something worth looking at.
+Stopping the process retracts both; an unarmed `moe serve` behaves exactly as
+it always has.
+
+The tick decides nothing. It only asks the question you used to ask by typing a
+verb — everything about what a sweep may *do* is unchanged, including the
+settled-design floor, the occupancy guard, the review-and-test walk on every
+ride, and the journal marks on every machine turn. A tick sweeps only when the
+project's journal moved since its last heartbeat sweep, or a settled thread is
+parked with nobody inside it; and it stands down while a session is live in the
+project, while a survey is already running, and for one full tick after
+anything you did by hand. A quiet board costs nothing — no agent turn, no run,
+no journal line.
+
+Failure cools itself off: consecutive failed sweeps back a project's tick off
+exponentially, so a night of exhausted plan limits leaves a couple of open
+pulse runs on the dash rather than a pile. The first failure's run, sitting on
+ACTIVE, is the tell.
+
+The heartbeat also reaps: a session branch whose machine walk died — same host,
+pid gone, heartbeat stale — is abandoned so the run re-parks and the loop can
+retry it. A robot half-turn is regenerable. Sessions you started, sessions
+whose claimant might still be alive, and sessions with no record at all are
+never touched; they surface on the dash's ACTIVE row and `moe session resolve`
+/ `moe session abandon` are still yours.
 
 ## Twin
 

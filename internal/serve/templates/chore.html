@@ -23,7 +23,7 @@
     </p>
 
     <section class="actions">
-      {{if .Insecure}}
+      {{if .Dynamic}}
         {{if .Openable}}
         <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit">open</button></form>
         {{else}}

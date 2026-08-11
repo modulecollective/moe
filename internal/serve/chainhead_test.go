@@ -13,7 +13,7 @@ import (
 
 // chainHeadServer wires a chain head at alpha/batch whose ChainMembers
 // callback returns the given rows and live-parent key.
-func chainHeadServer(t *testing.T, members []dash.Row, chainedUnder string, insecure bool) *Server {
+func chainHeadServer(t *testing.T, members []dash.Row, chainedUnder string, dynamic bool) *Server {
 	t.Helper()
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "batch", dash.ChainWorkflow)
@@ -23,7 +23,7 @@ func chainHeadServer(t *testing.T, members []dash.Row, chainedUnder string, inse
 			return members, chainedUnder, nil
 		},
 	}
-	if insecure {
+	if dynamic {
 		return newTestServer(t, opts)
 	}
 	return newSafeTestServer(t, opts)
@@ -107,21 +107,21 @@ func TestChainHeadKickChipGating(t *testing.T) {
 		name         string
 		members      []dash.Row
 		chainedUnder string
-		insecure     bool
+		dynamic      bool
 		want         bool
 	}{
-		{name: "parked head with a batch", members: twoMembers, insecure: true, want: true},
-		{name: "safe mode drops it", members: twoMembers, insecure: false, want: false},
+		{name: "parked head with a batch", members: twoMembers, dynamic: true, want: true},
+		{name: "safe mode drops it", members: twoMembers, dynamic: false, want: false},
 		// `moe chain kick` would accept both of these; the page offers
 		// neither. Chained under a live parent is the CLI's own "kick the
 		// head" refusal. An empty head is what the dash calls `done ·
 		// close?` — a chip labelled "kick" that silently closed a
 		// placeholder would not be the action it names.
-		{name: "chained under a live parent", members: twoMembers, chainedUnder: "alpha/topic", insecure: true, want: false},
-		{name: "empty head", members: nil, insecure: true, want: false},
+		{name: "chained under a live parent", members: twoMembers, chainedUnder: "alpha/topic", dynamic: true, want: false},
+		{name: "empty head", members: nil, dynamic: true, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := chainHeadServer(t, tc.members, tc.chainedUnder, tc.insecure)
+			s := chainHeadServer(t, tc.members, tc.chainedUnder, tc.dynamic)
 			body := getRunPage(t, s, "/run/alpha/batch")
 			// The closing quote keeps the static check from matching the
 			// dynamic form's action — keep it that way.

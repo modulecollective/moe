@@ -1922,19 +1922,19 @@ func TestMakeNotifierPostsJSON(t *testing.T) {
 }
 
 // newTestServer builds an in-process server for tests. It forces
-// Insecure mode: most route and chip tests exercise the spawn surface
+// Dynamic mode: most route and chip tests exercise the spawn surface
 // (new run, promote, advance/ship/chain, stage spawn, chore open),
 // which the production-default safe mode refuses with 403. Safe-mode
-// behavior — the point of the --insecure split — is asserted explicitly
+// behavior — the point of the --dynamic split — is asserted explicitly
 // by the tests that use newSafeTestServer.
 func newTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
-	opts.Insecure = true
+	opts.Dynamic = true
 	return newServerWithDefaults(t, opts)
 }
 
 // newSafeTestServer builds an in-process server in the production-default
-// safe mode (Insecure stays false). The spawn-route 403s and the
+// safe mode (Dynamic stays false). The spawn-route 403s and the
 // hidden-affordance assertions use it.
 func newSafeTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()

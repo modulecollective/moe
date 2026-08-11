@@ -238,7 +238,7 @@ func TestSafeModeChorePageHidesOpen(t *testing.T) {
 
 // TestSafeModePromoteParks: the bare promote submit is journal-only —
 // it opens the destination run queued at its first stage, marks the
-// idea promoted, and redirects, all without the --insecure flag. This
+// idea promoted, and redirects, all without the --dynamic flag. This
 // is the operator's usual move; riding the run is the rarer one.
 func TestSafeModePromoteParks(t *testing.T) {
 	root := newGitServeRoot(t)

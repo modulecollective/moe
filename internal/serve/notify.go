@@ -15,10 +15,19 @@ import (
 // know which run finished and whether it succeeded; the activity
 // log on the per-run page carries the detail.
 type notifyPayload struct {
-	ID     string `json:"id"`     // "<project>/<slug>"
+	ID     string `json:"id"`     // "<project>/<slug>", or "heartbeat:<project>"
 	Status string `json:"status"` // "exited"
 	OK     bool   `json:"ok"`
 	Error  string `json:"error,omitempty"`
+	// Kind is "run" for a click-spawned or clicked-through run, and
+	// "heartbeat" for a resident sweep. The two want different reactions
+	// on a phone: a run that died is a thing to look at now, a sweep that
+	// died is the tell that the vendor is down and the loop has started
+	// cooling off.
+	Kind string `json:"kind"`
+	// Project names the swept project on a heartbeat payload, so the
+	// notification reads without having to parse ID. Empty for a run.
+	Project string `json:"project,omitempty"`
 }
 
 // makeNotifier returns a function suitable for children.notify. It
@@ -28,7 +37,10 @@ type notifyPayload struct {
 func makeNotifier(url string, logger io.Writer) func(id string, exitErr error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	return func(id string, exitErr error) {
-		p := notifyPayload{ID: id, Status: "exited", OK: exitErr == nil}
+		p := notifyPayload{ID: id, Status: "exited", OK: exitErr == nil, Kind: "run"}
+		if project := heartbeatProject(id); project != "" {
+			p.Kind, p.Project = "heartbeat", project
+		}
 		if exitErr != nil {
 			p.Error = exitErr.Error()
 		}

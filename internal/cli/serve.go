@@ -31,9 +31,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "", "listen address override (host or host:port); default 127.0.0.1:4242")
 	port := fs.Int("port", serve.DefaultPort, "listen port (ignored when --addr already includes one)")
-	insecure := fs.Bool("insecure", false, "enable run-spawning actions (new run, promote, advance/ship/chain, chain kick, chore open); off by default")
+	dynamic := fs.Bool("dynamic", false, "stand this process at the dynamic consent rung: run-spawning actions and the resident heartbeat; off by default")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--insecure]")
+		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the moe web UI as an HTTP server. Binds 127.0.0.1:4242 by")
 		moePrintln(stderr, "default; put a `tailscale serve` proxy (or similar) in front to expose")
@@ -42,9 +42,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Safe by default: idea capture, run close/edit/reopen, and all views")
 		moePrintln(stderr, "work; the run-spawning actions (which run agent subprocesses, i.e.")
-		moePrintln(stderr, "arbitrary code) refuse with 403. Pass --insecure, or set a non-empty")
-		moePrintln(stderr, "MOE_SERVE_INSECURE, to enable them — anything that can reach the")
-		moePrintln(stderr, "listener can then execute code.")
+		moePrintln(stderr, "arbitrary code) refuse with 403, and the heartbeat never ticks.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "--dynamic, or a non-empty MOE_SERVE_DYNAMIC, is the standing fourth")
+		moePrintln(stderr, "bang: this process may look at the board on its own clock and start")
+		moePrintln(stderr, "settled work, and anything that can reach the listener can spawn a")
+		moePrintln(stderr, "run — i.e. execute code. Stopping the process is the whole retraction.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -62,11 +65,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	opts := serveOptions(root, stdout, stderr)
 	opts.Addr = *addr
 	opts.Port = *port
-	// Flag or a non-empty env var enables the spawn bucket; the env
-	// var lets a daemonized cloud-box `moe serve` opt in without
-	// threading a flag through its unit/launcher. Non-empty enables,
-	// mirroring how MOE_SERVE_NOTIFY_URL is read just below.
-	opts.Insecure = *insecure || os.Getenv("MOE_SERVE_INSECURE") != ""
+	// Flag or a non-empty env var arms the process; the env var lets a
+	// daemonized cloud-box `moe serve` opt in without threading a flag
+	// through its unit/launcher. Non-empty enables, mirroring how
+	// MOE_SERVE_NOTIFY_URL is read just below.
+	//
+	// One switch, two consumers: the spawn bucket and the heartbeat. A
+	// separate heartbeat flag would be a consent matrix nobody needs —
+	// armed means the machine may act, clicks and clock alike.
+	opts.Dynamic = *dynamic || os.Getenv("MOE_SERVE_DYNAMIC") != ""
 	opts.NotifyURL = os.Getenv("MOE_SERVE_NOTIFY_URL")
 
 	srv, err := serve.New(opts)
@@ -88,13 +95,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 // serveOptions wires the cli side of the serve seam: every callback
 // serve.Options carries, closed over the bureaucracy root. Listener and
-// security fields (Addr, Port, Insecure, NotifyURL) are the caller's to
+// security fields (Addr, Port, Dynamic, NotifyURL) are the caller's to
 // set — they come from flags and env in runServe, and from the test
 // directly in tests.
 func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 	return serve.Options{
 		Root:   root,
 		Logger: stderr,
+		// The resident heartbeat's gate. Serve owns the clock, the
+		// backoff and the child; every question that needs the journal,
+		// the chain graph or the workflow registry is answered on this
+		// side. It only ticks on an armed serve — see Options.Dynamic.
+		Heartbeat: newHeartbeatGate(root),
 		GatherDash: func(projectID string) ([]dash.Row, int, int, []int, error) {
 			snap, err := GatherDashSnapshot(root, time.Now().UTC(), DashFilter{ProjectFilter: projectID})
 			if err != nil {
@@ -148,7 +160,7 @@ func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 		//
 		// tailPulse=false: a browser POST has no Ctrl-C for the blocking
 		// survey and discards its banner, and the chore auto-open the
-		// pulse carries would bypass serve's --insecure spawn gate. The
+		// pulse carries would bypass serve's --dynamic spawn gate. The
 		// pulse stays a terminal-surface tail; see closeRunInProcess.
 		CloseRun: func(project, runID string) error {
 			md, err := run.Load(root, project, runID)

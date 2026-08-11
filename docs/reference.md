@@ -14,7 +14,7 @@ source of truth for the exact command surface; this page is a map.
   to one project). `--watch` redraws it in place every 3 seconds until Ctrl-C —
   a live pane rather than a snapshot; it needs a terminal on stdout and exits 2
   without one.
-- `moe serve [--addr <host[:port]>] [--port <n>] [--insecure]` runs the local
+- `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
   project knowledge topics, twin documents, and a dashboard with the same
@@ -23,9 +23,12 @@ source of truth for the exact command surface; this page is a map.
   idea capture/edit/close/reopen, run close/edit/reopen, and opening or
   promoting into a *parked* run work, but the run-spawning actions — the
   new-run and promote forms' "& run" submits, advancing a stage, kicking a
-  chain head, and opening a due chore's run — refuse with 403. Pass `--insecure` (or set a
-  non-empty `MOE_SERVE_INSECURE`) to enable them; anything that can reach the
-  listener can then execute code.
+  chain head, and opening a due chore's run — refuse with 403, and the
+  heartbeat never ticks. `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the
+  standing fourth bang: it enables those actions — anything that can reach the
+  listener can then execute code — and starts the resident heartbeat, a
+  per-project ticker that runs `moe pulse new --dynamic` when the board warrants
+  it. Stopping the process retracts both.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
@@ -85,7 +88,10 @@ source of truth for the exact command surface; this page is a map.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
   maintains recorded intent.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
-  backlog sweep.
+  backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
+  consent rung — the sweep rides what it grooms instead of parking it, which is
+  what makes the verb callable by a clock. The heartbeat inside `moe serve
+  --dynamic` calls exactly this.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
 `followups.md` harvest into ideas without closing it — the way to pick up

@@ -20,7 +20,7 @@
     {{template "runformfields" .}}
 
     <button type="submit">promote</button>
-    {{if .Insecure}}<button type="submit" name="spawn" value="1">promote &amp; run</button>{{end}}
+    {{if .Dynamic}}<button type="submit" name="spawn" value="1">promote &amp; run</button>{{end}}
   </form>
 </main>
 {{template "themejs" .}}

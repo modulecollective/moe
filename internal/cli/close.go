@@ -159,7 +159,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // Ctrl-C-to-skip escape and a live banner that a browser POST has
 // neither of (serve discards both writers), and the chore auto-open it
 // carries mints runs — a spawn-bucket action serve gates behind
-// --insecure. Firing it from a safe-by-default serve close would both
+// --dynamic. Firing it from a safe-by-default serve close would both
 // hang the POST for the survey's duration and bypass that gate. The
 // pulse stays best-effort, so the next CLI/cascade run-traffic verb
 // tails it anyway; a serve close simply doesn't.

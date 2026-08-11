@@ -44,7 +44,7 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 				Addr:       "127.0.0.1:0",
 				Root:       root,
 				Logger:     io.Discard,
-				Insecure:   true,
+				Dynamic:    true,
 				WorkflowUI: lookupServeWorkflowUI,
 				GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 					return dash.Row{Project: p, Run: slug,

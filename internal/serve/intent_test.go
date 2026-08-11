@@ -36,7 +36,7 @@ func TestIntentRowsLinkToRunPage(t *testing.T) {
 
 // TestIntentPageRendersEditAndCloseChips: an in-progress intent gets
 // the same journal-only chips an idea does. Promote stays idea-only
-// even here, where the server runs insecure — an intent is never
+// even here, where the server runs dynamic — an intent is never
 // promoted.
 func TestIntentPageRendersEditAndCloseChips(t *testing.T) {
 	root := t.TempDir()

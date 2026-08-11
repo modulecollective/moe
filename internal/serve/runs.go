@@ -76,10 +76,10 @@ type runFormVM struct {
 	Workspace string
 	Agent     string
 	Workflow  string
-	// Insecure gates the spawning submit ("open & run" / "promote & run").
+	// Dynamic gates the spawning submit ("open & run" / "promote & run").
 	// Parking is journal-only and stays available in safe mode; only that
 	// button is hidden.
-	Insecure bool
+	Dynamic bool
 }
 
 // newRunVM backs the new-run form. Projects and workspaces are
@@ -141,7 +141,7 @@ func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Only the spawning submit needs insecure mode; parking is
+	// Only the spawning submit needs dynamic mode; parking is
 	// journal-only. Gate before the open so a refused click leaves no
 	// half-created run behind.
 	spawn := r.FormValue("spawn") != ""
@@ -804,7 +804,7 @@ func (s *Server) handleKickDynamic(w http.ResponseWriter, r *http.Request) {
 // A spawnNextStage sibling in posture, not in body: a chain head has no
 // stage ladder, so there is no next stage to re-derive server-side and
 // no spawnable-set check to make. What remains are the stage-free
-// guards — insecure gate, workflow, in-progress, no live child.
+// guards — dynamic gate, workflow, in-progress, no live child.
 //
 // Deliberately *not* re-checked here: whether the head is itself
 // chained under a live parent. That refusal needs the journal index,
@@ -1006,14 +1006,14 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		// so there is nothing for the cascade trio to spawn — which is why
 		// its chips are bespoke like idea's rather than derived. They
 		// spawn an agent ride all the same, so they keep the trio's gates:
-		// insecure mode, and not while a child is mid-turn.
+		// dynamic mode, and not while a child is mid-turn.
 		//
 		// One chip per ride, the same shape the cascade trio uses for the
 		// bang levels: "kick" is `!!!` over the chain as it stands now,
 		// "kick dynamic" is `!!!!` — the same ride, but tail pulses may
 		// grow the batch under it. Both gate identically; an empty head is
 		// no more kickable dynamically than statically.
-		if !live && s.opts.Insecure && chain.Kickable {
+		if !live && s.opts.Dynamic && chain.Kickable {
 			return []runAction{
 				{Label: "kick", Href: base + "/kick", Method: "POST"},
 				{Label: "kick dynamic", Href: base + "/kick-dynamic", Method: "POST"},
@@ -1027,7 +1027,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			// edit / close are journal-only, so both captures get them
 			// in safe mode. promote parks the destination run by
 			// default — also journal-only — so the chip joins them;
-			// only the page's "promote & run" submit is insecure-gated.
+			// only the page's "promote & run" submit is dynamic-gated.
 			// It stays idea-only: ideas are the only capture that
 			// promotes.
 			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
@@ -1055,9 +1055,9 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	}
 	var out []runAction
 	// The cascade chips spawn an agent, so they render only in
-	// insecure mode. The close-run chip below is journal-only (CloseRun
+	// dynamic mode. The close-run chip below is journal-only (CloseRun
 	// runs in-process, no spawn) and stays in safe mode.
-	if !live && s.opts.Insecure && ui.Cascade {
+	if !live && s.opts.Dynamic && ui.Cascade {
 		// A "" or excluded next stage (sdlc's push) yields no chips:
 		// push stays terminal/CLI-only — the bang vocabulary
 		// collapses there — so a run parked right before push shows
@@ -1281,7 +1281,7 @@ func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Only the spawning submit needs insecure mode; parking the
+	// Only the spawning submit needs dynamic mode; parking the
 	// destination is journal-only. Gate before runopen.Promote so a
 	// refused click doesn't half-promote the idea.
 	spawn := r.FormValue("spawn") != ""
@@ -1378,7 +1378,7 @@ func (s *Server) gatherRunFormVM() (runFormVM, error) {
 		Workspaces: wsOpts,
 		Agents:     agentOptions,
 		Workflows:  s.opts.NewRunWorkflows,
-		Insecure:   s.opts.Insecure,
+		Dynamic:    s.opts.Dynamic,
 	}
 	if len(vm.Workflows) > 0 {
 		vm.Workflow = vm.Workflows[0].Name

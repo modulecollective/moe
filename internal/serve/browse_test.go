@@ -243,7 +243,7 @@ func TestBrowseMissingDocIs404(t *testing.T) {
 }
 
 // TestBrowseWorksInSafeMode: read-only views must not touch the spawn
-// bucket — they render identically with Insecure off.
+// bucket — they render identically with Dynamic off.
 func TestBrowseWorksInSafeMode(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "lore/x.md", "# X\n\nbody.\n")
