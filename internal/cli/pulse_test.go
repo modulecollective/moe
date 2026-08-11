@@ -590,7 +590,7 @@ func TestPulseFiresFromTwinClose(t *testing.T) {
 
 // TestPulseDoesNotFireFromServeClose: serve dispatches closes through the
 // same closeRunInProcess seam, but a browser POST has no Ctrl-C for the
-// blocking survey and the chore auto-open would bypass serve's --insecure
+// blocking survey and the chore auto-open would bypass serve's --dynamic
 // spawn gate — so serve passes tailPulse=false. Driving the seam exactly
 // as serve's CloseRun callback does (registry lookup, skipEdit=true,
 // tailPulse=false) pins that an sdlc close through serve stays quiet.
@@ -1469,5 +1469,78 @@ func TestReconcileAtPulseSkipsWhenInterrupted(t *testing.T) {
 
 	if stderr.Len() != 0 || stdout.Len() != 0 {
 		t.Fatalf("reconcile ran despite the latch: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+// TestPulseNewDynamicCarriesConsent: `--dynamic` is the whole of the
+// external-cron (and heartbeat) story — without it a sweep grooms and
+// parks, with it the sweep rides what it grooms. The stub records the
+// process ride mode from inside the sweep, which is the seam every
+// downstream consumer reads: the groom step's placement rules, the
+// self-kick gate, the consent trailers, the survey's ride-context line.
+//
+// The unflagged case pins the other half: no withRideMode call at all,
+// so rideWalkActive stays false and a bare `moe pulse new` still marks
+// itself as operator-typed curation.
+func TestPulseNewDynamicCarriesConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantMode rideMode
+		wantWalk bool
+	}{
+		{name: "bare", args: []string{"pulse", "new", "moe"}, wantMode: rideNone, wantWalk: false},
+		{name: "dynamic", args: []string{"pulse", "new", "--dynamic", "moe"}, wantMode: rideDynamic, wantWalk: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			trailerstest.SeedProject(t, root, "moe")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			var gotMode rideMode
+			var gotWalk bool
+			orig := runPulseSurvey
+			runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+				gotMode, gotWalk = currentRideMode, rideWalkActive
+				return 0
+			}
+			t.Cleanup(func() { runPulseSurvey = orig })
+
+			var out, errb bytes.Buffer
+			if code := Run(tc.args, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, errb.String())
+			}
+			if gotMode != tc.wantMode {
+				t.Errorf("ride mode inside the sweep = %s, want %s", gotMode, tc.wantMode)
+			}
+			if gotWalk != tc.wantWalk {
+				t.Errorf("rideWalkActive inside the sweep = %v, want %v", gotWalk, tc.wantWalk)
+			}
+		})
+	}
+}
+
+// TestPulseNewRestoresRideModeAfterDynamic: the flag hands *this
+// invocation* to the machine and nothing beyond it. A leaked mode would
+// make the next cascade in the same process ride without being asked.
+func TestPulseNewRestoresRideModeAfterDynamic(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	orig := runPulseSurvey
+	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int { return 0 }
+	t.Cleanup(func() { runPulseSurvey = orig })
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"pulse", "new", "--dynamic", "moe"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if currentRideMode != rideNone || rideWalkActive {
+		t.Errorf("after the verb: mode=%s walk=%v, want none/false", currentRideMode, rideWalkActive)
 	}
 }

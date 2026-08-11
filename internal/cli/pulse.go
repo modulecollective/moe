@@ -50,9 +50,11 @@ import (
 // mid-chain hop defers to the run behind it, so a ride spends one survey
 // per generation rather than one per hop.
 //
-// `moe pulse new <project>` runs the whole pulse by hand; it is also
-// the verb an external cron would call. Cron itself stays out of moe —
-// the primitives are cron-safe, the cron is not ours.
+// `moe pulse new <project>` runs the whole pulse by hand, and
+// `--dynamic` is the consent rung that makes it the verb a clock can
+// call: grooming may kick what it grooms. `moe serve --dynamic` hosts
+// the clock (see internal/serve/heartbeat.go), and an external cron can
+// call the same verb.
 const (
 	pulseWorkflow = "pulse"
 	// pulseDoc is the single stage's document id. The survey canvas
@@ -1408,12 +1410,17 @@ type surveyOutcome struct {
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	dynamic := fs.Bool("dynamic", false, "ride what the sweep grooms — the standing fourth bang")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse new <project>")
+		moePrintln(stderr, "usage: moe pulse new [--dynamic] <project>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
 		moePrintln(stderr, "(never executes one), then a headless read-only survey that files")
 		moePrintln(stderr, "followups, writes a report, and may spawn and groom parked fix runs.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Without --dynamic the sweep is pure curation: everything it grooms")
+		moePrintln(stderr, "parks. With it, the sweep rides what it grooms — the same consent")
+		moePrintln(stderr, "`!!!!` carries, said at the door a clock can knock on.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -1430,6 +1437,18 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "pulse new: %v\n", err)
 		return 1
+	}
+	// --dynamic is the whole flag: it hands this invocation to the machine
+	// at the dynamic rung, exactly as `!!!!` and `moe chain kick
+	// --dynamic` do. Everything downstream — the groom step's placement
+	// rules, the self-kick gate, the consent trailers, the survey's
+	// ride-context line — already reads process ride mode, so nothing else
+	// has to change. Without the flag no withRideMode call happens at all,
+	// which is what keeps the unflagged verb byte-identical to today:
+	// rideWalkActive stays false, so a bare sweep still marks itself as
+	// operator-typed curation.
+	if *dynamic {
+		defer withRideMode(rideDynamic)()
 	}
 	// `moe pulse new` is the one place the pulse *is* the verb, so a skip
 	// is the verb's own outcome: exit 130. (At a run-traffic tail the
