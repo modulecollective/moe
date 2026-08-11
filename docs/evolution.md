@@ -119,7 +119,8 @@ many chores.
 The pulse solved the occasion problem by not being a thing you invoke. It fires
 at the *tail* of run traffic — sdlc close, sdlc push, twin close. The occasion
 is "work just landed," which is exactly when there is something new to notice.
-Nothing fires on a clock, then or now.
+Nothing fired on a clock. The one clock MoE carries came later, and all it does
+is wake the machine to run this same survey.
 
 A pulse is a read-only headless sweep of one project: recent journal, drift
 between twin and code, the open backlog, plus context the harness computes and
@@ -217,12 +218,16 @@ kick another generation without a structural depth bound. Each generation is
 still visible on the dash and still passes review and test; the ride ends when
 a survey adds nothing. Ctrl-C is the operator's brake on one already in flight.
 
-Underneath those, nothing that made step 2 safe was traded away. Nothing fires
-on a clock. The survey sandbox is read-only; the agent proposes JSON and the
-harness stamps it. Every ridden run still walks review and test. Every merge is
-still fast-forward behind the push hooks. Parked chains never move on their
-own — appending to a parked chain is curation, not execution. And the retreat
-is built in: stop typing the fourth bang, or Ctrl-C a sweep already in flight.
+Underneath those, nothing that made step 2 safe was traded away. A clock did
+arrive since: an armed `moe serve --dynamic` carries a resident heartbeat that
+looks at each project's board every twenty minutes. It only wakes the machine
+to look, and every guard that follows applies to the sweep it fires exactly as
+it applies to a typed one. The survey sandbox is read-only; the agent proposes
+JSON and the harness stamps it. Every ridden run still walks review and test.
+Every merge is still fast-forward behind the push hooks. Parked chains never
+move on their own — appending to a parked chain is curation, not execution. And
+the retreat is built in: stop typing the fourth bang, stop the armed serve, or
+Ctrl-C a sweep already in flight.
 
 ## What we're still finding out
 

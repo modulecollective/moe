@@ -12,8 +12,9 @@ canvas — an artifact the next stage reads without replaying the whole chat —
 and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
-There is no daemon, no scheduler, and no swarm. Agents act when you invoke a
-command, and the operator stays strategist, reviewer, and source of judgment.
+There is no crontab and no swarm. Agents act on your consent — typed at a
+command, or standing for as long as an armed `moe serve --dynamic` you started
+stays up — and the operator stays strategist, reviewer, and source of judgment.
 MoE is also deliberately single-operator — see [Anti-Social on
 Purpose](#anti-social-on-purpose) for why that is a bet rather than a missing
 feature. The bet behind that stance: agents have made careful work cheap. When a

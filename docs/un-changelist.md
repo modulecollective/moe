@@ -48,9 +48,10 @@ The lesson was not that automation or live views are forbidden. It was that
 motion needs an operator-rooted occasion, and state that survives a sitting is
 more valuable than supervision state that exists only while somebody watches.
 The current constraint is stated more compactly in the
-[README](../README.md): no daemon, no scheduler, no swarm. MoE works best as a
-tool one operator invokes, with artifacts that are still there when they come
-back.
+[README](../README.md): no crontab, no swarm, and agents that act on your
+consent — typed at a command, or standing while an armed process you started
+stays up. MoE works best as a tool one operator invokes, with artifacts that
+are still there when they come back.
 
 ## A workflow does not create an occasion
 
