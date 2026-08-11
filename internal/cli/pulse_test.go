@@ -824,6 +824,7 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 	var calls int
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 		calls++
+		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -934,6 +935,7 @@ func TestPulseSurveyOpensTopLevel(t *testing.T) {
 
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -967,12 +969,16 @@ func TestPulseSurveyOpensTopLevel(t *testing.T) {
 	}
 }
 
-// TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock: a non-zero survey
-// (agent failure or SIGINT) is not propagated and does not auto-close —
-// the run stays open on the dash for a human to look at. Escalation is
-// now by visibility, not by blocking: the next auto-fire still runs a
-// fresh survey, so a persistently broken sweep piles up open runs rather
-// than silently starving the pulse.
+// TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock: a survey the agent
+// failed does not auto-close — the run stays open on the dash for a
+// human to look at. Escalation is by visibility, not by blocking: the
+// next auto-fire still runs a fresh survey, so a persistently broken
+// sweep piles up open runs rather than silently starving the pulse.
+//
+// It also reports out non-zero. That is the only channel an unattended
+// sweep has: the heartbeat runs it as a child and reads the exit status
+// to drive the failure backoff and the notify ok bit, so a dead sweep
+// reported as clean would reset the backoff and post success.
 func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -986,11 +992,11 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	// Failure is not a verb failure…
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("survey exit=%d, want 0 (failure not propagated)", code)
+	// The failure crosses out…
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
+		t.Fatal("survey exit=0 on a died sweep — the backoff and the notify ok bit read this")
 	}
-	// …but the run stays open for a manual look.
+	// …and the run stays open for a manual look.
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
 		t.Fatalf("open pulse runs = %v, want exactly one left open by the failed sweep", open)
 	}
@@ -998,8 +1004,8 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	// No single-flight: the next auto-fire still reaches the agent turn
 	// and opens a second run, so the broken sweeps pile up (visible on the
 	// dash) instead of blocking.
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("second survey exit=%d, want 0 (failure not propagated)", code)
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
+		t.Fatal("second survey exit=0 on a died sweep")
 	}
 	if calls != 2 {
 		t.Fatalf("openPulse calls=%d, want 2 — the second fire must run a fresh survey", calls)
@@ -1031,6 +1037,11 @@ func twinRuns(t *testing.T, root, projectID string) map[string]string {
 // or a crash after writing nothing) must NOT auto-close. The run lingers
 // on the dash's ACTIVE list — escalation by visibility — and no reflect
 // is spawned off a sweep that never concluded.
+//
+// It reports out non-zero too: a vendor that hangs up mid-turn doesn't
+// reliably exit non-zero, so this is the shape a plan-limit night can
+// arrive as, and counting it clean would reset the backoff meant to pace
+// exactly that.
 func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -1045,8 +1056,8 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
-		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code == 0 {
+		t.Fatalf("survey exit=0 on an unfilled gate — a sweep that concluded nothing is not a clean sweep; stderr=%q", errb.String())
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
 		t.Fatalf("open pulse runs = %v, want one left open by the unfilled gate", open)
@@ -1361,8 +1372,8 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	if code := runPulseSurvey(root, "tele", "" /*spawner*/, nil /*pi*/, &out, &errb); code != 0 {
-		t.Fatalf("survey exit=%d, want 0 (a refused sweep is not a verb failure); stderr=%q", code, errb.String())
+	if code := runPulseSurvey(root, "tele", "" /*spawner*/, nil /*pi*/, &out, &errb); code == 0 {
+		t.Fatalf("survey exit=0, want non-zero (a refused sweep did not complete); stderr=%q", errb.String())
 	}
 	if !strings.Contains(errb.String(), "uncommitted tracked-file changes") {
 		t.Errorf("stderr = %q, want the boundary refusal named", errb.String())

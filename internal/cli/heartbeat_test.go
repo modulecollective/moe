@@ -160,15 +160,39 @@ func TestHeartbeatStandsDownForALiveSession(t *testing.T) {
 	}
 }
 
-// TestHeartbeatStandsDownForAnOpenSurvey: the pulse's own single-flight,
-// read from outside. A sweep already running owns this generation.
-func TestHeartbeatStandsDownForAnOpenSurvey(t *testing.T) {
+// TestHeartbeatStandsDownForASurveyMidTurn: the pulse's single-flight,
+// read the only way that stays honest — a survey holds a session branch
+// for its whole agent turn, exactly like any other stage. A sweep
+// already running owns this generation.
+func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
 	root := spawnFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "pulse-in-flight", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
+	if _, err := session.Open(root, "moe", "pulse-in-flight", pulseDoc); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v with a survey in flight, want none", got)
+		t.Errorf("due = %v with a survey mid-turn, want none", got)
+	}
+}
+
+// TestHeartbeatSweepsPastALingeringOpenSurvey is the other side, and the
+// one that keeps the loop resident. A sweep that died leaves its run
+// open on the dash's ACTIVE list forever — nothing closes it but a
+// human. Standing down on that would let the first vendor failure wedge
+// this project's heartbeat until somebody noticed, and would leave the
+// failure backoff pacing a loop that never gets to run. The open run is
+// the operator's tell; the backoff is what bounds the pile.
+func TestHeartbeatSweepsPastALingeringOpenSurvey(t *testing.T) {
+	root := spawnFixture(t)
+	groomFixture(t, root, "fix-a")
+	// A run open with no session branch under it: the shape a survey
+	// leaves behind when its agent turn died.
+	seedRun(t, root, "moe", "pulse-that-died", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
+
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v, want [moe] — a dead sweep's lingering run must not wedge the heartbeat", got)
 	}
 }
 

@@ -141,14 +141,25 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 		}
 	}
 
-	// Stand-downs. A ride or a sitting in flight means the tail-pulse
-	// path already owns the next sweep, and a survey already open means
-	// one is in flight — the pulse's own single-flight, read from here so
-	// the tick doesn't pile a second one on.
+	// The stand-down. A ride mid-hop, an operator sitting in a stage and
+	// a survey mid-turn all look the same from here — a live session
+	// branch somewhere in the project — and all mean the tail-pulse path
+	// already owns the next sweep.
+	//
+	// Deliberately *not* also "no open pulse run", which is what the
+	// design's gate list says and what the recovery story it sits beside
+	// contradicts. A survey holds a session branch for its whole agent
+	// turn, so an in-flight one is already caught here and the ticker
+	// single-flights its own children besides; all a run-status check
+	// adds on top is the sweeps that *died*. Those are exactly the ones
+	// that must not block. A failed survey leaves its run open on the
+	// dash's ACTIVE list until a human closes it (escalation by
+	// visibility), so standing down on it would let the first vendor
+	// failure wedge this project's heartbeat indefinitely — and would
+	// leave the failure backoff pacing a loop that never gets to run.
+	// Repeat failures are bounded by that backoff instead, which is the
+	// job it was written for.
 	if occupied[projectID] {
-		return ""
-	}
-	if slug := openPulseRun(sc, projectID); slug != "" {
 		return ""
 	}
 	if moved {
@@ -259,18 +270,6 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 			continue
 		}
 		return rootKey
-	}
-	return ""
-}
-
-// openPulseRun returns the project's in-flight survey, or "". The
-// pulse's own single-flight rule read from outside: a sweep already
-// running owns this generation.
-func openPulseRun(sc *pulseScan, projectID string) string {
-	for _, md := range sc.mds {
-		if md.Project == projectID && md.Workflow == pulseWorkflow && md.Status == run.StatusInProgress {
-			return md.ID
-		}
 	}
 	return ""
 }

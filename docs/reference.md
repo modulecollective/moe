@@ -91,7 +91,9 @@ source of truth for the exact command surface; this page is a map.
   backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
   consent rung — the sweep rides what it grooms instead of parking it, which is
   what makes the verb callable by a clock. The heartbeat inside `moe serve
-  --dynamic` calls exactly this.
+  --dynamic` calls exactly this, and reads the exit status: `moe pulse new`
+  exits non-zero when the sweep died or concluded nothing, which is what drives
+  the per-project failure backoff. A Ctrl-C skip exits 130, not a failure.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
 `followups.md` harvest into ideas without closing it — the way to pick up

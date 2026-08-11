@@ -379,12 +379,19 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // stub the agent turn out.
 //
 // Every fire runs a fresh survey unconditionally — there is no rate
-// limiter. On a clean (exit 0) survey it auto-closes its own run; a
+// limiter. On a clean survey it auto-closes its own run and returns 0; a
 // failed or SIGINT'd sweep leaves the run open on the dash's ACTIVE list
 // (escalation by visibility), but does not block the next survey.
 // Concurrent and piled-up pulse runs are allowed: run opening mints
 // distinct dated slugs under the repolock, so parallel fires don't
 // collide.
+//
+// The return is one bit for the caller: did this sweep complete. Zero
+// for a clean sweep and for an operator interrupt (which the latch
+// reports separately); non-zero for a sweep that died or concluded
+// nothing. The heartbeat's per-project backoff and the notify payload
+// both read it through the child's exit status, so it is the only
+// channel a failed unattended sweep has.
 //
 // Body assigned in init() rather than at declaration to break the
 // firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
@@ -446,10 +453,21 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		return 0
 	}
 
-	// A non-zero exit (agent failure or SIGINT) is never propagated —
-	// abandoning a sweep is not a verb failure — and (mid-agent) it leaves
-	// the run open on the dash's ACTIVE list for the operator to inspect
-	// and close by hand. It does not block the next survey.
+	// An interrupt is never propagated as a failure — abandoning a sweep
+	// is the operator's own act, not a broken one — but a survey that
+	// *died* exits non-zero, because the sweep's outcome is the only
+	// thing that crosses out of this process. The resident heartbeat runs
+	// the sweep as `moe pulse new --dynamic <project>`, and its child's
+	// exit status is what drives the per-project failure backoff and the
+	// notify payload's ok bit. Reporting a dead sweep as a clean one
+	// resets the backoff on the exact failure it was written for (a night
+	// of exhausted plan limits) and tells a phone glance the sweep
+	// succeeded. Either way the run stays open on the dash's ACTIVE list
+	// for the operator, and either way the next survey is unblocked.
+	//
+	// The tail-pulse path is unaffected: firePulse drops the code
+	// outright, so a pulse failure still never changes the outcome of the
+	// verb whose tail fired it.
 	survey := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
 	if survey.code == exitInterrupted {
 		// The Ctrl-C may have been observed only at the agent boundary, so
@@ -480,9 +498,12 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		moePrintf(stderr, "pulse: interrupted — leaving %s/%s open for review\n", projectID, md.ID)
 		return 0
 	case survey.code != 0:
-		// A failed or abandoned sweep with no interrupt — leave the run open
-		// on the dash's ACTIVE list (escalation by visibility).
-		return 0
+		// A failed sweep with no interrupt — the vendor died, the box lost
+		// the network, the turn crashed. Leave the run open on the dash's
+		// ACTIVE list (escalation by visibility) and report the failure
+		// out, so a heartbeat sweep cools off instead of hot-looping into
+		// the same wall every tick.
+		return 1
 	}
 
 	// Read the survey's `## Gate` verdict. An unfilled or unparsable gate
@@ -492,10 +513,16 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	// (escalation by visibility), and skip the reflect spawn. Any parsed
 	// non-empty status passes; a pulse has no ready/blocked vocabulary,
 	// only close-or-linger.
+	//
+	// It reports out as a failure for the same reason the branch above
+	// does. A vendor that hangs up mid-turn does not always exit
+	// non-zero, and a sweep that concluded nothing is the shape that
+	// arrives when it doesn't — counting it clean would reset the very
+	// backoff meant to pace it.
 	gate, ok := readPulseGate(root, projectID, md.ID)
 	if !ok {
 		moePrintf(stderr, "pulse: %s/%s left an unfilled gate — leaving the run open for review\n", projectID, md.ID)
-		return 0
+		return 1
 	}
 	// Mint, then groom, then kick. The order is the design's: the graph
 	// can only be stamped once every run in it exists, and a kick must

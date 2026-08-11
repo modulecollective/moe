@@ -495,15 +495,17 @@ verb — everything about what a sweep may *do* is unchanged, including the
 settled-design floor, the occupancy guard, the review-and-test walk on every
 ride, and the journal marks on every machine turn. A tick sweeps only when the
 project's journal moved since its last heartbeat sweep, or a settled thread is
-parked with nobody inside it; and it stands down while a session is live in the
-project, while a survey is already running, and for one full tick after
-anything you did by hand. A quiet board costs nothing — no agent turn, no run,
-no journal line.
+parked with nobody inside it; and it stands down while anything is live in the
+project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and for
+one full tick after anything you did by hand. A quiet board costs nothing — no
+agent turn, no run, no journal line.
 
 Failure cools itself off: consecutive failed sweeps back a project's tick off
 exponentially, so a night of exhausted plan limits leaves a couple of open
 pulse runs on the dash rather than a pile. The first failure's run, sitting on
-ACTIVE, is the tell.
+ACTIVE, is the tell — a sweep that died leaves it open forever, and the
+heartbeat deliberately sweeps straight past it rather than letting one dead
+vendor night wedge the project until you notice.
 
 The heartbeat also reaps: a session branch whose machine walk died — same host,
 pid gone, heartbeat stale — is abandoned so the run re-parks and the loop can
