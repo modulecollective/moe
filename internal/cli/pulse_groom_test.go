@@ -626,3 +626,115 @@ func TestGroomProceedsWhenTheEdgeSetIsUnchanged(t *testing.T) {
 		t.Fatalf("edges = %v, want %s → %s stamped", edges, a, b)
 	}
 }
+
+// stagedUnderHead mints an operator head (no SpawnedBy) with the named
+// parked runs chained under it, the way an operator staging a batch by
+// hand leaves the board. Returns the head's qualified key.
+func stagedUnderHead(t *testing.T, root, headSlug string, members ...string) string {
+	t.Helper()
+	head, err := mintChainRun(root, "moe", headSlug, "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := "moe/" + head.ID
+	for _, m := range members {
+		chainEdgeCommit(t, root, prev, "moe/"+m)
+		prev = "moe/" + m
+	}
+	return "moe/" + head.ID
+}
+
+// TestGroomWontMoveAMemberOutOfAnOperatorHead is the staging fence's
+// load-bearing direction. Grooming's move authority is what could
+// re-stamp a run *out* of a unit the operator was still composing, and
+// under a resident clock that would make hand-curation impossible.
+func TestGroomWontMoveAMemberOutOfAnOperatorHead(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	headKey := stagedUnderHead(t, root, "operator-topic", minted["fix-a"])
+
+	before := liveEdges(t, root)
+	var errb bytes.Buffer
+	// A later sweep tries to consolidate fix-a onto fix-b's thread.
+	groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, "", nil /*kickoff edges*/, io.Discard, &errb)
+
+	after := liveEdges(t, root)
+	if after[headKey] != before[headKey] {
+		t.Errorf("head edge moved: %q → %q; the operator's staging fence must hold", before[headKey], after[headKey])
+	}
+	if !strings.Contains(errb.String(), "the operator is staging under "+headKey) {
+		t.Errorf("stderr = %q, want the fence named", errb.String())
+	}
+}
+
+// TestGroomWontSpliceIntoAnOperatorHead is the other direction: an
+// `onto` aimed inside a hand-staged unit self-roots rather than
+// splicing, the same redirect the static-ride fence takes. The work is
+// still worth teeing up; it just doesn't join the operator's batch.
+func TestGroomWontSpliceIntoAnOperatorHead(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	headKey := stagedUnderHead(t, root, "operator-topic", minted["fix-a"])
+
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-b")}}, "", nil /*kickoff edges*/, io.Discard, &errb)
+
+	edges := liveEdges(t, root)
+	if edges["moe/"+minted["fix-a"]] != "" {
+		t.Errorf("fix-a gained a child %q; the fence must refuse the splice", edges["moe/"+minted["fix-a"]])
+	}
+	if edges[headKey] != "moe/"+minted["fix-a"] {
+		t.Errorf("head → %q, want the operator's unit unchanged", edges[headKey])
+	}
+	if !strings.Contains(errb.String(), "self-rooting instead (the head is the fence)") {
+		t.Errorf("stderr = %q, want the redirect named", errb.String())
+	}
+}
+
+// TestGroomStillConsolidatesUnderAMachineHead: the fence is scoped to
+// one unit-shape and nothing else. A pulse-minted head is SpawnedBy-
+// stamped, so consolidation-by-moving keeps working exactly where it
+// actually runs — which is the whole story the no-source-filter rule
+// was written for.
+func TestGroomStillConsolidatesUnderAMachineHead(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	head, err := mintChainRun(root, "moe", "machine-topic", "moe/pulse-1", "", io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chainEdgeCommit(t, root, "moe/"+head.ID, "moe/"+minted["fix-a"])
+
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, "", nil /*kickoff edges*/, io.Discard, &errb)
+
+	edges := liveEdges(t, root)
+	if edges["moe/"+minted["fix-b"]] != "moe/"+minted["fix-a"] {
+		t.Errorf("fix-b → %q, want fix-a moved onto it; machine units stay groomable\nstderr=%s",
+			edges["moe/"+minted["fix-b"]], errb.String())
+	}
+}
+
+// TestGroomExtendsTheDynamicRideItIsInside: the one exemption. The
+// operator typed the fourth bang at this very unit, which is broader
+// consent than any fence — refusing here would revoke the mid-ride
+// growth the ride exists to allow.
+func TestGroomExtendsTheDynamicRideItIsInside(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "riding", "fix-b")
+	headKey := stagedUnderHead(t, root, "operator-topic", minted["riding"])
+	spawner := "moe/" + minted["riding"]
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("fix-b")}}, spawner, nil /*kickoff edges*/, io.Discard, &errb)
+
+	edges := liveEdges(t, root)
+	if edges[spawner] != "moe/"+minted["fix-b"] {
+		t.Errorf("ridden tail → %q, want fix-b appended (head=%s)\nstderr=%s", edges[spawner], headKey, errb.String())
+	}
+}

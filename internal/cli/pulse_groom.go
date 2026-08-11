@@ -27,19 +27,35 @@ import (
 // self-heals. The groomer is the merge.
 //
 // Moving is the same act as placing. A `runs` slug may name a parked
-// run already chained elsewhere — under any head, operator-minted
-// included — and grooming re-stamps it to the group's placement,
-// splicing the old unit around the gap. There is no source filter: any
-// parked run in the project is groomable. That is the design's sharpest
-// edge, and the placement bar in pulse.md ("would the operator kick
-// these, in this order, unchanged?") is what carries it.
+// run already chained elsewhere and grooming re-stamps it to the group's
+// placement, splicing the old unit around the gap. Nearly any parked run
+// in the project is groomable. That is the design's sharpest edge, and
+// the placement bar in pulse.md ("would the operator kick these, in this
+// order, unchanged?") is what carries it.
 //
-// Appending or moving onto a *parked* chain — anyone's — is curation,
-// not execution: nothing moves until that chain's kick. The one place
-// grooming is fenced is the unit a *static* ride is currently walking,
-// in both directions: a placement aimed into it is redirected (see
-// groomAnchor), and a `runs` slug naming one of its members is dropped
-// rather than moved out (see placeGroup).
+// Appending or moving onto a *parked* chain is curation, not execution:
+// nothing moves until that chain's kick. Grooming is fenced out of two
+// units, in both directions each time — a placement aimed in is
+// redirected to a self-rooted thread (see groomAnchor), and a `runs`
+// slug naming a member is dropped rather than moved out (see
+// placeGroup):
+//
+//   - the unit a *static* ride is currently walking (see ridingFenced),
+//     because `!!!`'s contract is that what the operator saw at kick
+//     time is what runs;
+//   - any unit under an **operator-minted chain head** (see
+//     stagingFenced), because under a resident clock the head is the
+//     operator's staging fence. Machine kicks were already refused there
+//     twice over — a hand-minted head is stageless so it never clears
+//     the settled-design admit, and kicking a member under a live parent
+//     fails closed with "kick the head" — but grooming's move authority
+//     could still re-stamp members *out* of a unit the operator was
+//     composing. When grooming only ran inside rides the operator had
+//     just kicked, "anything parked is groomable" was safe; a heartbeat
+//     that sweeps while nobody is watching makes hand-curation
+//     impossible without this. Machine-headed and headless threads stay
+//     fully groomable, so consolidation-by-moving is unchanged where it
+//     actually runs.
 
 // groomGroup is one thread the sweep is about to stamp: its members in
 // execution order, plus where the thread goes. Built from the gate's
@@ -291,13 +307,18 @@ func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer
 				label, m.name(), sw.projectID)
 			continue
 		}
-		if sw.fenced(key) {
+		if sw.ridingFenced(key) {
 			// The other half of the static fence: a group may name a
 			// still-parked member of the ridden unit and move it *out*,
 			// which shrinks the ride the operator consented to just as
 			// surely as an `onto` would grow it.
 			moePrintf(stderr, "pulse: groom: %s names %s inside the chain this static ride is walking — dropping that entry (`!!!!` to reshape a ride)\n",
 				label, key)
+			continue
+		}
+		if head := sw.stagingFenced(key); head != "" {
+			moePrintf(stderr, "pulse: groom: %s names %s, which the operator is staging under %s — dropping that entry (the head is the fence)\n",
+				label, key, head)
 			continue
 		}
 		if indexOfString(members, key) >= 0 {
@@ -373,9 +394,14 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 				label, grp.Onto)
 			return "", "", false
 		}
-		if sw.fenced(key) {
+		if sw.ridingFenced(key) {
 			moePrintf(stderr, "pulse: groom: %s targets %s inside the chain this static ride is walking — self-rooting instead (`!!!!` to extend a ride)\n",
 				label, key)
+			return "", "", true
+		}
+		if head := sw.stagingFenced(key); head != "" {
+			moePrintf(stderr, "pulse: groom: %s targets %s, which the operator is staging under %s — self-rooting instead (the head is the fence)\n",
+				label, key, head)
 			return "", "", true
 		}
 		return key, "", true
@@ -421,9 +447,40 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 	}
 }
 
-// fenced reports whether a run sits inside the unit a static ride is
-// currently walking. `!!!`'s contract is that what the operator saw at
-// kick time is what runs, which the sweep honours in both directions:
+// stagingFenced reports the operator-minted chain head a run is staged
+// under, or "" when the run is machine territory. This is the durable
+// hold, and it is the head the operator already names with `moe chain
+// new` — no new mark was invented for it.
+//
+// "Operator-minted" is read off the head's own SpawnedBy: a pulse-minted
+// head is stamped (see mintChainRun's caller in groomAnchor), and
+// absence means *unknown, never operator's-to-take* — the same mark
+// semantics every other machine/human split in the system uses. The
+// fence is scoped to `chain`-workflow heads on purpose: a headless
+// thread whose root is a settled operator run stays machine territory,
+// which is the line the design draws and the one verb (`moe chain new`)
+// the operator has to reach for to hold something.
+//
+// One exemption: the unit a *dynamic* ride is walking. There the
+// operator typed the fourth bang at this very unit, which is the
+// broadest consent there is — fencing it would revoke mid-ride growth
+// the ride exists to allow. A static ride's unit is fenced by
+// ridingFenced regardless of who minted the head.
+func (sw *groomSweep) stagingFenced(key string) string {
+	if sw.mode == rideDynamic && sw.spawnerUnit[key] {
+		return ""
+	}
+	root := sw.graph.Root(key)
+	md := sw.byKey[root]
+	if md == nil || md.Workflow != chainWorkflow || md.SpawnedBy != "" {
+		return ""
+	}
+	return root
+}
+
+// ridingFenced reports whether a run sits inside the unit a static ride
+// is currently walking. `!!!`'s contract is that what the operator saw
+// at kick time is what runs, which the sweep honours in both directions:
 //
 //   - As a placement target (groomAnchor), the group is redirected to a
 //     self-rooted thread rather than refused — the work is still worth
@@ -437,7 +494,7 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 //
 // The spawner's unit *is* the ridden unit, so no extra identity has to
 // be threaded down here to know which one that is.
-func (sw *groomSweep) fenced(key string) bool {
+func (sw *groomSweep) ridingFenced(key string) bool {
 	return sw.mode == rideStatic && sw.spawnerUnit[key]
 }
 
