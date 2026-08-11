@@ -65,8 +65,11 @@ type Heartbeat interface {
 	Due(tick time.Duration, log io.Writer) []string
 	// Swept records that a project's heartbeat sweep has finished, so
 	// the sweep's own journal commits don't read as a delta worth
-	// sweeping again.
-	Swept(projectID string)
+	// sweeping again. clean reports whether the child exited zero, which
+	// is the difference between "a survey looked at this board and made
+	// its calls" and "a survey died partway" — the gate needs both, and
+	// only the first is a reason to stop offering the same parked work.
+	Swept(projectID string, clean bool)
 }
 
 // heartbeat is the ticker's own state: per project, the cool-off a run
@@ -165,16 +168,20 @@ func (s *Server) heartbeatTick() {
 }
 
 // awaitHeartbeat records a sweep's outcome once its child exits: the
-// gate's tip cursor either way, and the backoff ledger.
+// gate's cursors, and the backoff ledger.
 //
-// The cursor moves even on failure. A sweep that died still wrote its
-// run-open commit, and leaving the cursor behind it would make the next
-// tick read that commit as fresh delta and sweep straight into the same
-// wall — the backoff would be pacing a loop it never gets to slow.
+// The tip cursor moves even on failure. A sweep that died still wrote
+// its run-open commit, and leaving the cursor behind it would make the
+// next tick read that commit as fresh delta and sweep straight into the
+// same wall — the backoff would be pacing a loop it never gets to slow.
+// The exit code is what separates that case from a sweep that actually
+// surveyed the board; the gate keeps them apart, so the failure path
+// still gets retried on the parked-work leg.
 func (s *Server) awaitHeartbeat(projectID string, c *child) {
 	<-c.done
-	s.opts.Heartbeat.Swept(projectID)
-	if skip := s.heartbeat.record(projectID, c.exitErr != nil); skip > 0 {
+	failed := c.exitErr != nil
+	s.opts.Heartbeat.Swept(projectID, !failed)
+	if skip := s.heartbeat.record(projectID, failed); skip > 0 {
 		s.logf("heartbeat: %s failed (%v) — skipping %d tick(s)", projectID, c.exitErr, skip)
 	}
 }

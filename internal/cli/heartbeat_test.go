@@ -95,7 +95,7 @@ func TestHeartbeatSweptMovesTheCursor(t *testing.T) {
 	// The sweep runs and leaves its own commits behind.
 	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Consent: dynamic")
-	g.Swept("moe")
+	g.Swept("moe", true)
 
 	if got := dueProjects(t, g); len(got) != 0 {
 		t.Errorf("due = %v after its own sweep, want none — a quiet board must cost nothing", got)
@@ -113,6 +113,109 @@ func TestHeartbeatSweepsWhenSettledWorkIsParked(t *testing.T) {
 
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Errorf("due = %v, want [moe] — settled work is parked", got)
+	}
+}
+
+// sweepFixture is the shape every parked-leg cursor test starts from: a
+// board with one parked settled thread, a gate that has offered it once,
+// and the run-open/close commits a survey leaves behind. The caller says
+// how that survey ended.
+//
+// Returns the gate, ready for the tick *after* the sweep.
+func sweptOnceOverParkedWork(t *testing.T, root string, clean bool) *heartbeatGate {
+	t.Helper()
+	g := newHeartbeatGate(root)
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v on the first look, want [moe] — settled work is parked", got)
+	}
+	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Consent: dynamic")
+	g.Swept("moe", clean)
+	return g
+}
+
+// TestHeartbeatStopsOfferingWorkASweepAlreadyDeclined is the bug. The
+// parked leg is a pure predicate over board state, so a sweep that
+// looked at a thread and deliberately parked it with a reason leaves the
+// board byte-identical to what it just declined — and without a memory
+// of having looked, every tick after re-asks the same question at the
+// cost of a full agent turn, forever.
+func TestHeartbeatStopsOfferingWorkASweepAlreadyDeclined(t *testing.T) {
+	root := spawnFixture(t)
+	groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
+
+	for tick := range 3 {
+		if got := dueProjects(t, g); len(got) != 0 {
+			t.Fatalf("due = %v on tick %d after a clean sweep declined this board, want none", got, tick+1)
+		}
+	}
+}
+
+// TestHeartbeatKeepsOfferingWorkAfterAFailedSweep is the other side, and
+// the property the fix is most at risk of breaking. A sweep that died
+// answered nothing, so its board must keep being offered — the backoff
+// ledger is what paces the retry, and it can only do that job if the
+// gate keeps saying yes.
+func TestHeartbeatKeepsOfferingWorkAfterAFailedSweep(t *testing.T) {
+	root := spawnFixture(t)
+	groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, false /*died*/)
+
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v after a sweep died, want [moe] — the retry is the backoff's to pace, not the gate's to swallow", got)
+	}
+}
+
+// TestHeartbeatDeltaReArmsADeclinedBoard: standing down is scoped to the
+// board the survey actually saw. Anything landing in the project moves
+// the journal, and every input the parked leg reads is journal-derived —
+// so the moved leg is the whole re-arm, and a clean sweep quiets it
+// again.
+func TestHeartbeatDeltaReArmsADeclinedBoard(t *testing.T) {
+	root := spawnFixture(t)
+	groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
+	if got := dueProjects(t, g); len(got) != 0 {
+		t.Fatalf("due = %v right after the sweep, want none", got)
+	}
+
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v once the journal moved, want [moe]", got)
+	}
+
+	g.Swept("moe", true)
+	if got := dueProjects(t, g); len(got) != 0 {
+		t.Errorf("due = %v after the second sweep, want none", got)
+	}
+}
+
+// TestHeartbeatReapReArmsADeclinedBoard: a reap frees a thread by
+// removing a branch and a worktree, and writes no journal commit — so it
+// changes the board invisibly to both cursors. Clearing the surveyed
+// cursor is what keeps "moe died mid-turn" recoverable, and because reap
+// runs at the top of Due it lands in the same tick.
+func TestHeartbeatReapReArmsADeclinedBoard(t *testing.T) {
+	root := spawnFixture(t)
+	minted := groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
+	if got := dueProjects(t, g); len(got) != 0 {
+		t.Fatalf("due = %v right after the sweep, want none", got)
+	}
+
+	// The sweep kicked the thread and the walk died holding its branch.
+	s, err := session.Open(root, "moe", minted["fix-a"], "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDeadMachineClaim(t, s)
+
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v after the reap freed the thread, want [moe] in the same tick", got)
+	}
+	if git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Error("session branch survived the reap")
 	}
 }
 

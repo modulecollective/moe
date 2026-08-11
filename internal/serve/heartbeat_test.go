@@ -17,12 +17,13 @@ import (
 )
 
 // fakeHeartbeat is the cli-side gate, stubbed. due is what each pass
-// returns; swept records the tip-cursor callbacks so a test can assert
-// the ticker closes the loop.
+// returns; swept records the cursor callbacks so a test can assert the
+// ticker closes the loop, and cleans the flag each one carried.
 type fakeHeartbeat struct {
 	mu     sync.Mutex
 	due    []string
 	swept  []string
+	cleans []bool
 	passes int
 }
 
@@ -33,16 +34,23 @@ func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []string {
 	return append([]string(nil), f.due...)
 }
 
-func (f *fakeHeartbeat) Swept(projectID string) {
+func (f *fakeHeartbeat) Swept(projectID string, clean bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.swept = append(f.swept, projectID)
+	f.cleans = append(f.cleans, clean)
 }
 
 func (f *fakeHeartbeat) sweptList() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.swept...)
+}
+
+func (f *fakeHeartbeat) cleanList() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.cleans...)
 }
 
 func (f *fakeHeartbeat) passCount() int {
@@ -132,6 +140,37 @@ func TestHeartbeatSpawnsTheDynamicSweep(t *testing.T) {
 
 	if got := argv(); !strings.Contains(got, "pulse new --dynamic alpha") {
 		t.Errorf("child argv = %q, want the dynamic sweep", got)
+	}
+}
+
+// TestHeartbeatReportsWhetherTheSweepWasClean: the exit code is the
+// only thing that separates "a survey looked at this board and made its
+// calls" from "a survey died partway", and the gate needs the
+// difference — a clean sweep stops the parked-work leg re-offering the
+// same thread, a dead one must not.
+func TestHeartbeatReportsWhetherTheSweepWasClean(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		exitCode int
+		want     bool
+	}{
+		{name: "clean", exitCode: 0, want: true},
+		{name: "failed", exitCode: 1, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, _ := argvRecorder(t, tc.exitCode)
+			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			s := newTestServer(t, Options{
+				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+			})
+
+			s.heartbeatTick()
+			waitFor(t, "the sweep to be recorded", func() bool { return len(gate.cleanList()) == 1 })
+
+			if got := gate.cleanList()[0]; got != tc.want {
+				t.Errorf("Swept clean = %v for a child exiting %d, want %v", got, tc.exitCode, tc.want)
+			}
+		})
 	}
 }
 

@@ -495,10 +495,12 @@ verb — everything about what a sweep may *do* is unchanged, including the
 settled-design floor, the occupancy guard, the review-and-test walk on every
 ride, and the journal marks on every machine turn. A tick sweeps only when the
 project's journal moved since its last heartbeat sweep, or a settled thread is
-parked with nobody inside it; and it stands down while anything is live in the
-project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and for
-one full tick after anything you did by hand. A quiet board costs nothing — no
-agent turn, no run, no journal line.
+parked with nobody inside it *and no sweep has looked at that board since it
+last changed* — a thread a survey saw and deliberately parked with a reason is
+not re-offered until something moves. It stands down while anything is live in
+the project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and
+for one full tick after anything you did by hand. A quiet board costs nothing —
+no agent turn, no run, no journal line.
 
 Failure cools itself off: consecutive failed sweeps back a project's tick off
 exponentially, so a night of exhausted plan limits leaves a couple of open

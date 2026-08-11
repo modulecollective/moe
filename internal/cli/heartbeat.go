@@ -32,23 +32,37 @@ import (
 
 // heartbeatGate implements serve.Heartbeat against a bureaucracy root.
 //
-// Its only state is the journal tip each project stood at when its last
-// heartbeat sweep finished. In-memory on purpose: the question it
-// answers is "has anything happened since I last looked", and a serve
-// that just started has, correctly, never looked. Seeding lazily (the
-// first observation records the tip and reads as *not* moved) is what
-// keeps a restart from sweeping every project on a quiet board — an
-// armed serve picks up existing work through the parked-thread leg
-// instead, which is the leg that means something.
+// Its only state is two cursors per project, both journal shas, both
+// written when a sweep finishes:
+//
+//   - tips — where the journal stood when the last sweep finished, clean
+//     or not. Answers "has anything happened since I last looked".
+//   - surveyed — where it stood when the last *clean* sweep finished.
+//     Answers "has a survey already looked at this exact board", which
+//     is what keeps a thread the survey deliberately parked with a
+//     reason from being re-offered every twenty minutes forever. It
+//     works because a project's kickable-thread state is a function of
+//     its journal tip: everything the parked leg reads is
+//     journal-derived, and a sweep surveys the whole board rather than
+//     one thread.
+//
+// In-memory on purpose, both of them: a serve that just started has,
+// correctly, never looked. Seeding tips lazily (the first observation
+// records it and reads as *not* moved) is what keeps a restart from
+// sweeping every project on a quiet board — an armed serve picks up
+// existing work through the parked-thread leg instead, which is the leg
+// that means something, and an empty surveyed map leaves that pickup
+// untouched.
 type heartbeatGate struct {
 	root string
 
-	mu   sync.Mutex
-	tips map[string]string
+	mu       sync.Mutex
+	tips     map[string]string
+	surveyed map[string]string
 }
 
 func newHeartbeatGate(root string) *heartbeatGate {
-	return &heartbeatGate{root: root, tips: map[string]string{}}
+	return &heartbeatGate{root: root, tips: map[string]string{}, surveyed: map[string]string{}}
 }
 
 // Due answers one tick: which projects warrant a sweep right now.
@@ -94,7 +108,12 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []string {
 // a survey writes its own run open and close commits, so recording the
 // tip at dispatch time would leave every quiet board reading as moved
 // forever.
-func (g *heartbeatGate) Swept(projectID string) {
+//
+// Only a clean sweep also moves the surveyed cursor. A sweep that died
+// answered nothing, so the parked leg must keep offering its board —
+// that is what the failure backoff is pacing, and what keeps a dead
+// vendor night from wedging the project.
+func (g *heartbeatGate) Swept(projectID string, clean bool) {
 	tip, _, _, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		return
@@ -102,6 +121,9 @@ func (g *heartbeatGate) Swept(projectID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tips[projectID] = tip
+	if clean {
+		g.surveyed[projectID] = tip
+	}
 }
 
 // projectDue is the per-project gate. Returns the reason to sweep, or
@@ -130,11 +152,21 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	if !known {
 		g.tips[projectID] = tip
 	}
+	surveyed := g.surveyed[projectID] == tip
 	g.mu.Unlock()
 
 	moved := known && seen != tip
 	parked := ""
 	if !moved {
+		// A clean sweep already surveyed this exact board. Whatever is
+		// parked on it, the survey saw and left parked on purpose, so
+		// offering it again is re-asking a question the machine has
+		// already answered — at the cost of a full agent turn every tick,
+		// forever. Any change to a thread's kickability is a journal
+		// commit, which the moved leg above catches.
+		if surveyed {
+			return ""
+		}
 		parked = parkedKickableThread(g.root, sc, projectID)
 		if parked == "" {
 			return ""
@@ -205,6 +237,15 @@ func (g *heartbeatGate) reap(log io.Writer) {
 			fmt.Fprintf(log, "heartbeat: reap %s: %v\n", s.Branch, err)
 			continue
 		}
+		// Abandon removes a branch and a worktree and writes no journal
+		// commit, so a reap changes the board invisibly to both cursors.
+		// Clearing surveyed is what lets the parked leg re-offer the freed
+		// thread — and because reap runs at the top of Due, it happens in
+		// the same tick, which is today's recovery behaviour for "moe died
+		// mid-turn".
+		g.mu.Lock()
+		delete(g.surveyed, s.Project)
+		g.mu.Unlock()
 		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s\n",
 			s.Branch, s.Project, s.Run, s.Doc)
 	}
