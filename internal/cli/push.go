@@ -556,17 +556,14 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 	}
 	if push.TrailerValue(root, md.Project, md.ID, "MoE-PR") == "" {
 		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-		// Unlike the mint sites, push is shared between operator and
-		// machine: `moe push` / an interactive `moe sdlc push` reach here
-		// too. Stamp only when a bang answer or a chain kick handed the
-		// walk to the machine on the genuine first push. A markerless
-		// legacy repair cannot recover the original walk, so absence stays
-		// the honest "unknown" rather than attributing the later retry.
+		// walkConsent's ordinary rule, narrowed to the genuine first
+		// push: this record is also the provenance claim "shipped under a
+		// machine walk", and a markerless legacy repair cannot recover
+		// the original walk. Absence stays the honest "unknown" rather
+		// than attributing the later retry.
 		consent := ""
 		if firstPush {
-			if value, machineWalk := consentTrailerValue(); machineWalk {
-				consent = value
-			}
+			consent = walkConsent()
 		}
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
 			trailers.Block{
@@ -786,14 +783,11 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 	paths = append(paths, pushCanvasPath)
 
-	// Same rule as openPRPath: push is shared between operator and
-	// machine, and this merge path is the one `!!`/`!!!` cascades ship
-	// through — stamp only when a bang answer or a chain kick handed
-	// the walk to the machine.
-	consent, machineWalk := consentTrailerValue()
-	if !machineWalk {
-		consent = ""
-	}
+	// This merge path is the one `!!`/`!!!` cascades ship through, so
+	// the stamp doubles as the provenance claim the run page reads —
+	// unlike openPRPath there is no retry to disambiguate, so the plain
+	// rule stands.
+	consent := walkConsent()
 	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:          md.ID,

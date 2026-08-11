@@ -1155,6 +1155,47 @@ func TestJournalIndexConsentRoundTrip(t *testing.T) {
 	}
 }
 
+// TestJournalIndexPushConsentPinsTheTerminalRecord: PushConsent is the
+// provenance claim "this run shipped under a machine walk", so only the
+// records that mean a ship may set it.
+//
+// The pin became load-bearing once every commit a walk lands carries
+// MoE-Consent: a push stage's own session-start and work-turn commits
+// carry MoE-Document: push too, so a ride whose push stage opened and
+// then died would otherwise mint a shipped-by-machine hop for a run that
+// never shipped.
+func TestJournalIndexPushConsentPinsTheTerminalRecord(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	// A ride that reached the push stage and got no further.
+	commit("work: start session for push",
+		"MoE-Project: a\nMoE-Run: stalled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Session: 0f1e\nMoE-Consent: dynamic\n")
+	commit("work: update push",
+		"MoE-Project: a\nMoE-Run: stalled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Session: 0f1e\nMoE-Consent: dynamic\n")
+	// A ride that shipped, and an upstream merge `moe sync` reconciled.
+	commit("push: a/shipped merged",
+		"MoE-Project: a\nMoE-Run: shipped\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: deadbeef\nMoE-Consent: dynamic\n")
+	commit("sync: a/reconciled merged",
+		"MoE-Project: a\nMoE-Run: reconciled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: cafebabe\nMoE-Consent: static\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, ok := idx.PushConsent["a/stalled"]; ok {
+		t.Errorf("PushConsent[a/stalled] = %q, want absent — the run never shipped", got)
+	}
+	if got, want := idx.PushConsent["a/shipped"], "dynamic"; got != want {
+		t.Errorf("PushConsent[a/shipped] = %q, want %q", got, want)
+	}
+	if got, want := idx.PushConsent["a/reconciled"], "static"; got != want {
+		t.Errorf("PushConsent[a/reconciled] = %q, want %q", got, want)
+	}
+}
+
 // TestJournalIndexConsentAbsentForOperatorEdges: an operator `chain edit`
 // stamps no consent, and a later one re-placing an edge strips the
 // machine attribution an earlier groom had. Attribution rides the same

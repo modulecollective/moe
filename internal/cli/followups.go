@@ -246,7 +246,11 @@ func markHarvested(line, baseSlug, resolvedSlug string) (string, bool) {
 // progress commit took the dirty file with it.
 func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) error {
 	relPath := run.FollowupsPath(projectID, runID)
-	openTrailers := trailers.Block{FromRun: projectID + "/" + runID}
+	// enterTerminal harvests on every close and merge, so these idea
+	// opens land inside a ride's window as often as they land under an
+	// operator's own `moe close`. Same stamp rule as the close commit
+	// they ride beside.
+	openTrailers := trailers.Block{FromRun: projectID + "/" + runID, Consent: walkConsent()}
 
 	spec := scratchHarvestSpec[parsedFollowup]{
 		relPath:         relPath,

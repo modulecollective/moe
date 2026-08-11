@@ -394,6 +394,13 @@ func operatorActed(root, projectID, rev string) bool {
 // machineAuthored reports whether a commit body carries either machine
 // mark. Its inverse is what both halves of the quiet window call
 // operator-authored, so the two cannot drift apart.
+//
+// It is only as good as the marks: a machine commit that lands unstamped
+// reads as the operator's here, which costs the sweep-exit walk a
+// redundant sweep and the quiet window a tick of hesitation. walkConsent
+// (ridemode.go) is the rule that keeps the journal honest for it — an
+// emit site that skips the stamp is what breaks this predicate, not
+// anything in this file.
 func machineAuthored(body string) bool {
 	return strings.Contains(body, "\nMoE-Consent:") || strings.Contains(body, "\nMoE-Spawned-By:")
 }

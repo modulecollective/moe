@@ -260,6 +260,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			Run:      runID,
 			Project:  projectID,
 			Workflow: workflow,
+			Consent:  walkConsent(),
 		}.String()
 	if err := sync.WithJournalPush(root, repolock.Options{
 		Purpose: workflow + "-close",

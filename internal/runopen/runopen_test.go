@@ -461,7 +461,7 @@ func TestMarkPromotedWritesTheEdgeForAnUnmintedDestination(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 	seedRunMetadata(t, root, "alpha", "reflect-2026-05-14", "twin", run.StatusInProgress)
 
-	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", io.Discard, io.Discard); err != nil {
+	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", "", io.Discard, io.Discard); err != nil {
 		t.Fatalf("MarkPromoted: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -482,7 +482,7 @@ func TestMarkPromotedWritesTheEdgeForAnUnmintedDestination(t *testing.T) {
 		}
 	}
 	// Second call refuses: the idea is no longer in progress.
-	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", io.Discard, io.Discard); err == nil {
+	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", "", io.Discard, io.Discard); err == nil {
 		t.Error("MarkPromoted on a promoted idea = nil error, want a refusal")
 	}
 }

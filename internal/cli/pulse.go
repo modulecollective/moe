@@ -439,6 +439,12 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 		IDBase:   pulseWorkflow,
 		Workflow: pulseWorkflow,
 		SeedDocs: map[string]string{pulseDoc: pulseCanvasSkeleton},
+		// No MoE-Spawned-By (see above), so this is the one mint whose
+		// consent stands alone rather than decorating a spawn edge —
+		// and it is the first commit of the range a sweep's own exit
+		// walks. Unstamped, the sweep's opening act read as the
+		// operator's.
+		Trailers: trailers.Block{Consent: walkConsent()},
 	}, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
@@ -1101,7 +1107,7 @@ func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr 
 		if id == "" {
 			return ""
 		}
-		if markErr := runopen.MarkPromoted(m.root, projectID, idea.ID, projectID, id, stdout, stderr); markErr != nil {
+		if markErr := runopen.MarkPromoted(m.root, projectID, idea.ID, projectID, id, walkConsent(), stdout, stderr); markErr != nil {
 			moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
 		}
 		moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)

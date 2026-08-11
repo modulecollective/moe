@@ -32,6 +32,7 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 			Workflow: md.Workflow,
 			Document: docID,
 			Session:  md.Documents[docID].Session,
+			Consent:  walkConsent(),
 		}.String()
 	err := run.StageAndCommit(root, msg, runJSON)
 	if errors.Is(err, run.ErrNothingToCommit) {
@@ -68,6 +69,7 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 			Project:  md.Project,
 			Workflow: md.Workflow,
 			Document: docID,
+			Consent:  walkConsent(),
 		}.String()
 	return git.Run(root, "commit", "--allow-empty", "-m", msg)
 }
@@ -107,6 +109,7 @@ func commitWikiTurn(workRoot, workflow, projectID, runSlug, docID, wikiRel strin
 			Project:  projectID,
 			Workflow: workflow,
 			Document: docID,
+			Consent:  walkConsent(),
 		}.String()
 	return run.StageAndCommit(workRoot, msg, paths...)
 }
@@ -151,6 +154,7 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 			Workflow: md.Workflow,
 			Document: docID,
 			Session:  md.Documents[docID].Session,
+			Consent:  walkConsent(),
 		}.String()
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
 	// followups.md is sibling of run.json — stages append to it as

@@ -94,6 +94,32 @@ func consentTrailerValue() (value string, active bool) {
 	return currentRideMode.String(), rideWalkActive
 }
 
+// walkConsent is the MoE-Consent value for a journal commit written by
+// an emit site shared between operator verbs and machine walks: the ride
+// level while a walk is in flight, and "" otherwise. It is the whole
+// stamp rule in one call — every such site spells it the same way, so
+// the set of machine-marked commits can't drift site by site.
+//
+// The rule exists because MoE-Consent is documented as *the* machine
+// marker ("Presence is the machine marker", trailers.Block.Consent) and
+// serve's heartbeat promises every act it takes is journal-marked —
+// neither of which was true of the run-lifecycle commits a walk lands.
+// A sweep's own `Open run` / `work: start session for pulse` / `work:
+// update pulse` / `Close pulse run` carried no mark at all, so a reader
+// asking "did the operator do this" read the machine's own exhaust as
+// the operator's.
+//
+// Empty when no walk is active, so an operator's commit message stays
+// byte-identical to what it was before this landed — the stamp records
+// a fact about the process, and typing `moe close` yourself is not it.
+func walkConsent() string {
+	value, active := consentTrailerValue()
+	if !active {
+		return ""
+	}
+	return value
+}
+
 // spawnConsent is the MoE-Consent value for the open commit of a run
 // being minted with spawnedBy. It pairs with MoE-Spawned-By rather than
 // standing alone: `spawned_by` present already means machine-opened, so

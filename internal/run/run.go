@@ -1206,7 +1206,16 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		// Push records are the run's own commits (MoE-Run + Document:
 		// push), so they key by runKey like the rest. Only machine-driven
 		// pushes carry consent, so a hit is the ship-under-a-ride fact.
-		if consent != "" && docID == "push" {
+		//
+		// The subject pin is what keeps that fact about the *ship*: a
+		// push stage's own session-start and work-turn commits carry
+		// Document: push too, and every commit a machine walk lands is
+		// consent-stamped, so a ride whose push stage opened and then
+		// died would otherwise mint a "shipped under a machine walk"
+		// provenance hop for a run that never shipped. Same
+		// subject-pinning idiom the work-turn and advance-marker arms
+		// below use.
+		if consent != "" && docID == "push" && isPushRecordSubject(subject) {
 			if _, ok := idx.PushConsent[runKey]; !ok {
 				idx.PushConsent[runKey] = consent
 			}
@@ -1251,6 +1260,15 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		idx.DailyRunCountByProject[proj] = perProject
 	}
 	return idx, nil
+}
+
+// isPushRecordSubject reports whether subject is one of the terminal
+// records that mean a run actually shipped: `push: <p>/<r>` and
+// `push: <p>/<r> merged` from push.go, `sync: <p>/<r> <status>` from
+// sync.go reconciling an upstream merge. Everything else carrying
+// Document: push is stage traffic on the way there.
+func isPushRecordSubject(subject string) bool {
+	return strings.HasPrefix(subject, "push: ") || strings.HasPrefix(subject, "sync: ")
 }
 
 // splitChainPair splits a MoE-Chained-To / -Removed trailer value into

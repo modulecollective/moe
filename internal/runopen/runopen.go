@@ -176,7 +176,7 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 	if err != nil {
 		return Promoted{}, err
 	}
-	markErr := markIdeaPromoted(root, src, md.Project, md.ID, stdout, stderr)
+	markErr := markIdeaPromoted(root, src, md.Project, md.ID, opts.Consent, stdout, stderr)
 	return Promoted{Run: md, MarkErr: markErr}, nil
 }
 
@@ -215,7 +215,7 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 // core either minted or mapped onto. The promotion edge is the same one
 // either way, so the journal, the dash, and `moe idea reopen` read a
 // twin-tagged idea exactly like any other promoted idea.
-func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug string, stdout, stderr io.Writer) error {
+func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
 	if destProjectID == "" || destSlug == "" {
 		return errors.New("runopen: MarkPromoted requires a destination run")
 	}
@@ -229,7 +229,7 @@ func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug string, std
 	if md.Status != run.StatusInProgress {
 		return fmt.Errorf("runopen: idea %s/%s is already %s", projectID, ideaSlug, md.Status)
 	}
-	return markIdeaPromoted(root, md, destProjectID, destSlug, stdout, stderr)
+	return markIdeaPromoted(root, md, destProjectID, destSlug, consent, stdout, stderr)
 }
 
 // markIdeaPromoted bumps the source idea run's status to
@@ -237,7 +237,14 @@ func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug string, std
 // trailer pointing at the destination run. Separate commit from the
 // destination's open: two short commits keep git history honest (one
 // event per commit).
-func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug string, stdout, stderr io.Writer) error {
+//
+// consent is the caller's MoE-Consent value — the same one the
+// destination's open commit carries — and is empty for an operator's
+// `moe idea promote`. Both halves of the promotion are one act, so a
+// pulse's promote leaves two machine-marked commits rather than a
+// marked open beside an unmarked status bump sitting in the same sweep
+// window.
+func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, destProjectID, destSlug) +
@@ -246,6 +253,7 @@ func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug str
 			Project:    md.Project,
 			Workflow:   dash.IdeaWorkflow,
 			PromotedTo: destProjectID + "/" + destSlug,
+			Consent:    consent,
 		}.String()
 	return sync.WithJournalPush(root, repolock.Options{
 		Purpose: "idea-promote",

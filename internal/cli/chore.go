@@ -339,7 +339,7 @@ func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, s
 		IDBase:   state.Definition.Name,
 		Workflow: state.Definition.Workflow,
 		SeedDocs: map[string]string{stages[0]: prompt},
-		Trailers: trailers.Block{Chore: state.Definition.Key()},
+		Trailers: trailers.Block{Chore: state.Definition.Key(), Consent: walkConsent()},
 	}, stdout, stderr)
 	if err != nil {
 		return nil, err

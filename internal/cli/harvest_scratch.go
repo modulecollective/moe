@@ -212,6 +212,7 @@ func commitScratchProgress[T any](root, projectID, runID, workflow string, spec 
 			Run:      runID,
 			Project:  projectID,
 			Workflow: workflow,
+			Consent:  walkConsent(),
 		}.String()
 	paths := append([]string{spec.relPath}, spec.progressPaths...)
 	return run.StageAndCommit(root, msg, paths...)

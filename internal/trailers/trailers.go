@@ -67,6 +67,14 @@ type Block struct {
 	// "no consent given". An absent trailer means either an operator
 	// action or a commit written before the trailer landed; readers
 	// must not read absence as "operator" for history.
+	//
+	// "Presence is the machine marker" is a claim about coverage, and
+	// the emit sites are what make it true: every journal commit package
+	// cli writes while a machine walk is in flight stamps this, through
+	// the one walkConsent() call each site shares. The heartbeat's
+	// sweep-exit walk reads that coverage directly — a machine commit
+	// that lands unstamped reads as the operator's and costs a
+	// redundant sweep — so a new emit site owes the stamp.
 	Consent string
 	Chore   string
 	// ChoreSkipped carries "<project>/<chore>" on the empty commit
