@@ -124,10 +124,12 @@ during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
 step away, and the chain codes, reviews, tests, and ships unattended — each run
 still gated, journaled, and revertible in the morning.
 
-This is deliberately not scheduling. Every chain is rooted in one operator
-trigger; MoE ships no cron and nothing starts on a clock. The story is "you
-pull the trigger at 6pm and the work outlasts your attention", not "MoE runs at
-night".
+This is deliberately not scheduling. Every chain roots in operator consent,
+which is either typed — the bang you fire — or standing, an armed `moe serve
+--dynamic` whose [heartbeat](#the-heartbeat) is the one clock MoE carries and
+whose retraction is stopping the process. MoE ships no cron of anyone else's
+and no calendar-fired run. Typed, the story is "you pull the trigger at 6pm and
+the work outlasts your attention", not "MoE runs at night".
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
 — every operator-cascade workflow (SDLC, twin) plus chain heads — grouped into
@@ -317,8 +319,9 @@ trust an agent to run unattended. A chore is standing intent instead: it turns
 recurring project maintenance into runs you open on demand. A chore definition
 says what maintenance is due, when it becomes due, and which workflow run to
 open for it. MoE evaluates chores against the journal and surfaces the due ones
-— but nothing fires on its own. A due chore is a seeded run waiting in
-`moe dash` until you choose to open it.
+— but going due never executes anything. `moe chore open`, or a pulse's chore
+auto-open, mints the seeded run; from there it waits in `moe dash` like any
+other run until you choose to start it.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:
@@ -444,7 +447,8 @@ moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted swe
 The survey blocks with a `Ctrl-C to skip` banner; interrupting it abandons the
 sweep and leaves the run open for a manual sitting or close. `moe pulse new` is
 also the verb an external cron would call — the primitives are cron-safe, but
-MoE ships no scheduler of its own.
+MoE ships no cron of anyone else's. The one clock it does carry is the armed
+serve's own heartbeat, described below.
 
 The survey's first turn carries a GitHub context block the harness gathered:
 PRs merged since the last pulse (marking the ones that landed outside moe, which
