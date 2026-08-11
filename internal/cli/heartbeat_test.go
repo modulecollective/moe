@@ -116,10 +116,10 @@ func TestHeartbeatSweepsWhenSettledWorkIsParked(t *testing.T) {
 	}
 }
 
-// sweepFixture is the shape every parked-leg cursor test starts from: a
-// board with one parked settled thread, a gate that has offered it once,
-// and the run-open/close commits a survey leaves behind. The caller says
-// how that survey ended.
+// sweptOnceOverParkedWork is the shape every parked-leg cursor test
+// starts from: a board with one parked settled thread, a gate that has
+// offered it once, and the run-open/close commits a survey leaves
+// behind. The caller says how that survey ended.
 //
 // Returns the gate, ready for the tick *after* the sweep.
 func sweptOnceOverParkedWork(t *testing.T, root string, clean bool) *heartbeatGate {
