@@ -274,6 +274,38 @@ func TestHeartbeatMovesOnceTheOperatorIsQuiet(t *testing.T) {
 	}
 }
 
+// TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator is the masking
+// case: the operator arranges loose runs by hand, and a ride merging and
+// closing lands its own commit on top before the next tick. Reading only
+// the tip, the machine sees a machine commit and helps itself to a board
+// whose arrangement is minutes old — the staging race the window exists
+// to close, arriving through the one door a tip-only read leaves open.
+func TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	journalCommit(t, root, "moe", "chain: edit", "")
+	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
+
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
+		t.Errorf("due = %v with the operator's act masked by a machine commit, want none", got)
+	}
+}
+
+// TestHeartbeatMovesOnceAMaskedOperatorIsQuiet: the masked board a tick
+// later. The window scan is a hesitation like the tip check it joins, so
+// it must expire on the same terms.
+func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	journalCommit(t, root, "moe", "chain: edit", "")
+	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
+
+	var log bytes.Buffer
+	if got := newHeartbeatGate(root).Due(0, &log); len(got) != 1 {
+		t.Errorf("due = %v once the quiet window passed, want [moe]\n%s", got, log.String())
+	}
+}
+
 // TestHeartbeatStandsDownForALiveSession: a ride mid-hop or an operator
 // sitting in a stage means somebody is already inside the project, and
 // the tail-pulse path owns the next sweep.

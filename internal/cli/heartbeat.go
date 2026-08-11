@@ -69,9 +69,11 @@ func newHeartbeatGate(root string) *heartbeatGate {
 //
 // Read-only and cheap by construction — one run scan, one journal index
 // (memoized on HEAD), one ref listing, and one `git log -1` per project.
-// A quiet board therefore costs no agent turn, no run, and no journal
-// noise, which is the whole reason a fixed cadence can be baked rather
-// than tuned.
+// A project whose tip is machine-authored and younger than one tick pays
+// one more log, scanning the window for a masked operator act; a quiet
+// board never reaches it. A quiet board therefore costs no agent turn, no
+// run, and no journal noise, which is the whole reason a fixed cadence
+// can be baked rather than tuned.
 //
 // Warn-only throughout, mirroring the pulse itself: a read that fails
 // drops the project from this tick rather than failing the tick. The
@@ -143,7 +145,12 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	// hand is never picked up while it is still being arranged. Staging
 	// can skip the window entirely by minting straight into a chain head
 	// — the fence the groom step honours.
-	if operatorTip && now.Sub(tipAt) < tick {
+	//
+	// The whole window, not just its tip: a machine commit landing on top
+	// of a hand-edit — a ride merging and closing while the operator
+	// stages loose runs — would otherwise mask the act it landed on and
+	// hand the half-arranged board straight to a sweep.
+	if now.Sub(tipAt) < tick && (operatorTip || operatorActedSince(g.root, projectID, now.Add(-tick))) {
 		return ""
 	}
 
@@ -276,8 +283,42 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 	if err != nil {
 		return "", time.Time{}, false, false
 	}
-	machine := strings.Contains(parts[2], "\nMoE-Consent:") || strings.Contains(parts[2], "\nMoE-Spawned-By:")
-	return parts[0], when, !machine, true
+	return parts[0], when, !machineAuthored(parts[2]), true
+}
+
+// operatorActedSince reports whether any journal commit touching the
+// project since t is operator-authored. It is the quiet window's real
+// question — the tip alone answers a narrower one, and a machine commit
+// landing on top of a hand-edit is exactly how the two diverge.
+//
+// --since filters on committer date, the same field the tip read compares
+// (%cI), so both halves of the window agree on what "younger than one
+// tick" means. Warn-only like every other read here: an unreadable log
+// reports no operator act and leaves the tip's answer standing.
+func operatorActedSince(root, projectID string, since time.Time) bool {
+	out, err := git.Output(root, "log", "--since="+since.Format(time.RFC3339), "--format=%x00%B", "--", "projects/"+projectID)
+	if err != nil {
+		return false
+	}
+	for body := range strings.SplitSeq(out, "\x00") {
+		if strings.TrimSpace(body) == "" {
+			// The leading empty field before the first commit's %x00, and
+			// the padding git puts between bodies. Neither is a commit, and
+			// reading one as operator-authored would hold every project.
+			continue
+		}
+		if !machineAuthored(body) {
+			return true
+		}
+	}
+	return false
+}
+
+// machineAuthored reports whether a commit body carries either machine
+// mark. Its inverse is what both halves of the quiet window call
+// operator-authored, so the two cannot drift apart.
+func machineAuthored(body string) bool {
+	return strings.Contains(body, "\nMoE-Consent:") || strings.Contains(body, "\nMoE-Spawned-By:")
 }
 
 // parkedKickableThread returns a thread root the heartbeat could start,
