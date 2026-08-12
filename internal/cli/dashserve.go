@@ -37,12 +37,15 @@ type serveState struct {
 	snap serve.ActivitySnapshot
 	ok   bool // a serve has written a state file here
 	err  error
+	// alive is the pid probe, taken once: the banner and the rows below
+	// it must not disagree about whether the process is still there.
+	alive bool
 }
 
 // readServeState reads the snapshot for one dash frame.
 func readServeState(root string) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
-	return serveState{snap: snap, ok: ok, err: err}
+	return serveState{snap: snap, ok: ok, err: err, alive: ok && repolock.ProcessAlive(snap.Pid)}
 }
 
 // bannerCluster is the serve status the banner carries in its tail:
@@ -60,7 +63,7 @@ func (s serveState) bannerCluster(now time.Time) string {
 	if !s.ok {
 		return ""
 	}
-	if !repolock.ProcessAlive(s.snap.Pid) {
+	if !s.alive {
 		return fmt.Sprintf("serve dead (pid %d) · stale %s",
 			s.snap.Pid, dash.HumanDuration(now.Sub(s.snap.WrittenAt)))
 	}
@@ -97,7 +100,7 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 		cliout.Printf(w, "%v\n", s.err)
 		return
 	}
-	if !s.ok || !repolock.ProcessAlive(s.snap.Pid) {
+	if !s.alive {
 		// A dead serve's project records are as stale as its stamp; the
 		// banner's "dead" is the whole message.
 		return
