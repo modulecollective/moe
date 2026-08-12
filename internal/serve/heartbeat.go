@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -54,15 +55,35 @@ const heartbeatBackoffCap = 6
 // and its notify hook for free.
 const heartbeatChildPrefix = "heartbeat:"
 
+// HeartbeatDecision is one project's verdict for one tick: whether to
+// sweep it, and the gate's own words for why.
+//
+// The reason is the display string, not a code. Every one of them is a
+// sentence the gate already had to compose to make the call, so
+// returning them costs the gate nothing and buys the operator the whole
+// trace — "the journal moved", "a sweep already surveyed the current
+// tip", "somebody is already inside the project". Nothing parses them
+// back, and nothing branches on them.
+type HeartbeatDecision struct {
+	Project string
+	Sweep   bool
+	Reason  string
+}
+
 // Heartbeat is the cli-side gate the ticker consults. Implemented by
 // cli's heartbeatGate; nil on Options disables the heartbeat entirely,
 // which is how every test that doesn't care about it opts out.
 type Heartbeat interface {
-	// Due returns the project ids whose board warrants a sweep now,
-	// given the tick length (the one-quiet-tick rule needs it). It also
-	// runs the reap of dead machine sessions. Read-only otherwise, and
-	// warn-only: a failed read drops a project rather than the tick.
-	Due(tick time.Duration, log io.Writer) []string
+	// Due returns one decision per project the gate looked at, given the
+	// tick length (the one-quiet-tick rule needs it). It also runs the
+	// reap of dead machine sessions. Read-only otherwise, and warn-only:
+	// a failed read drops a project rather than the tick.
+	//
+	// Every project's verdict crosses the seam, not just the ones to
+	// sweep. "Serve owns the clock, cli owns the judgement" is unchanged
+	// — the verdicts already crossed here; now they cross with their
+	// reasons attached instead of losing them to stderr.
+	Due(tick time.Duration, log io.Writer) []HeartbeatDecision
 	// Swept records that a project's heartbeat sweep has finished, so
 	// the sweep's own journal commits don't read as a delta worth
 	// sweeping again. clean reports whether the child exited zero, which
@@ -99,20 +120,22 @@ func (h *heartbeat) cooling(projectID string) (bool, int, int) {
 	return true, left - 1, h.fails[projectID]
 }
 
-// record folds one finished sweep into the ledger and returns the
-// cool-off it earned (0 for a clean sweep, which resets).
-func (h *heartbeat) record(projectID string, failed bool) int {
+// record folds one finished sweep into the ledger and returns the run of
+// failures it now stands at and the cool-off it earned (0, 0 for a clean
+// sweep, which resets both). The activity record keeps a copy for the
+// dash, which is why both come back rather than just the skip count.
+func (h *heartbeat) record(projectID string, failed bool) (fails, skip int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !failed {
 		delete(h.fails, projectID)
 		delete(h.skip, projectID)
-		return 0
+		return 0, 0
 	}
 	h.fails[projectID]++
-	skip := min(1<<(h.fails[projectID]-1), heartbeatBackoffCap)
+	skip = min(1<<(h.fails[projectID]-1), heartbeatBackoffCap)
 	h.skip[projectID] = skip
-	return skip
+	return h.fails[projectID], skip
 }
 
 // runHeartbeat is the ticker loop. Started by ListenAndServe when the
@@ -140,11 +163,28 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 }
 
 // heartbeatTick is one pass: ask the gate, filter by the ticker's own
-// state, spawn what's left.
+// state, spawn what's left, and record the whole verdict set — swept and
+// skipped alike — into the activity record both dashes read.
 func (s *Server) heartbeatTick() {
-	for _, projectID := range s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter()) {
+	now := time.Now()
+	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
+	s.activity.recordTick(now, decisions)
+	s.saveActivity()
+
+	for _, d := range decisions {
+		if !d.Sweep {
+			continue
+		}
+		projectID := d.Project
 		if cooling, left, fails := s.heartbeat.cooling(projectID); cooling {
 			s.logf("heartbeat: %s cooling off after %d failure(s) — %d tick(s) left", projectID, fails, left)
+			// The gate wanted this project swept and the backoff held it,
+			// so the gate's reason is not what happened. Overwrite it or
+			// the panel would read "sweeping — the journal moved" for a
+			// project that is doing nothing of the kind.
+			s.activity.recordSkip(projectID,
+				fmt.Sprintf("cooling off after %d failure(s)", fails), fails, left)
+			s.saveActivity()
 			continue
 		}
 		// A heartbeat child of our own still running is the ticker's
@@ -163,6 +203,8 @@ func (s *Server) heartbeatTick() {
 			continue
 		}
 		s.logf("heartbeat: sweeping %s", projectID)
+		s.activity.recordSweepStart(projectID, child.started)
+		s.saveActivity()
 		go s.awaitHeartbeat(projectID, child)
 	}
 }
@@ -181,9 +223,12 @@ func (s *Server) awaitHeartbeat(projectID string, c *child) {
 	<-c.done
 	failed := c.exitErr != nil
 	s.opts.Heartbeat.Swept(projectID, !failed)
-	if skip := s.heartbeat.record(projectID, failed); skip > 0 {
+	fails, skip := s.heartbeat.record(projectID, failed)
+	if skip > 0 {
 		s.logf("heartbeat: %s failed (%v) — skipping %d tick(s)", projectID, c.exitErr, skip)
 	}
+	s.activity.recordSweepEnd(projectID, time.Now(), !failed, fails, skip)
+	s.saveActivity()
 }
 
 // heartbeatProject returns the project a child id names when the child

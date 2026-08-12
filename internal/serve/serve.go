@@ -45,6 +45,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -277,6 +278,10 @@ type Server struct {
 	router    *http.ServeMux
 	children  *children
 	heartbeat *heartbeat
+	// activity is the runtime record both dashes read: process facts, the
+	// heartbeat's last verdicts, and a bounded ring of what it has been
+	// doing. See activity.go.
+	activity *activity
 }
 
 //go:embed templates/*.html static/*
@@ -309,9 +314,18 @@ func New(opts Options) (*Server, error) {
 		router:    http.NewServeMux(),
 		children:  newChildren(),
 		heartbeat: newHeartbeat(),
+		activity:  newActivity(os.Getpid(), addr, opts.Dynamic, time.Now()),
 	}
 	if opts.NotifyURL != "" {
 		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
+	}
+	s.children.onSpawn = func(id string, at time.Time) {
+		s.activity.recordChildSpawn(id, at)
+		s.saveActivity()
+	}
+	s.children.onExit = func(id string, at time.Time, exitErr error, tail string) {
+		s.activity.recordChildExit(id, at, exitErr, cleanTail(tail))
+		s.saveActivity()
 	}
 	s.registerRoutes()
 	return s, nil
@@ -338,6 +352,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("serve: listen %s: %w", s.addr, err)
 	}
 	s.logf("listening on http://%s/", s.addr)
+	// The state file goes down as soon as the listener is up, so `moe
+	// dash` can see an armed serve before its first tick — "up, nothing
+	// swept yet" is a different answer from "no serve at all", and both
+	// are worth telling apart.
+	s.saveActivity()
 	if s.opts.Dynamic {
 		s.logf("DYNAMIC: armed — the heartbeat may start settled work, and anything that can reach http://%s/ can execute code", s.addr)
 	}
@@ -376,6 +395,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			shutdownSoftGrace+shutdownHangupGrace+2*time.Second)
 		defer childCancel()
 		s.children.shutdown(childCtx, s.opts.Logger)
+		// A clean exit takes the state file with it. That is what makes a
+		// file left behind mean something: it names a pid, and a pid that
+		// is gone is a serve that crashed rather than one that stopped.
+		if err := removeSnapshot(s.opts.Root); err != nil {
+			s.logf("serve: remove state file: %v", err)
+		}
 		return <-errCh
 	case err := <-errCh:
 		return err
@@ -507,11 +532,16 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dash error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	vm := newDashVM(time.Now().UTC(), rows, projectCount, activeProjects, histogram, completedCap(r))
+	now := time.Now().UTC()
+	vm := newDashVM(now, rows, projectCount, activeProjects, histogram, completedCap(r))
 	if r.URL.Query().Get("fragment") != "" {
+		// A show-more fetch wants COMPLETED rows and nothing else.
 		s.render(w, r, "completed_chunk.html", vm.Completed)
 		return
 	}
+	// From memory, not from the state file: serve holds the record, and a
+	// round trip through its own snapshot would only add a beat of lag.
+	vm.Serve = s.activity.panel(now, "")
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path
@@ -556,6 +586,18 @@ func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
 		"serve is in safe mode; restart with --dynamic (or set MOE_SERVE_DYNAMIC) to enable run-spawning actions",
 		http.StatusForbidden)
 	return false
+}
+
+// saveActivity rewrites the state file from the current record.
+// Warn-only: the file is a convenience for `moe dash`, and a serve that
+// can't write it should still serve. Called from the ticker goroutine,
+// each sweep watcher, and the registry hooks — writeSnapshot is atomic,
+// so concurrent callers race only over which snapshot wins, and the next
+// event settles it.
+func (s *Server) saveActivity() {
+	if err := writeSnapshot(s.opts.Root, s.activity.snapshot(time.Now())); err != nil {
+		s.logf("serve: write state file: %v", err)
+	}
 }
 
 func (s *Server) logf(format string, a ...any) {

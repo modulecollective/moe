@@ -16,22 +16,31 @@ import (
 	"time"
 )
 
-// fakeHeartbeat is the cli-side gate, stubbed. due is what each pass
-// returns; swept records the cursor callbacks so a test can assert the
-// ticker closes the loop, and cleans the flag each one carried.
+// fakeHeartbeat is the cli-side gate, stubbed. due is the projects each
+// pass says to sweep and quiet the ones it stands down on; swept records
+// the cursor callbacks so a test can assert the ticker closes the loop,
+// and cleans the flag each one carried.
 type fakeHeartbeat struct {
 	mu     sync.Mutex
 	due    []string
+	quiet  []string
 	swept  []string
 	cleans []bool
 	passes int
 }
 
-func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []string {
+func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.passes++
-	return append([]string(nil), f.due...)
+	var out []HeartbeatDecision
+	for _, p := range f.due {
+		out = append(out, HeartbeatDecision{Project: p, Sweep: true, Reason: "the journal moved"})
+	}
+	for _, p := range f.quiet {
+		out = append(out, HeartbeatDecision{Project: p, Reason: "a sweep already surveyed the current tip"})
+	}
+	return out
 }
 
 func (f *fakeHeartbeat) Swept(projectID string, clean bool) {
@@ -224,7 +233,7 @@ func TestHeartbeatResetsBackoffOnACleanSweep(t *testing.T) {
 func TestHeartbeatBackoffIsCapped(t *testing.T) {
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true"})
 	for range 20 {
-		if skip := s.heartbeat.record("alpha", true); skip > heartbeatBackoffCap {
+		if _, skip := s.heartbeat.record("alpha", true); skip > heartbeatBackoffCap {
 			t.Fatalf("skip = %d, want no more than the cap %d", skip, heartbeatBackoffCap)
 		}
 	}
@@ -332,6 +341,125 @@ func TestArmedServeTicks(t *testing.T) {
 	}
 	if got := argv(); !strings.Contains(got, "pulse new --dynamic alpha") {
 		t.Errorf("armed serve spawned %q, want the dynamic sweep", got)
+	}
+}
+
+// TestHeartbeatTickRecordsTheWholeVerdictSet: the ticker only spawns for
+// the sweeps, but the record has to carry the stand-downs too — those are
+// the trace that used to go to stderr and die there.
+func TestHeartbeatTickRecordsTheWholeVerdictSet(t *testing.T) {
+	bin, _ := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}, quiet: []string{"beta"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+
+	vm := s.activity.panel(time.Now(), "")
+	states := map[string]string{}
+	for _, p := range vm.Projects {
+		states[p.Project] = p.Reason
+	}
+	if len(states) != 2 {
+		t.Fatalf("recorded projects = %v, want the swept and the quiet one", states)
+	}
+	if states["beta"] != "a sweep already surveyed the current tip" {
+		t.Errorf("beta reason = %q, want the gate's stand-down words", states["beta"])
+	}
+	if states["alpha"] != "the journal moved" {
+		t.Errorf("alpha reason = %q, want the gate's sweep words", states["alpha"])
+	}
+}
+
+// TestHeartbeatTickWritesTheStateFile: `moe dash` has no channel to a
+// running serve but the file, so a tick that doesn't write it is a tick
+// the terminal can't see.
+func TestHeartbeatTickWritesTheStateFile(t *testing.T) {
+	bin, _ := argvRecorder(t, 0)
+	root := t.TempDir()
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: bin, Heartbeat: gate,
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	waitFor(t, "the state file to name the sweep", func() bool {
+		snap, ok, err := ReadActivitySnapshot(root)
+		if !ok || err != nil {
+			return false
+		}
+		return len(snap.Projects) == 1 && snap.Projects[0].Decision == "the journal moved" &&
+			!snap.Projects[0].SweptAt.IsZero() && snap.Projects[0].SweepClean
+	})
+}
+
+// TestHeartbeatRecordsTheCoolOffAsWhatHappened: the gate said sweep and
+// the ticker's backoff said no. The record has to say the second, or the
+// dash reads "sweeping" for a project standing still.
+func TestHeartbeatRecordsTheCoolOffAsWhatHappened(t *testing.T) {
+	bin, _ := argvRecorder(t, 1)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+	})
+
+	state := func() serveProjectVM {
+		t.Helper()
+		vm := s.activity.panel(time.Now(), "")
+		if len(vm.Projects) != 1 {
+			t.Fatalf("panel projects = %+v, want alpha", vm.Projects)
+		}
+		return vm.Projects[0]
+	}
+
+	// One failure earns one skipped tick, and the tick after it spends the
+	// whole cool-off — so the project is back to plain "failed".
+	s.heartbeatTick()
+	waitFor(t, "the failed sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	s.heartbeatTick()
+	if got := state(); got.State != "failed" || !got.Failed {
+		t.Errorf("project line = %+v after a spent cool-off, want a failed state", got)
+	}
+
+	// A second failure earns two, so the tick after it leaves one
+	// outstanding — the state that has to read as "held back", not "about
+	// to sweep".
+	s.heartbeatTick()
+	waitFor(t, "the second failed sweep", func() bool { return len(gate.sweptList()) == 2 })
+	s.heartbeatTick()
+	got := state()
+	if got.State != "cooling" || !got.Failed {
+		t.Fatalf("project line = %+v with a cool-off outstanding, want a cooling state", got)
+	}
+	if !strings.Contains(got.Detail, "1 tick left") {
+		t.Errorf("cooling detail = %q, want the ticks left", got.Detail)
+	}
+}
+
+// TestServeRemovesTheStateFileOnCleanShutdown is what makes a leftover
+// file mean something: it names a pid, and a pid that is gone is a serve
+// that crashed rather than one that stopped.
+func TestServeRemovesTheStateFileOnCleanShutdown(t *testing.T) {
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/true"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- s.ListenAndServe(ctx) }()
+
+	waitFor(t, "the state file to appear on listen", func() bool {
+		_, ok, _ := ReadActivitySnapshot(root)
+		return ok
+	})
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+	if _, ok, _ := ReadActivitySnapshot(root); ok {
+		t.Error("the state file survived a clean shutdown")
 	}
 }
 

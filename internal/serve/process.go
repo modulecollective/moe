@@ -38,6 +38,16 @@ var shutdownSoftGrace = 10 * time.Second
 // is roughly shutdownIntrGap + shutdownSoftGrace + shutdownHangupGrace.
 var shutdownHangupGrace = 10 * time.Second
 
+// childTailBytes is how much of a child's PTY output the registry keeps.
+// A sweep that dies to a vendor error used to leave an exit code and
+// nothing else; 8KB is a few screens — the error, whatever framed it, and
+// the moe line around that — which is the difference between a glance
+// and an ssh session.
+//
+// Bounded and in memory only. It never reaches the state file, which
+// stays small enough for `moe dash` to re-read on every watch repaint.
+const childTailBytes = 8 << 10
+
 // child is one PTY-backed moe run the server is parenting.
 type child struct {
 	id      string // "<project>/<slug>" — known at spawn time
@@ -47,6 +57,11 @@ type child struct {
 
 	done    chan struct{}
 	exitErr error
+
+	// tailMu guards tailBuf, which the reader goroutine appends to while
+	// a request handler may be rendering it.
+	tailMu  sync.Mutex
+	tailBuf []byte
 }
 
 // children is the live PTY-child registry, keyed by id.
@@ -57,6 +72,13 @@ type children struct {
 	// shutdown). Empty by default; Server.New wires it when
 	// Options.NotifyURL is set.
 	notify func(id string, exitErr error)
+	// onSpawn and onExit are the activity record's hooks: one call per
+	// child started, one per child reaped, with the output tail attached
+	// to the second. Wired once in Server.New so every spawn site — a
+	// phone-launched run, a chore, a heartbeat sweep — lands in the ring
+	// without each one remembering to say so.
+	onSpawn func(id string, at time.Time)
+	onExit  func(id string, at time.Time, exitErr error, tail string)
 }
 
 func newChildren() *children {
@@ -109,11 +131,14 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 		started: time.Now(),
 		done:    make(chan struct{}),
 	}
-	notify := cs.notify
+	notify, onSpawn, onExit := cs.notify, cs.onSpawn, cs.onExit
 	cs.all[id] = c
 	cs.mu.Unlock()
 
-	go c.read(logger, notify)
+	if onSpawn != nil {
+		onSpawn(id, c.started)
+	}
+	go c.read(logger, notify, onExit)
 	return c, nil
 }
 
@@ -245,13 +270,19 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 
 // read drains the master PTY until EIO, then reaps the child and
 // closes done. Calls notify (if non-nil) once the exit status is
-// known. Output is dropped on the floor — the per-run page is a
-// monitor surface, not a remote terminal; the agent inside moe
-// handles its own per-document transcript mirror at session close.
-func (c *child) read(logger io.Writer, notify func(string, error)) {
+// known, then onExit with the output tail.
+//
+// Only the last childTailBytes are kept, and only so a child that died
+// can say what of. This is still not a remote terminal — nothing streams,
+// nothing is stored past the process's own lifetime, and the agent inside
+// moe handles its own per-document transcript mirror at session close.
+func (c *child) read(logger io.Writer, notify func(string, error), onExit func(string, time.Time, error, string)) {
 	buf := make([]byte, 4096)
 	for {
-		_, err := c.pty.File().Read(buf)
+		n, err := c.pty.File().Read(buf)
+		if n > 0 {
+			c.appendTail(buf[:n])
+		}
 		if err != nil {
 			break
 		}
@@ -264,6 +295,28 @@ func (c *child) read(logger io.Writer, notify func(string, error)) {
 	if notify != nil {
 		notify(c.id, c.exitErr)
 	}
+	if onExit != nil {
+		onExit(c.id, time.Now(), c.exitErr, c.tail())
+	}
+}
+
+// appendTail folds one PTY read into the bounded tail, dropping the
+// oldest bytes once it is full.
+func (c *child) appendTail(p []byte) {
+	c.tailMu.Lock()
+	defer c.tailMu.Unlock()
+	c.tailBuf = append(c.tailBuf, p...)
+	if len(c.tailBuf) > childTailBytes {
+		c.tailBuf = c.tailBuf[len(c.tailBuf)-childTailBytes:]
+	}
+}
+
+// tail returns the kept output as a string. Safe to call while the
+// reader is still running.
+func (c *child) tail() string {
+	c.tailMu.Lock()
+	defer c.tailMu.Unlock()
+	return string(c.tailBuf)
 }
 
 // writeRaw writes b verbatim to the child's PTY — no newline, no

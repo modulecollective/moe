@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -67,13 +68,12 @@ func journalCommit(t *testing.T, root, projectID, subject, trailers string) {
 	}
 }
 
-// dueProjects runs one gate pass and returns what it would sweep.
+// dueProjects runs one gate pass and returns what it would sweep. Due
+// answers for every project now, so the sweep subset is what these tests
+// keep asserting on — the reasons have their own tests below.
 func dueProjects(t *testing.T, g *heartbeatGate) []string {
 	t.Helper()
-	var log bytes.Buffer
-	got := g.Due(testTick, &log)
-	t.Logf("gate log:\n%s", log.String())
-	return got
+	return sweepIDs(dueDecisions(t, g, testTick))
 }
 
 // dueProjectsPastTheWindow is dueProjects with a zero-length tick, which
@@ -83,10 +83,37 @@ func dueProjects(t *testing.T, g *heartbeatGate) []string {
 // this to reach the leg it is actually about.
 func dueProjectsPastTheWindow(t *testing.T, g *heartbeatGate) []string {
 	t.Helper()
+	return sweepIDs(dueDecisions(t, g, 0))
+}
+
+// dueDecisions runs one gate pass and returns the whole verdict set.
+func dueDecisions(t *testing.T, g *heartbeatGate, tick time.Duration) []serve.HeartbeatDecision {
+	t.Helper()
 	var log bytes.Buffer
-	got := g.Due(0, &log)
+	got := g.Due(tick, &log)
 	t.Logf("gate log:\n%s", log.String())
 	return got
+}
+
+func sweepIDs(decisions []serve.HeartbeatDecision) []string {
+	var ids []string
+	for _, d := range decisions {
+		if d.Sweep {
+			ids = append(ids, d.Project)
+		}
+	}
+	return ids
+}
+
+// reasonFor returns the gate's words for one project in a verdict set,
+// or "" when the project isn't in it at all.
+func reasonFor(decisions []serve.HeartbeatDecision, projectID string) string {
+	for _, d := range decisions {
+		if d.Project == projectID {
+			return d.Reason
+		}
+	}
+	return ""
 }
 
 // TestHeartbeatFirstLookIsQuiet: a serve that just armed has, correctly,
@@ -100,6 +127,46 @@ func TestHeartbeatFirstLookIsQuiet(t *testing.T) {
 
 	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
 		t.Errorf("due = %v on a first look at a quiet board, want none", got)
+	}
+}
+
+// TestHeartbeatStandDownReasonsCrossTheSeam: the gate's verdicts used to
+// leave only the sweeps behind, with every stand-down reason going to
+// stderr and dying there. That is why four heartbeat bugs had to be
+// diagnosed by reading code and inferring invisible cursor state. Now
+// every project's reason crosses with it, in the gate's own words.
+func TestHeartbeatStandDownReasonsCrossTheSeam(t *testing.T) {
+	root := quietFixture(t)
+	journalCommit(t, root, "moe", "operator: a note", "")
+	g := newHeartbeatGate(root)
+
+	// A hand-commit inside the window: the operator gets a full tick with
+	// their hands on the board before the machine moves.
+	if got := reasonFor(dueDecisions(t, g, testTick), "moe"); !strings.Contains(got, "operator commit") {
+		t.Errorf("reason = %q, want the quiet window named", got)
+	}
+
+	// Past the window, with a clean sweep on the current tip: whatever is
+	// parked, a survey already saw and left parked on purpose.
+	g.Swept("moe", true)
+	if got := reasonFor(dueDecisions(t, g, 0), "moe"); !strings.Contains(got, "surveyed the current tip") {
+		t.Errorf("reason = %q, want the surveyed cursor named", got)
+	}
+}
+
+// TestHeartbeatEveryProjectGetsAVerdict: the record is per project, so a
+// project the gate looked at and stood down on has to come back — an
+// absent project would render as one the heartbeat has never heard of.
+func TestHeartbeatEveryProjectGetsAVerdict(t *testing.T) {
+	root := quietFixture(t)
+	decisions := dueDecisions(t, newHeartbeatGate(root), testTick)
+	if len(decisions) == 0 {
+		t.Fatal("no verdicts at all on a registered board")
+	}
+	for _, d := range decisions {
+		if d.Reason == "" {
+			t.Errorf("project %s came back with no reason", d.Project)
+		}
 	}
 }
 
@@ -374,9 +441,8 @@ func TestHeartbeatMovesOnceTheOperatorIsQuiet(t *testing.T) {
 
 	// A zero-length tick makes any commit older than "now" quiet, which
 	// is the same predicate a real tick applies twenty minutes later.
-	var log bytes.Buffer
-	if got := newHeartbeatGate(root).Due(0, &log); len(got) != 1 {
-		t.Errorf("due = %v once the quiet window passed, want [moe]\n%s", got, log.String())
+	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v once the quiet window passed, want [moe]", got)
 	}
 }
 
@@ -406,9 +472,8 @@ func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
 	journalCommit(t, root, "moe", "chain: edit", "")
 	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
 
-	var log bytes.Buffer
-	if got := newHeartbeatGate(root).Due(0, &log); len(got) != 1 {
-		t.Errorf("due = %v once the quiet window passed, want [moe]\n%s", got, log.String())
+	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v once the quiet window passed, want [moe]", got)
 	}
 }
 

@@ -76,7 +76,8 @@ func newHeartbeatGate(root string) *heartbeatGate {
 	}
 }
 
-// Due answers one tick: which projects warrant a sweep right now.
+// Due answers one tick: for every project the gate looked at, whether it
+// warrants a sweep right now and the gate's own words for why.
 //
 // Read-only and cheap by construction — one run scan, one journal index
 // (memoized on HEAD), one ref listing, and one `git log -1` per project.
@@ -89,7 +90,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // Warn-only throughout, mirroring the pulse itself: a read that fails
 // drops the project from this tick rather than failing the tick. The
 // next one is twenty minutes away and re-derives everything.
-func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []string {
+func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
 	g.reap(log)
 
 	projects, _, err := project.List(g.root)
@@ -105,14 +106,19 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []string {
 	now := time.Now()
 	occupied := openSessionProjects(g.root, now)
 
-	var due []string
+	// Every project's verdict comes back, not just the ones to sweep: the
+	// stand-downs are the trace that used to be invisible, and the loop
+	// already computed them. Only the sweeps are logged, as before — a
+	// line per quiet project per tick would bury the ones that matter.
+	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
 	for _, p := range projects {
-		if reason := g.projectDue(sc, p.ID, occupied, tick, now, log); reason != "" {
+		sweep, reason := g.projectDue(sc, p.ID, occupied, tick, now, log)
+		if sweep {
 			fmt.Fprintf(log, "heartbeat: sweeping %s — %s\n", p.ID, reason)
-			due = append(due, p.ID)
 		}
+		decisions = append(decisions, serve.HeartbeatDecision{Project: p.ID, Sweep: sweep, Reason: reason})
 	}
-	return due
+	return decisions
 }
 
 // Swept records where a project's journal stood once its heartbeat
@@ -171,15 +177,19 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 	}
 }
 
-// projectDue is the per-project gate. Returns the reason to sweep, or
-// "" to stand down. Order is cheapest-first and stand-downs come last,
+// projectDue is the per-project gate. Returns whether to sweep and the
+// reason either way. Order is cheapest-first and stand-downs come last,
 // so a project that is going to be skipped costs the least work.
-func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map[string]bool, tick time.Duration, now time.Time, log io.Writer) string {
+//
+// The stand-down reasons are display strings — they cross the seam in
+// the decision and land on both dashes. They are not parsed anywhere,
+// and nothing branches on them.
+func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map[string]bool, tick time.Duration, now time.Time, log io.Writer) (bool, string) {
 	tip, tipAt, operatorTip, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		// A project with no journal history at all — freshly registered,
 		// nothing to survey.
-		return ""
+		return false, "no journal history yet"
 	}
 
 	// One quiet tick. The operator gets a full tick with their hands on
@@ -194,7 +204,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	// stages loose runs — would otherwise mask the act it landed on and
 	// hand the half-arranged board straight to a sweep.
 	if now.Sub(tipAt) < tick && (operatorTip || operatorActedSince(g.root, projectID, now.Add(-tick))) {
-		return ""
+		return false, "an operator commit landed within the last tick"
 	}
 
 	g.mu.Lock()
@@ -215,11 +225,11 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 		// forever. Any change to a thread's kickability is a journal
 		// commit, which the moved leg above catches.
 		if surveyed {
-			return ""
+			return false, "a sweep already surveyed the current tip"
 		}
 		parked = parkedKickableThread(g.root, sc, projectID)
 		if parked == "" {
-			return ""
+			return false, "the journal hasn't moved and nothing settled is parked"
 		}
 	}
 
@@ -244,7 +254,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	// Repeat failures are bounded by that backoff instead, which is the
 	// job it was written for.
 	if occupied[projectID] {
-		return ""
+		return false, "somebody is already inside the project"
 	}
 
 	// This tick is going to sweep, so record where the journal stands now:
@@ -260,9 +270,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	g.mu.Unlock()
 
 	if moved {
-		return "the journal moved"
+		return true, "the journal moved"
 	}
-	return "settled work is parked at " + parked
+	return true, "settled work is parked at " + parked
 }
 
 // reap abandons orphaned machine sessions — a session branch whose

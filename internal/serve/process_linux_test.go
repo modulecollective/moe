@@ -45,6 +45,79 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// TestChildKeepsAnOutputTail: PTY bytes used to go straight on the floor,
+// so a sweep that died to a vendor error left an exit code and nothing
+// else. The tail is what makes the difference between a glance and an ssh
+// session.
+func TestChildKeepsAnOutputTail(t *testing.T) {
+	cs := newChildren()
+	if _, err := cs.spawn("p/r", "/bin/echo", []string{"credit limit reached"}, t.TempDir(), io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := cs.get("p/r")
+	select {
+	case <-c.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("child never exited")
+	}
+	if got := c.tail(); !strings.Contains(got, "credit limit reached") {
+		t.Errorf("tail = %q, want the child's output", got)
+	}
+}
+
+// TestChildTailIsBounded: the tail rides in memory for the life of the
+// process, so a chatty child must not be able to grow it without limit.
+func TestChildTailIsBounded(t *testing.T) {
+	c := &child{}
+	chunk := strings.Repeat("x", 4096)
+	for range 20 {
+		c.appendTail([]byte(chunk))
+	}
+	if got := len(c.tail()); got != childTailBytes {
+		t.Errorf("tail is %d bytes after 80KB of output, want it capped at %d", got, childTailBytes)
+	}
+}
+
+// TestChildTailKeepsTheNewestBytes: a child that died says why in its last
+// lines, so the ring has to drop from the front.
+func TestChildTailKeepsTheNewestBytes(t *testing.T) {
+	c := &child{}
+	c.appendTail([]byte(strings.Repeat("o", childTailBytes)))
+	c.appendTail([]byte("the actual error"))
+	if got := c.tail(); !strings.HasSuffix(got, "the actual error") {
+		t.Errorf("tail = %q…%q, want it to end with the newest bytes", got[:20], got[len(got)-20:])
+	}
+}
+
+// TestChildHooksLandInTheActivityRing: the registry fires one spawn and
+// one exit hook per child, which is how every spawn site — a phone-launched
+// run, a chore, a heartbeat sweep — reaches the activity record without
+// each one remembering to say so.
+func TestChildHooksLandInTheActivityRing(t *testing.T) {
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/false"})
+	if _, err := s.children.spawn("alpha/fix-it", "/bin/false", nil, t.TempDir(), io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	c, _ := s.children.get("alpha/fix-it")
+	select {
+	case <-c.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("child never exited")
+	}
+
+	waitFor(t, "both hooks to land", func() bool {
+		return len(s.activity.panel(time.Now(), "alpha").Events) == 2
+	})
+	vm := s.activity.panel(time.Now(), "alpha")
+	// Newest first: the exit leads.
+	if vm.Events[0].Kind != "exit" || !vm.Events[0].Failed {
+		t.Errorf("newest event = %+v, want the failed exit", vm.Events[0])
+	}
+	if vm.Events[1].Kind != "spawn" {
+		t.Errorf("older event = %+v, want the spawn", vm.Events[1])
+	}
+}
+
 // TestSpawnAndReap is the minimum-viable spawn check: a child
 // records under the requested id, its read loop drains the master
 // PTY to EIO, and `done` closes after `cmd.Wait` returns. With the

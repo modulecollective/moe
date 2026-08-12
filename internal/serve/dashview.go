@@ -2,9 +2,12 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
+	"maps"
 	"math/rand"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -276,12 +279,143 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 	return out
 }
 
+// servePanelVM is the serve strip both the home dash and a project hub
+// draw: one status line for the process, one line per project the
+// heartbeat has a verdict for, and a short recent-activity list from the
+// ring. Server-rendered from memory on page load — no polling, no
+// fragment fetch. Reload is the phone gesture, and page weight is a
+// first-class constraint on this board.
+type servePanelVM struct {
+	// Armed distinguishes a serve that may pulse from one that is
+	// browse-only. An unarmed serve still renders the strip: "it's up but
+	// will never pulse" is exactly the confusion this is fixing.
+	Armed bool
+	Up    string // "3d 2h"
+	// NextSweep is how long until the next tick ("12m"), empty for an
+	// unarmed serve, which never ticks.
+	NextSweep string
+	Projects  []serveProjectVM
+	Events    []serveEventVM
+}
+
+// serveProjectVM is one project's line in the strip: what the heartbeat
+// is doing about it and why.
+type serveProjectVM struct {
+	Project string
+	// State is the one-word status the line leads with — "sweeping",
+	// "cooling", "failed", "quiet".
+	State  string
+	Detail string // "(3m)", "(2 ticks left)", "" — qualifies State
+	Reason string // the gate's own words
+	// Failed marks the states worth a colour: a dead last sweep, or a
+	// cool-off serving one out.
+	Failed bool
+}
+
+// serveEventVM is one line of the recent-activity list.
+type serveEventVM struct {
+	When string // dash.HumanAgo
+	Kind string
+	// Text is the whole line body: for a tick, the per-project verdicts
+	// joined; for a spawn/exit, the child and what happened to it.
+	Text   string
+	Failed bool
+	// Tail is the child's output snippet, shown behind a <details> on a
+	// failed exit and empty everywhere else. This is what turns "sweep
+	// failed, exit 1" into "sweep failed: credit limit reached".
+	Tail string
+}
+
+// panel renders the activity record for the web. projectFilter scopes it
+// to one project (the hub) or is empty for the whole board (the dash);
+// scoping filters the project lines, each tick's verdict set, and the
+// child events alike, so a hub shows that project's trace and nothing
+// else.
+func (a *activity) panel(now time.Time, projectFilter string) servePanelVM {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	vm := servePanelVM{Armed: a.armed, Up: dash.HumanDuration(now.Sub(a.started))}
+	if next := a.nextTick(); !next.IsZero() {
+		vm.NextSweep = dash.HumanDuration(max(next.Sub(now), 0))
+	}
+	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
+		if projectFilter != "" && id != projectFilter {
+			continue
+		}
+		vm.Projects = append(vm.Projects, serveProjectLine(now, id, a.projects[id]))
+	}
+	// Newest first: the ring stores in arrival order, and the question the
+	// list answers is "what just happened".
+	for i := len(a.events) - 1; i >= 0; i-- {
+		if ev, ok := serveEventLine(now, a.events[i], projectFilter); ok {
+			vm.Events = append(vm.Events, ev)
+		}
+	}
+	return vm
+}
+
+// serveProjectLine turns one project's record into its line. State
+// precedence is what the operator needs first: a live sweep, then a
+// cool-off holding the project back, then a dead last sweep, then quiet.
+func serveProjectLine(now time.Time, id string, p *activityProject) serveProjectVM {
+	line := serveProjectVM{Project: id, State: "quiet", Reason: p.decision}
+	switch {
+	case !p.started.IsZero():
+		line.State = "sweeping"
+		line.Detail = "(" + dash.HumanDuration(now.Sub(p.started)) + ")"
+	case p.coolTicks > 0:
+		line.State, line.Failed = "cooling", true
+		line.Detail = "(" + dash.Plural(p.coolTicks, "tick") + " left)"
+		line.Reason = fmt.Sprintf("last sweep failed %s", dash.HumanAgo(now, p.sweptAt))
+	case !p.sweptAt.IsZero() && !p.clean:
+		line.State, line.Failed = "failed", true
+		line.Detail = "(" + dash.HumanAgo(now, p.sweptAt) + ")"
+	}
+	return line
+}
+
+// serveEventLine turns one ring entry into its line, reporting false when
+// a project-scoped panel has no business showing it. A tick is board-wide
+// but its verdict set is per project, so scoping narrows the text rather
+// than dropping the event — unless the project has no verdict in it.
+func serveEventLine(now time.Time, ev activityEvent, projectFilter string) (serveEventVM, bool) {
+	vm := serveEventVM{When: dash.HumanAgo(now, ev.At), Kind: ev.Kind, Failed: ev.Failed}
+	if ev.Kind == "tick" {
+		var parts []string
+		for _, d := range ev.Decisions {
+			if projectFilter != "" && d.Project != projectFilter {
+				continue
+			}
+			verb := "quiet"
+			if d.Sweep {
+				verb = "sweeping"
+			}
+			parts = append(parts, fmt.Sprintf("%s %s — %s", d.Project, verb, d.Reason))
+		}
+		if len(parts) == 0 {
+			return serveEventVM{}, false
+		}
+		vm.Text = strings.Join(parts, " · ")
+		return vm, true
+	}
+	if projectFilter != "" && ev.Project != projectFilter {
+		return serveEventVM{}, false
+	}
+	vm.Text = ev.Subject + " " + ev.Detail
+	if ev.Failed {
+		vm.Tail = ev.Tail
+	}
+	return vm, true
+}
+
 // dashVM is the data the dash template renders against. Same three
 // buckets as the CLI dash; COMPLETED arrives pre-capped so the template
 // needs no slice math.
 type dashVM struct {
 	bannerArtVM
 	rowBuckets
+	Serve          servePanelVM
 	ProjectCount   int
 	ActiveProjects int
 }
