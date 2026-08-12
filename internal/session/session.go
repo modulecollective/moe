@@ -383,7 +383,7 @@ func List(root string) ([]*Session, error) {
 		if !strings.HasPrefix(w.branch, "session/") {
 			continue
 		}
-		project, run, doc, ok := parseBranch(w.branch)
+		project, run, doc, ok := ParseBranch(w.branch)
 		if !ok {
 			continue
 		}
@@ -410,7 +410,7 @@ func FindByBranch(root, branch string) (*Session, error) {
 	// Branch may exist as an orphan (no worktree). Surface as a
 	// synthetic session so Abandon can still delete the branch.
 	if branchExists(root, branch) {
-		project, run, doc, ok := parseBranch(branch)
+		project, run, doc, ok := ParseBranch(branch)
 		if !ok {
 			return nil, fmt.Errorf("session: unparseable branch name %q", branch)
 		}
@@ -422,8 +422,13 @@ func FindByBranch(root, branch string) (*Session, error) {
 	return nil, nil
 }
 
-// parseBranch splits "session/<project>/<run>/<doc>" into its parts.
-func parseBranch(branch string) (project, run, doc string, ok bool) {
+// ParseBranch splits "session/<project>/<run>/<doc>" into its parts.
+//
+// Exported because a branch name is the only handle some callers hold —
+// the heartbeat's gc pass enumerates refs rather than worktrees, so that
+// an orphan branch with no worktree is still seen — and the triple is
+// what keys a claim.
+func ParseBranch(branch string) (project, run, doc string, ok bool) {
 	const prefix = "session/"
 	if !strings.HasPrefix(branch, prefix) {
 		return "", "", "", false

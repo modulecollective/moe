@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
@@ -158,9 +159,16 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 // the reap is consistent against parallel `moe session open` /
 // `session abandon` calls.
 //
+// Rules 1–4 are held back by a live claim — see sessionClaimHeld. Rule
+// 5 has no run behind it and so no claim concept.
+//
 // Partial-failure shape mirrors `moe clone gc`: per-orphan errors go to
 // stderr, surviving orphans are still listed for the operator, exit 1
 // if any reap failed.
+//
+// The verb is a thin caller of sessionGCPass; the heartbeat tick is the
+// other. See gc in heartbeat.go for why the rules are shared rather
+// than mirrored.
 func runSessionGC(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
 		moePrintln(stderr, "usage: moe session gc")
@@ -171,64 +179,22 @@ func runSessionGC(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	var reaped []string
-	var reapErrs []string
-	err = repolock.With(root, repolock.Options{Purpose: "session-gc"}, func() error {
-		regs, err := findOrphanSessions(root)
-		if err != nil {
-			return err
-		}
-		for _, s := range regs {
-			if err := session.Abandon(s); err != nil {
-				reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", s.Branch, err))
-				continue
-			}
-			reaped = append(reaped, s.Branch)
-		}
-		branches, err := findOrphanSessionBranches(root)
-		if err != nil {
-			return err
-		}
-		for _, b := range branches {
-			s, ferr := session.FindByBranch(root, b)
-			if ferr != nil {
-				reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", b, ferr))
-				continue
-			}
-			if s == nil {
-				// Branch vanished between scan and reap — nothing to do.
-				continue
-			}
-			if err := session.Abandon(s); err != nil {
-				reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", b, err))
-				continue
-			}
-			reaped = append(reaped, b)
-		}
-		dirs, err := findOrphanWorktreeDirs(root)
-		if err != nil {
-			return err
-		}
-		for _, dir := range dirs {
-			if err := os.RemoveAll(dir); err != nil {
-				reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v", dir, err))
-				continue
-			}
-			reaped = append(reaped, "worktree dir "+filepath.Base(dir))
-		}
-		return nil
-	})
+	reaped, reapErrs, err := sessionGCPass(root, repolock.Options{Purpose: "session-gc"})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	sort.Strings(reaped)
-	if len(reaped) == 0 && len(reapErrs) == 0 {
+	labels := make([]string, 0, len(reaped))
+	for _, r := range reaped {
+		labels = append(labels, r.label)
+	}
+	sort.Strings(labels)
+	if len(labels) == 0 && len(reapErrs) == 0 {
 		moePrintln(stdout, "session gc: no orphan sessions")
 		return 0
 	}
-	for _, r := range reaped {
-		moePrintf(stdout, "removed %s\n", r)
+	for _, l := range labels {
+		moePrintf(stdout, "removed %s\n", l)
 	}
 	for _, e := range reapErrs {
 		moePrintf(stderr, "session gc: %s\n", e)
@@ -239,12 +205,138 @@ func runSessionGC(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// reapedSession names one thing a gc pass removed: the label the verb
+// prints, and the project whose board it changed. Project is empty for
+// rule-5 worktree dirs, which name no run.
+type reapedSession struct {
+	label   string
+	project string
+}
+
+// sessionOrphans is one pass's candidate set, kept split by the rule
+// that found it because each rule reaps differently.
+type sessionOrphans struct {
+	sessions []*session.Session // rules 1–3: registered worktrees
+	branches []string           // rule 4: refs with no worktree
+	dirs     []string           // rule 5: dirs git doesn't know about
+}
+
+func (o sessionOrphans) empty() bool {
+	return len(o.sessions) == 0 && len(o.branches) == 0 && len(o.dirs) == 0
+}
+
+// collectSessionOrphans runs all five orphan rules. Every read is a git
+// query or a stat, so it is safe without the lock — which is what lets
+// the heartbeat ask whether there is anything to do before deciding the
+// lock is worth taking.
+func collectSessionOrphans(root string, now time.Time) (sessionOrphans, error) {
+	var o sessionOrphans
+	var err error
+	if o.sessions, err = findOrphanSessions(root, now); err != nil {
+		return sessionOrphans{}, err
+	}
+	if o.branches, err = findOrphanSessionBranches(root, now); err != nil {
+		return sessionOrphans{}, err
+	}
+	if o.dirs, err = findOrphanWorktreeDirs(root); err != nil {
+		return sessionOrphans{}, err
+	}
+	return o, nil
+}
+
+// reapSessionOrphans acts on a candidate set, returning what went and
+// the per-orphan failures. Caller holds the lock.
+func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, reapErrs []string) {
+	for _, s := range o.sessions {
+		if err := session.Abandon(s); err != nil {
+			reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", s.Branch, err))
+			continue
+		}
+		reaped = append(reaped, reapedSession{label: s.Branch, project: s.Project})
+	}
+	for _, b := range o.branches {
+		s, ferr := session.FindByBranch(root, b)
+		if ferr != nil {
+			reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", b, ferr))
+			continue
+		}
+		if s == nil {
+			// Branch vanished between scan and reap — nothing to do.
+			continue
+		}
+		if err := session.Abandon(s); err != nil {
+			reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", b, err))
+			continue
+		}
+		reaped = append(reaped, reapedSession{label: b, project: s.Project})
+	}
+	for _, dir := range o.dirs {
+		if err := os.RemoveAll(dir); err != nil {
+			reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v", dir, err))
+			continue
+		}
+		reaped = append(reaped, reapedSession{label: "worktree dir " + filepath.Base(dir)})
+	}
+	return reaped, reapErrs
+}
+
+// sessionGCPass is the whole gc act: take the lock, collect under it,
+// reap. Both callers go through here, so the five rules and the
+// live-claim hold have one implementation rather than two that must
+// agree forever.
+//
+// The collect inside the lock is the authoritative one. A caller may
+// scan first to decide whether the lock is worth taking — the heartbeat
+// does, so a clean board never locks — but that scan races `session
+// open` and `session close`, so nothing is reaped on its word.
+func sessionGCPass(root string, opts repolock.Options) ([]reapedSession, []string, error) {
+	var reaped []reapedSession
+	var reapErrs []string
+	err := repolock.With(root, opts, func() error {
+		o, err := collectSessionOrphans(root, time.Now())
+		if err != nil {
+			return err
+		}
+		reaped, reapErrs = reapSessionOrphans(root, o)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return reaped, reapErrs, nil
+}
+
+// sessionClaimHeld reports whether a session's liveness record still
+// vouches for somebody being inside it: a claim exists and is not
+// provably dead. Every rule with a run behind it skips a held
+// candidate — silently, because a held session is not an orphan at all.
+//
+// This is what makes the rules safe to run on a timer. `moe <wf> close`
+// has no open-session guard, so an operator sitting in a design pane
+// while `close` is typed in another produces rule 1's exact shape:
+// terminal status, session branch present, claimant alive and beating.
+// Reaping that pulls the worktree out from under them and takes the
+// uncommitted work with it. Tolerable while gc was a deliberate hand
+// verb; not once a tick runs it every twenty minutes.
+//
+// Composed from the two existing exports rather than a new liveness
+// predicate: ReadClaim answers presence, Dead answers provably-gone.
+// Ambiguity keeps its usual direction — another host, an unparsable
+// owner, a live pid or a fresh beat all read as held.
+func sessionClaimHeld(root, projectID, runID, docID string, now time.Time) bool {
+	if _, ok := session.ReadClaim(root, projectID, runID, docID); !ok {
+		return false
+	}
+	return !session.Dead(root, projectID, runID, docID, now)
+}
+
 // findOrphanSessions returns the registered-worktree sessions whose run
 // state says they're reapable: terminal status, missing run.json, or
 // missing project directory. Pushed and in-progress runs are skipped —
-// their worktrees are still load-bearing for live stage sessions.
+// their worktrees are still load-bearing for live stage sessions — and
+// so is any session whose claim is still live.
 // Result is sorted by branch so the verb's output order is stable.
-func findOrphanSessions(root string) ([]*session.Session, error) {
+func findOrphanSessions(root string, now time.Time) ([]*session.Session, error) {
 	sessions, err := session.List(root)
 	if err != nil {
 		return nil, err
@@ -259,6 +351,10 @@ func findOrphanSessions(root string) ([]*session.Session, error) {
 	}
 	var out []*session.Session
 	for _, s := range sessions {
+		// Somebody is inside this one, whatever its run says.
+		if sessionClaimHeld(root, s.Project, s.Run, s.Doc, now) {
+			continue
+		}
 		// Rule 3: project directory missing on disk.
 		if _, err := os.Stat(filepath.Join(root, "projects", s.Project)); errors.Is(err, os.ErrNotExist) {
 			out = append(out, s)
@@ -285,9 +381,10 @@ func findOrphanSessions(root string) ([]*session.Session, error) {
 // findOrphanSessionBranches returns `session/<p>/<r>/<d>` branches with
 // no worktree currently checked out. This is the rule-4 residue
 // `session.Open` refuses with "branch %s exists without a registered
-// worktree — abandoned close?". Result is sorted so the verb's output
-// is stable.
-func findOrphanSessionBranches(root string) ([]string, error) {
+// worktree — abandoned close?". A branch whose claim is still live is
+// held, same as the registered rules. Result is sorted so the verb's
+// output is stable.
+func findOrphanSessionBranches(root string, now time.Time) ([]string, error) {
 	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/session/")
 	if err != nil {
 		return nil, fmt.Errorf("session gc: list session branches: %w", err)
@@ -305,6 +402,12 @@ func findOrphanSessionBranches(root string) ([]string, error) {
 	var orphans []string
 	for _, b := range branches {
 		if wtBranches[b] {
+			continue
+		}
+		// A worktree-less branch with a live claim is a session whose
+		// worktree went missing under a running process — vanishingly
+		// rare, and not ours to clear while the claimant is alive.
+		if p, r, d, ok := session.ParseBranch(b); ok && sessionClaimHeld(root, p, r, d, now) {
 			continue
 		}
 		orphans = append(orphans, b)

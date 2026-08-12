@@ -334,3 +334,66 @@ func TestSessionGCPartialFailureExits1(t *testing.T) {
 		t.Errorf("surviving orphan dir gone: %v", err)
 	}
 }
+
+// TestSessionGCHoldsALiveClaim pins the rule that makes these five
+// rules safe to run on a timer: a candidate whose claimant is alive is
+// not an orphan at all. `moe <wf> close` has no open-session guard, so
+// an operator sitting in a stage while close is typed in another pane
+// produces rule 1's exact shape — and reaping it would take their
+// uncommitted work along with the worktree.
+//
+// Held is silent, not an error: somebody is inside, the dash already
+// shows the session, and there is nothing for the operator to fix.
+func TestSessionGCHoldsALiveClaim(t *testing.T) {
+	root := newSessionTestRoot(t)
+	trailerstest.SeedRun(t, root, "alpha", "closed-underneath", "sdlc", run.StatusClosed)
+	s, err := session.Open(root, "alpha", "closed-underneath", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	release, err := session.Hold(s, false /*operator*/)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	t.Cleanup(release)
+
+	code, stdout, stderr := runSessionGCInRoot(t, root)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "no orphan sessions") {
+		t.Errorf("a live session was reported as an orphan:\n%s", stdout)
+	}
+	if !git.Probe(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+s.Branch) {
+		t.Error("live session branch deleted")
+	}
+	if _, err := os.Stat(s.WorktreePath); err != nil {
+		t.Errorf("live session worktree removed: %v", err)
+	}
+}
+
+// TestSessionGCLeavesAnInProgressRunAlone guards rule 1's status set
+// from the other side. gc's whole licence is that the run is over;
+// widening the set to a live run would abandon stage sessions mid-turn
+// — and now that the heartbeat runs these rules every tick, the cost of
+// getting that set wrong is no longer bounded by a human typing the
+// verb.
+func TestSessionGCLeavesAnInProgressRunAlone(t *testing.T) {
+	root := newSessionTestRoot(t)
+	trailerstest.SeedRun(t, root, "alpha", "still-going", "sdlc", run.StatusInProgress)
+	s, err := session.Open(root, "alpha", "still-going", "design")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	code, stdout, stderr := runSessionGCInRoot(t, root)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "no orphan sessions") {
+		t.Errorf("a live run's session was reported as an orphan:\n%s", stdout)
+	}
+	if !git.Probe(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+s.Branch) {
+		t.Error("a live run's session branch was deleted")
+	}
+}
