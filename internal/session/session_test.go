@@ -145,6 +145,209 @@ func TestOpenResumesExistingSession(t *testing.T) {
 	}
 }
 
+// canvasRel is the canvas path the fixtures commit to — the document
+// whose staleness is the whole point of reconciling at open.
+const canvasRel = "projects/moe/runs/r1/documents/design/content.md"
+
+// TestOpenReconcilesStaleBranchOntoMain is the incident reduced: a
+// session commits, never closes, main moves underneath it (a
+// kick-back rewriting the design), and the stage re-runs. The resumed
+// worktree must show main's design, not the one the branch was cut on.
+func TestOpenReconcilesStaleBranchOntoMain(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\nv1\n", "work: seed design")
+
+	first, err := Open(root, "moe", "r1", "code")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	commitInWorktree(t, first.WorktreePath, "code.txt", "code\n", "work: update code")
+	preTip := gittest.HeadSHA(t, first.WorktreePath)
+
+	// Main moves: the design rewrite lands from its own session.
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\nv2\n", "work: update design")
+	mainTip := gittest.HeadSHA(t, root)
+
+	second, err := Open(root, "moe", "r1", "code")
+	if err != nil {
+		t.Fatalf("resume Open: %v", err)
+	}
+	if second.WorktreePath != first.WorktreePath {
+		t.Fatalf("resume moved worktree: %s -> %s", first.WorktreePath, second.WorktreePath)
+	}
+	if !git.Probe(root, "merge-base", "--is-ancestor", "main", second.Branch) {
+		t.Errorf("main is not an ancestor of %s after resume", second.Branch)
+	}
+	if gittest.HeadSHA(t, second.WorktreePath) == preTip {
+		t.Errorf("branch tip unchanged at %s — no rebase happened", preTip)
+	}
+	// The turn reads the current contract off disk, which is the cost
+	// the reconcile exists to remove.
+	design, err := os.ReadFile(filepath.Join(second.WorktreePath, canvasRel))
+	if err != nil {
+		t.Fatalf("read design from resumed worktree: %v", err)
+	}
+	if !strings.Contains(string(design), "v2") {
+		t.Errorf("resumed worktree still shows the superseded design: %q", design)
+	}
+	// The session's own commit rides on top rather than being dropped.
+	work, err := os.ReadFile(filepath.Join(second.WorktreePath, "code.txt"))
+	if err != nil {
+		t.Fatalf("read session work from resumed worktree: %v", err)
+	}
+	if string(work) != "code\n" {
+		t.Errorf("session commit lost in reconcile: %q", work)
+	}
+	if gittest.HeadSHA(t, root) != mainTip {
+		t.Errorf("reconcile moved main; it must only move at close")
+	}
+}
+
+// TestOpenFastForwardsBranchWithNoCommits covers the other stale
+// shape: the session died before committing anything, so there is
+// nothing to replay and the branch just catches up to main.
+func TestOpenFastForwardsBranchWithNoCommits(t *testing.T) {
+	root := newTestRoot(t)
+	if _, err := Open(root, "moe", "r1", "design"); err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	gittest.WriteAndCommit(t, root, "main-only.txt", "main\n", "main: add")
+	mainTip := gittest.HeadSHA(t, root)
+
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("resume Open: %v", err)
+	}
+	if got := gittest.HeadSHA(t, s.WorktreePath); got != mainTip {
+		t.Errorf("branch tip = %s, want main tip %s", got, mainTip)
+	}
+}
+
+// TestOpenLeavesDirtyCurrentSessionAlone is the regression guard for
+// the ancestor check. `git rebase` refuses on a dirty worktree even
+// when there is nothing to replay, so without the guard the ordinary
+// crash-resume — uncommitted edits, main unmoved — would start
+// refusing.
+func TestOpenLeavesDirtyCurrentSessionAlone(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\n", "work: seed design")
+
+	first, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	// Unstaged edit to a tracked file: the shape `git rebase` refuses
+	// on. Untracked scratch files don't stop a rebase, so they
+	// wouldn't exercise the guard.
+	dirt := filepath.Join(first.WorktreePath, canvasRel)
+	if err := os.WriteFile(dirt, []byte("# Design\nhalf-written turn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(root, "moe", "r1", "design"); err != nil {
+		t.Fatalf("resume Open on dirty-but-current session: %v", err)
+	}
+	body, err := os.ReadFile(dirt)
+	if err != nil {
+		t.Fatalf("uncommitted work gone after resume: %v", err)
+	}
+	if string(body) != "# Design\nhalf-written turn\n" {
+		t.Errorf("uncommitted work altered by resume: %q", body)
+	}
+}
+
+// TestOpenRefusesDirtyStaleSession: dirty *and* stale is the one shape
+// that refuses. Silently replaying a crashed turn's uncommitted edits
+// across a contract change is the staleness this run exists to kill.
+func TestOpenRefusesDirtyStaleSession(t *testing.T) {
+	root := newTestRoot(t)
+	first, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	commitInWorktree(t, first.WorktreePath, canvasRel, "# Design\n", "work: update design")
+	gittest.WriteAndCommit(t, root, "main-only.txt", "main\n", "main: add")
+
+	dirt := filepath.Join(first.WorktreePath, canvasRel)
+	if err := os.WriteFile(dirt, []byte("# Design\nunstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(root, "moe", "r1", "design")
+	if err == nil {
+		t.Fatal("expected refusal on dirty stale session, got nil")
+	}
+	var rfe *RebaseFailureError
+	if !errors.As(err, &rfe) {
+		t.Fatalf("expected *RebaseFailureError, got %T: %v", err, err)
+	}
+	if !rfe.Dirty {
+		t.Errorf("rfe.Dirty = false, want true; output=%q", rfe.GitOutput)
+	}
+	if rfe.Op != opOpen {
+		t.Errorf("rfe.Op = %q, want %q", rfe.Op, opOpen)
+	}
+	// Operators read the message, not the field — it has to say which
+	// side of the session refused, and offer the open-side remedy.
+	if !strings.HasPrefix(err.Error(), "session open:") {
+		t.Errorf("message is not open-flavoured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "re-run the stage") {
+		t.Errorf("message does not offer the open-side remedy: %v", err)
+	}
+	if _, statErr := os.Stat(first.WorktreePath); statErr != nil {
+		t.Errorf("worktree missing after refusal: %v", statErr)
+	}
+	if !branchExists(root, first.Branch) {
+		t.Errorf("branch missing after refusal")
+	}
+}
+
+// TestOpenReconcileConflictLeavesSessionIntact: the doubly-degenerate
+// state — unlanded commits that conflict with main's move. No
+// auto-resolve at open, so it refuses and leaves everything where the
+// operator can get at it.
+func TestOpenReconcileConflictLeavesSessionIntact(t *testing.T) {
+	root := newTestRoot(t)
+	gittest.WriteAndCommit(t, root, "shared.txt", "v1\n", "seed shared")
+
+	first, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	commitInWorktree(t, first.WorktreePath, "shared.txt", "session-edit\n", "session: touch shared")
+	preTip := gittest.HeadSHA(t, first.WorktreePath)
+
+	gittest.WriteAndCommit(t, root, "shared.txt", "main-edit\n", "main: touch shared")
+
+	_, err = Open(root, "moe", "r1", "design")
+	if err == nil {
+		t.Fatal("expected reconcile conflict, got nil")
+	}
+	var rfe *RebaseFailureError
+	if !errors.As(err, &rfe) {
+		t.Fatalf("expected *RebaseFailureError, got %T: %v", err, err)
+	}
+	if rfe.Op != opOpen {
+		t.Errorf("rfe.Op = %q, want %q", rfe.Op, opOpen)
+	}
+	if rfe.Dirty {
+		t.Errorf("rfe.Dirty = true, want false (real conflict, not a refusal)")
+	}
+	if !slices.Contains(rfe.Conflicts, "shared.txt") {
+		t.Errorf("expected shared.txt in rfe.Conflicts, got %v", rfe.Conflicts)
+	}
+	// --abort ran: the branch sits at its pre-rebase tip with no
+	// unmerged paths, so the operator starts from the conflict state
+	// rather than mid-rebase.
+	if got := gittest.HeadSHA(t, first.WorktreePath); got != preTip {
+		t.Errorf("branch tip = %s, want pre-rebase tip %s", got, preTip)
+	}
+	if left := sessionUnmergedPaths(first.WorktreePath); len(left) != 0 {
+		t.Errorf("rebase state not aborted, unmerged paths remain: %v", left)
+	}
+}
+
 func TestOpenOrphanBranchErrors(t *testing.T) {
 	root := newTestRoot(t)
 	// Create a session branch without a worktree to simulate a busted
@@ -201,6 +404,18 @@ func TestCloseRebaseConflictLeavesSessionIntact(t *testing.T) {
 	}
 	if rfe.Dirty {
 		t.Errorf("rfe.Dirty = true, want false (real conflict, not a refusal)")
+	}
+	// Close keeps its own flavour now that Open shares the error type:
+	// the remedy it offers ("moe session resolve") retries the close,
+	// which is the wrong advice on the open side.
+	if rfe.Op != opClose {
+		t.Errorf("rfe.Op = %q, want %q", rfe.Op, opClose)
+	}
+	if !strings.HasPrefix(err.Error(), "session close:") {
+		t.Errorf("message is not close-flavoured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "re-run moe session resolve") {
+		t.Errorf("message does not offer the close-side remedy: %v", err)
 	}
 	// Conflict files are read before --abort discards the rebase
 	// state, so the chain-back kickoff can name them.

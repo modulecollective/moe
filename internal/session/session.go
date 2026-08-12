@@ -15,11 +15,19 @@
 // held (see internal/repolock). Session turns in between run without
 // the lock.
 //
-// Conflict policy: if rebase fails, Close aborts the rebase and
-// returns a *RebaseFailureError that names the worktree, branch, and
-// conflict context. The CLI errors.As's it to launch a one-shot
-// agent in the worktree; falls back to "resolve by hand or
-// `moe session abandon`" when auto-resolve doesn't take.
+// Open and Close are symmetric about main: Open reconciles a resumed
+// branch onto current main before handing it back, Close rebases onto
+// main before landing. A session that fails to close — Ctrl-C, crash,
+// gate refusal — leaves a resumable branch, and without the entry-side
+// rebase every later resume would seat the agent on whatever main was
+// when the branch was cut.
+//
+// Conflict policy: if rebase fails, the rebase is aborted and a
+// *RebaseFailureError names the worktree, branch, and conflict
+// context. On close the CLI errors.As's it to launch a one-shot agent
+// in the worktree; falls back to "resolve by hand or `moe session
+// abandon`" when auto-resolve doesn't take. On open there is no
+// auto-resolve — the state it takes is rare enough to want an operator.
 package session
 
 import (
@@ -34,16 +42,30 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// RebaseFailureError is the typed error Close returns when the
-// rebase-onto-main step fails. Carries the diagnostic context the CLI
-// chain-back needs to launch a one-shot agent inside the session
-// worktree: the branch/worktree paths it'll cd into, the raw git
-// output that triggered the failure, the unmerged paths git left (or
-// nil when Dirty is true and the rebase never started), and the
+// Operation names for RebaseFailureError.Op. Unexported: nothing
+// outside this package branches on the value, it only reads it back
+// out of the rendered message.
+const (
+	opOpen  = "open"
+	opClose = "close"
+)
+
+// RebaseFailureError is the typed error Open and Close return when
+// their rebase-onto-main step fails. Carries the diagnostic context
+// the CLI chain-back needs to launch a one-shot agent inside the
+// session worktree: the branch/worktree paths it'll cd into, the raw
+// git output that triggered the failure, the unmerged paths git left
+// (or nil when Dirty is true and the rebase never started), and the
 // Dirty flag distinguishing "rebase refused because the worktree is
 // dirty" from "rebase hit real conflicts" — different kickoff shape
 // per design.
 type RebaseFailureError struct {
+	// Op is the operation that failed, "open" or "close". Rendered
+	// into the message so an operator can tell an entry-side refusal
+	// (nothing landed; the turn never started) from an exit-side one
+	// (a turn's commits are sitting on the branch). Empty reads as
+	// "close".
+	Op           string
 	Branch       string
 	WorktreePath string
 	// Conflicts lists the unmerged paths git flagged before --abort
@@ -92,24 +114,33 @@ func (e *CanvasUnchangedError) Error() string {
 }
 
 func (e *RebaseFailureError) Error() string {
+	op := e.Op
+	if op == "" {
+		op = opClose
+	}
+	headline := fmt.Sprintf("rebase %s onto main failed", e.Branch)
+	fix := "rebase"
 	if e.Dirty {
-		return fmt.Sprintf(
-			"session close: rebase %s onto main refused: worktree has uncommitted/unstaged changes\n"+
-				"  worktree: %s\n"+
-				"  branch:   %s\n"+
-				"  resolve by hand (cd into the worktree, clean up, re-run moe session resolve)\n"+
-				"  or drop it: moe session abandon %s\n"+
-				"  git output:\n%s",
-			e.Branch, e.WorktreePath, e.Branch, e.Branch, e.GitOutput)
+		headline = fmt.Sprintf(
+			"rebase %s onto main refused: worktree has uncommitted/unstaged changes", e.Branch)
+		fix = "clean up"
+	}
+	// The two operations leave different work pending. A failed close
+	// still has a close to finish, which `moe session resolve` retries.
+	// A failed open has nothing pending — re-running the stage opens
+	// again, and by then the branch is based on main.
+	retry := "re-run moe session resolve"
+	if op == opOpen {
+		retry = "re-run the stage"
 	}
 	return fmt.Sprintf(
-		"session close: rebase %s onto main failed\n"+
+		"session %s: %s\n"+
 			"  worktree: %s\n"+
 			"  branch:   %s\n"+
-			"  resolve by hand (cd into the worktree, rebase, re-run moe session resolve)\n"+
+			"  resolve by hand (cd into the worktree, %s, %s)\n"+
 			"  or drop it: moe session abandon %s\n"+
 			"  git output:\n%s",
-		e.Branch, e.WorktreePath, e.Branch, e.Branch, e.GitOutput)
+		op, headline, e.WorktreePath, e.Branch, fix, retry, e.Branch, e.GitOutput)
 }
 
 // Session identifies one active stage session.
@@ -149,10 +180,12 @@ func worktreesDir(root string) string {
 // docID). The caller must hold the repo lock.
 //
 // Resume logic: if the session branch exists and its worktree is
-// registered, return the existing Session — the operator is picking up
-// where they left off. If the branch exists without a registered
-// worktree (orphaned state from a botched close or manual tampering),
-// return an error pointing the operator at `moe session abandon`.
+// registered, reconcile it with main (see reconcileWithMain) and
+// return the existing Session — the operator is picking up where they
+// left off, and must pick it up from the current contract. If the
+// branch exists without a registered worktree (orphaned state from a
+// botched close or manual tampering), return an error pointing the
+// operator at `moe session abandon`.
 func Open(root, projectID, runID, docID string) (*Session, error) {
 	branch := BranchName(projectID, runID, docID)
 
@@ -165,10 +198,14 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 		if absErr != nil {
 			return nil, fmt.Errorf("session: resolve worktree path %q: %w", existing, absErr)
 		}
-		return &Session{
+		s := &Session{
 			Root: root, Project: projectID, Run: runID, Doc: docID,
 			Branch: branch, WorktreePath: abs,
-		}, nil
+		}
+		if err := reconcileWithMain(s); err != nil {
+			return nil, err
+		}
+		return s, nil
 	}
 	if branchExists(root, branch) {
 		return nil, fmt.Errorf(
@@ -204,6 +241,65 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 		Root: root, Project: projectID, Run: runID, Doc: docID,
 		Branch: branch, WorktreePath: abs,
 	}, nil
+}
+
+// reconcileWithMain replays a resumed session branch onto current
+// main, so the turn about to start reads the contract main carries
+// now rather than the one it carried when the branch was cut.
+//
+// The window this closes: a session that never closed leaves its
+// branch behind, and main keeps moving — a kick-back rewriting the
+// design, another stage landing, another machine's work arriving via
+// the auto-pull that runs immediately before Open. Resuming verbatim
+// seats the agent on the old base, where the design doc on disk can
+// be a superseded one. Close's rebase hides it after the fact: it
+// replays the turn's commits onto current main, so the finished
+// history is linear and the divergence leaves no trace.
+//
+// The ancestor guard is load-bearing, not an optimisation. `git
+// rebase` refuses on a dirty worktree even when there is nothing to
+// replay, and a dirty-but-current resume — the ordinary crashed-turn
+// recovery — has to keep working. Only stale branches take the rebase.
+func reconcileWithMain(s *Session) error {
+	if git.Probe(s.Root, "merge-base", "--is-ancestor", "main", s.Branch) {
+		return nil
+	}
+	// Covers both stale shapes: a branch with no commits of its own
+	// fast-forwards to main, a diverged one replays on top.
+	return rebaseOntoMain(s, opOpen)
+}
+
+// rebaseOntoMain replays the session branch onto main inside its
+// worktree, normalising failure into a *RebaseFailureError tagged
+// with op. The rebase is aborted on failure, leaving branch and
+// worktree at their pre-rebase state for the operator (or the
+// close-side auto-resolve agent) to work on.
+//
+// Conflict files are read before --abort discards the rebase state —
+// same pattern push uses for its RebaseConflictError. "cannot rebase"
+// in git's output means the rebase refused outright (dirty worktree)
+// rather than hitting a mid-rebase conflict; different kickoff shape,
+// so we surface it as Dirty.
+func rebaseOntoMain(s *Session, op string) error {
+	out, err := git.Combined(s.WorktreePath, "rebase", "main")
+	if err == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(out)
+	dirty := strings.Contains(trimmed, "cannot rebase")
+	var conflicts []string
+	if !dirty {
+		conflicts = sessionUnmergedPaths(s.WorktreePath)
+	}
+	_, _ = git.Combined(s.WorktreePath, "rebase", "--abort")
+	return &RebaseFailureError{
+		Op:           op,
+		Branch:       s.Branch,
+		WorktreePath: s.WorktreePath,
+		Conflicts:    conflicts,
+		GitOutput:    trimmed,
+		Dirty:        dirty,
+	}
 }
 
 // Close lands the session branch on local main and cleans up the
@@ -271,26 +367,9 @@ func Close(s *Session) error {
 	//
 	// On failure we return a typed *RebaseFailureError so the CLI
 	// chain-back can launch a one-shot agent in the worktree to
-	// resolve. Conflict files are read before --abort discards the
-	// rebase state — same pattern push uses for its
-	// RebaseConflictError. "cannot rebase" in git's output means the
-	// rebase refused outright (dirty worktree), not a mid-rebase
-	// conflict — different kickoff shape so we surface it as Dirty.
-	if out, err := git.Combined(s.WorktreePath, "rebase", "main"); err != nil {
-		trimmed := strings.TrimSpace(out)
-		dirty := strings.Contains(trimmed, "cannot rebase")
-		var conflicts []string
-		if !dirty {
-			conflicts = sessionUnmergedPaths(s.WorktreePath)
-		}
-		_, _ = git.Combined(s.WorktreePath, "rebase", "--abort")
-		return &RebaseFailureError{
-			Branch:       s.Branch,
-			WorktreePath: s.WorktreePath,
-			Conflicts:    conflicts,
-			GitOutput:    trimmed,
-			Dirty:        dirty,
-		}
+	// resolve.
+	if err := rebaseOntoMain(s, opClose); err != nil {
+		return err
 	}
 
 	// Fast-forward main from the canonical root, not via `update-ref`.
