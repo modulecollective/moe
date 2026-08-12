@@ -92,9 +92,10 @@ type Metadata struct {
 	// empty on every other path. omitempty keeps pre-existing run.json
 	// bodies unchanged.
 	ReopenOf string `json:"reopen_of,omitempty"`
-	// PromoteTo, when non-empty, names the workflow a harvested follow-up
-	// idea is licensed to become. The filing agent sets the tag; the pulse
-	// still decides whether and when to promote it. Empty ideas remain
+	// PromoteTo, when non-empty, names the workflow an idea is licensed
+	// to become. Stamped by a filer's followup tag at harvest or by
+	// `moe idea tag` (cleared by `moe idea untag`); the pulse still
+	// decides whether and when to promote it. Untagged ideas remain
 	// operator-triaged and cannot be machine-promoted.
 	PromoteTo string `json:"promote_to,omitempty"`
 	// SpawnedBy, when non-empty, names the run that machine-opened this
@@ -192,7 +193,8 @@ type Options struct {
 
 	// PromoteTo, when non-empty, persists the workflow tag carried by a
 	// harvested follow-up idea. It is deliberately not exposed by `idea
-	// new`: operator-authored ideas stay operator-triaged.
+	// new`: create-then-tag (`moe idea tag`) is two commands the rare
+	// time a tag is wanted at capture.
 	PromoteTo string
 
 	// SpawnedBy, when non-empty, names the qualified "<project>/<slug>" of
