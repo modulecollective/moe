@@ -723,6 +723,63 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	}
 }
 
+// TestShutdownWithALiveChildLeavesNoStateFile is the shutdown ordering
+// the whole crash signal rests on. children.shutdown returns as soon as
+// each child's done channel closes, but the reader goroutine runs its
+// exit hook — and the state-file save inside it — after closing it, and
+// the sweep watchers aren't waited on at all. So the ordinary Ctrl-C
+// with a live child has a straggling save landing after ListenAndServe
+// removed the file, re-creating it. Serve then exits leaving a record
+// that names a pid which no longer exists, and every later `moe dash`
+// reads a crash that never happened — permanently, until the next serve
+// start.
+//
+// The window is real but short, so the test holds the hook open across
+// the shutdown rather than betting on the scheduler. The wrapper only
+// delays the real hook; what it does when it runs is untouched.
+func TestShutdownWithALiveChildLeavesNoStateFile(t *testing.T) {
+	withShortShutdownGrace(t, 2*time.Second, 500*time.Millisecond)
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/cat"})
+
+	hooked := s.children.onExit
+	release, exited := make(chan struct{}), make(chan struct{})
+	s.children.onExit = func(id string, at time.Time, exitErr error, tail string) {
+		<-release
+		hooked(id, at, exitErr, tail)
+		close(exited)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- s.ListenAndServe(ctx) }()
+	waitFor(t, "the state file to appear on listen", func() bool {
+		_, ok, _ := ReadActivitySnapshot(root)
+		return ok
+	})
+
+	// /bin/cat in PTY cooked mode dies to the shutdown's Ctrl-C: a child
+	// that exits during the wind-down, which is the common case.
+	if _, err := s.children.spawn("alpha/fix-it", "/bin/cat", nil, root, io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+	close(release)
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the child's exit hook")
+	}
+
+	if _, ok, _ := ReadActivitySnapshot(root); ok {
+		t.Error("a straggling save re-created the state file after a clean shutdown; " +
+			"every later `moe dash` would report a crash that never happened")
+	}
+}
+
 // seedBureaucracy lays down a git-initialized root with a bureaucracy
 // marker and one project, then commits the seed so subsequent
 // run.New calls find a clean working tree. Returns the root.

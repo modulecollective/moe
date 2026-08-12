@@ -47,6 +47,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/modulecollective/moe/internal/chore"
@@ -282,6 +283,11 @@ type Server struct {
 	// heartbeat's last verdicts, and a bounded ring of what it has been
 	// doing. See activity.go.
 	activity *activity
+	// stateMu serialises the state file. Held across snapshot-and-write in
+	// saveActivity, and taken by dropActivity to set stopped. See
+	// saveActivity for why both.
+	stateMu sync.Mutex
+	stopped bool
 }
 
 //go:embed templates/*.html static/*
@@ -398,7 +404,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		// A clean exit takes the state file with it. That is what makes a
 		// file left behind mean something: it names a pid, and a pid that
 		// is gone is a serve that crashed rather than one that stopped.
-		if err := removeSnapshot(s.opts.Root); err != nil {
+		if err := s.dropActivity(); err != nil {
 			s.logf("serve: remove state file: %v", err)
 		}
 		return <-errCh
@@ -590,14 +596,50 @@ func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
 
 // saveActivity rewrites the state file from the current record.
 // Warn-only: the file is a convenience for `moe dash`, and a serve that
-// can't write it should still serve. Called from the ticker goroutine,
-// each sweep watcher, and the registry hooks — writeSnapshot is atomic,
-// so concurrent callers race only over which snapshot wins, and the next
-// event settles it.
+// can't write it should still serve.
+//
+// The lock is what makes the file honest. Callers arrive from three
+// goroutines at once — the ticker, each sweep watcher, and the registry
+// hooks — and a child that ends a sweep wakes two of them on the same
+// instant. writeSnapshot is atomic per write, but atomicity says nothing
+// about *order*: unserialised, a caller can snapshot, be descheduled
+// while a second caller records and writes something newer, and then
+// rename its stale copy over the top. Nothing rewrites the file until
+// the next event, which is minutes away, so the dash spends that whole
+// window showing a sweep that already finished. Holding stateMu across
+// snapshot-and-write makes rename order match record order: every
+// mutation is followed by a write whose snapshot is taken after it.
+//
+// Once stopped is set the save is a no-op — see dropActivity.
 func (s *Server) saveActivity() {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.stopped {
+		return
+	}
 	if err := writeSnapshot(s.opts.Root, s.activity.snapshot(time.Now())); err != nil {
 		s.logf("serve: write state file: %v", err)
 	}
+}
+
+// dropActivity closes the state file for good: no further save writes it,
+// and the file goes away.
+//
+// The flag is the point. children.shutdown returns as soon as every
+// child's done channel closes, but each reader goroutine runs its exit
+// hook *after* closing it, and the sweep watchers aren't waited on at
+// all — so on the ordinary Ctrl-C with a live child, a straggling save
+// lands after the remove and re-creates the file. Serve then exits
+// leaving a record that names a dead pid, and every later `moe dash`
+// reports a crash that never happened, permanently, until the next serve
+// start. Setting stopped under the same mutex saveActivity takes lets a
+// save already in flight finish before the remove and turns every later
+// one into a no-op.
+func (s *Server) dropActivity() error {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.stopped = true
+	return removeSnapshot(s.opts.Root)
 }
 
 func (s *Server) logf(format string, a ...any) {
