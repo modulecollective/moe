@@ -77,7 +77,7 @@ type Metadata struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Agent names the backend (claude / codex) that should drive
 	// every stage turn on this run. Empty falls through to the model
-	// stylesheet, then $MOE_AGENT, then "claude". Persisted at run-open via
+	// stylesheet, then "claude". Persisted at run-open via
 	// `--agent <name>` on `sdlc new` so cross-machine `sdlc resume`
 	// picks up the same backend without having to re-pass the flag.
 	// Per-stage overrides (`--agent codex` on a single stage) read
@@ -175,8 +175,8 @@ type Options struct {
 	// Agent, when non-empty, names the agent backend that should
 	// drive stage turns on this run. Persisted to Metadata.Agent.
 	// Stage callers thread this through stageSessionOpts.Agent so
-	// resolveAgentName picks it up over the model stylesheet /
-	// $MOE_AGENT / the "claude" hard default. Empty leaves
+	// resolveAgentName picks it up over the model stylesheet and the
+	// "claude" hard default. Empty leaves
 	// Metadata.Agent unset; the same
 	// precedence then runs unchanged.
 	Agent string

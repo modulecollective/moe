@@ -554,7 +554,7 @@ func TestSDLCReopenAgentFlagInheritsPriorWhenOmitted(t *testing.T) {
 }
 
 // TestSDLCReopenNoAgentClearsInheritedAgent: --no-agent leaves the
-// successor's Agent empty so the usual $MOE_AGENT → claude precedence
+// successor's Agent empty so the usual stylesheet → claude precedence
 // runs at first stage turn.
 func TestSDLCReopenNoAgentClearsInheritedAgent(t *testing.T) {
 	root := seedClosedSDLCRunWithFields(t, "tele", "fix-it", "# design\n", func(md *run.Metadata) {

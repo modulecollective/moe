@@ -73,7 +73,6 @@ func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "moe")
 	t.Setenv("MOE_HOME", root)
-	t.Setenv("MOE_AGENT", "claude")
 	t.Setenv("NO_COLOR", "1")
 
 	// Operator-side setup: a run with a tagged follow-up, harvested into

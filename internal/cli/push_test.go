@@ -1257,7 +1257,6 @@ func TestWriteMechanicalPushNoteEnumeratesWorkflowStages(t *testing.T) {
 // normal code/review/test execution.
 func TestRunPushSynthesisSessionLeavesModelToAgentDefault(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
-	t.Setenv("MOE_AGENT", "claude")
 
 	var captured stageSessionOpts
 	prev := runStageSession
@@ -2047,7 +2046,6 @@ func TestPromptPushNextStageNoScuttleWhenNil(t *testing.T) {
 // seam runPushSynthesisSession goes through.
 func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	t.Setenv("MOE_HOME", newTestBureaucracy(t))
-	t.Setenv("MOE_AGENT", "claude")
 
 	var capturedDoc string
 	var capturedOpts stageSessionOpts

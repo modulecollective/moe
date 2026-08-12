@@ -1205,7 +1205,6 @@ func taggedFollowupGroomAndKick(t *testing.T, park string) {
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "moe")
 	t.Setenv("MOE_HOME", root)
-	t.Setenv("MOE_AGENT", "claude")
 	t.Setenv("NO_COLOR", "1")
 
 	source, err := run.New(root, "moe", run.Options{ID: "source-run", Workflow: "sdlc"})

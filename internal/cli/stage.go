@@ -196,7 +196,7 @@ type stageSessionOpts struct {
 	knowledgeFixTurn bool
 	// Agent names the backend (claude / codex) that should drive this
 	// turn. Empty falls through resolveAgentName's precedence ladder:
-	// the model stylesheet, then $MOE_AGENT, else "claude". Stage
+	// the model stylesheet, then "claude". Stage
 	// callers populate this from the run.json field when present, or
 	// from a --agent flag override.
 	Agent string
@@ -275,24 +275,20 @@ func stageModel(explicit, sheetAgent, sheetModel, agentName string, stderr io.Wr
 // resolveAgentName picks the backend for this turn. Precedence:
 // $MOE_FORCE_AGENT (global override) → explicit per-call override
 // (--agent flag on this verb) → run-level persisted default
-// (run.json.Agent) → model stylesheet → $MOE_AGENT → "claude". Keep
+// (run.json.Agent) → model stylesheet → "claude". Keep
 // this helper as the single source for the operator-facing ladder;
 // stage call sites should go through stageAgentName.
 //
 // The stylesheet rung sits below the operator's explicit bindings
-// (--agent, run.json.Agent) and above the $MOE_AGENT scalar default:
-// this is the moe analog of fabro's "direct node attributes beat the
-// stylesheet". Everything above the stylesheet is operator-explicit for
-// this run; everything below is a background default the per-(workflow,
-// stage) sheet should override.
+// (--agent, run.json.Agent) and above the hard default. This is the moe
+// analog of fabro's "direct node attributes beat the stylesheet".
 //
-// $MOE_FORCE_AGENT is the high-precedence inverse of the low-precedence
-// $MOE_AGENT default: it wins over everything, including an explicit
-// --agent flag, so an operator can flip every stage of every run in the
-// process onto one backend during an outage. It is read live (never
-// persisted to run.json); unsetting it reverts each run to its own
-// configured agent. A bad value flows through and fails legibly at
-// dispatch via agent.Get, same as any other unknown backend name.
+// $MOE_FORCE_AGENT wins over everything, including an explicit --agent
+// flag, so an operator can flip every stage of every run in the process
+// onto one backend during an outage. It is read live (never persisted to
+// run.json); unsetting it reverts each run to its own configured agent. A
+// bad value flows through and fails legibly at dispatch via agent.Get,
+// same as any other unknown backend name.
 func resolveAgentName(explicit, runDefault, stylesheet string) string {
 	if v := os.Getenv("MOE_FORCE_AGENT"); v != "" {
 		return v
@@ -305,9 +301,6 @@ func resolveAgentName(explicit, runDefault, stylesheet string) string {
 	}
 	if stylesheet != "" {
 		return stylesheet
-	}
-	if v := os.Getenv("MOE_AGENT"); v != "" {
-		return v
 	}
 	return "claude"
 }

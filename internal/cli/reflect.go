@@ -53,7 +53,7 @@ func reflectCommand(workflow string, builder func(root, projectID string) (*wiki
 func runReflectSession(workflow string, builder func(root, projectID string) (*wiki.Config, error), args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" reflect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then $MOE_AGENT, then claude")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then claude")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	// The consent ladder, same trio the stage verbs and `new` carry
 	// (`!!` / `!!!` / `!!!!`). `--ship` seals the pass headless; `--chain`

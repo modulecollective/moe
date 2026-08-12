@@ -175,14 +175,12 @@ last rule in the file. The two properties cascade independently — a
 above the background defaults, mirroring "explicit beats the stylesheet":
 
 - Agent: `$MOE_FORCE_AGENT` → `--agent` flag → `run.json` agent → **stylesheet**
-  → `$MOE_AGENT` → `claude`.
+  → `claude`.
 - Model: **stylesheet** → backend CLI default. (There is no `--model` flag or
   `$MOE_MODEL` in v1 — editing the checked-in file is the one knob.)
 
-Note the consequence: a stylesheet `agent:` shadows `$MOE_AGENT`. If your rules
-pair `agent:` (as recommended), `$MOE_AGENT` does nothing for those stages —
-steer a single turn with `--agent`, or the whole process with
-`$MOE_FORCE_AGENT`.
+Steer a run with `--agent`, the whole process with `$MOE_FORCE_AGENT`, or the
+ambient default with a broad stylesheet `agent:` rule.
 
 A `model:` paired with an `agent:` is scoped to that backend: it rides only when
 the turn's resolved backend matches the stylesheet's own resolved `agent` for

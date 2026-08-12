@@ -117,10 +117,10 @@ moe init
 moe project add <repo-url>
 ```
 
-The default backend is `claude`. To prefer Codex for new runs, set
-`MOE_AGENT=codex` or pass `--agent codex` when opening a run or a stage
-(a model-stylesheet `agent:` rule outranks `MOE_AGENT` for the stages it
-matches). Codex needs no permissions-profile setup because MoE supplies it.
+The default backend is `claude`. To use Codex, pass `--agent codex` when
+opening a run or a stage, set `MOE_FORCE_AGENT=codex` for every turn in one
+process, or select it with a model-stylesheet `agent:` rule. Codex needs no
+permissions-profile setup because MoE supplies it.
 See [docs/reference.md](docs/reference.md#codex-setup) for the sandbox details.
 `moe dash` is the terminal
 home screen for re-entry, and `moe serve` is the same dashboard as a local web

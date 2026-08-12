@@ -410,7 +410,6 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 		name      string
 		explicit  string
 		persisted string
-		env       string
 		wantAgent string
 	}{
 		{
@@ -426,12 +425,6 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 			name:      "explicit override wins",
 			explicit:  "codex",
 			persisted: "claude",
-			env:       "claude",
-			wantAgent: "codex",
-		},
-		{
-			name:      "environment fallback",
-			env:       "codex",
 			wantAgent: "codex",
 		},
 	}
@@ -442,7 +435,6 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 			gittest.Run(t, root, "add", "bureaucracy.conf")
 			gittest.Run(t, root, "commit", "-m", "mark bureaucracy root")
 			t.Setenv("MOE_HOME", root)
-			t.Setenv("MOE_AGENT", tc.env)
 			md := trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 			if tc.persisted != "" {
 				md.Agent = tc.persisted

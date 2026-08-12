@@ -822,7 +822,7 @@ func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 	if !strings.Contains(got, "Explicit values persist to run.json; omitted values resolve at stage time") {
 		t.Fatalf("help missing agent persistence boundary:\n%s", got)
 	}
-	if !strings.Contains(got, "$MOE_AGENT, then claude") {
+	if !strings.Contains(got, "model stylesheet, then claude") {
 		t.Fatalf("help missing fallback step:\n%s", got)
 	}
 }
