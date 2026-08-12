@@ -793,7 +793,16 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	if md.Workflow == IdeaWorkflow {
 		switch md.Status {
 		case run.StatusInProgress:
-			return BucketBacklog, prefix + "capture", "", ""
+			note := prefix + "capture"
+			if md.PromoteTo != "" {
+				// The tag is the machine's license to start this idea, so
+				// it belongs where the operator's eye already lands. Same
+				// " → destination" grammar the promoted note below uses:
+				// there the arrow points at the run that happened, here at
+				// the workflow that may.
+				note += " → " + md.PromoteTo
+			}
+			return BucketBacklog, note, "", ""
 		case run.StatusPromoted:
 			note := prefix + "promoted"
 			if slug, ok := promotedToRun(idx, runKey, byRunKey); ok {

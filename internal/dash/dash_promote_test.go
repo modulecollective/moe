@@ -168,3 +168,27 @@ func TestPromoteOpenSuccessorStaysFlat(t *testing.T) {
 		t.Fatalf("idea note = %q, want the inline hint while the successor is open", got)
 	}
 }
+
+// TestTaggedIdeaNoteNamesItsWorkflow: a tag is the machine's license to
+// start an idea, and the backlog note is where the operator's eye
+// already lands — so the tag rides there rather than hiding in
+// run.json. Untagged ideas read exactly as before, which is the fence
+// staying visible from across the room.
+func TestTaggedIdeaNoteNamesItsWorkflow(t *testing.T) {
+	runs := []*run.Metadata{
+		{ID: "licensed", Project: "p", Workflow: IdeaWorkflow, Status: run.StatusInProgress, PromoteTo: "sdlc"},
+		{ID: "fenced", Project: "p", Workflow: IdeaWorkflow, Status: run.StatusInProgress},
+	}
+	when := map[string]time.Time{
+		"p/licensed": time.Now().UTC().Add(-2 * time.Hour),
+		"p/fenced":   time.Now().UTC().Add(-1 * time.Hour),
+	}
+	byKey, _ := buildPromote(t, runs, when, nil, nil)
+
+	if got := byKey["p/licensed"].Note; got != "idea:capture → sdlc" {
+		t.Fatalf("tagged idea note = %q, want %q", got, "idea:capture → sdlc")
+	}
+	if got := byKey["p/fenced"].Note; got != "idea:capture" {
+		t.Fatalf("untagged idea note = %q, want %q", got, "idea:capture")
+	}
+}
