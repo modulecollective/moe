@@ -47,6 +47,14 @@ blocks the gate and kicks the run back. `test` verifies the behavior and records
 what was run. `push` fast-forwards the target project's
 default branch, or opens a PR with `--pr`.
 
+A run whose work landed entirely as bureaucracy commits — project hooks,
+chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
+on its test gate, and `push` then closes the run rather than refusing an empty
+branch, so a ride carries on instead of stalling. It honors that only when the
+branch verifiably has zero commits ahead of the default branch: a gate and a
+branch that disagree refuse loudly, because the alternative is a mis-written
+gate deleting a sandbox that still held reviewed work.
+
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
 seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
 starts a new run seeded with a terminal prior run's design canvas, useful
@@ -494,6 +502,16 @@ pulse new --dynamic <project>` when it finds something worth looking at.
 Stopping the process retracts both; an unarmed `moe serve` behaves exactly as
 it always has.
 
+Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
+serve keeps on disk and carries its status in the banner's tail — armed or not,
+how long it has been up, when the next tick lands — spending a line on a project
+only when that project is sweeping, cooling off after a failure, or its last
+sweep died. The web boards carry the same one-line cluster, linked to a `/serve`
+page holding the trace: what each recent tick decided, and the output tail of
+any sweep that failed. That trace is the running process's memory rather than
+history — a restart starts it over, and the durable record of a sweep is still
+the run it opened.
+
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
 settled-design floor, the occupancy guard, the review-and-test walk on every
@@ -501,8 +519,13 @@ ride, and the journal marks on every machine turn. A tick sweeps only when the
 project's journal moved since its last heartbeat sweep, or a settled thread is
 parked with nobody inside it *and no sweep has looked at that board since it
 last changed* — a thread a survey saw and deliberately parked with a reason is
-not re-offered until something moves. It stands down while anything is live in
-the project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and
+not re-offered until something moves. That parked leg looks one step past a
+held door: settled work queued behind a thread head that is itself waiting on
+your design still counts, because a sweep grooms before it kicks and the groom
+is what can move that work out from behind the head. A `chain` head you minted
+yourself is the exception — it fences its whole batch, since staging one by hand
+is the point. The heartbeat stands down while anything is live in the project —
+a ride mid-hop, you sitting in a stage, a survey mid-turn — and
 for one full tick after anything you did by hand. A quiet board costs nothing —
 no agent turn, no run, no journal line.
 

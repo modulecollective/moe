@@ -146,7 +146,9 @@ full treatment.
 Three bureaucracy-side artifacts have no workflow of their own — project
 [hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores), and
 [knowledge topics](docs/workflows.md#knowledge). Edit them by hand, or let an
-sdlc run land them: a stage's per-turn commit picks all three up.
+sdlc run land them: a stage's per-turn commit picks all three up. Such a run
+ships nothing to the target repo — its test gate says so (`ship: none`) and
+`push` closes it.
 
 ## Going Deeper
 

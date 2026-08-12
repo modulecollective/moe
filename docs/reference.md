@@ -13,7 +13,10 @@ source of truth for the exact command surface; this page is a map.
   daily-activity histogram of recent run activity (`--project` scopes the chart
   to one project). `--watch` redraws it in place every 3 seconds until Ctrl-C —
   a live pane rather than a snapshot; it needs a terminal on stdout and exits 2
-  without one.
+  without one. When a `moe serve` is running against this bureaucracy, its
+  status rides the banner's tail — armed or not, uptime, next sweep — and a
+  project earns a line of its own only when it is sweeping, cooling off, or its
+  last sweep died.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
@@ -28,7 +31,10 @@ source of truth for the exact command surface; this page is a map.
   standing fourth bang: it enables those actions — anything that can reach the
   listener can then execute code — and starts the resident heartbeat, a
   per-project ticker that runs `moe pulse new --dynamic` when the board warrants
-  it. Stopping the process retracts both.
+  it. Stopping the process retracts both. A `/serve` page owns that ticker's
+  status and trace — what each recent tick decided, and the output tail of any
+  sweep that failed — reachable from the menu and from the one-line status
+  cluster every board header carries.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
