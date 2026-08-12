@@ -1024,6 +1024,33 @@ func HumanAgo(now, t time.Time) string {
 	}
 }
 
+// HumanDuration spells a duration as a length rather than an age: "12m",
+// "3h 5m", "3d 2h". HumanAgo's suffix is baked ("3d ago"), which is the
+// wrong tense for an uptime or a countdown, and the serve activity strip
+// on both dashes needs all three of them side by side.
+func HumanDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "under a minute"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd %dh", int(d.Hours()/24), int(d.Hours())%24)
+	}
+}
+
+// Plural spells "1 tick" / "2 ticks". Both dashes count down the
+// heartbeat's cool-off in ticks, and "(1 tick(s) left)" is the kind of
+// line that reads as unfinished.
+func Plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // CountProjects returns the number of registered projects in root —
 // i.e. projects/<id>/project.json files.
 func CountProjects(root string) (int, error) {
