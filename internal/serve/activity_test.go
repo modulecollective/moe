@@ -211,13 +211,17 @@ func TestActivityStateFileRejectsGarbage(t *testing.T) {
 }
 
 // TestActivityPanelPrecedence: what the operator needs first wins the
-// line. A live sweep beats a cool-off beats a dead last sweep.
+// line. A live sweep beats a cool-off beats a dead last sweep beats a
+// hold; quiet earns no line at all.
 func TestActivityPanelPrecedence(t *testing.T) {
 	now := time.Now()
 	for _, tc := range []struct {
 		name  string
 		setup func(a *activity)
-		want  string
+		// held stages a gate hold ahead of setup, so the case proves the
+		// state under test outranks it rather than merely coexisting.
+		held bool
+		want string
 	}{
 		{
 			name: "sweeping wins over a cool-off",
@@ -238,15 +242,46 @@ func TestActivityPanelPrecedence(t *testing.T) {
 			want:  "failed",
 		},
 		{
+			// A stand-down that names something outside the machine is the
+			// one quiet worth a row: an operator can act on it.
+			name: "a held sweep earns its row",
+			setup: func(a *activity) {
+				a.recordTick(now, []HeartbeatDecision{
+					{Project: "moe", Held: true, Reason: "somebody is already inside the project"},
+				})
+			},
+			want: "held",
+		},
+		{
+			name:  "a dead sweep outranks a hold",
+			setup: func(a *activity) { a.recordSweepEnd("moe", now.Add(-time.Hour), false, 1, 0) },
+			held:  true,
+			want:  "failed",
+		},
+		{
 			name:  "a clean sweep is quiet",
 			setup: func(a *activity) { a.recordSweepEnd("moe", now.Add(-time.Hour), true, 0, 0) },
-			want:  "quiet",
+			want:  "",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := testActivity(now.Add(-2*time.Hour), true)
+			if tc.held {
+				a.recordTick(now, []HeartbeatDecision{
+					{Project: "moe", Held: true, Reason: "somebody is already inside the project"},
+				})
+			}
 			tc.setup(a)
 			vm := a.panel(now)
+			// An empty want is the collapse: quiet spends no row, only a
+			// tally mark.
+			if tc.want == "" {
+				if len(vm.Projects) != 0 || vm.QuietCount != 1 {
+					t.Errorf("panel projects = %+v (quiet %d), want the quiet one collapsed",
+						vm.Projects, vm.QuietCount)
+				}
+				return
+			}
 			if len(vm.Projects) != 1 || vm.Projects[0].State != tc.want {
 				t.Errorf("panel projects = %+v, want state %q", vm.Projects, tc.want)
 			}
@@ -255,15 +290,16 @@ func TestActivityPanelPrecedence(t *testing.T) {
 }
 
 // TestActivityPanelIsBoardWide: /serve is the whole heartbeat's page —
-// every project it has a verdict for, every child it spawned, and a
-// tick's whole verdict set on one line.
+// every project it has a verdict worth reporting for, every child it
+// spawned, and a tick's news on one line.
 func TestActivityPanelIsBoardWide(t *testing.T) {
 	now := time.Now()
 	a := testActivity(now, true)
 	a.recordTick(now, []HeartbeatDecision{
 		{Project: "moe", Sweep: true, Reason: "the journal moved"},
-		{Project: "bureaucracy", Reason: "nothing parked"},
+		{Project: "bureaucracy", Held: true, Reason: "somebody is already inside the project"},
 	})
+	a.recordSweepStart("moe", now)
 	a.recordChildSpawn(heartbeatChildPrefix+"moe", now)
 	a.recordChildSpawn("bureaucracy/other", now)
 
@@ -276,8 +312,75 @@ func TestActivityPanelIsBoardWide(t *testing.T) {
 	}
 	tick := vm.Events[len(vm.Events)-1].Text
 	if !strings.Contains(tick, "moe sweeping — the journal moved") ||
-		!strings.Contains(tick, "bureaucracy quiet — nothing parked") {
-		t.Errorf("tick text = %q, want the whole verdict set", tick)
+		!strings.Contains(tick, "bureaucracy held — somebody is already inside the project") {
+		t.Errorf("tick text = %q, want both verdicts that are news", tick)
+	}
+}
+
+// TestActivityPanelCollapsesTheQuiet is the wall this page exists to
+// stop: fourteen projects with nothing to do produced fourteen rows all
+// restating "nothing to do", and a tick paragraph joining all fourteen
+// verdicts. One tally mark carries the same fact.
+func TestActivityPanelCollapsesTheQuiet(t *testing.T) {
+	now := time.Now()
+	a := testActivity(now, true)
+	a.recordTick(now, []HeartbeatDecision{
+		{Project: "moe", Sweep: true, Reason: "the journal moved"},
+		{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
+		{Project: "beta", Reason: "the journal hasn't moved and nothing settled is parked"},
+	})
+	a.recordSweepStart("moe", now)
+
+	vm := a.panel(now)
+	if len(vm.Projects) != 1 || vm.Projects[0].Project != "moe" {
+		t.Errorf("panel projects = %+v, want only the sweeping one", vm.Projects)
+	}
+	if vm.QuietCount != 2 {
+		t.Errorf("quiet count = %d, want both quiet projects tallied", vm.QuietCount)
+	}
+	if got, want := vm.Events[0].Text, "moe sweeping — the journal moved · 2 quiet"; got != want {
+		t.Errorf("tick text = %q, want %q", got, want)
+	}
+	for _, gone := range []string{"a sweep already surveyed the current tip", "alpha", "beta"} {
+		if strings.Contains(vm.Events[0].Text, gone) {
+			t.Errorf("tick text = %q, still spells out %q", vm.Events[0].Text, gone)
+		}
+	}
+}
+
+// TestActivityPanelDropsAnAllQuietTick: a tick where nothing happened is
+// not an event. The ring still records it — it is the CLI snapshot's
+// source and a debugging trail — but the page says "the heartbeat is
+// alive" once, on the status line, instead of once per tick.
+func TestActivityPanelDropsAnAllQuietTick(t *testing.T) {
+	now := time.Now()
+	a := testActivity(now.Add(-time.Hour), true)
+	a.recordTick(now.Add(-24*time.Minute), []HeartbeatDecision{
+		{Project: "moe", Reason: "a sweep already surveyed the current tip"},
+	})
+	a.recordTick(now.Add(-4*time.Minute), []HeartbeatDecision{
+		{Project: "moe", Reason: "a sweep already surveyed the current tip"},
+	})
+
+	vm := a.panel(now)
+	if len(vm.Events) != 0 {
+		t.Errorf("panel events = %+v, want an empty ring — nothing happened", vm.Events)
+	}
+	if len(a.events) != 2 {
+		t.Errorf("record holds %d events, want both ticks still recorded", len(a.events))
+	}
+	if vm.LastTick != "4m ago" {
+		t.Errorf("last tick = %q, want the liveness those entries were carrying", vm.LastTick)
+	}
+}
+
+// TestActivityPanelHasNoLastTickBeforeTheFirstOne: a serve that just
+// started has honestly never looked, and "last tick never" would be a
+// worse answer than saying nothing.
+func TestActivityPanelHasNoLastTickBeforeTheFirstOne(t *testing.T) {
+	now := time.Now()
+	if got := testActivity(now, true).panel(now).LastTick; got != "" {
+		t.Errorf("last tick = %q on a serve that has never ticked, want nothing", got)
 	}
 }
 

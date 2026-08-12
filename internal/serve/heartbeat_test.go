@@ -357,10 +357,12 @@ func TestHeartbeatTickRecordsTheWholeVerdictSet(t *testing.T) {
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	vm := s.activity.panel(time.Now())
+	// Off the record, not the panel: /serve summarises the trivial away,
+	// and the claim here is that the record still holds every verdict for
+	// the CLI snapshot and for anything that later wants to read one.
 	states := map[string]string{}
-	for _, p := range vm.Projects {
-		states[p.Project] = p.Reason
+	for _, p := range s.activity.snapshot(time.Now()).Projects {
+		states[p.Project] = p.Decision
 	}
 	if len(states) != 2 {
 		t.Fatalf("recorded projects = %v, want the swept and the quiet one", states)

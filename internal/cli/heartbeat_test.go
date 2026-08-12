@@ -116,6 +116,18 @@ func reasonFor(decisions []serve.HeartbeatDecision, projectID string) string {
 	return ""
 }
 
+// heldFor reports whether one project's verdict was a hold — a sweep
+// that wanted to run and didn't. False for a project that isn't in the
+// set at all, which is the same answer as "nothing held it".
+func heldFor(decisions []serve.HeartbeatDecision, projectID string) bool {
+	for _, d := range decisions {
+		if d.Project == projectID {
+			return d.Held
+		}
+	}
+	return false
+}
+
 // TestHeartbeatFirstLookIsQuiet: a serve that just armed has, correctly,
 // never looked. Seeding the cursor lazily is what keeps a restart from
 // sweeping every registered project on a board where nothing is waiting
@@ -151,6 +163,55 @@ func TestHeartbeatStandDownReasonsCrossTheSeam(t *testing.T) {
 	g.Swept("moe", true)
 	if got := reasonFor(dueDecisions(t, g, 0), "moe"); !strings.Contains(got, "surveyed the current tip") {
 		t.Errorf("reason = %q, want the surveyed cursor named", got)
+	}
+}
+
+// TestHeartbeatMarksTheHeldStandDowns: /serve renders only the
+// non-trivial, and this bit is what tells the two kinds of quiet apart.
+// A sweep blocked by something outside the machine — an operator commit
+// in the window, somebody inside the project — is news; "nothing to do"
+// spelled three ways is not. The split lives here rather than in a
+// reason-string match on the render side, which is what keeps the reason
+// strings free to be reworded.
+func TestHeartbeatMarksTheHeldStandDowns(t *testing.T) {
+	root := quietFixture(t)
+	journalCommit(t, root, "moe", "operator: a note", "")
+	g := newHeartbeatGate(root)
+
+	if !heldFor(dueDecisions(t, g, testTick), "moe") {
+		t.Error("an operator commit inside the window is a hold, not background hum")
+	}
+
+	// Past the window with a clean sweep on the tip: nothing to do, and
+	// nothing for the operator to act on either.
+	g.Swept("moe", true)
+	if heldFor(dueDecisions(t, g, 0), "moe") {
+		t.Error("a surveyed tip is the background hum, not a hold")
+	}
+}
+
+// TestHeartbeatMarksALiveSessionAsHeld: the other hold. Somebody is
+// inside the project, which is a fact about the board the operator can
+// see the consequence of, so it earns its row on /serve.
+func TestHeartbeatMarksALiveSessionAsHeld(t *testing.T) {
+	root := quietFixture(t)
+	minted := groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
+
+	// The journal moved, so this tick wants to sweep — and then finds
+	// somebody inside. That is the shape a hold is for; a board with
+	// nothing to do never reaches the occupancy check at all.
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	if _, err := session.Open(root, "moe", minted["fix-a"], "design"); err != nil {
+		t.Fatal(err)
+	}
+
+	decisions := dueDecisions(t, g, testTick)
+	if got := reasonFor(decisions, "moe"); !strings.Contains(got, "already inside") {
+		t.Fatalf("reason = %q, want the occupancy stand-down — the test isn't reaching it", got)
+	}
+	if !heldFor(decisions, "moe") {
+		t.Error("a live session holds a sweep that wanted to run — that is a hold")
 	}
 }
 

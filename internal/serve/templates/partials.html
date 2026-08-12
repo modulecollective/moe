@@ -87,10 +87,10 @@
 {{define "servepanel"}}
   <section class="dash-section serve-panel">
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}})</span>
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}})</span>
       {{else}}<span class="count">(browse-only · up {{.Up}})</span>{{end}}
     </span></h2>
-    {{if .Projects}}
+    {{if or .Projects .QuietCount}}
     <ul class="rows">
       {{range .Projects}}
       <li class="row">
@@ -99,6 +99,9 @@
         <span class="note">{{.Reason}}</span>
       </li>
       {{end}}
+      {{/* Every quiet project's reason restates "nothing to do", so they
+           collapse to a tally rather than a wall of identical rows. */}}
+      {{if .QuietCount}}<li class="row"><span class="note">{{.QuietCount}} quiet</span></li>{{end}}
     </ul>
     {{end}}
     {{if .Events}}
@@ -117,7 +120,7 @@
       </li>
       {{end}}
     </ul>
-    {{else if not .Projects}}<p class="empty">nothing yet — no tick has run</p>{{end}}
+    {{else if and (not .Projects) (not .QuietCount)}}<p class="empty">nothing yet — no tick has run</p>{{end}}
   </section>
 {{end}}
 

@@ -280,10 +280,10 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 }
 
 // servePanelVM is the serve record rendered for the web: one status line
-// for the process, one line per project the heartbeat has a verdict for,
-// and the recent-activity list from the ring. Server-rendered from memory
-// on page load — no polling, no fragment fetch. Reload is the phone
-// gesture, and page weight is a first-class constraint on this board.
+// for the process, one line per project worth reporting on, and the
+// recent-activity list from the ring. Server-rendered from memory on page
+// load — no polling, no fragment fetch. Reload is the phone gesture, and
+// page weight is a first-class constraint on this board.
 //
 // The whole panel is the /serve page. The boards spend only Cluster on
 // it, in their header — status is ambient, a day's trace is not, and
@@ -300,17 +300,29 @@ type servePanelVM struct {
 	NextSweep string
 	// Cluster is the brief status the page headers link to /serve with —
 	// the same line, byte for byte, that the CLI dash's banner carries.
-	Cluster  string
-	Projects []serveProjectVM
-	Events   []serveEventVM
+	Cluster string
+	// LastTick is how long ago the heartbeat last looked ("4m ago"), empty
+	// before the first one. It is the liveness a page of all-quiet tick
+	// entries used to communicate, in three words.
+	LastTick string
+	// Projects holds only the projects worth a row. Quiet ones — the ones
+	// whose verdict restates "nothing to do" — collapse into QuietCount.
+	Projects   []serveProjectVM
+	QuietCount int
+	Events     []serveEventVM
 }
+
+// serveStateQuiet is the one state /serve spends no row on: every quiet
+// project's reason restates "nothing to do", so a count is the whole of
+// what they add.
+const serveStateQuiet = "quiet"
 
 // serveProjectVM is one project's line in the strip: what the heartbeat
 // is doing about it and why.
 type serveProjectVM struct {
 	Project string
 	// State is the one-word status the line leads with — "sweeping",
-	// "cooling", "failed", "quiet".
+	// "cooling", "failed", "held", "quiet".
 	State  string
 	Detail string // "(3m)", "(2 ticks left)", "" — qualifies State
 	Reason string // the gate's own words
@@ -336,6 +348,14 @@ type serveEventVM struct {
 // panel renders the activity record for the web, board-wide. Single
 // operator, a ring of at most 50 events: scoping it per project would
 // buy a second rendering path for a page that's one scan long.
+//
+// Non-trivial first, throughout. The ring keeps recording every tick —
+// it is also the CLI snapshot's source and a debugging trail — but a
+// board of fourteen projects produces fourteen identical quiet rows and
+// a paragraph of repeated verdicts per tick, and none of it is news. The
+// filtering is here, at VM-build time: quiet projects become a count,
+// all-trivial ticks leave the ring, and what a wall of them was actually
+// saying — the heartbeat is alive — becomes LastTick.
 func (a *activity) panel(now time.Time) servePanelVM {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -344,11 +364,21 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	if next := a.nextTick(); !next.IsZero() {
 		vm.NextSweep = dash.HumanDuration(max(next.Sub(now), 0))
 	}
+	if !a.lastTick.IsZero() {
+		vm.LastTick = dash.HumanAgo(now, a.lastTick)
+	}
 	failing := 0
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
 		line := serveProjectLine(now, id, a.projects[id])
 		if line.Failed {
 			failing++
+		}
+		// Counted before the collapse, so the cluster's failing count is
+		// exactly the rows below it — a quiet line is never Failed, but
+		// tying the two to the same predicate is what keeps that true.
+		if line.State == serveStateQuiet {
+			vm.QuietCount++
+			continue
 		}
 		vm.Projects = append(vm.Projects, line)
 	}
@@ -356,16 +386,23 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	// Newest first: the ring stores in arrival order, and the question the
 	// list answers is "what just happened".
 	for i := len(a.events) - 1; i >= 0; i-- {
-		vm.Events = append(vm.Events, serveEventLine(now, a.events[i]))
+		if line, ok := serveEventLine(now, a.events[i]); ok {
+			vm.Events = append(vm.Events, line)
+		}
 	}
 	return vm
 }
 
 // serveProjectLine turns one project's record into its line. State
 // precedence is what the operator needs first: a live sweep, then a
-// cool-off holding the project back, then a dead last sweep, then quiet.
+// cool-off holding the project back, then a dead last sweep, then a
+// sweep the gate held, then quiet.
+//
+// held comes last of the earned states on purpose: it is this tick's
+// verdict, and a project whose last sweep died has a bigger problem than
+// why this tick stood down.
 func serveProjectLine(now time.Time, id string, p *activityProject) serveProjectVM {
-	line := serveProjectVM{Project: id, State: "quiet", Reason: p.decision}
+	line := serveProjectVM{Project: id, State: serveStateQuiet, Reason: p.decision}
 	switch {
 	case !p.started.IsZero():
 		line.State = "sweeping"
@@ -377,31 +414,47 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 	case !p.sweptAt.IsZero() && !p.clean:
 		line.State, line.Failed = "failed", true
 		line.Detail = "(" + dash.HumanAgo(now, p.sweptAt) + ")"
+	case p.held:
+		line.State = "held"
 	}
 	return line
 }
 
-// serveEventLine turns one ring entry into its line. A tick's body is its
-// whole verdict set, joined; a child's is what happened to it.
-func serveEventLine(now time.Time, ev activityEvent) serveEventVM {
+// serveEventLine turns one ring entry into its line. A tick's body is
+// the verdicts that are news — sweeps and holds, each with its reason —
+// plus a tally of the ones that aren't; a child's is what happened to
+// it. ok is false for a tick that was entirely trivial: it stays in the
+// ring, but a "nothing happened" line is what the status line's last
+// tick says once, for all of them.
+func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
 	vm := serveEventVM{When: dash.HumanAgo(now, ev.At), Kind: ev.Kind, Failed: ev.Failed}
 	if ev.Kind == "tick" {
 		var parts []string
+		quiet := 0
 		for _, d := range ev.Decisions {
-			verb := "quiet"
-			if d.Sweep {
-				verb = "sweeping"
+			switch {
+			case d.Sweep:
+				parts = append(parts, fmt.Sprintf("%s sweeping — %s", d.Project, d.Reason))
+			case d.Held:
+				parts = append(parts, fmt.Sprintf("%s held — %s", d.Project, d.Reason))
+			default:
+				quiet++
 			}
-			parts = append(parts, fmt.Sprintf("%s %s — %s", d.Project, verb, d.Reason))
+		}
+		if len(parts) == 0 {
+			return serveEventVM{}, false
+		}
+		if quiet > 0 {
+			parts = append(parts, fmt.Sprintf("%d quiet", quiet))
 		}
 		vm.Text = strings.Join(parts, " · ")
-		return vm
+		return vm, true
 	}
 	vm.Text = ev.Subject + " " + ev.Detail
 	if ev.Failed {
 		vm.Tail = ev.Tail
 	}
-	return vm
+	return vm, true
 }
 
 // dashVM is the data the dash template renders against. Same three

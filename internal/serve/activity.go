@@ -66,8 +66,13 @@ type activityEvent struct {
 
 // activityProject is the ticker's per-project record.
 type activityProject struct {
-	decision  string
-	sweep     bool
+	decision string
+	sweep    bool
+	// held is the last tick's HeartbeatDecision.Held: a stand-down worth
+	// a row on /serve rather than a tally mark. Runtime-only, like the
+	// rest of this struct — it never reaches the state file, because the
+	// CLI dash's earned rows stay sweeping/cooling/failed.
+	held      bool
 	started   time.Time // current sweep's start; zero when none is running
 	sweptAt   time.Time
 	clean     bool
@@ -134,7 +139,7 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 	for _, d := range decisions {
 		p := a.project(d.Project)
 		p.decision = d.Reason
-		p.sweep = d.Sweep
+		p.sweep, p.held = d.Sweep, d.Held
 	}
 	a.push(activityEvent{At: at, Kind: "tick", Decisions: slices.Clone(decisions)})
 }
@@ -147,7 +152,9 @@ func (a *activity) recordSkip(projectID, reason string, fails, coolTicks int) {
 	defer a.mu.Unlock()
 	p := a.project(projectID)
 	p.decision = reason
-	p.sweep = false
+	// Not held either: the cool-off earns its own row through coolTicks,
+	// and leaving the gate's held bit standing would double-claim it.
+	p.sweep, p.held = false, false
 	p.fails, p.coolTicks = fails, coolTicks
 }
 

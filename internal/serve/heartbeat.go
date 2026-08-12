@@ -56,7 +56,8 @@ const heartbeatBackoffCap = 6
 const heartbeatChildPrefix = "heartbeat:"
 
 // HeartbeatDecision is one project's verdict for one tick: whether to
-// sweep it, and the gate's own words for why.
+// sweep it, whether a stand-down held a sweep that wanted to run, and
+// the gate's own words for why.
 //
 // The reason is the display string, not a code. Every one of them is a
 // sentence the gate already had to compose to make the call, so
@@ -64,9 +65,16 @@ const heartbeatChildPrefix = "heartbeat:"
 // trace — "the journal moved", "a sweep already surveyed the current
 // tip", "somebody is already inside the project". Nothing parses them
 // back, and nothing branches on them.
+//
+// Held is what keeps that true now that /serve renders only the
+// non-trivial. The gate produces two kinds of quiet: nothing to do (the
+// background hum) and held — a sweep blocked by something the operator
+// can act on. Only the second earns a row and a line in the ring, and
+// the split rides on this bit rather than on matching the reason text.
 type HeartbeatDecision struct {
 	Project string
 	Sweep   bool
+	Held    bool
 	Reason  string
 }
 

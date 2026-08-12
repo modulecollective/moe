@@ -11,10 +11,11 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 )
 
-// panelServer is an armed serve with a project registered on disk (so the
+// panelServer is an armed serve with projects registered on disk (so the
 // hub route resolves) and an activity record staged the way a live
-// heartbeat would leave it: one project mid-sweep, one quiet, and a failed
-// sweep in the ring carrying its output tail.
+// heartbeat would leave it: one project mid-sweep, one held by the gate,
+// one with nothing to do, and a failed sweep in the ring carrying its
+// output tail.
 func panelServer(t *testing.T) *Server {
 	t.Helper()
 	root := t.TempDir()
@@ -30,7 +31,8 @@ func panelServer(t *testing.T) *Server {
 	})
 	s.activity.recordTick(now.Add(-3*time.Minute), []HeartbeatDecision{
 		{Project: "alpha", Sweep: true, Reason: "the journal moved"},
-		{Project: "beta", Reason: "a sweep already surveyed the current tip"},
+		{Project: "beta", Held: true, Reason: "somebody is already inside the project"},
+		{Project: "gamma", Reason: "a sweep already surveyed the current tip"},
 	})
 	s.activity.recordSweepStart("alpha", now.Add(-3*time.Minute))
 	s.activity.recordChildExit(heartbeatChildPrefix+"beta", now.Add(-40*time.Minute),
@@ -99,23 +101,42 @@ func TestServeMenuReachesTheServePage(t *testing.T) {
 }
 
 // TestServePageCarriesTheWholeTrace: /serve is where the former panel
-// went — status, every project the heartbeat has a verdict for, the ring,
-// and a failed child's output tail behind its details.
+// went — status, every project worth a verdict, the ring, and a failed
+// child's output tail behind its details.
 func TestServePageCarriesTheWholeTrace(t *testing.T) {
 	body := getBody(t, panelServer(t), "/serve")
 	for _, want := range []string{
 		"serve-panel",
 		"armed",
 		"next sweep in",
+		"last tick 3m ago",
 		"sweeping",
 		"the journal moved",
-		"a sweep already surveyed the current tip",
+		"held",
+		"somebody is already inside the project",
 		"<summary>output</summary>",
 		"credit limit reached",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/serve is missing %q", want)
 		}
+	}
+}
+
+// TestServePageSummarisesTheTrivial: the page that owns the trace is
+// also the page that has to stay readable. A project with nothing to do
+// is a tally mark, not a row restating "nothing to do", and its reason
+// doesn't reach the tick line either.
+func TestServePageSummarisesTheTrivial(t *testing.T) {
+	body := getBody(t, panelServer(t), "/serve")
+	if !strings.Contains(body, "1 quiet") {
+		t.Error("/serve should collapse the quiet projects to a count")
+	}
+	if strings.Contains(body, "a sweep already surveyed the current tip") {
+		t.Error("/serve still spells out a quiet project's reason")
+	}
+	if strings.Contains(body, "gamma") {
+		t.Error("/serve still names a project with nothing to report")
 	}
 }
 
@@ -128,6 +149,26 @@ func TestServePageIsBoardWide(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("/serve is missing project %q", want)
 		}
+	}
+}
+
+// TestServePageRendersAnAllQuietBoard: the near-idle case the design
+// signed up for — "last tick 4m ago · 12 quiet" and little else. It must
+// not read as the empty state, which means something different: no tick
+// has ever run.
+func TestServePageRendersAnAllQuietBoard(t *testing.T) {
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Dynamic: true})
+	s.activity.recordTick(time.Now().Add(-4*time.Minute), []HeartbeatDecision{
+		{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
+		{Project: "beta", Reason: "no journal history yet"},
+	})
+
+	body := getBody(t, s, "/serve")
+	if !strings.Contains(body, "last tick 4m ago") || !strings.Contains(body, "2 quiet") {
+		t.Error("/serve should say the heartbeat is alive and how much of the board is idle")
+	}
+	if strings.Contains(body, "nothing yet — no tick has run") {
+		t.Error("/serve read as never-ticked on a board that ticked and found nothing")
 	}
 }
 
