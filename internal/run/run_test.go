@@ -1180,10 +1180,22 @@ func TestJournalIndexPushConsentPinsTheTerminalRecord(t *testing.T) {
 		"MoE-Project: a\nMoE-Run: shipped\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: deadbeef\nMoE-Consent: dynamic\n")
 	commit("sync: a/reconciled merged",
 		"MoE-Project: a\nMoE-Run: reconciled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: cafebabe\nMoE-Consent: static\n")
+	// The gitlink bump sync.BumpOne lands right after a ride's merge
+	// record, and is consent-stamped so the heartbeat's sweep-exit walk
+	// reads it as the machine's. Its subject matches the `sync: ` arm,
+	// so pin that it still isn't a ship record. Two things keep it out
+	// and the first is the load-bearing one: it carries no MoE-Run, so
+	// the slug gate above drops it before any of these arms; and it
+	// carries no MoE-Document either. A pin, not a discriminating test
+	// — no single-line mutation of the push arm makes it fail.
+	commit("sync: bump project pointers", "a: 782f4cb..f07455f\n\nMoE-Consent: dynamic\n")
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if len(idx.PushConsent) != 2 {
+		t.Errorf("PushConsent = %v, want exactly the two ship records — a pointer bump is not a ship", idx.PushConsent)
 	}
 	if got, ok := idx.PushConsent["a/stalled"]; ok {
 		t.Errorf("PushConsent[a/stalled] = %q, want absent — the run never shipped", got)
