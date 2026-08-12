@@ -147,6 +147,25 @@ func (e *NestedError) Error() string {
 		e.Path, e.Holder.Purpose, time.Since(e.Holder.AcquiredAt).Round(time.Second), e.Purpose)
 }
 
+// EnsureDir creates <root>/.moe, drops the `*` gitignore inside so
+// nothing written there leaks into git history, and returns the
+// directory.
+//
+// Exported because the lock isn't the only runtime state that lives
+// under `.moe/` — `moe serve` keeps its activity snapshot there too — and
+// a second copy of "mkdir, then remember the gitignore" is one more way
+// for `.moe/` to show up in `git status`.
+func EnsureDir(root string) (string, error) {
+	dir := filepath.Join(root, ".moe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("repolock: mkdir %s: %w", dir, err)
+	}
+	if err := ensureGitignore(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
 // Acquire obtains the repo-wide lock at <root>/.moe/lock.
 //
 // Retries with bounded backoff while someone else holds the lock,
@@ -159,11 +178,8 @@ func (e *NestedError) Error() string {
 func Acquire(root string, opts Options) (*Lock, error) {
 	opts = applyDefaults(opts)
 
-	moeDir := filepath.Join(root, ".moe")
-	if err := os.MkdirAll(moeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("repolock: mkdir %s: %w", moeDir, err)
-	}
-	if err := ensureGitignore(moeDir); err != nil {
+	moeDir, err := EnsureDir(root)
+	if err != nil {
 		return nil, err
 	}
 
