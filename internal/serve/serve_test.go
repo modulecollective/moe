@@ -1956,6 +1956,15 @@ func newServerWithDefaults(t *testing.T, opts Options) *Server {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// Serve's state-file writers outlive the assertions: a sweep watcher
+	// and a child's exit hook both save after the condition a test waits
+	// on, and t.TempDir's cleanup would race that write ("RemoveAll
+	// cleanup: directory not empty"). Cleanups run last-registered-first,
+	// and Root was already a TempDir before this call, so closing the
+	// writer here happens first. dropActivity is the production seam for
+	// exactly this: it waits out a save in flight and makes every later
+	// one a no-op.
+	t.Cleanup(func() { _ = s.dropActivity() })
 	return s
 }
 

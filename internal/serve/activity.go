@@ -86,6 +86,13 @@ type activity struct {
 	addr    string
 	armed   bool
 	started time.Time
+	// interval is the tick cadence, captured once at construction rather
+	// than read on each snapshot. Snapshots run on the child-reader and
+	// sweep-watcher goroutines, and heartbeatInterval is a var only so
+	// tests can shorten it — reading it from there would be a write those
+	// goroutines race. The cadence is baked in production, so holding a
+	// copy costs nothing.
+	interval time.Duration
 
 	lastTick time.Time
 	projects map[string]*activityProject
@@ -98,6 +105,7 @@ func newActivity(pid int, addr string, armed bool, now time.Time) *activity {
 		addr:     addr,
 		armed:    armed,
 		started:  now,
+		interval: heartbeatInterval,
 		projects: map[string]*activityProject{},
 	}
 }
@@ -204,9 +212,9 @@ func (a *activity) nextTick() time.Time {
 		return time.Time{}
 	}
 	if a.lastTick.IsZero() {
-		return a.started.Add(heartbeatInterval)
+		return a.started.Add(a.interval)
 	}
-	return a.lastTick.Add(heartbeatInterval)
+	return a.lastTick.Add(a.interval)
 }
 
 // ActivitySnapshot is the JSON serve keeps at <root>/.moe/serve.json:
