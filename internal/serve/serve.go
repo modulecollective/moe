@@ -19,8 +19,8 @@
 // Because reach is the only gate, motion is opt-in. Several POST routes
 // run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary code), so by
 // default — safe mode — they refuse with 403 and the UI doesn't offer
-// them: idea capture, run close/edit/reopen, opening or promoting into a
-// *parked* run, and the read-only views work.
+// them: idea capture, idea tag/untag, run close/edit/reopen, opening or
+// promoting into a *parked* run, and the read-only views work.
 //
 // Options.Dynamic (the --dynamic flag or a non-empty MOE_SERVE_DYNAMIC)
 // arms the process. It is the standing spelling of the fourth bang, and
@@ -431,6 +431,8 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleCaptureEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
+	s.router.HandleFunc("POST /run/{project}/{slug}/tag", s.handleIdeaTag)
+	s.router.HandleFunc("POST /run/{project}/{slug}/untag", s.handleIdeaUntag)
 	// Stage advancement for in-progress cascade-workflow runs:
 	// /advance spawns the next stage interactively under the serve
 	// handshake; /ship spawns it under --ship (headless cascade through

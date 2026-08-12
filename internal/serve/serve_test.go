@@ -2264,3 +2264,161 @@ func TestPromoteErrorEchoesSelections(t *testing.T) {
 		}
 	}
 }
+
+// TestIdeaPageRendersTagChips: the tag chip is the dash face of `moe
+// idea tag` — one chip per workflow the promote form offers, and an
+// untag chip once a tag is on. An already-tagged workflow drops its own
+// chip: re-tagging it does nothing.
+func TestIdeaPageRendersTagChips(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	body := rr.Body.String()
+	if !strings.Contains(body, `action="/run/alpha/my-idea/tag?workflow=sdlc"`) {
+		t.Errorf("untagged idea should offer the tag chip\n%s", body)
+	}
+	if strings.Contains(body, `action="/run/alpha/my-idea/untag"`) {
+		t.Errorf("untagged idea should not offer untag\n%s", body)
+	}
+
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.PromoteTo = "sdlc"
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	body = rr.Body.String()
+	if !strings.Contains(body, `action="/run/alpha/my-idea/untag"`) {
+		t.Errorf("tagged idea should offer untag\n%s", body)
+	}
+	if strings.Contains(body, `action="/run/alpha/my-idea/tag?workflow=sdlc"`) {
+		t.Errorf("tagged idea should not re-offer its own tag\n%s", body)
+	}
+}
+
+// TestIdeaTagChipsRenderInSafeMode: tagging performs no motion — it
+// parks a license the pulse acts on under its own consent — so the
+// chips follow promote/edit/close rather than the dynamic-gated spawn
+// trio.
+func TestIdeaTagChipsRenderInSafeMode(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+	if !strings.Contains(rr.Body.String(), `action="/run/alpha/my-idea/tag?workflow=sdlc"`) {
+		t.Errorf("safe mode should still offer the tag chip\n%s", rr.Body.String())
+	}
+}
+
+// TestIdeaTagRoutesWriteAndRedirect walks the round trip the chips
+// drive: tag stamps promote_to, a replayed tag is still a 303 (the
+// no-op commit isn't an error), and untag clears it again.
+func TestIdeaTagRoutesWriteAndRedirect(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	post := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader("")))
+		return rr
+	}
+	promoteTo := func() string {
+		md, err := run.Load(root, "alpha", "my-idea")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return md.PromoteTo
+	}
+
+	for _, path := range []string{
+		"/run/alpha/my-idea/tag?workflow=sdlc",
+		"/run/alpha/my-idea/tag?workflow=sdlc", // replay: already tagged
+	} {
+		rr := post(path)
+		if rr.Code != http.StatusSeeOther {
+			t.Fatalf("%s: want 303, got %d body=%s", path, rr.Code, rr.Body.String())
+		}
+		if got := rr.Header().Get("Location"); got != "/run/alpha/my-idea" {
+			t.Fatalf("%s: Location=%q", path, got)
+		}
+		if got := promoteTo(); got != "sdlc" {
+			t.Fatalf("%s: promote_to=%q, want sdlc", path, got)
+		}
+	}
+
+	if rr := post("/run/alpha/my-idea/untag"); rr.Code != http.StatusSeeOther {
+		t.Fatalf("untag: want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := promoteTo(); got != "" {
+		t.Fatalf("promote_to=%q after untag, want empty", got)
+	}
+}
+
+// TestIdeaTagRouteDefaultsToTheFormsFirstWorkflow: an absent workflow
+// param takes the promote selector's default rather than untagging by
+// accident.
+func TestIdeaTagRouteDefaultsToTheFormsFirstWorkflow(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/my-idea/tag", strings.NewReader("")))
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.PromoteTo != "sdlc" {
+		t.Fatalf("promote_to=%q, want the selector default sdlc", md.PromoteTo)
+	}
+}
+
+// TestIdeaTagRouteRefusesUnknownWorkflowAndStaleIdeas: the workflow has
+// to be one the cli-composed selector offers, and a replayed POST onto
+// a now-terminal idea gets the same 409 close/reopen give.
+func TestIdeaTagRouteRefusesUnknownWorkflowAndStaleIdeas(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/my-idea/tag?workflow=nosuchflow", strings.NewReader("")))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown workflow: want 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusPromoted
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/run/alpha/my-idea/tag?workflow=sdlc",
+		"/run/alpha/my-idea/untag",
+	} {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader("")))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("%s: want 409, got %d body=%s", path, rr.Code, rr.Body.String())
+		}
+	}
+}

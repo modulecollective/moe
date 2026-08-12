@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -697,6 +698,56 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
+// handleIdeaTag stamps a workflow tag onto an in-progress idea. The
+// workflow rides the chip's query string (`?workflow=sdlc`) and is
+// resolved through the same selector the promote form uses; an absent
+// value takes that list's default. Journal-only — the tag licenses a
+// future pulse, it starts nothing here — so this route carries no
+// dynamic-mode gate.
+func (s *Server) handleIdeaTag(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("workflow"))
+	wf, ok := s.newRunWorkflow(name)
+	if !ok {
+		http.Error(w, "tag idea: unknown workflow "+strconv.Quote(name), http.StatusBadRequest)
+		return
+	}
+	s.setIdeaTag(w, r, wf.Name)
+}
+
+// handleIdeaUntag clears an idea's workflow tag — the per-idea pause.
+func (s *Server) handleIdeaUntag(w http.ResponseWriter, r *http.Request) {
+	s.setIdeaTag(w, r, "")
+}
+
+// setIdeaTag is the body both tag routes share. An idea already in the
+// requested state comes back as run.ErrNothingToCommit, which is a
+// success: a double-tap on the chip is a no-op, not a 500.
+func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow string) {
+	projectID := r.PathValue("project")
+	slug := r.PathValue("slug")
+	id := projectID + "/" + slug
+
+	err := runopen.TagIdea(s.opts.Root, projectID, slug, workflow, s.syncWriter(), s.syncWriter())
+	switch {
+	case err == nil, errors.Is(err, run.ErrNothingToCommit):
+	case errors.Is(err, run.ErrRunNotFound):
+		http.Error(w, "no such run: "+id, http.StatusNotFound)
+		return
+	case errors.Is(err, runopen.ErrNotTaggableIdea):
+		http.Error(w, "tag idea: "+err.Error(), http.StatusConflict)
+		return
+	default:
+		s.logf("tag idea %s: %v", id, err)
+		http.Error(w, "tag idea: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+}
+
 // spawnMode selects which cascade flag (if any) spawnNextStage appends
 // to `moe <workflow> <stage> <id>`. The four web chips map one-to-one onto
 // the modes, and each mode onto the bang vocabulary: advance (= `!`,
@@ -1033,6 +1084,10 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
 			if md.Workflow == dash.IdeaWorkflow {
 				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
+				// Tagging parks a license; the pulse that acts on it rides
+				// under its own consent. Journal-only here, so the chips
+				// join promote/edit/close in safe mode.
+				out = append(out, ideaTagActions(base, md, s.opts.NewRunWorkflows)...)
 			}
 			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
 		case run.StatusClosed:
@@ -1095,6 +1150,34 @@ func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 	vm.RowNote = noteHTML(row.Project, row.Note)
 	vm.RowWhen = dash.HumanAgo(now, row.When)
 	vm.NextStage = row.Stage
+}
+
+// ideaTagActions are the tag/untag chips on an in-progress idea — the
+// dash face of `moe idea tag`, and the operator's one-tap way to hand
+// the machine a license to start a parked idea.
+//
+// One "tag <workflow>" chip per entry in the promote form's selector
+// (the same cli-composed list, so the two surfaces can't disagree on
+// what a valid destination is), rendered as chips rather than a select
+// because the chip row carries no form fields. The workflow already
+// stamped gets no chip — re-tagging it would be a no-op — and an
+// "untag" chip appears once any tag is on, which is the per-idea pause.
+func ideaTagActions(base string, md *run.Metadata, wfs []NewRunWorkflow) []runAction {
+	var out []runAction
+	for _, wf := range wfs {
+		if wf.Name == md.PromoteTo {
+			continue
+		}
+		out = append(out, runAction{
+			Label:  "tag " + wf.Name,
+			Href:   base + "/tag?workflow=" + url.QueryEscape(wf.Name),
+			Method: "POST",
+		})
+	}
+	if md.PromoteTo != "" {
+		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST"})
+	}
+	return out
 }
 
 // isPromotableIdea reports whether the loaded run is an in-progress
