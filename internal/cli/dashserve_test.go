@@ -71,9 +71,9 @@ func TestDashSaysNothingWithoutAServe(t *testing.T) {
 // banner's tail instead of a line of their own.
 //
 // The exact string is pinned because the web header renders the identical
-// cluster (see internal/serve's TestServeClusterRidesTheBoardHeaders);
-// both sides route through dash.ServeCluster, and these two goldens are
-// what say so.
+// cluster (internal/serve's TestActivityPanelClusterMatchesTheCLIBanner
+// holds the other half). Both sides route through dash.ServeCluster, and
+// these two goldens are what say so.
 func TestDashBannerCarriesAnArmedServe(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
