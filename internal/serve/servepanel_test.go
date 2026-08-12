@@ -59,8 +59,16 @@ func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
 	for _, path := range []string{"/", "/projects/alpha"} {
 		body := getBody(t, s, path)
 		cluster := s.activity.panel(time.Now()).Cluster
-		if !strings.Contains(body, `<div class="banner-serve"><a href="/serve">`+cluster+`</a></div>`) {
+		clusterMarkup := `<div class="banner-serve"><a href="/serve">` + cluster + `</a></div>`
+		if !strings.Contains(body, clusterMarkup) {
 			t.Errorf("%s is missing the header cluster %q", path, cluster)
+		}
+		sub := strings.Index(body, `<div class="banner-sub">`)
+		clusterPos := strings.Index(body, clusterMarkup)
+		menu := strings.Index(body, `class="menu"`)
+		if sub < 0 || clusterPos < 0 || menu < 0 || !(sub < clusterPos && clusterPos < menu) ||
+			strings.Count(body[sub:clusterPos], `</div>`) != 2 {
+			t.Errorf("%s header order is banner, serve cluster, menu", path)
 		}
 		for _, unwanted := range []string{"serve-panel", "the journal moved", "credit limit reached"} {
 			if strings.Contains(body, unwanted) {

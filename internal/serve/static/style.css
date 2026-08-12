@@ -133,11 +133,15 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   margin-top: 0.2rem;
   color: var(--muted);
 }
-/* Serve's whole spend on a board: one muted line under the breadcrumb,
+/* Serve's whole spend on a board: one muted line in the header's top row,
    the same cluster the CLI banner carries, linking to /serve. */
 .banner-serve {
-  margin-top: 0.1rem;
   font-size: 0.92rem;
+  line-height: 2rem;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .banner-serve a { color: var(--muted); }
 .banner-serve a:hover, .banner-serve a:focus { color: var(--accent); }
