@@ -376,6 +376,12 @@ takes no placement. Prefer extending an existing thread to forking a
 new one: threads that multiply for no reason are the mess a later
 pulse has to clean up (by moving runs, which is the same act).
 
+One shape to avoid: don't seat ready work behind a head whose design is
+unwritten — the chain block marks those `held:` — unless the work
+genuinely continues that head's. The floor holds a thread at its head,
+so anything queued behind an unwritten one waits on the operator's
+trigger no matter how ready it is on its own.
+
 **An advanced run is the easiest thing on this canvas to groom.** The
 lane bar asks whether the operator would kick these runs, in this
 order, unchanged — and for an advanced run they have already answered
@@ -408,6 +414,18 @@ construction — the seed is a design you baked — so a fresh thread of
 your own spawns clears the floor on its own. When the floor holds a
 thread it says so on stderr, and the thread parks for the next pulse to
 place.
+
+**You may be that next pulse.** The hold lands on a thread's *head*, so
+a head whose design is unwritten holds everything queued behind it —
+including runs that clear the floor on their own. The chain block marks
+those heads `held:`. When you see one, decide whether the members
+behind it continue that head's work. If they don't, move them out into
+their own thread: that is the placing this paragraph promises, and it
+is an ordinary groom — name the runs in a group with no `onto`. If they
+do, leave them and say so in the report; that is a real answer, not a
+miss. Bias toward moving, on the same ledger as everything else here: a
+wrong move costs a run that still has to clear review and test, while a
+wrong leave strands ready work behind a door only the operator opens.
 
 **Park when you can name why the operator should look first.** Write
 the reason as one line:
