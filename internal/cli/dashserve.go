@@ -36,7 +36,8 @@ import (
 func renderServeLines(w io.Writer, now time.Time, root string) {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
 	if err != nil {
-		cliout.Printf(w, "serve: %v\n", err)
+		// The error already wears the "serve:" prefix (it names the file).
+		cliout.Printf(w, "%v\n", err)
 		return
 	}
 	if !ok {
