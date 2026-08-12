@@ -23,7 +23,7 @@ source of truth for the exact command surface; this page is a map.
   project knowledge topics, twin documents, and a dashboard with the same
   daily-activity chart (and a project-scoped one on each project page). **Safe
   by default:** all views,
-  idea capture/edit/close/reopen, run close/edit/reopen, and opening or
+  idea capture/edit/tag/untag/close/reopen, run close/edit/reopen, and opening or
   promoting into a *parked* run work, but the run-spawning actions — the
   new-run and promote forms' "& run" submits, advancing a stage, kicking a
   chain head, and opening a due chore's run — refuse with 403, and the
@@ -88,7 +88,9 @@ source of truth for the exact command surface; this page is a map.
 - `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
-- `moe idea new|edit|close|list|move|reopen|cat|log` manages backlog notes.
+- `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log` manages backlog
+  notes. `tag` stamps the workflow tag that licenses a pulse to start the idea
+  (`untag` clears it); untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat` manages operator-authored standing
   direction.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`

@@ -158,18 +158,28 @@ paragraphs (two-space indent, blank lines between paragraphs):
     Why: bar/baz both reach into foo's internals; foo.go:42 is
     the load-bearing assumption. Fix sketch: <one sentence>.
 
-When the work is mechanical, bounded, verifiable, and an agent could
-execute it without an operator decision, optionally tag the destination
-workflow in parentheses after the closing backtick:
+**Every entry decides whether to tag.** A workflow tag in parentheses
+after the closing backtick is the machine's license to start the work:
 
   - [ ] `cleanup-foo` (sdlc) — Clean up foo helper
 
-The tag licenses a future pulse to promote the harvested idea under its
-own slug; it does not schedule or start the work. Leave investigations,
-policy calls, speculative work, and anything needing human judgment
-untagged — untagged is the default and stays operator-triaged. Tags are
-validated at close against staged, chainable workflows; unknown or
-non-chainable tags are rejected rather than silently ignored.
+Tag `(sdlc)` when the fix is mechanical, bounded, and verifiable — all
+three. You have the work context right now; that judgment is worth more
+than an operator's later guess from the title alone. Leave it untagged
+when it needs a human decision: investigations, policy calls,
+speculative work, anything where "what should this even do" is still
+open. Untagged is valid, and it is the safe side — no pulse will ever
+propose an untagged idea, whoever filed it. What isn't valid is
+skipping the decision. An untagged entry should mean "a human should
+look at this", not "I didn't think about it".
+
+The tag licenses; it does not schedule. A tagged idea is proposed by a
+future pulse under its own slug, and the survey still decides whether
+and when it rides. Tags are validated at close against staged,
+chainable workflows; unknown or non-chainable tags are rejected rather
+than silently ignored. A missed tag is recoverable — the operator can
+stamp or clear one later with `moe idea tag` / `moe idea untag` — but
+it strands the work until someone notices.
 
 Content written in any other shape — plain bullets, prose, or a
 hyphen where the em-dash belongs — is **rejected at close**, not

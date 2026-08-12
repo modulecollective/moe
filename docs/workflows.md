@@ -267,6 +267,8 @@ moe idea new <project>/<slug>
 moe idea edit <project>/<slug>
 moe idea list <project>
 moe idea move <project>/<slug> <to-project>
+moe idea tag <project>/<slug> [workflow]
+moe idea untag <project>/<slug>
 moe idea close <project>/<slug>
 moe idea reopen <project>/<slug>
 ```
@@ -276,6 +278,15 @@ to groom the backlog or help shape notes. Every other workflow's `new` accepts
 `--from-idea <project>/<slug>`, promoting the idea into a run and preserving
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
+
+`idea tag` is the other way in, and the cheaper one: it stamps a workflow tag
+(`sdlc` by default) that licenses a pulse to promote the idea itself, under its
+own slug, when the survey judges it ready. The tag is the whole fence — **the
+machine starts only tagged ideas**, whoever filed them — so `idea untag` is the
+per-idea pause, and an untagged idea stays operator-only forever. Agents can
+tag at capture time with the followups grammar (`` - [ ] `slug` (sdlc) — Title ``);
+`idea tag` is how the operator stamps one that was filed without it. Tagged
+ideas say so on the dash, and both verbs have a chip on the idea's page.
 
 ## Intents
 
