@@ -16,8 +16,8 @@ import (
 )
 
 // The cli half of serve's resident heartbeat: the read-only gate that
-// decides whether a tick is worth an agent turn, and the reap step that
-// runs ahead of it.
+// decides whether a tick is worth an agent turn, and the two reaping
+// steps that run ahead of it.
 //
 // The split is the same one every other serve seam takes. Serve owns the
 // clock, the backoff and the child; every question that needs the
@@ -92,6 +92,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // next one is twenty minutes away and re-derives everything.
 func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
 	g.reap(log)
+	g.gc(log)
 
 	projects, _, err := project.List(g.root)
 	if err != nil {
@@ -330,6 +331,72 @@ func (g *heartbeatGate) reap(log io.Writer) {
 		g.mu.Unlock()
 		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s\n",
 			s.Branch, s.Project, s.Run, s.Doc)
+	}
+}
+
+// gc clears session branches whose *run* is over — merged, closed or
+// promoted, or a run whose run.json or project directory is gone. It is
+// `moe session gc`'s rule set on the tick's cadence instead of the
+// operator's memory.
+//
+// It exists because those branches are the other half of "somebody is
+// already inside the project", and the reap above cannot touch them.
+// The reap reasons from a claim: a machine session whose process is
+// provably dead. A branch left behind by an ending has no claim to
+// probe — the clean endings delete it, and branches older than the
+// mechanism never had one — and a claim it cannot read reads as
+// occupied, deliberately. So the project stands down every tick,
+// forever, and nothing but a hand-run `moe session gc` ever moves it.
+//
+// This step reasons from the run instead, which needs no claim: a
+// terminal run has nobody inside it whatever its branch says. Between
+// them the two steps cover both doors residue comes in by — a branch
+// predating the claim mechanism, and an ending that deletes the claim
+// while the branch survives.
+//
+// What keeps a timer safe to point at a destructive rule is that the
+// rule was already codified as trash (gc's rule 1) and that a live
+// claim holds a candidate back — see sessionClaimHeld. Scan first and
+// lock only when there is something to reap: a clean board is the
+// common case and must not take the repo lock every twenty minutes.
+//
+// Warn-only like everything else in the tick. A reap that fails is a
+// branch that stays and a project that stays held; the next tick
+// retries by construction, and the pile is visible in the serve log.
+func (g *heartbeatGate) gc(log io.Writer) {
+	candidates, err := collectSessionOrphans(g.root, time.Now())
+	if err != nil {
+		fmt.Fprintf(log, "heartbeat: session gc scan: %v\n", err)
+		return
+	}
+	if candidates.empty() {
+		return
+	}
+	reaped, reapErrs, err := sessionGCPass(g.root, repolock.Options{
+		Purpose: "session-gc",
+		// A pass with many candidates can outlive the stale threshold,
+		// and a lock read as crashed is a lock somebody takes over.
+		Heartbeat: true,
+	})
+	if err != nil {
+		fmt.Fprintf(log, "heartbeat: session gc: %v\n", err)
+		return
+	}
+	for _, e := range reapErrs {
+		fmt.Fprintf(log, "heartbeat: session gc: %s\n", e)
+	}
+	for _, r := range reaped {
+		// Same invisibility the reap has: Abandon writes no journal
+		// commit, so a freed project's board changes without either
+		// cursor noticing. Clearing surveyed is what lets the parked leg
+		// re-offer a thread this pass just unblocked — in the same tick,
+		// because gc runs at the top of Due.
+		if r.project != "" {
+			g.mu.Lock()
+			delete(g.surveyed, r.project)
+			g.mu.Unlock()
+		}
+		fmt.Fprintf(log, "heartbeat: session gc removed %s\n", r.label)
 	}
 }
 

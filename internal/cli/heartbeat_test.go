@@ -746,3 +746,122 @@ func writeDeadClaim(t *testing.T, s *session.Session, machine bool) {
 		t.Fatal(err)
 	}
 }
+
+// TestHeartbeatGCFreesABoardAClaimlessBranchHeldForever is the wedge
+// this run closes, in the exact shape found five times on the real
+// board: a run that is over with one stage's branch still on it and no
+// claim to probe. The reap above can't help — there is nothing to prove
+// dead — and a branch that can't be probed reads as occupancy, so the
+// project stands down every tick until a human remembers `moe session
+// gc`.
+//
+// Both halves are asserted because both are load-bearing: the branch
+// goes, *and* the freed board is re-offered in the same tick. Nothing
+// here moves the journal, so the surveyed cursor is what would
+// otherwise keep declining a board the reap just changed.
+func TestHeartbeatGCFreesABoardAClaimlessBranchHeldForever(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
+	if got := dueProjects(t, g); len(got) != 0 {
+		t.Fatalf("due = %v right after the sweep, want none", got)
+	}
+
+	seedRun(t, root, "moe", "already-merged", "sdlc", run.StatusMerged, time.Now().Local(), nil)
+	s, err := session.Open(root, "moe", "already-merged", "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var log bytes.Buffer
+	decisions := g.Due(testTick, &log)
+
+	if git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Fatalf("a claimless branch on a merged run survived the tick\n%s", log.String())
+	}
+	if got := sweepIDs(decisions); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v, want [moe] — the freed board must be re-offered in the same tick\nlog:\n%s",
+			got, log.String())
+	}
+}
+
+// TestHeartbeatGCClearsARefWithNoWorktree is the other door residue
+// comes in by, and today's shape: an ending that deleted the worktree
+// and left the ref. `session.Open` refuses to reuse it ("abandoned
+// close?"), so the stage rerun the branch belongs to can never start
+// until somebody clears it by hand.
+func TestHeartbeatGCClearsARefWithNoWorktree(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	seedRun(t, root, "moe", "closed-by-hand", "sdlc", run.StatusClosed, time.Now().Local(), nil)
+	branch := session.BranchName("moe", "closed-by-hand", "design")
+	gittest.Run(t, root, "branch", branch)
+
+	var log bytes.Buffer
+	newHeartbeatGate(root).Due(testTick, &log)
+
+	if git.HasRef(root, "refs/heads/"+branch) {
+		t.Fatalf("the orphan ref survived the tick\n%s", log.String())
+	}
+	if _, err := session.Open(root, "moe", "closed-by-hand", "design"); err != nil {
+		t.Errorf("the stage rerun is still refused after the tick: %v", err)
+	}
+}
+
+// TestHeartbeatGCHoldsALiveClaimOnATerminalRun is the direction where a
+// wrong answer destroys something. `moe <wf> close` has no open-session
+// guard, so an operator sitting in a design pane while close is typed
+// in another produces rule 1's exact shape — terminal status, branch
+// present, claimant alive and beating. Reaping that removes the
+// worktree with --force and takes the uncommitted work with it, which
+// was tolerable for a hand verb and is not for a twenty-minute tick.
+func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	seedRun(t, root, "moe", "closed-underneath", "sdlc", run.StatusClosed, time.Now().Local(), nil)
+	s, err := session.Open(root, "moe", "closed-underneath", "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := session.Hold(s, false /*operator*/)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+
+	var log bytes.Buffer
+	decisions := newHeartbeatGate(root).Due(testTick, &log)
+
+	if !git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Fatalf("a live session was reaped out from under its claimant\n%s", log.String())
+	}
+	if _, err := os.Stat(s.WorktreePath); err != nil {
+		t.Errorf("the live session's worktree went with it: %v", err)
+	}
+	if got := sweepIDs(decisions); len(got) != 0 {
+		t.Errorf("due = %v with somebody inside the project, want none", got)
+	}
+}
+
+// TestHeartbeatGCReapsATerminalRunWithADeadClaim is the widened edge:
+// rule 1 ignores claims entirely today, and the hold narrows it to
+// *live* ones. A claim that is provably dead on a run that is over
+// still goes — and this one is operator-marked, so the reap above would
+// never touch it.
+func TestHeartbeatGCReapsATerminalRunWithADeadClaim(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	seedRun(t, root, "moe", "merged-and-dead", "sdlc", run.StatusMerged, time.Now().Local(), nil)
+	s, err := session.Open(root, "moe", "merged-and-dead", "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDeadClaim(t, s, false /*operator*/)
+
+	var log bytes.Buffer
+	newHeartbeatGate(root).Due(testTick, &log)
+
+	if git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Errorf("a dead claim on a finished run kept the branch alive\n%s", log.String())
+	}
+}
