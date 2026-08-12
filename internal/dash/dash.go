@@ -1041,6 +1041,33 @@ func HumanDuration(d time.Duration) string {
 	}
 }
 
+// ServeCluster spells the live serve status both dashes carry —
+// the CLI banner's tail and the web header's link — as one dotted
+// cluster:
+//
+//	serve armed · up 4m · next 15m · 1 failing
+//	serve browse-only · up 4m
+//
+// The two surfaces are contractually the same line, so the text is
+// built once here rather than twice in a printf and a template. next
+// is empty for a serve with no tick scheduled (an unarmed one never
+// has); failing is dropped at zero, so a healthy board spends nothing
+// on it. The CLI's dead-serve state has no web counterpart (a dead
+// serve serves no pages) and stays in the CLI.
+func ServeCluster(armed bool, up, next string, failing int) string {
+	cluster := "serve browse-only · up " + up
+	if armed {
+		cluster = "serve armed · up " + up
+		if next != "" {
+			cluster += " · next " + next
+		}
+	}
+	if failing > 0 {
+		cluster += fmt.Sprintf(" · %d failing", failing)
+	}
+	return cluster
+}
+
 // Plural spells "1 tick" / "2 ticks". Both dashes count down the
 // heartbeat's cool-off in ticks, and "(1 tick(s) left)" is the kind of
 // line that reads as unfinished.

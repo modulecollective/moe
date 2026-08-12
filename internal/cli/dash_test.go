@@ -1503,7 +1503,9 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
-	const marker = "  dash  "
+	// The stamp is the banner's first cluster after the gradient mark;
+	// a serve cluster (absent here) would follow it behind a wide dot.
+	const marker = "░▒▓  "
 	var stamp string
 	for line := range strings.SplitSeq(out.String(), "\n") {
 		if !strings.Contains(line, "MINISTRY OF EVERYTHING") {
@@ -1513,13 +1515,13 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 		if !ok {
 			t.Fatalf("banner line has no %q marker: %q", marker, line)
 		}
-		stamp = strings.TrimSpace(after)
+		stamp, _, _ = strings.Cut(strings.TrimSpace(after), "  ·  ")
 	}
 	if stamp == "" {
 		t.Fatalf("no banner line in output:\n%s", out.String())
 	}
 
-	got, err := time.ParseInLocation("2006-01-02  15:04", stamp, time.Local)
+	got, err := time.ParseInLocation("2006-01-02 15:04", stamp, time.Local)
 	if err != nil {
 		t.Fatalf("banner stamp %q: %v", stamp, err)
 	}

@@ -66,12 +66,33 @@ func TestTitleSeq(t *testing.T) {
 	}
 }
 
+// TestDashGolden pins both halves of the dash mark: the bare banner an
+// operator with no serve gets, and the same line with a serve cluster
+// joined on by the wide dot the stage-entry banner uses between clusters.
 func TestDashGolden(t *testing.T) {
-	var buf bytes.Buffer
 	now := time.Date(2026, 5, 14, 0, 13, 0, 0, time.UTC)
-	Dash(&buf, now)
-	if got, want := buf.String(), "▓▒░ MINISTRY OF EVERYTHING ░▒▓  dash  2026-05-14  00:13\n"; got != want {
-		t.Fatalf("Dash =\n%q\nwant\n%q", got, want)
+	for _, tc := range []struct {
+		name  string
+		serve string
+		want  string
+	}{
+		{
+			name: "no serve",
+			want: "▓▒░ MINISTRY OF EVERYTHING ░▒▓  2026-05-14 00:13\n",
+		},
+		{
+			name:  "serve status",
+			serve: "serve armed · up 4m · next 15m",
+			want:  "▓▒░ MINISTRY OF EVERYTHING ░▒▓  2026-05-14 00:13  ·  serve armed · up 4m · next 15m\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			Dash(&buf, now, tc.serve)
+			if got := buf.String(); got != tc.want {
+				t.Fatalf("Dash =\n%q\nwant\n%q", got, tc.want)
+			}
+		})
 	}
 }
 

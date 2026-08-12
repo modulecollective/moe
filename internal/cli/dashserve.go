@@ -20,42 +20,90 @@ import (
 // reads the snapshot serve keeps at <root>/.moe/serve.json and spends at
 // most a handful of lines on it.
 //
-// The line budget is the point. No file means no lines at all, which is
-// what keeps the dash byte-identical for an operator who doesn't run
-// serve; a quiet board gets one status line; a project only earns a line
-// of its own when it is sweeping, cooling, or its last sweep died.
-// --watch gets freshness for free — the 3s repaint re-reads one small
-// file.
+// The line budget is the point. Status costs no line at all: it rides the
+// banner's tail as one cluster, in the same slot for every state, so an
+// operator who doesn't run serve sees the banner they always saw. A
+// project only earns a line of its own when it is sweeping, cooling, or
+// its last sweep died. --watch gets freshness for free — the 3s repaint
+// re-reads one small file.
 
-// renderServeLines writes the serve block, or nothing at all when no
-// serve has ever written a state file here.
+// serveState is one read of serve's state file, held so the frame can
+// spend it twice: once on the banner's tail, once on the rows below.
 //
 // Warn-only: a state file that won't parse becomes one line and the rest
 // of the dash renders. A dashboard that refused to draw because a monitor
 // file was truncated would have the priorities backwards.
-func renderServeLines(w io.Writer, now time.Time, root string) {
+type serveState struct {
+	snap serve.ActivitySnapshot
+	ok   bool // a serve has written a state file here
+	err  error
+}
+
+// readServeState reads the snapshot for one dash frame.
+func readServeState(root string) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
-	if err != nil {
+	return serveState{snap: snap, ok: ok, err: err}
+}
+
+// bannerCluster is the serve status the banner carries in its tail:
+// whether the process may pulse, how long it has been up, when the next
+// tick lands, and how many projects are in trouble. Empty when no serve
+// has ever written a state file here — which is what keeps the banner
+// unchanged for an operator who doesn't run serve.
+//
+// A file whose pid is gone is a serve that crashed: clean shutdown
+// removes the file, so its presence plus a dead pid is the whole signal.
+// The stamp's age is roughly when. It rides the same slot as every other
+// state — placement that moved by state would cost the reader more than
+// the alarm buys.
+func (s serveState) bannerCluster(now time.Time) string {
+	if !s.ok {
+		return ""
+	}
+	if !repolock.ProcessAlive(s.snap.Pid) {
+		return fmt.Sprintf("serve dead (pid %d) · stale %s",
+			s.snap.Pid, dash.HumanDuration(now.Sub(s.snap.WrittenAt)))
+	}
+	var next string
+	if !s.snap.NextTick.IsZero() {
+		next = dash.HumanDuration(max(s.snap.NextTick.Sub(now), 0))
+	}
+	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
+		next, s.failing(now))
+}
+
+// failing counts the projects whose row would read "cooling" or
+// "failed" — the same states the web panel colours, derived from the
+// same predicate that earns the rows, so the banner's count and the
+// lines under it can't disagree.
+func (s serveState) failing(now time.Time) int {
+	n := 0
+	for _, p := range s.snap.Projects {
+		switch state, _ := serveProjectState(now, p); state {
+		case "cooling", "failed":
+			n++
+		}
+	}
+	return n
+}
+
+// renderLines writes what serve earns below the banner: the parse
+// warning if the file was unreadable, then a row per noteworthy project.
+// A healthy quiet board writes nothing — its status is already in the
+// banner's tail.
+func (s serveState) renderLines(w io.Writer, now time.Time) {
+	if s.err != nil {
 		// The error already wears the "serve:" prefix (it names the file).
-		cliout.Printf(w, "%v\n", err)
+		cliout.Printf(w, "%v\n", s.err)
 		return
 	}
-	if !ok {
+	if !s.ok || !repolock.ProcessAlive(s.snap.Pid) {
+		// A dead serve's project records are as stale as its stamp; the
+		// banner's "dead" is the whole message.
 		return
 	}
-
-	// A file whose pid is gone is a serve that crashed: clean shutdown
-	// removes the file, so its presence plus a dead pid is the whole
-	// signal. The stamp's age is roughly when.
-	if !repolock.ProcessAlive(snap.Pid) {
-		cliout.Printf(w, "serve: dead (pid %d) — stale since %s\n",
-			snap.Pid, dash.HumanAgo(now, snap.WrittenAt))
-		return
-	}
-
-	cliout.Printf(w, "serve: %s\n", serveStatusLine(now, snap))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, p := range snap.Projects {
+	for _, p := range s.snap.Projects {
 		state, detail := serveProjectState(now, p)
 		if state == "" {
 			continue
@@ -63,20 +111,6 @@ func renderServeLines(w io.Writer, now time.Time, root string) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", p.Project, state, detail)
 	}
 	tw.Flush()
-}
-
-// serveStatusLine is the one line an operator always gets: whether the
-// process may pulse, how long it has been up, and when the next tick
-// lands.
-func serveStatusLine(now time.Time, snap serve.ActivitySnapshot) string {
-	if !snap.Armed {
-		return fmt.Sprintf("browse-only (unarmed) · up %s", dash.HumanDuration(now.Sub(snap.Started)))
-	}
-	line := fmt.Sprintf("armed · up %s", dash.HumanDuration(now.Sub(snap.Started)))
-	if !snap.NextTick.IsZero() {
-		line += " · next sweep in " + dash.HumanDuration(max(snap.NextTick.Sub(now), 0))
-	}
-	return line
 }
 
 // serveProjectState decides whether a project has earned a line and what

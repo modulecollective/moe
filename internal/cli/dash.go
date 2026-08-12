@@ -364,14 +364,16 @@ func renderDashFrame(stdout io.Writer, now time.Time, root string, snap DashSnap
 	// and a watched dash reads as alive.
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	// Mark the dash render with the same one-line gradient bar every
-	// stage session opens with, suffixed with the render timestamp so
-	// the operator can tell a stale tab from a fresh one. Dash refreshes
-	// are frequent, so we keep it to one line instead of a multi-line
-	// block.
-	banner.Dash(stdout, now)
-	// Directly under the header, above the art: an armed serve is context
-	// for everything below it, and a dead one is the first thing to know.
-	renderServeLines(stdout, now, root)
+	// stage session opens with, carrying the render timestamp and serve's
+	// status in its tail. Serve status is ambient context, not an event —
+	// it belongs with the render metadata rather than on a line of its
+	// own, and this way it costs the frame nothing.
+	serveState := readServeState(root)
+	banner.Dash(stdout, now, serveState.bannerCluster(now))
+	// Directly under the banner, above the art: the projects a sweep is
+	// working, holding back, or has killed. The banner's serve cluster is
+	// their label.
+	serveState.renderLines(stdout, now)
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
 	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all, state, r)
 }

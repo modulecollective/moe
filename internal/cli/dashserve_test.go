@@ -3,9 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,24 +39,42 @@ func deadPid(t *testing.T) int {
 	return cmd.Process.Pid
 }
 
+// serveCluster is what the banner's tail carries for this root.
+func serveCluster(t *testing.T, root string, now time.Time) string {
+	t.Helper()
+	return readServeState(root).bannerCluster(now)
+}
+
+// serveLines is what serve earns *below* the banner.
 func serveLines(t *testing.T, root string, now time.Time) string {
 	t.Helper()
 	var buf bytes.Buffer
-	renderServeLines(&buf, now, root)
+	readServeState(root).renderLines(&buf, now)
 	return buf.String()
 }
 
 // TestDashSaysNothingWithoutAServe is the line budget's floor: an operator
-// who doesn't run serve sees the dash they saw before this change.
+// who doesn't run serve sees the dash they saw before this change —
+// nothing below the banner and nothing in its tail.
 func TestDashSaysNothingWithoutAServe(t *testing.T) {
-	if got := serveLines(t, t.TempDir(), time.Now()); got != "" {
+	root, now := t.TempDir(), time.Now()
+	if got := serveCluster(t, root, now); got != "" {
+		t.Errorf("banner tail = %q with no serve running, want nothing at all", got)
+	}
+	if got := serveLines(t, root, now); got != "" {
 		t.Errorf("dash printed %q with no serve running, want nothing at all", got)
 	}
 }
 
-// TestDashShowsAnArmedServe: one line for the process — may it pulse, how
-// long has it been up, when does the next tick land.
-func TestDashShowsAnArmedServe(t *testing.T) {
+// TestDashBannerCarriesAnArmedServe: the operator's three facts — may it
+// pulse, how long has it been up, when does the next tick land — ride the
+// banner's tail instead of a line of their own.
+//
+// The exact string is pinned because the web header renders the identical
+// cluster (see internal/serve's TestServeClusterRidesTheBoardHeaders);
+// both sides route through dash.ServeCluster, and these two goldens are
+// what say so.
+func TestDashBannerCarriesAnArmedServe(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	writeServeState(t, root, serve.ActivitySnapshot{
@@ -65,49 +83,89 @@ func TestDashShowsAnArmedServe(t *testing.T) {
 		NextTick: now.Add(12 * time.Minute),
 	})
 
-	got := serveLines(t, root, now)
-	for _, want := range []string{"serve:", "armed", "up 3d 2h", "next sweep in 12m"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("serve line %q is missing %q", got, want)
-		}
+	if got, want := serveCluster(t, root, now), "serve armed · up 3d 2h · next 12m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	if got := serveLines(t, root, now); got != "" {
+		t.Errorf("a healthy quiet board spent %q below the banner, want nothing", got)
 	}
 }
 
-// TestDashShowsAnUnarmedServe: a serve that is up and will never pulse is
-// the confusion the panel exists to fix, on this surface too.
-func TestDashShowsAnUnarmedServe(t *testing.T) {
+// TestDashBannerOmitsAnUnscheduledSweep: an armed serve between ticks has
+// no countdown to promise, so the fact is dropped rather than faked.
+func TestDashBannerOmitsAnUnscheduledSweep(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true, Started: now.Add(-4 * time.Minute),
+	})
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// TestDashBannerCarriesAnUnarmedServe: a serve that is up and will never
+// pulse is the confusion this exists to fix, on this surface too.
+func TestDashBannerCarriesAnUnarmedServe(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	writeServeState(t, root, serve.ActivitySnapshot{Pid: os.Getpid(), Started: now.Add(-time.Hour)})
 
-	got := serveLines(t, root, now)
-	if !strings.Contains(got, "browse-only (unarmed)") {
-		t.Errorf("serve line = %q, want the unarmed spelling", got)
+	got := serveCluster(t, root, now)
+	if want := "serve browse-only · up 1h 0m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
 	}
-	if strings.Contains(got, "next sweep") {
-		t.Errorf("serve line = %q promised a sweep an unarmed serve never runs", got)
+	if strings.Contains(got, "next") {
+		t.Errorf("banner tail = %q promised a sweep an unarmed serve never runs", got)
+	}
+}
+
+// TestDashBannerCountsFailingProjects: the earned fourth fact. It
+// summarises what the rows below detail, so a glance at the banner alone
+// still says "something is wrong down there" — and stays silent when
+// nothing is.
+func TestDashBannerCountsFailingProjects(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true, Started: now.Add(-4 * time.Minute),
+		NextTick: now.Add(15 * time.Minute),
+		Projects: []serve.ActivityProject{
+			// A live sweep is not a failure, even mid-cool-off: the row it
+			// renders says "sweeping", and the count follows the rows.
+			{Project: "sweeper", Sweep: true, CoolTicks: 1, SweepStarted: now.Add(-time.Minute)},
+			{Project: "cooler", CoolTicks: 2, SweptAt: now.Add(-40 * time.Minute)},
+			{Project: "faller", SweptAt: now.Add(-5 * time.Minute)},
+			{Project: "quiet", Decision: "a sweep already surveyed the current tip"},
+		},
+	})
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m · next 15m · 2 failing"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 }
 
 // TestDashShowsACrashedServe: clean shutdown removes the file, so a file
 // naming a dead pid is a serve that died — which used to be indis-
-// tinguishable from never having run one.
+// tinguishable from never having run one. It rides the same banner slot
+// as every other state, and its stale project records stay unprinted.
 func TestDashShowsACrashedServe(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	pid := deadPid(t)
 	writeServeState(t, root, serve.ActivitySnapshot{
-		Pid: pid, Armed: true, Started: now.Add(-time.Hour), WrittenAt: now.Add(-90 * time.Minute),
+		Pid: pid, Armed: true, Started: now.Add(-time.Hour), WrittenAt: now.Add(-3 * time.Hour),
+		Projects: []serve.ActivityProject{{Project: "faller", SweptAt: now.Add(-4 * time.Hour)}},
 	})
 
-	got := serveLines(t, root, now)
-	for _, want := range []string{"dead", strconv.Itoa(pid), "stale since 1h ago"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("serve line %q is missing %q", got, want)
-		}
+	got := serveCluster(t, root, now)
+	if want := fmt.Sprintf("serve dead (pid %d) · stale 3h 0m", pid); got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 	if strings.Contains(got, "armed") {
-		t.Errorf("serve line = %q, want a dead serve to stop claiming it will pulse", got)
+		t.Errorf("banner tail = %q, want a dead serve to stop claiming it will pulse", got)
+	}
+	if lines := serveLines(t, root, now); lines != "" {
+		t.Errorf("a dead serve printed %q from its stale records, want nothing", lines)
 	}
 }
 
@@ -152,17 +210,22 @@ func TestDashSpendsProjectLinesOnlyOnNoteworthyProjects(t *testing.T) {
 
 // TestDashSurvivesATruncatedStateFile: a dashboard that refused to draw
 // because a monitor file was half-written would have the priorities
-// backwards.
+// backwards. The warning keeps its own line — it names a file, and that's
+// a warning rather than status.
 func TestDashSurvivesATruncatedStateFile(t *testing.T) {
 	root := t.TempDir()
+	now := time.Now()
 	if err := os.MkdirAll(root+"/.moe", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(serve.ActivityPath(root), []byte("{half"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := serveLines(t, root, time.Now())
+	got := serveLines(t, root, now)
 	if !strings.HasPrefix(got, "serve:") || strings.Count(got, "\n") != 1 {
 		t.Errorf("serve lines = %q, want one warning line", got)
+	}
+	if tail := serveCluster(t, root, now); tail != "" {
+		t.Errorf("banner tail = %q for an unreadable state file, want nothing", tail)
 	}
 }

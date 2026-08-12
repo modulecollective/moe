@@ -682,3 +682,36 @@ func TestActiveChainLiveParentStillSuppressesArrowOnHead(t *testing.T) {
 		t.Errorf("head p/a Note = %q, want no settled-parent hint", active[0].Note)
 	}
 }
+
+// TestServeCluster pins the one line the CLI banner and the web header
+// both carry. The compressions matter: "next 15m" not "next sweep in
+// 15m", "browse-only" without the parenthetical restating it, and no
+// failing token at all on a healthy board.
+func TestServeCluster(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		armed   bool
+		up      string
+		next    string
+		failing int
+		want    string
+	}{
+		{name: "armed", armed: true, up: "4m", next: "15m", want: "serve armed · up 4m · next 15m"},
+		{name: "armed, no tick scheduled", armed: true, up: "4m", want: "serve armed · up 4m"},
+		{name: "unarmed", up: "2h 5m", want: "serve browse-only · up 2h 5m"},
+		{
+			name: "one failing", armed: true, up: "4m", next: "15m", failing: 1,
+			want: "serve armed · up 4m · next 15m · 1 failing",
+		},
+		{
+			name: "unarmed with failures", up: "4m", failing: 3,
+			want: "serve browse-only · up 4m · 3 failing",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ServeCluster(tc.armed, tc.up, tc.next, tc.failing); got != tc.want {
+				t.Errorf("ServeCluster = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
