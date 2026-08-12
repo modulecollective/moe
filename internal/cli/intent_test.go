@@ -170,9 +170,7 @@ func TestIntentNewRefusesDirtyWorkingTree(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root)
 	var out, errb bytes.Buffer
 	code := Run([]string{"intent", "new", "tele/x"}, &out, &errb)
 	if code == 0 {

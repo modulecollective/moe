@@ -30,6 +30,20 @@ func newTestBureaucracy(t *testing.T) string {
 	return root
 }
 
+// dirtyTracked makes root dirty in the only sense the clean-tree guards
+// still care about: a tracked file carrying an uncommitted
+// modification. Untracked strays don't count — they can't ride a
+// path-scoped commit — so a test that means to trip the gate has to
+// touch something git tracks.
+func dirtyTracked(t *testing.T, root string) {
+	t.Helper()
+	const rel = "tracked-stray.txt"
+	gittest.WriteAndCommit(t, root, rel, "one\n", "seed tracked file")
+	if err := os.WriteFile(filepath.Join(root, rel), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestEmbeddedFragmentsCoverRegisteredStages is the load-bearing
 // coverage check. For every registered (workflow, stage) pair that opens
 // an agent session, the embedded FS must carry a non-empty fragment.

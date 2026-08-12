@@ -355,10 +355,8 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	// Drop a stray untracked file so the dirty-tree gate fires.
-	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Modify a tracked file so the dirty-tree gate fires.
+	dirtyTracked(t, root)
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "new", "tele/x"}, &out, &errb)
 	if code == 0 {
@@ -366,6 +364,32 @@ func TestIdeaNewRefusesDirtyWorkingTree(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "uncommitted changes") {
 		t.Fatalf("expected dirty-tree error, got: %q", errb.String())
+	}
+}
+
+// TestIdeaNewIgnoresUntrackedFiles is the symptom this narrowing fixes:
+// every agent sandbox carries untracked `.claude/` and `.mcp.json` bind
+// mounts that can't be removed from inside, which made backlog capture
+// structurally unreachable from a chat stage.
+func TestIdeaNewIgnoresUntrackedFiles(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := Run([]string{"idea", "new", "tele/x"}, &out, &errb); code != 0 {
+		t.Fatalf("expected capture to ignore an untracked stray, exit=%d stderr=%q", code, errb.String())
+	}
+	// The stray stayed out of the capture commit — the guard's whole
+	// premise is that path-scoped staging can't pick it up.
+	if named := gittest.Output(t, root, "show", "--name-only", "--format=", "HEAD"); strings.Contains(named, ".mcp.json") {
+		t.Fatalf("stray rode the capture commit: %q", named)
 	}
 }
 
@@ -596,9 +620,7 @@ func TestIdeaEditRefusesDirtyWorkingTree(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele/busy"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root)
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "edit", "tele/busy"}, &out, &errb)
 	if code == 0 {
@@ -1152,9 +1174,7 @@ func TestIdeaMoveRefusesDirtyWorkingTree(t *testing.T) {
 	if code := Run([]string{"idea", "new", "tele/dirty"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture failed")
 	}
-	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root)
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "move", "tele/dirty", "moe"}, &out, &errb)
 	if code == 0 {
@@ -1417,9 +1437,7 @@ func TestIdeaReopenRefusesDestinationMerged(t *testing.T) {
 // change.
 func TestIdeaReopenRefusesDirtyWorkingTree(t *testing.T) {
 	root, _ := reopenFixture(t, "tele", "needs-clean-tree", run.StatusClosed)
-	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root)
 	var out, errb bytes.Buffer
 	code := Run([]string{"idea", "reopen", "tele/needs-clean-tree"}, &out, &errb)
 	if code == 0 {

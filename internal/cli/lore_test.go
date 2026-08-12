@@ -961,9 +961,7 @@ func TestSDLCCloseTreatsLoreFileAsCleanForGate(t *testing.T) {
 	// Now demonstrate the gate still trips on an unrelated dirty file.
 	root2 := seedCloseFixture(t, "tele", "ship-it-2", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root2)
-	if err := os.WriteFile(filepath.Join(root2, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root2)
 	out.Reset()
 	errb.Reset()
 	code = Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it-2"}, &out, &errb)

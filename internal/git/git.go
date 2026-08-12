@@ -306,6 +306,13 @@ type StatusEntry struct {
 	From string
 }
 
+// Untracked reports whether the entry is a file git doesn't track.
+// Untracked files are never in the index, so they can't ride a
+// path-scoped `git add` + `git commit` — clean-tree guards fronting
+// those commits ignore them. (`!!` never appears: Status doesn't pass
+// --ignored.)
+func (e StatusEntry) Untracked() bool { return e.XY == "??" }
+
 // Status reports the working-tree status of dir, scoped to paths
 // (all paths if none given). Output is parsed from
 // `git status --porcelain=v1 -z --untracked-files=all`, so paths

@@ -1043,9 +1043,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 	// Now demonstrate the gate still trips on an unrelated dirty file.
 	root2 := seedCloseFixture(t, "tele", "ship-it-2", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root2)
-	if err := os.WriteFile(filepath.Join(root2, "stray.txt"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dirtyTracked(t, root2)
 	out.Reset()
 	errb.Reset()
 	code = Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it-2"}, &out, &errb)
@@ -1085,5 +1083,44 @@ func TestIdeaCloseDoesNotHarvestFollowups(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "should-not-harvest", "run.json")); !os.IsNotExist(err) {
 		t.Fatalf("idea close should not have harvested followups.md: %v", err)
+	}
+}
+
+// TestDirtyOutsidePathsIgnoresUntracked pins the two legs of the
+// narrowed predicate directly: an untracked stray outside the exemption
+// list is clean (it can't ride the path-scoped close commit), while a
+// modified tracked file outside the list still refuses.
+func TestDirtyOutsidePathsIgnoresUntracked(t *testing.T) {
+	root := newTestBureaucracy(t)
+	gittest.WriteAndCommit(t, root, "exempt.md", "one\n", "seed exempt file")
+
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := dirtyOutsidePaths(root, "exempt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirty {
+		t.Fatal("an untracked stray should not count as dirty")
+	}
+
+	// The exempted path may carry a tracked modification — that's the
+	// close-retry case the list exists for.
+	if err := os.WriteFile(filepath.Join(root, "exempt.md"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirty, err = dirtyOutsidePaths(root, "exempt.md"); err != nil {
+		t.Fatal(err)
+	} else if dirty {
+		t.Fatal("a modified exempt path should not count as dirty")
+	}
+
+	// Anything else tracked-and-modified still refuses.
+	dirtyTracked(t, root)
+	if dirty, err = dirtyOutsidePaths(root, "exempt.md"); err != nil {
+		t.Fatal(err)
+	} else if !dirty {
+		t.Fatal("a modified tracked file outside the exemptions must still count as dirty")
 	}
 }

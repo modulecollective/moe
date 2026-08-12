@@ -203,14 +203,16 @@ type Options struct {
 	// Trailers.ReopenOf. Empty on operator-opened and standalone runs.
 	SpawnedBy string
 
-	// AllowDirty bypasses the working-tree-clean precondition. The
-	// guardrail is there so a stray edit doesn't ride along on the
-	// open-run commit; callers that already vetted the tree (the
-	// followups harvester is the only current example — it allows a
-	// modified followups.md to ride along to the close commit, while
-	// each per-idea open-run commit only stages its own paths) opt out
-	// here. The opt-out is per-caller because run.New still stages
-	// only its addPaths, so dirt elsewhere is not silently committed.
+	// AllowDirty bypasses the working-tree-clean precondition (which
+	// counts staged changes and tracked-file modifications, never
+	// untracked files). The guardrail is there so a stray edit doesn't
+	// ride along on the open-run commit; callers that already vetted
+	// the tree (the followups harvester is the only current example —
+	// it allows a modified followups.md to ride along to the close
+	// commit, while each per-idea open-run commit only stages its own
+	// paths) opt out here. The opt-out is per-caller because run.New
+	// still stages only its addPaths, so dirt elsewhere is not
+	// silently committed.
 	AllowDirty bool
 }
 
@@ -1403,12 +1405,22 @@ func workingTreeDirty(root string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("run: git status: %w", err)
 	}
-	return len(entries) > 0, nil
+	for _, e := range entries {
+		if !e.Untracked() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // WorkingTreeDirty exposes the same precondition New uses internally so
 // other commit-on-create entry points (e.g. `moe idea add`) can refuse
 // to ride a stray edit on their commit.
+//
+// Untracked files never count as dirty: every commit these guards front
+// stages its own paths, so a file outside the index can't ride along.
+// Counting them made the guard unreachable inside an agent sandbox,
+// which always carries untracked `.claude/` and `.mcp.json` mounts.
 func WorkingTreeDirty(root string) (bool, error) {
 	return workingTreeDirty(root)
 }

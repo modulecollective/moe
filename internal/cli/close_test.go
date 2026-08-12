@@ -582,3 +582,27 @@ func TestCloseUnreachableOriginWarnsAndSucceeds(t *testing.T) {
 		t.Fatal("close commit missing from local main")
 	}
 }
+
+// TestSDLCCloseIgnoresUnrelatedUntrackedFile: close and its harvest leg
+// share the narrowed clean-tree gate — an untracked stray anywhere in
+// the tree is not dirt, because the close commit stages only its own
+// paths.
+func TestSDLCCloseIgnoresUnrelatedUntrackedFile(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("expected harvest to ignore an untracked stray, exit=%d stderr=%q", code, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("expected close to ignore an untracked stray, exit=%d stderr=%q", code, errb.String())
+	}
+}

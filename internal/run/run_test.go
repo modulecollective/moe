@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
@@ -1262,4 +1263,87 @@ func TestJournalIndexConsentUnstampedHistoryIsUnknown(t *testing.T) {
 	if _, ok := idx.SpawnConsent["a/old"]; ok {
 		t.Errorf("SpawnConsent[a/old] present, want absent for pre-trailer history")
 	}
+}
+
+// TestNewIgnoresUntrackedFiles: the clean-tree precondition fronts a
+// path-scoped `git add` + `git commit`, so a file outside the index can
+// never ride along. Counting untracked files made the guard unreachable
+// from any agent sandbox, which always carries untracked `.claude/` and
+// `.mcp.json` bind mounts.
+func TestNewIgnoresUntrackedFiles(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(root, "tele", Options{Workflow: "idea", ID: "capture-me"}); err != nil {
+		t.Fatalf("New with an untracked stray: %v", err)
+	}
+	// And the stray is still sitting there uncommitted — the run's
+	// commit staged only its own paths.
+	entries, err := gitStatusPaths(t, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entries["stray.txt"] {
+		t.Fatalf("stray.txt should still be untracked after the open commit, status was %v", entries)
+	}
+}
+
+// TestNewRefusesStagedForeignChange is the leg the guard actually
+// earns: a staged change rides any bare `git commit`, so New must still
+// refuse on it after the untracked narrowing.
+func TestNewRefusesStagedForeignChange(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	if err := os.WriteFile(filepath.Join(root, "foreign.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "--", "foreign.txt")
+
+	_, err := New(root, "tele", Options{Workflow: "idea", ID: "capture-me"})
+	if err == nil {
+		t.Fatal("expected refusal on a staged foreign change, got nil")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("error should name the dirty tree, got: %v", err)
+	}
+}
+
+// TestNewRefusesModifiedTrackedFile: an unstaged edit to a tracked file
+// can't ride the commit either, but refusing keeps the quiescent-tree
+// stance for files the bureaucracy owns — matching git's own dirty
+// definition for rebase.
+func TestNewRefusesModifiedTrackedFile(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+
+	rel := filepath.Join("projects", "tele", "project.json")
+	if err := os.WriteFile(filepath.Join(root, rel), []byte(`{"id":"tele","edited":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := New(root, "tele", Options{Workflow: "idea", ID: "capture-me"})
+	if err == nil {
+		t.Fatal("expected refusal on a modified tracked file, got nil")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("error should name the dirty tree, got: %v", err)
+	}
+}
+
+// gitStatusPaths reports the porcelain status of root as a path set.
+func gitStatusPaths(t *testing.T, root string) (map[string]bool, error) {
+	t.Helper()
+	entries, err := git.Status(root)
+	if err != nil {
+		return nil, err
+	}
+	paths := map[string]bool{}
+	for _, e := range entries {
+		paths[e.Path] = true
+	}
+	return paths, nil
 }

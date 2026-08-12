@@ -178,10 +178,10 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// lore/ is exempt for the same reason one level out: it's harvest
 	// *output*, and enterTerminal stages it into this very close commit.
 	// The exemption list is exactly the set of paths the close is about
-	// to commit anyway, so exempting them widens nothing. Without lore/
-	// on the list, a close whose commit failed can't be retried — the
-	// rollback leaves the promoted lore/<slug>.md untracked, and the run
-	// trips its own gate.
+	// to commit anyway, so exempting them widens nothing. It still earns
+	// its keep on a retry after a failed close commit: a re-promoted
+	// lore/<slug>.md that already existed is tracked-and-modified, which
+	// would otherwise trip the run's own gate.
 	if !isCaptureWorkflow(workflow) {
 		followupsRel := run.FollowupsPath(projectID, runID)
 		loreRel := run.FeedbackPath(projectID, runID, "lore")

@@ -545,10 +545,9 @@ func checkSandboxBoundary(clonePath, entryHEAD, stageDoc string) error {
 	}
 	var dirty []string
 	for _, e := range entries {
-		// Untracked entries carry XY=="??"; everything else is a
-		// tracked-file change that the stage is contracted not to
-		// leave behind.
-		if e.XY == "??" {
+		// Everything that isn't untracked is a tracked-file change
+		// that the stage is contracted not to leave behind.
+		if e.Untracked() {
 			continue
 		}
 		dirty = append(dirty, e.XY+" "+e.Path)

@@ -397,10 +397,12 @@ func launchEditorOrFail(path string) error {
 // scratch files — followups.md and feedback/lore.md — while still
 // refusing on anything else dirty.
 //
+// Untracked files never count, matching run.WorkingTreeDirty: they
+// can't ride the path-scoped close commit.
+//
 // An exceptRel with a trailing slash is a directory prefix: `lore/`
-// exempts every promoted lore entry under it. Close needs that because
-// harvest writes lore/<slug>.md as untracked files, and git.Status
-// reports them individually.
+// exempts every promoted lore entry under it. Close needs that for a
+// re-promoted entry that is tracked-and-modified on a retry.
 func dirtyOutsidePaths(root string, exceptRels ...string) (bool, error) {
 	entries, err := git.Status(root)
 	if err != nil {
@@ -415,7 +417,7 @@ func dirtyOutsidePaths(root string, exceptRels ...string) (bool, error) {
 		return false
 	}
 	for _, e := range entries {
-		if allowed(e.Path) {
+		if e.Untracked() || allowed(e.Path) {
 			continue
 		}
 		return true, nil
