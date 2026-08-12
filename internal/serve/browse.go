@@ -176,6 +176,9 @@ type hubVM struct {
 	// rowBuckets is the same Active/Intents/Backlog/Completed split the
 	// home dash renders, over this project's rows alone.
 	rowBuckets
+	// Serve is the same activity strip the home dash draws, scoped to
+	// this project's heartbeat verdicts and children.
+	Serve        servePanelVM
 	Project      string
 	HasKnowledge bool
 	TopicCount   int
@@ -225,6 +228,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	vm.Serve = s.activity.panel(now, projectID)
 	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID), nil)
 	if _, err := os.Stat(filepath.Join(s.knowledgeDir(projectID), "index.md")); err == nil {
 		vm.HasKnowledge = true

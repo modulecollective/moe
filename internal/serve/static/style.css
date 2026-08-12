@@ -592,3 +592,34 @@ form.new-run button:hover, form.new-run button:focus {
 .t-result .t-output { padding: 0.5rem; overflow-x: auto; }
 .t-result.error { border-color: var(--warn); }
 .t-result.error > summary { color: var(--warn); }
+
+/* The serve activity strip. Two row lists in one section: the
+   heartbeat's per-project verdicts, then the recent-activity ring. Both
+   ride .rows, so the strip inherits the dash's row rhythm and only the
+   two new spans need rules of their own. */
+.serve-panel .serve-events { margin-top: 0.75rem; }
+.serve-state, .serve-kind {
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.serve-state { color: var(--fg); }
+.serve-state.failed, .serve-panel .note.failed { color: var(--warn); }
+.serve-kind { text-transform: uppercase; letter-spacing: 0.05em; }
+.serve-tail { flex-basis: 100%; }
+.serve-tail > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.serve-tail > pre {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}

@@ -77,6 +77,43 @@
   </script>
 {{end}}
 
+{{define "servepanel"}}
+  <section class="dash-section serve-panel">
+    <h2><span>serve
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}})</span>
+      {{else}}<span class="count">(browse-only · up {{.Up}})</span>{{end}}
+    </span></h2>
+    {{if .Projects}}
+    <ul class="rows">
+      {{range .Projects}}
+      <li class="row">
+        <a class="slug" href="/projects/{{.Project}}">{{.Project}}</a>
+        <span class="serve-state{{if .Failed}} failed{{end}}">{{.State}}{{if .Detail}} {{.Detail}}{{end}}</span>
+        <span class="note">{{.Reason}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+    {{if .Events}}
+    <ul class="rows serve-events">
+      {{range .Events}}
+      <li class="row">
+        <span class="when">{{.When}}</span>
+        <span class="serve-kind">{{.Kind}}</span>
+        <span class="note{{if .Failed}} failed{{end}}">{{.Text}}</span>
+        {{if .Tail}}
+        <details class="serve-tail">
+          <summary>output</summary>
+          <pre>{{.Tail}}</pre>
+        </details>
+        {{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{else if not .Projects}}<p class="empty">nothing yet — no tick has run</p>{{end}}
+  </section>
+{{end}}
+
 {{define "completedrows"}}
   {{range .}}
   <li class="row{{if .Chained}} chained{{else if .Depth}} nested depth{{.Depth}}{{end}}">
