@@ -134,12 +134,8 @@ func parseFollowups(body []byte, currentProject string) (lines []string, todo []
 			project, slug = e.slug[:i], e.slug[i+1:]
 		}
 		if e.promoteTo != "" {
-			wf, lookupErr := LookupWorkflow(e.promoteTo)
-			if lookupErr != nil {
-				return nil, nil, fmt.Errorf("line %d: follow-up workflow tag %q is not registered", e.lineIdx+1, e.promoteTo)
-			}
-			if !chainableWorkflow(e.promoteTo) || len(wf.Stages()) == 0 {
-				return nil, nil, fmt.Errorf("line %d: follow-up workflow tag %q is not a staged, chainable workflow", e.lineIdx+1, e.promoteTo)
+			if err := validatePromoteTag(e.promoteTo); err != nil {
+				return nil, nil, fmt.Errorf("line %d: follow-up %w", e.lineIdx+1, err)
 			}
 		}
 		todo = append(todo, parsedFollowup{
@@ -153,6 +149,25 @@ func parseFollowups(body []byte, currentProject string) (lines []string, todo []
 		})
 	}
 	return lines, todo, nil
+}
+
+// validatePromoteTag vets a workflow tag destined for a run's
+// PromoteTo: registered, chainable, and carrying a stage ladder to
+// walk. Shared by the two surfaces that mint a tag — the followups
+// grammar at close (`(sdlc)` after the slug) and `moe idea tag` — so a
+// tag the operator can type is exactly a tag a filer can write.
+//
+// Messages are phrased to compose after a caller's noun ("line 4:
+// follow-up " + msg).
+func validatePromoteTag(tag string) error {
+	wf, err := LookupWorkflow(tag)
+	if err != nil {
+		return fmt.Errorf("workflow tag %q is not registered", tag)
+	}
+	if !chainableWorkflow(tag) || len(wf.Stages()) == 0 {
+		return fmt.Errorf("workflow tag %q is not a staged, chainable workflow", tag)
+	}
+	return nil
 }
 
 // isIndentedBody reports whether line qualifies as body content for the

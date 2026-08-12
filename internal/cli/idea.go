@@ -69,6 +69,18 @@ func init() {
 		argKind: argIdea,
 	})
 	g.Register(&Command{
+		Name:    "tag",
+		Summary: "license the machine to promote an idea (workflow tag, default sdlc)",
+		Run:     runIdeaTag,
+		argKind: argIdea,
+	})
+	g.Register(&Command{
+		Name:    "untag",
+		Summary: "clear an idea's workflow tag — the per-idea pause",
+		Run:     runIdeaUntag,
+		argKind: argIdea,
+	})
+	g.Register(&Command{
 		Name:    "move",
 		Summary: "re-home an open idea under a different project",
 		Run:     runIdeaMove,
@@ -375,6 +387,119 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
 	for _, e := range entries {
 		fmt.Fprintln(stdout, e.slug)
+	}
+	return 0
+}
+
+// defaultPromoteTag is the workflow `moe idea tag` stamps when the
+// operator names none. sdlc is the overwhelming case — the tag says
+// "an agent could just execute this" and sdlc is how work executes.
+const defaultPromoteTag = "sdlc"
+
+// runIdeaTag stamps a workflow tag onto a parked idea. The tag is the
+// machine's license: the pulse survey proposes only tagged ideas, so
+// tagging is how the operator says "you may start this" without the
+// promote ritual. It is a license, not a schedule — the survey still
+// decides whether and where the idea rides.
+//
+// The workflow argument is optional and defaults to sdlc; it is
+// validated against the same bar the followups grammar applies to a
+// filer's `(sdlc)` tag, so the two mint identical state.
+func runIdeaTag(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea tag", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea tag <project>/<slug> [workflow]\n")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 && fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+	workflow := defaultPromoteTag
+	if fs.NArg() == 2 {
+		workflow = fs.Arg(1)
+	}
+	if err := validatePromoteTag(workflow); err != nil {
+		moePrintf(stderr, "idea tag: %v\n", err)
+		return 2
+	}
+	return setIdeaTag(fs.Arg(0), workflow, "idea tag", stdout, stderr)
+}
+
+// runIdeaUntag clears an idea's workflow tag — the per-idea pause. An
+// untagged idea is operator-fenced: no pulse will propose it, whoever
+// filed it and whatever ran before.
+func runIdeaUntag(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("idea untag", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintf(stderr, "usage: moe idea untag <project>/<slug>\n")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	return setIdeaTag(fs.Arg(0), "", "idea untag", stdout, stderr)
+}
+
+// setIdeaTag is the body both verbs share: resolve the ref, apply the
+// idea gates, and write the tag through the same seam the dash chips
+// use. An empty workflow untags; verb names the caller for error
+// prefixes.
+func setIdeaTag(ref, workflow, verb string, stdout, stderr io.Writer) int {
+	projectID, slug, err := splitProjectRun(ref)
+	if err != nil {
+		moePrintf(stderr, "%s: %v\n", verb, err)
+		return 2
+	}
+
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	if err := requireProject(root, projectID); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if err := requireCleanTree(root); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	md, err := loadIdeaRun(root, projectID, slug)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if md.Status != run.StatusInProgress {
+		moePrintf(stderr, "idea %s/%s is %s, not open — refusing to change its tag\n", projectID, slug, md.Status)
+		return 1
+	}
+
+	err = runopen.TagIdea(root, projectID, slug, workflow, stdout, stderr)
+	switch {
+	case errors.Is(err, run.ErrNothingToCommit):
+		// Already in the requested state — say so and exit clean, so a
+		// double-tap (or a re-run of the same one-liner) is a no-op
+		// rather than a failure.
+		if workflow == "" {
+			moePrintf(stdout, "idea %s/%s is already untagged\n", projectID, slug)
+		} else {
+			moePrintf(stdout, "idea %s/%s is already tagged → %s\n", projectID, slug, workflow)
+		}
+	case err != nil:
+		moePrintf(stderr, "%s: %v\n", verb, err)
+		return 1
+	case workflow == "":
+		moePrintf(stdout, "untagged idea %s/%s\n", projectID, slug)
+	default:
+		moePrintf(stdout, "tagged idea %s/%s → %s\n", projectID, slug, workflow)
 	}
 	return 0
 }
