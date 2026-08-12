@@ -48,45 +48,30 @@ func getBody(t *testing.T, s *Server, path string) string {
 	return rec.Body.String()
 }
 
-// TestServePanelRendersOnTheDash: the operator's question — is serve going
-// to pulse, is one running now, what happened last tick — has to be
-// answerable from the page they already open.
-func TestServePanelRendersOnTheDash(t *testing.T) {
-	body := getBody(t, panelServer(t), "/")
-	for _, want := range []string{
-		"serve-panel",
-		"armed",
-		"next sweep in",
-		"sweeping",
-		"the journal moved",
-		"a sweep already surveyed the current tip",
-		"credit limit reached",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("dash is missing %q from the serve panel", want)
+// TestServeClusterRidesTheBoardHeaders: the boards spend one muted line
+// on serve — the same cluster the CLI banner carries — and link it to the
+// page that owns the trace. A day of ticks on every dash load was the
+// noise this change exists to stop.
+func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
+	s := panelServer(t)
+	for _, path := range []string{"/", "/projects/alpha"} {
+		body := getBody(t, s, path)
+		cluster := s.activity.panel(time.Now()).Cluster
+		if !strings.Contains(body, `<div class="banner-serve"><a href="/serve">`+cluster+`</a></div>`) {
+			t.Errorf("%s is missing the header cluster %q", path, cluster)
+		}
+		for _, unwanted := range []string{"serve-panel", "the journal moved", "credit limit reached"} {
+			if strings.Contains(body, unwanted) {
+				t.Errorf("%s still carries %q — the trace belongs on /serve", path, unwanted)
+			}
 		}
 	}
 }
 
-// TestServePanelScopesOnTheProjectHub: the hub embeds the same partial, and
-// another project's sweeps there would be noise.
-func TestServePanelScopesOnTheProjectHub(t *testing.T) {
-	body := getBody(t, panelServer(t), "/projects/alpha")
-	if !strings.Contains(body, "the journal moved") {
-		t.Error("the hub is missing this project's verdict")
-	}
-	if strings.Contains(body, "a sweep already surveyed the current tip") {
-		t.Error("the hub leaked another project's verdict")
-	}
-	if strings.Contains(body, "credit limit reached") {
-		t.Error("the hub leaked another project's failed sweep")
-	}
-}
-
-// TestServePanelRendersUnarmed: "it's up but will never pulse" is exactly
-// the confusion the panel exists to fix, so an unarmed serve renders the
-// strip rather than hiding it.
-func TestServePanelRendersUnarmed(t *testing.T) {
+// TestServeClusterRendersUnarmed: "it's up but will never pulse" is
+// exactly the confusion this exists to fix, so an unarmed serve says so
+// in the header rather than going quiet.
+func TestServeClusterRendersUnarmed(t *testing.T) {
 	s := newSafeTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: t.TempDir(),
@@ -95,23 +80,75 @@ func TestServePanelRendersUnarmed(t *testing.T) {
 		},
 	})
 	body := getBody(t, s, "/")
-	if !strings.Contains(body, "browse-only") {
-		t.Error("an unarmed serve should say so on the dash")
+	if !strings.Contains(body, "serve browse-only · up") {
+		t.Error("an unarmed serve should say so in the dash header")
 	}
-	if strings.Contains(body, "next sweep in") {
+	if strings.Contains(body, "· next ") {
 		t.Error("an unarmed serve promised a sweep it will never run")
 	}
 }
 
-// TestServePanelDoesNotReadTheStateFile: serve holds the record, so a round
+// TestServeMenuReachesTheServePage: the cluster only renders on the two
+// boards, and the menu is on every page — so the menu is what makes the
+// trace reachable from anywhere.
+func TestServeMenuReachesTheServePage(t *testing.T) {
+	body := getBody(t, panelServer(t), "/lore")
+	if !strings.Contains(body, `<a href="/serve">serve</a>`) {
+		t.Error("the hamburger menu is missing its serve entry")
+	}
+}
+
+// TestServePageCarriesTheWholeTrace: /serve is where the former panel
+// went — status, every project the heartbeat has a verdict for, the ring,
+// and a failed child's output tail behind its details.
+func TestServePageCarriesTheWholeTrace(t *testing.T) {
+	body := getBody(t, panelServer(t), "/serve")
+	for _, want := range []string{
+		"serve-panel",
+		"armed",
+		"next sweep in",
+		"sweeping",
+		"the journal moved",
+		"a sweep already surveyed the current tip",
+		"<summary>output</summary>",
+		"credit limit reached",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/serve is missing %q", want)
+		}
+	}
+}
+
+// TestServePageIsBoardWide: the hub's scoped trace is gone, so a project
+// that only shows up in another project's tick still has to be findable
+// here.
+func TestServePageIsBoardWide(t *testing.T) {
+	body := getBody(t, panelServer(t), "/serve")
+	for _, want := range []string{"alpha", "beta"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/serve is missing project %q", want)
+		}
+	}
+}
+
+// TestServePageEmptyState: a serve that has never ticked renders a page
+// that says so rather than a blank one.
+func TestServePageEmptyState(t *testing.T) {
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	if body := getBody(t, s, "/serve"); !strings.Contains(body, "nothing yet — no tick has run") {
+		t.Error("/serve should name its empty state")
+	}
+}
+
+// TestServePageDoesNotReadTheStateFile: serve holds the record, so a round
 // trip through its own snapshot would add a beat of lag for nothing. Proven
 // by rendering with no file on disk at all.
-func TestServePanelDoesNotReadTheStateFile(t *testing.T) {
+func TestServePageDoesNotReadTheStateFile(t *testing.T) {
 	s := panelServer(t)
 	if _, ok, _ := ReadActivitySnapshot(s.opts.Root); ok {
 		t.Fatal("fixture wrote a state file; this test needs none")
 	}
-	if body := getBody(t, s, "/"); !strings.Contains(body, "the journal moved") {
-		t.Error("the panel rendered nothing without a state file — it should render from memory")
+	if body := getBody(t, s, "/serve"); !strings.Contains(body, "the journal moved") {
+		t.Error("the page rendered nothing without a state file — it should render from memory")
 	}
 }

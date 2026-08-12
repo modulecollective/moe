@@ -449,6 +449,11 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /chore/{project}/{name}", s.handleChorePage)
 	s.router.HandleFunc("POST /chore/{project}/{name}/open", s.handleChoreOpen)
 
+	// The heartbeat's own page: what it decided, what it spawned, what
+	// died. The boards carry a brief status cluster in their header and
+	// link here for the trace.
+	s.router.HandleFunc("GET /serve", s.handleServePage)
+
 	// Read-only browsing of the bureaucracy's durable content: lore,
 	// projects, per-project knowledge and digital-twin docs. All render
 	// from os.ReadFile + the internal/md renderer; none touch the spawn
@@ -547,7 +552,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	}
 	// From memory, not from the state file: serve holds the record, and a
 	// round trip through its own snapshot would only add a beat of lag.
-	vm.Serve = s.activity.panel(now, "")
+	vm.Serve = s.activity.panel(now)
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path
@@ -562,6 +567,15 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.render(w, r, "dash.html", vm)
+}
+
+// handleServePage renders the heartbeat's trace: the process status, a
+// line per project it has a verdict for, and the whole activity ring
+// with each failed child's output tail behind a details. Board-wide —
+// single operator, at most 50 events, so one page and one scan beat a
+// per-project filter.
+func (s *Server) handleServePage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "serve.html", s.activity.panel(time.Now().UTC()))
 }
 
 // render runs a named template with data and surfaces template

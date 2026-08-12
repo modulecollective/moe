@@ -279,23 +279,30 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 	return out
 }
 
-// servePanelVM is the serve strip both the home dash and a project hub
-// draw: one status line for the process, one line per project the
-// heartbeat has a verdict for, and a short recent-activity list from the
-// ring. Server-rendered from memory on page load — no polling, no
-// fragment fetch. Reload is the phone gesture, and page weight is a
-// first-class constraint on this board.
+// servePanelVM is the serve record rendered for the web: one status line
+// for the process, one line per project the heartbeat has a verdict for,
+// and the recent-activity list from the ring. Server-rendered from memory
+// on page load — no polling, no fragment fetch. Reload is the phone
+// gesture, and page weight is a first-class constraint on this board.
+//
+// The whole panel is the /serve page. The boards spend only Cluster on
+// it, in their header — status is ambient, a day's trace is not, and
+// putting the trace on every dash load was the same noise the CLI's
+// standalone status line was.
 type servePanelVM struct {
 	// Armed distinguishes a serve that may pulse from one that is
-	// browse-only. An unarmed serve still renders the strip: "it's up but
+	// browse-only. An unarmed serve still renders the panel: "it's up but
 	// will never pulse" is exactly the confusion this is fixing.
 	Armed bool
 	Up    string // "3d 2h"
 	// NextSweep is how long until the next tick ("12m"), empty for an
 	// unarmed serve, which never ticks.
 	NextSweep string
-	Projects  []serveProjectVM
-	Events    []serveEventVM
+	// Cluster is the brief status the page headers link to /serve with —
+	// the same line, byte for byte, that the CLI dash's banner carries.
+	Cluster  string
+	Projects []serveProjectVM
+	Events   []serveEventVM
 }
 
 // serveProjectVM is one project's line in the strip: what the heartbeat
@@ -326,12 +333,10 @@ type serveEventVM struct {
 	Tail string
 }
 
-// panel renders the activity record for the web. projectFilter scopes it
-// to one project (the hub) or is empty for the whole board (the dash);
-// scoping filters the project lines, each tick's verdict set, and the
-// child events alike, so a hub shows that project's trace and nothing
-// else.
-func (a *activity) panel(now time.Time, projectFilter string) servePanelVM {
+// panel renders the activity record for the web, board-wide. Single
+// operator, a ring of at most 50 events: scoping it per project would
+// buy a second rendering path for a page that's one scan long.
+func (a *activity) panel(now time.Time) servePanelVM {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -339,18 +344,19 @@ func (a *activity) panel(now time.Time, projectFilter string) servePanelVM {
 	if next := a.nextTick(); !next.IsZero() {
 		vm.NextSweep = dash.HumanDuration(max(next.Sub(now), 0))
 	}
+	failing := 0
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
-		if projectFilter != "" && id != projectFilter {
-			continue
+		line := serveProjectLine(now, id, a.projects[id])
+		if line.Failed {
+			failing++
 		}
-		vm.Projects = append(vm.Projects, serveProjectLine(now, id, a.projects[id]))
+		vm.Projects = append(vm.Projects, line)
 	}
+	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep, failing)
 	// Newest first: the ring stores in arrival order, and the question the
 	// list answers is "what just happened".
 	for i := len(a.events) - 1; i >= 0; i-- {
-		if ev, ok := serveEventLine(now, a.events[i], projectFilter); ok {
-			vm.Events = append(vm.Events, ev)
-		}
+		vm.Events = append(vm.Events, serveEventLine(now, a.events[i]))
 	}
 	return vm
 }
@@ -375,38 +381,27 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 	return line
 }
 
-// serveEventLine turns one ring entry into its line, reporting false when
-// a project-scoped panel has no business showing it. A tick is board-wide
-// but its verdict set is per project, so scoping narrows the text rather
-// than dropping the event — unless the project has no verdict in it.
-func serveEventLine(now time.Time, ev activityEvent, projectFilter string) (serveEventVM, bool) {
+// serveEventLine turns one ring entry into its line. A tick's body is its
+// whole verdict set, joined; a child's is what happened to it.
+func serveEventLine(now time.Time, ev activityEvent) serveEventVM {
 	vm := serveEventVM{When: dash.HumanAgo(now, ev.At), Kind: ev.Kind, Failed: ev.Failed}
 	if ev.Kind == "tick" {
 		var parts []string
 		for _, d := range ev.Decisions {
-			if projectFilter != "" && d.Project != projectFilter {
-				continue
-			}
 			verb := "quiet"
 			if d.Sweep {
 				verb = "sweeping"
 			}
 			parts = append(parts, fmt.Sprintf("%s %s — %s", d.Project, verb, d.Reason))
 		}
-		if len(parts) == 0 {
-			return serveEventVM{}, false
-		}
 		vm.Text = strings.Join(parts, " · ")
-		return vm, true
-	}
-	if projectFilter != "" && ev.Project != projectFilter {
-		return serveEventVM{}, false
+		return vm
 	}
 	vm.Text = ev.Subject + " " + ev.Detail
 	if ev.Failed {
 		vm.Tail = ev.Tail
 	}
-	return vm, true
+	return vm
 }
 
 // dashVM is the data the dash template renders against. Same three

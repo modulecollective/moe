@@ -106,9 +106,9 @@ func TestChildHooksLandInTheActivityRing(t *testing.T) {
 	}
 
 	waitFor(t, "both hooks to land", func() bool {
-		return len(s.activity.panel(time.Now(), "alpha").Events) == 2
+		return len(s.activity.panel(time.Now()).Events) == 2
 	})
-	vm := s.activity.panel(time.Now(), "alpha")
+	vm := s.activity.panel(time.Now())
 	// Newest first: the exit leads.
 	if vm.Events[0].Kind != "exit" || !vm.Events[0].Failed {
 		t.Errorf("newest event = %+v, want the failed exit", vm.Events[0])

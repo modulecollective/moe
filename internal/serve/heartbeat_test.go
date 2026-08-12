@@ -357,7 +357,7 @@ func TestHeartbeatTickRecordsTheWholeVerdictSet(t *testing.T) {
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	vm := s.activity.panel(time.Now(), "")
+	vm := s.activity.panel(time.Now())
 	states := map[string]string{}
 	for _, p := range vm.Projects {
 		states[p.Project] = p.Reason
@@ -408,7 +408,7 @@ func TestHeartbeatRecordsTheCoolOffAsWhatHappened(t *testing.T) {
 
 	state := func() serveProjectVM {
 		t.Helper()
-		vm := s.activity.panel(time.Now(), "")
+		vm := s.activity.panel(time.Now())
 		if len(vm.Projects) != 1 {
 			t.Fatalf("panel projects = %+v, want alpha", vm.Projects)
 		}

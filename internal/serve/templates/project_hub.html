@@ -10,11 +10,11 @@
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → {{.Project}}</div>
+      {{template "serveheader" .Serve}}
     </div>
     {{template "headeractions" .}}
   </header>
   {{template "bannerart" .}}
-  {{template "servepanel" .Serve}}
 
   <section class="dash-section">
     <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>

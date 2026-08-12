@@ -21,6 +21,7 @@
     <a href="/">dashboard</a>
     <a href="/lore">lore</a>
     <a href="/projects">projects</a>
+    <a href="/serve">serve</a>
     <button id="theme-toggle" class="theme-toggle" type="button"><span class="theme-label-dark">dark mode</span><span class="theme-label-light">light mode</span></button>
   </div>
 </details>
@@ -75,6 +76,12 @@
     }, 3000);
   })();
   </script>
+{{end}}
+
+{{/* The boards' whole spend on serve: the same status cluster the CLI
+     dash's banner carries, in the page header, linked to the trace. */}}
+{{define "serveheader"}}
+  <div class="banner-serve"><a href="/serve">{{.Cluster}}</a></div>
 {{end}}
 
 {{define "servepanel"}}

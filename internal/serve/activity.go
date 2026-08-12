@@ -54,9 +54,6 @@ type activityEvent struct {
 	// Subject is the child id a spawn/exit happened to ("heartbeat:moe",
 	// "alpha/fix-it"). Empty for a tick, which is board-wide.
 	Subject string
-	// Project is what the event belongs to, so a project-scoped panel can
-	// filter. Empty when a child id doesn't name one.
-	Project string
 	Detail  string
 	Failed  bool
 	// Tail is the child's last PTY bytes, ANSI-stripped. Exit events
@@ -177,7 +174,7 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 func (a *activity) recordChildSpawn(id string, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.push(activityEvent{At: at, Kind: "spawn", Subject: id, Project: childProject(id), Detail: "started"})
+	a.push(activityEvent{At: at, Kind: "spawn", Subject: id, Detail: "started"})
 }
 
 func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail string) {
@@ -188,19 +185,9 @@ func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.push(activityEvent{
-		At: at, Kind: "exit", Subject: id, Project: childProject(id),
+		At: at, Kind: "exit", Subject: id,
 		Detail: detail, Failed: exitErr != nil, Tail: tail,
 	})
-}
-
-// childProject names the project a child id belongs to. Heartbeat
-// children carry it behind the prefix; a run child's id leads with it.
-func childProject(id string) string {
-	if p := heartbeatProject(id); p != "" {
-		return p
-	}
-	p, _, _ := strings.Cut(id, "/")
-	return p
 }
 
 // nextTick is when the ticker fires next: the last tick plus the baked

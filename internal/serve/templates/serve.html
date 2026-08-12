@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>serve — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a> → serve</div>
+    </div>
+    {{template "headeractions" .}}
+  </header>
+
+  {{template "servepanel" .}}
+</main>
+{{template "themejs" .}}
+</body>
+</html>

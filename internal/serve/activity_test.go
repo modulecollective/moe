@@ -133,24 +133,8 @@ func TestActivityUnarmedServeHasNoNextTick(t *testing.T) {
 	if got := a.snapshot(now).NextTick; !got.IsZero() {
 		t.Errorf("next tick = %v on an unarmed serve, want none", got)
 	}
-	if vm := a.panel(now, ""); vm.Armed || vm.NextSweep != "" {
+	if vm := a.panel(now); vm.Armed || vm.NextSweep != "" {
 		t.Errorf("panel = %+v, want browse-only with no countdown", vm)
-	}
-}
-
-// TestActivityChildProjectSplitsTheTwoNamespaces: the ring keys events by
-// child id, and a heartbeat child's id is deliberately unspellable as a
-// run id. Both have to resolve to the project they belong to so a
-// project-scoped panel can filter.
-func TestActivityChildProjectSplitsTheTwoNamespaces(t *testing.T) {
-	for id, want := range map[string]string{
-		heartbeatChildPrefix + "moe": "moe",
-		"alpha/fix-it":               "alpha",
-		"alpha":                      "alpha",
-	} {
-		if got := childProject(id); got != want {
-			t.Errorf("childProject(%q) = %q, want %q", id, got, want)
-		}
 	}
 }
 
@@ -262,7 +246,7 @@ func TestActivityPanelPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := testActivity(now.Add(-2*time.Hour), true)
 			tc.setup(a)
-			vm := a.panel(now, "")
+			vm := a.panel(now)
 			if len(vm.Projects) != 1 || vm.Projects[0].State != tc.want {
 				t.Errorf("panel projects = %+v, want state %q", vm.Projects, tc.want)
 			}
@@ -270,9 +254,10 @@ func TestActivityPanelPrecedence(t *testing.T) {
 	}
 }
 
-// TestActivityPanelScopesToAProject: the project hub embeds the same
-// strip, and a hub showing another project's sweeps would be noise.
-func TestActivityPanelScopesToAProject(t *testing.T) {
+// TestActivityPanelIsBoardWide: /serve is the whole heartbeat's page —
+// every project it has a verdict for, every child it spawned, and a
+// tick's whole verdict set on one line.
+func TestActivityPanelIsBoardWide(t *testing.T) {
 	now := time.Now()
 	a := testActivity(now, true)
 	a.recordTick(now, []HeartbeatDecision{
@@ -282,30 +267,17 @@ func TestActivityPanelScopesToAProject(t *testing.T) {
 	a.recordChildSpawn(heartbeatChildPrefix+"moe", now)
 	a.recordChildSpawn("bureaucracy/other", now)
 
-	vm := a.panel(now, "moe")
-	if len(vm.Projects) != 1 || vm.Projects[0].Project != "moe" {
-		t.Errorf("scoped projects = %+v, want moe alone", vm.Projects)
+	vm := a.panel(now)
+	if len(vm.Projects) != 2 {
+		t.Errorf("panel projects = %+v, want both", vm.Projects)
 	}
-	for _, ev := range vm.Events {
-		if strings.Contains(ev.Text, "bureaucracy") {
-			t.Errorf("scoped event leaked another project: %q", ev.Text)
-		}
+	if len(vm.Events) != 3 {
+		t.Errorf("panel events = %+v, want the tick and both spawns", vm.Events)
 	}
-	// The tick is board-wide but its verdict set is per project, so
-	// scoping narrows the text rather than dropping the event.
-	if !strings.Contains(vm.Events[len(vm.Events)-1].Text, "moe sweeping — the journal moved") {
-		t.Errorf("scoped tick text = %q, want this project's verdict", vm.Events[len(vm.Events)-1].Text)
-	}
-}
-
-// TestActivityPanelDropsATickWithNothingForThisProject: a project the
-// gate never looked at gets no tick lines, not empty ones.
-func TestActivityPanelDropsATickWithNothingForThisProject(t *testing.T) {
-	now := time.Now()
-	a := testActivity(now, true)
-	a.recordTick(now, []HeartbeatDecision{{Project: "moe", Sweep: true, Reason: "the journal moved"}})
-	if vm := a.panel(now, "bureaucracy"); len(vm.Events) != 0 {
-		t.Errorf("events = %+v for a project with no verdict, want none", vm.Events)
+	tick := vm.Events[len(vm.Events)-1].Text
+	if !strings.Contains(tick, "moe sweeping — the journal moved") ||
+		!strings.Contains(tick, "bureaucracy quiet — nothing parked") {
+		t.Errorf("tick text = %q, want the whole verdict set", tick)
 	}
 }
 
@@ -317,7 +289,7 @@ func TestActivityPanelIsNewestFirst(t *testing.T) {
 	a.recordChildSpawn("alpha/first", now)
 	a.recordChildSpawn("alpha/second", now.Add(time.Minute))
 
-	vm := a.panel(now, "")
+	vm := a.panel(now)
 	if len(vm.Events) != 2 || !strings.Contains(vm.Events[0].Text, "second") {
 		t.Errorf("events = %+v, want the newest first", vm.Events)
 	}
@@ -333,7 +305,7 @@ func TestActivityExitCarriesItsTail(t *testing.T) {
 	a.recordChildExit(heartbeatChildPrefix+"moe", now, errors.New("exit status 1"), "credit limit reached")
 	a.recordChildExit("alpha/fine", now, nil, "all good")
 
-	vm := a.panel(now, "")
+	vm := a.panel(now)
 	var failed, clean serveEventVM
 	for _, ev := range vm.Events {
 		if ev.Failed {
@@ -397,5 +369,43 @@ func TestCleanTailKeepsOnlyTheNewestLines(t *testing.T) {
 	got := cleanTail(b.String())
 	if n := len(strings.Split(got, "\n")); n != tailRenderLines {
 		t.Errorf("cleanTail kept %d lines, want %d", n, tailRenderLines)
+	}
+}
+
+// TestActivityPanelClusterMatchesTheCLIBanner is the cross-surface pin.
+// The web header and the CLI banner are contractually the same line —
+// both route through dash.ServeCluster, and this golden plus internal/
+// cli's TestDashBannerCarriesAnArmedServe are what say so. Change one
+// and the other fails.
+func TestActivityPanelClusterMatchesTheCLIBanner(t *testing.T) {
+	now := time.Now()
+	a := testActivity(now.Add(-3*24*time.Hour-2*time.Hour), true)
+	// A tick 8m back puts the next one 12m out on the 20m cadence.
+	a.recordTick(now.Add(-8*time.Minute), nil)
+	if got, want := a.panel(now).Cluster, "serve armed · up 3d 2h · next 12m"; got != want {
+		t.Errorf("panel cluster = %q, want %q", got, want)
+	}
+}
+
+// TestActivityPanelClusterCountsFailingProjects: the earned fourth fact.
+// It is what keeps "a sweep is failing" on a board glance now that the
+// panel itself lives on /serve.
+func TestActivityPanelClusterCountsFailingProjects(t *testing.T) {
+	now := time.Now()
+	a := testActivity(now, true)
+	a.recordTick(now, []HeartbeatDecision{
+		{Project: "alpha", Sweep: true, Reason: "the journal moved"},
+		{Project: "beta", Sweep: true, Reason: "the journal moved"},
+		{Project: "gamma", Reason: "a sweep already surveyed the current tip"},
+	})
+	a.recordSweepEnd("alpha", now, false /*failed*/, 1, 1)
+	a.recordSweepEnd("beta", now, true /*clean*/, 0, 0)
+
+	if got := a.panel(now).Cluster; !strings.HasSuffix(got, " · 1 failing") {
+		t.Errorf("panel cluster = %q, want a failing count of 1", got)
+	}
+	a.recordSweepEnd("alpha", now, true /*clean*/, 0, 0)
+	if got := a.panel(now).Cluster; strings.Contains(got, "failing") {
+		t.Errorf("panel cluster = %q, want nothing spent on failures at zero", got)
 	}
 }

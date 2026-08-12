@@ -100,6 +100,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		"/run/alpha/my-idea/edit",             // edit_idea
 		"/run/alpha/fix-it/transcript/design", // transcript (empty state)
 		"/chore/alpha/readme-refresh",         // chore
+		"/serve",                              // serve
 		"/lore",                               // lore_index
 		"/lore/widget-thing",                  // doc
 		"/projects",                           // projects_index
