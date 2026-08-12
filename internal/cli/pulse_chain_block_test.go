@@ -7,6 +7,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // chainEdge stamps a chain edge the way `chain edit` does: an empty
@@ -59,7 +60,9 @@ func TestChainStateBlockCrossProject(t *testing.T) {
 	chainEdge(t, root, "other/far-head", "other/far-tail")
 
 	got := chainStateBlock(mustPulseScan(t, root), "moe")
-	if !strings.Contains(got, "`mine` (sdlc)") {
+	// Prefix-matched past the workflow: `mine` heads the unit, so it also
+	// carries a held annotation. What this test is about is the label.
+	if !strings.Contains(got, "`mine` (sdlc") {
 		t.Errorf("block missing this project's member bare:\n%s", got)
 	}
 	if !strings.Contains(got, "`other/theirs` (sdlc)") {
@@ -156,5 +159,76 @@ func TestChainStateBlockSettledParentOnlyForeignTail(t *testing.T) {
 
 	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("block rendered a unit with no active member in this project:\n%s", got)
+	}
+}
+
+// TestChainStateBlockNamesAHeldHead is the 2026-08-12 strand as the
+// survey sees it: a seed-only head with ready work queued behind it.
+// The line used to render identically to a runnable thread and the
+// guidance under it said the whole line was somebody else's to kick, so
+// the one agent that could re-place the members read the board as fine.
+//
+// The member is seed-only too, and must render bare: a run held behind
+// a *runnable* head is just the next stage's work, and annotating every
+// unwritten design would bury the one hold that strands anything.
+func TestChainStateBlockNamesAHeldHead(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# A promoted idea\n\nseed\n"})
+	seedRun(t, root, "moe", "readme-update", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Update the README\n\nthe chore's own prompt\n"})
+	chainEdge(t, root, "moe/sketch", "moe/readme-update")
+
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
+	if !strings.Contains(got, "`sketch` (sdlc, held: only a seed)") {
+		t.Errorf("block renders a held head unannotated:\n%s", got)
+	}
+	if !strings.Contains(got, "`readme-update` (sdlc) — Update the README") {
+		t.Errorf("block annotates a member's hold, which strands nothing:\n%s", got)
+	}
+	if !strings.Contains(got, "move them out into") {
+		t.Errorf("block marks a head held but never says whose job the strand is:\n%s", got)
+	}
+}
+
+// TestChainStateBlockNamesAWorkedButUnadvancedHead: the other hold
+// reason. A reopened run whose turn closed without an advance reads
+// differently to the survey than a stage nothing has run at, and both
+// wordings come from the kick's own vocabulary so the two surfaces
+// cannot describe the same disk fact two ways.
+func TestChainStateBlockNamesAWorkedButUnadvancedHead(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "reopened", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Reopened for a re-edit\n\nbody\n"})
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "reopened", "sdlc", "design", now.Add(-time.Hour))
+	seedRun(t, root, "moe", "queued", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "moe/reopened", "moe/queued")
+
+	got := chainStateBlock(mustPulseScan(t, root), "moe")
+	if !strings.Contains(got, "`reopened` (sdlc, held: its turn closed but not advanced)") {
+		t.Errorf("block missing the worked-not-advanced hold reason:\n%s", got)
+	}
+}
+
+// TestChainStateBlockLeavesARunnableHeadAlone is the annotation's cost
+// control. A head the floor admits is exactly the thread the trailing
+// guidance has always described, and marking it would teach the survey
+// to unpick threads that are about to run on their own.
+func TestChainStateBlockLeavesARunnableHeadAlone(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+
+	seedRun(t, root, "moe", "advanced", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# Advanced past design\n\nbody\n"})
+	advanceAt(t, root, "moe", "advanced", "design", now.Add(-2*time.Hour))
+	seedRun(t, root, "moe", "queued", "sdlc", run.StatusInProgress, now, nil)
+	chainEdge(t, root, "moe/advanced", "moe/queued")
+
+	if got := chainStateBlock(mustPulseScan(t, root), "moe"); strings.Contains(got, "`advanced` (sdlc, held") {
+		t.Errorf("block marks a head the floor would start:\n%s", got)
 	}
 }

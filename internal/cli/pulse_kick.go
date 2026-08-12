@@ -152,11 +152,8 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 			continue
 		}
 		if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
-			held := "only a seed"
-			if turnClosed {
-				held = "its turn closed but not advanced"
-			}
-			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with %s — the operator holds the trigger\n", th.Root, held)
+			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with %s — the operator holds the trigger\n",
+				th.Root, designHeldReason(turnClosed))
 			continue
 		}
 		if stage := openSessionStage(root, md); stage != "" {
@@ -238,6 +235,20 @@ func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) (se
 		return false, false
 	}
 	return false, !when.IsZero()
+}
+
+// designHeldReason names why an unsettled root is held, in the one
+// vocabulary every surface that reports the hold uses: the kick's skip
+// line on stderr, and the held-head annotation the survey reads in the
+// chain-state block. Two surfaces describing the same disk fact in two
+// wordings is how an agent learns to read them as two different states.
+// Takes rootDesignSettled's turnClosed bit, and means nothing without
+// it — settled roots are not held at all.
+func designHeldReason(turnClosed bool) string {
+	if turnClosed {
+		return "its turn closed but not advanced"
+	}
+	return "only a seed"
 }
 
 // openSessionStage returns the stage md has a live session branch at,

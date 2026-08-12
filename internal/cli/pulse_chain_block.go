@@ -68,15 +68,15 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 		}
 		var members []string
 		touches := false
-		for _, it := range unit {
+		for i, it := range unit {
 			md := byKey[it.Key]
 			if md == nil {
 				continue
 			}
 			l, mine := label(md)
 			touches = touches || mine
-			members = append(members, fmt.Sprintf("`%s` (%s) — %s",
-				l, md.Workflow, settledRunTitle(root, md)))
+			members = append(members, fmt.Sprintf("`%s` (%s%s) — %s",
+				l, md.Workflow, heldNote(root, md, idx, i == 0 && len(unit) > 1), settledRunTitle(root, md)))
 		}
 		if !touches || len(members) == 0 || (len(members) < 2 && prefix == "") {
 			continue
@@ -97,7 +97,13 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 	sb.WriteString("\nA line that opens with a settled run — `(sdlc, merged) →` — is a thread already " +
 		"executing: that item shipped and the active run after it is what runs next. Read it as " +
 		"ordered and in flight, not as a loose run or a deliberate un-threading.\n")
-	sb.WriteString("\nEach line is a thread the operator (or a confident groom) will kick as-is. " +
+	sb.WriteString("\nA head marked `held:` is one the floor will not start — its design is unwritten, " +
+		"and only the operator opens that door. The hold covers the whole thread, so anything " +
+		"queued behind it waits on the operator too, however ready it is on its own. Decide, per " +
+		"line: do those members continue the held head's work? If they don't, move them out into " +
+		"their own thread — that is the placing this block exists to prompt. If they do, leave " +
+		"them and say so in the report; that is a real answer, not a miss.\n")
+	sb.WriteString("\nA line with no such mark is a thread the operator (or a confident groom) will kick as-is. " +
 		"Check two things against this list before writing. A finding an upcoming chained run " +
 		"will already fix is not a finding — verify against current code first, same posture as " +
 		"the merged-run rule. And a spawn " +
@@ -107,4 +113,34 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 		"This is also your grooming map: a `chain` group's `onto` names any run above, and " +
 		"extending an existing thread beats forking a new one.")
 	return sb.String()
+}
+
+// heldNote renders the `, held: …` annotation naming a head the floor
+// will not start, or "" for anything else. The strand this names —
+// settled runs queued behind a head only the operator can trigger — is
+// invisible otherwise: the line renders identically either way, and the
+// guidance under it used to tell the survey the whole thread was
+// somebody else's to kick.
+//
+// The caller passes annotate for a head with members behind it, and
+// those two conditions are the whole scope. Only the head, because only
+// the head's hold is load-bearing: the floor evaluates a thread at its
+// root, so a held member behind a runnable head is just the next
+// stage's work. And only with members, because a held run alone on its
+// line strands nothing — it is simply waiting for its operator, which
+// is what a seed-only run is supposed to do.
+//
+// A `chain` head is skipped on purpose even though it never clears the
+// admit either. It has no design stage for "held" to be about, and it
+// is the operator's staging fence — the groom this annotation prompts
+// would refuse to move its members anyway (stagingFenced), so naming it
+// would be asking for work that cannot land.
+func heldNote(root string, md *run.Metadata, idx *run.JournalIndex, annotate bool) string {
+	if !annotate || md.Workflow == chainWorkflow {
+		return ""
+	}
+	if settled, turnClosed := rootDesignSettled(root, md, idx); !settled {
+		return ", held: " + designHeldReason(turnClosed)
+	}
+	return ""
 }
