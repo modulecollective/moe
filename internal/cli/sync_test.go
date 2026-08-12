@@ -1007,3 +1007,50 @@ func lastCommitMessage(t *testing.T, root string) string {
 	t.Helper()
 	return gittest.Output(t, root, "log", "-1", "--format=%B")
 }
+
+// TestPushBumpStampsConsentOnlyInsideAWalk is the stamp rule at the one
+// emit site whose commit body is built outside package cli.
+//
+// sync.BumpOne runs from the push merge path, so it lands inside a
+// machine walk whenever a ride ships a run — and its commit is scoped to
+// projects/<id>/src, which is exactly the path filter the heartbeat's
+// sweep-exit walk uses. Unstamped, a sweep whose ride shipped read its
+// own bump as an operator act and froze both cursors. The operator
+// direction matters as much: `moe push` by hand must leave the message
+// byte-identical to what it was before the trailer existed.
+func TestPushBumpStampsConsentOnlyInsideAWalk(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ride bool
+	}{
+		{name: "operator"},
+		{name: "walk", ride: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSyncFixture(t)
+			f.addProjectSubmodule("proj", "main")
+			f.advanceOrigin("proj", "main", "hello\n")
+			if tc.ride {
+				t.Cleanup(withRideMode(rideDynamic))
+			}
+			var stdout bytes.Buffer
+			if err := sync.BumpOne(f.root, "proj", walkConsent(), &stdout); err != nil {
+				t.Fatalf("BumpOne: %v\nstdout=%s", err, stdout.String())
+			}
+			msg := lastCommitMessage(t, f.root)
+			if !strings.Contains(msg, "sync: bump project pointers") {
+				t.Fatalf("wrong commit landed:\n%s", msg)
+			}
+			switch {
+			case tc.ride && !strings.Contains(msg, "MoE-Consent: dynamic"):
+				t.Errorf("a ride's pointer bump is unmarked — the sweep-exit walk reads it as the operator's:\n%s", msg)
+			case !tc.ride && strings.Contains(msg, "MoE-Consent:"):
+				t.Errorf("an operator's own push stamped its bump:\n%s", msg)
+			}
+			// The gate's own predicate, not just the trailer text.
+			if got := machineAuthored(msg); got != tc.ride {
+				t.Errorf("machineAuthored(bump) = %v, want %v:\n%s", got, tc.ride, msg)
+			}
+		})
+	}
+}

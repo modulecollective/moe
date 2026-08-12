@@ -30,6 +30,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // GitmoduleEntry is the parsed shape of one [submodule "..."] stanza
@@ -355,7 +356,7 @@ func BumpProjectPointers(root string, stdout io.Writer) error {
 	// Scope the commit to just the gitlink paths so any unrelated
 	// changes the operator already had staged don't get swept into a
 	// "sync: bump project pointers" commit by accident.
-	commitArgs := append([]string{"commit", "-m", pointerBumpCommitMessage(bumps), "--"}, paths...)
+	commitArgs := append([]string{"commit", "-m", pointerBumpCommitMessage(bumps, "" /*`moe sync` is an operator verb*/), "--"}, paths...)
 	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
 	}
@@ -373,7 +374,14 @@ func BumpProjectPointers(root string, stdout io.Writer) error {
 // with the ff-push that just landed, without sweeping in unrelated
 // submodules whose dirty or diverged state could shadow the bump for
 // the project the operator actually shipped.
-func BumpOne(root, projectID string, stdout io.Writer) error {
+//
+// consent is the caller's MoE-Consent value — walkConsent() at both
+// push call sites, so empty for an operator's own `moe push`. This is
+// the one bump that lands *inside* a machine walk: it is scoped to
+// projects/<id>/src, which puts it in the range the heartbeat's
+// sweep-exit walk reads, and a sweep whose ride ships a run would
+// otherwise leave it there unmarked and freeze both cursors.
+func BumpOne(root, projectID, consent string, stdout io.Writer) error {
 	entries, err := ParseGitmodules(filepath.Join(root, ".gitmodules"))
 	if err != nil {
 		return err
@@ -401,7 +409,7 @@ func BumpOne(root, projectID string, stdout io.Writer) error {
 	if out, err := git.Combined(root, "add", bump.Path); err != nil {
 		return fmt.Errorf("moe sync: git add %s: %w (%s)", bump.Path, err, out)
 	}
-	commitArgs := []string{"commit", "-m", pointerBumpCommitMessage([]Bump{*bump}), "--", bump.Path}
+	commitArgs := []string{"commit", "-m", pointerBumpCommitMessage([]Bump{*bump}, consent), "--", bump.Path}
 	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
 	}
@@ -416,7 +424,15 @@ func BumpOne(root, projectID string, stdout io.Writer) error {
 //
 //	moe: 4562047..d077102
 //	…
-func pointerBumpCommitMessage(bumps []Bump) string {
+//
+//	MoE-Consent: dynamic
+//
+// consent is empty for `moe sync` and for an operator's own push, and
+// the message is then byte-identical to what it was before the trailer
+// existed. It carries no MoE-Document, so the journal index's push-record
+// arm — which needs Document: push as well as the subject — never reads
+// this as a ship.
+func pointerBumpCommitMessage(bumps []Bump, consent string) string {
 	sort.Slice(bumps, func(i, j int) bool { return bumps[i].Path < bumps[j].Path })
 	var sb strings.Builder
 	sb.WriteString("sync: bump project pointers\n\n")
@@ -426,6 +442,9 @@ func pointerBumpCommitMessage(bumps []Bump) string {
 			id = b.Path
 		}
 		fmt.Fprintf(&sb, "%s: %s..%s\n", id, git.ShortSHA(b.FromSHA), git.ShortSHA(b.ToSHA))
+	}
+	if consent != "" {
+		sb.WriteString("\n" + trailers.Block{Consent: consent}.String())
 	}
 	return sb.String()
 }

@@ -812,7 +812,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		// origin's default branch has moved to the merged tip. Soft-warn
 		// on failure: the remote merge already landed, so the operator
 		// can recover with an explicit `moe sync`.
-		if err := sync.BumpOne(root, md.Project, stdout); err != nil {
+		if err := sync.BumpOne(root, md.Project, walkConsent(), stdout); err != nil {
 			moePrintf(stderr, "warning: auto-bump project pointer: %v\n", err)
 		}
 		return nil
@@ -928,7 +928,7 @@ func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecor
 		if err := run.StageAndCommit(root, pending.Msg, pending.Paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 			return err
 		}
-		if err := sync.BumpOne(root, md.Project, stdout); err != nil {
+		if err := sync.BumpOne(root, md.Project, walkConsent(), stdout); err != nil {
 			moePrintf(stderr, "warning: auto-bump project pointer: %v\n", err)
 		}
 		return nil
