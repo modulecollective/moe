@@ -44,10 +44,9 @@ its argv to a file and writes the stage canvas itself. Both backends
 resolve their binary through `exec.LookPath` — the same seam the
 `fakeClaudeOnPath` test helper uses — so real `moe sdlc` / `twin` /
 `pulse` invocations against a scratch bureaucracy run end-to-end with no
-session spent. Two gotchas: stage ladders are ordered (walk from the
-first stage), and the scratch bureaucracy needs `.claude/` and
-`.mcp.json` in `.git/info/exclude`. Full recipe: the project's
-knowledge topic `knowledge/topics/driving-moe-end-to-end.md`.
+session spent. One gotcha: stage ladders are ordered (walk from the
+first stage). Full recipe: the project's knowledge topic
+`knowledge/topics/driving-moe-end-to-end.md`.
 
 In test stage, **don't** spawn `moe serve` to check rendered HTML or
 HTTP status — assert it in-process with `httptest` against
