@@ -52,6 +52,11 @@ var ErrNotCapture = errors.New("runopen: not an in-progress capture (workflow no
 // text names the specific status or destination-state problem.
 var ErrNotReopenableIdea = errors.New("runopen: not a reopenable idea")
 
+// ErrNotTaggableIdea is returned by TagIdea when the slug is not an
+// in-progress idea run. The wrapped error text names which of the two
+// (workflow, status) failed.
+var ErrNotTaggableIdea = errors.New("runopen: not a taggable idea")
+
 // NotClosableError reports a close refused because of the run's current
 // state — a non-idea run that is pushed, already terminal, or of a
 // different workflow — rather than an internal failure (the
@@ -262,6 +267,61 @@ func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
+		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
+// TagIdea stamps workflow onto an in-progress idea's PromoteTo — the
+// license a pulse survey needs before it will propose the idea for a
+// run of its own. An empty workflow clears the tag (`moe idea untag`),
+// which is the per-idea pause: an untagged idea is operator-fenced,
+// always, whoever filed it.
+//
+// The tag is a license, not a schedule: the survey still decides whether
+// and where a tagged idea rides. Nothing here starts anything.
+//
+// The workflow name is deliberately NOT validated here — runopen has no
+// workflow registry. Callers vet it against theirs first (cli's
+// validatePromoteTag, serve's promote-form list). Refuses anything that
+// isn't an in-progress idea with ErrNotTaggableIdea, and returns
+// run.ErrNothingToCommit when the idea already carries this exact tag —
+// callers treat that as success.
+func TagIdea(root, projectID, slug, workflow string, stdout, stderr io.Writer) error {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IdeaWorkflow {
+		return fmt.Errorf("%w: run %s/%s is a %s run, not an idea", ErrNotTaggableIdea, projectID, slug, md.Workflow)
+	}
+	if md.Status != run.StatusInProgress {
+		return fmt.Errorf("%w: idea %s/%s is %s, not in progress", ErrNotTaggableIdea, projectID, slug, md.Status)
+	}
+
+	subject := fmt.Sprintf("Tag idea %s/%s (%s)", projectID, slug, workflow)
+	purpose := "idea-tag"
+	if workflow == "" {
+		subject = fmt.Sprintf("Untag idea %s/%s", projectID, slug)
+		purpose = "idea-untag"
+	}
+	msg := subject + "\n\n" +
+		trailers.Block{
+			Run:      slug,
+			Project:  projectID,
+			Workflow: dash.IdeaWorkflow,
+		}.String()
+	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
+	return sync.WithJournalPush(root, repolock.Options{
+		Purpose: purpose,
+		Run:     projectID + "/" + slug,
+	}, stdout, stderr, func() error {
+		md.PromoteTo = workflow
+		if err := run.Save(root, md); err != nil {
+			return err
+		}
+		// A re-tag to the same workflow leaves run.json byte-identical,
+		// so StageAndCommit reports ErrNothingToCommit rather than
+		// minting an empty journal entry.
 		return run.StageAndCommit(root, msg, runJSONRel)
 	})
 }
