@@ -665,6 +665,96 @@ func TestHeartbeatIgnoresAnOperatorStagedHead(t *testing.T) {
 	}
 }
 
+// strandFixture is the 2026-08-12 seed's exact shape: an
+// operator-promoted sketch sitting at design with nothing but its seed,
+// and a machine-minted run — settled by construction — chained behind
+// it. The floor holds the head correctly; the question this fixture
+// asks is whether anything ever looks at what queued up behind it.
+//
+// Returns the stranded member's run id.
+func strandFixture(t *testing.T, root string) string {
+	t.Helper()
+	// Mint before seeding: seedRun leaves its run.json untracked, and the
+	// minter commits into the same tree.
+	stranded := groomFixture(t, root, "fix-a")["fix-a"]
+	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# A promoted idea\n\nseed\n"})
+	chainEdgeCommit(t, root, "moe/sketch", "moe/"+stranded)
+	return stranded
+}
+
+// TestParkedLegLooksPastAHeldHead is the bug. Both runs behind the seed
+// on 2026-08-12 cleared the floor on their own, and the parked leg —
+// asking the kick's root-only question — read the board as empty, so no
+// tick ever fired and the documented "parks for the next pulse to
+// place" recovery never got a pulse to run in.
+func TestParkedLegLooksPastAHeldHead(t *testing.T) {
+	root := quietFixture(t)
+	want := "moe/" + strandFixture(t, root)
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+		t.Errorf("parkedKickableThread = %q, want %q — settled work queued behind a held head is not an empty board", got, want)
+	}
+}
+
+// TestParkedLegHoldsAnOperatorStagedBatch is the fence the member walk
+// is most at risk of breaking. A hand-minted `chain` head is the
+// operator composing a batch, and the runs under it are machine-minted
+// and therefore settled — the exact shape that would otherwise summon a
+// sweep onto work somebody is still arranging.
+func TestParkedLegHoldsAnOperatorStagedBatch(t *testing.T) {
+	root := quietFixture(t)
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chainEdgeCommit(t, root, "moe/"+head.ID, "moe/"+groomFixture(t, root, "fix-a")["fix-a"])
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+		t.Errorf("parkedKickableThread = %q, want \"\" — the head is the operator's staging fence", got)
+	}
+}
+
+// TestParkedLegSkipsAnOccupiedStrandedMember: the member walk owes the
+// floor's whole question, not just the design half. Somebody sitting in
+// the stranded run is the same occupancy that holds a root.
+func TestParkedLegSkipsAnOccupiedStrandedMember(t *testing.T) {
+	root := quietFixture(t)
+	stranded := strandFixture(t, root)
+	if _, err := session.Open(root, "moe", stranded, "design"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+		t.Errorf("parkedKickableThread = %q, want \"\" — somebody is inside the stranded run", got)
+	}
+}
+
+// TestParkedLegStillReturnsAnAdmittingRoot pins the path that did not
+// change: a root that clears the floor itself is still what the leg
+// names, and the walk below it never runs.
+func TestParkedLegStillReturnsAnAdmittingRoot(t *testing.T) {
+	root := quietFixture(t)
+	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+		t.Errorf("parkedKickableThread = %q, want %q", got, want)
+	}
+}
+
+// TestParkedLegHoldsALoneHeldRun: a seed-only run with nothing behind
+// it strands nobody. Offering it would spend an agent turn on a board
+// whose only content is a door the operator has not opened.
+func TestParkedLegHoldsALoneHeldRun(t *testing.T) {
+	root := quietFixture(t)
+	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# A promoted idea\n\nseed\n"})
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+		t.Errorf("parkedKickableThread = %q, want \"\" — a lone seed-only run is the operator's", got)
+	}
+}
+
 // TestHeartbeatReapsADeadMachineSession is the recovery half: `moe`
 // died mid-turn, the session branch it left behind holds the run under
 // the occupancy guard, and nothing else ever clears it. A robot half

@@ -489,15 +489,46 @@ func machineAuthored(body string) bool {
 	return strings.Contains(body, "\nMoE-Consent:") || strings.Contains(body, "\nMoE-Spawned-By:")
 }
 
-// parkedKickableThread returns a thread root the heartbeat could start,
-// or "" when the project has none. This is the same admit pulseSelfKick
-// applies — a live thread whose root has a settled design and nobody
-// inside — asked ahead of time so a project with genuinely nothing to do
-// never spends an agent turn finding that out.
+// parkedKickableThread returns a run the heartbeat's sweep could cause
+// motion on, or "" when the project has none — asked ahead of time so a
+// project with genuinely nothing to do never spends an agent turn
+// finding that out.
 //
 // It is deliberately the *predicate*, not a decision: what actually gets
 // started is the survey's call, made with the park reasons and the
 // ordering bar in hand. This only says the board is not empty.
+//
+// "Not empty" is deliberately a wider question than pulseSelfKick's
+// admit, and this is the one place the two are meant to differ. The
+// kick evaluates a thread at its root; this leg is a pre-ask for the
+// whole *sweep*, and a sweep grooms before it kicks. So the honest
+// question is "could a sweep cause motion here", which includes settled
+// work queued behind a root the floor holds: the groom can re-place it
+// and the kick then starts it. Mirroring the root-only admit is what
+// let one seed-only head strand two settled runs behind it on
+// 2026-08-12 with no tick ever firing — the floor held the thread
+// correctly, and the recovery pulse.md promises never got its turn.
+//
+// Three shapes, one per thread:
+//
+//   - An operator-minted `chain` head holds its whole thread, members
+//     and all. That head is the operator's staging fence — the same one
+//     stagingFenced enforces against the groom's move authority — and
+//     this is the one leg that would otherwise reach past it into a
+//     batch someone is composing by hand. It used to fall out
+//     implicitly (a stageless head never clears the design admit);
+//     the member walk below makes it worth saying out loud.
+//   - A root that clears the floor itself: returned, as it always was.
+//   - A root held for an unsettled design: the first member behind it
+//     that clears the floor on its own. Whether those members actually
+//     belong behind that head is the survey's question to answer, not
+//     this predicate's — see the held-head annotation in
+//     chainStateBlock, which is what gets asked.
+//
+// A root held for *occupancy* rather than design is not looked past.
+// The corpse-branch shape has its own deliberate recovery (the skip
+// line is the signpost, see openSessionStage) and nothing here changes
+// it.
 func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 	seen := map[string]bool{}
 	for _, md := range sc.mds {
@@ -513,7 +544,26 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 		if rootMd == nil || !run.ChainChildLive(rootKey, sc.byKey) {
 			continue
 		}
+		if rootMd.Workflow == chainWorkflow && rootMd.SpawnedBy == "" {
+			continue
+		}
 		if settled, _ := rootDesignSettled(root, rootMd, sc.idx); !settled {
+			// Chain edges only ever point at live runs (NewChainGraph drops
+			// terminal children), so in-progress is the only liveness the
+			// walk owes on top of the floor's own two questions.
+			for _, key := range sc.graph.Thread(rootKey)[1:] {
+				memberMd := sc.byKey[key]
+				if memberMd == nil || memberMd.Status != run.StatusInProgress {
+					continue
+				}
+				if settled, _ := rootDesignSettled(root, memberMd, sc.idx); !settled {
+					continue
+				}
+				if openSessionStage(root, memberMd) != "" {
+					continue
+				}
+				return key
+			}
 			continue
 		}
 		if openSessionStage(root, rootMd) != "" {
