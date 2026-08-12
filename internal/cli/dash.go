@@ -105,7 +105,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		renderDashFrame(stdout, now, snap, *all)
+		renderDashFrame(stdout, now, root, snap, *all)
 		return 0
 	}
 
@@ -159,7 +159,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			// replaces, so no special case is needed.
 			moePrintf(&frame, "%v\n", err)
 		} else if sizeErr == nil {
-			renderDashFrame(&frame, now, snap, *all)
+			renderDashFrame(&frame, now, root, snap, *all)
 		}
 		_ = writeWatchViewport(stdout, frame.Bytes(), rows, columns)
 		_, _ = io.WriteString(stdout, dashFramePost)
@@ -353,10 +353,12 @@ func isWideTerminalRune(r rune) bool {
 	return false
 }
 
-// renderDashFrame writes one full dashboard frame — banner, factory
-// art, sections — to its destination. Watch mode uses ttyFrameBuffer so
-// cliout's colour gates still reach the real terminal through Unwrap.
-func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool) {
+// renderDashFrame writes one full dashboard frame — banner, serve lines,
+// factory art, sections — to its destination. Watch mode uses
+// ttyFrameBuffer so cliout's colour gates still reach the real terminal
+// through Unwrap, and re-reads serve's state file per frame, which is one
+// small os.ReadFile.
+func renderDashFrame(stdout io.Writer, now time.Time, root string, snap DashSnapshot, all bool) {
 	state := dash.FactoryStateFromRows(snap.Rows)
 	// Fresh rand per frame, so the factory's smoke re-rolls each tick
 	// and a watched dash reads as alive.
@@ -367,6 +369,9 @@ func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all boo
 	// are frequent, so we keep it to one line instead of a multi-line
 	// block.
 	banner.Dash(stdout, now)
+	// Directly under the header, above the art: an armed serve is context
+	// for everything below it, and a dead one is the first thing to know.
+	renderServeLines(stdout, now, root)
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
 	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all, state, r)
 }
