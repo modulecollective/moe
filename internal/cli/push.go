@@ -609,8 +609,11 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 
 // prRecordPendingName is the untracked marker openPRPath leaves when
 // GitHub has the PR and run.json says pushed, but the journal commit did
-// not land. Deliberately not gitignored: it keeps the owed work visible
-// and trips the existing dirty-tree gates until a retry finishes it.
+// not land. Deliberately not gitignored: it shows up in `git status` as
+// the honest marker of owed work. The marker alone doesn't wedge the
+// dirty-tree gates — untracked files stopped counting as dirty — but on a
+// first push the run.json already flipped to pushed sits beside it
+// uncommitted, and that wedges them until a retry finishes the record.
 const prRecordPendingName = "pr-record.pending"
 
 // pendingPRRecord preserves the inputs a later invocation cannot infer
