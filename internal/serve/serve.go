@@ -332,12 +332,14 @@ func New(opts Options) (*Server, error) {
 	s.children.onExit = func(id string, at time.Time, exitErr error, tail string) {
 		// A heartbeat sweep names the run it minted in its emit file. This
 		// is where both are known at once, so it is where the exit event and
-		// the project row learn it — and where the file goes.
+		// the project row learn it — and where the file goes. Recorded even
+		// when empty: panel() may have lazily cached the slug mid-sweep
+		// without checking the run survived, and this read is the check — a
+		// sweep whose run was disposed takes its link back off the row here.
 		runID := ""
 		if project := heartbeatProject(id); project != "" {
-			if runID = takeSweepRun(s.opts.Root, project); runID != "" {
-				s.activity.recordSweepRun(project, runID)
-			}
+			runID = takeSweepRun(s.opts.Root, project)
+			s.activity.recordSweepRun(project, runID)
 		}
 		s.activity.recordChildExit(id, at, exitErr, cleanTail(tail), runID)
 		s.saveActivity()

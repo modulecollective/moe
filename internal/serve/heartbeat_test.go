@@ -692,3 +692,35 @@ func TestSweepRunFileTakesOnlyASlug(t *testing.T) {
 		}
 	}
 }
+
+// TestDisposedRunDropsTheLazyCachedLink: panel() caches a live sweep's
+// slug without checking the run exists — tolerable mid-flight only
+// because the exit read is authoritative. A sweep interrupted after
+// minting disposes its run; the row must not keep wearing the cached
+// link once the exit read finds nothing behind it.
+func TestDisposedRunDropsTheLazyCachedLink(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	now := time.Now()
+
+	s.activity.recordSweepStart("alpha", now.Add(-3*time.Minute))
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The emit file names a run that is not on disk — the shape a
+	// mid-sweep dispose leaves behind.
+	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.activity.panel(now).Projects[0].Run; got != "pulse-2026-04-01" {
+		t.Fatalf("live row Run=%q, want the lazily cached slug", got)
+	}
+
+	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 130"), "")
+	s.activity.recordSweepEnd("alpha", now, false, 1, 0)
+
+	if got := s.activity.panel(now).Projects[0].Run; got != "" {
+		t.Errorf("row Run=%q after the exit read found no run, want the cached link dropped", got)
+	}
+}
