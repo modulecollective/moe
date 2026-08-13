@@ -208,9 +208,18 @@ func (s *Server) heartbeatTick() {
 				continue
 			}
 		}
+		// The emit file and the row's run id both still name the last
+		// sweep's run, and neither is this one's. Both clears belong here,
+		// before the spawn: a child can write its emit file, exit, and have
+		// its reader goroutine land recordSweepRun before this goroutine
+		// reaches the next statement. takeSweepRun consumed the file on the
+		// way through, so a clear after the spawn erases the new sweep's
+		// link with nothing left to read it back — the row stays Failed
+		// with no run for good.
 		if err := clearSweepRun(s.opts.Root, projectID); err != nil {
 			s.logf("heartbeat: clear sweep run file for %s: %v", projectID, err)
 		}
+		s.activity.recordSweepRun(projectID, "")
 		child, err := s.children.spawn(id, s.opts.MoeBin,
 			[]string{"pulse", "new", "--dynamic",
 				"--emit-run", sweepRunPath(s.opts.Root, projectID), projectID},

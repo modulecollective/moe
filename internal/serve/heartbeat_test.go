@@ -666,6 +666,39 @@ func TestStaleEmitFileIsClearedBeforeTheSpawn(t *testing.T) {
 	}
 }
 
+// TestNewSweepDropsTheLastSweepsRunFromTheRow is the emit file's clear
+// applied to the row that renders it: a project the ticker sweeps again
+// must stop naming the previous sweep's run, and it has to stop before
+// the spawn, because the new child can name its own run the moment it
+// starts. The child here never exits, so nothing but the pre-spawn clear
+// can take the old run off the row.
+func TestNewSweepDropsTheLastSweepsRunFromTheRow(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	bin := filepath.Join(t.TempDir(), "slow-moe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate, MoeBin: bin,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s.children.shutdown(ctx, io.Discard)
+	})
+	s.activity.recordSweepRun("alpha", "pulse-2026-04-01") // an earlier sweep's
+
+	s.heartbeatTick()
+
+	for _, p := range s.activity.panel(time.Now()).Projects {
+		if p.Project == "alpha" && p.Run != "" {
+			t.Errorf("sweeping row Run=%q, want none — that run belonged to the last sweep", p.Run)
+		}
+	}
+}
+
 // TestLiveSweepRowLinksMidFlight: the slug is on disk seconds after the
 // spawn, but serve only hears about it at exit — and a sweep that kicked
 // a ride can be "sweeping" for hours. Those are the ones worth peeking

@@ -173,15 +173,15 @@ func (a *activity) recordSkip(projectID, reason string, fails, coolTicks int) {
 	p.fails, p.coolTicks = fails, coolTicks
 }
 
+// recordSweepStart stamps a live sweep's start on the row. It leaves
+// runID alone on purpose: the caller runs this after the spawn, and a
+// fast child can already have named its run through recordSweepRun by
+// then. Dropping the last sweep's run is the caller's job, alongside its
+// emit file, before the spawn — see heartbeatTick.
 func (a *activity) recordSweepStart(projectID string, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p := a.project(projectID)
-	p.started = at
-	// The last sweep's run is not this one's, and the new one hasn't
-	// minted its own yet — the row goes back to naming no run until the
-	// emit file says otherwise.
-	p.runID = ""
+	a.project(projectID).started = at
 }
 
 // recordSweepRun folds in the run a sweep minted, once serve has read it

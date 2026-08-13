@@ -317,6 +317,23 @@ func TestActivityPanelIsBoardWide(t *testing.T) {
 	}
 }
 
+// TestSweepStartKeepsTheRunItsChildAlreadyNamed: recordSweepStart runs
+// after the spawn, so a child that writes its emit file and exits in
+// microseconds can land recordSweepRun first. Clearing the row's run
+// here would erase that link permanently — takeSweepRun consumed the
+// emit file, so the panel's mid-flight read finds nothing and the row
+// stays Failed with no run. The clear lives before the spawn instead.
+func TestSweepStartKeepsTheRunItsChildAlreadyNamed(t *testing.T) {
+	now := time.Now()
+	a := testActivity(t, now, true)
+	a.recordSweepRun("moe", "pulse-2026-04-01")
+	a.recordSweepStart("moe", now)
+
+	if got := a.panel(now).Projects[0].Run; got != "pulse-2026-04-01" {
+		t.Errorf("row Run=%q, want the run its own child already named", got)
+	}
+}
+
 // TestActivityPanelCollapsesTheQuiet is the wall this page exists to
 // stop: fourteen projects with nothing to do produced fourteen rows all
 // restating "nothing to do", and a tick paragraph joining all fourteen
