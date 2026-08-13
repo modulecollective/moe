@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -280,6 +281,12 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	if moved {
 		return true, false, "the journal moved"
 	}
+	if md := sc.byKey[parked]; md != nil && md.Workflow == dash.IdeaWorkflow {
+		// Display only, like every reason here — but this is the operator's
+		// whole trace of why a tick moved, and a tagged idea is not settled
+		// work. It is a licence nobody has spent yet.
+		return true, false, "a tagged idea is parked at " + parked
+	}
 	return true, false, "settled work is parked at " + parked
 }
 
@@ -509,7 +516,8 @@ func machineAuthored(body string) bool {
 // 2026-08-12 with no tick ever firing — the floor held the thread
 // correctly, and the recovery pulse.md promises never got its turn.
 //
-// Three shapes, one per thread:
+// Three shapes, one per thread — plus a fourth that is no thread at
+// all, the tagged-idea leg at the bottom of the walk:
 //
 //   - An operator-minted `chain` head holds its whole thread, members
 //     and all. That head is the operator's staging fence — the same one
@@ -570,6 +578,28 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 			continue
 		}
 		return rootKey
+	}
+	// The fourth shape, walked after the threads so a parked run keeps
+	// today's claim on the returned key: a live idea carrying a workflow
+	// tag. The tag is the whole predicate — it is the licence to start
+	// (untagged means human), an idea has no thread and no design floor
+	// to clear, and validatePromoteTag already guaranteed at write time
+	// that the tag names a usable workflow. A `(twin)` tag counts: the
+	// sweep resolves it through the reflect nomination, which is motion.
+	//
+	// Without this leg a tag stamped while serve was down is swallowed
+	// for good — the cursors seed lazily and read as "not moved", and the
+	// recovery that is supposed to cover exactly that (an armed serve
+	// picking existing work up through this leg) couldn't see ideas at
+	// all. That is how two ideas tagged 2026-08-12 sat parked until a
+	// human intervened.
+	for _, md := range sc.mds {
+		if md.Project != projectID || md.Status != run.StatusInProgress {
+			continue
+		}
+		if md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
+			return md.Project + "/" + md.ID
+		}
 	}
 	return ""
 }

@@ -755,6 +755,132 @@ func TestParkedLegHoldsALoneHeldRun(t *testing.T) {
 	}
 }
 
+// parkTaggedIdea stamps a tagged idea and pushes the tag commit back out
+// of the quiet window — the operator tagged it, a tick has passed, and
+// the machine's turn to look has come.
+func parkTaggedIdea(t *testing.T, root, slug, promoteTo string) string {
+	t.Helper()
+	md, err := run.New(root, "moe", run.Options{
+		ID: slug, Workflow: "idea", PromoteTo: promoteTo,
+		SeedDocs: map[string]string{"idea": "# " + slug + "\n\nWorth doing.\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateHead(t, root, time.Hour)
+	return "moe/" + md.ID
+}
+
+// TestParkedLegSeesATaggedIdea is the other half of the bug. A tag is
+// the licence to start, and it was invisible to the one leg that makes a
+// quiet board warrant a sweep — so a tag stamped while serve was down
+// bought nothing, and a tag stamped while it was up bought exactly one
+// sweep it could not afford to lose.
+func TestParkedLegSeesATaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	want := parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+		t.Errorf("parkedKickableThread = %q, want %q — a tagged idea is licensed work, not an empty board", got, want)
+	}
+}
+
+// TestParkedLegSeesATwinTaggedIdea: a `(twin)` tag resolves through the
+// reflect nomination rather than a promotion, and that is still motion.
+func TestParkedLegSeesATwinTaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	want := parkTaggedIdea(t, root, "boundary-moved", "twin")
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+		t.Errorf("parkedKickableThread = %q, want %q", got, want)
+	}
+}
+
+// TestParkedLegHoldsAnUntaggedIdea is the fence the new leg is most at
+// risk of breaking. Untagged means human: an idea nobody has licensed is
+// the operator's inbox, and summoning a sweep onto it is the whole thing
+// the tag exists to gate.
+func TestParkedLegHoldsAnUntaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	parkTaggedIdea(t, root, "needs-triage", "" /*untagged*/)
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+		t.Errorf("parkedKickableThread = %q, want \"\" — untagged means human", got)
+	}
+}
+
+// TestParkedLegHoldsAPromotedIdea: promotion is terminal for the idea,
+// and the run it promoted into answers for the work from then on.
+func TestParkedLegHoldsAPromotedIdea(t *testing.T) {
+	root := quietFixture(t)
+	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+	md, err := run.Load(root, "moe", "cleanup-foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusPromoted
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+		t.Errorf("parkedKickableThread = %q, want \"\" — a promoted idea is done being an idea", got)
+	}
+}
+
+// TestParkedLegPrefersAParkedRunToATaggedIdea pins the walk order. The
+// returned key only proves the board is not empty and feeds a display
+// string — every real ordering call is the survey's — but runs kept
+// today's claim on it deliberately, so the reason strings a settled
+// board produces are unchanged by this leg existing.
+func TestParkedLegPrefersAParkedRunToATaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
+	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+		t.Errorf("parkedKickableThread = %q, want the parked run %q", got, want)
+	}
+}
+
+// TestHeartbeatSweepsForATaggedIdea is the operator's story end to end:
+// a board with nothing on it but a tag, no journal delta to ride on, and
+// a serve that was armed the whole time or has just restarted — either
+// way the tick fires and says why in the operator's own terms.
+func TestHeartbeatSweepsForATaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	idea := parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+	g := newHeartbeatGate(root)
+
+	decisions := dueDecisions(t, g, testTick)
+	if got := sweepIDs(decisions); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] — a tagged idea is parked", got)
+	}
+	if got, want := reasonFor(decisions, "moe"), "a tagged idea is parked at "+idea; got != want {
+		t.Errorf("reason = %q, want %q — a tag is a licence nobody has spent, not settled work", got, want)
+	}
+}
+
+// TestHeartbeatStopsOfferingATaggedIdeaASweepDeclined: the new leg owes
+// the same contract every other parked shape has. A clean sweep that saw
+// the idea and left it parked answered the question, and re-asking it
+// every tick costs an agent turn forever.
+func TestHeartbeatStopsOfferingATaggedIdeaASweepDeclined(t *testing.T) {
+	root := quietFixture(t)
+	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+	g := newHeartbeatGate(root)
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v on the first look, want [moe]", got)
+	}
+	g.Swept("moe", true /*clean*/)
+
+	for tick := range 3 {
+		if got := dueProjects(t, g); len(got) != 0 {
+			t.Fatalf("due = %v on tick %d after a clean sweep declined this idea, want none", got, tick+1)
+		}
+	}
+}
+
 // TestHeartbeatReapsADeadMachineSession is the recovery half: `moe`
 // died mid-turn, the session branch it left behind holds the run under
 // the occupancy guard, and nothing else ever clears it. A robot half
