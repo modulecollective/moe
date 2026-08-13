@@ -777,3 +777,83 @@ func TestMissingRunDropsTheLazyCachedLink(t *testing.T) {
 		t.Errorf("row Run=%q after the exit read found no run, want the cached link dropped", got)
 	}
 }
+
+// TestSnoozedTickSpawnsNothing is the whole point of the feature: a
+// board the gate wants swept, held because the operator said hold. The
+// gate still runs — its reap and its verdicts are cheap and useful — but
+// no child is spawned, so no agent turn is spent.
+func TestSnoozedTickSpawnsNothing(t *testing.T) {
+	root := t.TempDir()
+	bin, argv := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	var log syncBuf
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: bin, Heartbeat: gate, Logger: &log,
+	})
+	if err := WriteSnooze(root, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	s.heartbeatTick()
+
+	if got := gate.passCount(); got != 1 {
+		t.Errorf("gate consulted %d times, want the snoozed tick to still look", got)
+	}
+	if got := argv(); got != "" {
+		t.Errorf("child argv = %q, want no child at all under a snooze", got)
+	}
+	if len(gate.sweptList()) != 0 {
+		t.Errorf("swept %v, want nothing swept under a snooze", gate.sweptList())
+	}
+	// The row says why, in the ticker's own words — a project the gate
+	// wanted swept would otherwise render as sweeping.
+	row := s.activity.panel(time.Now()).Projects
+	if len(row) != 1 || !strings.HasPrefix(row[0].Reason, "snoozed until ") {
+		t.Errorf("panel rows = %+v, want one row naming the snooze", row)
+	}
+}
+
+// TestExpiredSnoozeResumesSweeping: the snooze's fail-safe direction.
+// Nothing sweeps the file up, so an elapsed instant has to let the very
+// next tick through on its own.
+func TestExpiredSnoozeResumesSweeping(t *testing.T) {
+	root := t.TempDir()
+	bin, _ := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: bin, Heartbeat: gate,
+	})
+	if err := WriteSnooze(root, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+}
+
+// TestSnoozeLeavesTheBackoffLedgerAlone: snooze and the failure cool-off
+// are orthogonal pacing, and a snooze that spent every project's
+// cool-off while holding them all anyway would be paying down someone
+// else's debt. The cool-off must still be there when the snooze lifts.
+func TestSnoozeLeavesTheBackoffLedgerAlone(t *testing.T) {
+	root := t.TempDir()
+	bin, _ := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: bin, Heartbeat: gate,
+	})
+	// One failure earns one skipped tick.
+	s.heartbeat.record("alpha", true)
+	if err := WriteSnooze(root, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Any number of snoozed ticks must not eat it.
+	s.heartbeatTick()
+	s.heartbeatTick()
+	s.heartbeatTick()
+
+	if cooling, _, _ := s.heartbeat.cooling("alpha"); !cooling {
+		t.Error("the cool-off should have survived the snooze intact")
+	}
+}

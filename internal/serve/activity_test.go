@@ -46,7 +46,7 @@ func TestActivityCoolOffOverridesTheGatesReason(t *testing.T) {
 	now := time.Now()
 	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{{Project: "moe", Sweep: true, Reason: "the journal moved"}})
-	a.recordSkip("moe", "cooling off after 2 failure(s)", 2, 1)
+	a.recordSkip("moe", "cooling off after 2 failure(s)", false, 2, 1)
 
 	p := a.snapshot(now).Projects[0]
 	if p.Sweep {
