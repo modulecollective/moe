@@ -49,7 +49,12 @@ Start from the delta, not the whole project:
   order lives in journal trailers, so neither the journal slice nor the
   disk scan shows it — the scan tells you a run is in progress, never
   that it is third in a batch about to be kicked. Work already queued
-  is work you do not file, rank, or spawn again.
+  is work you do not file, rank, or spawn again. Under a dynamic ride
+  it is also work that *starts* when this sweep finishes — the harness
+  kicks every parked thread that clears its floor, whether or not you
+  groomed it. So your job on queued work is not to re-place work that
+  is already in order; it is to decide whether any of it needs a
+  `park` sentence. See "Parking a thread".
 - **What is advanced and waiting** — your kickoff may carry an
   advanced-runs block: runs that reached a chain prompt where the
   operator chose "advance, don't run now". They are stalled
@@ -154,8 +159,11 @@ harness parses once your turn exits. It carries three signals:
   the dash for a human to look at. There's no ready/blocked vocabulary
   — a pulse only ever closes or lingers.
 - **`loose`** — an optional list of runs to open with no ordering
-  opinion. They park standalone. Omit it entirely when nothing clears
-  the bar, which is the common case. See below.
+  opinion. They park standalone and unchained — which is not the same
+  as being held back: a run with nothing ahead of it is a thread of
+  one, and under a dynamic ride it starts with the rest. Holding work
+  back takes a `park` line; see "Parking a thread". Omit the list
+  entirely when nothing clears the bar, which is the common case.
 - **`threads`** — an optional list of runs in execution order. Omit it
   when you have no ordering conviction, which is often. See "Grooming
   lanes" below.
@@ -227,8 +235,10 @@ equal it goes *last*: when this gate builds a thread, write the twin
 spec as the final entry of the thread carrying the cycle's work.
 Leaving a pending reflect in `loose` while you order other work is the
 choice that needs justifying, not placing it. A reflect written in
-`loose` parks standalone and unchained, same as any other spec —
-nothing rides it until someone kicks it.
+`loose` parks standalone and unchained, same as any other spec — and
+under a dynamic ride it starts on its own, in no particular relation to
+the work it was meant to sweep. That is one more reason the tail is the
+default.
 
 Two cases carry that justification. If the thread's membership or
 order is a guess — it fails the lane bar — don't append the reflect to
@@ -367,8 +377,9 @@ not ordering it, because a chain is what gets executed as-is.
 conviction the bar asks for is conviction about *sequence*, and a
 single-run thread makes no sequence claim — so it is held to the spawn
 bar and nothing more. Don't read the lane bar as a reason to send a
-lone run to `loose`: `loose` is for work you can't order *or wouldn't
-start yet*, not for work you simply had nothing to order it against.
+lone run to `loose`: `loose` is for work you can't order, not for work
+you simply had nothing to order it against — and not for work you'd
+rather not start yet, which is what a `park` line is for.
 
 Placement is judgment, not a rule. Work that continues a thread goes
 `onto` that thread — even an operator-minted one. A big standalone fix
@@ -402,8 +413,9 @@ Inside one, placement *is* execution — see below.
 
 ### Parking a thread
 
-Under a dynamic ride, **every thread you groom starts when this sweep
-finishes.** You are not asking for that; it is what the ride is. Your
+Under a dynamic ride, **every kickable parked thread starts when this
+sweep finishes** — the ones you groomed and the ones that were already
+in order. You are not asking for that; it is what the ride is. Your
 judgment goes into the exception.
 
 The floor is the harness's and you do not re-derive it: it starts
@@ -437,11 +449,19 @@ put in on a hunch, work touching an irreversible or outward-facing
 surface. If you cannot write the sentence, there is no park — let it
 run.
 
+A thread you are not otherwise grooming is parked the same way: state
+it as a group — its runs in the order they already sit, with the same
+`onto` if it hangs off something — and add the `park` line. Restating
+an order that is already correct changes no edges, so the park is all
+the group does.
+
 The asymmetry is measured, not assumed. A wrong park strands a whole
-generation until a human notices — three of those have happened, one
-of them the sweep that prompted this rewrite. A wrong kick spends a
-run that still has to clear its own review and test gates before it
-ships, and the operator can Ctrl-C the ride. Bias toward motion.
+generation until a human notices — four of those have happened, one of
+them the sweep that prompted this rewrite and one a pair of sweeps that
+read a stalled thread, agreed it should run, and left it. A wrong kick
+spends a run that still has to clear its own review and test gates
+before it ships, and the operator can Ctrl-C the ride. Bias toward
+motion.
 
 There is no cap on how many generations this can run for: a kicked
 thread's own tail fires its own sweep, which may kick again. What ends
@@ -449,14 +469,13 @@ it is you having nothing left worth chaining — so a thin generation is
 a real answer, and manufacturing one to keep the machine busy is the
 failure mode to avoid.
 
-**Inside a dynamic ride, the thread is where next work goes.** That is
-the whole idiom, and it is easy to miss when the cycle's work has all
-merged and there is no order left to claim: a lone fix run written to
-`loose` parks and waits for a human, which under a dynamic ride means
-the generation you just surveyed ends with nobody picking up what you
-found. If there is work you'd have the machine do next, write it in a
-thread — one run is a thread. The spawn bar doesn't move, and work that
-fails it belongs in `loose` or in a followup.
+**Inside a dynamic ride, everything that clears the floor starts** —
+the threads you groomed, the threads that were already in order, and a
+lone run you wrote to `loose`, which is a thread of one with nothing
+ahead of it. So the thread is where work with a *sequence* claim goes,
+and `loose` is not a way to open work without starting it; a `park`
+line is. The spawn bar doesn't move, and work that fails it belongs in
+a followup.
 
 When this pulse is firing inside a ride, your context carries a block
 saying so and naming which kind. Inside a **static** ride the machine

@@ -86,12 +86,11 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
 	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
 	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
-	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic ride every thread you groom starts when the " +
-	"sweep finishes — that is what the ride is for — so the field you write is `\"park\"`: one line naming why the operator " +
-	"should look at this thread first (an ordering you wouldn't defend, a speculative member, an irreversible or " +
-	"outward-facing surface). No park means it runs. Inside a dynamic ride the thread is therefore where next work goes: a " +
-	"single-run thread makes no ordering claim, so work you'd have the machine start goes there rather than in `loose`, " +
-	"which parks until a human picks it up.\n\n" +
+	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic ride every kickable parked thread starts " +
+	"when the sweep finishes — the ones you groom and the ones already in order — so the field you write is `\"park\"`: one " +
+	"line naming why the operator should look at this thread first (an ordering you wouldn't defend, a speculative member, " +
+	"an irreversible or outward-facing surface). No park means it runs, and that includes a run you wrote to `loose`, which " +
+	"is a thread of one. `loose` says you have no ordering opinion; it does not say the work waits.\n\n" +
 	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
 	"See the stage guidance."
 
