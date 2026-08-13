@@ -173,25 +173,34 @@ func TestSelfKickSkipsAtAChainedSpawner(t *testing.T) {
 	}
 }
 
+// handMintedHeadFixture stands up the operator's staging fence: a chain
+// head minted by hand (no SpawnedBy) with a settled fix chained behind
+// it. The edge is stamped the way `moe chain edit` stamps one, because
+// the groom's own fence would redirect a group aimed at that head and
+// the fixture wants the batch actually assembled.
+func handMintedHeadFixture(t *testing.T) (root, headKey string, groomed groomResult, stages *[]openSdlcStageInvocation) {
+	t.Helper()
+	root, stages, _ = kickFixture(t)
+	minted := groomFixture(t, root, "fix-a")
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headKey = "moe/" + head.ID
+	chainEdgeCommit(t, root, headKey, "moe/"+minted["fix-a"])
+	return root, headKey, groomChains(root, "moe", "pulse-groom",
+		nil /*no groups*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr), stages
+}
+
 // TestSelfKickSkipsAHandMintedChainHead: the operator composes a chain
 // head over an afternoon and hangs work off it. The `chain` workflow's
 // ladder is empty by design, so a hand-minted head is never past its
 // first stage and carries no machine or chore seed — it stays with the
 // operator.
 func TestSelfKickSkipsAHandMintedChainHead(t *testing.T) {
-	root, stages, _ := kickFixture(t)
-	groomFixture(t, root, "fix-a")
-
-	// An operator-minted head (no SpawnedBy) with the fix behind it.
-	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	headKey := "moe/" + head.ID
-	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: head.ID, Runs: runsFrom("fix-a")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
-
 	defer withRideMode(rideDynamic)()
+	root, headKey, groomed, stages := handMintedHeadFixture(t)
+
 	var errb bytes.Buffer
 	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: headKey}), "", io.Discard, &errb)
 
@@ -200,6 +209,31 @@ func TestSelfKickSkipsAHandMintedChainHead(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "waiting at its first stage with only a seed") {
 		t.Errorf("stderr = %q, want the settled-design guard named", errb.String())
+	}
+}
+
+// TestSelfKickDoesNotEnumerateAStagedBatch is the same fence seen from
+// the board rather than the gate. Enumeration walks every parked run,
+// and the fix behind the operator's head is settled and would otherwise
+// clear the floor on its own — the head is what holds it, and it holds
+// it *silently*: staging is a normal state, not a hold worth a line per
+// sweep. The heartbeat's parked leg skips it the same way, which is why
+// both sides read the same predicate.
+func TestSelfKickDoesNotEnumerateAStagedBatch(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, headKey, groomed, stages := handMintedHeadFixture(t)
+
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed), "" /*unchained spawner*/, io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing out of a batch the operator is staging", kickStages(*stages))
+	}
+	if strings.Contains(errb.String(), headKey) {
+		t.Errorf("stderr = %q, want the staging fence held without a line", errb.String())
+	}
+	if !strings.Contains(errb.String(), "nothing parked — nothing to start") {
+		t.Errorf("stderr = %q, want the empty board reported", errb.String())
 	}
 }
 
@@ -553,22 +587,24 @@ func TestSelfKickKicksASharedRootOnce(t *testing.T) {
 	}
 }
 
-// TestSelfKickReportsAThreadlessSweep closes the silent `!!!!`. A
-// dynamic ride whose tail sweep groomed nothing used to end with no
-// stderr line at all — the step returned before its first print — so
-// the operator saw a sweep finish and a terminal go quiet with no
-// account of why. Every dynamic invocation now says what it did.
-func TestSelfKickReportsAThreadlessSweep(t *testing.T) {
-	root, _, groomed, stages := selfKickFixture(t)
+// TestSelfKickReportsAnEmptyBoard closes the silent `!!!!`. A dynamic
+// ride whose sweep found nothing at all used to end with no stderr line
+// — the step returned before its first print — so the operator saw a
+// sweep finish and a terminal go quiet with no account of why. Every
+// dynamic invocation says what it did.
+func TestSelfKickReportsAnEmptyBoard(t *testing.T) {
+	root, stages, _ := kickFixture(t)
 
 	defer withRideMode(rideDynamic)()
+	groomed := groomChains(root, "moe", "pulse-groom",
+		nil /*no groups*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed), "", io.Discard, &errb)
+	pulseSelfKick(root, groomed, "", io.Discard, &errb)
 
 	if len(*stages) != 0 {
-		t.Fatalf("drove %v, want nothing from a sweep with no threads", kickStages(*stages))
+		t.Fatalf("drove %v, want nothing from an empty board", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "nothing groomed — nothing to start") {
+	if !strings.Contains(errb.String(), "nothing parked — nothing to start") {
 		t.Errorf("stderr = %q, want the quiet sweep reported", errb.String())
 	}
 }
@@ -599,5 +635,214 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "already settled") {
 		t.Errorf("stderr = %q, want the settled-root skip named", errb.String())
+	}
+}
+
+// strandedThreadFixture is the run this change opened on: an sdlc run
+// the operator opened and drove through design and code, parked at
+// review, correctly ordered and therefore invisible to a survey with no
+// ordering opinion to write. Its gate is empty, which is what the two
+// pulses of 2026-08-13 actually wrote.
+//
+// Callers arm the dynamic ride before calling: the groom builds the
+// board's graph under one, and the kick enumerates off that graph.
+func strandedThreadFixture(t *testing.T) (root, runKey string, groomed groomResult, stages *[]openSdlcStageInvocation) {
+	t.Helper()
+	root, stages, _ = kickFixture(t)
+	now := time.Now().Local()
+	seedRun(t, root, "moe", "stalled-at-review", "sdlc", run.StatusInProgress, now,
+		map[string]string{"design": "# The fix\n\nbody\n", "code": "# The diff\n\nbody\n"})
+	advanceAt(t, root, "moe", "stalled-at-review", "design", now.Add(-4*time.Hour))
+	advanceAt(t, root, "moe", "stalled-at-review", "code", now.Add(-2*time.Hour))
+
+	groomed = groomChains(root, "moe", "pulse-groom",
+		nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	if len(groomed.threads) != 0 {
+		t.Fatalf("threads = %+v, want none — the gate named nothing", groomed.threads)
+	}
+	return root, "moe/stalled-at-review", groomed, stages
+}
+
+// TestSelfKickRidesAThreadTheGateNeverNamed is the stranding. A failed
+// ride re-arms the heartbeat, the heartbeat re-offers the board, and
+// the retry sweep finds a thread already in the right order — so it
+// grooms nothing, and a kick keyed on the gate's `threads` list had
+// nothing to start. The retry was a vehicle that structurally could not
+// perform the retry. Enumeration is what closes it: the ride resumes at
+// the stage the run is parked at, replaying nothing.
+func TestSelfKickRidesAThreadTheGateNeverNamed(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, runKey, groomed, stages := strandedThreadFixture(t)
+
+	var errb bytes.Buffer
+	pulseSelfKick(root, groomed, "" /*unchained spawner*/, io.Discard, &errb)
+
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "stalled-at-review:review" {
+		t.Fatalf("drove %v, want the ride to enter at review; stderr=%q", got, errb.String())
+	}
+	if !strings.Contains(errb.String(), "kicking "+runKey) {
+		t.Errorf("stderr = %q, want the kick announced", errb.String())
+	}
+}
+
+// TestSelfKickHoldsAnEnumeratedThreadTheSurveyParked: the survey keeps
+// its one veto over work it did not groom. Naming the thread in a group
+// with a `park` line is the whole grammar — restating an order that is
+// already correct changes no edges, so the park is all the group does.
+//
+// It also pins the precedence the candidate order encodes: the groomed
+// thread carries the park and is seen first, so the same root arriving
+// from the board behind it is already spoken for.
+func TestSelfKickHoldsAnEnumeratedThreadTheSurveyParked(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, runKey, _, stages := strandedThreadFixture(t)
+
+	groomed := groomChains(root, "moe", "pulse-groom-2",
+		[]groomGroup{{Runs: runsFrom("stalled-at-review"), Park: "the review canvas contradicts the design"}},
+		"", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	var errb bytes.Buffer
+	pulseSelfKick(root, groomed, "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing on a parked thread", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), runKey+" parked by the survey — the review canvas contradicts the design") {
+		t.Errorf("stderr = %q, want the park reason reported verbatim", errb.String())
+	}
+}
+
+// TestSelfKickKicksAnEnumeratedRootOnce: the gate groomed the thread
+// and the board holds it too. One root, one ride — kicking it twice
+// would start the ride and then start its finished remains.
+func TestSelfKickKicksAnEnumeratedRootOnce(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, runKey, groomed, _ := strandedThreadFixture(t)
+
+	var errb bytes.Buffer
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: runKey}), "", io.Discard, &errb)
+
+	if got := strings.Count(errb.String(), "kicking "+runKey); got != 1 {
+		t.Errorf("kicked %s %d time(s), want 1; stderr=%q", runKey, got, errb.String())
+	}
+}
+
+// TestSelfKickHoldsEnumeratedThreadsAtAChainedSpawner: the re-entrancy
+// guard covers the board, not just the gate. A pulse fired by a run
+// that is itself a chain member starts nothing at all — the ride
+// carrying that run picks up growth on its own tail.
+func TestSelfKickHoldsEnumeratedThreadsAtAChainedSpawner(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, _, groomed, stages := strandedThreadFixture(t)
+
+	groomed.spawnerChained = true
+	var errb bytes.Buffer
+	pulseSelfKick(root, groomed, "moe/some-chained-run", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing from a chained spawner", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "itself chained") {
+		t.Errorf("stderr = %q, want the re-entrancy skip named", errb.String())
+	}
+}
+
+// TestSelfKickHoldsEnumeratedFloorMisses: the floor is unchanged for
+// work that arrives off the board rather than out of the gate, and it
+// reports each hold in the same words. A seed-only root the operator is
+// still composing, and a root somebody has a stage open on.
+func TestSelfKickHoldsEnumeratedFloorMisses(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setUp func(t *testing.T, root string)
+		want  string
+	}{
+		{
+			name:  "seed only",
+			setUp: func(t *testing.T, root string) {},
+			want:  "waiting at its first stage with only a seed",
+		},
+		{
+			name: "session open",
+			setUp: func(t *testing.T, root string) {
+				advanceAt(t, root, "moe", "promoted-sketch", "design", time.Now().Local().Add(-2*time.Hour))
+				if _, err := session.Open(root, "moe", "promoted-sketch", "code"); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "live session at code",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer withRideMode(rideDynamic)()
+			root, stages, _ := kickFixture(t)
+			seedRun(t, root, "moe", "promoted-sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
+				map[string]string{"design": "# A thought I had\n\nseed\n"})
+			tc.setUp(t, root)
+
+			groomed := groomChains(root, "moe", "pulse-groom",
+				nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+			var errb bytes.Buffer
+			pulseSelfKick(root, groomed, "", io.Discard, &errb)
+
+			if len(*stages) != 0 {
+				t.Fatalf("drove %v, want the floor to hold it", kickStages(*stages))
+			}
+			if !strings.Contains(errb.String(), tc.want) {
+				t.Errorf("stderr = %q, want %q", errb.String(), tc.want)
+			}
+		})
+	}
+}
+
+// TestSelfKickDoesNotEnumerateASettledThread: a thread whose root has
+// merged is finished from the kick's point of view, and enumeration
+// never offers one. The groomed path prints "already settled" because
+// the survey named it; the board says nothing, because a merged run is
+// not a decision anyone made this sweep.
+func TestSelfKickDoesNotEnumerateASettledThread(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, stages, _ := kickFixture(t)
+	minted := groomFixture(t, root, "shipped", "fix-a")
+	chainEdgeCommit(t, root, "moe/"+minted["shipped"], "moe/"+minted["fix-a"])
+	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
+
+	groomed := groomChains(root, "moe", "pulse-groom",
+		nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	var errb bytes.Buffer
+	pulseSelfKick(root, groomed, "", io.Discard, &errb)
+
+	if len(*stages) != 0 {
+		t.Fatalf("drove %v, want nothing on a settled thread", kickStages(*stages))
+	}
+	if !strings.Contains(errb.String(), "nothing parked — nothing to start") {
+		t.Errorf("stderr = %q, want the settled thread passed over in silence", errb.String())
+	}
+}
+
+// TestKickableRootsAndTheParkedLegSeeOneBoard is the seam this change
+// welded shut. The heartbeat sweeps because it found parked kickable
+// work; the kick decides what may start. When the two enumerated the
+// board separately they could disagree — the heartbeat re-offering a
+// thread the kick structurally could not reach is how a run sat still
+// for two days — so both now read one predicate.
+func TestKickableRootsAndTheParkedLegSeeOneBoard(t *testing.T) {
+	root, _, _ := kickFixture(t)
+	minted := groomFixture(t, root, "loose-fix", "staged-fix", "shipped-fix")
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chainEdgeCommit(t, root, "moe/"+head.ID, "moe/"+minted["staged-fix"])
+	setRunStatus(t, root, "moe", minted["shipped-fix"], run.StatusMerged)
+
+	sc := mustPulseScan(t, root)
+	roots := kickableThreadRoots(sc.mds, sc.byKey, sc.graph, "moe")
+	want := []string{"moe/" + minted["loose-fix"]}
+	if strings.Join(roots, ",") != strings.Join(want, ",") {
+		t.Fatalf("kickable roots = %v, want %v — the staged batch and the merged run are neither side's business", roots, want)
+	}
+	if got := parkedKickableThread(root, sc, "moe"); got != want[0] {
+		t.Errorf("parked leg = %q, want the same root the kick would take, %q", got, want[0])
 	}
 }

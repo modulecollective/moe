@@ -118,6 +118,16 @@ type groomResult struct {
 	// byKey is the sweep's run metadata, including any chain head this
 	// sweep minted mid-walk.
 	byKey map[string]*run.Metadata
+	// mds, graph and projectID are what the kick's board enumeration
+	// needs on top of the groomed threads: the scan to walk, the final
+	// graph to walk it back through, and which project is being swept.
+	// Carried rather than re-read for the same reason byKey is — the
+	// kick's picture of the board has to be the one the sweep just
+	// stamped, or an enumerated root names a thread that no longer
+	// starts there.
+	mds       []*run.Metadata
+	graph     *run.ChainGraph
+	projectID string
 	// idx is the journal the sweep read to build its graph, carried so
 	// the kick's readiness check (stage satisfaction, the chore map)
 	// reads the same snapshot rather than forking a second index. It
@@ -172,7 +182,13 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 	// that produced no threads, so no kick is wanted anyway, but the
 	// conservative default is what makes that safe to say out loud.
 	bail := groomResult{spawnerChained: true}
-	if len(groups) == 0 {
+	if len(groups) == 0 && currentRideMode != rideDynamic {
+		// Nothing to place, and no kick downstream to feed: the scan and
+		// index below would answer a question nobody is going to ask.
+		// Under a dynamic ride they are exactly the question — the kick
+		// enumerates the board off this graph, and a survey with no
+		// ordering opinion is the ordinary shape of a board whose stalled
+		// thread is already correctly ordered.
 		return bail
 	}
 	mds, err := run.Scan(root)
@@ -260,6 +276,9 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 	result := groomResult{
 		threads:        threads,
 		byKey:          sw.byKey,
+		mds:            mds,
+		graph:          sw.graph,
+		projectID:      projectID,
 		idx:            idx,
 		spawnerChained: spawnerKey != "" && len(sw.graph.Unit(spawnerKey)) >= 2,
 	}

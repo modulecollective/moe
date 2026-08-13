@@ -505,56 +505,42 @@ func machineAuthored(body string) bool {
 // started is the survey's call, made with the park reasons and the
 // ordering bar in hand. This only says the board is not empty.
 //
+// Which roots are worth asking about is kickableThreadRoots' answer,
+// shared with the kick's own board enumeration so the two seams cannot
+// drift apart — the heartbeat re-offering a board the kick could not
+// reach is what stranded a run for two days on 2026-08-13. What each
+// side *does* with a root still differs, and this leg's extra reach is
+// the difference.
+//
 // "Not empty" is deliberately a wider question than pulseSelfKick's
-// admit, and this is the one place the two are meant to differ. The
-// kick evaluates a thread at its root; this leg is a pre-ask for the
-// whole *sweep*, and a sweep grooms before it kicks. So the honest
-// question is "could a sweep cause motion here", which includes settled
-// work queued behind a root the floor holds: the groom can re-place it
-// and the kick then starts it. Mirroring the root-only admit is what
-// let one seed-only head strand two settled runs behind it on
-// 2026-08-12 with no tick ever firing — the floor held the thread
+// admit. The kick evaluates a thread at its root; this leg is a pre-ask
+// for the whole *sweep*, and a sweep grooms before it kicks. So the
+// honest question is "could a sweep cause motion here", which includes
+// settled work queued behind a root the floor holds: the groom can
+// re-place it and the kick then starts it. Mirroring the root-only
+// admit is what let one seed-only head strand two settled runs behind
+// it on 2026-08-12 with no tick ever firing — the floor held the thread
 // correctly, and the recovery pulse.md promises never got its turn.
 //
-// Three shapes, one per thread — plus a fourth that is no thread at
-// all, the tagged-idea leg at the bottom of the walk:
+// Two shapes on top of the shared root set — plus a third that is no
+// thread at all, the tagged-idea leg at the bottom of the walk:
 //
-//   - An operator-minted `chain` head holds its whole thread, members
-//     and all. That head is the operator's staging fence — the same one
-//     stagingFenced enforces against the groom's move authority — and
-//     this is the one leg that would otherwise reach past it into a
-//     batch someone is composing by hand. It used to fall out
-//     implicitly (a stageless head never clears the design admit);
-//     the member walk below makes it worth saying out loud.
 //   - A root that clears the floor itself: returned, as it always was.
 //   - A root held for an unsettled design: the first member behind it
 //     that clears the floor on its own. Whether those members actually
 //     belong behind that head is the survey's question to answer, not
 //     this predicate's — see the held-head annotation in
-//     chainStateBlock, which is what gets asked.
+//     chainStateBlock, which is what gets asked. This descent is the
+//     half that stays here: a member under a held head is grooming work
+//     for the survey, not something the kick may start.
 //
 // A root held for *occupancy* rather than design is not looked past.
 // The corpse-branch shape has its own deliberate recovery (the skip
 // line is the signpost, see openSessionStage) and nothing here changes
 // it.
 func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
-	seen := map[string]bool{}
-	for _, md := range sc.mds {
-		if md.Project != projectID || md.Status != run.StatusInProgress || !chainableWorkflow(md.Workflow) {
-			continue
-		}
-		rootKey := sc.graph.Root(md.Project + "/" + md.ID)
-		if seen[rootKey] {
-			continue
-		}
-		seen[rootKey] = true
+	for _, rootKey := range kickableThreadRoots(sc.mds, sc.byKey, sc.graph, projectID) {
 		rootMd := sc.byKey[rootKey]
-		if rootMd == nil || !run.ChainChildLive(rootKey, sc.byKey) {
-			continue
-		}
-		if rootMd.Workflow == chainWorkflow && rootMd.SpawnedBy == "" {
-			continue
-		}
 		if settled, _ := rootDesignSettled(root, rootMd, sc.idx); !settled {
 			// Chain edges only ever point at live runs (NewChainGraph drops
 			// terminal children), so in-progress is the only liveness the

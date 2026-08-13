@@ -2,6 +2,7 @@ package cli
 
 import (
 	"io"
+	"sort"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
@@ -13,9 +14,9 @@ import (
 // `chain` claim the survey makes, twin reflects included.
 
 // pulseSelfKick is the last step of a pulse: under a dynamic ride, start
-// every thread the sweep just groomed. This is the only door to
-// machine-rooted motion, and two structural guards hold it shut
-// everywhere else.
+// every kickable parked thread on the board — the ones this sweep
+// groomed first, then the rest. This is the only door to machine-rooted
+// motion, and two structural guards hold it shut everywhere else.
 //
 // Kicking is the default and *parking* is the marked case, because the
 // error ledger only ever ran one way. Three strandings in four days —
@@ -28,6 +29,18 @@ import (
 // reason when it wants the operator to look first, and the reason is
 // mandatory by shape — parking costs a generation, so it owes a
 // sentence.
+//
+// The candidate set is the *board*, not the gate's `threads` list, and
+// that is the fourth stranding's fix. A dynamic pulse is the retry
+// vehicle the heartbeat re-offers when a ride fails; a thread that is
+// already correctly ordered gives the survey nothing to groom, so a
+// gate-keyed kick made the retry a sweep that structurally could not
+// perform it. Two pulses surveyed the same stalled thread on
+// 2026-08-13, each wrote that this sweep was itself a plausible
+// vehicle, and each closed clean with the thread still sitting. So
+// parking now means what the heartbeat's clean-sweep guard already
+// believed it meant — a thread the survey held *with a reason* — and a
+// thread the gate never mentions is started if it clears the floor.
 //
 // First, **dynamic consent upstream**. A `!!!` tail pulse — or a manual
 // `moe pulse new` — grooms and parks; only a fourth bang the operator
@@ -82,10 +95,13 @@ import (
 // invisible. Every hold is one line, warn-only ethos.
 //
 // Every fact this step keys on comes out of the groom's final in-memory
-// graph (see groomResult) — thread roots, the spawner's chain
-// membership, and whether a root is still kickable. Re-reading the
-// journal here would answer the same questions a second time against a
-// state the sweep had already moved. The one live read is the root's
+// graph (see groomResult) — thread roots, the board's parked threads,
+// the spawner's chain membership, and whether a root is still kickable.
+// Re-reading the journal here would answer the same questions a second
+// time against a state the sweep had already moved, and the enumeration
+// makes that sharper rather than looser: it walks the same scan the
+// groom placed against, so a root it names is a root the sweep just
+// stamped. The one live read is the root's
 // session branches, and that is the point: it asks whether the operator
 // has a stage open *right now*, which no snapshot can say.
 //
@@ -100,8 +116,17 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 	if currentRideMode != rideDynamic {
 		return 0
 	}
-	if len(groomed.threads) == 0 {
-		moePrintf(stderr, "pulse: kick: nothing groomed — nothing to start\n")
+	// The groomed threads first, then the rest of the board. Order is the
+	// whole of the precedence rule: a gate group that named a thread
+	// enumeration would also find carries that thread's `park`, and the
+	// dedupe below keeps the first mention of each root.
+	candidates := make([]groomedThread, 0, len(groomed.threads))
+	candidates = append(candidates, groomed.threads...)
+	for _, rootKey := range kickableThreadRoots(groomed.mds, groomed.byKey, groomed.graph, groomed.projectID) {
+		candidates = append(candidates, groomedThread{Root: rootKey})
+	}
+	if len(candidates) == 0 {
+		moePrintf(stderr, "pulse: kick: nothing parked — nothing to start\n")
 		return 0
 	}
 	// Threads are keyed by root, and a park on any group that landed in
@@ -118,8 +143,8 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		}
 	}
 	var wanted []groomedThread
-	seen := make(map[string]bool, len(groomed.threads))
-	for _, th := range groomed.threads {
+	seen := make(map[string]bool, len(candidates))
+	for _, th := range candidates {
 		if seen[th.Root] {
 			continue
 		}
@@ -134,7 +159,7 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		return 0
 	}
 	if spawnerKey != "" && groomed.spawnerChained {
-		moePrintf(stderr, "pulse: kick: holding %d groomed thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
+		moePrintf(stderr, "pulse: kick: holding %d thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
 			len(wanted), spawnerKey)
 		return 0
 	}
@@ -177,6 +202,63 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		}
 	}
 	return firstFailure
+}
+
+// kickableThreadRoots returns the thread roots in a project that could
+// be started: every in-progress chainable run walked back to its root,
+// deduped, sorted so the answer doesn't ride on scan order.
+//
+// This is a shared *test*, not a shared answer, and the difference is
+// load-bearing. Both callers ask "which roots are worth looking at" and
+// then respond differently: the kick offers each one to the floor and
+// prints a line per hold, while the heartbeat's parked leg asks whether
+// a *sweep* could cause motion, which lets it look past a design-held
+// head into the members queued behind it (see parkedKickableThread) —
+// grooming work for the survey, and not something the kick may start.
+// Before this the two seams enumerated the board separately, and the
+// heartbeat re-offering a thread the kick could not reach is exactly
+// how a run stalled for two days.
+//
+// Two shapes are dropped here because they are never a candidate on
+// either side, whatever the floor would say:
+//
+//   - a root whose thread has already settled. `onto` admits a merged
+//     anchor on purpose — that is the queue-jump case — so a live
+//     thread can be rooted at a finished run, and riding it would start
+//     it from its finished end.
+//   - an operator-minted `chain` head. That head is the staging fence
+//     the groom's stagingFenced honours, and a stageless head never
+//     clears the settled-design admit anyway; dropping it here is what
+//     makes the hold silent rather than a line per sweep about a normal
+//     state.
+func kickableThreadRoots(mds []*run.Metadata, byKey map[string]*run.Metadata, graph *run.ChainGraph, projectID string) []string {
+	if graph == nil {
+		// A groom that bailed before building one. Nothing to enumerate,
+		// and the next sweep re-derives the board for free.
+		return nil
+	}
+	var roots []string
+	seen := make(map[string]bool, len(mds))
+	for _, md := range mds {
+		if md.Project != projectID || md.Status != run.StatusInProgress || !chainableWorkflow(md.Workflow) {
+			continue
+		}
+		rootKey := graph.Root(md.Project + "/" + md.ID)
+		if seen[rootKey] {
+			continue
+		}
+		seen[rootKey] = true
+		rootMd := byKey[rootKey]
+		if rootMd == nil || !run.ChainChildLive(rootKey, byKey) {
+			continue
+		}
+		if rootMd.Workflow == chainWorkflow && rootMd.SpawnedBy == "" {
+			continue
+		}
+		roots = append(roots, rootKey)
+	}
+	sort.Strings(roots)
+	return roots
 }
 
 // rootDesignSettled reports whether md's design is settled — the one
