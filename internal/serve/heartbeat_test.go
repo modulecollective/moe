@@ -575,20 +575,18 @@ func TestFailedSweepRowLinksItsRun(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the failed sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
-	waitFor(t, "the cool-off row", func() bool {
+	// Failed and Run are written by two different goroutines reacting to
+	// the same child exit, so waiting on one and asserting the other
+	// races the gap between them. One predicate over one panel snapshot
+	// covers both.
+	waitFor(t, "the cool-off row to link the run the dead sweep left open", func() bool {
 		for _, p := range s.activity.panel(time.Now()).Projects {
-			if p.Project == "alpha" && p.Failed {
+			if p.Project == "alpha" && p.Failed && p.Run == "pulse-2026-04-01" {
 				return true
 			}
 		}
 		return false
 	})
-
-	for _, p := range s.activity.panel(time.Now()).Projects {
-		if p.Project == "alpha" && p.Run != "pulse-2026-04-01" {
-			t.Errorf("cooling row Run=%q, want the run the dead sweep left open", p.Run)
-		}
-	}
 }
 
 // TestSweepLinkNeedsTheRunToExist: the emit file can name a run that
@@ -608,6 +606,17 @@ func TestSweepLinkNeedsTheRunToExist(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	// The gate is swept before the exit event exists, so assert on the
+	// event's presence — otherwise a ring with no exit event at all reads
+	// as "no bad link" and the test passes without testing anything.
+	waitFor(t, "the exit event", func() bool {
+		for _, ev := range s.activity.panel(time.Now()).Events {
+			if ev.Kind == "exit" {
+				return true
+			}
+		}
+		return false
+	})
 
 	for _, ev := range s.activity.panel(time.Now()).Events {
 		if ev.Kind == "exit" && ev.RunURL != "" {
@@ -638,6 +647,17 @@ func TestStaleEmitFileIsClearedBeforeTheSpawn(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	// The gate is swept before the exit event exists, so without this the
+	// ring can still be empty when the loop runs and "no link" is
+	// vacuously true.
+	waitFor(t, "the exit event", func() bool {
+		for _, ev := range s.activity.panel(time.Now()).Events {
+			if ev.Kind == "exit" {
+				return true
+			}
+		}
+		return false
+	})
 
 	for _, ev := range s.activity.panel(time.Now()).Events {
 		if ev.Kind == "exit" && ev.RunURL != "" {
