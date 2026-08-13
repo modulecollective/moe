@@ -36,7 +36,7 @@ func panelServer(t *testing.T) *Server {
 	})
 	s.activity.recordSweepStart("alpha", now.Add(-3*time.Minute))
 	s.activity.recordChildExit(heartbeatChildPrefix+"beta", now.Add(-40*time.Minute),
-		errors.New("exit status 1"), "credit limit reached")
+		errors.New("exit status 1"), "credit limit reached", "" /*run*/)
 	return s
 }
 
@@ -199,5 +199,34 @@ func TestServePageDoesNotReadTheStateFile(t *testing.T) {
 	}
 	if body := getBody(t, s, "/serve"); !strings.Contains(body, "the journal moved") {
 		t.Error("the page rendered nothing without a state file — it should render from memory")
+	}
+}
+
+// TestServePanelLinksSweepsToTheirRuns: the panel's job here is to stop
+// the operator leaving /serve to hunt the dash for a `pulse-*` slug whose
+// date roughly matches. Both halves render as links — the project row's
+// sweep, and a ring event whose subject already names a run.
+func TestServePanelLinksSweepsToTheirRuns(t *testing.T) {
+	s := panelServer(t)
+	s.activity.recordSweepRun("alpha", "pulse-2026-04-01")
+	s.activity.recordChildSpawn("alpha/fix-it", time.Now().Add(-2*time.Minute))
+
+	body := getBody(t, s, "/serve")
+	for _, want := range []string{
+		`<a class="slug" href="/run/alpha/pulse-2026-04-01">pulse-2026-04-01</a>`,
+		`<a class="slug" href="/run/alpha/fix-it">alpha/fix-it</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/serve is missing %s", want)
+		}
+	}
+	// A heartbeat subject serve knows no run for stays plain text: the
+	// ring is append-only and a spawn event is pushed before the run
+	// exists, so there is nothing to backfill.
+	if strings.Contains(body, `href="/run/beta/`) {
+		t.Errorf("/serve linked a heartbeat subject with no run behind it")
+	}
+	if !strings.Contains(body, "heartbeat:beta exited") {
+		t.Errorf("/serve lost the unlinked subject's own line")
 	}
 }

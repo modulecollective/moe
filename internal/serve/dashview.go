@@ -326,6 +326,11 @@ type serveProjectVM struct {
 	State  string
 	Detail string // "(3m)", "(2 ticks left)", "" — qualifies State
 	Reason string // the gate's own words
+	// Run is the pulse run the current-or-last sweep minted, linked from
+	// the row. Only the states a sweep earns carry one — sweeping,
+	// cooling, failed — and it is empty when serve hasn't learned the
+	// slug (a sweep that just started, one that died before minting).
+	Run string
 	// Failed marks the states worth a colour: a dead last sweep, or a
 	// cool-off serving one out.
 	Failed bool
@@ -335,8 +340,14 @@ type serveProjectVM struct {
 type serveEventVM struct {
 	When string // dash.HumanAgo
 	Kind string
-	// Text is the whole line body: for a tick, the per-project verdicts
-	// joined; for a spawn/exit, the child and what happened to it.
+	// Subject is the child the line leads with ("heartbeat:moe",
+	// "alpha/fix-it"), empty for a tick. RunURL is the run page it links
+	// to when there is one to point at: the pulse run a sweep minted, or
+	// the run a run-child already names.
+	Subject string
+	RunURL  string
+	// Text is the rest of the line: for a tick, the per-project verdicts
+	// joined; for a spawn/exit, what happened to the child.
 	Text   string
 	Failed bool
 	// Tail is the child's output snippet, shown behind a <details> on a
@@ -369,7 +380,16 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	}
 	failing := 0
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
-		line := serveProjectLine(now, id, a.projects[id])
+		p := a.projects[id]
+		// A live sweep's run exists on disk seconds after the spawn, but
+		// nothing tells serve about it until the child exits — and a sweep
+		// that kicked a ride can be live for hours. One small read per live
+		// sweep per page load buys the mid-flight link; once seen, the
+		// record keeps it.
+		if p.runID == "" && !p.started.IsZero() {
+			p.runID = readSweepRun(a.root, id)
+		}
+		line := serveProjectLine(now, id, p)
 		if line.Failed {
 			failing++
 		}
@@ -407,13 +427,18 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 	case !p.started.IsZero():
 		line.State = "sweeping"
 		line.Detail = "(" + dash.HumanDuration(now.Sub(p.started)) + ")"
+		line.Run = p.runID
 	case p.coolTicks > 0:
 		line.State, line.Failed = "cooling", true
 		line.Detail = "(" + dash.Plural(p.coolTicks, "tick") + " left)"
 		line.Reason = fmt.Sprintf("last sweep failed %s", dash.HumanAgo(now, p.sweptAt))
+		line.Run = p.runID
 	case !p.sweptAt.IsZero() && !p.clean:
 		line.State, line.Failed = "failed", true
 		line.Detail = "(" + dash.HumanAgo(now, p.sweptAt) + ")"
+		// The payoff: the run a dead sweep left open is exactly what the
+		// operator wants one click away.
+		line.Run = p.runID
 	case p.held:
 		line.State = "held"
 	}
@@ -450,11 +475,31 @@ func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
 		vm.Text = strings.Join(parts, " · ")
 		return vm, true
 	}
-	vm.Text = ev.Subject + " " + ev.Detail
+	vm.Subject, vm.Text = ev.Subject, ev.Detail
+	vm.RunURL = eventRunURL(ev)
 	if ev.Failed {
 		vm.Tail = ev.Tail
 	}
 	return vm, true
+}
+
+// eventRunURL is where a child event's subject links, and "" when it
+// links nowhere. Two kinds of child, two ways to reach the run: a
+// heartbeat sweep carries the run it minted (read out of its emit file
+// at exit), and every other child's subject already *is* a run id, which
+// needs no channel at all.
+func eventRunURL(ev activityEvent) string {
+	if project := heartbeatProject(ev.Subject); project != "" {
+		if ev.Run == "" {
+			return ""
+		}
+		return "/run/" + project + "/" + ev.Run
+	}
+	project, slug, ok := strings.Cut(ev.Subject, "/")
+	if !ok || !slugPattern.MatchString(project) || !slugPattern.MatchString(slug) {
+		return ""
+	}
+	return "/run/" + ev.Subject
 }
 
 // dashVM is the data the dash template renders against. Same three

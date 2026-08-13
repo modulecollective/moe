@@ -97,6 +97,9 @@
         <a class="slug" href="/projects/{{.Project}}">{{.Project}}</a>
         <span class="serve-state{{if .Failed}} failed{{end}}">{{.State}}{{if .Detail}} {{.Detail}}{{end}}</span>
         <span class="note">{{.Reason}}</span>
+        {{/* The sweep's own pulse run, once serve knows it — "what is that
+             sweep actually doing" is one click, not a hunt on the dash. */}}
+        {{if .Run}}<a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Run}}</a>{{end}}
       </li>
       {{end}}
       {{/* Every quiet project's reason restates "nothing to do", so they
@@ -110,7 +113,10 @@
       <li class="row">
         <span class="when">{{.When}}</span>
         <span class="serve-kind">{{.Kind}}</span>
-        <span class="note{{if .Failed}} failed{{end}}">{{.Text}}</span>
+        <span class="note{{if .Failed}} failed{{end}}">
+          {{- if .Subject}}
+            {{- if .RunURL}}<a class="slug" href="{{.RunURL}}">{{.Subject}}</a>{{else}}{{.Subject}}{{end}} {{end -}}
+          {{.Text}}</span>
         {{if .Tail}}
         <details class="serve-tail">
           <summary>output</summary>
