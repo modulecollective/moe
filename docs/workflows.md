@@ -132,12 +132,13 @@ during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
 step away, and the chain codes, reviews, tests, and ships unattended — each run
 still gated, journaled, and revertible in the morning.
 
-This is deliberately not scheduling. Every chain roots in operator consent,
-which is either typed — the bang you fire — or standing, an armed `moe serve
---dynamic` whose [heartbeat](#the-heartbeat) is the one clock MoE carries and
-whose retraction is stopping the process. MoE ships no cron of anyone else's
-and no calendar-fired run. Typed, the story is "you pull the trigger at 6pm and
-the work outlasts your attention", not "MoE runs at night".
+Every chain roots in operator consent, which is either typed — the bang you
+fire — or standing, an armed `moe serve --dynamic` whose
+[heartbeat](#the-heartbeat) is the one clock MoE carries and whose retraction is
+stopping the process. MoE ships no cron of anyone else's. Typed, the story is
+"you pull the trigger at 6pm and the work outlasts your attention", not "MoE
+runs at night"; standing, it is "the clock you armed keeps asking", under every
+guard a typed ride runs under.
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
 — every operator-cascade workflow (SDLC, twin) plus chain heads — grouped into
@@ -335,12 +336,14 @@ up in what gets filed and ranked, not in an edge table.
 
 Recurring maintenance otherwise lives in your memory or in a cron job you don't
 trust an agent to run unattended. A chore is standing intent instead: it turns
-recurring project maintenance into runs you open on demand. A chore definition
-says what maintenance is due, when it becomes due, and which workflow run to
-open for it. MoE evaluates chores against the journal and surfaces the due ones
-— but going due never executes anything. `moe chore open`, or a pulse's chore
-auto-open, mints the seeded run; from there it waits in `moe dash` like any
-other run until you choose to start it.
+recurring project maintenance into a run MoE knows how to open. A chore
+definition says what maintenance is due, when it becomes due, and which workflow
+run to open for it. MoE evaluates chores against the journal and surfaces the
+due ones; `moe chore open`, or a pulse's chore auto-open, mints the seeded run.
+What happens after that is what you armed: with no `moe serve --dynamic` up, the
+run waits in `moe dash` like any other until you start it, while under an armed
+serve the [heartbeat](#the-heartbeat)'s sweep may both open it and ride it on
+through review, test, and ship.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:

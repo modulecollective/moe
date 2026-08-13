@@ -12,9 +12,11 @@ canvas — an artifact the next stage reads without replaying the whole chat —
 and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
-There is no crontab and no swarm. Agents act on your consent — typed at a
-command, or standing for as long as an armed `moe serve --dynamic` you started
-stays up — and the operator stays strategist, reviewer, and source of judgment.
+There is no swarm, and the only clock is one you armed: MoE ships no cron of
+anyone else's, just a heartbeat inside a `moe serve --dynamic` you started.
+Agents act on your consent — typed at a command, or standing for as long as
+that process stays up — and the operator stays strategist, reviewer, and source
+of judgment.
 MoE is also deliberately single-operator — see [Anti-Social on
 Purpose](#anti-social-on-purpose) for why that is a bet rather than a missing
 feature. The bet behind that stance: agents have made careful work cheap. When a
@@ -73,7 +75,8 @@ journaled, and revertible in the morning.
 - you want follow-up ideas, project intent, and cross-project lessons to feed
   future runs automatically;
 - you want recurring maintenance to surface as ready-to-open runs instead of
-  living in your memory;
+  living in your memory — and, once you arm `moe serve --dynamic`, to open and
+  ride itself;
 - you pay for a flat-rate dev subscription that idles sixteen hours a day and
   would rather it worked a queue overnight than sat unused;
 - you prefer explicit CLI commands and Git history over a hosted coordination
