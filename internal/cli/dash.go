@@ -368,7 +368,7 @@ func renderDashFrame(stdout io.Writer, now time.Time, root string, snap DashSnap
 	// status in its tail. Serve status is ambient context, not an event —
 	// it belongs with the render metadata rather than on a line of its
 	// own, and this way it costs the frame nothing.
-	serveState := readServeState(root)
+	serveState := readServeState(root, now)
 	banner.Dash(stdout, now, serveState.bannerCluster(now))
 	// Directly under the banner, above the art: the projects a sweep is
 	// working, holding back, or has killed. The banner's serve cluster is

@@ -467,6 +467,13 @@ func (s *Server) registerRoutes() {
 	// died. The boards carry a brief status cluster in their header and
 	// link here for the trace.
 	s.router.HandleFunc("GET /serve", s.handleServePage)
+	// The heartbeat's brake, and its release. Deliberately outside the
+	// spawn bucket: these two spawn nothing, and braking is not motion.
+	// Anyone who can reach the listener can already start a run on an
+	// armed serve; letting them stop the clock instead is the fail-safe
+	// direction.
+	s.router.HandleFunc("POST /serve/snooze", s.handleSnooze)
+	s.router.HandleFunc("POST /serve/wake", s.handleWake)
 
 	// Read-only browsing of the bureaucracy's durable content: lore,
 	// projects, per-project knowledge and digital-twin docs. All render
@@ -590,6 +597,43 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 // per-project filter.
 func (s *Server) handleServePage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "serve.html", s.activity.panel(time.Now().UTC()))
+}
+
+// handleSnooze holds the heartbeat for the posted duration. The page
+// offers presets, but the parse is the general one — a hand-rolled POST
+// of any Go duration is the same act, and rejecting it would only push
+// the operator to the CLI for something the route already does.
+func (s *Server) handleSnooze(w http.ResponseWriter, r *http.Request) {
+	d, err := time.ParseDuration(r.FormValue("duration"))
+	if err != nil {
+		http.Error(w, "snooze: bad duration: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if d <= 0 {
+		http.Error(w, "snooze: duration must be positive; use wake to resume now",
+			http.StatusBadRequest)
+		return
+	}
+	until := time.Now().Add(d)
+	if err := WriteSnooze(s.opts.Root, until); err != nil {
+		s.logf("snooze: %v", err)
+		http.Error(w, "snooze: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logf("heartbeat: snoozed until %s", until.Format(time.RFC3339))
+	http.Redirect(w, r, "/serve", http.StatusSeeOther)
+}
+
+// handleWake drops the hold. Idempotent — waking a serve that isn't
+// snoozed is the state the click asked for either way.
+func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
+	if err := ClearSnooze(s.opts.Root); err != nil {
+		s.logf("wake: %v", err)
+		http.Error(w, "wake: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logf("heartbeat: awake")
+	http.Redirect(w, r, "/serve", http.StatusSeeOther)
 }
 
 // render runs a named template with data and surfaces template

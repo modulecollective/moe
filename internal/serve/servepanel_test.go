@@ -230,3 +230,119 @@ func TestServePanelLinksSweepsToTheirRuns(t *testing.T) {
 		t.Errorf("/serve lost the unlinked subject's own line")
 	}
 }
+
+// postForm drives a POST route through the handler the way a browser
+// would submit one of the page's own forms.
+func postForm(t *testing.T, s *Server, path, form string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// TestServePageOffersTheSnoozePresets: /serve is the heartbeat's own
+// page, so it is where the brake lives. Presets are actions, not config
+// — arbitrary durations stay the CLI's job.
+func TestServePageOffersTheSnoozePresets(t *testing.T) {
+	s := panelServer(t)
+	body := getBody(t, s, "/serve")
+	for _, want := range []string{`action="/serve/snooze"`, `value="1h"`, `value="4h"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/serve missing %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `action="/serve/wake"`) {
+		t.Error("/serve should not offer wake when nothing is snoozed")
+	}
+}
+
+// TestSnoozeRouteHoldsAndWakeReleases walks the two clicks the page
+// offers and checks each lands on the file the ticker reads.
+func TestSnoozeRouteHoldsAndWakeReleases(t *testing.T) {
+	s := panelServer(t)
+
+	if rec := postForm(t, s, "/serve/snooze", "duration=1h"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /serve/snooze = %d, want 303: %s", rec.Code, rec.Body.String())
+	}
+	until, snoozed, err := ReadSnooze(s.opts.Root, time.Now())
+	if err != nil || !snoozed {
+		t.Fatalf("ReadSnooze after the click = %v, %v; want a hold", snoozed, err)
+	}
+	if got := time.Until(until); got < 55*time.Minute || got > time.Hour {
+		t.Errorf("snooze lands in %s, want about an hour", got)
+	}
+
+	// And the page swaps its controls for the resume time and a wake.
+	body := getBody(t, s, "/serve")
+	if !strings.Contains(body, `action="/serve/wake"`) {
+		t.Errorf("/serve should offer wake while snoozed:\n%s", body)
+	}
+	if !strings.Contains(body, "sweeps resume "+SnoozeClock(until)) {
+		t.Errorf("/serve should name the resume time:\n%s", body)
+	}
+	if strings.Contains(body, `action="/serve/snooze"`) {
+		t.Error("/serve should not offer a second snooze while one is in force")
+	}
+
+	if rec := postForm(t, s, "/serve/wake", ""); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /serve/wake = %d, want 303: %s", rec.Code, rec.Body.String())
+	}
+	if _, snoozed, _ := ReadSnooze(s.opts.Root, time.Now()); snoozed {
+		t.Error("wake should have dropped the hold")
+	}
+}
+
+// TestSnoozeRouteRejectsAJunkDuration: the route parses any Go duration,
+// but zero and negative are a typo whose two charitable readings point in
+// opposite directions.
+func TestSnoozeRouteRejectsAJunkDuration(t *testing.T) {
+	s := panelServer(t)
+	for _, form := range []string{"duration=soon", "duration=", "duration=0", "duration=-1h"} {
+		if rec := postForm(t, s, "/serve/snooze", form); rec.Code != http.StatusBadRequest {
+			t.Errorf("POST /serve/snooze %q = %d, want 400", form, rec.Code)
+		}
+	}
+	if _, snoozed, _ := ReadSnooze(s.opts.Root, time.Now()); snoozed {
+		t.Error("a rejected duration must not have written a hold")
+	}
+}
+
+// TestSnoozeNeedsNoSpawnConsent: braking is not motion. These two routes
+// spawn nothing, so a safe-mode serve answers them like any other
+// journal-write route rather than 403ing through spawnAllowed.
+func TestSnoozeNeedsNoSpawnConsent(t *testing.T) {
+	root := t.TempDir()
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	if rec := postForm(t, s, "/serve/snooze", "duration=1h"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /serve/snooze on a safe-mode serve = %d, want 303", rec.Code)
+	}
+	// It still doesn't *offer* the controls: a browse-only serve has no
+	// clock to hold, and a snooze button there would promise a pause on
+	// sweeps that were never going to happen.
+	if body := getBody(t, s, "/serve"); strings.Contains(body, `action="/serve/snooze"`) {
+		t.Errorf("a browse-only /serve should offer no snooze controls:\n%s", body)
+	}
+}
+
+// TestSnoozeTakesTheNextSlotInTheHeaderCluster: the boards' whole spend
+// on serve is one line, and while the clock is held the answer the
+// operator wants in it is when spending resumes.
+func TestSnoozeTakesTheNextSlotInTheHeaderCluster(t *testing.T) {
+	s := panelServer(t)
+	until := time.Now().Add(90 * time.Minute)
+	if err := WriteSnooze(s.opts.Root, until); err != nil {
+		t.Fatal(err)
+	}
+	want := "snoozed until " + SnoozeClock(until)
+	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
+		body := getBody(t, s, path)
+		if !strings.Contains(body, want) {
+			t.Errorf("%s header missing %q:\n%s", path, want, body)
+		}
+		if strings.Contains(body, "· next ") {
+			t.Errorf("%s should drop the next-tick token while snoozed:\n%s", path, body)
+		}
+	}
+}

@@ -298,6 +298,11 @@ type servePanelVM struct {
 	// NextSweep is how long until the next tick ("12m"), empty for an
 	// unarmed serve, which never ticks.
 	NextSweep string
+	// Snoozed is the wall-clock time sweeps resume ("09:00"), empty when
+	// the heartbeat is running free. It is what the control cluster on
+	// /serve keys off: a resume time and a wake button while it's set, the
+	// preset snooze buttons while it isn't.
+	Snoozed string
 	// Cluster is the brief status the page headers link to /serve with —
 	// the same line, byte for byte, that the CLI dash's banner carries.
 	Cluster string
@@ -378,6 +383,14 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	if !a.lastTick.IsZero() {
 		vm.LastTick = dash.HumanAgo(now, a.lastTick)
 	}
+	// Read per render rather than held on the record: the file is the
+	// transport, and `moe serve snooze` from a terminal has to show up on
+	// the next page load rather than the next tick. Errors are the tick's
+	// to report — a malformed file reads as no snooze here, which is the
+	// same fail-open the tick takes.
+	if until, snoozed, _ := ReadSnooze(a.root, now); snoozed {
+		vm.Snoozed = SnoozeClock(until)
+	}
 	failing := 0
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
 		p := a.projects[id]
@@ -402,7 +415,7 @@ func (a *activity) panel(now time.Time) servePanelVM {
 		}
 		vm.Projects = append(vm.Projects, line)
 	}
-	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep, failing)
+	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep, vm.Snoozed, failing)
 	// Newest first: the ring stores in arrival order, and the question the
 	// list answers is "what just happened".
 	for i := len(a.events) - 1; i >= 0; i-- {

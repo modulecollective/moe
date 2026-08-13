@@ -42,14 +42,14 @@ func deadPid(t *testing.T) int {
 // serveCluster is what the banner's tail carries for this root.
 func serveCluster(t *testing.T, root string, now time.Time) string {
 	t.Helper()
-	return readServeState(root).bannerCluster(now)
+	return readServeState(root, now).bannerCluster(now)
 }
 
 // serveLines is what serve earns *below* the banner.
 func serveLines(t *testing.T, root string, now time.Time) string {
 	t.Helper()
 	var buf bytes.Buffer
-	readServeState(root).renderLines(&buf, now)
+	readServeState(root, now).renderLines(&buf, now)
 	return buf.String()
 }
 
@@ -227,5 +227,50 @@ func TestDashSurvivesATruncatedStateFile(t *testing.T) {
 	}
 	if tail := serveCluster(t, root, now); tail != "" {
 		t.Errorf("banner tail = %q for an unreadable state file, want nothing", tail)
+	}
+}
+
+// TestDashBannerCarriesASnooze: the snooze is read off its own file
+// rather than out of serve.json, so `moe serve snooze` shows up in
+// `moe dash` on the next frame instead of the next tick — twenty minutes
+// of the dash disagreeing with the command just typed.
+func TestDashBannerCarriesASnooze(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	// The snapshot is deliberately the *pre-snooze* one: serve only
+	// rewrites it on its own events, so this is exactly the state a dash
+	// frame finds seconds after the verb ran.
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true,
+		Started:  now.Add(-4 * time.Minute),
+		NextTick: now.Add(12 * time.Minute),
+	})
+	until := now.Add(90 * time.Minute)
+	if err := serve.WriteSnooze(root, until); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "serve armed · up 4m · snoozed until " + serve.SnoozeClock(until)
+	if got := serveCluster(t, root, now); got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// TestDashBannerDropsAnExpiredSnooze: nothing sweeps the file up, so the
+// banner has to stop reporting a hold that has elapsed on its own.
+func TestDashBannerDropsAnExpiredSnooze(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true,
+		Started:  now.Add(-4 * time.Minute),
+		NextTick: now.Add(12 * time.Minute),
+	})
+	if err := serve.WriteSnooze(root, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m · next 12m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 }

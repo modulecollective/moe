@@ -40,12 +40,25 @@ type serveState struct {
 	// alive is the pid probe, taken once: the banner and the rows below
 	// it must not disagree about whether the process is still there.
 	alive bool
+	// snoozed is the operator's hold on the heartbeat, read straight off
+	// its own file rather than out of the snapshot. Serve only rewrites
+	// serve.json on its own events, so waiting for the snooze to appear
+	// there would leave `moe serve snooze` invisible in `moe dash` until
+	// the next tick — twenty minutes of the dash disagreeing with the
+	// command the operator just ran.
+	snoozed string
 }
 
 // readServeState reads the snapshot for one dash frame.
-func readServeState(root string) serveState {
+func readServeState(root string, now time.Time) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
-	return serveState{snap: snap, ok: ok, err: err, alive: ok && repolock.ProcessAlive(snap.Pid)}
+	st := serveState{snap: snap, ok: ok, err: err, alive: ok && repolock.ProcessAlive(snap.Pid)}
+	// Warn-only, like the snapshot read above it: a broken snooze file
+	// costs the banner its snooze word, not the frame.
+	if until, snoozed, _ := serve.ReadSnooze(root, now); snoozed {
+		st.snoozed = serve.SnoozeClock(until)
+	}
+	return st
 }
 
 // bannerCluster is the serve status the banner carries in its tail:
@@ -72,7 +85,7 @@ func (s serveState) bannerCluster(now time.Time) string {
 		next = dash.HumanDuration(max(s.snap.NextTick.Sub(now), 0))
 	}
 	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
-		next, s.failing(now))
+		next, s.snoozed, s.failing(now))
 }
 
 // failing counts the projects whose row would read "cooling" or

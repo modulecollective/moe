@@ -693,6 +693,7 @@ func TestServeCluster(t *testing.T) {
 		armed   bool
 		up      string
 		next    string
+		snoozed string
 		failing int
 		want    string
 	}{
@@ -707,9 +708,25 @@ func TestServeCluster(t *testing.T) {
 			name: "unarmed with failures", up: "4m", failing: 3,
 			want: "serve browse-only · up 4m · 3 failing",
 		},
+		// A snooze takes the next slot rather than adding one: the ticker
+		// still fires, but "next 15m" beside "snoozed until 09:00" would be
+		// two answers to the question the operator is actually asking.
+		{
+			name: "snoozed", armed: true, up: "4m", next: "15m", snoozed: "09:00",
+			want: "serve armed · up 4m · snoozed until 09:00",
+		},
+		{
+			name: "snoozed with failures", armed: true, up: "4m", next: "15m",
+			snoozed: "09:00", failing: 2,
+			want: "serve armed · up 4m · snoozed until 09:00 · 2 failing",
+		},
+		// A browse-only serve has no clock to hold, so a stray snooze file
+		// buys it no word — the line would promise a pause on sweeps that
+		// were never going to happen.
+		{name: "unarmed and snoozed", up: "4m", snoozed: "09:00", want: "serve browse-only · up 4m"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ServeCluster(tc.armed, tc.up, tc.next, tc.failing); got != tc.want {
+			if got := ServeCluster(tc.armed, tc.up, tc.next, tc.snoozed, tc.failing); got != tc.want {
 				t.Errorf("ServeCluster = %q, want %q", got, tc.want)
 			}
 		})

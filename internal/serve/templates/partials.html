@@ -87,9 +87,27 @@
 {{define "servepanel"}}
   <section class="dash-section serve-panel">
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}})</span>
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .Snoozed}} · snoozed until {{.Snoozed}}{{else if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}})</span>
       {{else}}<span class="count">(browse-only · up {{.Up}})</span>{{end}}
     </span></h2>
+    {{/* The brake. Only an armed serve has a clock to hold, so a
+         browse-only one gets no controls. Presets are actions, not
+         config — arbitrary durations are `moe serve snooze 90m`. */}}
+    {{if .Armed}}
+    <section class="actions">
+      {{if .Snoozed}}
+      <span class="action disabled" aria-disabled="true">sweeps resume {{.Snoozed}}</span>
+      <form method="post" action="/serve/wake" class="action-form"><button class="action" type="submit">wake</button></form>
+      {{else}}
+      <form method="post" action="/serve/snooze" class="action-form">
+        <input type="hidden" name="duration" value="1h"><button class="action" type="submit">snooze 1h</button>
+      </form>
+      <form method="post" action="/serve/snooze" class="action-form">
+        <input type="hidden" name="duration" value="4h"><button class="action" type="submit">snooze 4h</button>
+      </form>
+      {{end}}
+    </section>
+    {{end}}
     {{if or .Projects .QuietCount}}
     <ul class="rows">
       {{range .Projects}}

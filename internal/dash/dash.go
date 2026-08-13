@@ -1055,6 +1055,7 @@ func HumanDuration(d time.Duration) string {
 // cluster:
 //
 //	serve armed · up 4m · next 15m · 1 failing
+//	serve armed · up 4m · snoozed until 09:00
 //	serve browse-only · up 4m
 //
 // The two surfaces are contractually the same line, so the text is
@@ -1063,11 +1064,20 @@ func HumanDuration(d time.Duration) string {
 // has); failing is dropped at zero, so a healthy board spends nothing
 // on it. The CLI's dead-serve state has no web counterpart (a dead
 // serve serves no pages) and stays in the CLI.
-func ServeCluster(armed bool, up, next string, failing int) string {
+//
+// snoozed — a wall-clock resume time — takes the next slot rather than
+// adding one. The ticker does still fire on a snoozed serve; it looks
+// and holds. But "next 12m" next to "snoozed until 09:00" would read as
+// two answers to the same question, and the one the operator asked is
+// when spending resumes.
+func ServeCluster(armed bool, up, next, snoozed string, failing int) string {
 	cluster := "serve browse-only · up " + up
 	if armed {
 		cluster = "serve armed · up " + up
-		if next != "" {
+		switch {
+		case snoozed != "":
+			cluster += " · snoozed until " + snoozed
+		case next != "":
 			cluster += " · next " + next
 		}
 	}
