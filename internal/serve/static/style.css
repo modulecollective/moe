@@ -284,6 +284,20 @@ section h2 .count {
    and fit the factory-art rail (small glyphs, scroll if still too wide). */
 @media (max-width: 640px) {
   html { font-size: 14px; }
+  /* The serve cluster is nowrap with a content-width basis, so in the
+     desktop no-wrap row it takes ~230px before .banner (flex-basis 0)
+     gets anything — on a phone that starves the title to ~76px and the
+     breadcrumb wraps one word per line. Give the cluster its own row.
+     order:1 is load-bearing: DOM order is banner → serve → menu, so
+     without it the full-width serve row lands between them and pushes
+     ☰ to a third row. The 2rem line-height only exists to centre the
+     cluster against the menu box in the desktop row. */
+  .page-header { flex-wrap: wrap; row-gap: 0.2rem; }
+  .banner-serve {
+    order: 1;
+    flex-basis: 100%;
+    line-height: inherit;
+  }
   .banner-art {
     /* The 61-col rail clips at 0.7rem once the flex theme-toggle eats into
        the banner column. Scale with viewport width (capped at 0.7rem) so it
