@@ -278,9 +278,10 @@ func clearSweepRun(root, projectID string) error {
 
 // readSweepRun returns the run slug a live sweep has already written, or
 // "" when there is nothing there yet. Shape-validated because this is a
-// file boundary; the run itself is not checked, so a page load during
-// the seconds between a dispose and the child's exit can show a link
-// that 404s.
+// file boundary; whether the run exists is not checked here, so a page
+// load in the seconds after the slug lands but before the run's opening
+// commit can show a link that 404s. takeSweepRun is where that gets
+// checked.
 func readSweepRun(root, projectID string) string {
 	body, err := os.ReadFile(sweepRunPath(root, projectID))
 	if err != nil {
@@ -294,9 +295,16 @@ func readSweepRun(root, projectID string) string {
 }
 
 // takeSweepRun is the exit-time read: the slug, then the file goes. The
-// run has to still exist — an interrupted sweep disposes the run it
-// minted after writing this file, and a link to a deleted run is worse
-// than the plain text /serve had before.
+// run has to still exist, because a link to a run that isn't there is
+// worse than the plain text /serve had before.
+//
+// Note what this does *not* catch: a Ctrl-C'd sweep. disposePulseRun
+// closes the run it minted — stamping the skip note over the canvas —
+// rather than deleting it, so run.json survives and the link stands.
+// That is the better answer anyway: the row points at a real page that
+// says the sweep was skipped. The stat covers the states where the run
+// genuinely isn't on disk — a mint that failed after the emit write, a
+// stale file whose run was since removed by hand.
 func takeSweepRun(root, projectID string) string {
 	slug := readSweepRun(root, projectID)
 	_ = clearSweepRun(root, projectID)

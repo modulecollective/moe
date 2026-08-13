@@ -591,10 +591,12 @@ func TestFailedSweepRowLinksItsRun(t *testing.T) {
 	}
 }
 
-// TestSweepLinkNeedsTheRunToExist: an interrupted sweep disposes the run
-// it minted *after* writing the emit file. A link to a deleted run is
-// worse than the plain text /serve had before, so the run has to still
-// be there at exit.
+// TestSweepLinkNeedsTheRunToExist: the emit file can name a run that
+// never landed — a mint that failed after the write, a stale file whose
+// run was since removed. A link to a run that isn't there is worse than
+// the plain text /serve had before, so the run has to still be on disk
+// at exit. (A Ctrl-C'd sweep is *not* this case: disposePulseRun closes
+// its run rather than deleting it, so that link stands.)
 func TestSweepLinkNeedsTheRunToExist(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
@@ -693,12 +695,11 @@ func TestSweepRunFileTakesOnlyASlug(t *testing.T) {
 	}
 }
 
-// TestDisposedRunDropsTheLazyCachedLink: panel() caches a live sweep's
+// TestMissingRunDropsTheLazyCachedLink: panel() caches a live sweep's
 // slug without checking the run exists — tolerable mid-flight only
-// because the exit read is authoritative. A sweep interrupted after
-// minting disposes its run; the row must not keep wearing the cached
-// link once the exit read finds nothing behind it.
-func TestDisposedRunDropsTheLazyCachedLink(t *testing.T) {
+// because the exit read is authoritative. When that read finds nothing
+// behind the slug, the row must not keep wearing the cached link.
+func TestMissingRunDropsTheLazyCachedLink(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
@@ -708,8 +709,7 @@ func TestDisposedRunDropsTheLazyCachedLink(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The emit file names a run that is not on disk — the shape a
-	// mid-sweep dispose leaves behind.
+	// The emit file names a run that is not on disk.
 	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

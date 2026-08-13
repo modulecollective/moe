@@ -334,8 +334,9 @@ func New(opts Options) (*Server, error) {
 		// is where both are known at once, so it is where the exit event and
 		// the project row learn it — and where the file goes. Recorded even
 		// when empty: panel() may have lazily cached the slug mid-sweep
-		// without checking the run survived, and this read is the check — a
-		// sweep whose run was disposed takes its link back off the row here.
+		// without checking the run was ever committed, and this read is the
+		// check — a sweep whose run never landed takes its link back off
+		// the row here.
 		runID := ""
 		if project := heartbeatProject(id); project != "" {
 			runID = takeSweepRun(s.opts.Root, project)
