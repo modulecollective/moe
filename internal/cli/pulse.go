@@ -14,6 +14,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/chore"
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -898,6 +899,11 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 // proposed twice in one gate hits the dedupe rather than minting a dated
 // sibling.
 //
+// Both spellings of a thread entry reach the minter: an object spec
+// mints, and a string names a parked run — which may be a tagged idea,
+// and then promotion is what "opens" it. Only the string that resolves
+// to nothing promotable travels on as a slug for the groom.
+//
 // A minted run travels onward as its own run id rather than as a name in
 // a shared namespace. That is the whole of the alias map's replacement:
 // the gate's two lists used to name each other by slug, so the mapping
@@ -917,7 +923,20 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
 		for _, entry := range th.Runs {
 			if entry.Spec == nil {
-				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
+				// A string entry names "any parked run in the project", and a
+				// tagged idea is one — the survey that nominated all three
+				// parked ideas on 2026-08-13 spelled every entry this way and
+				// the groom dropped all three, because resolveMember admits
+				// only chainable runs. So promotion gets its turn here too:
+				// the grammar offers two spellings and both have to work.
+				// Anything that isn't a promotable idea falls through to the
+				// slug it always was — an ordinary parked run is the common
+				// case and stays the groom's to resolve.
+				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, stdout, stderr); id != "" {
+					grp.Runs = append(grp.Runs, groomMember{mintedID: id})
+				} else {
+					grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
+				}
 				continue
 			}
 			// Mint in place. A spec that fails leaves a hole in the order
@@ -1092,22 +1111,43 @@ func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr 
 // `--from-idea` uses. Everything else already has this work in flight
 // and skips.
 func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr io.Writer) string {
+	id, dup := m.promoteIfTaggedIdea(slug, s, stdout, stderr)
+	if dup {
+		moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", m.projectID, slug)
+	}
+	return id
+}
+
+// promoteIfTaggedIdea promotes the tagged idea named by slug and returns
+// the destination run's id, or "" when slug doesn't name one. It is the
+// promotion seam both entries into the gate share: a spec whose slug
+// collided with a live run (promoteOrSkip, above) and a thread's string
+// entry naming a parked run (applyPulseGate) are the same question asked
+// from two grammars, and a tagged idea is a promotable answer to both.
+//
+// dup reports the one case a caller has to speak to itself: slug names
+// live work that isn't a lone idea. What that means depends on the
+// grammar — a duplicate proposal to the spec path, an ordinary parked
+// run to the thread path — so it's returned rather than warned about
+// here. Every other refusal (an unreadable scan, an untagged idea, an
+// unusable tag, a failed promotion) has already warned by the time this
+// returns "".
+func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, stderr io.Writer) (id string, dup bool) {
 	projectID, pulseSlug := m.projectID, m.pulseSlug
 	spawnedBy := projectID + "/" + pulseSlug
 
 	matches, err := matchingLiveRuns(m.root, projectID, slug)
 	if err != nil {
 		moePrintf(stderr, "pulse: spawn: scan live match for %s/%s: %v\n", projectID, slug, err)
-		return ""
+		return "", false
 	}
-	if len(matches) != 1 || matches[0].Workflow != "idea" {
-		moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", projectID, slug)
-		return ""
+	if len(matches) != 1 || matches[0].Workflow != dash.IdeaWorkflow {
+		return "", true
 	}
 	idea := matches[0]
 	if idea.PromoteTo == "" {
 		moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
-		return ""
+		return "", false
 	}
 	if idea.PromoteTo == "twin" {
 		// A `(twin)` tag nominates a reflect; it does not name a
@@ -1120,18 +1160,18 @@ func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr 
 		// reachable through the MoE-Promoted-To edge.
 		id := maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
 		if id == "" {
-			return ""
+			return "", false
 		}
 		if markErr := runopen.MarkPromoted(m.root, projectID, idea.ID, projectID, id, walkConsent(), stdout, stderr); markErr != nil {
 			moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
 		}
 		moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)
-		return id
+		return id, false
 	}
 	wf, lookupErr := LookupWorkflow(idea.PromoteTo)
 	if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
 		moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
-		return ""
+		return "", false
 	}
 	if strings.TrimSpace(s.Design) != "" {
 		moePrintf(stderr, "pulse: spawn: ignoring design body for tagged idea %s/%s; the idea canvas is the seed\n", projectID, idea.ID)
@@ -1144,14 +1184,14 @@ func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr 
 	}, stdout, stderr)
 	if promoteErr != nil {
 		moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
-		return ""
+		return "", false
 	}
 	if promoted.MarkErr != nil {
 		moePrintf(stderr, "pulse: warning: promoted %s/%s but could not mark the idea: %v\n", projectID, promoted.Run.ID, promoted.MarkErr)
 	}
 	m.live = append(m.live, promoted.Run.ID)
 	moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, idea.PromoteTo, projectID, promoted.Run.ID)
-	return promoted.Run.ID
+	return promoted.Run.ID, false
 }
 
 // ensureLive loads the dedupe set on first use, so a gate whose specs
