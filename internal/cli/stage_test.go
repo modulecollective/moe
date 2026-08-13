@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -962,6 +963,44 @@ func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "no document changes") {
 		t.Errorf("stdout missing nothing-to-commit line: %q", stdout.String())
+	}
+}
+
+// TestCloseErrorPrintsOneSessionClosePrefix pins the convention the
+// doubled-prefix bug broke: session close errors self-describe, so the
+// CLI print sites add nothing. Both stage.go sites take the same
+// canvas-unchanged refusal — the close error an operator sees most —
+// and both must render its "session close:" exactly once.
+func TestCloseErrorPrintsOneSessionClosePrefix(t *testing.T) {
+	closeErr := &session.CanvasUnchangedError{
+		Project:      "moe",
+		Run:          "r",
+		Doc:          "code",
+		Branch:       "session/moe/r/code",
+		WorktreePath: "/tmp/sessions/r",
+		CanvasPath:   "projects/moe/runs/r/documents/code/content.md",
+	}
+
+	t.Run("reportWikiSessionExit", func(t *testing.T) {
+		in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "code"}
+		var stdout, stderr bytes.Buffer
+		if code := reportWikiSessionExit(in, nil, nil, closeErr, nil, nil, &stdout, &stderr); code != 1 {
+			t.Errorf("exit code = %d, want 1 on close error", code)
+		}
+		assertOneSessionClosePrefix(t, stderr.String())
+	})
+
+	t.Run("closeBootstrapFailedSession", func(t *testing.T) {
+		var stderr bytes.Buffer
+		closeBootstrapFailedSession(func(bool) error { return closeErr }, &stderr)
+		assertOneSessionClosePrefix(t, stderr.String())
+	})
+}
+
+func assertOneSessionClosePrefix(t *testing.T, stderr string) {
+	t.Helper()
+	if n := strings.Count(stderr, "session close:"); n != 1 {
+		t.Errorf("stderr has %d %q prefixes, want exactly 1: %q", n, "session close:", stderr)
 	}
 }
 

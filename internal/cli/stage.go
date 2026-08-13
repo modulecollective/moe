@@ -984,7 +984,8 @@ type wikiTurnSpec struct {
 // post-executor path's failure case.
 func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.Writer) {
 	if err := closeSess(false); err != nil {
-		moePrintf(stderr, "session close: %v\n", err)
+		// Bare %v — close errors self-describe. See closeWithAutoResolve.
+		moePrintf(stderr, "%v\n", err)
 	}
 }
 
@@ -1405,7 +1406,8 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		moePrintf(stdout, "committed %s turn for %s/%s\n", in.DocID, in.Project, in.RunSlug)
 	}
 	if closeErr != nil {
-		moePrintf(stderr, "session close: %v\n", closeErr)
+		// Bare %v — close errors self-describe. See closeWithAutoResolve.
+		moePrintf(stderr, "%v\n", closeErr)
 		return 1
 	}
 	if runErr != nil || finalizeErr != nil || gateErr != nil {

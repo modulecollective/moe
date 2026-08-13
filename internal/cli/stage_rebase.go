@@ -26,7 +26,10 @@ func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, st
 	if !errors.As(err, &rebaseFail) {
 		return err
 	}
-	moePrintf(stderr, "session close: %v\n", err)
+	// Bare %v: every error out of closeSess self-describes (session
+	// errors open with "session close:", repolock errors with
+	// "repolock:"), so a print-site prefix here would double it.
+	moePrintf(stderr, "%v\n", err)
 	moePrintln(stderr, "  launching an agent to resolve the rebase; single-shot — if it can't, the message above is what you'll see again")
 
 	prompt := buildSessionRebaseResolveKickoff(rebaseFail)

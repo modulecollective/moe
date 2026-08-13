@@ -65,6 +65,11 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 	if !strings.Contains(stderr.String(), "launching an agent") {
 		t.Errorf("stderr should announce the chain-back: %q", stderr.String())
 	}
+	// The error self-describes with "session close:"; the print site
+	// must not prepend a second one. Guards the doubled-prefix bug.
+	if n := strings.Count(stderr.String(), "session close:"); n != 1 {
+		t.Errorf("stderr has %d %q prefixes, want exactly 1: %q", n, "session close:", stderr.String())
+	}
 }
 
 // TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError: the
