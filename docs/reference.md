@@ -35,6 +35,14 @@ source of truth for the exact command surface; this page is a map.
   status and trace — what each recent tick decided, and the output tail of any
   sweep that failed — reachable from the menu and from the one-line status
   cluster every board header carries.
+- `moe serve snooze [duration]` / `moe serve wake` hold and release the
+  heartbeat without stopping the process. A snooze pauses the clock and nothing
+  else: clicks, `!!!!` tails and hand-run pulses stay live, because those spend
+  only when you ask them to. With no argument, `snooze` reports the current
+  hold. It works with serve up or down, survives a restart, and always expires —
+  the indefinite off-switch is still stopping the process. `/serve` carries 1h
+  and 4h preset buttons plus a wake; both dashes show `snoozed until 09:00` in
+  place of the next-sweep countdown.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
