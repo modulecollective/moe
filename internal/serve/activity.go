@@ -56,6 +56,11 @@ type activityEvent struct {
 	Subject string
 	Detail  string
 	Failed  bool
+	// Run is the pulse run a heartbeat sweep minted, read out of the
+	// child's emit file at exit. Empty for every other child — a run
+	// child's subject already names its run — and empty for a sweep that
+	// died before minting one.
+	Run string
 	// Tail is the child's last PTY bytes, ANSI-stripped. Exit events
 	// only, and web-only: it never reaches the state file.
 	Tail string
@@ -72,7 +77,12 @@ type activityProject struct {
 	// a row on /serve rather than a tally mark. Runtime-only, like the
 	// rest of this struct — it never reaches the state file, because the
 	// CLI dash's earned rows stay sweeping/cooling/failed.
-	held      bool
+	held bool
+	// runID is the pulse run the current-or-last sweep minted, learned
+	// from the child's emit file — lazily while the sweep is live, and at
+	// its exit. Empty until one is known, and cleared at each sweep start:
+	// the previous sweep's run is not this one's.
+	runID     string
 	started   time.Time // current sweep's start; zero when none is running
 	sweptAt   time.Time
 	clean     bool
@@ -84,6 +94,10 @@ type activityProject struct {
 type activity struct {
 	mu sync.Mutex
 
+	// root is the bureaucracy the record belongs to. Held because a live
+	// sweep's run is on disk, not in the record: panel() reads the emit
+	// file for a project whose sweep is still running (see sweepRunPath).
+	root    string
 	pid     int
 	addr    string
 	armed   bool
@@ -101,8 +115,9 @@ type activity struct {
 	events   []activityEvent
 }
 
-func newActivity(pid int, addr string, armed bool, now time.Time) *activity {
+func newActivity(root string, pid int, addr string, armed bool, now time.Time) *activity {
 	return &activity{
+		root:     root,
 		pid:      pid,
 		addr:     addr,
 		armed:    armed,
@@ -161,7 +176,20 @@ func (a *activity) recordSkip(projectID, reason string, fails, coolTicks int) {
 func (a *activity) recordSweepStart(projectID string, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.project(projectID).started = at
+	p := a.project(projectID)
+	p.started = at
+	// The last sweep's run is not this one's, and the new one hasn't
+	// minted its own yet — the row goes back to naming no run until the
+	// emit file says otherwise.
+	p.runID = ""
+}
+
+// recordSweepRun folds in the run a sweep minted, once serve has read it
+// out of the child's emit file.
+func (a *activity) recordSweepRun(projectID, runID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.project(projectID).runID = runID
 }
 
 func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fails, coolTicks int) {
@@ -184,7 +212,7 @@ func (a *activity) recordChildSpawn(id string, at time.Time) {
 	a.push(activityEvent{At: at, Kind: "spawn", Subject: id, Detail: "started"})
 }
 
-func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail string) {
+func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail, runID string) {
 	detail := "exited cleanly"
 	if exitErr != nil {
 		detail = "exited: " + exitErr.Error()
@@ -193,7 +221,7 @@ func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail 
 	defer a.mu.Unlock()
 	a.push(activityEvent{
 		At: at, Kind: "exit", Subject: id,
-		Detail: detail, Failed: exitErr != nil, Tail: tail,
+		Detail: detail, Failed: exitErr != nil, Tail: tail, Run: runID,
 	})
 }
 

@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // The resident heartbeat: the clock that makes MoE's find → order →
@@ -204,8 +208,13 @@ func (s *Server) heartbeatTick() {
 				continue
 			}
 		}
+		if err := clearSweepRun(s.opts.Root, projectID); err != nil {
+			s.logf("heartbeat: clear sweep run file for %s: %v", projectID, err)
+		}
 		child, err := s.children.spawn(id, s.opts.MoeBin,
-			[]string{"pulse", "new", "--dynamic", projectID}, s.opts.Root, s.opts.Logger)
+			[]string{"pulse", "new", "--dynamic",
+				"--emit-run", sweepRunPath(s.opts.Root, projectID), projectID},
+			s.opts.Root, s.opts.Logger)
 		if err != nil {
 			s.logf("heartbeat: spawn %s: %v", projectID, err)
 			continue
@@ -237,6 +246,67 @@ func (s *Server) awaitHeartbeat(projectID string, c *child) {
 	}
 	s.activity.recordSweepEnd(projectID, time.Now(), !failed, fails, skip)
 	s.saveActivity()
+}
+
+// sweepRunPath is where the sweep child for projectID writes its run —
+// the slug's way back across the process boundary.
+//
+// A sweep mints its pulse run inside the child, and the only thing that
+// crossed back before this was the exit code, which is why /serve could
+// say "moe sweeping (3m)" and never name what it was sweeping into. The
+// child writes the slug to this file (`moe pulse new --emit-run`) and
+// serve reads it. One file per project, owned by serve: cleared before
+// every spawn, so an absent file always means "no run minted", never "a
+// run from some earlier sweep".
+//
+// Under `.moe/`, which carries a `*` gitignore — sweeps never dirty the
+// tree.
+func sweepRunPath(root, projectID string) string {
+	return filepath.Join(root, ".moe", "sweep-"+projectID)
+}
+
+// clearSweepRun drops a project's emit file. Called before each spawn:
+// a file left by a sweep whose exit serve never saw (a restart mid-sweep)
+// would otherwise be read as the new sweep's run.
+func clearSweepRun(root, projectID string) error {
+	err := os.Remove(sweepRunPath(root, projectID))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// readSweepRun returns the run slug a live sweep has already written, or
+// "" when there is nothing there yet. Shape-validated because this is a
+// file boundary; the run itself is not checked, so a page load during
+// the seconds between a dispose and the child's exit can show a link
+// that 404s.
+func readSweepRun(root, projectID string) string {
+	body, err := os.ReadFile(sweepRunPath(root, projectID))
+	if err != nil {
+		return ""
+	}
+	slug := strings.TrimSpace(string(body))
+	if !slugPattern.MatchString(slug) {
+		return ""
+	}
+	return slug
+}
+
+// takeSweepRun is the exit-time read: the slug, then the file goes. The
+// run has to still exist — an interrupted sweep disposes the run it
+// minted after writing this file, and a link to a deleted run is worse
+// than the plain text /serve had before.
+func takeSweepRun(root, projectID string) string {
+	slug := readSweepRun(root, projectID)
+	_ = clearSweepRun(root, projectID)
+	if slug == "" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(root, run.Dir(projectID, slug), "run.json")); err != nil {
+		return ""
+	}
+	return slug
 }
 
 // heartbeatProject returns the project a child id names when the child

@@ -147,7 +147,7 @@ func TestHeartbeatSpawnsTheDynamicSweep(t *testing.T) {
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	if got := argv(); !strings.Contains(got, "pulse new --dynamic alpha") {
+	if got := argv(); !strings.Contains(got, "pulse new --dynamic ") || !strings.HasSuffix(strings.TrimSpace(got), " alpha") {
 		t.Errorf("child argv = %q, want the dynamic sweep", got)
 	}
 }
@@ -339,7 +339,7 @@ func TestArmedServeTicks(t *testing.T) {
 	if err := s.ListenAndServe(ctx); err != nil {
 		t.Fatalf("ListenAndServe: %v", err)
 	}
-	if got := argv(); !strings.Contains(got, "pulse new --dynamic alpha") {
+	if got := argv(); !strings.Contains(got, "pulse new --dynamic ") || !strings.HasSuffix(strings.TrimSpace(got), " alpha") {
 		t.Errorf("armed serve spawned %q, want the dynamic sweep", got)
 	}
 }
@@ -498,6 +498,197 @@ func TestNotifyDistinguishesASweepFromARun(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatalf("notifier never POSTed for %s", tc.id)
+		}
+	}
+}
+
+// emitRunRecorder writes a fake `moe` that honours --emit-run: it writes
+// the given slug to the path serve passed, then exits with the given
+// status. It stands in for a sweep child, whose real job — from serve's
+// side — is exactly this: mint a run and name it.
+func emitRunRecorder(t *testing.T, slug string, exitCode int) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "fake-moe")
+	script := "#!/bin/sh\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"  if [ \"$1\" = \"--emit-run\" ]; then printf '%s\\n' " + slug + " > \"$2\"; fi\n" +
+		"  shift\n" +
+		"done\n" +
+		"exit " + strconv.Itoa(exitCode) + "\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// TestSweepExitEventLinksItsRun: "heartbeat:alpha exited cleanly" was
+// every word serve had about a sweep. The run the sweep opened is what
+// answers "and what did it do" — one click from the event, now that the
+// child names it.
+func TestSweepExitEventLinksItsRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate,
+		MoeBin: emitRunRecorder(t, "pulse-2026-04-01", 0),
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	waitFor(t, "the exit event", func() bool {
+		for _, ev := range s.activity.panel(time.Now()).Events {
+			if ev.Kind == "exit" {
+				return true
+			}
+		}
+		return false
+	})
+
+	var exit serveEventVM
+	for _, ev := range s.activity.panel(time.Now()).Events {
+		if ev.Kind == "exit" {
+			exit = ev
+		}
+	}
+	if got, want := exit.RunURL, "/run/alpha/pulse-2026-04-01"; got != want {
+		t.Errorf("exit event RunURL=%q, want %q", got, want)
+	}
+	// Serve owns the file: read once, then gone, so its presence never
+	// outlives the sweep that wrote it.
+	if _, err := os.Stat(sweepRunPath(root, "alpha")); !os.IsNotExist(err) {
+		t.Errorf("emit file still there after the exit (err=%v), want it consumed", err)
+	}
+}
+
+// TestFailedSweepRowLinksItsRun is the payoff: the run a dead sweep left
+// open is exactly the thing the operator wants, and hunting the dash for
+// a `pulse-*` slug whose date roughly matches was the whole complaint.
+func TestFailedSweepRowLinksItsRun(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate,
+		MoeBin: emitRunRecorder(t, "pulse-2026-04-01", 1),
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the failed sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	waitFor(t, "the cool-off row", func() bool {
+		for _, p := range s.activity.panel(time.Now()).Projects {
+			if p.Project == "alpha" && p.Failed {
+				return true
+			}
+		}
+		return false
+	})
+
+	for _, p := range s.activity.panel(time.Now()).Projects {
+		if p.Project == "alpha" && p.Run != "pulse-2026-04-01" {
+			t.Errorf("cooling row Run=%q, want the run the dead sweep left open", p.Run)
+		}
+	}
+}
+
+// TestSweepLinkNeedsTheRunToExist: an interrupted sweep disposes the run
+// it minted *after* writing the emit file. A link to a deleted run is
+// worse than the plain text /serve had before, so the run has to still
+// be there at exit.
+func TestSweepLinkNeedsTheRunToExist(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate,
+		MoeBin: emitRunRecorder(t, "pulse-2026-04-01", 0),
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+
+	for _, ev := range s.activity.panel(time.Now()).Events {
+		if ev.Kind == "exit" && ev.RunURL != "" {
+			t.Errorf("exit event RunURL=%q, want none — the run it named is gone", ev.RunURL)
+		}
+	}
+}
+
+// TestStaleEmitFileIsClearedBeforeTheSpawn: a serve restarted mid-sweep
+// leaves a file naming the old sweep's run. Absent is the only honest
+// "nothing minted yet", so the next spawn clears it first — otherwise the
+// new sweep would render as the old one's run.
+func TestStaleEmitFileIsClearedBeforeTheSpawn(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	bin, _ := argvRecorder(t, 0) // a child that mints nothing
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate, MoeBin: bin,
+	})
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+
+	for _, ev := range s.activity.panel(time.Now()).Events {
+		if ev.Kind == "exit" && ev.RunURL != "" {
+			t.Errorf("exit event RunURL=%q, want none — that run belonged to an earlier sweep", ev.RunURL)
+		}
+	}
+}
+
+// TestLiveSweepRowLinksMidFlight: the slug is on disk seconds after the
+// spawn, but serve only hears about it at exit — and a sweep that kicked
+// a ride can be "sweeping" for hours. Those are the ones worth peeking
+// at, so the row reads the file rather than waiting.
+func TestLiveSweepRowLinksMidFlight(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	a := newActivity(root, 4242, "127.0.0.1:4242", true, now)
+	a.recordSweepStart("alpha", now.Add(-3*time.Minute))
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vm := a.panel(now)
+	if len(vm.Projects) != 1 || vm.Projects[0].State != "sweeping" {
+		t.Fatalf("projects=%+v, want one sweeping row", vm.Projects)
+	}
+	if got := vm.Projects[0].Run; got != "pulse-2026-04-01" {
+		t.Errorf("live row Run=%q, want the run the sweep is filling in", got)
+	}
+	// Cached: the next page load costs no read.
+	if err := os.Remove(sweepRunPath(root, "alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.panel(now).Projects[0].Run; got != "pulse-2026-04-01" {
+		t.Errorf("second load Run=%q, want the cached slug", got)
+	}
+}
+
+// TestSweepRunFileTakesOnlyASlug: a file boundary, and the value lands in
+// an href. Shape-check it rather than trust whatever is on disk.
+func TestSweepRunFileTakesOnlyASlug(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"../../etc/passwd", "a b", "", "Pulse-2026", "alpha/pulse-2026-04-01"} {
+		if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := readSweepRun(root, "alpha"); got != "" {
+			t.Errorf("readSweepRun(%q) = %q, want nothing — not a run slug", body, got)
 		}
 	}
 }

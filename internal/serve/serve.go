@@ -320,7 +320,7 @@ func New(opts Options) (*Server, error) {
 		router:    http.NewServeMux(),
 		children:  newChildren(),
 		heartbeat: newHeartbeat(),
-		activity:  newActivity(os.Getpid(), addr, opts.Dynamic, time.Now()),
+		activity:  newActivity(opts.Root, os.Getpid(), addr, opts.Dynamic, time.Now()),
 	}
 	if opts.NotifyURL != "" {
 		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
@@ -330,7 +330,16 @@ func New(opts Options) (*Server, error) {
 		s.saveActivity()
 	}
 	s.children.onExit = func(id string, at time.Time, exitErr error, tail string) {
-		s.activity.recordChildExit(id, at, exitErr, cleanTail(tail))
+		// A heartbeat sweep names the run it minted in its emit file. This
+		// is where both are known at once, so it is where the exit event and
+		// the project row learn it — and where the file goes.
+		runID := ""
+		if project := heartbeatProject(id); project != "" {
+			if runID = takeSweepRun(s.opts.Root, project); runID != "" {
+				s.activity.recordSweepRun(project, runID)
+			}
+		}
+		s.activity.recordChildExit(id, at, exitErr, cleanTail(tail), runID)
 		s.saveActivity()
 	}
 	s.registerRoutes()

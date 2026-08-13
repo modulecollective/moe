@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func testActivity(now time.Time, armed bool) *activity {
-	return newActivity(4242, "127.0.0.1:4242", armed, now)
+func testActivity(t *testing.T, now time.Time, armed bool) *activity {
+	return newActivity(t.TempDir(), 4242, "127.0.0.1:4242", armed, now)
 }
 
 // TestActivityRecordsEveryVerdictNotJustTheSweeps is the whole point of
@@ -18,7 +18,7 @@ func testActivity(now time.Time, armed bool) *activity {
 // diagnosed by inferring invisible cursor state.
 func TestActivityRecordsEveryVerdictNotJustTheSweeps(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{
 		{Project: "moe", Sweep: true, Reason: "the journal moved"},
 		{Project: "bureaucracy", Reason: "a sweep already surveyed the current tip"},
@@ -44,7 +44,7 @@ func TestActivityRecordsEveryVerdictNotJustTheSweeps(t *testing.T) {
 // doing nothing of the kind.
 func TestActivityCoolOffOverridesTheGatesReason(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{{Project: "moe", Sweep: true, Reason: "the journal moved"}})
 	a.recordSkip("moe", "cooling off after 2 failure(s)", 2, 1)
 
@@ -67,7 +67,7 @@ func TestActivityCoolOffOverridesTheGatesReason(t *testing.T) {
 // live, exit clears that and records the outcome.
 func TestActivitySweepLifecycle(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordSweepStart("moe", now)
 	if p := a.snapshot(now).Projects[0]; !p.Sweeping() {
 		t.Fatalf("project = %+v, want a live sweep", p)
@@ -97,7 +97,7 @@ func TestActivityFailedNeedsAFinishedSweep(t *testing.T) {
 // to survive a serve left running for weeks without growing.
 func TestActivityRingIsBounded(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	for i := range activityRing * 3 {
 		a.recordChildSpawn("alpha/run", now.Add(time.Duration(i)*time.Second))
 	}
@@ -112,7 +112,7 @@ func TestActivityRingIsBounded(t *testing.T) {
 // a different answer from "no serve at all".
 func TestActivityNextTickIsExactBeforeTheFirstTick(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	if got := a.snapshot(now).NextTick; !got.Equal(now.Add(heartbeatInterval)) {
 		t.Errorf("next tick = %v, want the process start plus one interval", got)
 	}
@@ -129,7 +129,7 @@ func TestActivityNextTickIsExactBeforeTheFirstTick(t *testing.T) {
 // will never pulse" is exactly the confusion being fixed.
 func TestActivityUnarmedServeHasNoNextTick(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, false)
+	a := testActivity(t, now, false)
 	if got := a.snapshot(now).NextTick; !got.IsZero() {
 		t.Errorf("next tick = %v on an unarmed serve, want none", got)
 	}
@@ -149,7 +149,7 @@ func TestActivityStateFileRoundTrips(t *testing.T) {
 		t.Fatalf("read with no file = (%v, %v), want (false, nil) — a dash with no serve must stay as it was", ok, err)
 	}
 
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{{Project: "moe", Sweep: true, Reason: "the journal moved"}})
 	if err := writeSnapshot(root, a.snapshot(now)); err != nil {
 		t.Fatalf("writeSnapshot: %v", err)
@@ -183,7 +183,7 @@ func TestActivityStateFileRoundTrips(t *testing.T) {
 // operator's tree.
 func TestActivityStateFileStaysOutOfGit(t *testing.T) {
 	root := t.TempDir()
-	if err := writeSnapshot(root, testActivity(time.Now(), true).snapshot(time.Now())); err != nil {
+	if err := writeSnapshot(root, testActivity(t, time.Now(), true).snapshot(time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(root + "/.moe/.gitignore")
@@ -265,7 +265,7 @@ func TestActivityPanelPrecedence(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := testActivity(now.Add(-2*time.Hour), true)
+			a := testActivity(t, now.Add(-2*time.Hour), true)
 			if tc.held {
 				a.recordTick(now, []HeartbeatDecision{
 					{Project: "moe", Held: true, Reason: "somebody is already inside the project"},
@@ -294,7 +294,7 @@ func TestActivityPanelPrecedence(t *testing.T) {
 // spawned, and a tick's news on one line.
 func TestActivityPanelIsBoardWide(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{
 		{Project: "moe", Sweep: true, Reason: "the journal moved"},
 		{Project: "bureaucracy", Held: true, Reason: "somebody is already inside the project"},
@@ -323,7 +323,7 @@ func TestActivityPanelIsBoardWide(t *testing.T) {
 // verdicts. One tally mark carries the same fact.
 func TestActivityPanelCollapsesTheQuiet(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{
 		{Project: "moe", Sweep: true, Reason: "the journal moved"},
 		{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
@@ -354,7 +354,7 @@ func TestActivityPanelCollapsesTheQuiet(t *testing.T) {
 // alive" once, on the status line, instead of once per tick.
 func TestActivityPanelDropsAnAllQuietTick(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now.Add(-time.Hour), true)
+	a := testActivity(t, now.Add(-time.Hour), true)
 	a.recordTick(now.Add(-24*time.Minute), []HeartbeatDecision{
 		{Project: "moe", Reason: "a sweep already surveyed the current tip"},
 	})
@@ -379,7 +379,7 @@ func TestActivityPanelDropsAnAllQuietTick(t *testing.T) {
 // worse answer than saying nothing.
 func TestActivityPanelHasNoLastTickBeforeTheFirstOne(t *testing.T) {
 	now := time.Now()
-	if got := testActivity(now, true).panel(now).LastTick; got != "" {
+	if got := testActivity(t, now, true).panel(now).LastTick; got != "" {
 		t.Errorf("last tick = %q on a serve that has never ticked, want nothing", got)
 	}
 }
@@ -388,12 +388,12 @@ func TestActivityPanelHasNoLastTickBeforeTheFirstOne(t *testing.T) {
 // just happened".
 func TestActivityPanelIsNewestFirst(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordChildSpawn("alpha/first", now)
 	a.recordChildSpawn("alpha/second", now.Add(time.Minute))
 
 	vm := a.panel(now)
-	if len(vm.Events) != 2 || !strings.Contains(vm.Events[0].Text, "second") {
+	if len(vm.Events) != 2 || vm.Events[0].Subject != "alpha/second" {
 		t.Errorf("events = %+v, want the newest first", vm.Events)
 	}
 }
@@ -404,9 +404,9 @@ func TestActivityPanelIsNewestFirst(t *testing.T) {
 // noise.
 func TestActivityExitCarriesItsTail(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
-	a.recordChildExit(heartbeatChildPrefix+"moe", now, errors.New("exit status 1"), "credit limit reached")
-	a.recordChildExit("alpha/fine", now, nil, "all good")
+	a := testActivity(t, now, true)
+	a.recordChildExit(heartbeatChildPrefix+"moe", now, errors.New("exit status 1"), "credit limit reached", "" /*run*/)
+	a.recordChildExit("alpha/fine", now, nil, "all good", "" /*run*/)
 
 	vm := a.panel(now)
 	var failed, clean serveEventVM
@@ -432,8 +432,8 @@ func TestActivityExitCarriesItsTail(t *testing.T) {
 // watch repaint, so 8KB of PTY bytes per child has no business in it.
 func TestActivityTailIsNotInTheStateFile(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
-	a.recordChildExit(heartbeatChildPrefix+"moe", now, errors.New("boom"), "SECRET-TAIL-MARKER")
+	a := testActivity(t, now, true)
+	a.recordChildExit(heartbeatChildPrefix+"moe", now, errors.New("boom"), "SECRET-TAIL-MARKER", "" /*run*/)
 
 	root := t.TempDir()
 	if err := writeSnapshot(root, a.snapshot(now)); err != nil {
@@ -482,7 +482,7 @@ func TestCleanTailKeepsOnlyTheNewestLines(t *testing.T) {
 // and the other fails.
 func TestActivityPanelClusterMatchesTheCLIBanner(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now.Add(-3*24*time.Hour-2*time.Hour), true)
+	a := testActivity(t, now.Add(-3*24*time.Hour-2*time.Hour), true)
 	// A tick 8m back puts the next one 12m out on the 20m cadence.
 	a.recordTick(now.Add(-8*time.Minute), nil)
 	if got, want := a.panel(now).Cluster, "serve armed · up 3d 2h · next 12m"; got != want {
@@ -495,7 +495,7 @@ func TestActivityPanelClusterMatchesTheCLIBanner(t *testing.T) {
 // panel itself lives on /serve.
 func TestActivityPanelClusterCountsFailingProjects(t *testing.T) {
 	now := time.Now()
-	a := testActivity(now, true)
+	a := testActivity(t, now, true)
 	a.recordTick(now, []HeartbeatDecision{
 		{Project: "alpha", Sweep: true, Reason: "the journal moved"},
 		{Project: "beta", Sweep: true, Reason: "the journal moved"},
