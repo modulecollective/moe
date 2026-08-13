@@ -82,7 +82,7 @@ func TestPulseSurveyLatchBeforeOpenMintsNothing(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, latchedPulseInterrupt(t), io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, latchedPulseInterrupt(t), io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if calls != 0 {
@@ -117,7 +117,7 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
@@ -180,7 +180,7 @@ func TestPulseDisposeStampFailureLeavesRunOpen(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if closed := closedPulseRuns(t, root); len(closed) != 0 {
@@ -228,7 +228,7 @@ func TestPulseDisposeCommitFailureRestoresRun(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, newTestPulseInterrupt(t), io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if closed := closedPulseRuns(t, root); len(closed) != 0 {
@@ -304,7 +304,7 @@ func TestPulseSurveyMidAgentInterruptLeavesRunOpen(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	pi := newTestPulseInterrupt(t)
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, pi, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, pi, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (interrupt not a verb failure)", code)
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
@@ -340,7 +340,7 @@ func TestPulseSurveyLatchWithCleanAgentExitLeavesRunOpen(t *testing.T) {
 
 	var errb bytes.Buffer
 	pi := newTestPulseInterrupt(t)
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, pi, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, pi, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
@@ -372,7 +372,7 @@ func TestPulseNewExitsInterruptedOnSkip(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	orig := runPulseSurvey
-	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	runPulseSurvey = func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		pi.mark() // the operator Ctrl-C'd the sweep
 		return 0
 	}
@@ -830,7 +830,7 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0 (no single-flight refusal); stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
@@ -884,7 +884,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d stderr=%q", code, errb.String())
 	}
 	if calls != 1 {
@@ -940,7 +940,7 @@ func TestPulseSurveyOpensTopLevel(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "ship-it" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 
@@ -993,7 +993,7 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	// The failure crosses out…
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
 		t.Fatal("survey exit=0 on a died sweep — the backoff and the notify ok bit read this")
 	}
 	// …and the run stays open for a manual look.
@@ -1004,7 +1004,7 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	// No single-flight: the next auto-fire still reaches the agent turn
 	// and opens a second run, so the broken sweeps pile up (visible on the
 	// dash) instead of blocking.
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code == 0 {
 		t.Fatal("second survey exit=0 on a died sweep")
 	}
 	if calls != 2 {
@@ -1056,7 +1056,7 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, &errb); code == 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code == 0 {
 		t.Fatalf("survey exit=0 on an unfilled gate — a sweep that concluded nothing is not a clean sweep; stderr=%q", errb.String())
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
@@ -1087,7 +1087,7 @@ func TestPulseSurveyTwinSpawnMintsReflect(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 
@@ -1159,7 +1159,7 @@ func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
@@ -1246,7 +1246,7 @@ esac
 
 	var out, errb bytes.Buffer
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, nil, &out, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb); code != 0 {
 		t.Fatalf("pulse exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -1371,7 +1371,7 @@ exit 0
 `)
 
 	var out, errb bytes.Buffer
-	if code := runPulseSurvey(root, "tele", "" /*spawner*/, nil /*pi*/, &out, &errb); code == 0 {
+	if code := runPulseSurvey(root, "tele", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, &out, &errb); code == 0 {
 		t.Fatalf("survey exit=0, want non-zero (a refused sweep did not complete); stderr=%q", errb.String())
 	}
 	if !strings.Contains(errb.String(), "uncommitted tracked-file changes") {
@@ -1512,7 +1512,7 @@ func TestPulseNewDynamicCarriesConsent(t *testing.T) {
 			var gotMode rideMode
 			var gotWalk bool
 			orig := runPulseSurvey
-			runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+			runPulseSurvey = func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 				gotMode, gotWalk = currentRideMode, rideWalkActive
 				return 0
 			}
@@ -1543,7 +1543,9 @@ func TestPulseNewRestoresRideModeAfterDynamic(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	orig := runPulseSurvey
-	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int { return 0 }
+	runPulseSurvey = func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+		return 0
+	}
 	t.Cleanup(func() { runPulseSurvey = orig })
 
 	var out, errb bytes.Buffer
@@ -1552,5 +1554,78 @@ func TestPulseNewRestoresRideModeAfterDynamic(t *testing.T) {
 	}
 	if currentRideMode != rideNone || rideWalkActive {
 		t.Errorf("after the verb: mode=%s walk=%v, want none/false", currentRideMode, rideWalkActive)
+	}
+}
+
+// TestPulseEmitsTheRunItMinted: the sweep's run is minted inside the
+// child process, and the exit code is all that crosses back on its own —
+// which is why /serve could say "moe sweeping (3m)" and never name what
+// it was sweeping into. `--emit-run` is that channel, and the write lands
+// the moment the run exists rather than at the end: a sweep that kicked a
+// ride is live for hours, and those are the ones worth a link mid-flight.
+func TestPulseEmitsTheRunItMinted(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	emit := filepath.Join(t.TempDir(), "sweep-moe")
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		// Mid-sweep is exactly when a spawning serve reads it.
+		body, err := os.ReadFile(emit)
+		if err != nil {
+			t.Errorf("read emit file during the agent turn: %v", err)
+		} else if got := strings.TrimSpace(string(body)); got != runID {
+			t.Errorf("emit file = %q, want the run being swept into (%q)", got, runID)
+		}
+		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
+		return surveyOutcome{code: 0, agentStarted: true}
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, emit, nil /*pi*/, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
+	}
+	closed := closedPulseRuns(t, root)
+	if len(closed) != 1 {
+		t.Fatalf("closed pulse runs=%v, want the one this sweep opened", closed)
+	}
+	body, err := os.ReadFile(emit)
+	if err != nil {
+		t.Fatalf("read emit file after the sweep: %v", err)
+	}
+	// Bare slug, one line: serve reads it with no parsing to get wrong.
+	if got, want := string(body), closed[0]+"\n"; got != want {
+		t.Errorf("emit file = %q, want %q", got, want)
+	}
+}
+
+// TestPulseEmitFailureNeverFailsTheSweep: the emit file is a convenience
+// for the process that spawned the sweep. Losing it costs a link on
+// /serve, and a sweep that surveyed the board is still a sweep that
+// surveyed the board.
+func TestPulseEmitFailureNeverFailsTheSweep(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
+
+	emit := filepath.Join(t.TempDir(), "no-such-dir", "sweep-moe")
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
+		return surveyOutcome{code: 0, agentStarted: true}
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	if code := runPulseSurvey(root, "moe", "" /*spawner*/, emit, nil /*pi*/, io.Discard, &errb); code != 0 {
+		t.Fatalf("survey exit=%d, want 0 — an unwritable emit path is not a failed sweep; stderr=%q", code, errb.String())
+	}
+	if len(closedPulseRuns(t, root)) != 1 {
+		t.Fatalf("want the sweep's run closed as usual; stderr=%q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "emit run") {
+		t.Errorf("stderr=%q, want a warning naming the emit failure", errb.String())
 	}
 }

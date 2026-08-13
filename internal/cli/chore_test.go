@@ -431,7 +431,7 @@ func TestPulseNewOpensDueChoresBeforeTheSurvey(t *testing.T) {
 
 	openAtSurvey := ""
 	orig := runPulseSurvey
-	runPulseSurvey = func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+	runPulseSurvey = func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 		openAtSurvey = choreOpenRun(t, root, "readme-refresh")
 		return 0
 	}

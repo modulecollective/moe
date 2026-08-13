@@ -280,26 +280,27 @@ func liveChainedChild(root string, md *run.Metadata, stderr io.Writer) string {
 // callers thread it to exitInterrupted so a Ctrl-C halts a cascade
 // instead of riding on to the next run.
 var firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool {
-	_, interrupted := runPulse(root, projectID, spawner, stdout, stderr)
+	_, interrupted := runPulse(root, projectID, spawner, "" /*emitRun*/, stdout, stderr)
 	return interrupted
 }
 
 // runPulse is the whole pulse: the deterministic chore auto-open (which
 // opens runs but executes none), then the survey. spawner is the
 // triggering run's slug ("" for a manual `moe pulse new`, which threads
-// no parent edge).
+// no parent edge). emitRun is the file the survey names its run in, ""
+// for every caller but a spawning serve (see pulseSurvey).
 //
 // It owns the pulse's scoped Ctrl-C latch (installPulseInterrupt): the
 // "scanning — Ctrl-C to skip" banner prints up front, before the run is
 // minted, so the operator knows the skip window is live from the start.
 // The second return is whether the operator interrupted the sweep.
-func runPulse(root, projectID, spawner string, stdout, stderr io.Writer) (int, bool) {
+func runPulse(root, projectID, spawner, emitRun string, stdout, stderr io.Writer) (int, bool) {
 	pi := installPulseInterrupt()
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
 	autoOpenDueChores(root, projectID, pi, stdout, stderr)
 	reconcileAtPulse(root, projectID, pi, stdout, stderr)
-	code := runPulseSurvey(root, projectID, spawner, pi, stdout, stderr)
+	code := runPulseSurvey(root, projectID, spawner, emitRun, pi, stdout, stderr)
 	return code, pi.interrupted()
 }
 
@@ -397,13 +398,13 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
 // introduces (auto-close → closeRunInProcess → firePulse) — the same
 // init-order dodge openPulseStage uses.
-var runPulseSurvey func(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int
+var runPulseSurvey func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int
 
 func init() {
 	runPulseSurvey = pulseSurvey
 }
 
-func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 	// The survey run itself is top-level: no MoE-Spawned-By edge back to
 	// the run whose tail fired it. A pulse closes one generation and roots
 	// the next, so nesting it under its trigger would chain every
@@ -449,6 +450,20 @@ func pulseSurvey(root, projectID, spawner string, pi *pulseInterrupt, stdout, st
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
 		return 1
+	}
+
+	// The slug is minted here, inside the child, and a serve that spawned
+	// this sweep has no other way to learn it — the exit code is the only
+	// thing that crosses back on its own. emitRun is that channel: a
+	// parameter rather than process state or an env var, because a sweep's
+	// ride tail can fire further pulses in-process, and any ambient
+	// carrier would let one of those name its run in a file serve reads as
+	// this sweep's. Warn-only: an unwritable path costs a link, not a
+	// sweep.
+	if emitRun != "" {
+		if err := os.WriteFile(emitRun, []byte(md.ID+"\n"), 0o644); err != nil {
+			moePrintf(stderr, "pulse: emit run for %s: %v\n", projectID, err)
+		}
 	}
 
 	// Checkpoint: a Ctrl-C landed while the run was being minted — dispose
@@ -1444,8 +1459,12 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dynamic := fs.Bool("dynamic", false, "ride what the sweep grooms — the standing fourth bang")
+	// The spawner's channel back: `moe serve` passes a path here and reads
+	// the run the sweep opened out of it, so /serve can link a sweep to
+	// the pulse run it minted. Nothing else passes it.
+	emitRun := fs.String("emit-run", "", "write the run this sweep opens to `path` (one line, bare slug)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse new [--dynamic] <project>")
+		moePrintln(stderr, "usage: moe pulse new [--dynamic] [--emit-run <path>] <project>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
 		moePrintln(stderr, "(never executes one), then a headless read-only survey that files")
@@ -1487,7 +1506,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	// is the verb's own outcome: exit 130. (At a run-traffic tail the
 	// verb's durable work already succeeded, so those callers keep their
 	// own exit code and only thread the interrupt to halt a cascade.)
-	code, interrupted := runPulse(root, projectID, "" /*spawner*/, stdout, stderr)
+	code, interrupted := runPulse(root, projectID, "" /*spawner*/, *emitRun, stdout, stderr)
 	if interrupted {
 		return exitInterrupted
 	}
