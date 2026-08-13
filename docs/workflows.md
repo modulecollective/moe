@@ -490,13 +490,16 @@ A head is a naming convenience, not a container every batch receives.
 
 On a static ride (`!!!` or bare `moe chain kick`), grooming changes recorded
 placement and not execution: newly placed work parks for a later ride. Under a
-`!!!!`/`--dynamic` ride, placement *is* execution — every groomed thread is
-kicked when the sweep finishes, and the survey's way out is a `"park"` line
-naming why the operator should look first. Either way the harness holds a root
-that has only a seed or a live session; a machine-baked, chore-authored, or
-past-first-stage root has a settled design and is ready to start. A fired kick
-is itself dynamic, so its tail may sweep, groom, and kick again. The ride ends
-when a survey adds nothing, with no generation cap.
+`!!!!`/`--dynamic` ride, placement *is* execution, and the candidate set is the
+whole board — every structurally kickable parked thread is kicked when the sweep
+finishes, the ones this sweep groomed first and then the rest, deduped by root.
+Kicking is the default; the survey's way out is a `"park"` line naming why the
+operator should look first, and that reason is mandatory. Either way the harness
+holds a root that has only a seed or a live session; a machine-baked,
+chore-authored, or past-first-stage root has a settled design and is ready to
+start. A fired kick is itself dynamic, so its tail may sweep, groom, and kick
+again. The ride ends when a sweep leaves nothing to start, with no generation
+cap.
 
 Grooming may move a queued run out of one thread and into another — that is how
 stray threads consolidate. Two units are off limits. The chain a *static* ride
@@ -530,16 +533,17 @@ The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
 settled-design floor, the occupancy guard, the review-and-test walk on every
 ride, and the journal marks on every machine turn. A tick sweeps only when the
-project's journal moved since its last heartbeat sweep, or a settled thread is
+project's journal moved since its last heartbeat sweep, or startable work is
 parked with nobody inside it *and no sweep has looked at that board since it
-last changed* — a thread a survey saw and deliberately parked with a reason is
-not re-offered until something moves. That parked leg looks one step past a
-held door: settled work queued behind a thread head that is itself waiting on
-your design still counts, because a sweep grooms before it kicks and the groom
-is what can move that work out from behind the head. A `chain` head you minted
-yourself is the exception — it fences its whole batch, since staging one by hand
-is the point. The heartbeat stands down while anything is live in the project —
-a ride mid-hop, you sitting in a stage, a survey mid-turn — and
+last changed* — a settled thread, or an open idea you tagged, since the tag is
+the licence to start it. A thread a survey saw and deliberately parked with a
+reason is not re-offered until something moves. That parked leg looks one step
+past a held door: settled work queued behind a thread head that is itself
+waiting on your design still counts, because a sweep grooms before it kicks and
+the groom is what can move that work out from behind the head. A `chain` head
+you minted yourself is the exception — it fences its whole batch, since staging
+one by hand is the point. The heartbeat stands down while anything is live in
+the project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and
 for one full tick after anything you did by hand. A quiet board costs nothing —
 no agent turn, no run, no journal line.
 
