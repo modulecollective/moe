@@ -88,17 +88,21 @@ import (
 // state the sweep had already moved. The one live read is the root's
 // session branches, and that is the point: it asks whether the operator
 // has a stage open *right now*, which no snapshot can say.
-func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) {
+//
+// The return is the first ordinary child failure, after every other
+// eligible root has been offered, or exitInterrupted immediately. Zero
+// means no ride started or every ride finished cleanly.
+func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) int {
 	// No dynamic consent, nothing to say. Absence of a `park` is not a
 	// request, so a static or unridden sweep parking everything it
 	// groomed is the norm it has always been — the old "N thread(s) asked
 	// for a kick" line reported a decision that no longer exists.
 	if currentRideMode != rideDynamic {
-		return
+		return 0
 	}
 	if len(groomed.threads) == 0 {
 		moePrintf(stderr, "pulse: kick: nothing groomed — nothing to start\n")
-		return
+		return 0
 	}
 	// Threads are keyed by root, and a park on any group that landed in
 	// one holds the whole thread. Two groups routinely groom into the
@@ -127,13 +131,14 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		wanted = append(wanted, th)
 	}
 	if len(wanted) == 0 {
-		return
+		return 0
 	}
 	if spawnerKey != "" && groomed.spawnerChained {
 		moePrintf(stderr, "pulse: kick: holding %d groomed thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
 			len(wanted), spawnerKey)
-		return
+		return 0
 	}
+	firstFailure := 0
 	for _, th := range wanted {
 		proj, runID, err := splitProjectRun(th.Root)
 		if err != nil {
@@ -163,8 +168,15 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", th.Root)
 		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {
 			moePrintf(stderr, "pulse: kick %s exited %d\n", th.Root, code)
+			if code == exitInterrupted {
+				return code
+			}
+			if firstFailure == 0 {
+				firstFailure = code
+			}
 		}
 	}
+	return firstFailure
 }
 
 // rootDesignSettled reports whether md's design is settled — the one

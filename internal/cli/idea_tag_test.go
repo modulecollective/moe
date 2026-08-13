@@ -266,7 +266,8 @@ func TestIdeaTagUsageErrors(t *testing.T) {
 // the identical ride. Same fake-claude pulse turn as
 // TestTaggedFollowupHarvestPromoteGroomAndKick, but the tag arrives by
 // hand on an idea filed without one — the two stranded ideas that
-// prompted this run, replayed.
+// prompted this run, replayed. The destination deliberately fails its
+// first turn, so the pulse invocation must report that stalled ride.
 func TestOperatorTaggedIdeaRidesLikeAHarvestedTag(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -304,8 +305,8 @@ esac
 
 	var out, errb bytes.Buffer
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb); code != 0 {
-		t.Fatalf("pulse exit=%d stderr=%q", code, errb.String())
+	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb); code != 1 {
+		t.Fatalf("pulse exit=%d, want failed child exit 1; stderr=%q", code, errb.String())
 	}
 
 	idea, err := run.Load(root, "moe", "tagged-by-hand")

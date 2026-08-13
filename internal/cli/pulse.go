@@ -381,19 +381,21 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // stub the agent turn out.
 //
 // Every fire runs a fresh survey unconditionally — there is no rate
-// limiter. On a clean survey it auto-closes its own run and returns 0; a
-// failed or SIGINT'd sweep leaves the run open on the dash's ACTIVE list
+// limiter. On a clean survey it auto-closes its own run; a failed or
+// SIGINT'd sweep leaves the run open on the dash's ACTIVE list
 // (escalation by visibility), but does not block the next survey.
 // Concurrent and piled-up pulse runs are allowed: run opening mints
 // distinct dated slugs under the repolock, so parallel fires don't
 // collide.
 //
-// The return is one bit for the caller: did this sweep complete. Zero
-// for a clean sweep and for an operator interrupt (which the latch
-// reports separately); non-zero for a sweep that died or concluded
-// nothing. The heartbeat's per-project backoff and the notify payload
-// both read it through the child's exit status, so it is the only
-// channel a failed unattended sweep has.
+// The return describes the whole invocation, including a dynamic ride
+// the completed survey started. Zero means the survey and every kicked
+// thread finished cleanly (or the operator interrupted the survey, which
+// the latch reports separately); non-zero means the survey died,
+// concluded nothing, or a kicked ride stalled. The heartbeat's
+// per-project backoff and the notify payload both read it through the
+// child's exit status, so it is the only channel a failed unattended
+// invocation has.
 //
 // Body assigned in init() rather than at declaration to break the
 // firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
@@ -579,8 +581,7 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	// a long time, and a sweep that has already done all its work should
 	// not sit on the dash's ACTIVE list for the duration.
 	pi.Close()
-	pulseSelfKick(root, groomed, spawnerKey, stdout, stderr)
-	return 0
+	return pulseSelfKick(root, groomed, spawnerKey, stdout, stderr)
 }
 
 // closePulseRun closes a pulse run through the registered close — the

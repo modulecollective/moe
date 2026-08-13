@@ -1184,10 +1184,11 @@ func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
 //
 // It also carries the end-to-end half of the default flip, in the one
 // place a gate written by an agent reaches the kick through the whole
-// pipe. The plain gate asks for nothing and rides; the same gate plus a
-// `park` line holds, and prints the survey's sentence. This is the
-// 2026-07-25 incident's shape: that sweep groomed a thread, wrote no
-// kick field, and the ride ended in silence.
+// pipe. The plain gate asks for nothing and rides; its failed child now
+// fails the pulse invocation while leaving both the pulse closed and the
+// child parked. The same gate plus a `park` line holds, and prints the
+// survey's sentence. This is the 2026-07-25 incident's shape: that sweep
+// groomed a thread, wrote no kick field, and the ride ended in silence.
 func TestTaggedFollowupHarvestPromoteGroomAndKick(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -1246,8 +1247,13 @@ esac
 
 	var out, errb bytes.Buffer
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb); code != 0 {
-		t.Fatalf("pulse exit=%d stderr=%q", code, errb.String())
+	code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb)
+	wantCode := 0
+	if park == "" {
+		wantCode = 1
+	}
+	if code != wantCode {
+		t.Fatalf("pulse exit=%d, want %d; stderr=%q", code, wantCode, errb.String())
 	}
 
 	idea, err := run.Load(root, "moe", "tagged-fix")
@@ -1270,9 +1276,24 @@ esac
 	if promoted == nil || promoted.SpawnedBy == "" {
 		t.Fatalf("promoted run = %+v, want machine lineage", promoted)
 	}
+	if promoted.Status != run.StatusInProgress {
+		t.Fatalf("promoted run status=%q, want in_progress (parked)", promoted.Status)
+	}
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == pulseWorkflow && md.Status != run.StatusClosed {
+			t.Fatalf("pulse run %s status=%q, want closed before its ride starts", md.ID, md.Status)
+		}
+	}
 	if park == "" {
 		if !strings.Contains(errb.String(), "pulse: kicking moe/"+promoted.ID+" (dynamic)") {
 			t.Fatalf("pulse never reached self-kick for promoted run; stderr=%q", errb.String())
+		}
+		wf, err := LookupWorkflow(promoted.Workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next, kind, err := wf.Next(root, promoted); err != nil || kind != NextKindStage || next == "" {
+			t.Fatalf("failed child next=(%q, %v, %v), want a parked pending stage", next, kind, err)
 		}
 		return
 	}

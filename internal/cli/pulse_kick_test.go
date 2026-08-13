@@ -52,6 +52,77 @@ func TestSelfKickRidesUnderTheFourthBang(t *testing.T) {
 	}
 }
 
+// TestSelfKickReturnsTheFirstFailureAndKeepsKicking pins the pulse's
+// invocation contract: an ordinary stalled ride re-arms the heartbeat,
+// but does not withhold an independent thread the survey also groomed.
+func TestSelfKickReturnsTheFirstFailureAndKeepsKicking(t *testing.T) {
+	root, _, _ := kickFixture(t)
+	minted := groomFixture(t, root, "fails-first", "fails-later")
+	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
+		{Runs: runsFrom("fails-first")},
+		{Runs: runsFrom("fails-later")},
+	}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	var dispatched []string
+	prev := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		dispatched = append(dispatched, runID+":"+stage)
+		if runID == minted["fails-first"] {
+			return 7
+		}
+		return 9
+	}
+	t.Cleanup(func() { openSdlcStage = prev })
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	if code := pulseSelfKick(root, groomed, "", io.Discard, &errb); code != 7 {
+		t.Fatalf("self-kick exit=%d, want first failure 7; stderr=%q", code, errb.String())
+	}
+	want := []string{minted["fails-first"] + ":design", minted["fails-later"] + ":design"}
+	if strings.Join(dispatched, ",") != strings.Join(want, ",") {
+		t.Fatalf("dispatched %v, want both independent roots %v", dispatched, want)
+	}
+	for _, wantLine := range []string{
+		"kick moe/" + minted["fails-first"] + " exited 7",
+		"kick moe/" + minted["fails-later"] + " exited 9",
+	} {
+		if !strings.Contains(errb.String(), wantLine) {
+			t.Errorf("stderr=%q, want %q", errb.String(), wantLine)
+		}
+	}
+}
+
+// TestSelfKickInterruptStopsLaterThreads preserves Ctrl-C as operator
+// intent: unlike an ordinary failure, it ends the pulse-rooted ride
+// before another groomed root starts.
+func TestSelfKickInterruptStopsLaterThreads(t *testing.T) {
+	root, _, _ := kickFixture(t)
+	minted := groomFixture(t, root, "interrupted", "must-not-start")
+	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
+		{Runs: runsFrom("interrupted")},
+		{Runs: runsFrom("must-not-start")},
+	}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	var dispatched []string
+	prev := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, _, _ io.Writer) int {
+		dispatched = append(dispatched, runID+":"+stage)
+		return exitInterrupted
+	}
+	t.Cleanup(func() { openSdlcStage = prev })
+
+	defer withRideMode(rideDynamic)()
+	var errb bytes.Buffer
+	if code := pulseSelfKick(root, groomed, "", io.Discard, &errb); code != exitInterrupted {
+		t.Fatalf("self-kick exit=%d, want exitInterrupted; stderr=%q", code, errb.String())
+	}
+	want := []string{minted["interrupted"] + ":design"}
+	if strings.Join(dispatched, ",") != strings.Join(want, ",") {
+		t.Fatalf("dispatched %v, want only the interrupted root %v", dispatched, want)
+	}
+}
+
 // TestSelfKickSkipsWithoutDynamicConsent: a plain push, `!!` or `!!!`
 // tail pulse grooms and parks. This is what makes the surprise ride
 // impossible by construction — "I ran a plain push and my terminal is
