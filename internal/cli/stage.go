@@ -1368,9 +1368,12 @@ const exitInterrupted = 130
 // reportWikiSessionExit prints the closing per-turn messages and
 // returns the exit code for runWikiSession. It is the one place that
 // decides how the possible failures (claude run, gate, commit, close,
-// finalize) compose into a single exit status. Run / finalize / gate
-// errors each independently force a non-zero exit even when the
-// per-turn commit landed cleanly — finalize failure means
+// finalize) compose into a single exit status. Every error it holds
+// gets printed, and the exit code is decided once at the bottom —
+// no branch returns early, because the failures travel together and
+// each one carries recovery information the others don't. Run /
+// finalize / gate errors each independently force a non-zero exit
+// even when the per-turn commit landed cleanly — finalize failure means
 // checkpoint.json / log.md weren't written, and a 0 exit there would
 // let the operator move on without noticing. Gate failure means we
 // deliberately skipped both finalize and commit; the gate's own
@@ -1394,6 +1397,7 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		moePrintf(stderr, "%s exited: %v\n", agentLabel, runErr)
 		// Fall through to report commit result and exit non-zero.
 	}
+	commitFailed := false
 	switch {
 	case gateErr != nil:
 		// Gate already explained itself on stderr; no commit happened.
@@ -1401,21 +1405,28 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		moePrintln(stdout, "no document changes; nothing committed")
 	case commitErr != nil:
 		moePrintf(stderr, "commit turn: %v\n", commitErr)
-		return 1
+		// No early return: a failed commit usually travels with a failed
+		// close (an uncommitted canvas either never existed or sits dirty
+		// in the worktree), and the close error is the only report that
+		// names the surviving branch and worktree. Returning here left the
+		// operator with the commit line while a session branch survived
+		// unannounced, to trip an occupancy gate later as a mystery.
+		commitFailed = true
 	default:
 		moePrintf(stdout, "committed %s turn for %s/%s\n", in.DocID, in.Project, in.RunSlug)
 	}
 	if closeErr != nil {
 		// Bare %v — close errors self-describe. See closeWithAutoResolve.
 		moePrintf(stderr, "%v\n", closeErr)
-		return 1
 	}
-	if runErr != nil || finalizeErr != nil || gateErr != nil {
+	if runErr != nil || commitFailed || closeErr != nil || finalizeErr != nil || gateErr != nil {
 		// An operator Ctrl-C during the turn is a stop, not a failure:
 		// surface it as exitInterrupted so the cascade halts the chain
-		// rather than reacting as if the stage barfed. finalizeErr /
-		// gateErr collateral of an interrupted turn rides under the same
-		// code — the interrupt is the dominant intent.
+		// rather than reacting as if the stage barfed. Commit / close /
+		// finalize / gate collateral of an interrupted turn rides under
+		// the same code — the interrupt is the dominant intent, and a
+		// Ctrl-C before the agent writes routinely produces exactly that
+		// collateral (unwritten canvas → commit and close both refuse).
 		if errors.Is(runErr, agent.ErrInterrupted) {
 			return exitInterrupted
 		}

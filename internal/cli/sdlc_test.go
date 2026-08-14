@@ -163,14 +163,23 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit when agent never touches the canvas; stderr=%q stdout=%q", errb.String(), out.String())
 	}
-	// Some loud failure must reach the operator — either commitTurn
-	// refusing the empty canvas, or session.Close refusing the
-	// unchanged canvas. Either gate satisfies the "fail loud" rule
-	// the design records; what matters is that the cascade stopped.
+	// Both refusals must reach the operator: commitTurn rejecting the
+	// empty canvas, and session.Close rejecting the unchanged canvas.
+	// They are not interchangeable — the close error is the only one
+	// that names the session branch that survives this failure, and its
+	// `moe session abandon` hint is the operator's recovery path. When
+	// the reporter returned early on the commit error, the close error
+	// was swallowed and the surviving branch surfaced later as a
+	// mystery occupancy-gate failure on an unrelated verb.
 	stderrStr := errb.String()
-	if !strings.Contains(stderrStr, "agent did not write to its canvas") &&
-		!strings.Contains(stderrStr, "unchanged from main") {
-		t.Errorf("expected loud refusal naming the canvas-untouched failure mode, got: %q", stderrStr)
+	if !strings.Contains(stderrStr, "agent did not write to its canvas") {
+		t.Errorf("expected the commit refusal naming the untouched canvas, got: %q", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "unchanged from main") {
+		t.Errorf("expected the close refusal naming the unchanged canvas, got: %q", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "moe session abandon") {
+		t.Errorf("expected the recovery hint for the session branch this failure strands, got: %q", stderrStr)
 	}
 	// Canvas on disk hasn't moved.
 	afterBlob, _ := os.ReadFile(canvasPath)

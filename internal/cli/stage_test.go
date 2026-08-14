@@ -966,6 +966,75 @@ func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	}
 }
 
+// TestReportWikiSessionExitPrintsBothCommitAndCloseErrors is the
+// regression pin for this run's incident: a headless turn that never
+// wrote its canvas failed to commit *and* failed to close, and the
+// early return on commitErr swallowed the close error — the only
+// report that names the surviving branch, its worktree, and the
+// `moe session abandon` recovery. The operator saw a one-line commit
+// error; the stranded session surfaced later as an unrelated-looking
+// gate failure.
+func TestReportWikiSessionExitPrintsBothCommitAndCloseErrors(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "design"}
+	commitErr := errors.New("commit: canvas projects/moe/runs/r/documents/design/content.md does not exist — agent did not write to its canvas this turn")
+	closeErr := &session.CanvasUnchangedError{
+		Project:      "moe",
+		Run:          "r",
+		Doc:          "design",
+		Branch:       "session/moe/r/design",
+		WorktreePath: "/tmp/sessions/r",
+		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
+	}
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, nil, commitErr, closeErr, nil, nil, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 when commit and close both fail", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "commit turn:") {
+		t.Errorf("stderr missing commit failure: %q", got)
+	}
+	if !strings.Contains(got, "moe session abandon") {
+		t.Errorf("stderr missing the close error's recovery hint — the stranded session goes unannounced: %q", got)
+	}
+	// The commit failed, so nothing may claim it landed.
+	if strings.Contains(stdout.String(), "committed design turn") {
+		t.Errorf("commit failed but stdout claims it landed: %q", stdout.String())
+	}
+}
+
+// TestReportWikiSessionExitInterruptWinsOverCommitAndClose pins the
+// widening that came with printing both errors: with the single exit
+// point, an operator Ctrl-C dominates its own collateral. A Ctrl-C
+// before the agent writes leaves the canvas untouched, so commit and
+// close both refuse — that cascade must still read as an interrupt
+// (130), not a stage failure (1), or the chain reacts as if the stage
+// barfed.
+func TestReportWikiSessionExitInterruptWinsOverCommitAndClose(t *testing.T) {
+	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "design", Agent: "claude"}
+	runErr := fmt.Errorf("execute turn: %w", agent.ErrInterrupted)
+	commitErr := errors.New("commit: canvas does not exist — agent did not write to its canvas this turn")
+	closeErr := &session.CanvasUnchangedError{
+		Project:      "moe",
+		Run:          "r",
+		Doc:          "design",
+		Branch:       "session/moe/r/design",
+		WorktreePath: "/tmp/sessions/r",
+		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
+	}
+	var stdout, stderr bytes.Buffer
+	code := reportWikiSessionExit(in, runErr, commitErr, closeErr, nil, nil, &stdout, &stderr)
+	if code != exitInterrupted {
+		t.Errorf("exit code = %d, want %d — the interrupt is the dominant intent", code, exitInterrupted)
+	}
+	// Both reports still reach the operator; only the classification
+	// changes.
+	got := stderr.String()
+	if !strings.Contains(got, "commit turn:") || !strings.Contains(got, "moe session abandon") {
+		t.Errorf("interrupted turn dropped a failure report: %q", got)
+	}
+}
+
 // TestCloseErrorPrintsOneSessionClosePrefix pins the convention the
 // doubled-prefix bug broke: session close errors self-describe, so the
 // CLI print sites add nothing. Both stage.go sites take the same
