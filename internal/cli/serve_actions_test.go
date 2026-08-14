@@ -108,6 +108,10 @@ func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
 // serve-spawned sitting that fell through to the chain prompt would
 // wedge on the PTY stdin nobody types into.
 func TestSkipPostTurnPromptServeHandshake(t *testing.T) {
+	// The negative control below asserts the unset-env default, so clear
+	// the handshake first: `moe serve` exports MOE_SERVE_AGENT=1 into
+	// every agent it spawns, and this suite runs inside those stages.
+	t.Setenv("MOE_SERVE_AGENT", "")
 	sandboxShaped := stageSessionOpts{NeedsSandbox: true, EnforceSandboxBoundary: true}
 	if skipPostTurnPrompt(sandboxShaped) {
 		t.Fatal("without the handshake an interactive sitting should reach the prompt")
