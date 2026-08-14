@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
@@ -105,6 +107,12 @@ import (
 // session branches, and that is the point: it asks whether the operator
 // has a stage open *right now*, which no snapshot can say.
 //
+// The walk itself lives in planKick, so the same decisions the loop
+// executes are the ones a dynamic sweep stamps onto its own canvas
+// before this step runs. What stays here is execution: the stderr
+// account, the floor's live re-check as each root is reached, and the
+// child exits.
+//
 // The return is the first ordinary child failure, after every other
 // eligible root has been offered, or exitInterrupted immediately. Zero
 // means no ride started or every ride finished cleanly.
@@ -116,19 +124,106 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 	if currentRideMode != rideDynamic {
 		return 0
 	}
-	// The groomed threads first, then the rest of the board. Order is the
-	// whole of the precedence rule: a gate group that named a thread
-	// enumeration would also find carries that thread's `park`, and the
-	// dedupe below keeps the first mention of each root.
-	candidates := make([]groomedThread, 0, len(groomed.threads))
-	candidates = append(candidates, groomed.threads...)
-	for _, rootKey := range kickableThreadRoots(groomed.mds, groomed.byKey, groomed.graph, groomed.projectID) {
-		candidates = append(candidates, groomedThread{Root: rootKey})
-	}
-	if len(candidates) == 0 {
+	plan := planKick(root, groomed, spawnerKey)
+	if len(plan.Steps) == 0 {
 		moePrintf(stderr, "pulse: kick: nothing parked — nothing to start\n")
 		return 0
 	}
+	// The survey's own vetoes first, in plan order, so the account of what
+	// the sweep held reads before the first ride's output starts
+	// streaming through this same writer.
+	var wanted []kickStep
+	for _, step := range plan.Steps {
+		if step.Park != "" {
+			moePrintf(stderr, "pulse: kick: %s parked by the survey — %s\n", step.Root, step.Park)
+			continue
+		}
+		wanted = append(wanted, step)
+	}
+	if len(wanted) == 0 {
+		return 0
+	}
+	if plan.ChainedSpawner != "" {
+		moePrintf(stderr, "pulse: kick: holding %d thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
+			len(wanted), plan.ChainedSpawner)
+		return 0
+	}
+	firstFailure := 0
+	for _, step := range wanted {
+		proj, runID, err := splitProjectRun(step.Root)
+		if err != nil {
+			moePrintf(stderr, "pulse: kick: malformed thread root %q: %v\n", step.Root, err)
+			continue
+		}
+		if step.Hold != "" {
+			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, step.Hold)
+			continue
+		}
+		// Re-ask the floor. A ride earlier in this same loop runs for as
+		// long as it takes, and the one question the floor asks that a
+		// snapshot cannot answer — is a session open right now — can have
+		// flipped by the time the loop arrives here. The stamped section
+		// says "queued", not "will start", for exactly this window.
+		if hold := kickFloorHold(root, step.Root, groomed); hold != "" {
+			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, hold)
+			continue
+		}
+		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", step.Root)
+		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {
+			moePrintf(stderr, "pulse: kick %s exited %d\n", step.Root, code)
+			if code == exitInterrupted {
+				return code
+			}
+			if firstFailure == 0 {
+				firstFailure = code
+			}
+		}
+	}
+	return firstFailure
+}
+
+// kickStep is one thread root's place in a dynamic sweep's kick order,
+// and what the sweep decided about it. Exactly one of Park and Hold is
+// non-empty for a root that will not start; both empty means it cleared
+// every guard and the loop will offer it a ride.
+type kickStep struct {
+	Root string
+	// Gate is true for a root this sweep's gate groomed, false for one
+	// the board enumeration found sitting parked.
+	Gate bool
+	// Park is the survey's own reason to hold this root, verbatim from
+	// the gate. Non-empty means the floor was never consulted — the
+	// survey's veto is upstream of it.
+	Park string
+	// Hold is the floor's reason, phrased as the tail of the kick's
+	// stderr skip line so that line and the canvas section cannot drift
+	// into two wordings for one disk fact.
+	Hold string
+}
+
+// kickPlan is the whole of a dynamic sweep's kick decision: every root
+// it will walk, in execution order, and why each one starts or doesn't.
+//
+// It exists so the sweep can *say* what it is about to do. A queued
+// retry and a stranded run looked identical to the operator, because
+// the kick reported only to the stderr of a process that outlives no
+// terminal — three diagnosis runs in four days each re-derived the
+// queue by hand. The canvas stamp renders this; pulseSelfKick executes
+// it; neither builds its own answer.
+type kickPlan struct {
+	Steps []kickStep
+	// ChainedSpawner is the spawner's key when the re-entrancy guard
+	// holds every root the survey did not park. It is a property of the
+	// sweep rather than of any one root, and it fires *before* the floor
+	// is consulted, so the steps it holds carry no Hold of their own.
+	ChainedSpawner string
+}
+
+// planKick walks the candidate roots and decides each one's fate,
+// reading only the groom's final in-memory graph plus the roots' live
+// session branches (see openSessionStage). No side effects: the caller
+// decides whether to print it, stamp it, or execute it.
+func planKick(root string, groomed groomResult, spawnerKey string) kickPlan {
 	// Threads are keyed by root, and a park on any group that landed in
 	// one holds the whole thread. Two groups routinely groom into the
 	// same thread — one `onto` a run the other placed — and hand back two
@@ -142,66 +237,121 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 			parked[th.Root] = th.Park
 		}
 	}
-	var wanted []groomedThread
-	seen := make(map[string]bool, len(candidates))
-	for _, th := range candidates {
-		if seen[th.Root] {
-			continue
+	// The groomed threads first, then the rest of the board. Order is the
+	// whole of the precedence rule: a gate group that named a thread
+	// enumeration would also find carries that thread's `park`, and the
+	// dedupe keeps the first mention of each root.
+	var plan kickPlan
+	seen := make(map[string]bool, len(groomed.threads))
+	add := func(rootKey string, gate bool) {
+		if seen[rootKey] {
+			return
 		}
-		seen[th.Root] = true
-		if reason := parked[th.Root]; reason != "" {
-			moePrintf(stderr, "pulse: kick: %s parked by the survey — %s\n", th.Root, reason)
-			continue
-		}
-		wanted = append(wanted, th)
+		seen[rootKey] = true
+		plan.Steps = append(plan.Steps, kickStep{Root: rootKey, Gate: gate, Park: parked[rootKey]})
 	}
-	if len(wanted) == 0 {
-		return 0
+	for _, th := range groomed.threads {
+		add(th.Root, true)
+	}
+	for _, rootKey := range kickableThreadRoots(groomed.mds, groomed.byKey, groomed.graph, groomed.projectID) {
+		add(rootKey, false)
+	}
+
+	startable := 0
+	for _, step := range plan.Steps {
+		if step.Park == "" {
+			startable++
+		}
+	}
+	if startable == 0 {
+		return plan
 	}
 	if spawnerKey != "" && groomed.spawnerChained {
-		moePrintf(stderr, "pulse: kick: holding %d thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
-			len(wanted), spawnerKey)
-		return 0
+		plan.ChainedSpawner = spawnerKey
+		return plan
 	}
-	firstFailure := 0
-	for _, th := range wanted {
-		proj, runID, err := splitProjectRun(th.Root)
-		if err != nil {
-			moePrintf(stderr, "pulse: kick: malformed thread root %q: %v\n", th.Root, err)
+	for i := range plan.Steps {
+		if plan.Steps[i].Park != "" {
 			continue
 		}
-		// A group can be groomed onto a thread whose head has already
-		// shipped — `onto` admits a settled anchor on purpose, that being
-		// the queue-jump case — and the root then walks back to a merged
-		// run. Kicking one would ride a finished thread from its finished
-		// end. ChainChildLive is the same terminal-or-missing test every
-		// other edge reader applies.
-		md := groomed.byKey[th.Root]
-		if md == nil || !run.ChainChildLive(th.Root, groomed.byKey) {
-			moePrintf(stderr, "pulse: kick: %s heads a thread that has already settled — skipping\n", th.Root)
-			continue
-		}
-		if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
-			moePrintf(stderr, "pulse: kick: %s is waiting at its first stage with %s — the operator holds the trigger\n",
-				th.Root, designHeldReason(turnClosed))
-			continue
-		}
-		if stage := openSessionStage(root, md); stage != "" {
-			moePrintf(stderr, "pulse: kick: %s has a live session at %s — skipping\n", th.Root, stage)
-			continue
-		}
-		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", th.Root)
-		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {
-			moePrintf(stderr, "pulse: kick %s exited %d\n", th.Root, code)
-			if code == exitInterrupted {
-				return code
-			}
-			if firstFailure == 0 {
-				firstFailure = code
-			}
-		}
+		plan.Steps[i].Hold = kickFloorHold(root, plan.Steps[i].Root, groomed)
 	}
-	return firstFailure
+	return plan
+}
+
+// kickFloorHold asks the floor about one root and returns why it is
+// held, or "" if it clears. The three legs are the safety floor the
+// survey's `park` sits on top of, and the returned phrase is the tail of
+// the kick's stderr skip line.
+//
+// Called twice per root on the happy path — once when the plan is built,
+// once when the loop reaches the root — and that is the point rather
+// than an oversight: openSessionStage is a live read, and the roots
+// behind the first ride can wait hours for their turn.
+func kickFloorHold(root, threadRoot string, groomed groomResult) string {
+	// A group can be groomed onto a thread whose head has already
+	// shipped — `onto` admits a settled anchor on purpose, that being
+	// the queue-jump case — and the root then walks back to a merged
+	// run. Kicking one would ride a finished thread from its finished
+	// end. ChainChildLive is the same terminal-or-missing test every
+	// other edge reader applies.
+	md := groomed.byKey[threadRoot]
+	if md == nil || !run.ChainChildLive(threadRoot, groomed.byKey) {
+		return "heads a thread that has already settled — skipping"
+	}
+	if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
+		return "is waiting at its first stage with " + designHeldReason(turnClosed) +
+			" — the operator holds the trigger"
+	}
+	if stage := openSessionStage(root, md); stage != "" {
+		return "has a live session at " + stage + " — skipping"
+	}
+	return ""
+}
+
+// renderKickSection renders a plan as the `## Kick` section a dynamic
+// sweep stamps onto its own canvas at close. The pulse canvas is what
+// the operator reads when a thread looks stuck, and until now it stopped
+// at "parked, nothing to groom" — true of the board and silent about the
+// queue the same sweep was about to run.
+//
+// Deliberately not a promise. The wording is "queued", the header says
+// the floor is re-checked, and a root the loop then holds prints its
+// skip line to stderr as it always did. A section that claimed execution
+// would be a second decoy artifact where the first one cost three runs.
+func renderKickSection(plan kickPlan) string {
+	var b strings.Builder
+	b.WriteString("## Kick\n\n")
+	if len(plan.Steps) == 0 {
+		b.WriteString("Nothing parked — nothing to start.\n")
+		return b.String()
+	}
+	b.WriteString("The order this sweep handed its kick loop. Queued is a plan, not a\n")
+	b.WriteString("promise: the floor is re-checked as each root is reached, so a live\n")
+	b.WriteString("session or a settled thread can still hold one here.\n\n")
+	for i, step := range plan.Steps {
+		source := "parked board"
+		if step.Gate {
+			source = "gate thread"
+		}
+		fmt.Fprintf(&b, "%d. %s — %s, %s\n", i+1, step.Root, source, kickStepOutcome(step, plan.ChainedSpawner))
+	}
+	return b.String()
+}
+
+// kickStepOutcome is one step's fate in the section's vocabulary,
+// reusing the stderr phrasing wherever there is one to reuse.
+func kickStepOutcome(step kickStep, chainedSpawner string) string {
+	switch {
+	case step.Park != "":
+		return "parked by the survey — " + step.Park
+	case chainedSpawner != "":
+		return "held — " + chainedSpawner + " is itself chained"
+	case step.Hold != "":
+		return step.Hold
+	default:
+		return "queued — floor re-checked at start"
+	}
 }
 
 // kickableThreadRoots returns the thread roots in a project that could
