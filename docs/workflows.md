@@ -499,7 +499,13 @@ holds a root that has only a seed or a live session; a machine-baked,
 chore-authored, or past-first-stage root has a settled design and is ready to
 start. A fired kick is itself dynamic, so its tail may sweep, groom, and kick
 again. The ride ends when a sweep leaves nothing to start, with no generation
-cap.
+cap. The sweep stamps that order onto its own canvas as a closing `## Kick`
+section — each root queued, parked with the survey's reason, or held by the
+floor and why — in the same commit as the close, so a sweep's report says what
+it was about to run and not only what it filed. The section records a plan, not
+a promise: the floor is re-checked as each root is reached, so a root can still
+be held past its "queued" line. Static sweeps stamp nothing — they start
+nothing.
 
 Grooming may move a queued run out of one thread and into another — that is how
 stray threads consolidate. Two units are off limits. The chain a *static* ride
@@ -517,7 +523,9 @@ licenses two things: the run-spawning buttons in the web UI, and a resident
 heartbeat that looks at each project's board every twenty minutes and runs `moe
 pulse new --dynamic <project>` when it finds something worth looking at.
 Stopping the process retracts both; an unarmed `moe serve` behaves exactly as
-it always has.
+it always has. `moe serve snooze [duration]` holds just the heartbeat — clicks,
+`!!!!` tails, and hand-run pulses stay live — and `moe serve wake` releases it
+early.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,
