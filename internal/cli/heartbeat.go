@@ -594,8 +594,10 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 
 // openSessionProjects reports which projects have a live session branch
 // anywhere in them — a ride mid-hop, or the operator sitting in a stage.
-// Either way somebody is already inside that project and the tail-pulse
-// path owns the next sweep.
+// Either way somebody is already inside that project, and the heartbeat
+// stands down: the occupant's commits move the journal tip when they
+// land, so the next tick's moved leg picks the project back up —
+// standing down costs a tick, not the sweep.
 //
 // *Live* is the load-bearing word, and it is not the branch. A branch
 // whose claimant is provably dead is a corpse the reap deliberately

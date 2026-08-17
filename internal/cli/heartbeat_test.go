@@ -539,8 +539,9 @@ func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
 }
 
 // TestHeartbeatStandsDownForALiveSession: a ride mid-hop or an operator
-// sitting in a stage means somebody is already inside the project, and
-// the tail-pulse path owns the next sweep.
+// sitting in a stage means somebody is already inside the project; their
+// commits move the journal tip when they land, so the next tick's moved
+// leg picks the project back up.
 func TestHeartbeatStandsDownForALiveSession(t *testing.T) {
 	root := quietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
