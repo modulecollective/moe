@@ -175,7 +175,6 @@ edges, one row per member with the dash's own status vocabulary, and offers a
 **kick** chip beside it (dynamic mode only) so the dash's `parked · kick?`
 hint has a surface in the browser.
 
-
 `moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
 that run to its ship, then rides on into each chained run in order. A chain-run
 head has no stages to walk, so it just closes and the ride carries on. An

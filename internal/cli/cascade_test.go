@@ -355,7 +355,6 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
 	}
-
 }
 
 // openTwinStageInvocation mirrors openSdlcStageInvocation for the
