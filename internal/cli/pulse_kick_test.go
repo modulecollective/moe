@@ -34,10 +34,10 @@ func wantKick(groomed groomResult, threads ...groomedThread) groomResult {
 	return groomed
 }
 
-// TestSelfKickRidesUnderTheFourthBang: an unchained spawner, a dynamic
-// verb upstream, a machine-rooted thread — the pulse kicks it, and the
+// TestSelfKickRidesUnderDynamicConsent: a dynamic sweep and a
+// machine-rooted parked thread — the pulse kicks it, and the
 // ride is itself dynamic. This is the level-4 loop's one door.
-func TestSelfKickRidesUnderTheFourthBang(t *testing.T) {
+func TestSelfKickRidesUnderDynamicConsent(t *testing.T) {
 	root, threadRoot, groomed, stages := selfKickFixture(t)
 
 	defer withRideMode(rideDynamic)()
@@ -123,13 +123,13 @@ func TestSelfKickInterruptStopsLaterThreads(t *testing.T) {
 	}
 }
 
-// TestSelfKickSkipsWithoutDynamicConsent: a plain push, `!!` or `!!!`
-// tail pulse grooms and parks. This is what makes the surprise ride
-// impossible by construction — "I ran a plain push and my terminal is
-// riding a thread I never saw" cannot happen.
+// TestSelfKickSkipsWithoutDynamicConsent: a hand-typed `moe pulse new`
+// grooms and parks. This is what makes the surprise ride
+// impossible by construction — "I swept a project by hand and my
+// terminal is riding a thread I never saw" cannot happen.
 //
 // Silently, and that is the point of the schema flip: with no ask-field
-// on the gate, an unparked thread outside a dynamic ride is not a
+// on the gate, an unparked thread outside a dynamic sweep is not a
 // declined request, it is ordinary curation. The old line reported a
 // decision that no longer exists.
 func TestSelfKickSkipsWithoutDynamicConsent(t *testing.T) {
@@ -145,7 +145,7 @@ func TestSelfKickSkipsWithoutDynamicConsent(t *testing.T) {
 				t.Fatalf("drove %v, want nothing under %s", kickStages(*stages), mode)
 			}
 			if errb.Len() != 0 {
-				t.Errorf("stderr = %q, want silence outside a dynamic ride", errb.String())
+				t.Errorf("stderr = %q, want silence outside a dynamic sweep", errb.String())
 			}
 		})
 	}
@@ -291,7 +291,7 @@ func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 }
 
 // choreKickFixture reproduces the 2026-07-22 *evening* incident: a
-// dynamic tail pulse nominated a judged chore, openChoreInProcess
+// dynamic sweep nominated a judged chore, openChoreInProcess
 // opened its run with the MoE-Chore trailer and — alone among
 // machine-open paths — no SpawnedBy, and the groom rooted a thread at
 // that fresh run. Seeded rather than driven through the chore pipeline
@@ -465,7 +465,7 @@ func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 // reason is the marked case now — the thread is groomed and ready and
 // the harness would start it, and the sentence the survey spent is what
 // stops it. The reason prints verbatim, because it is the only account
-// the operator gets of why a `!!!!` ended with this thread sitting.
+// the operator gets of why a dynamic sweep ended with this thread sitting.
 func TestSelfKickHoldsAParkedThread(t *testing.T) {
 	root, threadRoot, groomed, stages := selfKickFixture(t)
 

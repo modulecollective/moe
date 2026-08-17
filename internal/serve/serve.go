@@ -23,7 +23,7 @@
 // promoting into a *parked* run, and the read-only views work.
 //
 // Options.Dynamic (the --dynamic flag or a non-empty MOE_SERVE_DYNAMIC)
-// arms the process. It is the standing spelling of the fourth bang, and
+// arms the process. It is the standing consent rung, and
 // it licenses two things at once:
 //
 //   - the spawn bucket, so a phone click can launch a run. That's an

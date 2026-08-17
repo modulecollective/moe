@@ -49,7 +49,7 @@ Start from the delta, not the whole project:
   order lives in journal trailers, so neither the journal slice nor the
   disk scan shows it — the scan tells you a run is in progress, never
   that it is third in a batch about to be kicked. Work already queued
-  is work you do not file, rank, or spawn again. Under a dynamic ride
+  is work you do not file, rank, or spawn again. Under a dynamic sweep
   it is also work that *starts* when this sweep finishes — the harness
   kicks every parked thread that clears its floor, whether or not you
   groomed it. So your job on queued work is not to re-place work that
@@ -161,7 +161,7 @@ harness parses once your turn exits. It carries three signals:
 - **`loose`** — an optional list of runs to open with no ordering
   opinion. They park standalone and unchained — which is not the same
   as being held back: a run with nothing ahead of it is a thread of
-  one, and under a dynamic ride it starts with the rest. Holding work
+  one, and under a dynamic sweep it starts with the rest. Holding work
   back takes a `park` line; see "Parking a thread". Omit the list
   entirely when nothing clears the bar, which is the common case.
 - **`threads`** — an optional list of runs in execution order. Omit it
@@ -236,7 +236,7 @@ spec as the final entry of the thread carrying the cycle's work.
 Leaving a pending reflect in `loose` while you order other work is the
 choice that needs justifying, not placing it. A reflect written in
 `loose` parks standalone and unchained, same as any other spec — and
-under a dynamic ride it starts on its own, in no particular relation to
+under a dynamic sweep it starts on its own, in no particular relation to
 the work it was meant to sweep. That is one more reason the tail is the
 default.
 
@@ -363,9 +363,7 @@ Three placements, first match wins:
 - **`head`** — mint a chain placeholder with that slug base and chain
   the thread under it. Ask for one only when *naming* the thread helps
   the dash tell the story ("perf-cleanups"). It is never required.
-- **neither** — the thread lands after the chain this pulse fired on if
-  there is one and the ride allows it; otherwise it parks as its own
-  headless thread.
+- **neither** — the thread self-roots as its own headless thread.
 
 **The lane bar: the spawn bar, plus ordering conviction.** Ask
 yourself: *would the operator kick these, in this order, unchanged?*
@@ -407,21 +405,21 @@ What you cannot infer from the marker is *urgency*, only readiness. It
 says "carry this forward", not "carry it first". Order an advanced run
 against the rest of the queue on the merits, same as anything else.
 
-**Outside a dynamic ride, nothing you place executes.** Chaining under
+**Outside a dynamic sweep, nothing you place executes.** Chaining under
 a parked thread is curation: that thread runs when someone kicks it.
 Inside one, placement *is* execution — see below.
 
 ### Parking a thread
 
-Under a dynamic ride, **every kickable parked thread starts when this
+Under a dynamic sweep, **every kickable parked thread starts when this
 sweep finishes** — the ones you groomed and the ones that were already
-in order. You are not asking for that; it is what the ride is. Your
-judgment goes into the exception.
+in order. You are not asking for that; it is what a dynamic sweep is.
+Your judgment goes into the exception.
 
 The floor is the harness's and you do not re-derive it: it starts
-nothing without the operator's dynamic consent, nothing from a chained
-spawner, nothing whose root lacks a settled design, and nothing anyone
-has a session open on. Runs *this* sweep mints are settled by
+nothing without the operator's dynamic consent, nothing whose root
+lacks a settled design, and nothing anyone has a session open on.
+Runs *this* sweep mints are settled by
 construction — the seed is a design you baked — so a fresh thread of
 your own spawns clears the floor on its own. When the floor holds a
 thread it says so on stderr, and the thread parks for the next pulse to
@@ -463,13 +461,14 @@ spends a run that still has to clear its own review and test gates
 before it ships, and the operator can Ctrl-C the ride. Bias toward
 motion.
 
-There is no cap on how many generations this can run for: a kicked
-thread's own tail fires its own sweep, which may kick again. What ends
-it is you having nothing left worth chaining — so a thin generation is
-a real answer, and manufacturing one to keep the machine busy is the
-failure mode to avoid.
+There is no cap on how many generations this can run for: what a kicked
+thread lands moves the journal, so the clock offers the board again and
+a later sweep may kick again. What ends it is a sweep having nothing
+left worth chaining — so a thin generation is a real answer, and
+manufacturing one to keep the machine busy is the failure mode to
+avoid.
 
-**Inside a dynamic ride, everything that clears the floor starts** —
+**Inside a dynamic sweep, everything that clears the floor starts** —
 the threads you groomed, the threads that were already in order, and a
 lone run you wrote to `loose`, which is a thread of one with nothing
 ahead of it. So the thread is where work with a *sequence* claim goes,
@@ -477,12 +476,10 @@ and `loose` is not a way to open work without starting it; a `park`
 line is. The spawn bar doesn't move, and work that fails it belongs in
 a followup.
 
-When this pulse is firing inside a ride, your context carries a block
-saying so and naming which kind. Inside a **static** ride the machine
-can neither grow nor shrink what's running — a thread naming a ridden
-run gets that entry dropped — so shape new threads worth naming
-instead of trying to reshape it. Inside a **dynamic** ride, extending
-the tail is exactly the move.
+When this sweep is dynamic, your context carries a block saying so.
+Nothing is riding while you work — a pulse is the only thing that
+starts rides, and it starts them after you finish — so the board you
+read is the board the kick loop walks.
 
 ### A parked reflect is a thread, not a finished job
 
@@ -494,8 +491,8 @@ it was opened for any less real. Treat it like any other parked
 machine-rooted thread, and give it the same slot a fresh one would
 get: when this sweep grooms lanes, write a twin spec at the tail of the
 thread carrying the work it should read the settled record of, or in a
-thread of its own and let it ride. A reflect that would read a
-half-finished record is exactly the case `"park"` is for — name that in
+thread of its own. A reflect that would read a half-finished record
+is exactly the case `"park"` is for — name that in
 the park line rather than leaving the reflect out of the order.
 
 You do not need to know which case you are in. Writing a

@@ -15,7 +15,7 @@ import (
 // An armed serve sweeps on a 20-minute clock and each sweep can spend
 // agent turns. The only brake before this was killing the process, which
 // also takes down the dash and every run serve is parenting. A snooze
-// pauses the clock and nothing else — clicks, `!!!!` tails and hand-run
+// pauses the clock and nothing else — clicks and hand-run
 // pulses stay live throughout, because those spend only when the
 // operator asks them to.
 //

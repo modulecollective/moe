@@ -1007,7 +1007,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // reopen — idea has no stage verbs to derive). Every other workflow's
 // chips are composed from its registration-time serve declaration
 // (Options.WorkflowUI): cascade workflows get the "→ <stage>" /
-// "ship" / "chain" / "dynamic" quartet keyed off the re-derived next
+// "ship" / "chain" trio keyed off the re-derived next
 // stage. Workflows with a close pipeline get a close-run chip when close
 // is the routine idle-page next move; perpetual workflows keep close off
 // the idle page but still expose it while a child is live. A workflow that declared
@@ -1083,8 +1083,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			out = append(out,
 				runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
 				runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
-				runAction{Label: "chain", Href: base + "/chain", Method: "POST"},
-				runAction{Label: "dynamic", Href: base + "/dynamic", Method: "POST"})
+				runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
 		}
 	}
 	if ui.Close && (!ui.Perpetual || live) {

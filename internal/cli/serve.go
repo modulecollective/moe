@@ -60,13 +60,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "work; the run-spawning actions (which run agent subprocesses, i.e.")
 		moePrintln(stderr, "arbitrary code) refuse with 403, and the heartbeat never ticks.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "--dynamic, or a non-empty MOE_SERVE_DYNAMIC, is the standing fourth")
-		moePrintln(stderr, "bang: this process may look at the board on its own clock and start")
+		moePrintln(stderr, "--dynamic, or a non-empty MOE_SERVE_DYNAMIC, is the standing consent")
+		moePrintln(stderr, "rung: this process may look at the board on its own clock and start")
 		moePrintln(stderr, "settled work, and anything that can reach the listener can spawn a")
 		moePrintln(stderr, "run — i.e. execute code. Stopping the process is the whole retraction.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "`moe serve snooze 2h` holds the clock without stopping anything:")
-		moePrintln(stderr, "no sweeps until it expires, while clicks, `!!!!` tails and hand-run")
+		moePrintln(stderr, "no sweeps until it expires, while clicks and hand-run")
 		moePrintln(stderr, "pulses stay live. It survives a restart, and it always expires.")
 	}
 	if err := fs.Parse(args); err != nil {

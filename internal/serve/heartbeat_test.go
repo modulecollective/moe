@@ -240,9 +240,9 @@ func TestHeartbeatBackoffIsCapped(t *testing.T) {
 }
 
 // TestHeartbeatSingleFlightsItsOwnChild: a sweep that kicked a ride can
-// outlive many ticks, and the ride's own tail pulses own growth while it
-// does. A second child for the same project would be a second sweep of a
-// board that is already moving.
+// outlive many ticks, and the sweep child itself walks the board while
+// it lives. A second child for the same project would be a second sweep
+// of a board that is already moving.
 func TestHeartbeatSingleFlightsItsOwnChild(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "slow-moe")

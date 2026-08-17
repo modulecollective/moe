@@ -28,7 +28,7 @@ source of truth for the exact command surface; this page is a map.
   new-run and promote forms' "& run" submits, advancing a stage, kicking a
   chain head, and opening a due chore's run — refuse with 403, and the
   heartbeat never ticks. `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the
-  standing fourth bang: it enables those actions — anything that can reach the
+  standing consent rung: it enables those actions — anything that can reach the
   listener can then execute code — and starts the resident heartbeat, a
   per-project ticker that runs `moe pulse new --dynamic` when the board warrants
   it. Stopping the process retracts both. A `/serve` page owns that ticker's
@@ -37,7 +37,7 @@ source of truth for the exact command surface; this page is a map.
   cluster every board header carries.
 - `moe serve snooze [duration]` / `moe serve wake` hold and release the
   heartbeat without stopping the process. A snooze pauses the clock and nothing
-  else: clicks, `!!!!` tails and hand-run pulses stay live, because those spend
+  else: clicks and hand-run pulses stay live, because those spend
   only when you ask them to. With no argument, `snooze` reports the current
   hold. It works with serve up or down, survives a restart, and always expires —
   the indefinite off-switch is still stopping the process. `/serve` carries 1h
@@ -82,9 +82,9 @@ source of truth for the exact command surface; this page is a map.
   lines to record a run chain in the bureaucracy journal.
 - `moe chain note <project>/<run>` edits a head's purpose note: why the batch
   exists. Membership isn't written there — it renders live from the edges.
-- `moe chain kick [--dynamic] <project>/<run>` rides a chain headlessly from
-  the named head; bare kick is static, while `--dynamic` permits tail pulses to
-  extend the ride.
+- `moe chain kick <project>/<run>` rides a chain headlessly from
+  the named head. What is chained now is what runs: a kick sweeps nothing, so
+  nothing can grow the batch under it.
 - `moe chain close [--no-edit] <project>/<run>` drops a head without riding it.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
 - `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any
@@ -105,12 +105,12 @@ source of truth for the exact command surface; this page is a map.
   maintains recorded intent.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
   backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
-  consent rung — the sweep rides what it grooms instead of parking it, which is
-  what makes the verb callable by a clock. The heartbeat inside `moe serve
-  --dynamic` calls exactly this, and reads the exit status — which describes the
-  whole invocation, including a dynamic ride the survey started. `moe pulse new`
-  exits non-zero when the sweep died, concluded nothing, or a kicked ride
-  stalled, which is what drives the per-project failure backoff. A Ctrl-C skip
+  consent rung — the sweep starts every kickable parked thread on the board
+  instead of parking them, which is what makes the verb callable by a clock.
+  The heartbeat inside `moe serve --dynamic` calls exactly this, and reads the
+  exit status — which describes the whole invocation, including the rides the
+  sweep started. `moe pulse new` exits non-zero when the sweep died, concluded
+  nothing, or a kicked ride stalled, which drives the failure backoff. A skip
   exits 130, not a failure. It also passes `--emit-run <path>`: the sweep writes
   the run it opens there, so /serve can link a sweep to the pulse run it minted
   rather than leaving the operator to hunt the dash for a matching `pulse-*`

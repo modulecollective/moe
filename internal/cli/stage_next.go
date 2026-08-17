@@ -832,8 +832,8 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 	md = fresh
 
 	// The consent level the operator just typed, held for the whole
-	// dispatch so every tail pulse under it — this run's and every run
-	// the ride reaches — reads the same mode. See ridemode.go.
+	// dispatch so every commit the walk lands — this run's and every run
+	// the ride reaches — is stamped with the same mode. See ridemode.go.
 	defer withRideMode(rideModeForAnswer(answer))()
 
 	var destination string
@@ -1059,14 +1059,6 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		}
 		if closeCmd := g.Lookup("close"); closeCmd != nil {
 			moePrintf(stdout, "cascade: close (headless)\n")
-			// The tail pulse's interrupt is deliberately NOT mapped to
-			// exitInterrupted here: this branch is non-sdlc only (sdlc ships
-			// via the push branch above), and the chain ride already ran at
-			// line ~1000, before this close. There is no ride left to skip,
-			// so a Ctrl-C'd tail pulse is exactly the bare-close case — the
-			// cascade's own work (every stage committed, run closed)
-			// succeeded, so it exits on the close's own code, same rule as
-			// `moe <wf> close`.
 			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: code})
 			if code != 0 {

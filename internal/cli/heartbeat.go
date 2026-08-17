@@ -244,10 +244,12 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 
 	// The stand-down. A ride mid-hop, an operator sitting in a stage and
 	// a survey mid-turn all look the same from here — a live session
-	// branch somewhere in the project — and all mean the tail-pulse path
-	// already owns the next sweep. Live, not merely present: a branch
-	// whose claimant is provably dead has stopped owning anything, and
-	// openSessionProjects no longer counts it.
+	// branch somewhere in the project — and all mean somebody else is
+	// already moving this project. A ride's commits move the journal tip
+	// when it lands, so the next tick's moved leg picks the project back
+	// up; standing down costs a tick, not the sweep. Live, not merely
+	// present: a branch whose claimant is provably dead has stopped
+	// owning anything, and openSessionProjects no longer counts it.
 	//
 	// Deliberately *not* also "no open pulse run", which is what the
 	// design's gate list says and what the recovery story it sits beside

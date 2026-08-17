@@ -17,11 +17,11 @@ exist to kick work back to `code` or `design`, not to decorate the ladder.
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain|--dynamic] <project>/<slug>
-moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
-moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
-moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
-moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain | --dynamic] <project>/<run>
+moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
+moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
@@ -70,17 +70,15 @@ the first stage — handy for minting a run to pick up later. Opposite it sits
 the cascade ladder, the same one the chain prompt spells in bangs: `--ship`
 (= `!!`) opens the run and cascades every stage headless through push, then
 ships — fire-and-forget; `--chain` (= `!!!`) does that and rides the chain the
-run heads; `--dynamic` (= `!!!!`) rides it and licenses the machine to extend
-that ride, so a tail pulse may groom work onto the tail and start threads it
-rooted. The rungs are a ladder, not modifiers — pick one, and `--park` excludes
-all of them. Every tail composes with either seed: `--seed --park` mints from a
-typed seed and walks away, `--from-idea --dynamic` promotes an idea and rides it
-with the machine free to grow the ride. All ride the shared `new` facade, so
+run heads. The rungs are a ladder, not modifiers — pick one, and `--park`
+excludes both. Every tail composes with either seed: `--seed --park` mints from
+a typed seed and walks away, `--from-idea --chain` promotes an idea and rides
+it. All ride the shared `new` facade, so
 every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
 needs the workflow to have a cascade dispatcher, which it refuses to mint a run
 without). These tails reach past `new`: `moe chore open`, `moe twin reflect`,
 and `moe sdlc reopen` — the other creators that end at the chain prompt — take
-`--park` and the whole `--ship`/`--chain`/`--dynamic` ladder with the same
+`--park` and the whole `--ship`/`--chain` ladder with the same
 meaning. (`--chain`'s ride is usually a no-op on a freshly minted run, which
 heads no chain yet; it's offered because the ladder is one vocabulary and the
 rung's consent is what matters — same as `new --chain` on a fresh run.)
@@ -95,17 +93,15 @@ Every cascade is headless — the axis is *how far*, not *how*:
 - `!!` runs every remaining stage headlessly and ships **this run** (or
   auto-closes, for workflows without a push gate), then stops.
 - `!!!` is the same as `!!`, but after this run ships it **rides the whole
-  chain** — cascading into the next live chained run.
-- `!!!!` is the same ride as `!!!`, but **dynamic** — the machine may extend
-  it while it runs: a tail pulse can groom new work onto the ridden tail and
-  kick threads it rooted.
+  chain** — cascading into the next live chained run. It is the top rung: what
+  is chained when you type it is what runs, because nothing sweeps mid-ride.
 
 The cascade mode flags on `design`/`code`/`review`/`test` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
 and ships this run; `--chain` (= `!!!`) does the same and then rides the
-whole chain; `--dynamic` (= `!!!!`) rides it and may grow it. The five
+whole chain. The four
 cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
@@ -115,7 +111,7 @@ kicks the run back rather than parking. Interactively the chain prompt becomes a
 kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
 blocking canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the
 run; after the fix, MoE re-offers the gate that blocked instead of walking
-forward. Headless ship cascades (`!!` / `!!!` / `!!!!`, and serve's ship) take
+forward. Headless ship cascades (`!!` / `!!!`, and serve's ship) take
 one bounded `code` kickback carrying the blocking canvas, then re-dispatch the
 blocked stage and re-check its gate once — if the fix doesn't stick, it parks as
 before. `!` and `!<stage>` take no recovery turn of their own: they stop at the
@@ -166,7 +162,7 @@ and keep as many live at once as you have topics.
 moe chain new moe/perf-cleanups     # mint a head to collect under
 moe chain note moe/perf-cleanups    # why this batch exists
 moe chain edit                      # move runs beneath it
-moe chain kick [--dynamic] moe/perf-cleanups # ride it statically or dynamically
+moe chain kick moe/perf-cleanups    # ride the batch as it stands
 moe chain close moe/perf-cleanups   # drop the head without riding
 ```
 
@@ -179,6 +175,7 @@ edges, one row per member with the dash's own status vocabulary, and offers a
 **kick** chip beside it (dynamic mode only) so the dash's `parked · kick?`
 hint has a surface in the browser.
 
+
 `moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
 that run to its ship, then rides on into each chained run in order. A chain-run
 head has no stages to walk, so it just closes and the ride carries on. An
@@ -186,9 +183,6 @@ ordinary run works too — it ships first, then rides its children — and a run
 with no children is a chain of one, so kick is also how you fire a single parked
 run headlessly. Kick refuses a run that is itself chained under another; kick
 the head instead.
-
-Pass `--dynamic` for programmatic `!!!!`: a bare kick runs the visible chain
-statically, while a dynamic kick permits tail pulses to grow the ride.
 
 Kick exits non-zero if any run in the chain stalls — the stalled stage's own
 exit code, with a `chain ride into <run> exited N` line on stderr naming where.
@@ -390,7 +384,7 @@ The runtime, mirroring hooks:
 ```sh
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
-moe chore open [--now] [--park|--ship|--chain|--dynamic] <project>/<chore>  # open the seeded run for a due chore
+moe chore open [--now] [--park|--ship|--chain] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
@@ -407,28 +401,20 @@ committed by any means makes the chore due as "definition changed."
 
 A pulse is a read-only sweep of one project that feeds the backlog and grooms
 queued work into lanes. "Work just landed — what's next?" is a reflex worth
-automating, but only inside consent bounds: a pulse fires at the tail of the
-run-traffic verbs (`moe sdlc close`, `moe sdlc push`, `moe twin close`, and the
-cascades' auto-close) **and only when you handed the machine the wheel** —
-inside a ride (`!!!`/`!!!!`, their `--chain`/`--dynamic` twins, `moe chain
-kick`, and the kicks a pulse roots itself). A ship you are watching land is
-quiet: `!!`, a `!`/`!<stage>` step that lands on push, a bare `moe sdlc push`
-or close. Never from `moe sync`. Scope is always the driven run's project.
+automating, but only inside consent bounds: **the only pulse that fires on its
+own is the clock's**, and the only clock is one you started — `moe serve
+--dynamic` carries a resident heartbeat (see [the heartbeat](#the-heartbeat)
+below). No verb tails a sweep. A ship is quiet whatever bang drove it, a `moe
+chain kick` rides the batch you kicked and nothing else, and `moe sync` never
+pulses. `moe pulse new <project>` is the manual valve.
 
-A pulse also fires on a clock, but only one you started: `moe serve --dynamic`
-carries a resident heartbeat (see [the heartbeat](#the-heartbeat) below).
-
-Inside a ride it also waits for the **end of the chain**: a hop that still has
-a queued chained child behind it defers, so a four-run ride spends one sweep at
-its tail rather than four. The cost is pickup latency — a finding after hop 1
-waits for the tail — and the gain is a sweep that reads the whole generation's
-work at once. When that sweep chains and kicks more work (dynamic rides only),
-that generation's own tail sweeps in turn; the ride ends when a sweep finds
-nothing worth chaining.
-
-So after an attended ship, growth parks: findings wait for the next ride's tail
-sweep, for the heartbeat, or for `moe pulse new` — the manual valve, which is
-also the only way to sweep a project without shipping anything.
+Growth is therefore clock-paced rather than recursive. A ride's own commits
+move the journal tip, so the next tick's sweep sees the generation it landed
+and can start the next one; nothing starts work in the middle of a ride. What
+that costs is latency — a finding after a ship waits for the next tick (≤20
+minutes) or a hand-run pulse. What it buys is one walker: a sweep's picture of
+the board stays the board it walks, so what it says it is starting is what
+starts.
 
 Every pulse does three things:
 
@@ -488,44 +474,40 @@ runs into ordinary chain threads, leave them loose when it has no ordering
 opinion, or add a chain head when a stable name helps tell the thread's story.
 A head is a naming convenience, not a container every batch receives.
 
-On a static ride (`!!!` or bare `moe chain kick`), grooming changes recorded
-placement and not execution: newly placed work parks for a later ride. Under a
-`!!!!`/`--dynamic` ride, placement *is* execution, and the candidate set is the
-whole board — every structurally kickable parked thread is kicked when the sweep
-finishes, the ones this sweep groomed first and then the rest, deduped by root.
-Kicking is the default; the survey's way out is a `"park"` line naming why the
-operator should look first, and that reason is mandatory. Either way the harness
-holds a root that has only a seed or a live session; a machine-baked,
-chore-authored, or past-first-stage root has a settled design and is ready to
-start. A fired kick is itself dynamic, so its tail may sweep, groom, and kick
-again. The ride ends when a sweep leaves nothing to start, with no generation
-cap. The sweep stamps that order onto its own canvas as a closing `## Kick`
-section — each root queued, parked with the survey's reason, or held by the
-floor and why — in the same commit as the close, so a sweep's report says what
-it was about to run and not only what it filed. The section records a plan, not
-a promise: the floor is re-checked as each root is reached, so a root can still
-be held past its "queued" line. Static sweeps stamp nothing — they start
-nothing.
+In a hand-typed `moe pulse new`, grooming changes recorded placement and not
+execution: newly placed work parks for a later kick. Under `--dynamic`,
+placement *is* execution, and the candidate set is the whole board — every
+structurally kickable parked thread is kicked when the sweep finishes, the ones
+this sweep groomed first and then the rest, deduped by root. Kicking is the
+default; the survey's way out is a `"park"` line naming why the operator should
+look first, and that reason is mandatory. Either way the harness holds a root
+that has only a seed or a live session; a machine-baked, chore-authored, or
+past-first-stage root has a settled design and is ready to start. The sweep
+stamps that order onto its own canvas as a closing `## Kick` section — each
+root queued, parked with the survey's reason, or held by the floor and why — in
+the same commit as the close, so a sweep's report says what it was about to run
+and not only what it filed. The section records a plan, not a promise: the
+floor is re-checked as each root is reached, so a root can still be held past
+its "queued" line. Curation sweeps stamp nothing — they start nothing.
 
 Grooming may move a queued run out of one thread and into another — that is how
-stray threads consolidate. Two units are off limits. The chain a *static* ride
-is walking is fenced in both directions, because `!!!` promises that what you
-saw at kick time is what runs. And any unit under a **chain head you minted
-yourself** is fenced the same way: the head is your staging fence, so a batch
-you are composing by hand is never reshaped under you. Machine-minted heads and
+stray threads consolidate. One unit is off limits: any unit under a **chain
+head you minted yourself**. The head is your staging fence, so a batch you are
+composing by hand is never reshaped under you. Machine-minted heads and
 headless threads stay fully groomable. Want something held, name a head; want
-it gone, close it.
+it gone, close it. A ride needs no fence of its own — nothing sweeps while one
+is walking, so what you kicked is what runs.
 
 ### The heartbeat
 
-`moe serve --dynamic` is the standing spelling of `!!!!`. Running that process
+`moe serve --dynamic` is the standing consent rung. Running that process
 licenses two things: the run-spawning buttons in the web UI, and a resident
 heartbeat that looks at each project's board every twenty minutes and runs `moe
-pulse new --dynamic <project>` when it finds something worth looking at.
-Stopping the process retracts both; an unarmed `moe serve` behaves exactly as
-it always has. `moe serve snooze [duration]` holds just the heartbeat — clicks,
-`!!!!` tails, and hand-run pulses stay live — and `moe serve wake` releases it
-early.
+pulse new --dynamic <project>` when it finds something worth looking at. That
+heartbeat is the only automatic pulse there is. Stopping the process retracts
+both; an unarmed `moe serve` behaves exactly as it always has. `moe serve
+snooze [duration]` holds just the heartbeat — clicks and hand-run pulses stay
+live — and `moe serve wake` releases it early.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,

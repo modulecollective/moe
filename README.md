@@ -55,10 +55,9 @@ wrote, each turn committed to the journal.
 
 The bangs are the lever for how far a run travels without you: `!` runs just
 the next stage and parks at the gate, `!<stage>` runs up to a named gate, `!!`
-ships this run, `!!!` ships it and rides on into the next queued run, and
-`!!!!` makes that ride dynamic so tail pulses may extend it and start ready
-threads. The full vocabulary — every stage spelled out, chains, and the
-matching CLI flags — is in [docs/workflows.md](docs/workflows.md#sdlc).
+ships this run, and `!!!` ships it and rides on into the next queued run. The
+full vocabulary — every stage spelled out, chains, and the matching CLI flags —
+is in [docs/workflows.md](docs/workflows.md#sdlc).
 
 `!!!` is where the economics turn: shape a few runs during the day,
 `moe chain edit` them into a sequence, and fire `!!!` once as you step away.

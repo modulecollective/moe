@@ -253,3 +253,37 @@ Every one that needed editing first is a fragment that needs a better sentence.
 The bottleneck, as the table promised, has moved again. It is no longer
 attention, or review, or the backlog. It's judgment about what's worth doing —
 and that is a much better problem to have.
+
+## Step 5: the clock is the only trigger
+
+Step 4 left two mechanisms firing pulses: the heartbeat, and the older
+ride-tail path, where every run-traffic verb inside a ride swept at its
+chain's momentary tail. The two overlapped, and the overlap bit.
+
+Under a dynamic ride, each kicked ride's own tail fired a nested pulse that
+started the *next* parked thread. Control came back to the outer kick loop
+with its snapshot stale, so N parked threads produced N real rides but
+N(N+1)/2 `pulse: kicking` lines. The log asserted starts that never happened,
+in the one section whose whole ethos is being the operator's account of an
+unattended night.
+
+The fix was subtraction: ride-tail pulses are gone. Serve's heartbeat is the
+one automatic pulse; `moe pulse new` by hand is the manual valve. With no verb
+firing a sweep in-process, the kick loop is the only walker, so a sweep's
+picture of the board stays the board it walks and every "kicking" line
+announces a start that happens.
+
+The fourth bang went with them. `!!!!` existed to say "tail pulses may groom
+onto this ride and kick"; with no tail pulses it changed nothing, and a consent
+rung that changes nothing teaches a false distinction. `!!!` is the top typed
+rung: ship and ride the chain as it stands. The dynamic rung survives where it
+still means something — `moe pulse new --dynamic`, the verb the clock calls,
+which `moe serve --dynamic` stands behind.
+
+What that trades is recursion for cadence. A generation's follow-on work used
+to start the moment its ride's tail groomed it; now it waits for the next tick
+(≤20 minutes) or a hand-run pulse. The open-ended machine walk survives — each
+sweep's kick loop rides the whole board, each ride's commits re-arm the moved
+leg — but the clock owns the pacing. That is the point, not the cost: the
+direction is that more and more happens automatically, and the clock is where
+that autonomy grows, not the bang grammar.

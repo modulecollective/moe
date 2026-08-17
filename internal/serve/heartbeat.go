@@ -20,7 +20,7 @@ import (
 // decides nothing — on each tick it asks the cli-side gate which
 // projects warrant a look, and for each one runs `moe pulse new
 // --dynamic <project>` as an ordinary PTY child. The sweep that child
-// runs is the same sweep a `!!!!` tail fires, held to the same floor:
+// runs is the only automatic pulse there is, held to a fixed floor:
 // only settled designs with nobody inside get started, every ride walks
 // review and test, and every act it takes is journal-marked.
 //
@@ -225,7 +225,8 @@ func (s *Server) heartbeatTick() {
 		}
 		// A heartbeat child of our own still running is the ticker's
 		// single-flight: a sweep that kicked a ride can outlive many
-		// ticks, and the ride's own tail pulses own growth while it does.
+		// ticks, and the sweep child itself walks the board while it
+		// lives.
 		id := heartbeatChildPrefix + projectID
 		if c, ok := s.children.get(id); ok {
 			if exited, _ := c.snapshot(); !exited {

@@ -98,16 +98,16 @@ type groomedThread struct {
 	Root   string
 	// Park carries the survey's reason to hold this thread, verbatim from
 	// the gate. Empty is the common case and means "start it" — under a
-	// dynamic ride, and only there.
+	// dynamic sweep, and only there.
 	Park string
 }
 
 // groomResult is what the groom step hands the kick step. The whole
 // point is that the kick reads nothing from disk: every question it asks
-// — where does this thread start, is that run kickable, is the spawner
-// itself chained — is answered from the same final in-memory graph the
-// sweep just stamped. A second read would be a second answer, and the
-// window between them is exactly where a stale kick root came from.
+// — where does this thread start, is that run kickable — is answered
+// from the same final in-memory graph the sweep just stamped. A second
+// read would be a second answer, and the window between them is exactly
+// where a stale kick root came from.
 type groomResult struct {
 	threads []groomedThread
 	// byKey is the sweep's run metadata, including any chain head this
@@ -165,7 +165,7 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 	if len(groups) == 0 && currentRideMode != rideDynamic {
 		// Nothing to place, and no kick downstream to feed: the scan and
 		// index below would answer a question nobody is going to ask.
-		// Under a dynamic ride they are exactly the question — the kick
+		// Under a dynamic sweep they are exactly the question — the kick
 		// enumerates the board off this graph, and a survey with no
 		// ordering opinion is the ordinary shape of a board whose stalled
 		// thread is already correctly ordered.

@@ -82,7 +82,7 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
 	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
 	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
-	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic ride every kickable parked thread starts " +
+	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic sweep every kickable parked thread starts " +
 	"when the sweep finishes — the ones you groom and the ones already in order — so the field you write is `\"park\"`: one " +
 	"line naming why the operator should look at this thread first (an ordering you wouldn't defend, a speculative member, " +
 	"an irreversible or outward-facing surface). No park means it runs, and that includes a run you wrote to `loose`, which " +
@@ -1391,7 +1391,7 @@ type surveyOutcome struct {
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dynamic := fs.Bool("dynamic", false, "ride what the sweep grooms — the standing fourth bang")
+	dynamic := fs.Bool("dynamic", false, "start the parked threads on the board when the sweep finishes")
 	// The spawner's channel back: `moe serve` passes a path here and reads
 	// the run the sweep opened out of it, so /serve can link a sweep to
 	// the pulse run it minted. Nothing else passes it.
@@ -1404,8 +1404,9 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "followups, writes a report, and may spawn and groom parked fix runs.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Without --dynamic the sweep is pure curation: everything it grooms")
-		moePrintln(stderr, "parks. With it, the sweep rides what it grooms — the same consent")
-		moePrintln(stderr, "`!!!!` carries, said at the door a clock can knock on.")
+		moePrintln(stderr, "parks. With it, the sweep starts every kickable parked thread on")
+		moePrintln(stderr, "the board when it finishes — the consent `moe serve --dynamic`")
+		moePrintln(stderr, "stands behind, said at the door a clock can knock on.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -1424,21 +1425,17 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// --dynamic is the whole flag: it hands this invocation to the machine
-	// at the dynamic rung, exactly as `!!!!` and `moe chain kick
-	// --dynamic` do. Everything downstream — the groom step's placement
-	// rules, the self-kick gate, the consent trailers, the survey's
-	// ride-context line — already reads process ride mode, so nothing else
-	// has to change. Without the flag no withRideMode call happens at all,
-	// which is what keeps the unflagged verb byte-identical to today:
-	// rideWalkActive stays false, so a bare sweep still marks itself as
-	// operator-typed curation.
+	// at the dynamic rung. Everything downstream — the self-kick gate, the
+	// consent trailers, the survey's context line — reads process ride
+	// mode, so nothing else has to change. Without the flag no
+	// withRideMode call happens at all, which is what keeps the unflagged
+	// verb pure curation: rideWalkActive stays false, so a bare sweep
+	// marks itself as operator-typed.
 	if *dynamic {
 		defer withRideMode(rideDynamic)()
 	}
-	// `moe pulse new` is the one place the pulse *is* the verb, so a skip
-	// is the verb's own outcome: exit 130. (At a run-traffic tail the
-	// verb's durable work already succeeded, so those callers keep their
-	// own exit code and only thread the interrupt to halt a cascade.)
+	// The pulse is the verb here, so a skip is the verb's own outcome:
+	// exit 130.
 	code, interrupted := runPulse(root, projectID, *emitRun, stdout, stderr)
 	if interrupted {
 		return exitInterrupted
