@@ -235,8 +235,8 @@ func TestRunChoreOpenParkPrintsHintWithoutPrompt(t *testing.T) {
 }
 
 // The consent ladder on `chore open` is the same ladder new and the
-// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
-// `!!!!`. Chores open an sdlc run, so the cascade drives openSdlcStage +
+// stage verbs carry: --ship / --chain map to `!!` / `!!!`,
+// and chores open an sdlc run, so the cascade drives openSdlcStage +
 // push; the assertion reads currentRideMode from inside the cascade, the
 // seam that proves the flag's consent reached the ride.
 func TestRunChoreOpenCascadeLadderCarriesConsent(t *testing.T) {
@@ -246,7 +246,6 @@ func TestRunChoreOpenCascadeLadderCarriesConsent(t *testing.T) {
 	}{
 		{flag: "--ship", want: rideNone},
 		{flag: "--chain", want: rideStatic},
-		{flag: "--dynamic", want: rideDynamic},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			seedChoreRoot(t)
@@ -290,7 +289,7 @@ func TestRunChoreOpenLadderRungsMutuallyExclusive(t *testing.T) {
 	seedChoreRoot(t)
 
 	var stdout, stderr bytes.Buffer
-	code := runChoreOpen([]string{"--chain", "--dynamic", "moe/readme-refresh"}, &stdout, &stderr)
+	code := runChoreOpen([]string{"--ship", "--chain", "moe/readme-refresh"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, stderr.String())
 	}
@@ -302,7 +301,7 @@ func TestRunChoreOpenLadderRungsMutuallyExclusive(t *testing.T) {
 // --park is the opposite tail to every rung, not just --ship, and the
 // message names the rung the operator actually typed.
 func TestRunChoreOpenParkExcludesEveryCascadeRung(t *testing.T) {
-	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+	for _, flag := range []string{"--ship", "--chain"} {
 		t.Run(flag, func(t *testing.T) {
 			seedChoreRoot(t)
 

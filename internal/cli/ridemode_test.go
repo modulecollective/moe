@@ -9,9 +9,10 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// TestRideModeForAnswer pins the bang-to-mode ladder. The two
-// non-riding forms carry no mode at all: there is no unit for the
-// machine to grow or refrain from growing.
+// TestRideModeForAnswer pins the bang-to-mode ladder. The non-riding
+// forms carry no mode at all: there is no chain in flight to describe.
+// `!!!!` is not a rung — it reads as an unknown answer, same as any
+// other typo.
 func TestRideModeForAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		answer string
@@ -21,7 +22,7 @@ func TestRideModeForAnswer(t *testing.T) {
 		{"!code", rideNone},
 		{"!!", rideNone},
 		{"!!!", rideStatic},
-		{"!!!!", rideDynamic},
+		{"!!!!", rideNone},
 	} {
 		if got := rideModeForAnswer(tc.answer); got != tc.want {
 			t.Errorf("rideModeForAnswer(%q) = %v, want %v", tc.answer, got, tc.want)
@@ -132,7 +133,7 @@ func TestConsentTrailerValueTracksTheWalk(t *testing.T) {
 		defer withRideMode(rideDynamic)()
 		value, active := consentTrailerValue()
 		if !active || value != "dynamic" {
-			t.Errorf("inside a `!!!!` ride: (%q, %v), want (\"dynamic\", true)", value, active)
+			t.Errorf("inside a dynamic sweep: (%q, %v), want (\"dynamic\", true)", value, active)
 		}
 	}()
 	if _, active := consentTrailerValue(); active {

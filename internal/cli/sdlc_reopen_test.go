@@ -630,8 +630,8 @@ func TestSDLCReopenParkPrintsHintWithoutPrompt(t *testing.T) {
 }
 
 // The consent ladder on `sdlc reopen` is the same ladder new and the
-// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
-// `!!!!`. A reopened run mints seeded at design; the cascade rides it
+// stage verbs carry: --ship / --chain map to `!!` / `!!!`,
+// and a reopened run mints seeded at design; the cascade rides it
 // from there under the flag's ride mode — the seam this verifies. The
 // first dispatch must be design on the reopened successor, not the prior.
 func TestSDLCReopenCascadeLadderCarriesConsent(t *testing.T) {
@@ -641,7 +641,6 @@ func TestSDLCReopenCascadeLadderCarriesConsent(t *testing.T) {
 	}{
 		{flag: "--ship", want: rideNone},
 		{flag: "--chain", want: rideStatic},
-		{flag: "--dynamic", want: rideDynamic},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
@@ -694,7 +693,7 @@ func TestSDLCReopenLadderRungsMutuallyExclusive(t *testing.T) {
 	seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--chain", "--dynamic", "tele/fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--ship", "--chain", "tele/fix-it"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
@@ -706,7 +705,7 @@ func TestSDLCReopenLadderRungsMutuallyExclusive(t *testing.T) {
 // --park is the opposite tail to every rung, not just --ship, and the
 // message names the rung the operator actually typed.
 func TestSDLCReopenParkExcludesEveryCascadeRung(t *testing.T) {
-	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+	for _, flag := range []string{"--ship", "--chain"} {
 		t.Run(flag, func(t *testing.T) {
 			seedClosedSDLCRun(t, "tele", "fix-it", "# Fix it\n\nThe write-up.\n")
 
@@ -724,13 +723,13 @@ func TestSDLCReopenParkExcludesEveryCascadeRung(t *testing.T) {
 
 // A cascade flag doesn't bypass reopen's status guard: an in-progress
 // prior still refuses before any mint, so no successor run is created.
-func TestSDLCReopenDynamicStillRefusesInProgress(t *testing.T) {
+func TestSDLCReopenChainStillRefusesInProgress(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "still-here", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--dynamic", "tele/still-here"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--chain", "tele/still-here"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on in-progress prior; stdout=%q", out.String())
 	}

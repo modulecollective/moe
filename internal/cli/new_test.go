@@ -587,7 +587,7 @@ func TestRunNewShipCascadesToShip(t *testing.T) {
 }
 
 // The consent ladder on `new` is the same ladder the stage verbs
-// carry: --ship / --chain / --dynamic map to `!!` / `!!!` / `!!!!`, and
+// carry: --ship / --chain map to `!!` / `!!!`, and
 // the mode each answer sets is what the stages actually run under. The
 // stub records currentRideMode from inside the cascade, which is the
 // seam that matters — a flag that opened the run and cascaded but
@@ -599,7 +599,6 @@ func TestRunNewCascadeLadderCarriesConsent(t *testing.T) {
 	}{
 		{flag: "--ship", want: rideNone},
 		{flag: "--chain", want: rideStatic},
-		{flag: "--dynamic", want: rideDynamic},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
@@ -647,7 +646,7 @@ func TestRunNewCascadeLadderRungsMutuallyExclusive(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--chain", "--dynamic", "tele/two-rungs"}, &out, &errb)
+	code := runNew("sdlc", []string{"--ship", "--chain", "tele/two-rungs"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
@@ -662,7 +661,7 @@ func TestRunNewCascadeLadderRungsMutuallyExclusive(t *testing.T) {
 // --park is the opposite tail to every rung, not just --ship, and the
 // message names the rung the operator actually typed.
 func TestRunNewParkExcludesEveryCascadeRung(t *testing.T) {
-	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+	for _, flag := range []string{"--ship", "--chain"} {
 		t.Run(flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
 			markBureaucracy(t, root)

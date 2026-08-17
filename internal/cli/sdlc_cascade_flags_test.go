@@ -61,13 +61,12 @@ var sdlcStageVerbs = []stageVerb{
 // boundary, where the user-facing error fires.
 func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 	cases := []struct {
-		name    string
-		once    bool
-		to      string
-		ship    bool
-		chain   bool
-		dynamic bool
-		want    string
+		name  string
+		once  bool
+		to    string
+		ship  bool
+		chain bool
+		want  string
 	}{
 		{name: "no-flag", want: ""},
 		{name: "once", once: true, want: "!"},
@@ -75,11 +74,10 @@ func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 		{name: "to-push", to: "push", want: "!push"},
 		{name: "ship", ship: true, want: "!!"},
 		{name: "chain", chain: true, want: "!!!"},
-		{name: "dynamic", dynamic: true, want: "!!!!"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain, tc.dynamic)
+			got, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain)
 			if !ok {
 				t.Fatalf("ok=false for single-flag case %+v", tc)
 			}
@@ -96,9 +94,9 @@ func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 // combination and the helper is the only thing that decides.
 func TestCascadeAnswerFromFlagsMutualExclusion(t *testing.T) {
 	cases := []struct {
-		name                       string
-		once, ship, chain, dynamic bool
-		to                         string
+		name              string
+		once, ship, chain bool
+		to                string
 	}{
 		{name: "once-and-ship", once: true, ship: true},
 		{name: "once-and-chain", once: true, chain: true},
@@ -106,13 +104,11 @@ func TestCascadeAnswerFromFlagsMutualExclusion(t *testing.T) {
 		{name: "ship-and-chain", ship: true, chain: true},
 		{name: "ship-and-to", ship: true, to: "push"},
 		{name: "chain-and-to", chain: true, to: "push"},
-		{name: "chain-and-dynamic", chain: true, dynamic: true},
-		{name: "dynamic-and-ship", dynamic: true, ship: true},
 		{name: "three-flags", once: true, ship: true, to: "push"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain, tc.dynamic); ok {
+			if _, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain); ok {
 				t.Fatalf("expected ok=false for combo %+v", tc)
 			}
 		})
@@ -493,20 +489,6 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 		{
 			verb:   sdlcStageVerbs[3],
 			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"test"}, wantHeadless: true, wantShipPushed: true},
-		},
-		// --dynamic: the same walk and the same ride as --chain. The
-		// fourth bang differs only in what a tail pulse under it may do,
-		// which travels as the ride mode — so the dispatch shape here is
-		// identical, and that identity is the thing worth pinning.
-		{
-			verb:   sdlcStageVerbs[0],
-			flags:  []string{"--dynamic"},
-			expect: expect{stages: []string{"design", "code", "review", "test"}, wantHeadless: true, wantShipPushed: true},
-		},
-		{
-			verb:   sdlcStageVerbs[3],
-			flags:  []string{"--dynamic"},
 			expect: expect{stages: []string{"test"}, wantHeadless: true, wantShipPushed: true},
 		},
 	}

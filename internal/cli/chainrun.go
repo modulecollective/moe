@@ -44,10 +44,9 @@ import (
 //
 // The invariant the whole surface preserves: **chaining under a parked
 // chain is inert.** Grooming reshapes membership; it never starts
-// anything. Motion roots in an operator kick — static (`!!!`, the
-// machine can't grow it) or dynamic (`!!!!`, it can) — or in a
-// confident pulse downstream of a fourth bang the operator typed
-// (pulse_kick.go).
+// anything. Motion roots in an operator kick (`!!!` / `moe chain kick`)
+// or in a dynamic sweep's own kick loop (pulse_kick.go), which runs only
+// under `moe pulse new --dynamic` — the clock's rung.
 const (
 	// chainWorkflow is the workflow name written to run.json. Aliased
 	// from dash so the string lives in one place — dash also needs it
@@ -195,9 +194,8 @@ func seedChainNote(note *string, stderr io.Writer) int {
 func runChainKick(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("chain kick", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dynamic := fs.Bool("dynamic", false, "ride dynamically: tail pulses may groom onto this chain's tail and kick threads they root (= !!!!)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe chain kick [--dynamic] <project>/<run>")
+		moePrintln(stderr, "usage: moe chain kick <project>/<run>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Rides the named chain from its head, headlessly: the head cascades")
 		moePrintln(stderr, "to its ship, then each chained run is walked design -> ... -> push")
@@ -205,10 +203,8 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "it just closes and the ride carries on into its children. Reorder or")
 		moePrintln(stderr, "prune with `moe chain edit` first.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Default is the static ride: the machine cannot grow it. What is")
-		moePrintln(stderr, "chained now is what runs. --dynamic lifts that — tail pulses may")
-		moePrintln(stderr, "append work onto the tail this ride has yet to reach, so the ride")
-		moePrintln(stderr, "can outlive the batch you can see.")
+		moePrintln(stderr, "What is chained now is what runs: a kick sweeps nothing, so nothing")
+		moePrintln(stderr, "can grow the batch under you.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -228,20 +224,15 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	mode := rideStatic
-	if *dynamic {
-		mode = rideDynamic
-	}
-	return chainKickRun(root, projectID, runID, mode, stdout, stderr)
+	return chainKickRun(root, projectID, runID, rideStatic, stdout, stderr)
 }
 
 // chainKickRun is the kick body, split from the verb's flag parsing so
 // the pulse's own self-kick (item 6 of the grooming design) roots a ride
 // through exactly this path rather than a sibling implementation. mode
-// is the consent level the ride carries — static for a bare `moe chain
-// kick`, dynamic for `--dynamic` and for every kick the pulse roots
-// itself (a confident pulse rooting a bounded-only ride would defeat the
-// point; an operator who wants bounded keeps `!!!`).
+// is the consent level the ride carries — static for a typed `moe chain
+// kick`, dynamic for every kick a sweep roots itself, which is what
+// makes those rides' commits read as the machine's.
 func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr io.Writer) int {
 	defer withRideMode(mode)()
 	if err := requireProject(root, projectID); err != nil {

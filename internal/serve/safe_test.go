@@ -23,14 +23,14 @@ import (
 // those two carry the form body that asks for the agent.
 func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 	for path, body := range map[string]string{
-		"/run/new":                  "spawn=1",
-		"/run/alpha/x/promote":      "spawn=1",
-		"/run/alpha/x/advance":      "",
-		"/run/alpha/x/ship":         "",
-		"/run/alpha/x/chain":        "",
-		"/run/alpha/x/kick":         "",
-		"/run/alpha/x/kick-dynamic": "",
-		"/chore/alpha/x/open":       "",
+		"/run/new":             "spawn=1",
+		"/run/alpha/x/promote": "spawn=1",
+		"/run/alpha/x/advance": "",
+		"/run/alpha/x/ship":    "",
+		"/run/alpha/x/chain":   "",
+		"/run/alpha/x/kick":    "",
+
+		"/chore/alpha/x/open": "",
 	} {
 		t.Run(path, func(t *testing.T) {
 			s := newSafeTestServer(t, Options{

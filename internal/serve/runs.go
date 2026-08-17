@@ -749,18 +749,16 @@ func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow str
 }
 
 // spawnMode selects which cascade flag (if any) spawnNextStage appends
-// to `moe <workflow> <stage> <id>`. The four web chips map one-to-one onto
-// the modes, and each mode onto the bang vocabulary: advance (= `!`,
+// to `moe <workflow> <stage> <id>`. The three web chips map one-to-one
+// onto the modes, and each mode onto the bang vocabulary: advance (= `!`,
 // no flag), ship (= `!!`, --ship, ship this run), chain (= `!!!`,
-// --chain, ship + ride the whole chain), dynamic (= `!!!!`, --dynamic,
-// the same ride the machine may extend).
+// --chain, ship + ride the whole chain).
 type spawnMode int
 
 const (
 	spawnAdvance spawnMode = iota
 	spawnShip
 	spawnChain
-	spawnDynamic
 )
 
 // verb is the human-facing label spawnNextStage uses in log lines and
@@ -771,8 +769,6 @@ func (m spawnMode) verb() string {
 		return "ship"
 	case spawnChain:
 		return "chain"
-	case spawnDynamic:
-		return "dynamic"
 	default:
 		return "advance"
 	}
@@ -786,8 +782,6 @@ func (m spawnMode) flag() string {
 		return "--ship"
 	case spawnChain:
 		return "--chain"
-	case spawnDynamic:
-		return "--dynamic"
 	default:
 		return ""
 	}
@@ -820,37 +814,16 @@ func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
 	s.spawnNextStage(w, r, spawnChain)
 }
 
-// handleDynamic spawns the run's next stage under --dynamic: the same
-// headless cascade + chain ride as chain, but the ride may grow while it
-// runs — tail pulses may groom onto the ridden chain's tail and kick
-// threads they root. The "dynamic" chip posts here; it gates identically
-// to ship/chain and the web still doesn't exceed the CLI.
-func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, spawnDynamic)
-}
-
 // handleKick rides a chain head headlessly from the browser by spawning
 // `moe chain kick <id>` — the same verb, unwrapped. The "kick" chip on
 // a parked head's page posts here, finally giving the dash's `parked ·
 // kick?` hint a web surface to name: before this the hint pointed at an
 // action only a terminal could take.
 func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
-	s.kickChainHead(w, r, false)
+	s.kickChainHead(w, r)
 }
 
-// handleKickDynamic is the web spelling of `!!!!`: the same ride as
-// /kick, but spawned with --dynamic, so tail pulses may groom further
-// runs onto the chain mid-ride and the batch can grow past what was
-// chained at click time. The "kick dynamic" chip posts here. No extra
-// gate over /kick — the click consents to the wider ride exactly as
-// typing the flag does, and the web still doesn't exceed the CLI.
-func (s *Server) handleKickDynamic(w http.ResponseWriter, r *http.Request) {
-	s.kickChainHead(w, r, true)
-}
-
-// kickChainHead is the shared body behind /kick and /kick-dynamic. The
-// two routes fork on one thing — whether --dynamic joins the spawn
-// argv; every guard below is common.
+// kickChainHead is the body behind /kick.
 //
 // A spawnNextStage sibling in posture, not in body: a chain head has no
 // stage ladder, so there is no next stage to re-derive server-side and
@@ -863,7 +836,7 @@ func (s *Server) handleKickDynamic(w http.ResponseWriter, r *http.Request) {
 // propagate), and the chips don't render when it would fire. Copying
 // it into serve would be a second authority on the same question that
 // could disagree with the first.
-func (s *Server) kickChainHead(w http.ResponseWriter, r *http.Request, dynamic bool) {
+func (s *Server) kickChainHead(w http.ResponseWriter, r *http.Request) {
 	if !s.spawnAllowed(w) {
 		return
 	}
@@ -892,9 +865,6 @@ func (s *Server) kickChainHead(w http.ResponseWriter, r *http.Request, dynamic b
 		}
 	}
 	argv := []string{"chain", "kick", id}
-	if dynamic {
-		argv = []string{"chain", "kick", "--dynamic", id}
-	}
 	if _, err := s.children.spawn(id, s.opts.MoeBin, argv, s.opts.Root, s.opts.Logger); err != nil {
 		s.logf("kick %s: spawn: %v", id, err)
 		http.Error(w, "kick: "+err.Error(), http.StatusInternalServerError)
@@ -1055,20 +1025,12 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	if md.Workflow == dash.ChainWorkflow {
 		// A chain head declares no serve workflow UI — it has no stages,
 		// so there is nothing for the cascade trio to spawn — which is why
-		// its chips are bespoke like idea's rather than derived. They
-		// spawn an agent ride all the same, so they keep the trio's gates:
-		// dynamic mode, and not while a child is mid-turn.
-		//
-		// One chip per ride, the same shape the cascade trio uses for the
-		// bang levels: "kick" is `!!!` over the chain as it stands now,
-		// "kick dynamic" is `!!!!` — the same ride, but tail pulses may
-		// grow the batch under it. Both gate identically; an empty head is
-		// no more kickable dynamically than statically.
+		// its chip is bespoke like idea's rather than derived. It spawns
+		// an agent ride all the same, so it keeps the trio's gates:
+		// dynamic mode, and not while a child is mid-turn. "kick" is `!!!`
+		// over the chain as it stands.
 		if !live && s.opts.Dynamic && chain.Kickable {
-			return []runAction{
-				{Label: "kick", Href: base + "/kick", Method: "POST"},
-				{Label: "kick dynamic", Href: base + "/kick-dynamic", Method: "POST"},
-			}
+			return []runAction{{Label: "kick", Href: base + "/kick", Method: "POST"}}
 		}
 		return nil
 	}

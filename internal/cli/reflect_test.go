@@ -779,8 +779,8 @@ func TestTwinReflectParkPrintsHintWithoutPrompt(t *testing.T) {
 }
 
 // The consent ladder on `twin reflect` is the same ladder new and the
-// stage verbs carry: --ship / --chain / --dynamic map to `!!` / `!!!` /
-// `!!!!`, and the ride mode each answer sets is what the reflect stages
+// stage verbs carry: --ship / --chain map to `!!` / `!!!`,
+// and the ride mode each answer sets is what the reflect stages
 // run under. A flag that opened the pass and cascaded but carried no
 // consent is exactly the gap this closes — so the assertion reads
 // currentRideMode from inside the cascade, the seam that matters.
@@ -791,7 +791,6 @@ func TestTwinReflectCascadeLadderCarriesConsent(t *testing.T) {
 	}{
 		{flag: "--ship", want: rideNone},
 		{flag: "--chain", want: rideStatic},
-		{flag: "--dynamic", want: rideDynamic},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
@@ -848,7 +847,7 @@ func TestTwinReflectLadderRungsMutuallyExclusive(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"twin", "reflect", "--chain", "--dynamic", "tele"}, &out, &errb)
+	code := Run([]string{"twin", "reflect", "--ship", "--chain", "tele"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}
@@ -860,7 +859,7 @@ func TestTwinReflectLadderRungsMutuallyExclusive(t *testing.T) {
 // --park is the opposite tail to every rung, not just --ship, and the
 // message names the rung the operator actually typed.
 func TestTwinReflectParkExcludesEveryCascadeRung(t *testing.T) {
-	for _, flag := range []string{"--ship", "--chain", "--dynamic"} {
+	for _, flag := range []string{"--ship", "--chain"} {
 		t.Run(flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
 			markBureaucracy(t, root)

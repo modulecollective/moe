@@ -1,49 +1,46 @@
 package cli
 
-// Ride modes are consent vocabulary, one notch past `!!!`.
+// Ride modes are consent vocabulary: what the invocation licensed the
+// machine to do beyond the verb the operator typed.
 //
-// `!!!` (and plain `moe chain kick`) is the **static** ride: the
-// machine cannot reshape it. Tail pulses still survey, spawn and
-// groom, but a placement that resolves into the unit being ridden is
-// redirected to a self-rooted thread and a group naming a ridden
-// member has that entry dropped, so what the operator saw at kick
-// time is what runs.
+// `!!!` (and `moe chain kick`) is the **static** ride: ship this run and
+// walk the chain as it stands. It sweeps nothing — no verb fires a pulse
+// in-process any more — so what the operator saw at kick time is what
+// runs, by construction.
 //
-// `!!!!` (and `moe chain kick --dynamic`) is the **dynamic** ride, and
-// means one thing everywhere: *the machine may run things beyond what
-// you see right now.* A tail pulse may append onto the ridden unit's
-// tail (the per-hop journal-index rebuild in maybeRideChain picks it
-// up), and — on an unchained spawner — may kick a thread it groomed.
+// `moe pulse new --dynamic` is the **dynamic** rung, and means one thing:
+// *the machine may run things beyond what you see right now.* A sweep
+// under it kicks the parked threads on the board. `moe serve --dynamic`
+// is the standing spelling of that consent, and every kick a sweep roots
+// inherits it.
 //
 // The mode is a property of the *invocation*, not of any one call in
 // the stack: one `moe` process is one operator verb carrying one
 // consent level, and every hop of a ride inherits it. So it is held as
 // process state rather than threaded through push options, close
-// commands and the chain-kick body — five plumbing seams for a value
+// commands and the chain-kick body — four plumbing seams for a value
 // that can never legitimately differ between them.
 //
-// Its only consumers are the pulse: whether a terminal transition tails
-// one at all (pulseFiresForRun), the groom step's placement rules, the
-// self-kick gate, and the survey's chain-state context line.
+// Its consumers are the pulse's self-kick gate and the survey's context
+// line, plus the consent trailers every machine-written commit carries.
 // maybeRideChain, `chain edit`, kick and every other chain mechanic
-// never read it — the mode gates the pulse; the chain itself doesn't
+// never read it — the mode gates the sweep; the chain itself doesn't
 // care. That is also why `rideChain bool` still threads the cascade
 // unchanged: "does this ride at all" is a different question from
-// "may the machine grow it".
+// "may the machine start more".
 type rideMode int
 
 const (
-	// rideNone: no ride in flight — a bare push, `!`, `!<stage>`, `!!`.
-	// No terminal transition tails a pulse at all, so the grooming rules
-	// below are reachable only through a manual `moe pulse new`, where
-	// placement is pure curation: nothing that pulse places can move
-	// until someone kicks the thread it landed on.
+	// rideNone: no ride in flight — a bare push, `!`, `!<stage>`, `!!`,
+	// or a hand-typed `moe pulse new`. A sweep here is pure curation:
+	// nothing it places can move until someone kicks the thread it
+	// landed on.
 	rideNone rideMode = iota
-	// rideStatic: `!!!` / `moe chain kick`. Grooming is redirected away
-	// from the ridden unit; self-kick is refused.
+	// rideStatic: `!!!` / `moe chain kick`. Ship and ride the chain as
+	// it stands; a sweep under it starts nothing.
 	rideStatic
-	// rideDynamic: `!!!!` / `moe chain kick --dynamic`, and every kick
-	// the pulse roots itself. Mid-ride growth and self-kick are live.
+	// rideDynamic: `moe pulse new --dynamic` (the heartbeat's own child),
+	// and every kick a sweep roots itself. Self-kick is live.
 	rideDynamic
 )
 
@@ -157,15 +154,12 @@ func rideModeContextLine() string {
 }
 
 // rideModeForAnswer maps a chain-prompt bang answer to its mode. Only
-// the two ride forms carry one; `!`, `!<stage>` and `!!` do not ride, so
-// there is no unit for the machine to grow or refrain from growing.
+// `!!!` rides; `!`, `!<stage>` and `!!` do not, so there is no chain in
+// flight to describe. No typed answer reaches rideDynamic — that rung is
+// the pulse verb's `--dynamic`, said at the door a clock knocks on.
 func rideModeForAnswer(answer string) rideMode {
-	switch answer {
-	case "!!!":
+	if answer == "!!!" {
 		return rideStatic
-	case "!!!!":
-		return rideDynamic
-	default:
-		return rideNone
 	}
+	return rideNone
 }

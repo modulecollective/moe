@@ -429,7 +429,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if dispatcher != nil {
-		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain · !!!! = ride dynamic")
+		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -721,7 +721,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if md.Workflow == "sdlc" {
-		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain · !!!! = ride dynamic (the machine may extend it)")
+		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain")
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -748,11 +748,6 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	case "!!!":
 		// Same typed cascade push path as `!!`, plus the chain ride.
 		return promptPushCascadeShip(md, true, rideStatic, stdout, stderr)
-	case "!!!!":
-		// Same ride, with the dynamic license: the tail pulse may groom
-		// onto the ridden unit's tail and — on an unchained run, where
-		// this is the whole point — kick a thread it just groomed.
-		return promptPushCascadeShip(md, true, rideDynamic, stdout, stderr)
 	case "p":
 		return next.Run([]string{"--pr", md.Project + "/" + md.ID}, stdout, stderr)
 	case "x":
@@ -772,7 +767,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		wf, werr := LookupWorkflow(md.Workflow)
 		if werr == nil {
 			moePrintf(stderr,
-				"cascade: `%s` is at or behind the push gate; type `!!` (ship this run) / `!!!` (ship + ride the chain) / `!!!!` (ride dynamic) or pick m/p/n/x/b. (stages: %s)\n",
+				"cascade: `%s` is at or behind the push gate; type `!!` (ship this run) / `!!!` (ship + ride the chain) or pick m/p/n/x/b. (stages: %s)\n",
 				answer, strings.Join(wf.Stages(), ", "))
 		}
 		return 0
@@ -847,9 +842,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 	switch {
 	case answer == "!!":
 		// Ship this run and stop — no chain ride.
-	case answer == "!!!", answer == "!!!!":
-		// Both ride; the fourth bang differs only in what the tail
-		// pulse may do, which travels as the ride mode, not here.
+	case answer == "!!!":
 		rideChain = true
 	case answer == "!":
 		oneStep = true
