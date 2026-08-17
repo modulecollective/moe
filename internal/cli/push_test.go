@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
@@ -611,7 +610,7 @@ func TestRunPushReturnsDeferredOnRebaseRecovery(t *testing.T) {
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, _, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
+		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -661,7 +660,7 @@ exit 7
 		t.Setenv("MOE_HOME", f.root)
 		t.Setenv("NO_COLOR", "1")
 		var stdout, stderr bytes.Buffer
-		code, _, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
+		code, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("runPushTyped exit: want 0 (recovery exited cleanly), got %d; stderr=%s", code, stderr.String())
 		}
@@ -710,7 +709,7 @@ func TestRunPushHeadlessRecoveryOptionReachesRebaseChainBack(t *testing.T) {
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 	}, &stdout, &stderr)
 	if code != 0 {
@@ -751,7 +750,7 @@ exit 7
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 	}, &stdout, &stderr)
 	if code != 0 {
@@ -896,7 +895,7 @@ func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 		SkipTerminalEdit: true,
 	}, &stdout, &stderr)
@@ -938,7 +937,7 @@ func TestCascadePushStampsConsentOnMergeRecord(t *testing.T) {
 	t.Setenv("MOE_HOME", f.root)
 	t.Setenv("NO_COLOR", "1")
 	var stdout, stderr bytes.Buffer
-	code, _, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
+	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
 		SkipTerminalEdit: true,
 	}, &stdout, &stderr)
@@ -2492,168 +2491,4 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 	if strings.Contains(stdout, "pre-push hooks:") || strings.Contains(stderr, "pre-push hooks:") {
 		t.Fatalf("no scripts to run, but saw pre-push section header in output:\n%s\n%s", stdout, stderr)
 	}
-}
-
-// TestPushMergePathTailsPulse: the fast-forward ship is run traffic, so
-// inside a ride the merge path fires exactly one sweep once the merged
-// transition is durable — spawned by the run that just shipped, which is
-// the edge the dash nests the sweep under. Every other push test rides
-// TestMain's no-op firePulse, so the fire going missing here would pass
-// CI.
-func TestPushMergePathTailsPulse(t *testing.T) {
-	f := newPushFixture(t)
-	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
-
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	want := f.projectID + " " + f.runID
-	if len(*fired) != 1 || (*fired)[0] != want {
-		t.Fatalf("firePulse fired %v, want exactly one fire %q", *fired, want)
-	}
-}
-
-// TestPushPRPathTailsPulseOnFirstPushOnly: the PR path's fire sits
-// inside the `md.Status != StatusPushed` block, so a genuine first push
-// sweeps and a re-run that only refreshes the branch does not. That
-// placement is the invariant — moved out of the block, every `--pr`
-// re-run would spend a survey session.
-func TestPushPRPathTailsPulseOnFirstPushOnly(t *testing.T) {
-	f := newPushFixture(t)
-	const fakeRemote = "https://github.com/owner/repo.git"
-	const existingURL = "https://github.com/owner/repo/pull/77"
-	addInsteadOfRewrite(t, fakeRemote, f.origin)
-	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
-		`{"id":"`+f.projectID+`","submodule":"projects/`+f.projectID+`/src","remote":"`+fakeRemote+`","default_branch":"main"}`+"\n")
-	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
-	gittest.Run(t, f.root, "commit", "-m", "use GitHub-shaped remote for the PR-path pulse test")
-	fakeGhExistingPR(t, existingURL)
-	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
-
-	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("first push: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	want := f.projectID + " " + f.runID
-	if len(*fired) != 1 || (*fired)[0] != want {
-		t.Fatalf("first push fired %v, want exactly one fire %q", *fired, want)
-	}
-	if md := f.reloadRun(); md.Status != run.StatusPushed {
-		t.Fatalf("status after first push: want pushed, got %s", md.Status)
-	}
-
-	stdout, stderr, code = f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("re-push: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	if len(*fired) != 1 {
-		t.Fatalf("re-push fired again (%v); a branch refresh to an already-recorded PR must not sweep", *fired)
-	}
-}
-
-// TestPushDefersTailPulseMidChain: the end-of-chain deferral reaches the
-// push tail too. The gate itself is unit-tested; this pins that push
-// threads the bureaucracy root and the run's metadata through it at all
-// — without that, every hop of a ride would spend its own survey session
-// on a project the next hop is about to change again.
-func TestPushDefersTailPulseMidChain(t *testing.T) {
-	f := newPushFixture(t)
-	seedRun(t, f.root, f.projectID, "hop-two", "sdlc", run.StatusInProgress, time.Now(), nil)
-	gittest.Run(t, f.root, "add", "-A")
-	gittest.Run(t, f.root, "commit", "-m", "seed queued hop")
-	chainEdge(t, f.root, f.projectID+"/"+f.runID, f.projectID+"/hop-two")
-	// A ride is the only place the deferral can speak — the consent gate
-	// sits ahead of it.
-	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
-
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	if len(*fired) != 0 {
-		t.Fatalf("firePulse fired %v, want no fire mid-chain", *fired)
-	}
-	if !strings.Contains(stderr, "deferring tail sweep") {
-		t.Errorf("stderr = %q, want the deferral named", stderr)
-	}
-}
-
-// TestPushDoesNotTailPulseWithoutRideConsent is the headline case: a
-// `!!` ship, or a plain `moe sdlc push`, merges without spending a
-// survey session. The operator is watching this one run land — the
-// sweep's "survey the project and grow the backlog" posture belongs to
-// the modes where the machine has the wheel. Silent, too: nothing
-// announces what didn't happen.
-func TestPushDoesNotTailPulseWithoutRideConsent(t *testing.T) {
-	f := newPushFixture(t)
-	fired := stubFirePulse(t)
-
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	if md := f.reloadRun(); md.Status != run.StatusMerged {
-		t.Fatalf("status = %s, want merged — the ship itself must be unaffected", md.Status)
-	}
-	if len(*fired) != 0 {
-		t.Fatalf("firePulse fired %v, want no fire outside a ride", *fired)
-	}
-	if strings.Contains(stderr, "pulse:") {
-		t.Errorf("stderr = %q, want silence — an unridden ship is the default, not a suppression", stderr)
-	}
-}
-
-// TestPushThreadsPulseInterruptButBareVerbExitsZero pins the two halves
-// of the skip posture at the push tail. runPushTyped hands the sweep's
-// "operator skipped" bool back so cascadeShipStep can map it to
-// exitInterrupted and halt the chain; the untyped `moe sdlc push`
-// command drops it, because the push's own durable work already
-// succeeded. Sibling of TestBareCloseExitsZeroOnPulseSkip one verb over.
-//
-// Both halves need a ride in flight — that is the only shape in which a
-// push tails a sweep at all. Rides reach push through the typed path, so
-// the second subtest is holding pushCmd.Run's discard honest rather than
-// describing a walk that happens today.
-func TestPushThreadsPulseInterruptButBareVerbExitsZero(t *testing.T) {
-	stubSkippedPulse := func(t *testing.T) {
-		t.Helper()
-		orig := firePulse
-		firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
-		t.Cleanup(func() { firePulse = orig })
-		t.Cleanup(withRideMode(rideStatic))
-	}
-
-	t.Run("typed", func(t *testing.T) {
-		f := newPushFixture(t)
-		stubSkippedPulse(t)
-		t.Setenv("MOE_HOME", f.root)
-		t.Setenv("NO_COLOR", "1")
-
-		var stdout, stderr bytes.Buffer
-		code, interrupted, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
-		if err != nil {
-			t.Fatalf("runPushTyped: %v; stderr=%s", err, stderr.String())
-		}
-		if code != 0 {
-			t.Fatalf("exit=%d, want 0; stderr=%s", code, stderr.String())
-		}
-		if !interrupted {
-			t.Fatal("runPushTyped dropped the tail pulse's interrupt; the cascade would ride on to the next run")
-		}
-	})
-
-	t.Run("bare verb", func(t *testing.T) {
-		f := newPushFixture(t)
-		stubSkippedPulse(t)
-
-		stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-		if code != 0 {
-			t.Fatalf("bare push exit=%d, want 0 (a skipped tail pulse is not a push failure)\nstdout=%s\nstderr=%s",
-				code, stdout, stderr)
-		}
-	})
 }

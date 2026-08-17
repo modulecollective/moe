@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,39 +222,6 @@ func TestPushNoShipGateClosesOnPRPath(t *testing.T) {
 	}
 	if f.originHasRef("refs/heads/" + f.branch) {
 		t.Errorf("expected %s never pushed to origin", f.branch)
-	}
-}
-
-// TestPushNoShipGateThreadsPulseInterrupt: the close-ship tails its own
-// sweep and hands the "operator skipped" bool back, so a Ctrl-C'd survey
-// halts a `!!!` ride here exactly as it does on the merge path. This is
-// why the close is driven with tailPulse=false and the pulse fired from
-// push — closeRunInProcess drops the bool.
-func TestPushNoShipGateThreadsPulseInterrupt(t *testing.T) {
-	f := newPushFixture(t)
-	f.rewindBranchToDefault()
-	f.writeTestGate(noShipGate)
-
-	orig := firePulse
-	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
-	t.Cleanup(func() { firePulse = orig })
-	t.Cleanup(withRideMode(rideStatic))
-
-	t.Setenv("MOE_HOME", f.root)
-	t.Setenv("NO_COLOR", "1")
-	var stdout, stderr bytes.Buffer
-	code, interrupted, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("runPushTyped: %v; stderr=%s", err, stderr.String())
-	}
-	if code != 0 {
-		t.Fatalf("exit=%d, want 0; stderr=%s", code, stderr.String())
-	}
-	if !interrupted {
-		t.Fatal("close-ship dropped the tail pulse's interrupt; a `!!!` ride would carry on to the next run")
-	}
-	if md := f.reloadRun(); md.Status != run.StatusClosed {
-		t.Fatalf("status = %s, want closed — the skipped sweep must not undo the close", md.Status)
 	}
 }
 

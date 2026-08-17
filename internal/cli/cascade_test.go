@@ -105,7 +105,7 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 	t.Helper()
 	var captured []pushFromCascadeInvocation
 	prev := pushFromCascade
-	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
 		inv := pushFromCascadeInvocation{
 			args:    append([]string(nil), args...),
 			options: opts,
@@ -114,9 +114,9 @@ func stubPushFromCascade(t *testing.T, exit int, deferred *PushDeferredError) *[
 		}
 		captured = append(captured, inv)
 		if deferred != nil {
-			return exit, false, deferred
+			return exit, deferred
 		}
-		return exit, false, nil
+		return exit, nil
 	}
 	t.Cleanup(func() { pushFromCascade = prev })
 	return &captured
@@ -143,7 +143,7 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 	t.Helper()
 	var captured []pushFromCascadeInvocation
 	prev := pushFromCascade
-	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
+	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, error) {
 		if len(captured) >= len(outcomes) {
 			t.Fatalf("pushFromCascade called %d times, want at most %d (runaway retry?)", len(captured)+1, len(outcomes))
 		}
@@ -155,9 +155,9 @@ func stubPushFromCascadeSeq(t *testing.T, outcomes []pushOutcome) *[]pushFromCas
 			exit:    out.exit,
 		})
 		if out.deferred != nil {
-			return out.exit, false, out.deferred
+			return out.exit, out.deferred
 		}
-		return out.exit, false, nil
+		return out.exit, nil
 	}
 	t.Cleanup(func() { pushFromCascade = prev })
 	return &captured
@@ -355,37 +355,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
 	}
-}
 
-// TestCascadeYoloPushPulseInterruptHalts: an sdlc `!!!` cascade ships at
-// push, but the operator Ctrl-C's the push's tail pulse. pushFromCascade
-// reports the interrupt, and cascadeShipStep must halt the chain with
-// exitInterrupted before the ride — the sibling ride-on bug fix. The push
-// step reads "interrupted" so the summary doesn't claim a clean ship.
-func TestCascadeYoloPushPulseInterruptHalts(t *testing.T) {
-	stubOpenSdlcStage(t, nil)
-	prev := pushFromCascade
-	var calls int
-	pushFromCascade = func(_ string, args []string, opts pushRunOptions, _, _ io.Writer) (int, bool, error) {
-		calls++
-		return 0, true /*interrupted*/, nil
-	}
-	t.Cleanup(func() { pushFromCascade = prev })
-
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	var stdout, stderr bytes.Buffer
-	// rideChain=true (`!!!`): the Ctrl-C'd tail pulse must halt before the ride.
-	res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
-	if code != exitInterrupted {
-		t.Fatalf("cascade exit=%d, want exitInterrupted (%d): %+v", code, exitInterrupted, res.ran)
-	}
-	if calls != 1 {
-		t.Fatalf("pushFromCascade called %d times, want 1 (the ride must not fire another push)", calls)
-	}
-	last := res.ran[len(res.ran)-1]
-	if last.stage != "push" || last.code != exitInterrupted {
-		t.Fatalf("last step = %+v, want the push step recorded as interrupted", last)
-	}
 }
 
 // openTwinStageInvocation mirrors openSdlcStageInvocation for the
@@ -547,65 +517,38 @@ func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
 	}
 }
 
-// TestCascadeTwinAutoCloseTailsPulse is the wiring the stubbed sibling
-// above can't see. TestCascadeFromGateTwinYoloAutoCloses swaps the group's
-// close command for a recorder, so the close's own pulse tail never runs
-// — and nothing today would fail if the cascade started calling
-// closeRunInProcess with tailPulse=false the way serve deliberately does.
-// Same shape, but with the real close and a full close fixture.
-//
-// Both consent levels in one walk, because twin is where a carve-out
-// would be most tempting: a reflect ridden under `--chain` fires exactly
-// one sweep, spawned by the run it just closed; the same cascade under a
-// bare `!!` — an operator sealing the twin by hand — ships quiet. The
-// gate is the fire seam, not the workflow.
-func TestCascadeTwinAutoCloseTailsPulse(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode rideMode
-		want int
-	}{
-		{"ridden", rideStatic, 1},
-		{"bare !! seal", rideNone, 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := seedCloseFixture(t, "moe", "reflect-2026-05-17", "twin", run.StatusInProgress)
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("NO_COLOR", "1")
-			stubOpenTwinStage(t, nil)
-			md, err := run.Load(root, "moe", "reflect-2026-05-17")
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The finalize gate reads this canvas, and the real close
-			// refuses a dirty tree — so unlike the stubbed sibling it has
-			// to be committed.
-			writeSatisfiedTwinFinalizeCanvas(t, root, md)
-			gittest.Run(t, root, "add", "-A")
-			gittest.Run(t, root, "commit", "-m", "work: finalize canvas for the cascade close")
-			defer withRideMode(tc.mode)()
-			fired := stubFirePulse(t)
+// TestCascadeTwinAutoCloseReallyCloses is the wiring the stubbed sibling
+// above can't see. TestCascadeFromGateTwinYoloAutoCloses swaps the
+// group's close command for a recorder, so nothing there proves the
+// cascade's close reaches disk. Same walk, but with the real close and a
+// full close fixture.
+func TestCascadeTwinAutoCloseReallyCloses(t *testing.T) {
+	root := seedCloseFixture(t, "moe", "reflect-2026-05-17", "twin", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubOpenTwinStage(t, nil)
+	md, err := run.Load(root, "moe", "reflect-2026-05-17")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The finalize gate reads this canvas, and the real close refuses a
+	// dirty tree — so unlike the stubbed sibling it has to be committed.
+	writeSatisfiedTwinFinalizeCanvas(t, root, md)
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "work: finalize canvas for the cascade close")
 
-			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
-			if code != 0 {
-				t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-			}
-			if !res.shipped {
-				t.Fatalf("twin !! cascade must ship via close: %+v", res)
-			}
-			if reloaded, err := run.Load(root, "moe", "reflect-2026-05-17"); err != nil {
-				t.Fatal(err)
-			} else if reloaded.Status != run.StatusClosed {
-				t.Fatalf("run status = %q, want closed — the cascade's close did not land", reloaded.Status)
-			}
-			if len(*fired) != tc.want {
-				t.Fatalf("firePulse fired %v, want %d fire(s) for moe spawned by reflect-2026-05-17", *fired, tc.want)
-			}
-			if tc.want == 1 && (*fired)[0] != "moe reflect-2026-05-17" {
-				t.Fatalf("firePulse fired %v, want the closing run as spawner", *fired)
-			}
-		})
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("twin !! cascade must ship via close: %+v", res)
+	}
+	if reloaded, err := run.Load(root, "moe", "reflect-2026-05-17"); err != nil {
+		t.Fatal(err)
+	} else if reloaded.Status != run.StatusClosed {
+		t.Fatalf("run status = %q, want closed — the cascade's close did not land", reloaded.Status)
 	}
 }
 

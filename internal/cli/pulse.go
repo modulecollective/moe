@@ -30,9 +30,7 @@ import (
 // spawn parked fix runs and groom queued work into lanes. It has no
 // push — the artifact is the filed followups plus the canvas report.
 //
-// A pulse is more than the survey. It fires at the tail of the
-// operator-rooted run-traffic verbs (sdlc close, sdlc push, twin close,
-// and the cascades' auto-close), and every fire does three things:
+// A pulse is more than the survey. Every invocation does three things:
 //
 //   - Always: open every due chore's run for the project (never execute
 //     one) via openChoreInProcess. Automation acts on standing intent —
@@ -46,16 +44,14 @@ import (
 //     open on the dash's ACTIVE list for a human to look at, but nothing
 //     blocks the next survey — visible junk over invisible absence.
 //
-// Which run-traffic events actually fire is pulseFiresForRun's call:
-// inside a ride, at the momentary tail of the chain being ridden. A
-// mid-chain hop defers to the run behind it, so a ride spends one survey
-// per generation rather than one per hop.
-//
-// `moe pulse new <project>` runs the whole pulse by hand, and
-// `--dynamic` is the consent rung that makes it the verb a clock can
-// call: grooming may kick what it grooms. `moe serve --dynamic` hosts
-// the clock (see internal/serve/heartbeat.go), and an external cron can
-// call the same verb.
+// Nothing fires a pulse in-process. Run-traffic verbs used to tail one
+// at their chain's momentary tail, which meant a kicked ride's own tail
+// re-entered the sweep and re-walked a board the outer kick loop was
+// already walking. The pulse is now started only by a verb: `moe pulse
+// new <project>` by hand, and `--dynamic` is the consent rung that makes
+// it the verb a clock can call — grooming may kick what it grooms. `moe
+// serve --dynamic` hosts the clock (see internal/serve/heartbeat.go),
+// and an external cron can call the same verb.
 const (
 	pulseWorkflow = "pulse"
 	// pulseDoc is the single stage's document id. The survey canvas
@@ -172,118 +168,6 @@ func init() {
 	RegisterWorkflow(w)
 }
 
-// pulseFiresForRun reports whether a terminal transition of the given
-// run is traffic that should tail a pulse. Three conditions, all
-// structural.
-//
-// The workflow must move intent: sdlc and twin do — code and the
-// recorded canon — while the rest of the close-registered workflows
-// (chat, idea) and pulse itself do not, which is what
-// makes pulse-on-pulse recursion impossible. Used by both the close
-// seam and the push seam (twin has no push, so at a push point the
-// workflow is always sdlc — that half of the guard is defensive there).
-//
-// The invocation must carry **ride consent**. The pulse's posture is
-// "survey the project and grow the backlog", which is a thing to do
-// while the machine has the wheel — not while the operator is watching
-// a single run land and reaching for Ctrl-C. `!!!`/`!!!!`, their flag
-// twins `--chain`/`--dynamic`, `moe chain kick` and the kicks the pulse
-// roots itself all hand the wheel over; a `!!` ship, a `!`/`!<stage>`
-// step that lands on push, and a bare interactive `moe push` or close
-// do not. Silent, unlike the lineage skip below: under this model a
-// quiet ship is the expected default, not a suppression worth naming.
-//
-// And the run must sit at the **momentary tail of its chain**. A ride
-// that ships four runs used to spend four surveys, each sweeping a
-// project the next hop is about to change again; deferring while a live
-// chained child is still queued collapses those into one survey per
-// generation, fired where the whole generation's work is on the record.
-// What that costs is mid-ride pickup latency — a finding after hop 1
-// waits for the generation boundary — and that is the trade the design
-// took.
-//
-// This condition replaces an earlier **operator-rooted** bound, which
-// refused any run carrying SpawnedBy. That bound had two jobs and this
-// gate covers both: attended ships never fire at all (ride consent, one
-// condition up), and pulse-on-pulse recursion stays structurally
-// impossible (the pulse workflow never clears the first condition). What
-// the bound also did — and shouldn't have — was stop growth dead after
-// one machine generation: the runs a survey grooms and kicks are exactly
-// the runs that carry SpawnedBy, so their tails could never sweep and
-// the second generation was always the last. With the bound gone, each
-// generation's tail fires its own survey and the ride ends when a survey
-// adds nothing. Termination is behavioral rather than structural, which
-// is acceptable because every generation is real shipped work behind the
-// review/test gates, visible on the dash, and one Ctrl-C halts the ride.
-//
-// The second return is the one stderr line the caller prints when a
-// queued child is what deferred the sweep, and "" otherwise — a workflow
-// that never pulses, and an invocation that never consented, say
-// nothing. Since the ride gate sits ahead of it, that line can only
-// print inside a ride.
-func pulseFiresForRun(root string, md *run.Metadata, stderr io.Writer) (bool, string) {
-	if md.Workflow != "sdlc" && md.Workflow != "twin" {
-		return false, ""
-	}
-	if currentRideMode == rideNone {
-		return false, ""
-	}
-	if child := liveChainedChild(root, md, stderr); child != "" {
-		return false, fmt.Sprintf(
-			"pulse: deferring tail sweep — %s/%s chains into %s; the survey fires at the chain's tail\n",
-			md.Project, md.ID, child)
-	}
-	return true, ""
-}
-
-// liveChainedChild returns the run md chains into when that child is
-// still live, and "" when md is at its chain's momentary tail (or was
-// never chained at all). The liveness rule is ChainGraph's, so a child
-// that has already merged or been closed reads as no child — which is
-// what makes the last hop of a ride the one that sweeps.
-//
-// Fails open: a scan or index error means the deferral question can't be
-// answered, and the pre-deferral behaviour — sweep — is the one that
-// loses nothing. The warning is the tell, since a bureaucracy this
-// broken will fail the survey's own reads a moment later anyway.
-func liveChainedChild(root string, md *run.Metadata, stderr io.Writer) string {
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		moePrintf(stderr, "pulse: read chain edges for %s/%s: %v — sweeping anyway\n", md.Project, md.ID, err)
-		return ""
-	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		moePrintf(stderr, "pulse: scan runs for %s/%s: %v — sweeping anyway\n", md.Project, md.ID, err)
-		return ""
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, m := range mds {
-		byKey[m.Project+"/"+m.ID] = m
-	}
-	return run.NewChainGraph(idx, byKey).Child(md.Project + "/" + md.ID)
-}
-
-// firePulse runs the pulse for a project at the tail of a run-traffic
-// verb. spawner is the triggering run's slug — threaded in-process to
-// the groom fence and the kick's re-entrancy guard, and recorded nowhere
-// (see pulseSurvey: the sweep opens top-level). It is a var so the
-// close/push wiring can be observed in tests without running the
-// survey's agent turn.
-//
-// Warn-only by construction: the transition that triggered the pulse
-// has already committed and pushed by the time this runs, so a pulse
-// failure must never change the triggering verb's outcome (it mirrors
-// closeWithAutoResolve's posture, not the abort-on-fail push
-// synthesis). runPulse prints its own warnings; the exit code is
-// dropped here. The returned bool is "operator interrupted the sweep" —
-// callers thread it to exitInterrupted so a Ctrl-C halts a cascade
-// instead of riding on to the next run.
-var firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool {
-	_, interrupted := runPulse(root, projectID, spawner, "" /*emitRun*/, stdout, stderr)
-	return interrupted
-}
-
 // runPulse is the whole pulse: the deterministic chore auto-open (which
 // opens runs but executes none), then the survey. spawner is the
 // triggering run's slug ("" for a manual `moe pulse new`, which threads
@@ -311,12 +195,11 @@ func runPulse(root, projectID, spawner, emitRun string, stdout, stderr io.Writer
 // owns pointer bumps; the pulse takes only the reconcile step.
 //
 // Warn-only like everything else in the pulse: a reconcile failure
-// (offline, no gh, a wedged lock) must not derail the sweep or the verb
-// that triggered it. The repolock is acquired here because firePulse
-// runs after the triggering verb released it, and it is held only for
-// the walk — the survey's own run-open takes its own. The journal push
-// is conditional on something actually having moved: the common case is
-// a project with nothing pushed, which should stay a disk-only scan.
+// (offline, no gh, a wedged lock) must not derail the sweep. The
+// repolock is taken here and held only for the walk — the survey's own
+// run-open takes its own. The journal push is conditional on something
+// actually having moved: the common case is a project with nothing
+// pushed, which should stay a disk-only scan.
 func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
 	// Checkpoint: a Ctrl-C during chore auto-open skips the network walk
 	// too — the operator asked for the sweep to get out of the way.
@@ -379,12 +262,12 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // exercising the deterministic parts (chore auto-open, auto-close) can
 // stub the agent turn out.
 //
-// Every fire runs a fresh survey unconditionally — there is no rate
-// limiter. On a clean survey it auto-closes its own run; a failed or
-// SIGINT'd sweep leaves the run open on the dash's ACTIVE list
+// Every invocation runs a fresh survey unconditionally — there is no
+// rate limiter. On a clean survey it auto-closes its own run; a failed
+// or SIGINT'd sweep leaves the run open on the dash's ACTIVE list
 // (escalation by visibility), but does not block the next survey.
 // Concurrent and piled-up pulse runs are allowed: run opening mints
-// distinct dated slugs under the repolock, so parallel fires don't
+// distinct dated slugs under the repolock, so parallel sweeps don't
 // collide.
 //
 // The return describes the whole invocation, including a dynamic ride
@@ -396,10 +279,11 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // child's exit status, so it is the only channel a failed unattended
 // invocation has.
 //
-// Body assigned in init() rather than at declaration to break the
-// firePulse ↔ runPulseSurvey initialization cycle the auto-close arm
-// introduces (auto-close → closeRunInProcess → firePulse) — the same
-// init-order dodge openPulseStage uses.
+// Body assigned in init() rather than at declaration for the same
+// init-order reason openPulseStage uses one: the auto-close arm traces
+// pulseSurvey → closePulseRun → closeRunInProcess and back through the
+// registered close, which the var-init dependency analyser reads as a
+// cycle.
 var runPulseSurvey func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int
 
 func init() {
@@ -487,14 +371,10 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	// of exhausted plan limits) and tells a phone glance the sweep
 	// succeeded. Either way the run stays open on the dash's ACTIVE list
 	// for the operator, and either way the next survey is unblocked.
-	//
-	// The tail-pulse path is unaffected: firePulse drops the code
-	// outright, so a pulse failure still never changes the outcome of the
-	// verb whose tail fired it.
 	survey := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
 	if survey.code == exitInterrupted {
 		// The Ctrl-C may have been observed only at the agent boundary, so
-		// mark the latch to propagate the skip out and halt a cascade.
+		// mark the latch to propagate the skip out as the verb's own exit.
 		// Whether the run is disposed is agentStarted's call, below.
 		pi.mark()
 	}
@@ -553,16 +433,14 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
 	groomed := groomChains(root, projectID, md.ID, groups, spawnerKey, survey.chainEdges, stdout, stderr)
 
-	// Clean sweep: auto-close the run so the next run-traffic event can
-	// fire a fresh survey. Route through the registered close (subject +
+	// Clean sweep: auto-close the run so the next sweep starts from a
+	// clean board. Route through the registered close (subject +
 	// cleanup) so there's no parallel close path. skipEdit harvests
 	// followups.md as-is — the filings promote to ideas unreviewed;
-	// review moves to scrapping on the dash. tailPulse=false because
-	// pulse never tails pulse (pulseFiresForRun excludes it — the
-	// false just says so at the call). A close failure warns and leaves
-	// the run open, mirroring firePulse's warn-only posture: the report
-	// and filings are already durable on disk, so a failed auto-close is
-	// a close-by-hand-later, not a lost sweep.
+	// review moves to scrapping on the dash. A close failure warns and
+	// leaves the run open, mirroring the pulse's warn-only posture
+	// throughout: the report and filings are already durable on disk, so
+	// a failed auto-close is a close-by-hand-later, not a lost sweep.
 	//
 	// A dynamic sweep also stamps the kick order it is about to walk onto
 	// its own canvas, riding the close's cleanup so the section and the
@@ -620,8 +498,7 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 // closePulseRun closes a pulse run through the registered close — the
 // same subject the happy-path auto-close and the interrupt disposal both
 // ride, so there's no parallel close path. skipEdit harvests
-// followups.md as-is; tailPulse=false because pulse never tails pulse
-// (pulseFiresForRun excludes it).
+// followups.md as-is.
 //
 // cleanup is a parameter rather than the registration's own hook because
 // pulse registered nil (pulse has no workspace and no branch to tear
@@ -635,7 +512,7 @@ func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stdout, 
 		return fmt.Errorf("no close registration for %q", pulseWorkflow)
 	}
 	return closeRunInProcess(root, pulseWorkflow, reg.subject, cleanup,
-		projectID, runID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr)
+		projectID, runID, true /*skipEdit*/, stdout, stderr)
 }
 
 // disposePulseRun closes a just-minted pulse run the operator Ctrl-C'd

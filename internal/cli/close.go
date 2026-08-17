@@ -127,7 +127,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, true /*tailPulse*/, stdout, stderr); err != nil {
+	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stdout, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -152,18 +152,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // stdout/stderr are handed to the workflow cleanup hook; the only hook
 // today (sdlc's releaseWorkspaceCleanup) logs to the process streams
 // directly, so serve passes io.Discard without losing anything.
-//
-// tailPulse gates the run-traffic pulse tail below. The CLI verb passes
-// true; serve passes false, and deliberately so. The pulse is a
-// terminal-surface affordance: the blocking headless survey has a
-// Ctrl-C-to-skip escape and a live banner that a browser POST has
-// neither of (serve discards both writers), and the chore auto-open it
-// carries mints runs — a spawn-bucket action serve gates behind
-// --dynamic. Firing it from a safe-by-default serve close would both
-// hang the POST for the survey's duration and bypass that gate. The
-// pulse stays best-effort, so the next CLI/cascade run-traffic verb
-// tails it anyway; a serve close simply doesn't.
-func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit, tailPulse bool, stdout, stderr io.Writer) error {
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stdout, stderr io.Writer) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}
@@ -288,24 +277,6 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	// relationship to check.
 	if !isCaptureWorkflow(workflow) {
 		warnUnverifiedFollowupClaims(root, md, stderr)
-	}
-
-	// Tail a pulse for
-	// run-traffic closes — sdlc and twin, including the cascades'
-	// auto-close, which routes through this same path. Deliberately not
-	// wired into enterTerminal: sync's reconcile shares that helper and
-	// must never pulse. firePulse opens and commits its own runs, so it
-	// must run outside the WithJournalPush closure above — repolock is
-	// not reentrant. Its "operator skipped the sweep" bool is dropped
-	// here: a close's own durable work already succeeded, so a skipped
-	// advisory sweep is a successful skip, not a close failure — and the
-	// non-sdlc cascade auto-close deliberately exits on the close's own
-	// code too (see cascadeFromGate's close branch). The cascade halt
-	// rides the push seam, where mergePath/openPRPath consume the bool.
-	if fires, skip := pulseFiresForRun(root, md, stderr); tailPulse && fires {
-		firePulse(root, projectID, runID /*spawner*/, stdout, stderr)
-	} else if tailPulse && skip != "" {
-		moePrintf(stderr, "%s", skip)
 	}
 	return nil
 }

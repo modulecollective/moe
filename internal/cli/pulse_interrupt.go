@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 )
 
-// pulseInterrupt is the scoped Ctrl-C latch for a pulse tail. Between
+// pulseInterrupt is the scoped Ctrl-C latch for a pulse. Between
 // minting the survey run and the agent executor's own watcher
 // (agent.StartCommand), SIGINT has Go's default disposition — Ctrl-C
 // kills moe outright, orphaning the just-minted pulse run and any lock
@@ -18,9 +18,9 @@ import (
 // at the pulse's step boundaries) and the process survives, so the
 // normal unwind paths run — locks release via their defers, the
 // bootstrap-failure path tears the worktree down — and the pulse can
-// dispose of its own run. Its scope is exactly a pulse tail
-// (runPulse): firePulse and `moe pulse new`, never the interactive
-// `moe pulse pulse`, which stays the operator's own session.
+// dispose of its own run. Its scope is exactly the whole-pulse verb
+// (runPulse, behind `moe pulse new`), never the interactive `moe pulse
+// pulse`, which stays the operator's own session.
 //
 // A second Ctrl-C, after the first is latched, gets Go's default
 // disposition again — signal.Stop steps the watcher out of the way so

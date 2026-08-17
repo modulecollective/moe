@@ -309,9 +309,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 	// rides first): leaving a placeholder open while its chain executes
 	// puts a run on the dash's ACTIVE list that nobody is ever going to
 	// work. skipEdit because a chain head carries no followups worth an
-	// editor pop, and tailPulse=false because closing a placeholder is
-	// not run traffic — the runs it rides each tail their own pulse at
-	// push.
+	// editor pop.
 	if md.Workflow == chainWorkflow && md.Status == run.StatusInProgress {
 		reg, ok := lookupCloseRegistration(chainWorkflow)
 		if !ok {
@@ -319,7 +317,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 			return 1
 		}
 		if err := closeRunInProcess(root, chainWorkflow, reg.subject, reg.cleanup,
-			projectID, md.ID, true /*skipEdit*/, false /*tailPulse*/, stdout, stderr); err != nil {
+			projectID, md.ID, true /*skipEdit*/, stdout, stderr); err != nil {
 			moePrintf(stderr, "chain kick: close %s/%s: %v\n", projectID, md.ID, err)
 			return 1
 		}

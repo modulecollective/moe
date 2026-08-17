@@ -231,10 +231,6 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 // The whole close is one act, so the range it leaves behind is asserted
 // whole rather than one HEAD body — that is also the shape the gate
 // reads it in.
-//
-// tailPulse=false because the close under test is the mechanism, not the
-// cascade: a ride-mode close would otherwise tail a survey and pull a
-// whole agent turn into a unit test.
 func TestCloseStampsConsentOnlyInsideAWalk(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -264,7 +260,7 @@ func TestCloseStampsConsentOnlyInsideAWalk(t *testing.T) {
 			}
 			var out, errb bytes.Buffer
 			if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
-				"tele", "close-me", true /*skipEdit*/, false /*tailPulse*/, &out, &errb); err != nil {
+				"tele", "close-me", true /*skipEdit*/, &out, &errb); err != nil {
 				t.Fatalf("close: %v stderr=%q", err, errb.String())
 			}
 			tip, err := git.HEAD(root)

@@ -186,30 +186,3 @@ func TestPushResumeAcceptsHandCommittedRecord(t *testing.T) {
 		t.Fatalf("resume stdout:\n%s", stdout)
 	}
 }
-
-// TestPushResumeTailsPulseForStrandedShip: a ship that stranded never
-// swept, so the resume is where the one sweep per merged ship lands.
-// The stranding attempt must not fire — the merge isn't recorded yet.
-func TestPushResumeTailsPulseForStrandedShip(t *testing.T) {
-	f := newPushFixture(t)
-	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
-
-	lift := failMergeRecordCommits(t, f.root)
-	if _, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID); code == 0 {
-		t.Fatalf("expected the stranding push to fail; stderr=%s", stderr)
-	}
-	if len(*fired) != 0 {
-		t.Fatalf("stranded ship swept before its record landed: %v", *fired)
-	}
-	lift()
-
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-	if code != 0 {
-		t.Fatalf("resume: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
-	}
-	want := f.projectID + " " + f.runID
-	if len(*fired) != 1 || (*fired)[0] != want {
-		t.Fatalf("firePulse fired %v, want exactly one fire %q", *fired, want)
-	}
-}

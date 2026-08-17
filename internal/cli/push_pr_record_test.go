@@ -137,7 +137,6 @@ func strandPRRecord(t *testing.T, f *prRecordFixture) (lift func(), stderr strin
 func TestPushPRRecordFailurePersistsExactPendingRecord(t *testing.T) {
 	f := newPRRecordFixture(t)
 	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
 
 	lift, stderr := strandPRRecord(t, f)
 	defer lift()
@@ -161,9 +160,6 @@ func TestPushPRRecordFailurePersistsExactPendingRecord(t *testing.T) {
 	if strings.TrimSpace(staged) != filepath.Join(run.Dir(f.projectID, f.runID), "run.json") {
 		t.Fatalf("staged paths: want only run.json, got:\n%s", staged)
 	}
-	if len(*fired) != 0 {
-		t.Fatalf("stranded record fired pulse before recovery: %v", *fired)
-	}
 	if !strings.Contains(stderr, "re-run `moe sdlc push --pr "+f.projectID+"/"+f.runID+"`") {
 		t.Fatalf("stderr missing exact retry:\n%s", stderr)
 	}
@@ -180,7 +176,6 @@ func TestPushResumesPRRecordBeforeSynthesisOrGitHub(t *testing.T) {
 	}()
 	lift()
 	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
 	synthBefore := *f.synthCalls
 	ghBefore := f.ghCalls(t)
 
@@ -212,16 +207,11 @@ func TestPushResumesPRRecordBeforeSynthesisOrGitHub(t *testing.T) {
 	} else if len(entries) != 0 {
 		t.Fatalf("bureaucracy tree dirty after recovery: %#v", entries)
 	}
-	wantFire := f.projectID + " " + f.runID
-	if len(*fired) != 1 || (*fired)[0] != wantFire {
-		t.Fatalf("firePulse fired %v, want exactly one %q", *fired, wantFire)
-	}
 }
 
 func TestPushPRRecordRepeatedFailureKeepsMarker(t *testing.T) {
 	f := newPRRecordFixture(t)
 	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
 	lift, _ := strandPRRecord(t, f)
 	defer lift()
 	path := prRecordPendingPath(f.root, f.reloadRun())
@@ -247,9 +237,6 @@ func TestPushPRRecordRepeatedFailureKeepsMarker(t *testing.T) {
 		t.Fatalf("direct retry repeated upstream work: synth %d→%d, gh %q→%q",
 			synthBefore, *f.synthCalls, ghBefore, f.ghCalls(t))
 	}
-	if len(*fired) != 0 {
-		t.Fatalf("failed retries fired pulse: %v", *fired)
-	}
 }
 
 func TestPushPRRecordResumeAcceptsHandCommit(t *testing.T) {
@@ -273,12 +260,11 @@ func TestPushPRRecordResumeAcceptsHandCommit(t *testing.T) {
 	}
 }
 
-func TestPushPRRecordRemovalFailureDefersPulseUntilCleanup(t *testing.T) {
+func TestPushPRRecordRemovalFailureKeepsMarkerUntilCleanup(t *testing.T) {
 	f := newPRRecordFixture(t)
 	lift, _ := strandPRRecord(t, f)
 	lift()
 	defer withRideMode(rideStatic)()
-	fired := stubFirePulse(t)
 
 	origRemove := removePRRecordPending
 	removeCalls := 0
@@ -305,9 +291,6 @@ func TestPushPRRecordRemovalFailureDefersPulseUntilCleanup(t *testing.T) {
 	if !prPendingExists(f.pushFixture) {
 		t.Fatalf("failed cleanup removed %s", prRecordPendingName)
 	}
-	if len(*fired) != 0 {
-		t.Fatalf("failed cleanup fired pulse: %v", *fired)
-	}
 
 	stdout, stderr, code = f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 0 {
@@ -318,31 +301,6 @@ func TestPushPRRecordRemovalFailureDefersPulseUntilCleanup(t *testing.T) {
 	}
 	if prPendingExists(f.pushFixture) {
 		t.Fatalf("cleanup retry left %s", prRecordPendingName)
-	}
-	wantFire := f.projectID + " " + f.runID
-	if len(*fired) != 1 || (*fired)[0] != wantFire {
-		t.Fatalf("cleanup retries fired %v, want exactly one %q", *fired, wantFire)
-	}
-}
-
-func TestPushPRRecordResumeThreadsPulseInterrupt(t *testing.T) {
-	f := newPRRecordFixture(t)
-	lift, _ := strandPRRecord(t, f)
-	lift()
-	defer withRideMode(rideStatic)()
-	orig := firePulse
-	firePulse = func(root, projectID, spawner string, stdout, stderr io.Writer) bool { return true }
-	t.Cleanup(func() { firePulse = orig })
-	t.Setenv("MOE_HOME", f.root)
-	t.Setenv("NO_COLOR", "1")
-
-	var stdout, stderr strings.Builder
-	code, interrupted, err := runPushTyped("sdlc", []string{f.projectID + "/" + f.runID}, &stdout, &stderr)
-	if err != nil || code != 0 {
-		t.Fatalf("resume: exit=%d err=%v\nstdout=%s\nstderr=%s", code, err, stdout.String(), stderr.String())
-	}
-	if !interrupted {
-		t.Fatal("PR-record recovery dropped the tail pulse interrupt")
 	}
 }
 

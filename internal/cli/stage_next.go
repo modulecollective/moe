@@ -899,7 +899,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 // var to stub the cascade's push step without touching the standalone
 // `moe sdlc push` path (which still goes through pushCmd.Run →
 // runPushTyped → discard-error).
-var pushFromCascade func(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, bool, error)
+var pushFromCascade func(workflow string, args []string, opts pushRunOptions, stdout, stderr io.Writer) (int, error)
 
 func init() {
 	pushFromCascade = runPushTypedWithOptions
@@ -952,8 +952,8 @@ type cascadeResult struct {
 // opts.Headless), so the cascade owns routing.
 //
 // At push in cascade-to-ship mode the dispatch is the merge path
-// (pushFromCascade — the typed seam, not pushCmd.Run, so the tail
-// pulse's interrupt bool survives). `!!` and `!!!` default to
+// (pushFromCascade — the typed seam, not pushCmd.Run, so the
+// deferred-to-recovery error survives). `!!` and `!!!` default to
 // fast-forward merge; runPushTyped writes the merge-path push note
 // after deterministic hooks and shipping.
 func cascadeFromGate(startStage, destination string, oneStep bool, rideChain bool, md *run.Metadata, stdout, stderr io.Writer) (cascadeResult, int) {
@@ -1239,7 +1239,7 @@ func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canv
 func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, stderr io.Writer) (steps []cascadeStepResult, shipped bool, code int) {
 	retries := 0
 	for {
-		ship, interrupted, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
+		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
 			SkipTerminalEdit: true,
 		}, stdout, stderr)
@@ -1266,15 +1266,6 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		if ship != 0 {
 			steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 			return steps, false, ship
-		}
-		if interrupted {
-			// The ff-merge shipped, but the operator Ctrl-C'd the tail
-			// pulse. Halt the chain before the ride — record the push step
-			// as interrupted (not "ok") so the summary reads "push
-			// interrupted — stopped", and propagate exitInterrupted so
-			// everything above stops rather than riding on to the next run.
-			steps = append(steps, cascadeStepResult{stage: "push", code: exitInterrupted})
-			return steps, true, exitInterrupted
 		}
 		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
 		// Chain ride (`!!!` only): after the parent's terminal stage
