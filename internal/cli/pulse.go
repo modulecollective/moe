@@ -78,7 +78,7 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"open, and never manufacture one to justify the turn. Whatever the workflow, `why` is the one line the operator reads " +
 	"next to the verdict.\n\n" +
 	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
-	"freshly named head (`\"head\"`), or left to land opportunistically. A thread's `\"runs\"` entry is either a **string** " +
+	"freshly named head (`\"head\"`), or self-rooted as its own thread (neither key). A thread's `\"runs\"` entry is either a **string** " +
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
 	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
 	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
@@ -609,8 +609,7 @@ type pulseGate struct {
 	// order the survey isn't sure of. It stays a separate key rather
 	// than folding into a self-rooted thread because "park it, I have no
 	// opinion" and "root a new thread with this" are different
-	// judgements, and the opportunistic placement must not swallow the
-	// former.
+	// judgements.
 	Loose []pulseRunSpec `json:"loose"`
 	// Threads carries the survey's ordering opinion: runs in execution
 	// order, each group placed after an existing run, under a freshly
@@ -652,16 +651,16 @@ type pulseRunSpec struct {
 //
 // Onto attaches the group after that run, wherever it sits. Head mints
 // a chain placeholder with that slug base and chains the group under it.
-// Neither is the opportunistic placement — after the tail of the chain
-// the pulse fired on, when there is one and the ride is dynamic;
-// otherwise a self-rooted parked thread. Onto and Head together is a
-// warn-and-skip: they are two different answers to the same question.
+// Neither self-roots the group as its own headless thread — a dynamic
+// sweep's kick loop starts it, anything else parks it. Onto and Head
+// together is a warn-and-skip: they are two different answers to the
+// same question.
 //
 // Park is the survey's one-line reason the operator should look at this
 // thread before it runs. Non-empty parks the thread; absent lets it kick
-// once grooming is done, which is the default under a dynamic ride and
+// once grooming is done, which is the default under a dynamic sweep and
 // impossible without one (see pulseSelfKick). Park is the marked case
-// because the error ledger only ever ran one way — three strandings, no
+// because the error ledger only ever ran one way — strandings, never a
 // runaway — so the field the survey has to spend a sentence on is the
 // one that stops motion, not the one that causes it.
 type pulseThread struct {

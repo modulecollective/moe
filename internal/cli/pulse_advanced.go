@@ -128,8 +128,8 @@ func advancedRunsBlock(sc *pulseScan, projectID string) string {
 		"That marker is consent to carry the run forward, which is more than a machine-spawned fix run has: " +
 		"an advanced run clears the lane bar's ordering question on its own, so grooming one onto a thread " +
 		"(`chain`, `onto` an existing lane or its own group) is the normal move, not a stretch. Nothing here " +
-		"has a session yet — it is waiting for someone to kick it. Outside a dynamic ride grooming one is " +
-		"not kicking it; inside one a thread rooted at one of these starts like any other, and the marker " +
+		"has a session yet — it is waiting for someone to kick it. Outside a dynamic sweep grooming one is " +
+		"not kicking it; under one a thread rooted at one of these starts like any other, and the marker " +
 		"is the consent that admits it.")
 	return sb.String()
 }
