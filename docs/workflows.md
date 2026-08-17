@@ -258,8 +258,9 @@ backlog grooming feed runs without ever becoming automation.
 
 ```sh
 moe idea new <project>/<slug>
-moe idea edit <project>/<slug>
+moe idea edit [--chat] <project>/<slug>
 moe idea list <project>
+moe idea log <project>/<slug>
 moe idea move <project>/<slug> <to-project>
 moe idea tag <project>/<slug> [workflow]
 moe idea untag <project>/<slug>
@@ -267,8 +268,14 @@ moe idea close <project>/<slug>
 moe idea reopen <project>/<slug>
 ```
 
-Idea capture and editing use `$EDITOR`. Use `moe chat` when you want an agent
-to groom the backlog or help shape notes. Every other workflow's `new` accepts
+Capture uses `$EDITOR` and launches no agent — jotting stays cheap. Refinement
+is the one place an agent may hold the pen: `idea edit --chat` opens an
+interactive session on the idea's own document, so the thread persists in
+`run.json` and `moe idea log` reads it back. It is deliberately smaller than
+`moe chat` — no clone of the project's source, so the agent sharpens your
+framing rather than checking claims about the code. Reach for `moe chat` when
+you want to think *with* the project; reach for `edit --chat` to sharpen one
+note. Every other workflow's `new` accepts
 `--from-idea <project>/<slug>`, promoting the idea into a run and preserving
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
@@ -288,20 +295,26 @@ An **intent** is a short, operator-authored statement of where a project is
 going — a theme, a bet, a "we're heading here" — parked on the project while
 it's relevant and closed when it stops being so. It is not a task: an intent is
 never promoted, never executed, never handed to an agent to advance. Agents
-*read* intents; only the operator writes them.
+*read* intents; the direction is the operator's.
 
 ```sh
-moe intent new <project>/<slug>     # park a new intent in $EDITOR
-moe intent edit <project>/<slug>    # sharpen it — intents are living docs
-moe intent list <project>           # the open intents
-moe intent cat <project>/<slug>     # dump one to stdout
-moe intent close <project>/<slug>   # satisfied or abandoned (status -> closed)
+moe intent new <project>/<slug>            # park a new intent in $EDITOR
+moe intent edit [--chat] <project>/<slug>  # sharpen it — intents are living docs
+moe intent list <project>                  # the open intents
+moe intent cat <project>/<slug>            # dump one to stdout
+moe intent log <project>/<slug>            # read back a --chat session
+moe intent close <project>/<slug>          # satisfied or abandoned (status -> closed)
 ```
 
 Intents are just runs in a single-stage `intent` workflow, the same shape as
-ideas, with the same discipline that no verb launches an agent — capture stays
-cheap. The canvas body is freeform markdown: no fields, no priority, no
-until-date. Parked = open.
+ideas, and capture stays cheap the same way — `intent new` launches no agent.
+`intent edit --chat` opens the same document-only session `idea edit --chat`
+does, with one difference that is all prose: the agent is a scribe there. It
+types what the conversation converges on and asks the question that tightens
+the bet; it never originates direction. An operator driving a session is still
+the operator authoring — what stays banned is an *autonomous* agent writing
+where a project is headed. The canvas body is freeform markdown: no fields, no
+priority, no until-date. Parked = open.
 
 Where intents reach the robots:
 
