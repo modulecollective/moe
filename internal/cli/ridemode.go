@@ -131,26 +131,20 @@ func spawnConsent(spawnedBy string) string {
 	return value
 }
 
-// rideModeContextLine tells a mid-ride survey which kind of ride it is
-// inside, so its placement judgment can adapt. Empty when no ride is in
-// flight — most pulses — because a line that says "nothing is riding"
-// is context the agent can't act on.
+// rideModeContextLine tells a **dynamic** sweep that its ordering
+// opinion is about to become motion, so its placement judgment can
+// adapt. Empty otherwise — a hand-typed `moe pulse new` is pure
+// curation, and a line saying "nothing will start" is context the agent
+// can't act on.
 func rideModeContextLine() string {
-	switch currentRideMode {
-	case rideStatic:
-		return "This pulse is firing inside a **static** ride: the operator's kick is walking a chain " +
-			"right now, and the machine can neither grow nor shrink it. A placement aimed into that " +
-			"chain will be redirected to its own thread, and a group naming one of its runs will have " +
-			"that entry dropped rather than move the run out. Shape new threads worth naming instead " +
-			"of trying to reshape the one that's running; nothing you groom starts here."
-	case rideDynamic:
-		return "This pulse is firing inside a **dynamic** ride: the operator licensed the machine to " +
-			"extend it. Work groomed onto the ridden chain's tail will run in this same ride, and every " +
-			"other thread you groom gets its own kick when this sweep finishes unless you park it. Both " +
-			"are real motion with no human look in between — hold the ordering bar accordingly, and " +
-			"write a `\"park\"` line for any thread the operator should see first."
+	if currentRideMode != rideDynamic {
+		return ""
 	}
-	return ""
+	return "This is a **dynamic** sweep: the operator armed a clock that licensed the machine to start " +
+		"work. Every kickable parked thread on the board gets its own kick when this sweep finishes — " +
+		"the ones you groom and the ones already sitting in order — unless you park it. That is real " +
+		"motion with no human look in between, so hold the ordering bar accordingly and write a " +
+		"`\"park\"` line for any thread the operator should see first."
 }
 
 // rideModeForAnswer maps a chain-prompt bang answer to its mode. Only

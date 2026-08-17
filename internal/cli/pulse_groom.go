@@ -34,28 +34,23 @@ import (
 // order, unchanged?") is what carries it.
 //
 // Appending or moving onto a *parked* chain is curation, not execution:
-// nothing moves until that chain's kick. Grooming is fenced out of two
-// units, in both directions each time — a placement aimed in is
-// redirected to a self-rooted thread (see groomAnchor), and a `runs`
-// slug naming a member is dropped rather than moved out (see
-// placeGroup):
+// nothing moves until that chain's kick. Grooming is fenced out of one
+// unit, in both directions — a placement aimed in is redirected to a
+// self-rooted thread (see groomAnchor), and a `runs` slug naming a
+// member is dropped rather than moved out (see placeGroup): any unit
+// under an **operator-minted chain head** (see stagingFenced), because
+// under a resident clock the head is the operator's staging fence.
+// Machine kicks were already refused there twice over — a hand-minted
+// head is stageless so it never clears the settled-design admit, and
+// kicking a member under a live parent fails closed with "kick the head"
+// — but grooming's move authority could still re-stamp members *out* of
+// a unit the operator was composing. Machine-headed and headless threads
+// stay fully groomable, so consolidation-by-moving is unchanged where it
+// actually runs.
 //
-//   - the unit a *static* ride is currently walking (see ridingFenced),
-//     because `!!!`'s contract is that what the operator saw at kick
-//     time is what runs;
-//   - any unit under an **operator-minted chain head** (see
-//     stagingFenced), because under a resident clock the head is the
-//     operator's staging fence. Machine kicks were already refused there
-//     twice over — a hand-minted head is stageless so it never clears
-//     the settled-design admit, and kicking a member under a live parent
-//     fails closed with "kick the head" — but grooming's move authority
-//     could still re-stamp members *out* of a unit the operator was
-//     composing. When grooming only ran inside rides the operator had
-//     just kicked, "anything parked is groomable" was safe; a heartbeat
-//     that sweeps while nobody is watching makes hand-curation
-//     impossible without this. Machine-headed and headless threads stay
-//     fully groomable, so consolidation-by-moving is unchanged where it
-//     actually runs.
+// A ride the operator kicked needs no fence of its own: nothing sweeps
+// while one is walking, because no verb fires a pulse in-process. What
+// the operator saw at kick time is what runs, by construction.
 
 // groomGroup is one thread the sweep is about to stamp: its members in
 // execution order, plus where the thread goes. Built from the gate's
@@ -137,30 +132,16 @@ type groomResult struct {
 	// nominations land *before* this is built, which is what lets the
 	// kick's chore leg see a chore run this same sweep opened.
 	idx *run.JournalIndex
-	// spawnerChained is the re-entrancy answer pulseSelfKick needs:
-	// whether the triggering run sits in a live unit of two or more.
-	// Read off the final graph, so it is post-groom membership — the
-	// conservative choice, pinned in the audit's Decisions. Defaults to
-	// true so a groom that never got far enough to build a graph
-	// suppresses a kick rather than risking a nested ride.
-	spawnerChained bool
 }
 
 // groomSweep carries the one-sweep state the group walk threads: the
-// graph, the resolver's inputs, and the spawner context the placement
-// rules key on.
+// graph and the resolver's inputs.
 type groomSweep struct {
-	root       string
-	projectID  string
-	pulseSlug  string
-	graph      *run.ChainGraph
-	byKey      map[string]*run.Metadata
-	spawnerKey string
-	// spawnerUnit is the thread the pulse fired on. Under a static ride
-	// this is the unit being walked right now, and grooming is fenced
-	// out of it.
-	spawnerUnit map[string]bool
-	mode        rideMode
+	root      string
+	projectID string
+	pulseSlug string
+	graph     *run.ChainGraph
+	byKey     map[string]*run.Metadata
 }
 
 // groomChains is the pulse's groom step: walk the gate's `threads` groups
@@ -177,11 +158,10 @@ type groomSweep struct {
 // can't be resolved drops with a stderr line and the rest of the sweep
 // carries on. Grooming is an ordering opinion — losing one is a
 // re-groom next pulse, not a lost sweep.
-func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawnerKey string, kickoffEdges map[string]string, stdout, stderr io.Writer) groomResult {
-	// spawnerChained defaults true: every early return below is a groom
-	// that produced no threads, so no kick is wanted anyway, but the
-	// conservative default is what makes that safe to say out loud.
-	bail := groomResult{spawnerChained: true}
+func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoffEdges map[string]string, stdout, stderr io.Writer) groomResult {
+	// Every early return below is a groom that produced no threads and no
+	// graph, so the kick's board enumeration finds nothing to start.
+	var bail groomResult
 	if len(groups) == 0 && currentRideMode != rideDynamic {
 		// Nothing to place, and no kick downstream to feed: the scan and
 		// index below would answer a question nobody is going to ask.
@@ -231,16 +211,6 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 		pulseSlug: pulseSlug,
 		graph:     graph,
 		byKey:     byKey,
-		mode:      currentRideMode,
-	}
-	if spawnerKey != "" {
-		sw.spawnerKey = spawnerKey
-		sw.spawnerUnit = sw.graph.Unit(spawnerKey)
-		if len(sw.spawnerUnit) < 2 {
-			// A run with no live edges either way is not a chain member;
-			// there is no unit to extend and none to fence off.
-			sw.spawnerUnit = nil
-		}
 	}
 
 	var threads []groomedThread
@@ -274,13 +244,12 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, spawner
 	}
 
 	result := groomResult{
-		threads:        threads,
-		byKey:          sw.byKey,
-		mds:            mds,
-		graph:          sw.graph,
-		projectID:      projectID,
-		idx:            idx,
-		spawnerChained: spawnerKey != "" && len(sw.graph.Unit(spawnerKey)) >= 2,
+		threads:   threads,
+		byKey:     sw.byKey,
+		mds:       mds,
+		graph:     sw.graph,
+		projectID: projectID,
+		idx:       idx,
 	}
 
 	adds, removes := sw.graph.Diff()
@@ -324,15 +293,6 @@ func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer
 		if !ok {
 			moePrintf(stderr, "pulse: groom: %s names %q, which is not a parked run in %s — skipping that entry\n",
 				label, m.name(), sw.projectID)
-			continue
-		}
-		if sw.ridingFenced(key) {
-			// The other half of the static fence: a group may name a
-			// still-parked member of the ridden unit and move it *out*,
-			// which shrinks the ride the operator consented to just as
-			// surely as an `onto` would grow it.
-			moePrintf(stderr, "pulse: groom: %s names %s inside the chain this static ride is walking — dropping that entry (`!!!!` to reshape a ride)\n",
-				label, key)
 			continue
 		}
 		if head := sw.stagingFenced(key); head != "" {
@@ -413,11 +373,6 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 				label, grp.Onto)
 			return "", "", false
 		}
-		if sw.ridingFenced(key) {
-			moePrintf(stderr, "pulse: groom: %s targets %s inside the chain this static ride is walking — self-rooting instead (`!!!!` to extend a ride)\n",
-				label, key)
-			return "", "", true
-		}
 		if head := sw.stagingFenced(key); head != "" {
 			moePrintf(stderr, "pulse: groom: %s targets %s, which the operator is staging under %s — self-rooting instead (the head is the fence)\n",
 				label, key, head)
@@ -445,23 +400,9 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 		return key, key, true
 
 	default:
-		// Opportunistic. Extending the ride in flight needs the fourth
-		// bang; without it the group self-roots as a parked thread the
-		// operator (or a later pulse) can pick up.
-		if sw.mode == rideDynamic && len(sw.spawnerUnit) > 0 {
-			tail := sw.graph.Tail(sw.spawnerKey)
-			if indexOfString(members, tail) >= 0 {
-				// The same anchor-in-members contradiction `onto` refuses,
-				// except the harness picked this anchor, not the agent — so
-				// the group is redirected rather than dropped, matching the
-				// fence branch above. Attaching a group after a run it
-				// contains stamps a durable `X → X` edge.
-				moePrintf(stderr, "pulse: groom: %s would land after %s, which is one of its own runs — self-rooting instead\n",
-					label, tail)
-				return "", "", true
-			}
-			return tail, "", true
-		}
+		// Neither `onto` nor `head`: the group self-roots as its own
+		// thread. A dynamic sweep's kick loop starts it; anything else
+		// parks it for the operator (or a later pulse) to pick up.
 		return "", "", true
 	}
 }
@@ -479,42 +420,13 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 // thread whose root is a settled operator run stays machine territory,
 // which is the line the design draws and the one verb (`moe chain new`)
 // the operator has to reach for to hold something.
-//
-// One exemption: the unit a *dynamic* ride is walking. There the
-// operator typed the fourth bang at this very unit, which is the
-// broadest consent there is — fencing it would revoke mid-ride growth
-// the ride exists to allow. A static ride's unit is fenced by
-// ridingFenced regardless of who minted the head.
 func (sw *groomSweep) stagingFenced(key string) string {
-	if sw.mode == rideDynamic && sw.spawnerUnit[key] {
-		return ""
-	}
 	root := sw.graph.Root(key)
 	md := sw.byKey[root]
 	if md == nil || md.Workflow != chainWorkflow || md.SpawnedBy != "" {
 		return ""
 	}
 	return root
-}
-
-// ridingFenced reports whether a run sits inside the unit a static ride
-// is currently walking. `!!!`'s contract is that what the operator saw
-// at kick time is what runs, which the sweep honours in both directions:
-//
-//   - As a placement target (groomAnchor), the group is redirected to a
-//     self-rooted thread rather than refused — the work is still worth
-//     teeing up, it just doesn't join this ride.
-//   - As a group member (placeGroup), the entry is dropped, because
-//     grooming a ridden run somewhere else would detach it and shrink
-//     the ride out from under the kick.
-//
-// Since neither direction can touch the unit, the spawnerUnit snapshot
-// taken at sweep start stays exact for the whole sweep.
-//
-// The spawner's unit *is* the ridden unit, so no extra identity has to
-// be threaded down here to know which one that is.
-func (sw *groomSweep) ridingFenced(key string) bool {
-	return sw.mode == rideStatic && sw.spawnerUnit[key]
 }
 
 // resolveMember maps one thread position to a run key. A run this sweep

@@ -21,7 +21,7 @@ func planSteps(plan kickPlan) []string {
 		if step.Gate {
 			source = "gate"
 		}
-		out = append(out, step.Root+"|"+source+"|"+kickStepOutcome(step, plan.ChainedSpawner))
+		out = append(out, step.Root+"|"+source+"|"+kickStepOutcome(step))
 	}
 	return out
 }
@@ -36,9 +36,9 @@ func TestKickPlanOrdersGateThreadsAheadOfTheBoard(t *testing.T) {
 	minted := groomFixture(t, root, "aa-board", "zz-gate-head", "zz-gate-tail")
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Runs: runsFrom("zz-gate-head", "zz-gate-tail")}},
-		"", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, io.Discard, os.Stderr)
 
-	got := planSteps(planKick(root, groomed, "" /*unchained spawner*/))
+	got := planSteps(planKick(root, groomed))
 	want := []string{
 		"moe/" + minted["zz-gate-head"] + "|gate|queued — floor re-checked at start",
 		"moe/" + minted["aa-board"] + "|board|queued — floor re-checked at start",
@@ -55,7 +55,7 @@ func TestKickPlanNamesARootOnce(t *testing.T) {
 	defer withRideMode(rideDynamic)()
 	root, threadRoot, groomed, _ := selfKickFixture(t)
 
-	got := planSteps(planKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), ""))
+	got := planSteps(planKick(root, wantKick(groomed, groomedThread{Root: threadRoot})))
 	want := []string{threadRoot + "|gate|queued — floor re-checked at start"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("plan = %v, want one step for the shared root: %v", got, want)
@@ -70,7 +70,7 @@ func TestKickPlanCarriesTheParkSentence(t *testing.T) {
 	root, threadRoot, groomed, _ := selfKickFixture(t)
 	const why = "the reflect would read a half-finished record"
 
-	plan := planKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Park: why}), "")
+	plan := planKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Park: why}))
 	if len(plan.Steps) != 1 || plan.Steps[0].Park != why {
 		t.Fatalf("plan = %+v, want one step carrying the park sentence %q", plan.Steps, why)
 	}
@@ -127,32 +127,13 @@ func TestKickPlanNamesEachFloorHold(t *testing.T) {
 			root, _, _ := kickFixture(t)
 			threadRoot := tc.setUp(t, root)
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
-			plan := planKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "")
+			plan := planKick(root, wantKick(groomed, groomedThread{Root: threadRoot}))
 			if len(plan.Steps) != 1 || plan.Steps[0].Hold != tc.want {
 				t.Fatalf("plan = %+v, want one step held with %q", plan.Steps, tc.want)
 			}
 		})
-	}
-}
-
-// TestKickPlanHoldsEveryRootAtAChainedSpawner: the re-entrancy guard is
-// a property of the sweep, not of any one root, and it fires before the
-// floor is consulted — so the plan records it once and the steps it
-// holds carry no hold of their own.
-func TestKickPlanHoldsEveryRootAtAChainedSpawner(t *testing.T) {
-	defer withRideMode(rideDynamic)()
-	root, threadRoot, groomed, _ := selfKickFixture(t)
-	groomed.spawnerChained = true
-
-	plan := planKick(root, groomed, "moe/some-chained-run")
-	if plan.ChainedSpawner != "moe/some-chained-run" {
-		t.Fatalf("ChainedSpawner = %q, want the spawner named", plan.ChainedSpawner)
-	}
-	want := []string{threadRoot + "|gate|held — moe/some-chained-run is itself chained"}
-	if got := planSteps(plan); !slices.Equal(got, want) {
-		t.Fatalf("plan = %v, want %v", got, want)
 	}
 }
 
@@ -163,9 +144,9 @@ func TestKickPlanIsEmptyOnAnEmptyBoard(t *testing.T) {
 	defer withRideMode(rideDynamic)()
 	root, _, _ := kickFixture(t)
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
-	if plan := planKick(root, groomed, ""); len(plan.Steps) != 0 {
+	if plan := planKick(root, groomed); len(plan.Steps) != 0 {
 		t.Fatalf("plan = %+v, want no steps on an empty board", plan.Steps)
 	}
 }

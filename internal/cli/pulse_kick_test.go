@@ -22,7 +22,7 @@ func selfKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult
 	root, stages, _ = kickFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	return root, "moe/" + minted["fix-a"], groomed, stages
 }
 
@@ -42,7 +42,7 @@ func TestSelfKickRidesUnderTheFourthBang(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "" /*unchained spawner*/, io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	if len(*stages) == 0 {
 		t.Fatalf("nothing was driven; stderr=%q", errb.String())
@@ -61,7 +61,7 @@ func TestSelfKickReturnsTheFirstFailureAndKeepsKicking(t *testing.T) {
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
 		{Runs: runsFrom("fails-first")},
 		{Runs: runsFrom("fails-later")},
-	}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	var dispatched []string
 	prev := openSdlcStage
@@ -76,7 +76,7 @@ func TestSelfKickReturnsTheFirstFailureAndKeepsKicking(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	if code := pulseSelfKick(root, groomed, "", io.Discard, &errb); code != 7 {
+	if code := pulseSelfKick(root, groomed, io.Discard, &errb); code != 7 {
 		t.Fatalf("self-kick exit=%d, want first failure 7; stderr=%q", code, errb.String())
 	}
 	want := []string{minted["fails-first"] + ":design", minted["fails-later"] + ":design"}
@@ -102,7 +102,7 @@ func TestSelfKickInterruptStopsLaterThreads(t *testing.T) {
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
 		{Runs: runsFrom("interrupted")},
 		{Runs: runsFrom("must-not-start")},
-	}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+	}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	var dispatched []string
 	prev := openSdlcStage
@@ -114,7 +114,7 @@ func TestSelfKickInterruptStopsLaterThreads(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	if code := pulseSelfKick(root, groomed, "", io.Discard, &errb); code != exitInterrupted {
+	if code := pulseSelfKick(root, groomed, io.Discard, &errb); code != exitInterrupted {
 		t.Fatalf("self-kick exit=%d, want exitInterrupted; stderr=%q", code, errb.String())
 	}
 	want := []string{minted["interrupted"] + ":design"}
@@ -139,7 +139,7 @@ func TestSelfKickSkipsWithoutDynamicConsent(t *testing.T) {
 
 			defer withRideMode(mode)()
 			var errb bytes.Buffer
-			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 			if len(*stages) != 0 {
 				t.Fatalf("drove %v, want nothing under %s", kickStages(*stages), mode)
@@ -148,28 +148,6 @@ func TestSelfKickSkipsWithoutDynamicConsent(t *testing.T) {
 				t.Errorf("stderr = %q, want silence outside a dynamic ride", errb.String())
 			}
 		})
-	}
-}
-
-// TestSelfKickSkipsAtAChainedSpawner is the re-entrancy guard: if the
-// run whose tail fired this pulse is itself a chain member, the ride
-// carrying it already picks up growth on its own tail. Nested rides are
-// impossible by construction, not by flag-threading.
-func TestSelfKickSkipsAtAChainedSpawner(t *testing.T) {
-	root, threadRoot, groomed, stages := selfKickFixture(t)
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	// The spawner is the thread's own root — a chain member, which the
-	// groom sweep reports off its own final graph.
-	groomed.spawnerChained = true
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), threadRoot, io.Discard, &errb)
-
-	if len(*stages) != 0 {
-		t.Fatalf("drove %v, want nothing from a chained spawner", kickStages(*stages))
-	}
-	if !strings.Contains(errb.String(), "itself chained") {
-		t.Errorf("stderr = %q, want the re-entrancy skip named", errb.String())
 	}
 }
 
@@ -189,7 +167,7 @@ func handMintedHeadFixture(t *testing.T) (root, headKey string, groomed groomRes
 	headKey = "moe/" + head.ID
 	chainEdgeCommit(t, root, headKey, "moe/"+minted["fix-a"])
 	return root, headKey, groomChains(root, "moe", "pulse-groom",
-		nil /*no groups*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr), stages
+		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr), stages
 }
 
 // TestSelfKickSkipsAHandMintedChainHead: the operator composes a chain
@@ -202,7 +180,7 @@ func TestSelfKickSkipsAHandMintedChainHead(t *testing.T) {
 	root, headKey, groomed, stages := handMintedHeadFixture(t)
 
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: headKey}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: headKey}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an operator-rooted thread", kickStages(*stages))
@@ -224,7 +202,7 @@ func TestSelfKickDoesNotEnumerateAStagedBatch(t *testing.T) {
 	root, headKey, groomed, stages := handMintedHeadFixture(t)
 
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed), "" /*unchained spawner*/, io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing out of a batch the operator is staging", kickStages(*stages))
@@ -246,11 +224,11 @@ func TestSelfKickSkipsASeedOnlyOperatorRoot(t *testing.T) {
 	seedRun(t, root, "moe", "promoted-sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
 		map[string]string{"design": "# A thought I had\n\nseed\n"})
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("promoted-sketch")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("promoted-sketch")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/promoted-sketch"}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/promoted-sketch"}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a seed-only root", kickStages(*stages))
@@ -273,11 +251,11 @@ func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
 		map[string]string{"design": "# Worked, then parked\n\nbody\n"})
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "design-done", "sdlc", "design", time.Now().Local())
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("design-done")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("design-done")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/design-done"}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/design-done"}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a design that merely closed", kickStages(*stages))
@@ -299,11 +277,11 @@ func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "design", now.Add(-2*time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "code", now.Add(-time.Hour))
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("mid-ladder")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("mid-ladder")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/mid-ladder"}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/mid-ladder"}), io.Discard, &errb)
 
 	// Next parks at the last stage worked (code has no successor turn and
 	// no marker), so the ride resumes there rather than at design.
@@ -329,7 +307,7 @@ func choreKickFixture(t *testing.T) (root, threadRoot string, groomed groomResul
 		time.Time{})
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("readme-update-2026-07-22")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("readme-update-2026-07-22")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	if groomed.idx.ChoreByRun["moe/readme-update-2026-07-22"] == "" {
 		t.Fatal("precondition: the groom's index should carry the chore edge the open commit recorded")
 	}
@@ -347,7 +325,7 @@ func TestSelfKickRidesAChoreRootedThread(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	// A chore run is fresh, so the ride starts at its first stage.
 	if got := kickStages(*stages); len(got) == 0 || got[0] != "readme-update-2026-07-22:design" {
@@ -371,7 +349,7 @@ func TestSelfKickSkipsAChoreRootWithALiveSession(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing while a session is open", kickStages(*stages))
@@ -398,7 +376,7 @@ func advancedKickFixture(t *testing.T) (root, threadRoot string, groomed groomRe
 	advanceAt(t, root, "moe", "advanced-run", "design", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("advanced-run")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("advanced-run")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != "moe/advanced-run" {
 		t.Fatalf("threads = %+v, want one self-rooted at moe/advanced-run", groomed.threads)
 	}
@@ -418,7 +396,7 @@ func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	// Mid-ladder pickup: design is already satisfied by the marker, so
 	// the ride starts at code rather than re-opening the stage the
@@ -443,7 +421,7 @@ func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing while the operator has the stage open", kickStages(*stages))
@@ -473,37 +451,13 @@ func TestSelfKickSkipsAnAdvancedRootOutdatedByAReEdit(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on an out-dated marker", kickStages(*stages))
 	}
 	if !strings.Contains(errb.String(), "waiting at its first stage with its turn closed but not advanced") {
 		t.Errorf("stderr = %q, want the hold to name the closed turn, not a seed", errb.String())
-	}
-}
-
-// TestSelfKickRidesAtAnOperatorOpenedSpawner is the happy path with a
-// spawner actually named: a pulse fired by an unchained operator-opened
-// run kicks, and that kick is the one generation the `!!!!` licensed.
-// The generation bound itself now sits at fire time (pulseFiresForRun),
-// so by the time a pulse exists its spawner is already operator-rooted.
-func TestSelfKickRidesAtAnOperatorOpenedSpawner(t *testing.T) {
-	root, threadRoot, groomed, stages := selfKickFixture(t)
-	spawner, err := mintChainRun(root, "moe", "operator-push", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "moe/"+spawner.ID, io.Discard, &errb)
-
-	if len(*stages) == 0 {
-		t.Fatalf("nothing was driven; stderr=%q", errb.String())
-	}
-	if !strings.Contains(errb.String(), "kicking "+threadRoot) {
-		t.Errorf("stderr = %q, want the kick announced", errb.String())
 	}
 }
 
@@ -517,7 +471,7 @@ func TestSelfKickHoldsAParkedThread(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Park: "fix-b touches the push path"}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot, Park: "fix-b touches the push path"}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a parked thread", kickStages(*stages))
@@ -537,7 +491,7 @@ func TestSelfKickRidesAnUnaskedThread(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	if len(*stages) == 0 {
 		t.Fatalf("nothing was driven; stderr=%q", errb.String())
@@ -575,7 +529,7 @@ func TestSelfKickKicksASharedRootOnce(t *testing.T) {
 
 			defer withRideMode(rideDynamic)()
 			var errb bytes.Buffer
-			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}, second), "", io.Discard, &errb)
+			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}, second), io.Discard, &errb)
 
 			if got := strings.Count(errb.String(), "kicking "+threadRoot); got != tc.want {
 				t.Errorf("kicked %s %d time(s), want %d; stderr=%q", threadRoot, got, tc.want, errb.String())
@@ -587,8 +541,52 @@ func TestSelfKickKicksASharedRootOnce(t *testing.T) {
 	}
 }
 
-// TestSelfKickReportsAnEmptyBoard closes the silent `!!!!`. A dynamic
-// ride whose sweep found nothing at all used to end with no stderr line
+// TestSelfKickAnnouncesOneStartPerParkedThread is this run's seed bug,
+// pinned. Every "kicking" line is a claim that a ride is starting, and
+// the kick loop's whole ethos is being the operator's account of an
+// unattended sweep. Under the old model each kicked ride's own tail
+// fired a nested pulse that started the *next* parked thread, so control
+// came back here with the snapshot stale and the loop re-announced roots
+// an inner sweep had already ridden — N threads produced N rides but
+// N(N+1)/2 lines. With no in-process fire there is only one walker, so
+// the counts are equal by construction.
+func TestSelfKickAnnouncesOneStartPerParkedThread(t *testing.T) {
+	root, stages, _ := kickFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
+
+	defer withRideMode(rideDynamic)()
+	// No groups: the three loose parked runs are already correctly
+	// ordered, so the survey has nothing to groom and the kick's own
+	// board enumeration is what finds them — the retry shape the
+	// heartbeat re-offers.
+	groomed := groomChains(root, "moe", "pulse-groom",
+		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	var errb bytes.Buffer
+	pulseSelfKick(root, groomed, io.Discard, &errb)
+
+	for _, slug := range []string{"fix-a", "fix-b", "fix-c"} {
+		key := "moe/" + minted[slug]
+		if got := strings.Count(errb.String(), "kicking "+key); got != 1 {
+			t.Errorf("announced %s %d time(s), want exactly 1; stderr=%q", key, got, errb.String())
+		}
+	}
+	if got := strings.Count(errb.String(), "pulse: kicking "); got != 3 {
+		t.Errorf("kick lines = %d, want 3 (one per parked thread); stderr=%q", got, errb.String())
+	}
+	// Each ride walks its run's whole ladder, so count the runs entered
+	// rather than the dispatches: three announced starts, three rides.
+	ridden := map[string]bool{}
+	for _, inv := range *stages {
+		ridden[inv.runID] = true
+	}
+	if len(ridden) != 3 {
+		t.Errorf("drove %v, want one ride per parked thread", kickStages(*stages))
+	}
+}
+
+// TestSelfKickReportsAnEmptyBoard closes the silent sweep. A dynamic
+// sweep that found nothing at all used to end with no stderr line
 // — the step returned before its first print — so the operator saw a
 // sweep finish and a terminal go quiet with no account of why. Every
 // dynamic invocation says what it did.
@@ -597,9 +595,9 @@ func TestSelfKickReportsAnEmptyBoard(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*no groups*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	var errb bytes.Buffer
-	pulseSelfKick(root, groomed, "", io.Discard, &errb)
+	pulseSelfKick(root, groomed, io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing from an empty board", kickStages(*stages))
@@ -621,14 +619,14 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != shippedKey {
 		t.Fatalf("threads = %+v, want one rooted at the merged anchor %s", groomed.threads, shippedKey)
 	}
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: shippedKey}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: shippedKey}), io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a settled thread root", kickStages(*stages))
@@ -656,7 +654,7 @@ func strandedThreadFixture(t *testing.T) (root, runKey string, groomed groomResu
 	advanceAt(t, root, "moe", "stalled-at-review", "code", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want none — the gate named nothing", groomed.threads)
 	}
@@ -675,7 +673,7 @@ func TestSelfKickRidesAThreadTheGateNeverNamed(t *testing.T) {
 	root, runKey, groomed, stages := strandedThreadFixture(t)
 
 	var errb bytes.Buffer
-	pulseSelfKick(root, groomed, "" /*unchained spawner*/, io.Discard, &errb)
+	pulseSelfKick(root, groomed, io.Discard, &errb)
 
 	if got := kickStages(*stages); len(got) == 0 || got[0] != "stalled-at-review:review" {
 		t.Fatalf("drove %v, want the ride to enter at review; stderr=%q", got, errb.String())
@@ -699,10 +697,10 @@ func TestSelfKickHoldsAnEnumeratedThreadTheSurveyParked(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-groom-2",
 		[]groomGroup{{Runs: runsFrom("stalled-at-review"), Park: "the review canvas contradicts the design"}},
-		"", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, io.Discard, os.Stderr)
 
 	var errb bytes.Buffer
-	pulseSelfKick(root, groomed, "", io.Discard, &errb)
+	pulseSelfKick(root, groomed, io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a parked thread", kickStages(*stages))
@@ -720,30 +718,10 @@ func TestSelfKickKicksAnEnumeratedRootOnce(t *testing.T) {
 	root, runKey, groomed, _ := strandedThreadFixture(t)
 
 	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: runKey}), "", io.Discard, &errb)
+	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: runKey}), io.Discard, &errb)
 
 	if got := strings.Count(errb.String(), "kicking "+runKey); got != 1 {
 		t.Errorf("kicked %s %d time(s), want 1; stderr=%q", runKey, got, errb.String())
-	}
-}
-
-// TestSelfKickHoldsEnumeratedThreadsAtAChainedSpawner: the re-entrancy
-// guard covers the board, not just the gate. A pulse fired by a run
-// that is itself a chain member starts nothing at all — the ride
-// carrying that run picks up growth on its own tail.
-func TestSelfKickHoldsEnumeratedThreadsAtAChainedSpawner(t *testing.T) {
-	defer withRideMode(rideDynamic)()
-	root, _, groomed, stages := strandedThreadFixture(t)
-
-	groomed.spawnerChained = true
-	var errb bytes.Buffer
-	pulseSelfKick(root, groomed, "moe/some-chained-run", io.Discard, &errb)
-
-	if len(*stages) != 0 {
-		t.Fatalf("drove %v, want nothing from a chained spawner", kickStages(*stages))
-	}
-	if !strings.Contains(errb.String(), "itself chained") {
-		t.Errorf("stderr = %q, want the re-entrancy skip named", errb.String())
 	}
 }
 
@@ -781,9 +759,9 @@ func TestSelfKickHoldsEnumeratedFloorMisses(t *testing.T) {
 			tc.setUp(t, root)
 
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 			var errb bytes.Buffer
-			pulseSelfKick(root, groomed, "", io.Discard, &errb)
+			pulseSelfKick(root, groomed, io.Discard, &errb)
 
 			if len(*stages) != 0 {
 				t.Fatalf("drove %v, want the floor to hold it", kickStages(*stages))
@@ -808,9 +786,9 @@ func TestSelfKickDoesNotEnumerateASettledThread(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, "", nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
 	var errb bytes.Buffer
-	pulseSelfKick(root, groomed, "", io.Discard, &errb)
+	pulseSelfKick(root, groomed, io.Discard, &errb)
 
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing on a settled thread", kickStages(*stages))

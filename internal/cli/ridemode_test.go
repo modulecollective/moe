@@ -57,18 +57,18 @@ func TestWithRideModeRestores(t *testing.T) {
 	}
 }
 
-// TestRideModeContextLine: a mid-ride survey is told which kind of ride
-// it is inside, so its placement judgment can adapt. Outside a ride the
-// line is empty — "nothing is riding" is context the agent can't act
-// on.
+// TestRideModeContextLine: a dynamic sweep is told its ordering opinion
+// is about to become motion, so its placement judgment can adapt.
+// Everywhere else the line is empty — "nothing will start" is context
+// the agent can't act on.
 func TestRideModeContextLine(t *testing.T) {
 	if got := rideModeContextLine(); got != "" {
-		t.Errorf("context line outside a ride = %q, want empty", got)
+		t.Errorf("context line outside a sweep = %q, want empty", got)
 	}
 	func() {
 		defer withRideMode(rideStatic)()
-		if got := rideModeContextLine(); !strings.Contains(got, "static") {
-			t.Errorf("static context line = %q, want the mode named", got)
+		if got := rideModeContextLine(); got != "" {
+			t.Errorf("static context line = %q, want empty — a `!!!` ride sweeps nothing", got)
 		}
 	}()
 	func() {
@@ -85,10 +85,8 @@ func TestRideModeContextLine(t *testing.T) {
 
 // TestPulseKickoffCarriesRideLineWithNothingChained pins the *wiring*,
 // not the renderer. The line used to hang off chainStateBlock, which
-// renders only for an active chain of two or more members — so it
-// reached the agent in neither case it exists for. A tail pulse fires
-// after its spawner merged (the ridden unit drops below the bar), and
-// the self-kick door is an unchained spawner with no chain at all.
+// renders only for an active chain of two or more members — so a sweep
+// over a board of loose parked runs, the ordinary case, never saw it.
 func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -100,15 +98,15 @@ func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 	func() {
 		defer withRideMode(rideDynamic)()
 		got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
-		if !strings.Contains(got, "firing inside a **dynamic** ride") {
-			t.Errorf("dynamic ride line missing from the kickoff:\n%s", got)
+		if !strings.Contains(got, "a **dynamic** sweep") {
+			t.Errorf("dynamic sweep line missing from the kickoff:\n%s", got)
 		}
 	}()
-	// Outside a ride there is nothing to say, and a "nothing is riding"
-	// block would be context the agent can't act on.
+	// A hand-typed sweep starts nothing, and a block saying so is
+	// context the agent can't act on.
 	got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
-	if strings.Contains(got, "firing inside") {
-		t.Errorf("kickoff names a ride outside one:\n%s", got)
+	if strings.Contains(got, "**dynamic** sweep") {
+		t.Errorf("kickoff claims a dynamic sweep outside one:\n%s", got)
 	}
 }
 

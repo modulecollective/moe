@@ -32,7 +32,7 @@ func TestPulseSurveyStampsTheKickOrder(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*spawner*/, "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code != 0 {
+	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code != 0 {
 		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
 	}
 
@@ -97,7 +97,7 @@ func TestPulseSurveyStampsNoKickWithoutDynamicConsent(t *testing.T) {
 	}
 	t.Cleanup(func() { openPulse = orig })
 
-	if code := runPulseSurvey(root, "moe", "", "", nil /*pi*/, io.Discard, io.Discard); code != 0 {
+	if code := runPulseSurvey(root, "moe", "", nil /*pi*/, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("survey exit=%d, want 0", code)
 	}
 	closed := closedPulseRuns(t, root)
@@ -136,7 +136,7 @@ func TestPulseSurveyKickStampFailureLeavesRunOpen(t *testing.T) {
 	t.Cleanup(func() { openPulse = orig })
 
 	var errb bytes.Buffer
-	runPulseSurvey(root, "moe", "", "" /*emitRun*/, nil /*pi*/, io.Discard, &errb)
+	runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, &errb)
 
 	if closed := closedPulseRuns(t, root); len(closed) != 0 {
 		t.Fatalf("closed pulse runs = %v, want none — a failed stamp must not close the run silent about its queue", closed)

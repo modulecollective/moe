@@ -15,10 +15,10 @@ import (
 // anything itself. Where a spawned run *lands* is not here — that is a
 // `chain` claim the survey makes, twin reflects included.
 
-// pulseSelfKick is the last step of a pulse: under a dynamic ride, start
-// every kickable parked thread on the board — the ones this sweep
+// pulseSelfKick is the last step of a pulse: under a dynamic sweep,
+// start every kickable parked thread on the board — the ones this sweep
 // groomed first, then the rest. This is the only door to machine-rooted
-// motion, and two structural guards hold it shut everywhere else.
+// motion, and the dynamic rung is what holds it shut everywhere else.
 //
 // Kicking is the default and *parking* is the marked case, because the
 // error ledger only ever ran one way. Three strandings in four days —
@@ -44,31 +44,26 @@ import (
 // believed it meant — a thread the survey held *with a reason* — and a
 // thread the gate never mentions is started if it clears the floor.
 //
-// First, **dynamic consent upstream**. A `!!!` tail pulse — or a manual
-// `moe pulse new` — grooms and parks; only a fourth bang the operator
-// actually typed licenses the machine to start something. That is what
-// makes the surprise ride impossible by construction rather than by
-// restraint — "I ran a plain push and my terminal is riding a thread I
-// never saw" cannot happen, and a plain push no longer sweeps at all.
+// The guard is **dynamic consent upstream**. A hand-typed `moe pulse
+// new` grooms and parks; only `--dynamic` — the rung `moe serve
+// --dynamic` stands behind — licenses the machine to start something.
+// That is what makes the surprise ride impossible by construction rather
+// than by restraint: nothing but the clock the operator armed can turn a
+// sweep into motion, and no other verb sweeps at all.
 //
-// Second, **re-entrancy**: a pulse-kick only roots at an unchained
-// spawner. If the run whose tail fired this pulse is itself a chain
-// member, the ride that is (probably) carrying it already picks up
-// growth on its own tail, so nested rides are impossible — again by
-// construction, not by flag-threading.
-//
-// There is deliberately no third bound on *how many* generations this
-// can run for. A kicked ride's own tail does fire a pulse, so a survey
-// can groom and kick work whose tail grooms and kicks again — the
-// machine walks until a survey finds nothing worth chaining. What holds
-// that open-ended is the two guards above plus the ladder itself: each
+// There is deliberately no bound on *how many* generations this can run
+// for. Each ride's commits move the journal tip, so the next heartbeat
+// tick sweeps again and the machine walks until a survey finds nothing
+// worth chaining. Growth is clock-paced rather than recursive: a kicked
+// ride no longer sweeps at its own tail, so this loop is the only walker
+// and the board it snapshotted stays the board it walks. What holds the
+// open-ended part safe is the guard above plus the ladder itself — each
 // generation is real shipped work behind review and test, it shows up on
 // the dash as it lands, and a Ctrl-C halts the ride. Escalation by
 // visibility, not by counting.
 //
-// Kicks that do fire are themselves dynamic rides: a confident pulse
-// rooting bounded-only motion would defeat the point, and an operator
-// who wants bounded keeps `!!!`.
+// Kicks that do fire are stamped as dynamic rides, which is what marks
+// their commits as the machine's (see walkConsent).
 //
 // And the thread's root must have **a settled design** — a disk fact
 // about the work, not about who opened it. Lineage was the wrong proxy
@@ -92,13 +87,13 @@ import (
 // Under dynamic consent this step always reports: every kick, every
 // park with its reason, every harness hold, and a line for the sweep
 // that groomed nothing. It used to return before its first stderr line
-// when no thread asked, so a typed `!!!!` could end with no account of
+// when no thread asked, so a sweep could end with no account of
 // why nothing started — that silence is what made the 2026-07-25 park
 // invisible. Every hold is one line, warn-only ethos.
 //
 // Every fact this step keys on comes out of the groom's final in-memory
 // graph (see groomResult) — thread roots, the board's parked threads,
-// the spawner's chain membership, and whether a root is still kickable.
+// and whether a root is still kickable.
 // Re-reading the journal here would answer the same questions a second
 // time against a state the sweep had already moved, and the enumeration
 // makes that sharper rather than looser: it walks the same scan the
@@ -116,15 +111,14 @@ import (
 // The return is the first ordinary child failure, after every other
 // eligible root has been offered, or exitInterrupted immediately. Zero
 // means no ride started or every ride finished cleanly.
-func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, stderr io.Writer) int {
+func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) int {
 	// No dynamic consent, nothing to say. Absence of a `park` is not a
-	// request, so a static or unridden sweep parking everything it
-	// groomed is the norm it has always been — the old "N thread(s) asked
-	// for a kick" line reported a decision that no longer exists.
+	// request, so a hand-typed sweep parking everything it groomed is the
+	// norm it has always been.
 	if currentRideMode != rideDynamic {
 		return 0
 	}
-	plan := planKick(root, groomed, spawnerKey)
+	plan := planKick(root, groomed)
 	if len(plan.Steps) == 0 {
 		moePrintf(stderr, "pulse: kick: nothing parked — nothing to start\n")
 		return 0
@@ -141,11 +135,6 @@ func pulseSelfKick(root string, groomed groomResult, spawnerKey string, stdout, 
 		wanted = append(wanted, step)
 	}
 	if len(wanted) == 0 {
-		return 0
-	}
-	if plan.ChainedSpawner != "" {
-		moePrintf(stderr, "pulse: kick: holding %d thread(s) — %s is itself chained and its ride picks up growth on its own tail\n",
-			len(wanted), plan.ChainedSpawner)
 		return 0
 	}
 	firstFailure := 0
@@ -212,18 +201,13 @@ type kickStep struct {
 // it; neither builds its own answer.
 type kickPlan struct {
 	Steps []kickStep
-	// ChainedSpawner is the spawner's key when the re-entrancy guard
-	// holds every root the survey did not park. It is a property of the
-	// sweep rather than of any one root, and it fires *before* the floor
-	// is consulted, so the steps it holds carry no Hold of their own.
-	ChainedSpawner string
 }
 
 // planKick walks the candidate roots and decides each one's fate,
 // reading only the groom's final in-memory graph plus the roots' live
 // session branches (see openSessionStage). No side effects: the caller
 // decides whether to print it, stamp it, or execute it.
-func planKick(root string, groomed groomResult, spawnerKey string) kickPlan {
+func planKick(root string, groomed groomResult) kickPlan {
 	// Threads are keyed by root, and a park on any group that landed in
 	// one holds the whole thread. Two groups routinely groom into the
 	// same thread — one `onto` a run the other placed — and hand back two
@@ -257,19 +241,6 @@ func planKick(root string, groomed groomResult, spawnerKey string) kickPlan {
 		add(rootKey, false)
 	}
 
-	startable := 0
-	for _, step := range plan.Steps {
-		if step.Park == "" {
-			startable++
-		}
-	}
-	if startable == 0 {
-		return plan
-	}
-	if spawnerKey != "" && groomed.spawnerChained {
-		plan.ChainedSpawner = spawnerKey
-		return plan
-	}
 	for i := range plan.Steps {
 		if plan.Steps[i].Park != "" {
 			continue
@@ -334,19 +305,17 @@ func renderKickSection(plan kickPlan) string {
 		if step.Gate {
 			source = "gate thread"
 		}
-		fmt.Fprintf(&b, "%d. %s — %s, %s\n", i+1, step.Root, source, kickStepOutcome(step, plan.ChainedSpawner))
+		fmt.Fprintf(&b, "%d. %s — %s, %s\n", i+1, step.Root, source, kickStepOutcome(step))
 	}
 	return b.String()
 }
 
 // kickStepOutcome is one step's fate in the section's vocabulary,
 // reusing the stderr phrasing wherever there is one to reuse.
-func kickStepOutcome(step kickStep, chainedSpawner string) string {
+func kickStepOutcome(step kickStep) string {
 	switch {
 	case step.Park != "":
 		return "parked by the survey — " + step.Park
-	case chainedSpawner != "":
-		return "held — " + chainedSpawner + " is itself chained"
 	case step.Hold != "":
 		return step.Hold
 	default:

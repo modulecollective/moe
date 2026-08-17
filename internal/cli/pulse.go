@@ -169,22 +169,21 @@ func init() {
 }
 
 // runPulse is the whole pulse: the deterministic chore auto-open (which
-// opens runs but executes none), then the survey. spawner is the
-// triggering run's slug ("" for a manual `moe pulse new`, which threads
-// no parent edge). emitRun is the file the survey names its run in, ""
-// for every caller but a spawning serve (see pulseSurvey).
+// opens runs but executes none), then the survey. emitRun is the file
+// the survey names its run in, "" for every caller but a spawning serve
+// (see pulseSurvey).
 //
 // It owns the pulse's scoped Ctrl-C latch (installPulseInterrupt): the
 // "scanning — Ctrl-C to skip" banner prints up front, before the run is
 // minted, so the operator knows the skip window is live from the start.
 // The second return is whether the operator interrupted the sweep.
-func runPulse(root, projectID, spawner, emitRun string, stdout, stderr io.Writer) (int, bool) {
+func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, bool) {
 	pi := installPulseInterrupt()
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
 	autoOpenDueChores(root, projectID, pi, stdout, stderr)
 	reconcileAtPulse(root, projectID, pi, stdout, stderr)
-	code := runPulseSurvey(root, projectID, spawner, emitRun, pi, stdout, stderr)
+	code := runPulseSurvey(root, projectID, emitRun, pi, stdout, stderr)
 	return code, pi.interrupted()
 }
 
@@ -284,36 +283,19 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 // pulseSurvey → closePulseRun → closeRunInProcess and back through the
 // registered close, which the var-init dependency analyser reads as a
 // cycle.
-var runPulseSurvey func(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int
+var runPulseSurvey func(root, projectID, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int
 
 func init() {
 	runPulseSurvey = pulseSurvey
 }
 
-func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
+func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, stderr io.Writer) int {
 	// The survey run itself is top-level: no MoE-Spawned-By edge back to
-	// the run whose tail fired it. A pulse closes one generation and roots
-	// the next, so nesting it under its trigger would chain every
-	// generation into one ever-deepening lineage tree (gen-N tail → pulse →
-	// its spawns → gen-N+1 tail → pulse → …) rather than reading as the
-	// fencepost between two chains. Runs the pulse *mints* still carry
-	// SpawnedBy = <this pulse> and fold under it — that edge is load-bearing
-	// for pulseSelfKick's settled-design admit. What the trigger loses is
-	// only presentation: the sweep's own canvas names what landed, and its
-	// open commit sits beside the triggering merge in the journal.
-	//
-	// The spawner is still threaded in-process, qualified to
-	// "<project>/<slug>" so it can name a foreign run (cross-project
-	// coordination opens a run in one project from another); the empty
-	// guard keeps a manual `moe pulse new` from building a dangling
-	// "<project>/". Everything downstream — the groom fence, the kick's
-	// re-entrancy guard — keys on that qualified *key*, and the separate
-	// name is what keeps a bare slug from reaching a comparison that wants
-	// a key.
-	spawnerKey := ""
-	if spawner != "" {
-		spawnerKey = projectID + "/" + spawner
-	}
+	// anything. A pulse closes one generation and roots the next, so it
+	// reads as the fencepost between two chains rather than a member of
+	// either. Runs the pulse *mints* still carry SpawnedBy = <this pulse>
+	// and fold under it — that edge is load-bearing for pulseSelfKick's
+	// settled-design admit.
 
 	// Checkpoint: a Ctrl-C before the run is minted skips with nothing to
 	// clean — no run, no lock (runopen.Open's window hasn't opened yet).
@@ -341,11 +323,10 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	// The slug is minted here, inside the child, and a serve that spawned
 	// this sweep has no other way to learn it — the exit code is the only
 	// thing that crosses back on its own. emitRun is that channel: a
-	// parameter rather than process state or an env var, because a sweep's
-	// ride tail can fire further pulses in-process, and any ambient
-	// carrier would let one of those name its run in a file serve reads as
-	// this sweep's. Warn-only: an unwritable path costs a link, not a
-	// sweep.
+	// parameter rather than process state or an env var, so a concurrent
+	// sweep in the same process could never name its run in a file serve
+	// reads as this sweep's. Warn-only: an unwritable path costs a link,
+	// not a sweep.
 	if emitRun != "" {
 		if err := os.WriteFile(emitRun, []byte(md.ID+"\n"), 0o644); err != nil {
 			moePrintf(stderr, "pulse: emit run for %s: %v\n", projectID, err)
@@ -431,7 +412,7 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	// can only be stamped once every run in it exists, and a kick must
 	// not start until the thread it names has stopped moving.
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
-	groomed := groomChains(root, projectID, md.ID, groups, spawnerKey, survey.chainEdges, stdout, stderr)
+	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stdout, stderr)
 
 	// Clean sweep: auto-close the run so the next sweep starts from a
 	// clean board. Route through the registered close (subject +
@@ -454,7 +435,7 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	var before []byte
 	var stamp closeCleanup
 	if currentRideMode == rideDynamic {
-		section := renderKickSection(planKick(root, groomed, spawnerKey))
+		section := renderKickSection(planKick(root, groomed))
 		stamp = func(root string, _ *run.Metadata, _, _ io.Writer) error {
 			body, err := os.ReadFile(canvas)
 			if err != nil {
@@ -492,7 +473,7 @@ func pulseSurvey(root, projectID, spawner, emitRun string, pi *pulseInterrupt, s
 	// a long time, and a sweep that has already done all its work should
 	// not sit on the dash's ACTIVE list for the duration.
 	pi.Close()
-	return pulseSelfKick(root, groomed, spawnerKey, stdout, stderr)
+	return pulseSelfKick(root, groomed, stdout, stderr)
 }
 
 // closePulseRun closes a pulse run through the registered close — the
@@ -783,10 +764,10 @@ func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io
 		moePrintf(stderr, "pulse: reflect spawn: build twin wiki for %s: %v\n", projectID, err)
 		return ""
 	}
-	// Qualify the spawner to "<project>/<slug>" before minting, mirroring
-	// pulseSurvey's spawnerKey: the journal index treats these edges as
-	// always qualified. pulseSlug is the pulse run's own slug and is never
-	// empty here, so no empty-guard is needed.
+	// Qualify the spawner to "<project>/<slug>" before minting: the
+	// journal index treats these edges as always qualified. pulseSlug is
+	// the pulse run's own slug and is never empty here, so no empty-guard
+	// is needed.
 	md, err := mintReflectRun(root, projectID, projectID+"/"+pulseSlug, "" /*agent*/, canonical, stdout, stderr)
 	if err != nil {
 		if refusal, ok := errors.AsType[*reflectRefusal](err); ok {
@@ -1248,12 +1229,10 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	if judged := judgedChoresBlock(sc, projectID); judged != "" {
 		blocks = append(blocks, judged)
 	}
-	// Its own block, not a tail on the chain-state one. A tail pulse
-	// fires after its spawner merged, so the ridden unit is usually
-	// below the two-active-member bar chainStateBlock renders at — and
-	// an unchained spawner (the self-kick door) has no chain at all.
-	// Nested, the line reached the agent only when some *unrelated*
-	// chain happened to be active: absent in both cases it exists for.
+	// Its own block, not a tail on the chain-state one: the line is about
+	// what this sweep may start, which is true whether or not the board
+	// happens to hold an active chain of two or more. Nested under the
+	// chain-state block it reached the agent only by coincidence.
 	if ride := rideModeContextLine(); ride != "" {
 		blocks = append(blocks, ride)
 	}
@@ -1460,7 +1439,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	// is the verb's own outcome: exit 130. (At a run-traffic tail the
 	// verb's durable work already succeeded, so those callers keep their
 	// own exit code and only thread the interrupt to halt a cascade.)
-	code, interrupted := runPulse(root, projectID, "" /*spawner*/, *emitRun, stdout, stderr)
+	code, interrupted := runPulse(root, projectID, *emitRun, stdout, stderr)
 	if interrupted {
 		return exitInterrupted
 	}

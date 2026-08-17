@@ -305,7 +305,7 @@ esac
 
 	var out, errb bytes.Buffer
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "moe", "" /*unchained spawner*/, "" /*emitRun*/, nil, &out, &errb); code != 1 {
+	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil, &out, &errb); code != 1 {
 		t.Fatalf("pulse exit=%d, want failed child exit 1; stderr=%q", code, errb.String())
 	}
 
