@@ -39,6 +39,11 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"pulse pulse", []string{"pulse", "pulse", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
+		// The two edit verbs validate only on the --chat path; without
+		// it, --agent is a usage error before the backend lookup (see
+		// TestEditChatAgentFlagNeedsChat).
+		{"idea edit", []string{"idea", "edit", "--chat", "--agent=gpt", "moe/x"}},
+		{"intent edit", []string{"intent", "edit", "--chat", "--agent=gpt", "moe/x"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,15 +59,20 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestIdeaVerbsRejectAgentFlagsAsUnknown(t *testing.T) {
+// TestCaptureVerbsRejectAgentFlagsAsUnknown pins the capture half of the
+// discipline: `new` stays editor-only for both capture workflows, so
+// neither --chat nor --agent is defined there and both fail in flag
+// parsing rather than reaching a backend lookup. Refinement is the only
+// door an agent holds (see TestEditChatAgentFlagNeedsChat).
+func TestCaptureVerbsRejectAgentFlagsAsUnknown(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 	}{
-		{"new agent", []string{"idea", "new", "--agent=gpt", "moe/x"}},
-		{"new chat", []string{"idea", "new", "--chat", "moe/x"}},
-		{"edit agent", []string{"idea", "edit", "--agent=gpt", "moe/x"}},
-		{"edit chat", []string{"idea", "edit", "--chat", "moe/x"}},
+		{"idea new agent", []string{"idea", "new", "--agent=gpt", "moe/x"}},
+		{"idea new chat", []string{"idea", "new", "--chat", "moe/x"}},
+		{"intent new agent", []string{"intent", "new", "--agent=gpt", "moe/x"}},
+		{"intent new chat", []string{"intent", "new", "--chat", "moe/x"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,7 +85,27 @@ func TestIdeaVerbsRejectAgentFlagsAsUnknown(t *testing.T) {
 				t.Fatalf("%s: expected unknown-flag error, got: %q", tc.name, errb.String())
 			}
 			if strings.Contains(errb.String(), "unknown backend") {
-				t.Fatalf("%s: idea flags should fail in parsing, not backend lookup: %q", tc.name, errb.String())
+				t.Fatalf("%s: capture flags should fail in parsing, not backend lookup: %q", tc.name, errb.String())
+			}
+		})
+	}
+}
+
+// TestEditChatAgentFlagNeedsChat pins --agent as chat-only on the edit
+// verbs: the $EDITOR path launches no agent, so accepting the flag there
+// would be a dead flag that silently does nothing. It refuses at parse
+// time (exit 2), before any project or run lookup — note the fixture-free
+// invocation.
+func TestEditChatAgentFlagNeedsChat(t *testing.T) {
+	for _, verb := range []string{"idea", "intent"} {
+		t.Run(verb, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := Run([]string{verb, "edit", "--agent=claude", "moe/x"}, &out, &errb)
+			if code != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "--agent needs --chat") {
+				t.Fatalf("expected --agent-needs---chat error, got: %q", errb.String())
 			}
 		})
 	}

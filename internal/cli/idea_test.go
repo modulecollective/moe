@@ -314,8 +314,10 @@ func TestIdeaNewRequiresEditor(t *testing.T) {
 	if !strings.Contains(errb.String(), "EDITOR") || !strings.Contains(errb.String(), "VISUAL") {
 		t.Fatalf("expected error naming $EDITOR/$VISUAL, got: %q", errb.String())
 	}
+	// --chat is a refinement door, not a capture one: `idea new` doesn't
+	// define the flag, so its editor error must not offer it as a way out.
 	if strings.Contains(errb.String(), "--chat") {
-		t.Fatalf("editor error should not advertise removed --chat flag: %q", errb.String())
+		t.Fatalf("idea new's editor error should not advertise --chat: %q", errb.String())
 	}
 	// No run dir should have been written.
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "needs-an-editor")); !os.IsNotExist(err) {
@@ -606,6 +608,11 @@ func TestIdeaEditRequiresEditor(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "EDITOR") || !strings.Contains(errb.String(), "VISUAL") {
 		t.Fatalf("expected error naming $EDITOR/$VISUAL, got: %q", errb.String())
+	}
+	// The remedy the operator can act on without leaving the shell: an
+	// editorless box can still refine through --chat.
+	if !strings.Contains(errb.String(), "--chat") {
+		t.Fatalf("editor error should offer --chat as the way out, got: %q", errb.String())
 	}
 }
 

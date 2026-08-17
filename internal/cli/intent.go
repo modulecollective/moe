@@ -21,14 +21,18 @@ import (
 // operator-authored statement of where the project is going — a theme,
 // a bet — kept open while it's relevant and closed when it stops being
 // so. Intents are just runs in a dedicated single-stage workflow
-// (dash.IntentWorkflow, dash.IntentDocID), the same shape as ideas, and
-// they share the discipline that no `moe intent` verb launches an agent:
-// agents *read* intents (via the stage-prompt catalog and the pulse),
-// only the operator writes them.
+// (dash.IntentWorkflow, dash.IntentDocID), the same shape as ideas.
 //
-// Deliberately narrower than idea: no move, no reopen, no log in v1 —
-// add on first real need. An intent is never promoted, never executed,
-// never handed to an agent to advance.
+// Authorship stays the operator's. Agents *read* intents (via the
+// stage-prompt catalog and the pulse) and never originate direction —
+// an intent is never promoted, never executed, never handed to an agent
+// to advance. `moe intent edit --chat` is not an exception to that: it's
+// a session the operator opens and drives, where the agent is the pen
+// and the sharpener, typing what the conversation converges on. The ban
+// is on autonomous agents writing direction, and it stands.
+//
+// Deliberately narrower than idea: no move, no reopen. An intent is a
+// few lines the operator keeps or closes.
 
 func init() {
 	g := NewCommandGroup("intent", "intent workflow")
@@ -39,7 +43,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "sharpen a parked intent in $EDITOR",
+		Summary: "sharpen a parked intent ($EDITOR, or --chat for an agent session)",
 		Run:     runIntentEdit,
 		argKind: argIntent,
 	})
@@ -58,6 +62,16 @@ func init() {
 		Name:    "cat",
 		Summary: "dump an intent's canvas to stdout",
 		Run:     runCat(dash.IntentWorkflow, dash.IntentDocID),
+		argKind: argIntent,
+	})
+	// `edit --chat` mints a durable session on the intent document, so
+	// the transcript needs a reader — without one the sessions this
+	// feature creates would be unreadable, the dead surface the removed
+	// idea-chat path left behind.
+	g.Register(&Command{
+		Name:    "log",
+		Summary: "render an intent's agent transcript",
+		Run:     runLog(dash.IntentWorkflow, dash.IntentDocID),
 		argKind: argIntent,
 	})
 	RegisterGroup(g)
@@ -177,8 +191,10 @@ func runIntentNew(args []string, stdout, stderr io.Writer) int {
 func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("intent edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	chat := fs.Bool("chat", false, "sharpen in an interactive agent session instead of $EDITOR")
+	agentOverride := fs.String("agent", "", "with --chat, override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe intent edit <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe intent edit [--chat] [--agent <name>] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -187,6 +203,9 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if code := checkChatAgentFlags("intent edit", *chat, *agentOverride, stderr); code != 0 {
+		return code
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -211,8 +230,11 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	if *chat {
+		return openIntentChat(projectID, slug, *agentOverride, stdout, stderr)
+	}
 	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "intent: set $EDITOR or $VISUAL — intent edit needs an editor")
+		moePrintln(stderr, "intent: set $EDITOR or $VISUAL (or pass --chat) — intent edit needs an editor")
 		return 1
 	}
 
@@ -250,6 +272,34 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stdout, "sharpened intent %s/%s\n", projectID, slug)
 	}
 	return 0
+}
+
+// intentChatKickoff is the first user message of a sharpening session.
+// Where the idea kickoff guards against a design pass, this one guards
+// against authorship: the agent asks, then types what it heard.
+const intentChatKickoff = "The operator just opened this intent to sharpen it. Read " +
+	"the canvas first, then ask what they want to change — one question, and wait for " +
+	"their answer before you edit. The direction is theirs: write what they say, ask " +
+	"the question that tightens the bet, never invent direction the conversation " +
+	"didn't state. An intent is a few lines, not an essay."
+
+// openIntentChat is `moe intent edit --chat` — the same document-only
+// stage session openIdeaChat opens, on the intent document. See that
+// function for why NeedsSandbox and the chain prompt both stay off; the
+// reasoning is identical and the two verbs are deliberately the same
+// surface.
+//
+// The difference is prose, not plumbing: intents are operator-authored
+// standing direction, so the fragment and the kickoff both cast the
+// agent as scribe. See the package comment above for why a session the
+// operator drives doesn't breach that.
+func openIntentChat(projectID, slug, agentOverride string, stdout, stderr io.Writer) int {
+	return runStageSession(projectID, slug, dash.IntentDocID,
+		stageSessionOpts{
+			InitialPrompt: intentChatKickoff,
+			SkipNextStage: true,
+			Agent:         agentOverride,
+		}, stdout, stderr)
 }
 
 // runIntentClose closes an intent (satisfied or abandoned). Delegates to

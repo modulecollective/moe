@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -23,8 +24,10 @@ import (
 // that sit between nothing and a full run. Ideas are just runs in a
 // dedicated single-stage workflow (dash.IdeaWorkflow, dash.IdeaDocID) so
 // the slug namespace, dash bucketing, and trailer conventions are the
-// same as sdlc. The distinguishing discipline: `moe idea` verbs
-// never launch an agent — capture stays cheap.
+// same as sdlc. Capture stays cheap: `moe idea new` never launches an
+// agent. Refinement is the one door an agent may hold — `moe idea edit
+// --chat` opens an ordinary stage session on the idea's own document
+// (see openIdeaChat).
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
 // workflow's top-level form. The Workflow registration is a separate
@@ -41,7 +44,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "edit",
-		Summary: "refine a captured idea in $EDITOR",
+		Summary: "refine a captured idea ($EDITOR, or --chat for an agent session)",
 		Run:     runIdeaEdit,
 		argKind: argIdea,
 	})
@@ -98,8 +101,9 @@ func init() {
 	// --from-idea's wf.Stages() all resolve it. The single stage name
 	// `idea` lives in the DAG without a matching `moe idea idea` verb
 	// — operator-facing verbs (new/edit/close/list/cat) are group
-	// subcommands above. wf.Next reporting "idea" is fine: no chain
-	// prompt or resume path ever reaches the idea workflow today.
+	// subcommands above. wf.Next reporting "idea" is fine: `edit --chat`
+	// opens the stage session directly and suppresses the chain prompt
+	// (a single-stage workflow has nowhere to chain to).
 	w := NewWorkflow(dash.IdeaWorkflow)
 	w.RegisterStage(dash.IdeaDocID)
 	RegisterWorkflow(w)
@@ -272,8 +276,10 @@ func createIdea(root, projectID, slugBase, body, promoteTo string, extra trailer
 func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	chat := fs.Bool("chat", false, "refine in an interactive agent session instead of $EDITOR")
+	agentOverride := fs.String("agent", "", "with --chat, override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea edit [--chat] [--agent <name>] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -282,6 +288,9 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if code := checkChatAgentFlags("idea edit", *chat, *agentOverride, stderr); code != 0 {
+		return code
 	}
 	projectID, slug, err := splitProjectRun(fs.Arg(0))
 	if err != nil {
@@ -306,8 +315,11 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	if *chat {
+		return openIdeaChat(projectID, slug, *agentOverride, stdout, stderr)
+	}
 	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea edit needs an editor")
+		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea edit needs an editor")
 		return 1
 	}
 
@@ -343,6 +355,66 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	default:
 		moePrintf(stdout, "refined idea %s/%s\n", projectID, slug)
+	}
+	return 0
+}
+
+// ideaChatKickoff is the first user message of a refinement session.
+// It has to do two jobs the fragment can't: say that *this* turn was
+// opened by an operator who wants to talk (so the agent asks before
+// editing rather than rewriting on sight), and re-assert the shelf
+// boundary at the point of action.
+const ideaChatKickoff = "The operator just opened this idea to refine it. Read the " +
+	"canvas first, then ask what they want to sharpen — one question, and wait for " +
+	"their answer before you edit. Keep it a shelf note: sharper framing, a concrete " +
+	"example, a smaller scope. Not a design."
+
+// openIdeaChat is the Go-level seam behind `moe idea edit --chat`: an
+// ordinary interactive stage session on the idea's own document. Riding
+// runStageSession (rather than the run-less bespoke path this feature
+// had before `ditch-idea-chat` removed it) is the whole point — the
+// session id lands in run.json's `documents.idea.session` and resumes on
+// the next `--chat`, which is what gives `moe idea log` a transcript to
+// render.
+//
+// Two knobs beyond the defaults:
+//
+//   - NeedsSandbox stays false. An idea is a shelf note; refining it
+//     sharpens the operator's framing of a problem, it doesn't verify
+//     claims about code. That's the line against `moe chat`, which
+//     attaches a clone to think *with* the project.
+//   - SkipNextStage is always on. idea is a single-stage workflow with
+//     no successor, so the only post-turn prompt available is the close
+//     nudge — wrong for a shelf entry the operator is still deciding
+//     about. Session exit drops them back to the shell.
+//
+// Interactive-only: there is no headless parameter and no oneshot.md
+// fragment, because nothing cascades into an idea.
+func openIdeaChat(projectID, slug, agentOverride string, stdout, stderr io.Writer) int {
+	return runStageSession(projectID, slug, dash.IdeaDocID,
+		stageSessionOpts{
+			InitialPrompt: ideaChatKickoff,
+			SkipNextStage: true,
+			Agent:         agentOverride,
+		}, stdout, stderr)
+}
+
+// checkChatAgentFlags validates the `--chat` / `--agent` pair the two
+// edit verbs share. `--agent` without `--chat` is a usage error rather
+// than a silent no-op: the editor path spawns no agent, so accepting the
+// flag would be the dead-flag smell the removed idea-chat path had.
+// verb names the caller for the error prefix. Returns 0 to proceed.
+func checkChatAgentFlags(verb string, chat bool, agentOverride string, stderr io.Writer) int {
+	if agentOverride == "" {
+		return 0
+	}
+	if !chat {
+		moePrintf(stderr, "%s: --agent needs --chat; the $EDITOR path launches no agent\n", verb)
+		return 2
+	}
+	if _, err := agent.Get(agentOverride); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 2
 	}
 	return 0
 }

@@ -28,13 +28,16 @@ func TestIntentRegistered(t *testing.T) {
 	if code := cmd.Run(nil, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	for _, want := range []string{"new", "edit", "close", "list", "cat"} {
+	// `log` joined the set when `edit --chat` started minting durable
+	// sessions on the intent document — a transcript with no reader is
+	// the dead surface that sank the first idea-chat path.
+	for _, want := range []string{"new", "edit", "close", "list", "cat", "log"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("intent usage missing subcommand %q: %q", want, out.String())
 		}
 	}
-	// Intent is deliberately narrower than idea: no move/reopen/log in v1.
-	for _, deny := range []string{"move", "reopen", "log"} {
+	// Intent stays narrower than idea: no move, no reopen.
+	for _, deny := range []string{"move", "reopen"} {
 		if strings.Contains(out.String(), deny) {
 			t.Fatalf("intent usage should not carry %q in v1: %q", deny, out.String())
 		}

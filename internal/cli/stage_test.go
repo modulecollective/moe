@@ -55,10 +55,10 @@ func dirtyTracked(t *testing.T, root string) {
 // Stages listed in noFragmentStages are operational (e.g. push), don't
 // build a system prompt, and are exempt by design.
 func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
-	// `push` is operational (no stage session). `idea` and `intent`
-	// never enter a stage session either — both are editor-backed — so
-	// no per-stage fragment is shipped for them.
-	noFragmentStages := map[string]bool{"push": true, "idea": true, "intent": true}
+	// `push` is operational (no stage session) and is the last stage
+	// with no fragment: idea and intent both open one via
+	// `edit --chat`, so their fragments are shipped and covered here.
+	noFragmentStages := map[string]bool{"push": true}
 	for _, wfName := range WorkflowNames() {
 		// Other tests register throwaway workflows with a "test-"
 		// prefix to exercise the missing-fragment fallback; by design
