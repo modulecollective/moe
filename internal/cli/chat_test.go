@@ -63,6 +63,74 @@ func TestChatWorkflowSingleStage(t *testing.T) {
 	}
 }
 
+// TestPromptChatClose pins chat's inverse close policy: leaving the run
+// open is the default, and only an explicit y/yes archives it. The helper
+// dispatches the registered close shape without --no-edit so an
+// operator-driven close retains its editor and harvest behaviour.
+func TestPromptChatClose(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		closeCode    int
+		wantDispatch bool
+		wantCode     int
+	}{
+		{name: "blank", input: "\n"},
+		{name: "n", input: "n\n"},
+		{name: "eof"},
+		{name: "typo", input: "close it\n"},
+		{name: "y", input: "y\n", wantDispatch: true},
+		{name: "uppercase-y", input: "Y\n", wantDispatch: true},
+		{name: "yes", input: "yes\n", wantDispatch: true},
+		{name: "close-failure", input: "y\n", closeCode: 23, wantDispatch: true, wantCode: 23},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dispatched bool
+			var gotArgs []string
+			closeCmd := &Command{
+				Name: "close",
+				Run: func(args []string, _, _ io.Writer) int {
+					dispatched = true
+					gotArgs = append([]string(nil), args...)
+					return tc.closeCode
+				},
+			}
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if _, err := io.WriteString(w, tc.input); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			oldStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = oldStdin })
+
+			var stdout, stderr bytes.Buffer
+			if code := promptChatClose(closeCmd, "moe", "ponder", &stdout, &stderr); code != tc.wantCode {
+				t.Fatalf("exit=%d want %d; stderr=%q", code, tc.wantCode, stderr.String())
+			}
+			if dispatched != tc.wantDispatch {
+				t.Fatalf("close dispatched=%v want %v", dispatched, tc.wantDispatch)
+			}
+			if tc.wantDispatch {
+				if got := strings.Join(gotArgs, " "); got != "moe/ponder" {
+					t.Fatalf("close args=%q want %q (no --no-edit)", got, "moe/ponder")
+				}
+			}
+			const want = "chat sitting ended — close this run? [y/N]\n" +
+				"  y = close (resume reopens) · N = leave open\n"
+			if got := stdout.String(); got != want {
+				t.Fatalf("stdout=%q want %q", got, want)
+			}
+		})
+	}
+}
+
 // TestBuildSystemPromptInjectsChatFragment is the wiring check:
 // workflows/chat/chat.md lands in the prompt when the run names the
 // chat workflow at the chat stage. Sentinels on the load-bearing
@@ -378,5 +446,54 @@ func TestOpenChatHarvestsOnExit(t *testing.T) {
 	}
 	if !got.HarvestOnExit {
 		t.Error("a perpetual run's session end is the only harvest point it reliably reaches")
+	}
+}
+
+// TestOpenChatPreservesFailedSitting pins the routing order: a failed
+// agent/session, harvest, or boundary result returns immediately and can
+// never be replaced by the post-sitting prompt's safe zero result.
+func TestOpenChatPreservesFailedSitting(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	prev := runStageSession
+	runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int { return 17 }
+	t.Cleanup(func() { runStageSession = prev })
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 17 {
+		t.Fatalf("exit=%d want failed sitting's 17; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(out.String(), "chat sitting ended") {
+		t.Fatalf("failed sitting must not prompt: %q", out.String())
+	}
+}
+
+// TestOpenChatServeHandshakeSuppressesClosePrompt covers the unattended
+// serve-child call shape at the unit seam. stdin is non-interactive here
+// too, so test stage supplies the differentiating real-PTY proof that the
+// handshake itself prevents the read.
+func TestOpenChatServeHandshakeSuppressesClosePrompt(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("MOE_SERVE_AGENT", "1")
+
+	var opened bool
+	stubStageSession(t, &opened)
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !opened {
+		t.Fatal("session was not opened")
+	}
+	if strings.Contains(out.String(), "chat sitting ended") {
+		t.Fatalf("serve-owned sitting must not prompt: %q", out.String())
 	}
 }

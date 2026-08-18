@@ -220,6 +220,62 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	}
 }
 
+// TestPromptChatCloseLeavesOpenOnSignal pins chat's safe cooked-mode
+// interrupt: Ctrl-C acknowledges the abort and returns success without
+// dispatching close, just like the prompt's default N answer.
+func TestPromptChatCloseLeavesOpenOnSignal(t *testing.T) {
+	var dispatched bool
+	closeCmd := &Command{
+		Name: "close",
+		Run: func(_ []string, _, _ io.Writer) int {
+			dispatched = true
+			return 0
+		},
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr safeBuffer
+	exit := make(chan int, 1)
+	go func() {
+		exit <- promptChatClose(closeCmd, "moe", "ponder", &stdout, &stderr)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(stdout.String(), "[y/N]") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(stdout.String(), "[y/N]") {
+		t.Fatalf("prompt label never printed: %q", stdout.String())
+	}
+	if err := raiseSIGINT(); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+
+	select {
+	case code := <-exit:
+		if code != 0 {
+			t.Fatalf("exit=%d want 0 on SIGINT-leave-open; stderr=%q", code, stderr.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("promptChatClose did not return after SIGINT")
+	}
+	if dispatched {
+		t.Error("close dispatched on SIGINT-leave-open path")
+	}
+	if !strings.Contains(stdout.String(), "^C") {
+		t.Errorf("expected ^C feedback in stdout, got: %q", stdout.String())
+	}
+}
+
 // TestPromptPushNextStageDeclinesOnSignal mirrors the above for the
 // three-way push prompt. SIGINT must collapse to the same safe sentinel
 // (decline) the [N/m/p] label already defaults to — load-bearing

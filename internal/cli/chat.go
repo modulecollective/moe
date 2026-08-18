@@ -145,10 +145,10 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 //   - CanvasOnOpen appends the per-session marker so the moe-owned
 //     canvas moves every turn (the agent never writes it).
 //   - SkipNextStage is always on. chat is a single terminal stage, so
-//     the only post-turn prompt available is the close nudge, whose
+//     the shared post-turn prompt would be the close nudge, whose
 //     Y-default would close-on-Enter — exactly wrong for a run meant to
-//     be reopened. Suppressing it drops the operator back to the shell;
-//     they reopen to continue or `moe chat close` to finish.
+//     be reopened. A chat-specific, default-leave-open prompt follows a
+//     successful operator-driven sitting instead.
 //   - HarvestOnExit is always on. chat *does* harvest at close, but the
 //     run is perpetual by design, so close is an archive that may be
 //     weeks away or never — a thread's captures would sit unchecked for
@@ -175,7 +175,7 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 		"reason through decisions, and groom the backlog (open or refine ideas via the " +
 		"moe-howto skill) when asked — you do not write or drive code. Greet the operator " +
 		"in one line and ask what they'd like to think through. Then wait for their reply."
-	return runStageSession(projectID, runID, chatDoc,
+	code := runStageSession(projectID, runID, chatDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
@@ -187,6 +187,55 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 				return chatCanvasOnOpen(workRoot, md, agentName)
 			},
 		}, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+	if !stdinIsTerminal() || serveAgentSuppress() {
+		return 0
+	}
+	g, err := LookupGroup(chatWorkflow)
+	if err != nil {
+		moePrintf(stderr, "chat: %v\n", err)
+		return 1
+	}
+	closeCmd := g.Lookup("close")
+	if closeCmd == nil {
+		moePrintln(stderr, "chat: close command not registered")
+		return 1
+	}
+	return promptChatClose(closeCmd, projectID, runID, stdout, stderr)
+}
+
+// promptChatClose offers the chat lifecycle's safe post-sitting choice.
+// Unlike the shared terminal-stage prompt, blank input leaves the run
+// open: a chat is perpetual and close is only a soft archive. Only an
+// explicit y/yes dispatches the registered close command, without
+// --no-edit, so the operator-driven close keeps its editor and harvest
+// behaviour.
+//
+// Caller responsibility: invoke only after a successful sitting and gate
+// on stdinIsTerminal and serveAgentSuppress first. Keeping those routing
+// checks in openChat prevents scripted and serve-owned sessions from ever
+// reaching a read on stdin.
+func promptChatClose(closeCmd *Command, projectID, runID string, stdout, stderr io.Writer) int {
+	moePrintln(stdout, "chat sitting ended — close this run? [y/N]")
+	moePrintln(stdout, "  y = close (resume reopens) · N = leave open")
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	if interrupted {
+		moePrintln(stdout, "^C")
+		return 0
+	}
+	if err != nil && err != io.EOF {
+		moePrintf(stderr, "read stdin: %v\n", err)
+		return 1
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer != "y" && answer != "yes" {
+		return 0
+	}
+	return closeCmd.Run([]string{projectID + "/" + runID}, stdout, stderr)
 }
 
 // reopenClosedChat flips a closed chat run back to in_progress before
