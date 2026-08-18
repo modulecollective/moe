@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/rand"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -231,6 +232,13 @@ type Inputs struct {
 	Index            *run.JournalIndex
 	SessionDocsByRun map[string][]string     // keyed "<project>/<slug>"
 	NextByRun        map[string]NextDecision // keyed "<project>/<slug>"; populated only for in-progress, non-idea runs.
+	// SessionWhenByRun dates an open session from its branch tip, keyed
+	// "<project>/<slug>" like the maps above. Only capture runs read it
+	// (see captureSessionRow): a session's commits land on the session
+	// branch, so Index.LastActivity — which reads main — stays stale for
+	// the whole open window and would date a minutes-old session in
+	// days. Best-effort: a missing entry falls back to LastActivity.
+	SessionWhenByRun map[string]time.Time
 	Chores           []ChoreInput
 	// Intents is the set of open intents (slug + title) to render in the
 	// INTENTS section. Titles come off each canvas's first heading, so
@@ -271,6 +279,9 @@ func BuildRows(in Inputs) ([]Row, error) {
 		}
 		runKey := md.Project + "/" + md.ID
 		last := in.Index.LastActivity[runKey]
+		if row, ok := captureSessionRow(md, in.SessionDocsByRun[runKey], in.SessionWhenByRun[runKey], last); ok {
+			rows = append(rows, row)
+		}
 		b, note, stage, runningDoc := classify(md, byRunKey, in.Index, in.SessionDocsByRun[runKey], in.NextByRun)
 		if b == BucketNone {
 			continue
@@ -774,6 +785,48 @@ func nestPromotedIdeas(rows []Row, idx *run.JournalIndex) []Row {
 		out = append(out, rows[i])
 	}
 	return out
+}
+
+// captureSessionRow emits the extra ACTIVE row a capture run earns
+// while an `edit --chat` session is open on its canvas. It is additive:
+// the run keeps its standing row too — an intent stays in INTENTS via
+// the Inputs.Intents splice, an in-progress idea still classifies to
+// BACKLOG — because the parked entry and the live session are two true
+// things at once: the direction is still parked, and someone is working
+// on it right now.
+//
+// The note doubles as the resume instruction: "<workflow>:edit --chat"
+// spells the exact verb that re-enters the session, and [running]
+// carries the same "branch + worktree exist" liveness the rest of the
+// dash means by it.
+//
+// In-progress only. A stray session branch on a closed or promoted
+// capture run gets no row: an ACTIVE entry inviting a resume on a
+// settled run advertises an action the operator shouldn't take.
+func captureSessionRow(md *run.Metadata, openSessionDocs []string, sessionWhen, last time.Time) (Row, bool) {
+	if !IsCapture(md.Workflow) || md.Status != run.StatusInProgress {
+		return Row{}, false
+	}
+	docID, ok := CaptureDocID(md.Workflow)
+	if !ok {
+		return Row{}, false
+	}
+	if !slices.Contains(openSessionDocs, docID) {
+		return Row{}, false
+	}
+	when := sessionWhen
+	if when.IsZero() {
+		when = last
+	}
+	return Row{
+		Project:    md.Project,
+		Run:        md.ID,
+		Note:       md.Workflow + ":edit --chat [running]",
+		Stage:      docID,
+		RunningDoc: docID,
+		When:       when,
+		Bucket:     BucketActiveRuns,
+	}, true
 }
 
 // classify decides which section a run lands in, what note to render,

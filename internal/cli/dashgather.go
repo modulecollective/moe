@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
@@ -54,19 +57,26 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 	// session records carry the project, and a bare-slug key would paint
 	// a live marker onto a same-slug run in another project.
 	sessionDocsByRun := make(map[string][]string)
+	sessionWhenByRun := make(map[string]time.Time)
 	if ss, err := session.List(root); err == nil {
+		tips := sessionBranchTips(root)
 		for _, s := range ss {
 			key := s.Project + "/" + s.Run
 			sessionDocsByRun[key] = append(sessionDocsByRun[key], s.Doc)
+			if t, ok := tips[s.Branch]; ok && t.After(sessionWhenByRun[key]) {
+				sessionWhenByRun[key] = t
+			}
 		}
 	}
 
 	nextByRun := make(map[string]dash.NextDecision, len(mds))
 	for _, md := range mds {
 		// Idea and intent are single-stage capture workflows with no
-		// next-stage decision to compute — they never render an ACTIVE
-		// row (ideas classify to BACKLOG, intents to their own section),
-		// so skip the workflow lookup and NextWithIndex entirely.
+		// next-stage decision to compute: their standing row is BACKLOG
+		// (ideas) or the INTENTS section, and the extra ACTIVE row an
+		// open `edit --chat` session earns them is built from the session
+		// list, not from a next-stage decision. Skip the workflow lookup
+		// and NextWithIndex entirely.
 		if md.Workflow == dash.IdeaWorkflow || md.Workflow == dash.IntentWorkflow {
 			continue
 		}
@@ -125,6 +135,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		Runs:             mds,
 		Index:            idx,
 		SessionDocsByRun: sessionDocsByRun,
+		SessionWhenByRun: sessionWhenByRun,
 		NextByRun:        nextByRun,
 		Chores:           choreInputs,
 		Intents:          gatherIntents(root, mds),
@@ -151,6 +162,36 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		ActiveProjects: len(activeProjects),
 		Histogram:      dailyRunCounts(idx, now, filter.ProjectFilter),
 	}, nil
+}
+
+// sessionBranchTips maps every session branch to its tip's committer
+// date, in one for-each-ref rather than a rev-parse per session. The tip
+// is the "work: start session" commit at open, bumped by each committed
+// turn and by every resume reconcile — the last activity *in* the
+// session, which is the honest date for a row whose whole claim is that
+// the session is live.
+//
+// Best-effort, like the session.List call it feeds: a failed ref read
+// yields a nil map and every session falls back to the journal's
+// LastActivity. Degraded (a possibly stale date), not broken.
+func sessionBranchTips(root string) map[string]time.Time {
+	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads/session/")
+	if err != nil {
+		return nil
+	}
+	tips := make(map[string]time.Time)
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		branch, ts, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		secs, err := strconv.ParseInt(ts, 10, 64)
+		if err != nil {
+			continue
+		}
+		tips[branch] = time.Unix(secs, 0)
+	}
+	return tips
 }
 
 // dailyRunCounts projects the journal index's daily run-activity onto the
