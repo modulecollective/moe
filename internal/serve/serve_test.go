@@ -2469,3 +2469,30 @@ func TestIdeaTagRouteRefusesUnknownWorkflowAndStaleIdeas(t *testing.T) {
 		}
 	}
 }
+
+// TestNewDashVMCaptureSessionRowIsActive: the extra ACTIVE row an open
+// `edit --chat` session earns a capture run needs no bespoke serve work
+// — it files into .Active and links at /run/ like any other active row,
+// while the capture run's standing INTENTS entry stays in its own
+// bucket. This pins the generic path rather than adding one.
+func TestNewDashVMCaptureSessionRowIsActive(t *testing.T) {
+	now := time.Now().UTC()
+	rows := []dash.Row{
+		{Project: "tele", Run: "sharpen-me", Bucket: dash.BucketActiveRuns, When: now,
+			Note: "intent:edit --chat [running]", Stage: dash.IntentDocID, RunningDoc: dash.IntentDocID},
+		{Project: "tele", Run: "sharpen-me", Bucket: dash.BucketIntents, Note: "Sharpen me"},
+	}
+	vm := newDashVM(now, rows, 1, 1, nil, dash.CompletedCap)
+	if len(vm.Active) != 1 {
+		t.Fatalf("active len = %d, want 1", len(vm.Active))
+	}
+	if got := vm.Active[0].URL; got != "/run/tele/sharpen-me" {
+		t.Errorf("url = %q, want /run/tele/sharpen-me", got)
+	}
+	if !strings.Contains(string(vm.Active[0].Note), "edit --chat") {
+		t.Errorf("note = %q, want the resume verb", vm.Active[0].Note)
+	}
+	if len(vm.Intents) != 1 || vm.Intents[0].Run != "sharpen-me" {
+		t.Errorf("intents = %+v, want the standing row intact", vm.Intents)
+	}
+}
