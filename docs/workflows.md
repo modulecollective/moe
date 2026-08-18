@@ -216,10 +216,16 @@ moe chat close [--no-edit] <project>/<run>
 it. The agent never drives coding or shipping: if the conversation lands on
 "this needs building", it captures an idea and you start the SDLC ladder
 yourself. The run stays open across sittings, so re-running `chat` continues
-the same thread. The canvas is a moe-written session log; the conversation
-transcript is the record, read back with `moe chat log`. Grooming the idea
-backlog (`moe idea new|edit|close|reopen`) is the one state change a chat
-session makes on your behalf.
+the same thread. When an interactive sitting ends, moe asks whether to close
+the run, and the default is no — a chat is meant to be perpetual, so leaving it
+open is the safe answer; `y` runs the same operator-driven close as `moe chat
+close`, editor and harvest included. Close is a soft archive rather than a
+one-way door: running `chat` against a closed run reopens and continues it in
+one step, which is why there is no separate reopen verb. The canvas is a
+moe-written session log; the conversation transcript is the record, read back
+with `moe chat log`. Grooming the idea backlog
+(`moe idea new|edit|close|reopen`) is the one state change a chat session makes
+on your behalf.
 
 ## Knowledge
 
