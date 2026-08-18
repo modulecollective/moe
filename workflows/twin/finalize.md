@@ -102,11 +102,12 @@ findings.
 
 ## Committing
 
-Your inline fixes to any managed doc, the appended
-`history-summary.md`, and the canvas summary land in one
-per-turn commit. The wiki engine writes `log.md` and
-`checkpoint.json` as part of the same commit. The session-close
-gate refuses both an empty canvas and a non-empty hygiene scan.
+The harness lands your inline fixes to any managed doc, the appended
+`history-summary.md`, and the canvas summary in one per-turn commit
+after the turn — don't run `git add` or `git commit` yourself. The wiki
+engine writes `log.md` and `checkpoint.json` as part of the same commit.
+The session-close gate refuses both an empty canvas and a non-empty
+hygiene scan.
 
 ## When you're done
 

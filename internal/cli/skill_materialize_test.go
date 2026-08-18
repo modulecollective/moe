@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	moe "github.com/modulecollective/moe"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -163,6 +164,30 @@ func TestMaterializeMoeBureaucracySkillIsIdempotent(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Errorf("materialize is not idempotent across two calls:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+// TestMaterializeMoeBureaucracySkillHidesCodexTreeFromGit is the
+// regression for an agent's broad git-add sweeping session-specific
+// skill bodies into the bureaucracy journal.
+func TestMaterializeMoeBureaucracySkillHidesCodexTreeFromGit(t *testing.T) {
+	root := gittest.Init(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
+
+	if err := materializeMoeBureaucracySkill(root, "", md); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	ignorePath := filepath.Join(root, ".codex", ".gitignore")
+	ignore, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", ignorePath, err)
+	}
+	if got, want := string(ignore), "*\n"; got != want {
+		t.Errorf("%s = %q, want %q", ignorePath, got, want)
+	}
+	if got := gittest.Output(t, root, "status", "--porcelain"); got != "" {
+		t.Errorf("materialized skills visible to git status:\n%s", got)
 	}
 }
 

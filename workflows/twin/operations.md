@@ -72,15 +72,17 @@ work was compression is still a pass.
 
 ## Committing
 
-`operations.md` edits and the canvas summary land in one per-turn
-commit. The session-close gate refuses an empty canvas.
+The harness lands `operations.md` edits and the canvas summary in one
+per-turn commit after the turn — don't run `git add` or `git commit`
+yourself. The session-close gate refuses an empty canvas.
 
 ## When you're done
 
 1. You've read `operations.md` and the kickoff context.
 2. Updates (or their absence) are named on the canvas with
    triggers cited.
-3. Edits to `operations.md` are committed.
+3. Edits to `operations.md` are left for the harness to commit after
+   the turn; you haven't committed them yourself.
 4. The operator has what they need to take the next step.
 
 ## Before you start

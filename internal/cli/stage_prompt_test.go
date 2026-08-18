@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -416,10 +417,36 @@ func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	if strings.Contains(writable, "exposed read-only") {
 		t.Errorf("writable prompt leaked the read-only wording:\n%s", writable)
 	}
+	for name, got := range map[string]string{"read-only": readOnly, "writable": writable} {
+		for _, want := range []string{
+			"The harness commits run artifacts after the turn",
+			"never run `git add` or `git commit` in the bureaucracy worktree",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s prompt missing no-commit guard %q:\n%s", name, want, got)
+			}
+		}
+	}
 
 	// Document-only stages have no clone, so neither paragraph renders.
 	if got := operationalCore(root, md, "architecture", "", true); strings.Contains(got, "exposed read-only") {
 		t.Errorf("no clone means no sandbox paragraph:\n%s", got)
+	}
+}
+
+// TestTwinStageGuidesLeaveCommitsToHarness pins the workflow-local half
+// of the no-commit instruction. These fragments previously described
+// the resulting commit in passive voice, which an agent read as work it
+// should perform inside the bureaucracy worktree.
+func TestTwinStageGuidesLeaveCommitsToHarness(t *testing.T) {
+	for _, stage := range []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize"} {
+		body := moe.Stage("twin", stage)
+		normalized := strings.Join(strings.Fields(body), " ")
+		for _, want := range []string{"harness", "don't run", "`git add`", "`git commit`", "yourself"} {
+			if !strings.Contains(normalized, want) {
+				t.Errorf("twin %s guide missing %q in no-commit instruction:\n%s", stage, want, body)
+			}
+		}
 	}
 }
 

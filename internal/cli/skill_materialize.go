@@ -116,6 +116,10 @@ func writeSkill(workRoot, sessionCwd, skillName string, body []byte) error {
 		if err := os.MkdirAll(skillDir, 0o755); err != nil {
 			return fmt.Errorf("skill: mkdir %s: %w", skillDir, err)
 		}
+		ignorePath := filepath.Join(workRoot, dir, ".gitignore")
+		if err := os.WriteFile(ignorePath, []byte("*\n"), 0o644); err != nil {
+			return fmt.Errorf("skill: write %s: %w", ignorePath, err)
+		}
 		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), body, 0o644); err != nil {
 			return fmt.Errorf("skill: write %s/SKILL.md: %w", skillDir, err)
 		}

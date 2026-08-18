@@ -118,9 +118,10 @@ only work was compression counts.
 
 ## Committing
 
-`glossary.md` edits, any home-doc normalizations, and the canvas
-summary land in one per-turn commit. The session-close gate
-refuses an empty canvas.
+The harness lands `glossary.md` edits, any home-doc normalizations,
+and the canvas summary in one per-turn commit after the turn — don't
+run `git add` or `git commit` yourself. The session-close gate refuses
+an empty canvas.
 
 ## When you're done
 
@@ -128,8 +129,9 @@ refuses an empty canvas.
    canvases for term sightings.
 2. Promotions, retirements, and normalisations (or their absence)
    are named on the canvas.
-3. Edits to `glossary.md` and any normalised home docs are
-   committed.
+3. Edits to `glossary.md` and any normalised home docs are left for
+   the harness to commit after the turn; you haven't committed them
+   yourself.
 4. The operator has what they need to take the next step.
 
 ## Before you start

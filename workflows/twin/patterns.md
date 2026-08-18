@@ -82,15 +82,17 @@ sightings)
 
 ## Committing
 
-`patterns.md` edits and the canvas summary land in one per-turn
-commit. The session-close gate refuses an empty canvas.
+The harness lands `patterns.md` edits and the canvas summary in one
+per-turn commit after the turn — don't run `git add` or `git commit`
+yourself. The session-close gate refuses an empty canvas.
 
 ## When you're done
 
 1. You've read `patterns.md` and the kickoff context.
 2. Promotions, demotions, and anti-patterns (or their absence)
    are named on the canvas with sightings cited.
-3. Edits to `patterns.md` are committed.
+3. Edits to `patterns.md` are left for the harness to commit after
+   the turn; you haven't committed them yourself.
 4. The operator has what they need to take the next step.
 
 ## Before you start

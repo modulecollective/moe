@@ -120,11 +120,11 @@ pass's events touches the stated bets")
 
 ## Committing
 
-Your edits to `vision.md` (reference drift fixes and any
-structural cleanup — typo fixes, broken links) and your canvas
-summary land in the same per-turn commit. The session-close gate
-refuses to seal an empty canvas; write at least the one-line "no
-drift" note before exiting.
+The harness lands your edits to `vision.md` (reference drift fixes and
+any structural cleanup — typo fixes, broken links) and your canvas
+summary in the same per-turn commit after the turn — don't run `git add`
+or `git commit` yourself. The session-close gate refuses to seal an
+empty canvas; write at least the one-line "no drift" note before exiting.
 
 ## When you're done
 
@@ -132,7 +132,8 @@ The vision stage is ready to hand back when:
 
 1. You've read `vision.md` and the kickoff context.
 2. Drift (or its absence) is named on the canvas.
-3. Any structural fixes to `vision.md` are committed.
+3. Any structural fixes to `vision.md` are left for the harness to
+   commit after the turn; you haven't committed them yourself.
 4. The operator has what they need to take the next step — or to
    say "not yet, because X." (The stage-location header above
    names the exact invocation.)
