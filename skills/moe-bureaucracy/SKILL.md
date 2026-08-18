@@ -22,6 +22,12 @@ worth recording for future runs. MoE keeps three places for this:
   scope for the current canvas. The operator triages at close; survivors
   become idea runs.
 
+Both fan out when the run reaches a terminal status — close, merge, or push.
+A conversational session (`moe idea edit --chat`, `moe intent edit --chat`,
+`moe chat`) is the exception: its run may never reach one, so both harvest at
+*session end* instead, with no editor review — what you write fans out the
+moment the operator exits. Write accordingly.
+
 Two more sections at the end cover artifacts you write *as* the work rather
 than as a note about it: **Knowledge** (the project's durable domain
 reference) and **Hooks and chores** (the project's own automation). Those live

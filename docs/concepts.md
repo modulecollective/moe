@@ -77,7 +77,10 @@ MoE's memory improves through a few explicit channels:
   `followups.md`; close-time harvest promotes surviving entries to ideas, and
   `moe <workflow> harvest` re-runs that promotion without closing the run. A
   followup slug carrying a `<project>/` prefix routes the promoted idea to that
-  project's backlog instead of the current one.
+  project's backlog instead of the current one. Conversational sessions — the
+  two `edit --chat` verbs and `moe chat` — harvest at session end instead:
+  their runs either never harvest at close (capture workflows) or may never
+  close at all (chat is perpetual).
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,

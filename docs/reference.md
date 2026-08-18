@@ -96,11 +96,11 @@ source of truth for the exact command surface; this page is a map.
 - `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
-- `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log` manages backlog
-  notes. `tag` stamps the workflow tag that licenses a pulse to start the idea
-  (`untag` clears it); untagged ideas are operator-only.
-- `moe intent new|edit|close|list|cat` manages operator-authored standing
-  direction.
+- `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log|harvest` manages
+  backlog notes. `tag` stamps the workflow tag that licenses a pulse to start
+  the idea (`untag` clears it); untagged ideas are operator-only.
+- `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
+  standing direction.
 - `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
   maintains recorded intent.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
@@ -117,8 +117,17 @@ source of truth for the exact command surface; this page is a map.
   slug.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
-`followups.md` harvest into ideas without closing it — the way to pick up
-follow-ups a re-run regenerated after the run was already closed.
+`followups.md` and `feedback/lore.md` harvests — into ideas and `lore/`
+respectively — without closing it. It picks up captures a re-run regenerated
+after the run was already closed, and it is the recovery verb for a
+conversational session whose own session-end harvest failed partway.
+
+Conversational sessions (`moe idea edit --chat`, `moe intent edit --chat`,
+`moe chat`) harvest at session end rather than at close: the capture
+workflows' close deliberately skips harvest and a chat run is perpetual, so
+session end is the only harvest point they reliably reach. That pass is
+silent — the operator was in the conversation, so there is no editor review.
+Run the verb above for the reviewing form.
 
 ## Codex Setup
 
