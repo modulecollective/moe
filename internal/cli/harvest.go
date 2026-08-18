@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // harvestCommand builds the `harvest` subcommand for a workflow —
@@ -21,21 +22,41 @@ import (
 // re-run of a stage rewrites followups.md with fresh entries that can
 // never be picked up (close refuses an already-terminal run). This verb
 // is the trigger that isn't the status flip — it re-runs the existing
-// followups harvest pipeline against the run's current followups.md and
-// commits the rewritten file, leaving run.json untouched.
+// followups and lore harvest pipelines against the run's current
+// scratch files and commits what they rewrote, leaving run.json
+// untouched.
 //
-// Idempotent: the pipeline skips `- [x]` lines, so a clean run finds
+// Idempotent: the pipelines skip `- [x]` lines, so a clean run finds
 // nothing new and a regenerated file harvests only the fresh entries.
-// Registered for every non-idea workflow (idea runs have no follow-ups
-// dance — the run is the capture).
+// Registered for every workflow that can host an agent session — which,
+// since `idea edit --chat` and `intent edit --chat`, includes the
+// capture workflows. Their close still skips harvest (the run *is* the
+// capture), so this verb plus HarvestOnExit is the only path their
+// captures have.
 func harvestCommand(workflow string) *Command {
 	return &Command{
 		Name:    "harvest",
-		Summary: "re-harvest a run's followups.md into ideas without closing it",
+		Summary: "re-harvest a run's followups.md and feedback/lore.md without closing it",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runHarvest(workflow, args, stdout, stderr)
 		},
-		argKind: argProjectRun,
+		argKind: harvestArgKind(workflow),
+	}
+}
+
+// harvestArgKind picks the completion token kind for the verb's one
+// argument. The capture workflows own their own kinds — argProjectRun
+// deliberately excludes idea and intent runs — so a plain
+// argProjectRun here would leave `moe idea harvest <tab>` completing
+// nothing.
+func harvestArgKind(workflow string) argKind {
+	switch workflow {
+	case dash.IdeaWorkflow:
+		return argIdea
+	case dash.IntentWorkflow:
+		return argIntent
+	default:
+		return argProjectRun
 	}
 }
 
@@ -43,9 +64,9 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" harvest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	// --no-edit mirrors close: skip the editor pre-flight and harvest the
-	// file as-is. The pop is on by default here — the operator is
+	// files as-is. The pop is on by default here — the operator is
 	// explicitly invoking harvest, so they get to review what fans out.
-	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
+	noEdit := fs.Bool("no-edit", false, "skip the followups.md / feedback/lore.md editor steps (harvest as-is)")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s harvest [--no-edit] <project>/<run>\n", workflow)
 		fs.PrintDefaults()
@@ -86,29 +107,41 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// harvestRunInProcess re-runs the followups harvest for an already-
-// resolved run and commits the rewritten followups.md — without flipping
+// harvestRunInProcess re-runs the followups and lore harvests for an
+// already-resolved run and commits what they rewrote — without flipping
 // run status. Unlike closeRunInProcess it is status-agnostic: harvest is
-// journal-local (it creates idea runs and rewrites a scratch file),
-// touching neither the PR nor run.json, so it is safe on in_progress,
-// closed, merged, or pushed runs. That status-blindness is the whole
-// point — the reported gap is a closed run whose regenerated follow-ups
-// can never reach ideas through the close path.
+// journal-local (it creates idea runs, promotes lore files, and rewrites
+// two scratch files), touching neither the PR nor run.json, so it is
+// safe on in_progress, closed, merged, or pushed runs. That
+// status-blindness is the whole point — the reported gap is a closed run
+// whose regenerated follow-ups can never reach ideas through the close
+// path.
 //
-// Lore is deliberately out of scope here (close still harvests both):
-// the reported need is ideas, and the stray-content backstop already
-// covers lore's silent-loss case. A symmetric lore re-harvest is a
-// separate verb if the gap ever bites.
+// Both scratch files, in enterTerminal's order and with its staging: the
+// verb shipped followups-only with a note that a symmetric lore
+// re-harvest could be a separate verb if the gap ever bit. It bit — a
+// conversational session on an intent stranded a lore entry alongside
+// its followups — and a "harvest" that silently skips half the captures
+// is the trap that produced that run, so the pairing lives in the one
+// verb.
+//
+// No workflow is refused. The idea refusal this function shipped with
+// ("the run *is* the capture") predates `idea edit --chat`: an agent
+// session on a capture run files followups and lore like any other
+// stage, and capture close deliberately skips harvest, so refusing here
+// would leave those captures with no path at all.
 func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool, stdout, stderr io.Writer) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}
 
-	// Same clean-tree tolerance as close: the operator's local edits to
-	// followups.md are expected (it's the file being harvested), so the
-	// gate ignores that path while still refusing on anything else dirty.
+	// Same clean-tree tolerance as close, over the same path set: the
+	// operator's local edits to the scratch files are expected (they're
+	// what's being harvested) and lore/ is this commit's own output, so
+	// the gate ignores those while still refusing on anything else dirty.
 	followupsRel := run.FollowupsPath(projectID, runID)
-	dirty, derr := dirtyOutsidePaths(root, followupsRel)
+	loreRel := run.FeedbackPath(projectID, runID, "lore")
+	dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, wiki.LoreDirRel+"/")
 	if derr != nil {
 		return derr
 	}
@@ -126,11 +159,8 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 	if md.Workflow != workflow {
 		return fmt.Errorf("run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)
 	}
-	if workflow == dash.IdeaWorkflow {
-		return fmt.Errorf("idea %s/%s has no follow-ups to harvest", projectID, runID)
-	}
 
-	msg := fmt.Sprintf("harvest: capture follow-ups for %s/%s\n\n", projectID, runID) +
+	msg := fmt.Sprintf("harvest: capture follow-ups and lore for %s/%s\n\n", projectID, runID) +
 		trailers.Block{
 			Run:      runID,
 			Project:  projectID,
@@ -143,16 +173,27 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 		if err := harvestFollowups(root, projectID, runID, workflow, skipEdit); err != nil {
 			return err
 		}
-		// Nothing on disk means nothing fanned out — no file to commit.
-		rel := run.FollowupsPath(projectID, runID)
-		if _, statErr := os.Stat(filepath.Join(root, rel)); statErr != nil {
+		if err := harvestLore(root, projectID, runID, workflow, skipEdit); err != nil {
+			return err
+		}
+		// Stage exactly what enterTerminal stages, and only what's on
+		// disk: a run with neither scratch file has nothing to commit.
+		// lore/ goes in as a dir so every newly-promoted slug rides along
+		// without enumerating them.
+		var paths []string
+		for _, rel := range []string{followupsRel, loreRel, wiki.LoreDirRel} {
+			if _, statErr := os.Stat(filepath.Join(root, rel)); statErr == nil {
+				paths = append(paths, rel)
+			}
+		}
+		if len(paths) == 0 {
 			return nil
 		}
-		// A clean re-run (all `- [x]`) leaves followups.md byte-identical,
+		// A clean re-run (all `- [x]`) leaves both files byte-identical,
 		// so there's nothing staged: swallow ErrNothingToCommit and report
 		// the no-op as success. The harvested ideas' own open commits
 		// (written by createIdea inside the pipeline) are already landed.
-		if err := run.StageAndCommit(root, msg, rel); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+		if err := run.StageAndCommit(root, msg, paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 			return err
 		}
 		return nil

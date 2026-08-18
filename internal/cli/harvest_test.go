@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -22,10 +24,11 @@ func runStatus(t *testing.T, root, projectID, runID string) string {
 }
 
 // TestHarvestCommandRegistered confirms the verb landed in every
-// non-idea workflow group and stayed off the idea group (idea runs have
-// no follow-ups dance).
+// workflow group that can host an agent session — the capture
+// workflows included, since `edit --chat` lets a session file captures
+// on a run whose close deliberately skips harvest.
 func TestHarvestCommandRegistered(t *testing.T) {
-	for _, wf := range []string{"sdlc", "chat", "twin"} {
+	for _, wf := range []string{"sdlc", "chat", "twin", "idea", "intent"} {
 		g, ok := groups[wf]
 		if !ok {
 			t.Fatalf("group %q not registered", wf)
@@ -34,8 +37,22 @@ func TestHarvestCommandRegistered(t *testing.T) {
 			t.Errorf("%s: expected a harvest subcommand", wf)
 		}
 	}
-	if g, ok := groups["idea"]; ok && g.Lookup("harvest") != nil {
-		t.Error("idea workflow should not register harvest")
+}
+
+// TestHarvestArgKindPerWorkflow pins the completion token kind: the
+// capture workflows have their own candidate sources, and
+// argProjectRun deliberately excludes their runs — so wiring them to it
+// would leave `moe idea harvest <tab>` offering nothing.
+func TestHarvestArgKindPerWorkflow(t *testing.T) {
+	cases := map[string]argKind{
+		"sdlc":              argProjectRun,
+		dash.IdeaWorkflow:   argIdea,
+		dash.IntentWorkflow: argIntent,
+	}
+	for wf, want := range cases {
+		if got := harvestCommand(wf).argKind; got != want {
+			t.Errorf("%s harvest argKind = %v, want %v", wf, got, want)
+		}
 	}
 }
 
@@ -83,7 +100,7 @@ func TestHarvestFreshEntries(t *testing.T) {
 	// The rewritten file rides a harvest commit, and run.json status is
 	// untouched — harvest does not flip the run.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "harvest: capture follow-ups for tele/ship-it") {
+	if !strings.Contains(head, "harvest: capture follow-ups and lore for tele/ship-it") {
 		t.Fatalf("HEAD is not the harvest commit:\n%s", head)
 	}
 	for _, want := range []string{"MoE-Run: ship-it", "MoE-Project: tele", "MoE-Workflow: sdlc"} {
@@ -216,5 +233,112 @@ func TestHarvestRejectsWrongWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "is a sdlc run, not twin") {
 		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
+	}
+}
+
+// TestHarvestPromotesLore is the gap the verb shipped with: lore was
+// left out with a note that a separate verb could cover it if it ever
+// bit. A conversational session that stranded a lore entry alongside
+// its followups is that bite — so the one verb fans out both, in
+// enterTerminal's order and with its staging (the promoted lore/ file
+// rides the same commit as the rewritten scratch files).
+func TestHarvestPromotesLore(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeFollowups(t, root, "tele", "ship-it", "- [ ] `chase-zlib` — Chase the zlib upgrade\n")
+	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `sandbox-pid-hidden` — A sandbox pid check false-negatives",
+		"",
+		"  applies-when: code decides liveness from a recorded pid inside a sandbox",
+		"",
+		"  A stage sandbox gets its own PID namespace.",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+
+	if entry := readLoreEntry(t, root, "sandbox-pid-hidden"); !strings.Contains(entry, "own PID namespace") {
+		t.Fatalf("promoted lore entry missing its body:\n%s", entry)
+	}
+	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `sandbox-pid-hidden`") {
+		t.Fatalf("lore entry not marked harvested:\n%s", got)
+	}
+	// Both scratch files and the promoted lore file ride one commit —
+	// which is also what leaves the tree clean for a later close.
+	if st := gittest.Output(t, root, "status", "--porcelain"); strings.TrimSpace(st) != "" {
+		t.Fatalf("harvest left the tree dirty:\n%s", st)
+	}
+	files := gitLog(t, root, "-1", "--name-only", "--format=")
+	for _, want := range []string{
+		"projects/tele/runs/ship-it/followups.md",
+		"projects/tele/runs/ship-it/feedback/lore.md",
+		"lore/sandbox-pid-hidden.md",
+	} {
+		if !strings.Contains(files, want) {
+			t.Errorf("harvest commit missing %s:\n%s", want, files)
+		}
+	}
+}
+
+// TestHarvestLoreIsIdempotent: a second pass over an all-`[x]` lore
+// file is a clean no-op. Session-end harvest reruns on every session
+// exit, so "nothing new" has to cost nothing — no error, no commit, no
+// re-promoted entry.
+func TestHarvestLoreIsIdempotent(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
+		"- [ ] `one-fact` — One portable fact",
+		"",
+		"  applies-when: always",
+		"",
+		"  The body.",
+		"",
+	}, "\n"))
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("first harvest: exit=%d stderr=%q", code, errb.String())
+	}
+	afterFirst := gitLog(t, root, "-1", "--format=%H")
+
+	out.Reset()
+	errb.Reset()
+	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+		t.Fatalf("second harvest: exit=%d stderr=%q", code, errb.String())
+	}
+	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterFirst {
+		t.Fatalf("idempotent re-run created a commit:\nfirst=%s second=%s", afterFirst, afterSecond)
+	}
+}
+
+// TestHarvestAcceptsCaptureRuns: the idea refusal the verb shipped with
+// ("the run *is* the capture") died with `idea edit --chat`. A capture
+// run's close never harvests, so a refusal here would leave a session's
+// captures with no path out at all.
+func TestHarvestAcceptsCaptureRuns(t *testing.T) {
+	for _, wf := range []string{dash.IdeaWorkflow, dash.IntentWorkflow} {
+		t.Run(wf, func(t *testing.T) {
+			root := seedCloseFixture(t, "tele", "sharpen-me", wf, run.StatusInProgress)
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+
+			writeFollowups(t, root, "tele", "sharpen-me", "- [ ] `spotted-this` — Spotted mid-conversation\n")
+
+			var out, errb bytes.Buffer
+			if code := Run([]string{wf, "harvest", "--no-edit", "tele/sharpen-me"}, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, errb.String())
+			}
+			if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "spotted-this", "run.json")); err != nil {
+				t.Fatalf("expected the capture run's followup to fan out: %v", err)
+			}
+		})
 	}
 }
