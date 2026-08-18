@@ -255,7 +255,14 @@ func (a *activity) nextTick() time.Time {
 // It can lag reality by a beat, which at one event every few minutes is
 // nothing. The web panel does not read it — serve renders from memory.
 type ActivitySnapshot struct {
-	Pid     int       `json:"pid"`
+	Pid int `json:"pid"`
+	// PidNS is the pid namespace Pid is a number in, as Linux's
+	// "pid:[<inode>]" handle; empty where it can't be read. A reader in
+	// a different namespace — an agent harness's Bash sandbox, which
+	// gets its own — cannot see this pid at all, so its liveness probe
+	// would report a healthy serve as crashed. This is what lets that
+	// reader tell "gone" from "not visible from here".
+	PidNS   string    `json:"pid_ns,omitempty"`
 	Addr    string    `json:"addr"`
 	Armed   bool      `json:"armed"`
 	Started time.Time `json:"started"`
@@ -304,7 +311,12 @@ func (a *activity) snapshot(now time.Time) ActivitySnapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	snap := ActivitySnapshot{
-		Pid:       a.pid,
+		Pid: a.pid,
+		// Read per write rather than cached on the record: a live
+		// process never changes namespace, so this is a readlink for
+		// free correctness, and it keeps the field next to the pid it
+		// qualifies.
+		PidNS:     repolock.PidNamespace(),
 		Addr:      a.addr,
 		Armed:     a.armed,
 		Started:   a.started,

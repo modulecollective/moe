@@ -703,6 +703,25 @@ func ProcessAlive(pid int) bool {
 	return !errors.Is(err, syscall.ESRCH) && !errors.Is(err, os.ErrProcessDone)
 }
 
+// PidNamespace names the pid namespace this process runs in, as Linux's
+// "pid:[<inode>]" handle. Empty when there is nothing to read — no
+// /proc, not Linux — which callers read as "can't tell", never as a
+// namespace of its own.
+//
+// Exported next to ProcessAlive because it is that probe's missing
+// half. ProcessAlive can only see pids in the caller's own namespace,
+// and an agent harness's Bash sandbox gets a fresh one, so every
+// process started outside it reads as gone. Comparing this handle with
+// the writer's is how a reader learns whether the probe's answer is
+// evidence at all.
+func PidNamespace() string {
+	ns, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		return ""
+	}
+	return ns
+}
+
 // OwnerString is what we write as Owner in a fresh record: <host>/<pid>.
 // host is the caller's hostHandle output, supplied by Acquire so the
 // owner string and the isStale comparison stay in agreement.

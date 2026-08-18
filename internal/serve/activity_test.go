@@ -529,3 +529,18 @@ func TestActivityPanelClusterCountsFailingProjects(t *testing.T) {
 		t.Errorf("panel cluster = %q, want nothing spent on failures at zero", got)
 	}
 }
+
+// TestSnapshotStampsThePidNamespace: the pid alone is not enough for a
+// reader to probe. `moe dash` run from an agent's Bash sandbox sits in
+// its own pid namespace, where serve's pid does not exist and the
+// liveness probe answers "gone" for a process that is fine — so the
+// snapshot has to say which namespace its pid is a number in.
+func TestSnapshotStampsThePidNamespace(t *testing.T) {
+	self, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		t.Skipf("no pid namespace handle to compare against: %v", err)
+	}
+	if got := testActivity(t, time.Now(), true).snapshot(time.Now()).PidNS; got != self {
+		t.Errorf("snapshot PidNS = %q, want this process's namespace %q", got, self)
+	}
+}
