@@ -1,9 +1,10 @@
 # ▓▒░ MINISTRY OF EVERYTHING ░▒▓
 
-Ministry of Everything (MoE) is a CLI-first harness for one operator directing
-AI agents through durable markdown work. It runs
+Ministry of Everything (MoE) is a CLI-first harness for one operator and the
+AI agents working for them. It runs
 [Claude Code](https://claude.com/claude-code) or
-[Codex](https://chatgpt.com/codex/) against living markdown documents.
+[Codex](https://chatgpt.com/codex/) against living markdown documents — durable
+context that outlasts the sessions that write it.
 
 Running several agent threads usually means chat-history archaeology: the
 design lives in one scrollback, the test evidence in another, and the context
@@ -12,21 +13,26 @@ canvas — an artifact the next stage reads without replaying the whole chat —
 and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
-There is no swarm, and the only clock is one you armed: MoE ships no cron of
-anyone else's, just a heartbeat inside a `moe serve --dynamic` you started.
-Agents act on your consent — typed at a command, or standing for as long as
-that process stays up — and the operator stays strategist, reviewer, and source
-of judgment.
-MoE is also deliberately single-operator — see [Anti-Social on
-Purpose](#anti-social-on-purpose) for why that is a bet rather than a missing
-feature. The bet behind that stance: agents have made careful work cheap. When a
-designed, reviewed, tested change costs one conversation and two keystrokes,
-the discipline that used to be overhead becomes the default path. What MoE
-removes is the coordination tax — opening work, handing context forward,
-checking progress, filing the lessons that should shape the next run.
+Work travels as far as you license, and no further. Typed, that's a bang
+grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and rides
+the chain queued behind it. Standing, it's an armed `moe serve --dynamic`,
+whose heartbeat surveys each project's board, opens work that's ready — a due
+chore, a tagged idea, a parked chain — and rides it through review, test, and
+ship while you're away. Stopping that process retracts all of it.
+
+Underneath is a bet that agents have made careful work cheap. When a designed,
+reviewed, tested change costs one conversation and two keystrokes, the
+discipline that used to be overhead becomes the default path. What still costs
+is coordination — opening work, handing context forward, checking progress,
+filing the lessons that should shape the next run — so coordination is what MoE
+automates.
+
+MoE is deliberately single-operator: one person's backlog, one person's
+journal, no accounts and no sharing. [Anti-Social on
+Purpose](#anti-social-on-purpose) has the reasoning.
 
 MoE is built with MoE — every change ships through the same workflows it
-provides.
+provides, and these days most of those runs open themselves.
 
 Everything works from the CLI:
 
@@ -65,6 +71,11 @@ The chain then codes, reviews, tests, and ships on capacity your flat-rate dev
 subscription already pays for while you sleep — each run still gated,
 journaled, and revertible in the morning.
 
+The standing rung removes even that keystroke. Leave `moe serve --dynamic`
+running and its heartbeat finds ready work across each project's board, opens
+it, and carries it through the same gates and journal, no `!!!` required.
+Stopping the process is the off switch.
+
 ## You Might Want MoE If
 
 - you run several agent threads and need to resume them without chat-history
@@ -73,6 +84,8 @@ journaled, and revertible in the morning.
   artifacts instead of one long prompt;
 - you want follow-up ideas, project intent, and cross-project lessons to feed
   future runs automatically;
+- you want to steer by intent and monitor by exception — writing direction and
+  reviewing what merges, while most runs open themselves;
 - you want recurring maintenance to surface as ready-to-open runs instead of
   living in your memory — and, once you arm `moe serve --dynamic`, to open and
   ride itself;
@@ -142,7 +155,7 @@ full treatment.
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | operator-authored standing direction agents read but never originate |
 | [`twin`](docs/workflows.md#twin) | `vision` -> ... -> `glossary` -> `finalize` | recorded project intent |
-| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only sweep that fires on run traffic, feeds the backlog, and grooms queued work into lanes |
+| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey, fired by the armed serve's heartbeat or by hand, that feeds the backlog, grooms queued work into lanes, and under `--dynamic` starts what's ready |
 | [`chain`](docs/workflows.md#chains) | one `chain` purpose note, no stages | a placeholder head: the batch chained behind it rides as one on `moe chain kick` |
 
 Three bureaucracy-side artifacts have no workflow of their own — project
