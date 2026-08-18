@@ -97,6 +97,12 @@ func TestEditChatOpensDocumentSession(t *testing.T) {
 			if got.opts.Headless {
 				t.Error("edit --chat is interactive-only; nothing cascades into a capture run")
 			}
+			// The capture workflows' close deliberately skips harvest, so
+			// without this every followup and lore entry the session files
+			// is committed to the journal and stranded there.
+			if !got.opts.HarvestOnExit {
+				t.Error("a capture run's session end is its only harvest point")
+			}
 			if got.opts.Agent != "" {
 				t.Errorf("Agent=%q without --agent, want the ladder's empty default", got.opts.Agent)
 			}

@@ -74,6 +74,12 @@ func init() {
 		Run:     runLog(dash.IntentWorkflow, dash.IntentDocID),
 		argKind: argIntent,
 	})
+	// Manual recovery for captures a session couldn't fan out — a run
+	// that stranded entries before HarvestOnExit existed, or a
+	// session-end harvest that failed partway. Intent close never
+	// harvests (capture close), so without this verb there is no
+	// operator-driven path at all.
+	g.Register(harvestCommand(dash.IntentWorkflow))
 	RegisterGroup(g)
 
 	// Register the intent workflow so run.Load, dash lookup, and the cat
@@ -285,9 +291,9 @@ const intentChatKickoff = "The operator just opened this intent to sharpen it. R
 
 // openIntentChat is `moe intent edit --chat` — the same document-only
 // stage session openIdeaChat opens, on the intent document. See that
-// function for why NeedsSandbox and the chain prompt both stay off; the
-// reasoning is identical and the two verbs are deliberately the same
-// surface.
+// function for why NeedsSandbox and the chain prompt stay off and
+// HarvestOnExit goes on; the reasoning is identical and the two verbs
+// are deliberately the same surface.
 //
 // The difference is prose, not plumbing: intents are operator-authored
 // standing direction, so the fragment and the kickoff both cast the
@@ -298,6 +304,7 @@ func openIntentChat(projectID, slug, agentOverride string, stdout, stderr io.Wri
 		stageSessionOpts{
 			InitialPrompt: intentChatKickoff,
 			SkipNextStage: true,
+			HarvestOnExit: true,
 			Agent:         agentOverride,
 		}, stdout, stderr)
 }

@@ -95,6 +95,11 @@ func init() {
 		Run:     runIdeaReopen,
 		argKind: argIdea,
 	})
+	// Manual recovery for captures a session couldn't fan out — same
+	// reasoning as the intent group's registration: idea close is a
+	// capture close and never harvests, so this verb is the only
+	// operator-driven path to what an `edit --chat` session filed.
+	g.Register(harvestCommand(dash.IdeaWorkflow))
 	RegisterGroup(g)
 
 	// Register the idea workflow so run.Load, dash lookup, and
@@ -377,7 +382,7 @@ const ideaChatKickoff = "The operator just opened this idea to refine it. Read t
 // the next `--chat`, which is what gives `moe idea log` a transcript to
 // render.
 //
-// Two knobs beyond the defaults:
+// Three knobs beyond the defaults:
 //
 //   - NeedsSandbox stays false. An idea is a shelf note; refining it
 //     sharpens the operator's framing of a problem, it doesn't verify
@@ -387,6 +392,10 @@ const ideaChatKickoff = "The operator just opened this idea to refine it. Read t
 //     no successor, so the only post-turn prompt available is the close
 //     nudge — wrong for a shelf entry the operator is still deciding
 //     about. Session exit drops them back to the shell.
+//   - HarvestOnExit is always on. The session's prompt invites the agent
+//     to file followups and lore like any other stage, but idea close is
+//     a capture close and skips harvest, so without this the captures
+//     would be committed to the journal and stranded there.
 //
 // Interactive-only: there is no headless parameter and no oneshot.md
 // fragment, because nothing cascades into an idea.
@@ -395,6 +404,7 @@ func openIdeaChat(projectID, slug, agentOverride string, stdout, stderr io.Write
 		stageSessionOpts{
 			InitialPrompt: ideaChatKickoff,
 			SkipNextStage: true,
+			HarvestOnExit: true,
 			Agent:         agentOverride,
 		}, stdout, stderr)
 }

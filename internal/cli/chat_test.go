@@ -350,3 +350,33 @@ func TestOpenChatRefusesUnexpectedStatus(t *testing.T) {
 		t.Fatalf("missing refusal message: %q", errb.String())
 	}
 }
+
+// TestOpenChatHarvestsOnExit pins the third conversational surface onto
+// the same rule as the two capture verbs. chat *does* harvest at close,
+// but the run is perpetual by design — close is an archive that may be
+// weeks away or never — so a thread's captures would otherwise sit
+// unchecked for its whole life. The close-time pass stays as an
+// idempotent backstop.
+func TestOpenChatHarvestsOnExit(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var got stageSessionOpts
+	prev := runStageSession
+	runStageSession = func(_, _, _ string, opts stageSessionOpts, _, _ io.Writer) int {
+		got = opts
+		return 0
+	}
+	t.Cleanup(func() { runStageSession = prev })
+
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if !got.HarvestOnExit {
+		t.Error("a perpetual run's session end is the only harvest point it reliably reaches")
+	}
+}

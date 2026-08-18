@@ -215,6 +215,24 @@ type stageSessionOpts struct {
 	// seeds once on first open only; CanvasOnOpen fires every open, which
 	// is what the per-resume marker needs.
 	CanvasOnOpen func(workRoot string, md *run.Metadata, agentName string) error
+	// HarvestOnExit runs the followups + lore harvest against the
+	// canonical root once the turn is committed and merged. Set by the
+	// three conversational openers (openIntentChat, openIdeaChat,
+	// openChat) and nothing else: their runs never reach a harvesting
+	// terminal — the capture workflows' close deliberately skips harvest,
+	// and chat is perpetual, so its close may be weeks away or never — so
+	// session end is the only harvest point they have. Every other
+	// workflow already harvests at close or merge and must not double up
+	// here.
+	//
+	// The harvest is silent (skipEdit): the operator was *in* the
+	// conversation that produced the entries, so the review a close-time
+	// editor pop provides has already happened live, and a forced $EDITOR
+	// after every chat exit is friction with no new information (it also
+	// keeps the path uniform for serve-spawned sessions, which can't host
+	// an editor). `moe <workflow> harvest` is the reviewing form for
+	// anyone who wants the pop.
+	HarvestOnExit bool
 }
 
 // stageAgentName resolves the agent backend for a stage turn. It is
@@ -780,6 +798,23 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if knowledgeTouched && !opts.knowledgeFixTurn {
 		if code := enforceKnowledgeHygiene(root, md, docID, opts, stdout, stderr); code != 0 {
 			return code
+		}
+	}
+	// Session-end harvest for the conversational surfaces. This slot is
+	// the whole point: runWikiSession has returned, so the turn's commit
+	// is on main, the session worktree is torn down, and the repo lock is
+	// free for the harvest's own journal push to take. Running any
+	// earlier would deadlock on the lock and harvest a scratch file the
+	// agent's turn hadn't committed yet.
+	//
+	// A failure here is reported and exits non-zero, but it cannot
+	// un-commit the turn: the captures stay unchecked on disk and the
+	// next session end — or a manual `moe <workflow> harvest` — retries,
+	// which the `- [x]` skip makes free.
+	if opts.HarvestOnExit {
+		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID, true, stdout, stderr); err != nil {
+			moePrintf(stderr, "harvest: %v\n", err)
+			return 1
 		}
 	}
 	if !opts.knowledgeFixTurn {

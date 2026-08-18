@@ -149,6 +149,11 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 //     Y-default would close-on-Enter — exactly wrong for a run meant to
 //     be reopened. Suppressing it drops the operator back to the shell;
 //     they reopen to continue or `moe chat close` to finish.
+//   - HarvestOnExit is always on. chat *does* harvest at close, but the
+//     run is perpetual by design, so close is an archive that may be
+//     weeks away or never — a thread's captures would sit unchecked for
+//     its whole life. Harvesting per session makes the close-time pass
+//     an idempotent backstop rather than the only chance.
 //
 // chat is interactive-only: there is no headless parameter and no
 // oneshot.md fragment. The cascade dispatcher is still registered (see
@@ -176,6 +181,7 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,
 			SkipNextStage:          true,
+			HarvestOnExit:          true,
 			Agent:                  agentOverride,
 			CanvasOnOpen: func(workRoot string, md *run.Metadata, agentName string) error {
 				return chatCanvasOnOpen(workRoot, md, agentName)
