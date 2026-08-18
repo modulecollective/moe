@@ -140,6 +140,17 @@ func TestReapableOnlyForProvablyDeadMachineSessions(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "claim from another pid namespace — an agent sandbox's",
+			setup: func(t *testing.T, s *Session) {
+				writeClaimOrFail(t, s, Claim{
+					Branch: s.Branch, Machine: true, PidNS: "pid:[1]",
+					Owner:       fmt.Sprintf("%s/%d", hostnameOrSkip(t), exitedPid(t)),
+					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
+				})
+			},
+			want: false,
+		},
+		{
 			name: "unparseable owner",
 			setup: func(t *testing.T, s *Session) {
 				writeClaimOrFail(t, s, Claim{
@@ -228,6 +239,17 @@ func TestDeadIsReapableWithoutTheMachineBit(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "claim from another pid namespace — an agent sandbox's",
+			setup: func(t *testing.T, s *Session) {
+				writeClaimOrFail(t, s, Claim{
+					Branch: s.Branch, PidNS: "pid:[1]",
+					Owner:       fmt.Sprintf("%s/%d", hostnameOrSkip(t), exitedPid(t)),
+					HeartbeatAt: time.Now().Add(-2 * StaleAfter).UTC(),
+				})
+			},
+			want: false,
+		},
+		{
 			name: "never beat at all",
 			setup: func(t *testing.T, s *Session) {
 				writeClaimOrFail(t, s, Claim{
@@ -265,5 +287,27 @@ func writeClaimOrFail(t *testing.T, s *Session, c Claim) {
 	t.Helper()
 	if err := writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), c); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestHoldStampsThePidNamespace: claimDead's namespace guard is only
+// load-bearing if claimants record where their pid number is meaningful.
+func TestHoldStampsThePidNamespace(t *testing.T) {
+	root := newTestRoot(t)
+	s, err := Open(root, "moe", "r1", "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := Hold(s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	c, ok := ReadClaim(root, "moe", "r1", "design")
+	if !ok {
+		t.Fatal("no claim written")
+	}
+	if want := repolock.PidNamespace(); c.PidNS != want {
+		t.Errorf("claim pid_ns = %q, want %q", c.PidNS, want)
 	}
 }

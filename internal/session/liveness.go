@@ -59,7 +59,11 @@ type Claim struct {
 	// Only a true here makes a dead session reapable.
 	Machine bool `json:"machine"`
 	// Owner is "<host>/<pid>", repolock's shape.
-	Owner       string    `json:"owner"`
+	Owner string `json:"owner"`
+	// PidNS is the pid namespace the claimant wrote Owner's pid from.
+	// Empty reads as "the pid probe is authoritative" — see
+	// repolock.SamePidNS.
+	PidNS       string    `json:"pid_ns,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 	HeartbeatAt time.Time `json:"heartbeat_at"`
 }
@@ -98,6 +102,7 @@ func Hold(s *Session, machine bool) (release func(), err error) {
 		Branch:      s.Branch,
 		Machine:     machine,
 		Owner:       repolock.OwnerString(host),
+		PidNS:       repolock.PidNamespace(),
 		StartedAt:   now,
 		HeartbeatAt: now,
 	}
@@ -190,7 +195,7 @@ func Dead(root, projectID, runID, docID string, now time.Time) bool {
 }
 
 // claimDead is the "provably dead" core both predicates share: same
-// host, pid gone *and* heartbeat stale.
+// host, same pid namespace, pid gone *and* heartbeat stale.
 //
 // Both dead signals are required, not either. The pid probe alone
 // misfires on pid reuse; the heartbeat alone misfires on a process
@@ -205,6 +210,14 @@ func claimDead(c Claim, now time.Time) bool {
 	if !ok || owner != host {
 		// Another box's claim, or one we can't parse. We cannot probe its
 		// pid, so we cannot prove it dead.
+		return false
+	}
+	if !repolock.SamePidNS(c.PidNS) {
+		// Same hostname, different pid namespace — an agent sandbox
+		// reading a host claim, or the reverse. The pid number means
+		// nothing here, and reaping demands proof. The claim stays
+		// visible and reapable to a same-namespace reader, which is
+		// where the sweep runs anyway.
 		return false
 	}
 	if repolock.ProcessAlive(pid) {

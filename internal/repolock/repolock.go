@@ -63,7 +63,12 @@ const (
 // Record is the on-disk JSON payload of .moe/lock. Exposed so callers
 // can render it in error messages ("held by …").
 type Record struct {
-	Owner       string    `json:"owner"`
+	Owner string `json:"owner"`
+	// PidNS is the pid namespace the holder wrote from, as
+	// PidNamespace's handle. Empty when it can't be read (non-Linux, no
+	// /proc) or when an older binary wrote the record — both of which
+	// read as "the pid probe is authoritative", see SamePidNS.
+	PidNS       string    `json:"pid_ns,omitempty"`
 	Run         string    `json:"run,omitempty"`
 	Purpose     string    `json:"purpose"`
 	AcquiredAt  time.Time `json:"acquired_at"`
@@ -192,6 +197,7 @@ func Acquire(root string, opts Options) (*Lock, error) {
 		now := opts.Now().UTC()
 		rec := Record{
 			Owner:       OwnerString(localHost),
+			PidNS:       PidNamespace(),
 			Run:         opts.Run,
 			Purpose:     opts.Purpose,
 			AcquiredAt:  now,
@@ -628,7 +634,8 @@ func readRecord(path string) (Record, error) {
 
 // isStale returns true when rec was abandoned and another caller may
 // safely take over. Two cheap signals: heartbeat age past threshold,
-// and — if owner names a pid on this host — the pid no longer existing.
+// and — if owner names a pid on this host, in a pid namespace we can
+// answer for — the pid no longer existing.
 // localHost is the caller's host handle (see hostHandle); passing it in
 // avoids a re-lookup per iteration and keeps the comparison stable
 // across the Acquire loop.
@@ -647,6 +654,13 @@ func isStale(rec Record, now time.Time, localHost string) bool {
 		return false
 	}
 	if host != localHost {
+		return false
+	}
+	if !SamePidNS(rec.PidNS) {
+		// The pid was recorded in a namespace we cannot see into, so
+		// ProcessAlive here answers about an unrelated pid, or none.
+		// Returning false is exactly "heartbeat staleness alone decides":
+		// the age check above has already run.
 		return false
 	}
 	return !ProcessAlive(pid)
@@ -720,6 +734,23 @@ func PidNamespace() string {
 		return ""
 	}
 	return ns
+}
+
+// SamePidNS reports whether a pid probe run here can answer for a pid
+// recorded by a writer in the named namespace. True means the probe's
+// answer is evidence; false means it is about a different namespace's
+// pid numbers and proves nothing in either direction.
+//
+// An empty recorded handle is deliberately true. It means the writer
+// could not read its own namespace, or predates the field — and the
+// pre-namespace rule was "the probe is authoritative", which is what
+// keeps a record written by an older binary behaving as it did. On
+// non-Linux both sides are empty, so nothing changes there at all.
+//
+// Shared by isStale, internal/session's claimDead, and the dash's
+// probeLiveness: three readers of the same wrong evidence, one rule.
+func SamePidNS(recorded string) bool {
+	return recorded == "" || recorded == PidNamespace()
 }
 
 // OwnerString is what we write as Owner in a fresh record: <host>/<pid>.

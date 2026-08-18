@@ -1020,3 +1020,109 @@ func TestProcessAliveExitedPidIsDead(t *testing.T) {
 		t.Errorf("ProcessAlive(%d) = true for a child that has exited", cmd.Process.Pid)
 	}
 }
+
+// TestForeignPidNSFallsBackToTheHeartbeat is the sandbox-takeover bug,
+// pinned. An agent harness's Bash sandbox shares the host's hostname
+// but not its pid namespace, so a `moe` running there sees every host
+// pid as gone — and the same-host fast path handed it a live holder's
+// lock on the spot. With the writer's namespace recorded, a reader in a
+// different one has no evidence and must wait out the heartbeat.
+func TestForeignPidNSFallsBackToTheHeartbeat(t *testing.T) {
+	const localHost = "this-host"
+	// A pid that is almost certainly not alive, so the probe leg would
+	// say "gone" wherever it is allowed to run.
+	deadOwner := fmt.Sprintf("%s/%d", localHost, 999_999)
+	if _, pid, _ := ParseOwner(deadOwner); ProcessAlive(pid) {
+		t.Skip("pid 999999 happens to exist on this host")
+	}
+	now := time.Now().UTC()
+	fresh, stale := now, now.Add(-2*StaleThreshold)
+
+	for _, tc := range []struct {
+		name  string
+		pidNS string
+		beat  time.Time
+		want  bool
+	}{
+		{
+			name:  "foreign namespace, fresh heartbeat — the bug",
+			pidNS: "pid:[1]", // never this process's own handle
+			beat:  fresh,
+			want:  false,
+		},
+		{
+			name:  "foreign namespace, stale heartbeat — the fallback still fires",
+			pidNS: "pid:[1]",
+			beat:  stale,
+			want:  true,
+		},
+		{
+			name:  "our own namespace — the fast path is preserved",
+			pidNS: PidNamespace(),
+			beat:  fresh,
+			want:  true,
+		},
+		{
+			name:  "no namespace recorded — an older writer stays probe-authoritative",
+			pidNS: "",
+			beat:  fresh,
+			want:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := Record{
+				Owner:       deadOwner,
+				PidNS:       tc.pidNS,
+				Purpose:     "held",
+				AcquiredAt:  now.Add(-time.Minute),
+				HeartbeatAt: tc.beat,
+			}
+			if got := isStale(rec, now, localHost); got != tc.want {
+				t.Errorf("isStale = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAcquireStampsThePidNamespace: the guard above is only worth
+// anything if writers actually record the field — and keep recording it
+// through the heartbeat rewrite, which replaces the whole record.
+func TestAcquireStampsThePidNamespace(t *testing.T) {
+	root := t.TempDir()
+	l, err := Acquire(root, silentOpts("stamp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+
+	want := PidNamespace()
+	rec, err := readRecord(l.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.PidNS != want {
+		t.Errorf("fresh record pid_ns = %q, want %q", rec.PidNS, want)
+	}
+	if !l.beat() {
+		t.Fatal("beat() reported the lock lost")
+	}
+	rec, err = readRecord(l.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.PidNS != want {
+		t.Errorf("post-heartbeat pid_ns = %q, want %q", rec.PidNS, want)
+	}
+}
+
+func TestSamePidNS(t *testing.T) {
+	if !SamePidNS("") {
+		t.Error(`SamePidNS("") = false; an unrecorded namespace must leave the probe authoritative`)
+	}
+	if !SamePidNS(PidNamespace()) {
+		t.Error("SamePidNS(own) = false; our own namespace is answerable")
+	}
+	if SamePidNS("pid:[1]") {
+		t.Error(`SamePidNS("pid:[1]") = true; a foreign handle is unanswerable`)
+	}
+}

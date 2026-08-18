@@ -91,7 +91,7 @@ func readServeState(root string, now time.Time) serveState {
 // that can't establish its own namespace can prove nothing either, so
 // it says unknown too.
 func probeLiveness(snap serve.ActivitySnapshot) serveLiveness {
-	if snap.PidNS != "" && snap.PidNS != repolock.PidNamespace() {
+	if !repolock.SamePidNS(snap.PidNS) {
 		return serveUnknown
 	}
 	if repolock.ProcessAlive(snap.Pid) {
