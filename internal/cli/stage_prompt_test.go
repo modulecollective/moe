@@ -417,7 +417,12 @@ func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	if strings.Contains(writable, "exposed read-only") {
 		t.Errorf("writable prompt leaked the read-only wording:\n%s", writable)
 	}
-	for name, got := range map[string]string{"read-only": readOnly, "writable": writable} {
+	documentOnly := operationalCore(root, md, "architecture", "", true)
+	for name, got := range map[string]string{
+		"document-only": documentOnly,
+		"read-only":     readOnly,
+		"writable":      writable,
+	} {
 		for _, want := range []string{
 			"The harness commits run artifacts after the turn",
 			"never run `git add` or `git commit` in the bureaucracy worktree",
@@ -429,8 +434,8 @@ func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	}
 
 	// Document-only stages have no clone, so neither paragraph renders.
-	if got := operationalCore(root, md, "architecture", "", true); strings.Contains(got, "exposed read-only") {
-		t.Errorf("no clone means no sandbox paragraph:\n%s", got)
+	if strings.Contains(documentOnly, "exposed read-only") {
+		t.Errorf("no clone means no sandbox paragraph:\n%s", documentOnly)
 	}
 }
 

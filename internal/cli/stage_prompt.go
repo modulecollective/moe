@@ -434,11 +434,9 @@ canvases, digital-twin docs, and other bureaucracy paths are
 read-only context; do not edit those paths.
 `, clonePath)
 	}
-	if clonePath != "" {
-		out += `
+	out += `
 The harness commits run artifacts after the turn; never run ` + "`git add` or `git commit`" + ` in the bureaucracy worktree.
 `
-	}
 
 	// Names the project dirs that ride the turn commit. Without it the
 	// read-only-context sentence above reads as covering the whole
