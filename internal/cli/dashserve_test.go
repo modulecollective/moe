@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -271,6 +272,66 @@ func TestDashBannerDropsAnExpiredSnooze(t *testing.T) {
 	}
 
 	if got, want := serveCluster(t, root, now), "serve armed · up 4m · next 12m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// TestDashWontCallAServeDeadItCannotSee is the incident this three-valued
+// liveness exists for: an agent read the dash from a Bash sandbox, whose
+// pid namespace does not contain the host serve's pid, and relayed
+// "serve dead (pid 23970)" to an operator whose own terminal was showing
+// "serve armed". The probe is unanswerable across the boundary, so the
+// banner says so — and the rows stay, because they are the only view of
+// serve that reader has.
+func TestDashWontCallAServeDeadItCannotSee(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		// A namespace that is certainly not ours, and a pid that is
+		// certainly gone from ours — exactly what the sandbox sees.
+		Pid: deadPid(t), PidNS: "pid:[1]", Armed: true,
+		Started: now.Add(-2 * time.Hour), WrittenAt: now.Add(-3 * time.Minute),
+		NextTick: now.Add(14 * time.Minute),
+		Projects: []serve.ActivityProject{
+			{Project: "sweeper", Decision: "the journal moved", Sweep: true,
+				SweepStarted: now.Add(-time.Minute)},
+		},
+	})
+
+	got := serveCluster(t, root, now)
+	if want := "serve unknown (sandbox) · written 3m ago"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	// Neither claim is the reader's to make from here.
+	for _, forbidden := range []string{"armed", "dead"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("banner tail = %q, want no %q claim from a reader that can't see the pid", got, forbidden)
+		}
+	}
+	if lines := serveLines(t, root, now); !strings.Contains(lines, "sweeper  sweeping") {
+		t.Errorf("serve lines = %q, want the sweep rows an unknown serve still earns", lines)
+	}
+}
+
+// TestDashStillCallsADeadServeDeadInItsOwnNamespace: the guard is a
+// namespace comparison, not a blanket retreat from the probe. A reader
+// looking at a serve that wrote from the same namespace it is reading
+// in has real evidence, and a crashed serve must still read as crashed.
+func TestDashStillCallsADeadServeDeadInItsOwnNamespace(t *testing.T) {
+	self := repolock.PidNamespace()
+	if self == "" {
+		t.Skip("no pid namespace handle on this platform")
+	}
+	root := t.TempDir()
+	now := time.Now()
+	pid := deadPid(t)
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: pid, PidNS: self, Armed: true,
+		Started: now.Add(-time.Hour), WrittenAt: now.Add(-3 * time.Hour),
+	})
+
+	got := serveCluster(t, root, now)
+	if want := fmt.Sprintf("serve dead (pid %d) · stale 3h 0m", pid); got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 }

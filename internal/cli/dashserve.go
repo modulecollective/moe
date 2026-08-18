@@ -27,6 +27,17 @@ import (
 // its last sweep died. --watch gets freshness for free — the 3s repaint
 // re-reads one small file.
 
+// serveLiveness is what this reader can honestly say about the process
+// behind a state file. Three-valued because the pid probe is not always
+// answerable — see probeLiveness.
+type serveLiveness int
+
+const (
+	serveAlive serveLiveness = iota
+	serveDead
+	serveUnknown
+)
+
 // serveState is one read of serve's state file, held so the frame can
 // spend it twice: once on the banner's tail, once on the rows below.
 //
@@ -37,9 +48,10 @@ type serveState struct {
 	snap serve.ActivitySnapshot
 	ok   bool // a serve has written a state file here
 	err  error
-	// alive is the pid probe, taken once: the banner and the rows below
-	// it must not disagree about whether the process is still there.
-	alive bool
+	// live is the pid probe's verdict, taken once: the banner and the
+	// rows below it must not disagree about whether the process is
+	// still there.
+	live serveLiveness
 	// snoozed is the operator's hold on the heartbeat, read straight off
 	// its own file rather than out of the snapshot. Serve only rewrites
 	// serve.json on its own events, so waiting for the snooze to appear
@@ -52,13 +64,40 @@ type serveState struct {
 // readServeState reads the snapshot for one dash frame.
 func readServeState(root string, now time.Time) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
-	st := serveState{snap: snap, ok: ok, err: err, alive: ok && repolock.ProcessAlive(snap.Pid)}
+	st := serveState{snap: snap, ok: ok, err: err, live: serveDead}
+	if ok {
+		st.live = probeLiveness(snap)
+	}
 	// Warn-only, like the snapshot read above it: a broken snooze file
 	// costs the banner its snooze word, not the frame.
 	if until, snoozed, _ := serve.ReadSnooze(root, now); snoozed {
 		st.snoozed = serve.SnoozeClock(until)
 	}
 	return st
+}
+
+// probeLiveness decides what the pid probe is worth here.
+//
+// ProcessAlive only sees pids in the caller's own pid namespace, and an
+// agent harness's Bash sandbox gets its own — so a serve running fine
+// on the host reads as gone from inside one, and the dash used to
+// render "serve dead" over a serve the operator's terminal showed as
+// armed. Serve records the namespace it wrote from; when it isn't ours,
+// the probe is unanswerable and the honest answer is unknown.
+//
+// Dead means provably dead. An empty PidNS — a serve older than the
+// field, or a writer where the handle can't be read — leaves the probe
+// authoritative, which is what keeps this back-compatible. A reader
+// that can't establish its own namespace can prove nothing either, so
+// it says unknown too.
+func probeLiveness(snap serve.ActivitySnapshot) serveLiveness {
+	if snap.PidNS != "" && snap.PidNS != repolock.PidNamespace() {
+		return serveUnknown
+	}
+	if repolock.ProcessAlive(snap.Pid) {
+		return serveAlive
+	}
+	return serveDead
 }
 
 // bannerCluster is the serve status the banner carries in its tail:
@@ -72,13 +111,23 @@ func readServeState(root string, now time.Time) serveState {
 // The stamp's age is roughly when. It rides the same slot as every other
 // state — placement that moved by state would cost the reader more than
 // the alarm buys.
+//
+// The unknown line names the reader's position rather than the serve's
+// state, because the reader's position is the whole limitation, and it
+// carries neither "armed" nor "dead": agents pattern-match this
+// headline and relay it, which is how a sandboxed one came to tell its
+// operator their serve was down. The write stamp rides along as the one
+// signal that survives the namespace boundary intact.
 func (s serveState) bannerCluster(now time.Time) string {
 	if !s.ok {
 		return ""
 	}
-	if !s.alive {
+	switch s.live {
+	case serveDead:
 		return fmt.Sprintf("serve dead (pid %d) · stale %s",
 			s.snap.Pid, dash.HumanDuration(now.Sub(s.snap.WrittenAt)))
+	case serveUnknown:
+		return "serve unknown (sandbox) · written " + dash.HumanAgo(now, s.snap.WrittenAt)
 	}
 	var next string
 	if !s.snap.NextTick.IsZero() {
@@ -113,9 +162,12 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 		cliout.Printf(w, "%v\n", s.err)
 		return
 	}
-	if !s.alive {
+	if s.live == serveDead {
 		// A dead serve's project records are as stale as its stamp; the
-		// banner's "dead" is the whole message.
+		// banner's "dead" is the whole message. Only provable death
+		// buys this silence — under unknown the rows are the sandboxed
+		// reader's only view of what serve is sweeping, and the
+		// headline already flags what it can't vouch for.
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
