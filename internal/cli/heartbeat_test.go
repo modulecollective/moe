@@ -479,6 +479,128 @@ func TestHeartbeatReapReArmsADeclinedBoard(t *testing.T) {
 	}
 }
 
+// seedPulseRun stamps a pulse run and the journal commit that stands
+// for its activity: run.json on disk for the scan, plus a project-scoped
+// commit carrying the MoE-Project / MoE-Run trailers the journal index
+// keys LastActivity by. ago pushes that commit back into the past, which
+// is how a test says "this pulse ran, and then things happened".
+//
+// Returns nothing — every caller wants the board, not the run.
+func seedPulseRun(t *testing.T, root, projectID, id, status string, ago time.Duration) {
+	t.Helper()
+	seedRun(t, root, projectID, id, pulseWorkflow, status, time.Now().Local(), nil)
+	journalCommit(t, root, projectID, "pulse: "+id,
+		"MoE-Consent: dynamic\nMoE-Project: "+projectID+"\nMoE-Run: "+id)
+	if ago > 0 {
+		backdateHead(t, root, ago)
+	}
+}
+
+// TestHeartbeatSweepsWorkThatLandedWhileServeWasDown is the bug. The
+// moved leg is edge-triggered on an in-memory cursor, and seeding that
+// cursor lazily makes whatever landed last the permanent baseline — so
+// on a board with nothing parked, a restart on top of a merge had no leg
+// left to fire and went quiet forever, not for one tick. moe is the
+// project that lives this: reinstalling the binary restarts serve right
+// on top of the merge that just landed.
+func TestHeartbeatSweepsWorkThatLandedWhileServeWasDown(t *testing.T) {
+	root := quietFixture(t)
+	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+
+	decisions := dueDecisions(t, newHeartbeatGate(root), 0)
+	if got := sweepIDs(decisions); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v on a restart with a merge the last sweep never saw, want [moe]", got)
+	}
+	if got, want := reasonFor(decisions, "moe"), "work landed since the last sweep"; got != want {
+		t.Errorf("reason = %q, want %q", got, want)
+	}
+}
+
+// TestHeartbeatIsQuietOnARestartOverASweptBoard pins the convergence the
+// leg rests on. The pulse run's close commit *is* the project tip, and
+// both sides of the comparison read that same commit's committer time —
+// so they compare equal and a restart on a cleanly-swept board sweeps
+// nothing. Without the equality this leg would fire on every restart,
+// forever, which is a worse bug than the one it fixes.
+func TestHeartbeatIsQuietOnARestartOverASweptBoard(t *testing.T) {
+	root := quietFixture(t)
+	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 0 /*at the tip*/)
+
+	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 0 {
+		t.Errorf("due = %v on a restart over a board the last sweep closed clean, want none", got)
+	}
+}
+
+// TestHeartbeatIsQuietForAProjectThatWasNeverSwept is the storm guard.
+// A project with no pulse history has a zero bound, which would make the
+// comparison trivially true and sweep every never-surveyed project at
+// once on every restart — most of the register, today. "Never swept" is
+// not the claim "has unswept work", so the leg abstains and the project
+// stays reachable through the moved and parked legs exactly as before.
+func TestHeartbeatIsQuietForAProjectThatWasNeverSwept(t *testing.T) {
+	root := quietFixture(t)
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+
+	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 0 {
+		t.Errorf("due = %v for a project no sweep has ever run against, want none", got)
+	}
+}
+
+// TestHeartbeatDeltaDoesNotRetriggerAFailedSweep: a sweep that died
+// leaves its run open with its own last commit at the project tip, which
+// is also that run's newest activity — equal, so the delta leg abstains
+// rather than reading its own wreckage as unswept work and looping on it
+// every tick. Pacing the retry stays the failure backoff's job, through
+// the parked leg, which is what it was written for.
+func TestHeartbeatDeltaDoesNotRetriggerAFailedSweep(t *testing.T) {
+	root := quietFixture(t)
+	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+
+	g := newHeartbeatGate(root)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v on the restart tick, want [moe] — the merge is unswept", got)
+	}
+
+	// The sweep opens its run, gets partway, and dies.
+	seedPulseRun(t, root, "moe", "pulse-2", run.StatusInProgress, 0 /*at the tip*/)
+	g.Swept("moe", false /*died*/)
+
+	for tick := range 3 {
+		if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+			t.Fatalf("due = %v on tick %d after a sweep died, want none from this leg", got, tick+1)
+		}
+	}
+}
+
+// TestHeartbeatSurveyedShortCircuitsTheDelta is the ordering pin. While
+// serve is alive the surveyed cursor is the authoritative answer — a
+// clean sweep looked at this exact tip — and the delta leg exists only
+// for the case where that in-memory answer is missing. Reaching it on a
+// live serve would re-sweep a board the machine just finished with,
+// because the sweep's own close commit lands after the pulse activity it
+// is compared against on the *next* tick's read.
+func TestHeartbeatSurveyedShortCircuitsTheDelta(t *testing.T) {
+	root := quietFixture(t)
+	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+
+	g := newHeartbeatGate(root)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v on the restart tick, want [moe] — the merge is unswept", got)
+	}
+	g.Swept("moe", true /*clean*/)
+
+	decisions := dueDecisions(t, g, 0)
+	if got := sweepIDs(decisions); len(got) != 0 {
+		t.Fatalf("due = %v after a clean sweep of the delta, want none", got)
+	}
+	if got, want := reasonFor(decisions, "moe"), "a sweep already surveyed the current tip"; got != want {
+		t.Errorf("reason = %q, want %q — the surveyed cursor answers before the delta leg", got, want)
+	}
+}
+
 // TestHeartbeatHoldsForOneQuietTick is the staging race, closed. The
 // operator's last act on this project is minutes old, so the machine
 // waits a full tick rather than picking work up from under their hands.

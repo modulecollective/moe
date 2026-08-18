@@ -225,6 +225,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 	g.mu.Unlock()
 
 	moved := known && seen != tip
+	unswept := false
 	parked := ""
 	if !moved {
 		// A clean sweep already surveyed this exact board. Whatever is
@@ -236,9 +237,40 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 		if surveyed {
 			return false, false, "a sweep already surveyed the current tip"
 		}
-		parked = parkedKickableThread(g.root, sc, projectID)
-		if parked == "" {
-			return false, false, "the journal hasn't moved and nothing settled is parked"
+		// Work landed that no survey has seen. The moved leg is
+		// edge-triggered on an in-memory cursor a restart doesn't have, and
+		// seeding that cursor to the current tip makes the landing its own
+		// permanent baseline — so on a board with nothing parked, a restart
+		// on top of a merge reads quiet forever, not for one tick. The
+		// durable answer is in the journal both sides already live in: the
+		// project tip against the newest activity on the last pulse run.
+		//
+		// It converges because both sides are committer times on journal
+		// commits at second resolution. A cleanly-swept board compares
+		// equal — the pulse's close commit *is* the project tip — and After
+		// is strict, so a restart on a swept board stays quiet. A sweep
+		// that died leaves its open run's last commit at the tip, equal
+		// again, so this leg does not self-retrigger a failure; pacing the
+		// retries stays the backoff's job through the parked leg.
+		//
+		// Ahead of the parked probe because it is map lookups over the
+		// tick's shared scan where that one forks git per thread root, and
+		// when it fires the parked answer is moot — the sweep grooms and
+		// kicks regardless.
+		//
+		// A project with no pulse history at all abstains. "Never swept" is
+		// not the claim "has unswept work", and firing on it would sweep
+		// every never-surveyed project at once on every restart — the storm
+		// the lazy seed above exists to prevent. Those projects stay
+		// reachable through the moved and parked legs exactly as before.
+		if last := lastPulseAt(sc, projectID, ""); !last.IsZero() && tipAt.After(last) {
+			unswept = true
+		}
+		if !unswept {
+			parked = parkedKickableThread(g.root, sc, projectID)
+			if parked == "" {
+				return false, false, "the journal hasn't moved and nothing settled is parked"
+			}
 		}
 	}
 
@@ -282,6 +314,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 
 	if moved {
 		return true, false, "the journal moved"
+	}
+	if unswept {
+		return true, false, "work landed since the last sweep"
 	}
 	if md := sc.byKey[parked]; md != nil && md.Workflow == dash.IdeaWorkflow {
 		// Display only, like every reason here — but this is the operator's
