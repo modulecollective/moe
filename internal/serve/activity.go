@@ -160,15 +160,12 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 }
 
 // recordSkip overrides a project's verdict with the ticker's own — the
-// cool-off or the operator's snooze, neither of which the gate knows
-// anything about. Without it a project the gate wanted swept and the
-// ticker held would render as sweeping.
+// cool-off, which the gate knows nothing about. Without it a project the
+// gate wanted swept and the ticker held would render as sweeping.
 //
-// held is what separates the ticker's two holds. A cool-off earns its
-// own row through coolTicks, so setting held there would double-claim
-// it; a snooze sets no counters at all, and without the bit its row
-// would collapse into the quiet tally — which is the one thing a project
-// the operator is deliberately holding back is not.
+// held marks a hold that deserves its own row rather than collapsing
+// into the quiet tally. The cool-off passes false: it earns its row
+// through coolTicks, and setting held too would double-claim it.
 func (a *activity) recordSkip(projectID, reason string, held bool, fails, coolTicks int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
