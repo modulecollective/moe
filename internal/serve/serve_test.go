@@ -1972,19 +1972,19 @@ func TestMakeNotifierPostsJSON(t *testing.T) {
 // newTestServer builds an in-process server for tests. It forces
 // Dynamic mode: most route and chip tests exercise the spawn surface
 // (new run, promote, advance/ship/chain, stage spawn, chore open),
-// which the production-default safe mode refuses with 403. Safe-mode
+// which the production-default unarmed serve refuses with 403. Unarmed
 // behavior — the point of the --dynamic split — is asserted explicitly
-// by the tests that use newSafeTestServer.
+// by the tests that use newUnarmedTestServer.
 func newTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
 	opts.Dynamic = true
 	return newServerWithDefaults(t, opts)
 }
 
-// newSafeTestServer builds an in-process server in the production-default
-// safe mode (Dynamic stays false). The spawn-route 403s and the
-// hidden-affordance assertions use it.
-func newSafeTestServer(t *testing.T, opts Options) *Server {
+// newUnarmedTestServer builds an in-process server in the
+// production-default unarmed state (Dynamic stays false). The
+// spawn-route 403s and the hidden-affordance assertions use it.
+func newUnarmedTestServer(t *testing.T, opts Options) *Server {
 	t.Helper()
 	return newServerWithDefaults(t, opts)
 }
@@ -2350,19 +2350,19 @@ func TestIdeaPageRendersTagChips(t *testing.T) {
 	}
 }
 
-// TestIdeaTagChipsRenderInSafeMode: tagging performs no motion — it
+// TestIdeaTagChipsRenderUnarmed: tagging performs no motion — it
 // parks a license the pulse acts on under its own consent — so the
 // chips follow promote/edit/close rather than the dynamic-gated spawn
 // trio.
-func TestIdeaTagChipsRenderInSafeMode(t *testing.T) {
+func TestIdeaTagChipsRenderUnarmed(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
 	if !strings.Contains(rr.Body.String(), `action="/run/alpha/my-idea/tag?workflow=sdlc"`) {
-		t.Errorf("safe mode should still offer the tag chip\n%s", rr.Body.String())
+		t.Errorf("an unarmed serve should still offer the tag chip\n%s", rr.Body.String())
 	}
 }
 

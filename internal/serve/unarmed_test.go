@@ -13,15 +13,16 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// TestSafeModeRefusesSpawnRoutes: in the production-default safe mode
-// every spawn-bucket POST refuses with 403 and never spawns a child.
-// The guard fires before any load, so the routes refuse even for runs
-// that don't exist — exactly the point: no reachable path to code exec.
+// TestUnarmedServeRefusesSpawnRoutes: on the production-default unarmed
+// serve every spawn-bucket POST refuses with 403 and never spawns a
+// child. The guard fires before any load, so the routes refuse even for
+// runs that don't exist — exactly the point: no reachable path to code
+// exec.
 //
 // /run/new and /promote are dual-submit: the bare submit parks (no
-// spawn, allowed in safe mode) and only `spawn=1` reaches the gate, so
+// spawn, allowed unarmed) and only `spawn=1` reaches the gate, so
 // those two carry the form body that asks for the agent.
-func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
+func TestUnarmedServeRefusesSpawnRoutes(t *testing.T) {
 	for path, body := range map[string]string{
 		"/run/new":             "spawn=1",
 		"/run/alpha/x/promote": "spawn=1",
@@ -32,7 +33,7 @@ func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 		"/chore/alpha/x/open":  "",
 	} {
 		t.Run(path, func(t *testing.T) {
-			s := newSafeTestServer(t, Options{
+			s := newUnarmedTestServer(t, Options{
 				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo",
 			})
 			req := httptest.NewRequest("POST", path, strings.NewReader(body))
@@ -46,20 +47,20 @@ func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 				t.Errorf("403 body should name the unarmed state, got:\n%s", rr.Body.String())
 			}
 			if len(s.children.all) != 0 {
-				t.Errorf("safe-mode refusal must not spawn; registry has %d", len(s.children.all))
+				t.Errorf("unarmed refusal must not spawn; registry has %d", len(s.children.all))
 			}
 		})
 	}
 }
 
-// TestSafeModeAllowsIdeaCapture: the journal-write surface the operator
-// actually uses stays open in safe mode — POST /idea/new opens a run and
-// redirects, no flag required.
-func TestSafeModeAllowsIdeaCapture(t *testing.T) {
+// TestUnarmedServeAllowsIdeaCapture: the journal-write surface the
+// operator actually uses stays open on an unarmed serve — POST
+// /idea/new opens a run and redirects, no flag required.
+func TestUnarmedServeAllowsIdeaCapture(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedProject(t, root, "alpha")
 	gittest.Commit(t, root, "seed project")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	form := "id=alpha/new-idea&body=capture+this"
 	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
@@ -78,13 +79,13 @@ func TestSafeModeAllowsIdeaCapture(t *testing.T) {
 	}
 }
 
-// TestSafeModeAllowsIdeaClose: closing a run is journal-only (no agent),
-// so it works in safe mode too.
-func TestSafeModeAllowsIdeaClose(t *testing.T) {
+// TestUnarmedServeAllowsIdeaClose: closing a run is journal-only (no
+// agent), so it works on an unarmed serve too.
+func TestUnarmedServeAllowsIdeaClose(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	gittest.Commit(t, root, "seed idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	req := httptest.NewRequest("POST", "/run/alpha/my-idea/close", strings.NewReader(""))
 	rr := httptest.NewRecorder()
@@ -101,13 +102,13 @@ func TestSafeModeAllowsIdeaClose(t *testing.T) {
 	}
 }
 
-// TestSafeModeDashKeepsNewLinks: both dash "new" links survive safe
-// mode. Capturing an idea was always journal-only; opening a run is
-// too now that the new-run form's bare submit parks. The spawning
-// submit on the form itself is what safe mode hides.
-func TestSafeModeDashKeepsNewLinks(t *testing.T) {
+// TestUnarmedServeDashKeepsNewLinks: both dash "new" links survive an
+// unarmed serve. Capturing an idea was always journal-only; opening a
+// run is too now that the new-run form's bare submit parks. The
+// spawning submit on the form itself is what being unarmed hides.
+func TestUnarmedServeDashKeepsNewLinks(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
@@ -117,19 +118,19 @@ func TestSafeModeDashKeepsNewLinks(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{`href="/run/new"`, `href="/idea/new"`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("safe-mode dash should render %q\n%s", want, body)
+			t.Errorf("unarmed dash should render %q\n%s", want, body)
 		}
 	}
 }
 
-// TestSafeModeIdeaPageShowsPromote: an in-progress idea keeps all three
+// TestUnarmedServeIdeaPageShowsPromote: an in-progress idea keeps all three
 // journal-only chips. Promote parks the destination run by default, so
 // it's the same class as edit and close; only the promote page's
 // "promote & run" submit is gated.
-func TestSafeModeIdeaPageShowsPromote(t *testing.T) {
+func TestUnarmedServeIdeaPageShowsPromote(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
@@ -143,19 +144,19 @@ func TestSafeModeIdeaPageShowsPromote(t *testing.T) {
 		`action="/run/alpha/my-idea/close"`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("safe-mode idea page missing %q\n%s", want, body)
+			t.Errorf("unarmed idea page missing %q\n%s", want, body)
 		}
 	}
 }
 
-// TestSafeModeFormsHideSpawnButton: the promote and new-run forms each
-// render their parking submit in safe mode and drop the spawning one —
-// safe mode never offers a button the POST handler would refuse.
-func TestSafeModeFormsHideSpawnButton(t *testing.T) {
+// TestUnarmedServeFormsHideSpawnButton: the promote and new-run forms each
+// render their parking submit unarmed and drop the spawning one — an
+// unarmed serve never offers a button the POST handler would refuse.
+func TestUnarmedServeFormsHideSpawnButton(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	gittest.Commit(t, root, "seed idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	for _, tc := range []struct{ path, park string }{
 		{"/run/alpha/my-idea/promote", ">promote<"},
@@ -171,19 +172,19 @@ func TestSafeModeFormsHideSpawnButton(t *testing.T) {
 			t.Errorf("GET %s: missing the parking submit %q\n%s", tc.path, tc.park, body)
 		}
 		if strings.Contains(body, `name="spawn"`) {
-			t.Errorf("GET %s: safe mode must not render the spawning submit\n%s", tc.path, body)
+			t.Errorf("GET %s: an unarmed serve must not render the spawning submit\n%s", tc.path, body)
 		}
 	}
 }
 
-// TestSafeModeSDLCPageHidesSpawnChips: an in-progress sdlc run drops the
+// TestUnarmedServeSDLCPageHidesSpawnChips: an in-progress sdlc run drops the
 // advance/ship/chain trio (all spawn) but keeps the close chip (journal-
 // only via the CloseRun callback).
-func TestSafeModeSDLCPageHidesSpawnChips(t *testing.T) {
+func TestUnarmedServeSDLCPageHidesSpawnChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	now := time.Now().UTC()
-	s := newSafeTestServer(t, Options{
+	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 			return dash.Row{Project: p, Run: slug, Note: "sdlc:code", Stage: "code",
@@ -203,18 +204,19 @@ func TestSafeModeSDLCPageHidesSpawnChips(t *testing.T) {
 		`/run/alpha/fix-it/chain`,
 	} {
 		if strings.Contains(body, banned) {
-			t.Errorf("safe-mode sdlc page must not render %q\n%s", banned, body)
+			t.Errorf("unarmed sdlc page must not render %q\n%s", banned, body)
 		}
 	}
 	if !strings.Contains(body, `/run/alpha/fix-it/close`) {
-		t.Errorf("safe-mode sdlc page should still show the close chip\n%s", body)
+		t.Errorf("unarmed sdlc page should still show the close chip\n%s", body)
 	}
 }
 
-// TestSafeModeChorePageHidesOpen: a due chore renders no open affordance
-// in safe mode — open spawns an agent. The schedule detail still shows.
-func TestSafeModeChorePageHidesOpen(t *testing.T) {
-	s := newSafeTestServer(t, Options{
+// TestUnarmedServeChorePageHidesOpen: a due chore renders no open
+// affordance on an unarmed serve — open spawns an agent. The schedule
+// detail still shows.
+func TestUnarmedServeChorePageHidesOpen(t *testing.T) {
+	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: t.TempDir(),
 		GatherChore: func(project, name string) (chore.State, bool, error) {
 			return dueChoreState(), true, nil
@@ -228,23 +230,23 @@ func TestSafeModeChorePageHidesOpen(t *testing.T) {
 	}
 	body := rr.Body.String()
 	if strings.Contains(body, `action="/chore/alpha/readme-refresh/open"`) {
-		t.Errorf("safe-mode chore page must not render the open form\n%s", body)
+		t.Errorf("unarmed chore page must not render the open form\n%s", body)
 	}
 	if !strings.Contains(body, "schedule") {
-		t.Errorf("safe-mode chore page should still render the schedule detail\n%s", body)
+		t.Errorf("unarmed chore page should still render the schedule detail\n%s", body)
 	}
 }
 
-// TestSafeModePromoteParks: the bare promote submit is journal-only —
+// TestUnarmedServePromoteParks: the bare promote submit is journal-only —
 // it opens the destination run queued at its first stage, marks the
 // idea promoted, and redirects, all without the --dynamic flag. This
 // is the operator's usual move; riding the run is the rarer one.
-func TestSafeModePromoteParks(t *testing.T) {
+func TestUnarmedServePromoteParks(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
 	gittest.Commit(t, root, "seed idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -277,17 +279,17 @@ func TestSafeModePromoteParks(t *testing.T) {
 	}
 }
 
-// TestSafeModePromoteSpawnRefusesBeforePromote pins the handler's
+// TestUnarmedServePromoteSpawnRefusesBeforePromote pins the handler's
 // ordering: the spawn gate fires before runopen.Promote, so a refused
 // "promote & run" click leaves the idea untouched. Gating after the
 // open would half-promote — destination run on disk, idea marked, no
-// agent — from a click safe mode was supposed to refuse outright.
-func TestSafeModePromoteSpawnRefusesBeforePromote(t *testing.T) {
+// agent — from a click an unarmed serve was supposed to refuse outright.
+func TestUnarmedServePromoteSpawnRefusesBeforePromote(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
 	gittest.Commit(t, root, "seed idea")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader("spawn=1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -313,13 +315,13 @@ func TestSafeModePromoteSpawnRefusesBeforePromote(t *testing.T) {
 	}
 }
 
-// TestSafeModeNewRunParks: the new-run form's bare submit opens a run
+// TestUnarmedServeNewRunParks: the new-run form's bare submit opens a run
 // with no agent, the same journal-only write promote's does.
-func TestSafeModeNewRunParks(t *testing.T) {
+func TestUnarmedServeNewRunParks(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedProject(t, root, "alpha")
 	gittest.Commit(t, root, "seed project")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -340,13 +342,13 @@ func TestSafeModeNewRunParks(t *testing.T) {
 	}
 }
 
-// TestSafeModeNewRunSpawnRefusesBeforeOpen: the /run/new mirror of the
+// TestUnarmedServeNewRunSpawnRefusesBeforeOpen: the /run/new mirror of the
 // ordering probe above — a refused "open & run" leaves no run on disk.
-func TestSafeModeNewRunSpawnRefusesBeforeOpen(t *testing.T) {
+func TestUnarmedServeNewRunSpawnRefusesBeforeOpen(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedProject(t, root, "alpha")
 	gittest.Commit(t, root, "seed project")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing&spawn=1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

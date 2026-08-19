@@ -162,12 +162,13 @@ func TestIntentCloseRouteClosesAndRedirects(t *testing.T) {
 	}
 }
 
-// TestSafeModeKeepsIntentEditAndClose: edit and close are journal-only,
-// so they survive safe mode exactly as the idea pair does.
-func TestSafeModeKeepsIntentEditAndClose(t *testing.T) {
+// TestUnarmedServeKeepsIntentEditAndClose: edit and close are
+// journal-only, so they survive an unarmed serve exactly as the idea
+// pair does.
+func TestUnarmedServeKeepsIntentEditAndClose(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "ship-faster", dash.IntentWorkflow)
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	mustContain(t, get(t, s, "/run/alpha/ship-faster"), `>edit intent<`, `>close intent<`)
 }

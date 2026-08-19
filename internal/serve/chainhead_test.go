@@ -26,7 +26,7 @@ func chainHeadServer(t *testing.T, members []dash.Row, chainedUnder string, dyna
 	if dynamic {
 		return newTestServer(t, opts)
 	}
-	return newSafeTestServer(t, opts)
+	return newUnarmedTestServer(t, opts)
 }
 
 func getRunPage(t *testing.T, s *Server, path string) string {
@@ -109,7 +109,7 @@ func TestChainHeadKickChipGating(t *testing.T) {
 		want         bool
 	}{
 		{name: "parked head with a batch", members: twoMembers, dynamic: true, want: true},
-		{name: "safe mode drops it", members: twoMembers, dynamic: false, want: false},
+		{name: "unarmed serve drops it", members: twoMembers, dynamic: false, want: false},
 		// `moe chain kick` would accept both of these; the page offers
 		// neither. Chained under a live parent is the CLI's own "kick the
 		// head" refusal. An empty head is what the dash calls `done ·

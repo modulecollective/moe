@@ -12,7 +12,7 @@ func tracesServer(t *testing.T, traces RunTraces, gatherErr error) *Server {
 	t.Helper()
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "src", "sdlc")
-	return newSafeTestServer(t, Options{
+	return newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
 		GatherRunTraces: func(string, string) (RunTraces, error) {
 			return traces, gatherErr
@@ -109,7 +109,7 @@ func TestRunPageTracesDegradeNotFail(t *testing.T) {
 		"no callback": func() *Server {
 			root := t.TempDir()
 			seedRun(t, root, "alpha", "src", "sdlc")
-			return newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
+			return newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 		}(),
 		"gather errors": tracesServer(t, RunTraces{}, errors.New("followups.md is a directory")),
 	} {

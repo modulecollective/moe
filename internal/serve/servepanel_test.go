@@ -84,7 +84,7 @@ func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
 // exactly the confusion this exists to fix, so an unarmed serve says so
 // in the header rather than going quiet.
 func TestServeClusterRendersUnarmed(t *testing.T) {
-	s := newSafeTestServer(t, Options{
+	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: t.TempDir(),
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
@@ -167,7 +167,7 @@ func TestServePageIsBoardWide(t *testing.T) {
 // not read as the empty state, which means something different: no tick
 // has ever run.
 func TestServePageRendersAnAllQuietBoard(t *testing.T) {
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Dynamic: true})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
 	s.activity.recordTick(time.Now().Add(-4*time.Minute), []HeartbeatDecision{
 		{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
 		{Project: "beta", Reason: "no journal history yet"},
@@ -185,7 +185,7 @@ func TestServePageRendersAnAllQuietBoard(t *testing.T) {
 // TestServePageEmptyState: a serve that has never ticked renders a page
 // that says so rather than a blank one.
 func TestServePageEmptyState(t *testing.T) {
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
 	if body := getBody(t, s, "/serve"); !strings.Contains(body, "nothing yet — no tick has run") {
 		t.Error("/serve should name its empty state")
 	}
@@ -316,7 +316,7 @@ func TestProjectModeNeedsNoSpawnConsent(t *testing.T) {
 	gittest.Commit(t, root, "seed")
 	gittest.Run(t, root, "add", "-A")
 	gittest.Commit(t, root, "seed projects")
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root,
+	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root,
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
 			return nil, 1, 0, nil, nil
 		}})

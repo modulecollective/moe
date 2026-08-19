@@ -17,7 +17,7 @@ import (
 // destination page's own cascade chip.
 //
 // The unit tests around it cover the halves — the bare POST parks
-// (TestSafeModePromoteParks), and the trio renders for a run at a
+// (TestUnarmedServePromoteParks), and the trio renders for a run at a
 // declared stage (TestServeRunPageChipsComposeWithRealLookup, cli-side).
 // Neither joins them, so nothing pinned the design's claim that
 // parking leaves the ride one click away on the page it redirects to.
@@ -80,14 +80,14 @@ func TestPromoteParksThenRunPageRidesIt(t *testing.T) {
 	}
 }
 
-// TestSafeModeParkedPageOffersNoRide is the safe-mode half: parking
+// TestUnarmedServeParkedPageOffersNoRide is the unarmed half: parking
 // still works, but the destination page withholds the trio. The row is
-// wired to a real stage so the absence is attributable to safe mode
-// rather than to a run with no next stage.
-func TestSafeModeParkedPageOffersNoRide(t *testing.T) {
+// wired to a real stage so the absence is attributable to the unarmed
+// serve rather than to a run with no next stage.
+func TestUnarmedServeParkedPageOffersNoRide(t *testing.T) {
 	root := seedBureaucracy(t, "alpha")
 	seedIdeaRun(t, root, "alpha", "my-idea")
-	s := newSafeTestServer(t, Options{
+	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 			return dash.Row{Project: p, Run: slug, Note: "sdlc:design", Stage: "design",
@@ -103,7 +103,7 @@ func TestSafeModeParkedPageOffersNoRide(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("safe-mode park: want 303, got %d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("unarmed park: want 303, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	loc := rr.Header().Get("Location")
 
@@ -115,7 +115,7 @@ func TestSafeModeParkedPageOffersNoRide(t *testing.T) {
 	body := rr2.Body.String()
 	for _, banned := range []string{"/advance", "/ship", "/chain"} {
 		if strings.Contains(body, loc+banned) {
-			t.Errorf("safe-mode destination page must not render %q\n%s", banned, body)
+			t.Errorf("unarmed destination page must not render %q\n%s", banned, body)
 		}
 	}
 }

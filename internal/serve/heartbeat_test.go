@@ -302,7 +302,7 @@ func TestHeartbeatChildIdCannotCollideWithARun(t *testing.T) {
 func TestUnarmedServeNeverTicks(t *testing.T) {
 	bin, argv := argvRecorder(t, 0)
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
-	s := newSafeTestServer(t, Options{
+	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
 	})
 
