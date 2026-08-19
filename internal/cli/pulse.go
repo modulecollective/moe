@@ -1235,6 +1235,12 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	if ride := rideModeContextLine(); ride != "" {
 		blocks = append(blocks, ride)
 	}
+	// Beside it rather than folded into it: the ride line says what this
+	// invocation licensed, and this says what the project's standing mode
+	// does with that licence.
+	if mode := projectModeContextLine(sc.root, projectID); mode != "" {
+		blocks = append(blocks, mode)
+	}
 	// The chain edge set as the agent saw it. The sweep's ordering
 	// opinion is formed against exactly this picture, so it is what the
 	// apply step checks itself against before restructuring anything.
@@ -1391,12 +1397,17 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dynamic := fs.Bool("dynamic", false, "start the parked threads on the board when the sweep finishes")
+	// The clock's signature. Serve's heartbeat spawns a command otherwise
+	// spelled exactly like the operator's, and the per-project mode caps
+	// the clock rather than the operator — so the child has to say which
+	// one it is. Nothing else passes it.
+	heartbeat := fs.Bool("heartbeat", false, "the clock invoked this sweep; the project's mode binds it")
 	// The spawner's channel back: `moe serve` passes a path here and reads
 	// the run the sweep opened out of it, so /serve can link a sweep to
 	// the pulse run it minted. Nothing else passes it.
 	emitRun := fs.String("emit-run", "", "write the run this sweep opens to `path` (one line, bare slug)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse new [--dynamic] [--emit-run <path>] <project>")
+		moePrintln(stderr, "usage: moe pulse new [--dynamic] [--heartbeat] [--emit-run <path>] <project>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
 		moePrintln(stderr, "(never executes one), then a headless read-only survey that files")
@@ -1406,6 +1417,10 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "parks. With it, the sweep starts every kickable parked thread on")
 		moePrintln(stderr, "the board when it finishes — the consent `moe serve --dynamic`")
 		moePrintln(stderr, "stands behind, said at the door a clock can knock on.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "--heartbeat is serve's own marker on the sweeps its clock spawns:")
+		moePrintln(stderr, "those obey the project's mode (`moe project mode`). A sweep you")
+		moePrintln(stderr, "type is your consent and ignores the mode — don't pass it by hand.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -1432,6 +1447,12 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	// marks itself as operator-typed.
 	if *dynamic {
 		defer withRideMode(rideDynamic)()
+	}
+	// Separate from the rung above because it answers a different
+	// question: --dynamic is what the invocation licensed, --heartbeat is
+	// who made it. Only the second is what a per-project mode caps.
+	if *heartbeat {
+		defer withClockInvoked()()
 	}
 	// The pulse is the verb here, so a skip is the verb's own outcome:
 	// exit 130.

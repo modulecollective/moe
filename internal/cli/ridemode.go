@@ -1,5 +1,7 @@
 package cli
 
+import "github.com/modulecollective/moe/internal/project"
+
 // Ride modes are consent vocabulary: what the invocation licensed the
 // machine to do beyond the verb the operator typed.
 //
@@ -78,6 +80,30 @@ func withRideMode(m rideMode) func() {
 	return func() { currentRideMode, rideWalkActive = prevMode, prevActive }
 }
 
+// clockInvoked says the heartbeat spawned this process, rather than the
+// operator typing its command. It is the one thing per-project modes
+// bind on: the mode caps what the *clock* may start, and everything the
+// operator types — bangs, stage verbs, chain kicks, and a hand-typed
+// `moe pulse new --dynamic` — runs in every mode.
+//
+// It needs its own bit because the heartbeat's child is spelled exactly
+// like the hand-typed command. `--dynamic` is consent, not authorship;
+// `--emit-run` is incidental slug plumbing that a future caller could
+// legitimately pass. So the child says so out loud, with `--heartbeat`.
+//
+// Process state for the same reason currentRideMode is: one `moe`
+// process is one invocation, and who invoked it cannot differ between
+// two calls in the same stack.
+var clockInvoked = false
+
+// withClockInvoked marks this process as the heartbeat's own child and
+// returns the restore, matching withRideMode's shape.
+func withClockInvoked() func() {
+	prev := clockInvoked
+	clockInvoked = true
+	return func() { clockInvoked = prev }
+}
+
 // consentTrailerValue reports the MoE-Consent value for a commit written
 // by this invocation, plus whether a machine walk is actually in flight.
 //
@@ -145,6 +171,26 @@ func rideModeContextLine() string {
 		"the ones you groom and the ones already sitting in order — unless you park it. That is real " +
 		"motion with no human look in between, so hold the ordering bar accordingly and write a " +
 		"`\"park\"` line for any thread the operator should see first."
+}
+
+// projectModeContextLine tells a clock-invoked sweep that the project it
+// is surveying is in **safe** mode, so its grooming knows which of the
+// threads it places can actually start. Empty in every other case: auto
+// is the ordinary state the ride line already describes, paused never
+// reaches a sweep at all, and a hand-typed dynamic sweep ignores the
+// mode outright.
+func projectModeContextLine(root, projectID string) string {
+	if !clockInvoked {
+		return ""
+	}
+	if mode, err := project.ReadMode(root, projectID); err != nil || mode != project.ModeSafe {
+		return ""
+	}
+	return "This project is in **safe** mode: the clock may sweep it, but the kick will start only threads " +
+		"carrying an explicit operator mark — an advance marker, a chore's standing intent, or a workflow " +
+		"tag on the idea a run was promoted from. Everything else you groom is held with a reason and waits " +
+		"for the operator. Groom the board as you normally would; just don't count on an unmarked thread " +
+		"moving before someone looks at it."
 }
 
 // rideModeForAnswer maps a chain-prompt bang answer to its mode. Only

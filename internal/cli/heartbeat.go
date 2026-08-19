@@ -114,7 +114,7 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 	// line per quiet project per tick would bury the ones that matter.
 	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
 	for _, p := range projects {
-		sweep, held, reason := g.projectDue(sc, p.ID, occupied, tick, now, log)
+		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now, log)
 		if sweep {
 			fmt.Fprintf(log, "heartbeat: sweeping %s — %s\n", p.ID, reason)
 		}
@@ -193,7 +193,19 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 // something outside the machine (an operator commit in the quiet window,
 // somebody inside the project) are held; the rest are "nothing to do"
 // spelled three ways, and /serve collapses them to a count.
-func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map[string]bool, tick time.Duration, now time.Time, log io.Writer) (sweep, held bool, reason string) {
+func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied map[string]bool, tick time.Duration, now time.Time, log io.Writer) (sweep, held bool, reason string) {
+	projectID := p.ID
+
+	// The operator's standing cap, ahead of every read: a paused project
+	// costs this tick nothing at all, which is the whole of what paused
+	// promises. Not held — the operator chose this state, so a held row
+	// every twenty minutes would be the panel nagging about a decision.
+	// The mode badge carries the visibility instead.
+	mode := project.ModeOf(p)
+	if mode == project.ModePaused {
+		return false, false, "paused"
+	}
+
 	tip, tipAt, operatorTip, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		// A project with no journal history at all — freshly registered,
@@ -267,8 +279,16 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, projectID string, occupied map
 			unswept = true
 		}
 		if !unswept {
-			parked = parkedKickableThread(g.root, sc, projectID)
+			// Under safe the leg offers only what the kick could actually
+			// start, so a board with plenty parked and nothing marked spends
+			// no agent turn discovering that every twenty minutes. The moved
+			// and unswept legs above are untouched: safe stops the machine
+			// disposing, not proposing, and a delta still deserves a survey.
+			parked = parkedKickableThread(g.root, sc, projectID, mode == project.ModeSafe)
 			if parked == "" {
+				if mode == project.ModeSafe {
+					return false, false, "the journal hasn't moved and nothing operator-marked is parked"
+				}
 				return false, false, "the journal hasn't moved and nothing settled is parked"
 			}
 		}
@@ -575,7 +595,17 @@ func machineAuthored(body string) bool {
 // The corpse-branch shape has its own deliberate recovery (the skip
 // line is the signpost, see openSessionStage) and nothing here changes
 // it.
-func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
+//
+// markedOnly is the project's `safe` mode reaching the pre-ask: the
+// question narrows from "could a sweep cause motion here" to "could it
+// cause motion the operator has already licensed". It is the same
+// operatorMarked the kick admits on, asked here so the tick doesn't
+// spend an agent turn learning what the kick would then hold. The
+// tagged-idea leg passes it by construction — the tag *is* the mark.
+func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOnly bool) string {
+	admits := func(md *run.Metadata) bool {
+		return !markedOnly || operatorMarked(root, md, sc.mds, sc.idx)
+	}
 	for _, rootKey := range kickableThreadRoots(sc.mds, sc.byKey, sc.graph, projectID) {
 		rootMd := sc.byKey[rootKey]
 		if settled, _ := rootDesignSettled(root, rootMd, sc.idx); !settled {
@@ -593,11 +623,17 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string) string {
 				if openSessionStage(root, memberMd) != "" {
 					continue
 				}
+				if !admits(memberMd) {
+					continue
+				}
 				return key
 			}
 			continue
 		}
 		if openSessionStage(root, rootMd) != "" {
+			continue
+		}
+		if !admits(rootMd) {
 			continue
 		}
 		return rootKey

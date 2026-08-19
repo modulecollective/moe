@@ -179,14 +179,6 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 // skipped alike — into the activity record both dashes read.
 func (s *Server) heartbeatTick() {
 	now := time.Now()
-	// One read per tick, ahead of the gate: the operator's hold on the
-	// clock. Due still runs — it is read-only and cheap, it carries the
-	// reap of dead machine sessions, and the panel keeps its trace — but
-	// nothing a snoozed tick decides gets spawned.
-	snoozeUntil, snoozed, err := ReadSnooze(s.opts.Root, now)
-	if err != nil {
-		s.logf("heartbeat: %v", err)
-	}
 	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
 	s.activity.recordTick(now, decisions)
 	s.saveActivity()
@@ -196,22 +188,6 @@ func (s *Server) heartbeatTick() {
 			continue
 		}
 		projectID := d.Project
-		// Ahead of the cool-off, and it deliberately spends none of it:
-		// `cooling` consumes a tick of backoff on the way through, and a
-		// snooze that drained every project's cool-off while holding them
-		// all anyway would be the snooze paying down someone else's debt.
-		// The ledger keeps its state; the counters on the row don't, and
-		// shouldn't — nothing is counting down while the clock is held.
-		if snoozed {
-			// Said out loud on the same terms as the cool-off: both answer
-			// the "why has nothing happened for an hour" question an
-			// operator watching serve's terminal is about to ask.
-			s.logf("heartbeat: %s held — snoozed until %s", projectID, SnoozeClock(snoozeUntil))
-			s.activity.recordSkip(projectID,
-				"snoozed until "+SnoozeClock(snoozeUntil), true, 0, 0)
-			s.saveActivity()
-			continue
-		}
 		if cooling, left, fails := s.heartbeat.cooling(projectID); cooling {
 			s.logf("heartbeat: %s cooling off after %d failure(s) — %d tick(s) left", projectID, fails, left)
 			// The gate wanted this project swept and the backoff held it,
@@ -245,8 +221,12 @@ func (s *Server) heartbeatTick() {
 			s.logf("heartbeat: clear sweep run file for %s: %v", projectID, err)
 		}
 		s.activity.recordSweepRun(projectID, "")
+		// --heartbeat is the child saying who invoked it. The command is
+		// otherwise spelled exactly like the one an operator types, and the
+		// per-project mode caps the clock rather than the operator — so
+		// without it the child could not tell the two apart.
 		child, err := s.children.spawn(id, s.opts.MoeBin,
-			[]string{"pulse", "new", "--dynamic",
+			[]string{"pulse", "new", "--dynamic", "--heartbeat",
 				"--emit-run", sweepRunPath(s.opts.Root, projectID), projectID},
 			s.opts.Root, s.opts.Logger)
 		if err != nil {

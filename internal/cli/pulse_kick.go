@@ -6,7 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
@@ -251,15 +253,21 @@ func planKick(root string, groomed groomResult) kickPlan {
 }
 
 // kickFloorHold asks the floor about one root and returns why it is
-// held, or "" if it clears. The three legs are the safety floor the
-// survey's `park` sits on top of, and the returned phrase is the tail of
-// the kick's stderr skip line.
+// held, or "" if it clears. The legs are the safety floor the survey's
+// `park` sits on top of, and the returned phrase is the tail of the
+// kick's stderr skip line.
 //
 // Called twice per root on the happy path — once when the plan is built,
 // once when the loop reaches the root — and that is the point rather
-// than an oversight: openSessionStage is a live read, and the roots
-// behind the first ride can wait hours for their turn.
+// than an oversight: openSessionStage and the mode read are both live,
+// and the roots behind the first ride can wait hours for their turn.
 func kickFloorHold(root, threadRoot string, groomed groomResult) string {
+	// The operator's standing cap first: under paused or safe the answer
+	// is theirs, and the structural legs below are describing a start
+	// that isn't going to happen either way.
+	if hold := kickModeHold(root, threadRoot, groomed); hold != "" {
+		return hold
+	}
 	// A group can be groomed onto a thread whose head has already
 	// shipped — `onto` admits a settled anchor on purpose, that being
 	// the queue-jump case — and the root then walks back to a merged
@@ -448,6 +456,102 @@ func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) (se
 		return false, false
 	}
 	return false, !when.IsZero()
+}
+
+// operatorMarked reports whether a run carries an explicit operator mark
+// — the admit predicate `safe` mode holds the clock to, and the one
+// question that separates "the machine may propose this" from "the
+// machine may start this".
+//
+// Every leg is a disk fact about the *work*, not about who opened the
+// run. Keying on lineage is the proxy that stranded runs twice in July,
+// and rootDesignSettled next door is the same lesson already learned
+// once. One shared function, called by both the heartbeat's parked-leg
+// pre-ask and the kick's own admit, for the anti-drift reason
+// kickableThreadRoots exists: two seams answering the same question
+// separately is how a run sat for two days on 2026-08-13.
+//
+// Three shapes admit:
+//
+//   - **A valid advance marker.** The operator hit `a` at a chain prompt
+//     or clicked Advance. That is recorded permission to carry the
+//     thread forward, and because operatorAdvancedStage asks about
+//     whatever stage the run is waiting at, it admits a mid-ladder
+//     resume as readily as a design the operator signed off. Staleness
+//     rules are inherited whole — a marker a re-edit out-dated stops
+//     counting, exactly as it stops satisfying the stage.
+//   - **Chore-rooted.** The seed is the chore's operator-authored
+//     prompt.md, so standing intent is an operator mark by construction.
+//   - **Tagged-idea lineage.** A live idea carrying a workflow tag (the
+//     tag is the licence — untagged means human), and the run a
+//     promotion made out of one. Both read the same operator act, one
+//     before it is spent and one after.
+//
+// What that leaves out under safe, deliberately: a survey-invented spawn
+// nobody has looked at, and a thread whose only progress is machine
+// work-turns. Both stay on the board, held with a reason, until the
+// operator advances, tags, or kicks.
+//
+// The advance leg goes last because it forks git (a session-branch
+// probe) and the other two are map lookups over a scan the caller
+// already holds.
+func operatorMarked(root string, md *run.Metadata, mds []*run.Metadata, idx *run.JournalIndex) bool {
+	if md == nil {
+		return false
+	}
+	key := md.Project + "/" + md.ID
+	if idx != nil && idx.ChoreByRun[key] != "" {
+		return true
+	}
+	if md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
+		return true
+	}
+	if idx != nil {
+		for _, other := range mds {
+			if other.Workflow != dash.IdeaWorkflow || other.PromoteTo == "" {
+				continue
+			}
+			if idx.PromotedTo[other.Project+"/"+other.ID] == key {
+				return true
+			}
+		}
+	}
+	_, _, advanced := operatorAdvancedStage(root, md, idx)
+	return advanced
+}
+
+// kickModeHold asks the project's mode about one root and returns why it
+// holds, or "" when the mode lets it through. Empty for every invocation
+// the operator typed: the mode binds the clock, and a typed sweep is
+// consent whatever the standing config says.
+//
+// The read is per call rather than once per plan, and that is the point.
+// The gate decided to sweep some minutes before this child reached its
+// kick, and a ride earlier in the same loop can run for hours — so a
+// mode the operator flipped in either window binds the roots that
+// haven't started yet. A pause is meant to take effect when it's typed.
+//
+// An unreadable project.json holds rather than starts: this is the one
+// read in the kick whose failure mode is "the operator's brake is
+// invisible", and the fail-open direction the rest of the sweep takes
+// would spend it in exactly the wrong place.
+func kickModeHold(root, threadRoot string, groomed groomResult) string {
+	if !clockInvoked {
+		return ""
+	}
+	mode, err := project.ReadMode(root, groomed.projectID)
+	if err != nil {
+		return "is held — could not read the project's mode: " + err.Error()
+	}
+	switch mode {
+	case project.ModePaused:
+		return "is held by paused mode — the project starts nothing on its own"
+	case project.ModeSafe:
+		if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) {
+			return "is held by safe mode — no operator mark (an advance, a tag, or a chore licenses it)"
+		}
+	}
+	return ""
 }
 
 // designHeldReason names why an unsettled root is held, in the one

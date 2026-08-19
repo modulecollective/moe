@@ -820,7 +820,7 @@ func TestKickableRootsAndTheParkedLegSeeOneBoard(t *testing.T) {
 	if strings.Join(roots, ",") != strings.Join(want, ",") {
 		t.Fatalf("kickable roots = %v, want %v — the staged batch and the merged run are neither side's business", roots, want)
 	}
-	if got := parkedKickableThread(root, sc, "moe"); got != want[0] {
+	if got := parkedKickableThread(root, sc, "moe", false); got != want[0] {
 		t.Errorf("parked leg = %q, want the same root the kick would take, %q", got, want[0])
 	}
 }

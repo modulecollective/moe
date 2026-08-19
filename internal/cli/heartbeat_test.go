@@ -815,7 +815,7 @@ func TestParkedLegLooksPastAHeldHead(t *testing.T) {
 	root := quietFixture(t)
 	want := "moe/" + strandFixture(t, root)
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want %q — settled work queued behind a held head is not an empty board", got, want)
 	}
 }
@@ -833,7 +833,7 @@ func TestParkedLegHoldsAnOperatorStagedBatch(t *testing.T) {
 	}
 	chainEdgeCommit(t, root, "moe/"+head.ID, "moe/"+groomFixture(t, root, "fix-a")["fix-a"])
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
 		t.Errorf("parkedKickableThread = %q, want \"\" — the head is the operator's staging fence", got)
 	}
 }
@@ -848,7 +848,7 @@ func TestParkedLegSkipsAnOccupiedStrandedMember(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
 		t.Errorf("parkedKickableThread = %q, want \"\" — somebody is inside the stranded run", got)
 	}
 }
@@ -860,7 +860,7 @@ func TestParkedLegStillReturnsAnAdmittingRoot(t *testing.T) {
 	root := quietFixture(t)
 	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want %q", got, want)
 	}
 }
@@ -873,7 +873,7 @@ func TestParkedLegHoldsALoneHeldRun(t *testing.T) {
 	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
 		map[string]string{"design": "# A promoted idea\n\nseed\n"})
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
 		t.Errorf("parkedKickableThread = %q, want \"\" — a lone seed-only run is the operator's", got)
 	}
 }
@@ -903,7 +903,7 @@ func TestParkedLegSeesATaggedIdea(t *testing.T) {
 	root := quietFixture(t)
 	want := parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want %q — a tagged idea is licensed work, not an empty board", got, want)
 	}
 }
@@ -914,7 +914,7 @@ func TestParkedLegSeesATwinTaggedIdea(t *testing.T) {
 	root := quietFixture(t)
 	want := parkTaggedIdea(t, root, "boundary-moved", "twin")
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want %q", got, want)
 	}
 }
@@ -927,7 +927,7 @@ func TestParkedLegHoldsAnUntaggedIdea(t *testing.T) {
 	root := quietFixture(t)
 	parkTaggedIdea(t, root, "needs-triage", "" /*untagged*/)
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
 		t.Errorf("parkedKickableThread = %q, want \"\" — untagged means human", got)
 	}
 }
@@ -946,7 +946,7 @@ func TestParkedLegHoldsAPromotedIdea(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != "" {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
 		t.Errorf("parkedKickableThread = %q, want \"\" — a promoted idea is done being an idea", got)
 	}
 }
@@ -961,7 +961,7 @@ func TestParkedLegPrefersAParkedRunToATaggedIdea(t *testing.T) {
 	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
 	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe"); got != want {
+	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want the parked run %q", got, want)
 	}
 }
