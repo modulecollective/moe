@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,48 @@ func TestOperatorMarkedAdmitsAnAdvancedRun(t *testing.T) {
 	}
 }
 
+// TestOperatorMarkedAdmitsAChoreRootedRun: the seed is the chore's
+// operator-authored prompt.md, so standing intent is an operator mark by
+// construction. Its own leg because openChoreInProcess is the one
+// machine-open path that stamps no SpawnedBy — the shape that stranded a
+// judged chore on 2026-07-22, and the one safe would strand again if the
+// admit only looked at lineage.
+func TestOperatorMarkedAdmitsAChoreRootedRun(t *testing.T) {
+	root, threadRoot, groomed, _ := choreKickFixture(t)
+
+	if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) {
+		t.Error("a chore's prompt.md is standing operator intent and must admit")
+	}
+}
+
+// TestOperatorMarkedAdmitsARunPromotedFromATaggedIdea is the subtlest of
+// the legs: the mark was spent before the run existed. The tag licensed
+// the work, a sweep promoted the idea, and the destination run carries no
+// tag of its own — so the admit walks back through the journal's
+// promotion edge to the idea's persisted PromoteTo. Driven through the
+// real mint rather than a hand-built index, because both halves of that
+// walk are facts about the production path: promotion leaves PromoteTo in
+// place, and the edge points idea→run.
+func TestOperatorMarkedAdmitsARunPromotedFromATaggedIdea(t *testing.T) {
+	root := quietFixture(t)
+	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
+
+	minted := mintSpecs(root, "moe", "pulse-one",
+		[]pulseRunSpec{{Slug: "cleanup-foo", Title: "cleanup foo"}}, io.Discard, os.Stderr)
+	destID := minted["cleanup-foo"]
+	if destID == "" {
+		t.Fatalf("fixture: the tagged idea should have promoted; minted=%v", minted)
+	}
+
+	sc := mustPulseScan(t, root)
+	if got := sc.idx.PromotedTo["moe/cleanup-foo"]; got != "moe/"+destID {
+		t.Fatalf("fixture: promotion edge = %q, want moe/%s", got, destID)
+	}
+	if !operatorMarked(root, sc.byKey["moe/"+destID], sc.mds, sc.idx) {
+		t.Error("the tag was the licence; the run it promoted into inherits the mark")
+	}
+}
+
 // --- the parked-leg pre-ask ------------------------------------------
 
 // TestParkedLegUnderSafeHoldsAnUnmarkedBoard: a board with plenty parked
@@ -251,6 +294,47 @@ func TestSafeProjectSweepsOnADeltaButNotOnAnUnmarkedParkedBoard(t *testing.T) {
 	backdateHead(t, root, time.Hour)
 	if got := sweepIDs(dueDecisions(t, g, 0)); len(got) != 1 || got[0] != "moe" {
 		t.Errorf("due = %v after a journal move, want [moe] — safe still grooms", got)
+	}
+}
+
+// TestUnpausingSummonsASweepOffItsOwnCommit is why SetMode commits
+// trailer-free on main rather than writing project.json quietly: the
+// flip moves the project's journal tip, so the un-pause *is* the delta
+// the moved leg fires on and newly licensed work starts without anyone
+// remembering to pulse.
+//
+// Driven from a warm cursor — a serve that swept this project before the
+// pause — because that is the shape the claim is about. A gate that
+// first sees the project while it is paused has no cursor to compare
+// against, so its first tick after the flip lazily seeds one instead;
+// nothing is stranded by that, since anything the operator then marks is
+// itself another commit, and the sibling tests above cover the parked
+// leg finding marked work on a cold gate.
+func TestUnpausingSummonsASweepOffItsOwnCommit(t *testing.T) {
+	root := quietFixture(t)
+	groomFixture(t, root, "fix-a")
+	g := newHeartbeatGate(root)
+
+	if got := sweepIDs(dueDecisions(t, g, testTick)); len(got) != 1 {
+		t.Fatalf("fixture: the board should be sweepable before the pause, got %v", got)
+	}
+	g.Swept("moe", true)
+	if got := sweepIDs(dueDecisions(t, g, testTick)); len(got) != 0 {
+		t.Fatalf("fixture: a swept tip should stand down, got %v", got)
+	}
+
+	setMode(t, root, "moe", project.ModePaused)
+	if got := reasonFor(dueDecisions(t, g, testTick), "moe"); got != "paused" {
+		t.Fatalf("reason = %q, want paused", got)
+	}
+
+	setMode(t, root, "moe", project.ModeSafe)
+	decisions := dueDecisions(t, g, testTick)
+	if got := sweepIDs(decisions); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v after the un-pause, want [moe] — the flip is its own delta", got)
+	}
+	if got := reasonFor(decisions, "moe"); !strings.Contains(got, "journal moved") {
+		t.Errorf("reason = %q, want the moved leg — the mode commit is the move", got)
 	}
 }
 
