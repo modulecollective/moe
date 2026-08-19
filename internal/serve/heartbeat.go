@@ -19,10 +19,15 @@ import (
 // Everything here is a ticker, a gate check and a child spawn. It
 // decides nothing — on each tick it asks the cli-side gate which
 // projects warrant a look, and for each one runs `moe pulse new
-// --dynamic <project>` as an ordinary PTY child. The sweep that child
-// runs is the only automatic pulse there is, held to a fixed floor:
-// only settled designs with nobody inside get started, every ride walks
-// review and test, and every act it takes is journal-marked.
+// --dynamic --heartbeat <project>` as an ordinary PTY child (plus the
+// --emit-run plumbing documented below). --heartbeat is the clock
+// signing its own work, which is what lets the per-project mode (`moe
+// project mode`) cap the clock rather than the operator: the gate never
+// sweeps a paused project, and a safe one's kick starts only
+// operator-marked threads. The sweep that child runs is the only
+// automatic pulse there is, held to a fixed floor: only settled designs
+// with nobody inside get started, every ride walks review and test, and
+// every act it takes is journal-marked.
 //
 // Three properties are load-bearing:
 //
