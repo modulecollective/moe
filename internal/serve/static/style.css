@@ -328,6 +328,10 @@ section h2 .count {
    not "is it running now", and the two badges can sit on one row. */
 .badge.agent { color: var(--accent); }
 .status.exited { color: var(--muted); }
+/* The per-project mode. Muted throughout, auto included: it is a state
+   the operator set, not an alarm, and the projects index wears one on
+   every row. */
+.badge.mode { color: var(--muted); }
 
 .empty { color: var(--muted); font-style: italic; margin: 0.5rem 0 0; }
 

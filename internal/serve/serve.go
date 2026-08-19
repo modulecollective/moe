@@ -18,7 +18,7 @@
 //
 // Because reach is the only gate, motion is opt-in. Several POST routes
 // run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary code), so by
-// default — safe mode — they refuse with 403 and the UI doesn't offer
+// default — unarmed — they refuse with 403 and the UI doesn't offer
 // them: idea capture, idea tag/untag, run close/edit/reopen, opening or
 // promoting into a *parked* run, and the read-only views work.
 //
@@ -33,6 +33,12 @@
 //     sweeps a project on its own clock when the board warrants it.
 //     Running the armed process *is* the consent act — the legible
 //     replacement for installing a crontab. Stopping it retracts.
+//
+// Under that switch, each project carries its own cap on the clock —
+// `moe project mode <id> paused|safe|auto`, stored in project.json and
+// read by the gate and the sweep child. Arming stays above it: an
+// unarmed serve automates nothing anywhere, whatever any project's mode
+// says.
 package serve
 
 import (
@@ -165,7 +171,7 @@ type Options struct {
 	// submits, advance/ship/chain, chain kick, chore open) — and the
 	// heartbeat ticker (heartbeat.go).
 	//
-	// Off by default (safe mode): those POSTs refuse with 403, their UI
+	// Off by default (unarmed): those POSTs refuse with 403, their UI
 	// entry points don't render, and no tick ever fires; the
 	// journal-write routes — including parking a run from the new-run and
 	// promote forms' bare submits — and the read-only views are
@@ -433,7 +439,7 @@ func (s *Server) registerRoutes() {
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
 	s.router.HandleFunc("GET /run/{project}/{slug}/canvas/{stage}", s.handleCanvas)
-	// Read-only agent-transcript viewer for a stage. Same safe-mode
+	// Read-only agent-transcript viewer for a stage. Same unarmed-serve
 	// bucket as the canvas route; ?agent / ?before / ?fragment are the
 	// backend pick, the paging cursor, and the load-earlier fetch form.
 	s.router.HandleFunc("GET /run/{project}/{slug}/transcript/{stage}", s.handleTranscript)
@@ -464,22 +470,22 @@ func (s *Server) registerRoutes() {
 	// died. The boards carry a brief status cluster in their header and
 	// link here for the trace.
 	s.router.HandleFunc("GET /serve", s.handleServePage)
-	// The heartbeat's brake, and its release. Deliberately outside the
-	// spawn bucket: these two spawn nothing, and braking is not motion.
-	// Anyone who can reach the listener can already start a run on an
-	// armed serve; letting them stop the clock instead is the fail-safe
-	// direction.
-	s.router.HandleFunc("POST /serve/snooze", s.handleSnooze)
-	s.router.HandleFunc("POST /serve/wake", s.handleWake)
 
 	// Read-only browsing of the bureaucracy's durable content: lore,
 	// projects, per-project knowledge and digital-twin docs. All render
 	// from os.ReadFile + the internal/md renderer; none touch the spawn
-	// bucket, so they work in safe mode exactly like the dash and canvas.
+	// bucket, so they work on an unarmed serve exactly like the dash and
+	// canvas.
 	s.router.HandleFunc("GET /lore", s.handleLoreIndex)
 	s.router.HandleFunc("GET /lore/{name}", s.handleLoreEntry)
 	s.router.HandleFunc("GET /projects", s.handleProjectsIndex)
 	s.router.HandleFunc("GET /projects/{project}", s.handleProjectHub)
+	// The heartbeat's per-project brake. Deliberately outside the spawn
+	// bucket: it writes config and spawns nothing, and braking is not
+	// motion. Anyone who can reach the listener can already start a run on
+	// an armed serve; letting them hold one back instead is the fail-safe
+	// direction.
+	s.router.HandleFunc("POST /projects/{project}/mode", s.handleProjectMode)
 	s.router.HandleFunc("GET /projects/{project}/knowledge", s.handleKnowledge)
 	s.router.HandleFunc("GET /projects/{project}/knowledge/{topic}", s.handleKnowledgeTopic)
 	s.router.HandleFunc("GET /projects/{project}/twin/{doc}", s.handleTwinDoc)
@@ -596,43 +602,6 @@ func (s *Server) handleServePage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "serve.html", s.activity.panel(time.Now().UTC()))
 }
 
-// handleSnooze holds the heartbeat for the posted duration. The page
-// offers presets, but the parse is the general one — a hand-rolled POST
-// of any Go duration is the same act, and rejecting it would only push
-// the operator to the CLI for something the route already does.
-func (s *Server) handleSnooze(w http.ResponseWriter, r *http.Request) {
-	d, err := time.ParseDuration(r.FormValue("duration"))
-	if err != nil {
-		http.Error(w, "snooze: bad duration: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if d <= 0 {
-		http.Error(w, "snooze: duration must be positive; use wake to resume now",
-			http.StatusBadRequest)
-		return
-	}
-	until := time.Now().Add(d)
-	if err := WriteSnooze(s.opts.Root, until); err != nil {
-		s.logf("snooze: %v", err)
-		http.Error(w, "snooze: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.logf("heartbeat: snoozed until %s", until.Format(time.RFC3339))
-	http.Redirect(w, r, "/serve", http.StatusSeeOther)
-}
-
-// handleWake drops the hold. Idempotent — waking a serve that isn't
-// snoozed is the state the click asked for either way.
-func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
-	if err := ClearSnooze(s.opts.Root); err != nil {
-		s.logf("wake: %v", err)
-		http.Error(w, "wake: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.logf("heartbeat: awake")
-	http.Redirect(w, r, "/serve", http.StatusSeeOther)
-}
-
 // render runs a named template with data and surfaces template
 // errors via the logger. Template errors return 500 only when the
 // header hasn't been written yet; once bytes are on the wire a
@@ -646,19 +615,20 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 }
 
 // spawnAllowed gates the spawn bucket — the POST routes that run agent
-// subprocesses. In safe mode (the default) it writes a 403 and returns
-// false; with Dynamic set it returns true and the handler proceeds.
+// subprocesses. On an unarmed serve (the default) it writes a 403 and
+// returns false; with Dynamic set it returns true and the handler
+// proceeds.
 // The always-spawning handlers (advance/ship/chain, kick, chore open)
 // call it first thing; the dual-submit new-run and promote handlers
 // call it only when the spawn submit was used, before opening anything.
-// The matching UI gating (so safe mode never offers a control it would
-// refuse) lives in the view models, not here.
+// The matching UI gating (so an unarmed serve never offers a control it
+// would refuse) lives in the view models, not here.
 func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
 	if s.opts.Dynamic {
 		return true
 	}
 	http.Error(w,
-		"serve is in safe mode; restart with --dynamic (or set MOE_SERVE_DYNAMIC) to enable run-spawning actions",
+		"serve is unarmed; restart with --dynamic (or set MOE_SERVE_DYNAMIC) to enable run-spawning actions",
 		http.StatusForbidden)
 	return false
 }

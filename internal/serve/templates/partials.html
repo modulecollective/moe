@@ -86,34 +86,23 @@
 
 {{define "servepanel"}}
   <section class="dash-section serve-panel">
+    {{/* The mode counts ride the status line rather than the rows below
+         it: a paused project never ticks, so it earns no row to badge,
+         and "why has nothing happened in alpha" has to be answerable
+         here. Compact by exception — an all-auto board says nothing. */}}
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .Snoozed}} · snoozed until {{.Snoozed}}{{else if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}})</span>
-      {{else}}<span class="count">(browse-only · up {{.Up}})</span>{{end}}
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}})</span>
+      {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}})</span>{{end}}
     </span></h2>
-    {{/* The brake. Only an armed serve has a clock to hold, so a
-         browse-only one gets no controls. Presets are actions, not
-         config — arbitrary durations are `moe serve snooze 90m`. */}}
-    {{if .Armed}}
-    <section class="actions">
-      {{if .Snoozed}}
-      <span class="action disabled" aria-disabled="true">sweeps resume {{.Snoozed}}</span>
-      <form method="post" action="/serve/wake" class="action-form"><button class="action" type="submit">wake</button></form>
-      {{else}}
-      <form method="post" action="/serve/snooze" class="action-form">
-        <input type="hidden" name="duration" value="1h"><button class="action" type="submit">snooze 1h</button>
-      </form>
-      <form method="post" action="/serve/snooze" class="action-form">
-        <input type="hidden" name="duration" value="4h"><button class="action" type="submit">snooze 4h</button>
-      </form>
-      {{end}}
-    </section>
-    {{end}}
     {{if or .Projects .QuietCount}}
     <ul class="rows">
       {{range .Projects}}
       <li class="row">
         <a class="slug" href="/projects/{{.Project}}">{{.Project}}</a>
         <span class="serve-state{{if .Failed}} failed{{end}}">{{.State}}{{if .Detail}} {{.Detail}}{{end}}</span>
+        {{/* Marked-state only: auto is silent, so an all-auto board reads
+             exactly as it did before modes existed. */}}
+        {{if .Mode}}<span class="badge mode">{{.Mode}}</span>{{end}}
         <span class="note">{{.Reason}}</span>
         {{/* The sweep's own pulse run, once serve knows it — "what is that
              sweep actually doing" is one click, not a hunt on the dash. */}}

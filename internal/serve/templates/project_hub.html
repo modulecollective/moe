@@ -16,6 +16,25 @@
   </header>
   {{template "bannerart" .}}
 
+  {{/* The per-project brake. Three states, the current one inert — the
+       switch shows what is set as much as it sets it. It writes config
+       and spawns nothing, so it renders on an unarmed serve too. */}}
+  <section class="dash-section">
+    <h2><span>mode <span class="count">({{.Mode}})</span></span></h2>
+    <section class="actions">
+      {{range $.Modes}}
+      {{if eq . $.Mode}}
+      <span class="action disabled" aria-disabled="true">{{.}}</span>
+      {{else}}
+      <form method="post" action="/projects/{{$.Project}}/mode" class="action-form">
+        <input type="hidden" name="mode" value="{{.}}"><button class="action" type="submit">{{.}}</button>
+      </form>
+      {{end}}
+      {{end}}
+    </section>
+    <p class="note">paused: never swept · safe: swept and groomed, starts only what you marked · auto: starts every kickable parked thread. Bangs, stage verbs and chain kicks are unaffected in every mode.</p>
+  </section>
+
   <section class="dash-section">
     <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>
     {{if .Twin}}

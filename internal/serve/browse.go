@@ -13,6 +13,10 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/md"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/repolock"
+	// Aliased: serve.go in this package imports the stdlib sync, and one
+	// package can't spell the same identifier two ways.
+	moesync "github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/wiki"
 )
 
@@ -139,7 +143,12 @@ type projectsIndexVM struct {
 }
 
 type projectItemVM struct {
-	ID       string
+	ID string
+	// Mode is always rendered here, auto included. The index is the one
+	// place the operator goes to compare projects, so a column that
+	// vanished on the common value would make "which of these is capped"
+	// a question you answer by elimination.
+	Mode     string
 	Runs     int
 	Chores   int
 	Topics   int
@@ -160,6 +169,7 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 	for _, p := range mds {
 		vm.Projects = append(vm.Projects, projectItemVM{
 			ID:       p.ID,
+			Mode:     string(project.ModeOf(p)),
 			Runs:     runCounts[p.ID],
 			Chores:   choreCounts[p.ID],
 			Topics:   countMarkdown(s.knowledgeTopicsDir(p.ID), nil),
@@ -178,8 +188,14 @@ type hubVM struct {
 	rowBuckets
 	// Serve carries the header's serve cluster, board-wide as everywhere
 	// else — the hub links to the same /serve page.
-	Serve        servePanelVM
-	Project      string
+	Serve   servePanelVM
+	Project string
+	// Mode is this project's mode, and Modes the three the switch offers.
+	// Both always render: the hub is where the mode is *set*, so hiding
+	// the control at the default value would leave auto unreachable
+	// without the CLI.
+	Mode         string
+	Modes        []string
 	HasKnowledge bool
 	TopicCount   int
 	Twin         []twinDocVM
@@ -229,6 +245,18 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vm.Serve = s.activity.panel(now)
+	// After the fragment return: the switch is full-page furniture, and a
+	// show-more fetch has no business re-reading project.json for it. A
+	// project.json that won't load leaves the switch at auto rather than
+	// failing the page — the CLI is still the authoritative surface.
+	pmd, err := project.Load(s.opts.Root, projectID)
+	if err != nil {
+		s.logf("project hub %s: read mode: %v", projectID, err)
+	}
+	vm.Mode = string(project.ModeOf(pmd))
+	for _, m := range project.Modes {
+		vm.Modes = append(vm.Modes, string(m))
+	}
 	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID), nil)
 	if _, err := os.Stat(filepath.Join(s.knowledgeDir(projectID), "index.md")); err == nil {
 		vm.HasKnowledge = true
@@ -240,6 +268,38 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		vm.Twin = append(vm.Twin, twinDocVM{Name: slug})
 	}
 	s.render(w, r, "project_hub.html", vm)
+}
+
+// handleProjectMode sets one project's mode from the hub's switch. The
+// three-way choice is the whole payload; anything else is a 400 rather
+// than a silent normalization, because a mode nobody recognises is
+// exactly the case where guessing would arm the machine.
+//
+// Idempotent: re-posting the mode a project already has is a no-op
+// commit-wise and still redirects, so a double-tap on the switch costs
+// nothing and 500s nothing.
+func (s *Server) handleProjectMode(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	if !slugRe.MatchString(projectID) {
+		http.NotFound(w, r)
+		return
+	}
+	mode, err := project.ParseMode(strings.TrimSpace(r.FormValue("mode")))
+	if err != nil {
+		http.Error(w, "project mode: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	err = moesync.WithJournalPush(s.opts.Root, repolock.Options{Purpose: "project-mode"},
+		s.syncWriter(), s.syncWriter(), func() error {
+			return project.SetMode(s.opts.Root, projectID, mode)
+		})
+	if err != nil {
+		s.logf("project mode %s: %v", projectID, err)
+		http.Error(w, "project mode: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logf("project %s mode: %s", projectID, mode)
+	http.Redirect(w, r, "/projects/"+projectID, http.StatusSeeOther)
 }
 
 // --- knowledge --------------------------------------------------------

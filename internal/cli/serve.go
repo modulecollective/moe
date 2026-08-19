@@ -27,20 +27,6 @@ func init() {
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {
-	// Two verbs ride inside the serve command rather than turning it into
-	// a CommandGroup: a group dispatches on the first argument, and
-	// `moe serve --dynamic` has to keep working. Peeking for exactly two
-	// words costs less than the conversion and breaks nothing — neither
-	// is a flag, so a leading `-` still falls through to the parser.
-	if len(args) > 0 {
-		switch args[0] {
-		case "snooze":
-			return runServeSnooze(args[1:], stdout, stderr)
-		case "wake":
-			return runServeWake(args[1:], stdout, stderr)
-		}
-	}
-
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "", "listen address override (host or host:port); default 127.0.0.1:4242")
@@ -48,26 +34,24 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	dynamic := fs.Bool("dynamic", false, "stand this process at the dynamic consent rung: run-spawning actions and the resident heartbeat; off by default")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]")
-		moePrintln(stderr, "       moe serve snooze [duration]   hold the heartbeat (no arg: report)")
-		moePrintln(stderr, "       moe serve wake                resume sweeps now")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the moe web UI as an HTTP server. Binds 127.0.0.1:4242 by")
 		moePrintln(stderr, "default; put a `tailscale serve` proxy (or similar) in front to expose")
 		moePrintln(stderr, "it to peers. Pass --addr 0.0.0.0 or --addr <tailnet-ip> to bind wider.")
 		moePrintln(stderr, "Ctrl-C to stop; live runs spawned by serve die with it (PTY teardown).")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Safe by default: idea capture, run close/edit/reopen, and all views")
-		moePrintln(stderr, "work; the run-spawning actions (which run agent subprocesses, i.e.")
-		moePrintln(stderr, "arbitrary code) refuse with 403, and the heartbeat never ticks.")
+		moePrintln(stderr, "Unarmed by default: idea capture, run close/edit/reopen, and all")
+		moePrintln(stderr, "views work; the run-spawning actions (which run agent subprocesses,")
+		moePrintln(stderr, "i.e. arbitrary code) refuse with 403, and the heartbeat never ticks.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "--dynamic, or a non-empty MOE_SERVE_DYNAMIC, is the standing consent")
 		moePrintln(stderr, "rung: this process may look at the board on its own clock and start")
 		moePrintln(stderr, "settled work, and anything that can reach the listener can spawn a")
 		moePrintln(stderr, "run — i.e. execute code. Stopping the process is the whole retraction.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "`moe serve snooze 2h` holds the clock without stopping anything:")
-		moePrintln(stderr, "no sweeps until it expires, while clicks and hand-run")
-		moePrintln(stderr, "pulses stay live. It survives a restart, and it always expires.")
+		moePrintln(stderr, "`moe project mode <id> paused|safe` holds one project back without")
+		moePrintln(stderr, "stopping anything: paused is never swept, safe is swept and groomed")
+		moePrintln(stderr, "but starts only what you marked. Both bind the clock, not you.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

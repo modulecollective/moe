@@ -35,14 +35,8 @@ source of truth for the exact command surface; this page is a map.
   status and trace — what each recent tick decided, and the output tail of any
   sweep that failed — reachable from the menu and from the one-line status
   cluster every board header carries.
-- `moe serve snooze [duration]` / `moe serve wake` hold and release the
-  heartbeat without stopping the process. A snooze pauses the clock and nothing
-  else: clicks and hand-run pulses stay live, because those spend
-  only when you ask them to. With no argument, `snooze` reports the current
-  hold. It works with serve up or down, survives a restart, and always expires —
-  the indefinite off-switch is still stopping the process. `/serve` carries 1h
-  and 4h preset buttons plus a wake; both dashes show `snoozed until 09:00` in
-  place of the next-sweep countdown.
+- `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
+  in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
@@ -69,7 +63,24 @@ source of truth for the exact command surface; this page is a map.
 
 - `moe init [--remote <url>] [dir]` creates a bureaucracy.
 - `moe project add <repo-url>` registers a target project.
-- `moe project list` lists registered projects.
+- `moe project list` lists registered projects with their mode.
+- `moe project mode <id> [paused|safe|auto]` reads or sets a project's mode —
+  the standing cap on what the heartbeat may start there:
+  - `paused` — the heartbeat never sweeps the project. No agent turn is spent
+    on it at all.
+  - `safe` — it sweeps and grooms as ever (survey, park, chore nomination), but
+    the kick starts only threads carrying an explicit operator mark: a valid
+    advance marker, a chore's standing intent, or a workflow tag on the idea a
+    run was promoted from. Everything else is held with a named reason.
+  - `auto` — the default, and today's behaviour: every kickable parked thread
+    the survey doesn't park gets started.
+
+  The mode binds the clock, not you. `!`, `!!`, `!!!`, `moe chain kick`, stage
+  verbs, serve's per-run chips and a hand-typed `moe pulse new --dynamic` all
+  run in every mode — the typed word is consent whatever the config says.
+  Serve's arming stays above all three: an unarmed serve automates nothing
+  anywhere. The mode is stored in `projects/<id>/project.json` (absent means
+  `auto`) and is settable from the project hub's switch as well.
 - `moe project remove <id>` unregisters a project when no named workspaces
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and

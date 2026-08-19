@@ -78,8 +78,8 @@ type runFormVM struct {
 	Agent     string
 	Workflow  string
 	// Dynamic gates the spawning submit ("open & run" / "promote & run").
-	// Parking is journal-only and stays available in safe mode; only that
-	// button is hidden.
+	// Parking is journal-only and stays available on an unarmed serve;
+	// only that button is hidden.
 	Dynamic bool
 }
 
@@ -1038,7 +1038,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		switch md.Status {
 		case run.StatusInProgress:
 			// edit / close are journal-only, so both captures get them
-			// in safe mode. promote parks the destination run by
+			// on an unarmed serve. promote parks the destination run by
 			// default — also journal-only — so the chip joins them;
 			// only the page's "promote & run" submit is dynamic-gated.
 			// It stays idea-only: ideas are the only capture that
@@ -1048,7 +1048,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
 				// Tagging parks a license; the pulse that acts on it rides
 				// under its own consent. Journal-only here, so the chips
-				// join promote/edit/close in safe mode.
+				// join promote/edit/close on an unarmed serve.
 				out = append(out, ideaTagActions(base, md, s.opts.NewRunWorkflows)...)
 			}
 			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
@@ -1073,7 +1073,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	var out []runAction
 	// The cascade chips spawn an agent, so they render only in
 	// dynamic mode. The close-run chip below is journal-only (CloseRun
-	// runs in-process, no spawn) and stays in safe mode.
+	// runs in-process, no spawn) and stays on an unarmed serve.
 	if !live && s.opts.Dynamic && ui.Cascade {
 		// A "" or excluded next stage (sdlc's push) yields no chips:
 		// push stays terminal/CLI-only — the bang vocabulary

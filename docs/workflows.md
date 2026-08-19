@@ -523,9 +523,17 @@ licenses two things: the run-spawning buttons in the web UI, and a resident
 heartbeat that looks at each project's board every twenty minutes and runs `moe
 pulse new --dynamic <project>` when it finds something worth looking at. That
 heartbeat is the only automatic pulse there is. Stopping the process retracts
-both; an unarmed `moe serve` behaves exactly as it always has. `moe serve
-snooze [duration]` holds just the heartbeat — clicks and hand-run pulses stay
-live — and `moe serve wake` releases it early.
+both; an unarmed `moe serve` behaves exactly as it always has.
+
+Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
+do. `paused` means the heartbeat never sweeps the project at all. `safe` means
+it sweeps and grooms as ever but starts only threads you marked — a stage you
+advanced, a chore's standing intent, a workflow tag on the idea a run came
+from — holding everything else with a named reason. `auto` is the default and
+today's behaviour. The mode binds the clock, not you: bangs, stage verbs, chain
+kicks and a hand-typed `moe pulse new --dynamic` run in every mode, because the
+typed word is the consent. The project hub carries the same three-way switch,
+and the boards' serve cluster counts the projects that deviate.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,

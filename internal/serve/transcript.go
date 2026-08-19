@@ -87,7 +87,7 @@ type unitVM struct {
 
 // handleTranscript renders a stage's agent transcript at
 // GET /run/{project}/{slug}/transcript/{stage}. Read-only GET, same
-// safe-mode bucket as the dash and canvas routes. ?agent=claude|codex
+// unarmed-serve bucket as the dash and canvas routes. ?agent=claude|codex
 // picks the backend; ?before=<index> pages earlier; ?fragment=1 renders
 // just the unit blocks for the load-earlier JS to prepend.
 //

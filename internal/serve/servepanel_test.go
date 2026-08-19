@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 // panelServer is an armed serve with projects registered on disk (so the
@@ -242,107 +244,128 @@ func postForm(t *testing.T, s *Server, path, form string) *httptest.ResponseReco
 	return rec
 }
 
-// TestServePageOffersTheSnoozePresets: /serve is the heartbeat's own
-// page, so it is where the brake lives. Presets are actions, not config
-// — arbitrary durations stay the CLI's job.
-func TestServePageOffersTheSnoozePresets(t *testing.T) {
+// modeServer is panelServer over a git-backed root, so the mode route's
+// commit lands. Separate because the panel's read-only tests have no use
+// for a repo and the init costs a fork.
+func modeServer(t *testing.T) *Server {
+	t.Helper()
+	gittest.SetupEnv(t)
 	s := panelServer(t)
-	body := getBody(t, s, "/serve")
-	for _, want := range []string{`action="/serve/snooze"`, `value="1h"`, `value="4h"`} {
+	gittest.InitAt(t, s.opts.Root)
+	gittest.Commit(t, s.opts.Root, "seed")
+	gittest.Run(t, s.opts.Root, "add", "-A")
+	gittest.Commit(t, s.opts.Root, "seed projects")
+	return s
+}
+
+// TestProjectModeRouteSetsAndBadgesTheProject: the hub's switch is the
+// whole of the web-side brake, and what it writes is the same file the
+// gate reads.
+func TestProjectModeRouteSetsAndBadgesTheProject(t *testing.T) {
+	s := modeServer(t)
+	if rec := postForm(t, s, "/projects/alpha/mode", "mode=safe"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /projects/alpha/mode = %d, want 303: %s", rec.Code, rec.Body.String())
+	}
+	mode, err := project.ReadMode(s.opts.Root, "alpha")
+	if err != nil || mode != project.ModeSafe {
+		t.Fatalf("ReadMode after the click = %q, %v; want safe", mode, err)
+	}
+	// The hub renders the mode it now sits at as inert, and still offers
+	// the other two — the switch shows the state as much as it sets it.
+	body := getBody(t, s, "/projects/alpha")
+	if !strings.Contains(body, `aria-disabled="true">safe<`) {
+		t.Errorf("hub should render safe as the current, inert choice:\n%s", body)
+	}
+	for _, want := range []string{`value="paused"`, `value="auto"`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("/serve missing %s:\n%s", want, body)
+			t.Errorf("hub missing the %s submit:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, `action="/serve/wake"`) {
-		t.Error("/serve should not offer wake when nothing is snoozed")
+	// And back to auto, which is stored as absent rather than as a word.
+	if rec := postForm(t, s, "/projects/alpha/mode", "mode=auto"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST mode=auto = %d, want 303: %s", rec.Code, rec.Body.String())
+	}
+	if mode, _ := project.ReadMode(s.opts.Root, "alpha"); mode != project.ModeAuto {
+		t.Errorf("ReadMode after auto = %q, want auto", mode)
 	}
 }
 
-// TestSnoozeRouteHoldsAndWakeReleases walks the two clicks the page
-// offers and checks each lands on the file the ticker reads.
-func TestSnoozeRouteHoldsAndWakeReleases(t *testing.T) {
-	s := panelServer(t)
-
-	if rec := postForm(t, s, "/serve/snooze", "duration=1h"); rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /serve/snooze = %d, want 303: %s", rec.Code, rec.Body.String())
-	}
-	until, snoozed, err := ReadSnooze(s.opts.Root, time.Now())
-	if err != nil || !snoozed {
-		t.Fatalf("ReadSnooze after the click = %v, %v; want a hold", snoozed, err)
-	}
-	if got := time.Until(until); got < 55*time.Minute || got > time.Hour {
-		t.Errorf("snooze lands in %s, want about an hour", got)
-	}
-
-	// And the page swaps its controls for the resume time and a wake.
-	body := getBody(t, s, "/serve")
-	if !strings.Contains(body, `action="/serve/wake"`) {
-		t.Errorf("/serve should offer wake while snoozed:\n%s", body)
-	}
-	if !strings.Contains(body, "sweeps resume "+SnoozeClock(until)) {
-		t.Errorf("/serve should name the resume time:\n%s", body)
-	}
-	if strings.Contains(body, `action="/serve/snooze"`) {
-		t.Error("/serve should not offer a second snooze while one is in force")
-	}
-
-	if rec := postForm(t, s, "/serve/wake", ""); rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /serve/wake = %d, want 303: %s", rec.Code, rec.Body.String())
-	}
-	if _, snoozed, _ := ReadSnooze(s.opts.Root, time.Now()); snoozed {
-		t.Error("wake should have dropped the hold")
-	}
-}
-
-// TestSnoozeRouteRejectsAJunkDuration: the route parses any Go duration,
-// but zero and negative are a typo whose two charitable readings point in
-// opposite directions.
-func TestSnoozeRouteRejectsAJunkDuration(t *testing.T) {
-	s := panelServer(t)
-	for _, form := range []string{"duration=soon", "duration=", "duration=0", "duration=-1h"} {
-		if rec := postForm(t, s, "/serve/snooze", form); rec.Code != http.StatusBadRequest {
-			t.Errorf("POST /serve/snooze %q = %d, want 400", form, rec.Code)
+// TestProjectModeRouteRejectsAnUnknownMode: a mode nobody recognises is
+// exactly the case where guessing would arm the machine, so it 400s
+// rather than normalizing.
+func TestProjectModeRouteRejectsAnUnknownMode(t *testing.T) {
+	s := modeServer(t)
+	for _, form := range []string{"mode=", "mode=snooze", "mode=SAFE", "mode=off"} {
+		if rec := postForm(t, s, "/projects/alpha/mode", form); rec.Code != http.StatusBadRequest {
+			t.Errorf("POST /projects/alpha/mode %q = %d, want 400", form, rec.Code)
 		}
 	}
-	if _, snoozed, _ := ReadSnooze(s.opts.Root, time.Now()); snoozed {
-		t.Error("a rejected duration must not have written a hold")
+	if mode, _ := project.ReadMode(s.opts.Root, "alpha"); mode != project.ModeAuto {
+		t.Errorf("a rejected mode must not have been written: %q", mode)
 	}
 }
 
-// TestSnoozeNeedsNoSpawnConsent: braking is not motion. These two routes
-// spawn nothing, so a safe-mode serve answers them like any other
-// journal-write route rather than 403ing through spawnAllowed.
-func TestSnoozeNeedsNoSpawnConsent(t *testing.T) {
+// TestProjectModeNeedsNoSpawnConsent: braking is not motion. The route
+// writes config and spawns nothing, so an unarmed serve answers it like
+// any other journal-write route rather than 403ing through spawnAllowed.
+func TestProjectModeNeedsNoSpawnConsent(t *testing.T) {
+	gittest.SetupEnv(t)
 	root := t.TempDir()
-	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	if rec := postForm(t, s, "/serve/snooze", "duration=1h"); rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /serve/snooze on a safe-mode serve = %d, want 303", rec.Code)
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed")
+	gittest.Run(t, root, "add", "-A")
+	gittest.Commit(t, root, "seed projects")
+	s := newSafeTestServer(t, Options{Addr: "127.0.0.1:0", Root: root,
+		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
+			return nil, 1, 0, nil, nil
+		}})
+	if rec := postForm(t, s, "/projects/alpha/mode", "mode=paused"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST mode on an unarmed serve = %d, want 303: %s", rec.Code, rec.Body.String())
 	}
-	// It still doesn't *offer* the controls: a browse-only serve has no
-	// clock to hold, and a snooze button there would promise a pause on
-	// sweeps that were never going to happen.
-	if body := getBody(t, s, "/serve"); strings.Contains(body, `action="/serve/snooze"`) {
-		t.Errorf("a browse-only /serve should offer no snooze controls:\n%s", body)
+	if mode, _ := project.ReadMode(root, "alpha"); mode != project.ModePaused {
+		t.Errorf("ReadMode = %q, want paused", mode)
 	}
 }
 
-// TestSnoozeTakesTheNextSlotInTheHeaderCluster: the boards' whole spend
-// on serve is one line, and while the clock is held the answer the
-// operator wants in it is when spending resumes.
-func TestSnoozeTakesTheNextSlotInTheHeaderCluster(t *testing.T) {
-	s := panelServer(t)
-	until := time.Now().Add(90 * time.Minute)
-	if err := WriteSnooze(s.opts.Root, until); err != nil {
-		t.Fatal(err)
+// TestModeCountsRideTheHeaderCluster: the boards' whole spend on the
+// modes is a count in the line they already carry, and only when
+// something deviates.
+func TestModeCountsRideTheHeaderCluster(t *testing.T) {
+	s := modeServer(t)
+	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
+		if body := getBody(t, s, path); strings.Contains(body, " paused") ||
+			strings.Contains(body, "· 1 safe") {
+			t.Errorf("an all-auto board must spend nothing on modes: %s\n%s", path, body)
+		}
 	}
-	want := "snoozed until " + SnoozeClock(until)
+	if rec := postForm(t, s, "/projects/alpha/mode", "mode=paused"); rec.Code != http.StatusSeeOther {
+		t.Fatal(rec.Body.String())
+	}
+	if rec := postForm(t, s, "/projects/beta/mode", "mode=safe"); rec.Code != http.StatusSeeOther {
+		t.Fatal(rec.Body.String())
+	}
 	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
 		body := getBody(t, s, path)
-		if !strings.Contains(body, want) {
-			t.Errorf("%s header missing %q:\n%s", path, want, body)
+		if !strings.Contains(body, "1 paused · 1 safe") {
+			t.Errorf("%s header missing the mode counts:\n%s", path, body)
 		}
-		if strings.Contains(body, "· next ") {
-			t.Errorf("%s should drop the next-tick token while snoozed:\n%s", path, body)
-		}
+	}
+}
+
+// TestServePanelBadgesADeviantProject: a project that earns a row says
+// what mode it is in; an auto one says nothing, so an all-auto board
+// reads exactly as it did before modes existed.
+func TestServePanelBadgesADeviantProject(t *testing.T) {
+	s := modeServer(t)
+	if body := getBody(t, s, "/serve"); strings.Contains(body, `class="badge mode"`) {
+		t.Errorf("an all-auto board should carry no mode badge:\n%s", body)
+	}
+	// beta is the panel's held row, so it earns a line to badge.
+	if rec := postForm(t, s, "/projects/beta/mode", "mode=safe"); rec.Code != http.StatusSeeOther {
+		t.Fatal(rec.Body.String())
+	}
+	if body := getBody(t, s, "/serve"); !strings.Contains(body, `<span class="badge mode">safe</span>`) {
+		t.Errorf("/serve should badge beta as safe:\n%s", body)
 	}
 }

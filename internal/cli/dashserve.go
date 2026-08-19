@@ -8,6 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
 )
@@ -52,28 +53,46 @@ type serveState struct {
 	// rows below it must not disagree about whether the process is
 	// still there.
 	live serveLiveness
-	// snoozed is the operator's hold on the heartbeat, read straight off
-	// its own file rather than out of the snapshot. Serve only rewrites
-	// serve.json on its own events, so waiting for the snooze to appear
-	// there would leave `moe serve snooze` invisible in `moe dash` until
-	// the next tick — twenty minutes of the dash disagreeing with the
-	// command the operator just ran.
-	snoozed string
+	// modes counts the projects the operator has capped, read straight
+	// from project.json rather than out of the snapshot. Serve only
+	// rewrites serve.json on its own events, so waiting for a mode flip to
+	// appear there would leave `moe project mode` invisible in `moe dash`
+	// until the next tick — twenty minutes of the dash disagreeing with
+	// the command the operator just ran.
+	modes dash.ModeCounts
 }
 
 // readServeState reads the snapshot for one dash frame.
-func readServeState(root string, now time.Time) serveState {
+func readServeState(root string) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
 	st := serveState{snap: snap, ok: ok, err: err, live: serveDead}
 	if ok {
 		st.live = probeLiveness(snap)
 	}
-	// Warn-only, like the snapshot read above it: a broken snooze file
-	// costs the banner its snooze word, not the frame.
-	if until, snoozed, _ := serve.ReadSnooze(root, now); snoozed {
-		st.snoozed = serve.SnoozeClock(until)
-	}
+	// Warn-only, like the snapshot read above it: an unreadable projects/
+	// costs the banner its mode counts, not the frame.
+	st.modes = projectModeCounts(root)
 	return st
+}
+
+// projectModeCounts tallies the projects the operator has capped. Zero
+// on an all-auto board, which is what keeps the banner's tail unchanged
+// for an operator who has never set a mode.
+func projectModeCounts(root string) dash.ModeCounts {
+	mds, _, err := project.List(root)
+	if err != nil {
+		return dash.ModeCounts{}
+	}
+	var counts dash.ModeCounts
+	for _, md := range mds {
+		switch project.ModeOf(md) {
+		case project.ModePaused:
+			counts.Paused++
+		case project.ModeSafe:
+			counts.Safe++
+		}
+	}
+	return counts
 }
 
 // probeLiveness decides what the pid probe is worth here.
@@ -134,7 +153,7 @@ func (s serveState) bannerCluster(now time.Time) string {
 		next = dash.HumanDuration(max(s.snap.NextTick.Sub(now), 0))
 	}
 	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
-		next, s.snoozed, s.failing(now))
+		next, s.modes, s.failing(now))
 }
 
 // failing counts the projects whose row would read "cooling" or

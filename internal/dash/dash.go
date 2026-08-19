@@ -1103,12 +1103,20 @@ func HumanDuration(d time.Duration) string {
 	}
 }
 
+// ModeCounts is how many projects sit at each non-default mode. Zero
+// values mean an all-auto board, which is the norm and spends nothing on
+// the cluster line.
+type ModeCounts struct {
+	Paused int
+	Safe   int
+}
+
 // ServeCluster spells the live serve status both dashes carry —
 // the CLI banner's tail and the web header's link — as one dotted
 // cluster:
 //
 //	serve armed · up 4m · next 15m · 1 failing
-//	serve armed · up 4m · snoozed until 09:00
+//	serve armed · up 4m · next 15m · 1 paused · 2 safe
 //	serve browse-only · up 4m
 //
 // The two surfaces are contractually the same line, so the text is
@@ -1118,21 +1126,24 @@ func HumanDuration(d time.Duration) string {
 // on it. The CLI's dead-serve state has no web counterpart (a dead
 // serve serves no pages) and stays in the CLI.
 //
-// snoozed — a wall-clock resume time — takes the next slot rather than
-// adding one. The ticker does still fire on a snoozed serve; it looks
-// and holds. But "next 12m" next to "snoozed until 09:00" would read as
-// two answers to the same question, and the one the operator asked is
-// when spending resumes.
-func ServeCluster(armed bool, up, next, snoozed string, failing int) string {
+// The mode counts are compact by exception for the same reason: they say
+// how much of the board the clock is holding back, and on the ordinary
+// all-auto board they say nothing at all. They ride here rather than on
+// the run rows because the mode is a property of the clock, and the
+// clock is what this cluster is about.
+func ServeCluster(armed bool, up, next string, modes ModeCounts, failing int) string {
 	cluster := "serve browse-only · up " + up
 	if armed {
 		cluster = "serve armed · up " + up
-		switch {
-		case snoozed != "":
-			cluster += " · snoozed until " + snoozed
-		case next != "":
+		if next != "" {
 			cluster += " · next " + next
 		}
+	}
+	if modes.Paused > 0 {
+		cluster += fmt.Sprintf(" · %d paused", modes.Paused)
+	}
+	if modes.Safe > 0 {
+		cluster += fmt.Sprintf(" · %d safe", modes.Safe)
 	}
 	if failing > 0 {
 		cluster += fmt.Sprintf(" · %d failing", failing)

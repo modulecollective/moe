@@ -42,8 +42,8 @@ func TestSafeModeRefusesSpawnRoutes(t *testing.T) {
 			if rr.Code != http.StatusForbidden {
 				t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
 			}
-			if !strings.Contains(rr.Body.String(), "safe mode") {
-				t.Errorf("403 body should name safe mode, got:\n%s", rr.Body.String())
+			if !strings.Contains(rr.Body.String(), "serve is unarmed") {
+				t.Errorf("403 body should name the unarmed state, got:\n%s", rr.Body.String())
 			}
 			if len(s.children.all) != 0 {
 				t.Errorf("safe-mode refusal must not spawn; registry has %d", len(s.children.all))

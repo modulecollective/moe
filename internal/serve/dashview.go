@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 // noteHintRE matches a machine lineage hint's connector and target
@@ -298,11 +299,11 @@ type servePanelVM struct {
 	// NextSweep is how long until the next tick ("12m"), empty for an
 	// unarmed serve, which never ticks.
 	NextSweep string
-	// Snoozed is the wall-clock time sweeps resume ("09:00"), empty when
-	// the heartbeat is running free. It is what the control cluster on
-	// /serve keys off: a resume time and a wake button while it's set, the
-	// preset snooze buttons while it isn't.
-	Snoozed string
+	// Paused and Safe count the projects whose mode deviates from auto.
+	// Both zero on the ordinary board, which is what keeps the cluster
+	// line unchanged for an operator who never sets one.
+	Paused int
+	Safe   int
 	// Cluster is the brief status the page headers link to /serve with —
 	// the same line, byte for byte, that the CLI dash's banner carries.
 	Cluster string
@@ -336,6 +337,10 @@ type serveProjectVM struct {
 	// cooling, failed — and it is empty when serve hasn't learned the
 	// slug (a sweep that just started, one that died before minting).
 	Run string
+	// Mode is the project's mode when it isn't auto, empty otherwise.
+	// Marked-state-only, like every other mode display: on an all-auto
+	// board nothing renders.
+	Mode string
 	// Failed marks the states worth a colour: a dead last sweep, or a
 	// cool-off serving one out.
 	Failed bool
@@ -383,13 +388,19 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	if !a.lastTick.IsZero() {
 		vm.LastTick = dash.HumanAgo(now, a.lastTick)
 	}
-	// Read per render rather than held on the record: the file is the
-	// transport, and `moe serve snooze` from a terminal has to show up on
-	// the next page load rather than the next tick. Errors are the tick's
-	// to report — a malformed file reads as no snooze here, which is the
-	// same fail-open the tick takes.
-	if until, snoozed, _ := ReadSnooze(a.root, now); snoozed {
-		vm.Snoozed = SnoozeClock(until)
+	// Read per render rather than held on the record: modes live in
+	// project.json, and `moe project mode` from a terminal has to show up
+	// on the next page load rather than the next tick. It also covers the
+	// projects the heartbeat has no record for at all — a paused one never
+	// ticks, so its mode would otherwise be invisible in the counts.
+	modes := projectModes(a.root)
+	for _, m := range modes {
+		switch m {
+		case project.ModePaused:
+			vm.Paused++
+		case project.ModeSafe:
+			vm.Safe++
+		}
 	}
 	failing := 0
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
@@ -403,6 +414,9 @@ func (a *activity) panel(now time.Time) servePanelVM {
 			p.runID = readSweepRun(a.root, id)
 		}
 		line := serveProjectLine(now, id, p)
+		if m, ok := modes[id]; ok && m != project.ModeAuto {
+			line.Mode = string(m)
+		}
 		if line.Failed {
 			failing++
 		}
@@ -415,7 +429,8 @@ func (a *activity) panel(now time.Time) servePanelVM {
 		}
 		vm.Projects = append(vm.Projects, line)
 	}
-	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep, vm.Snoozed, failing)
+	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep,
+		dash.ModeCounts{Paused: vm.Paused, Safe: vm.Safe}, failing)
 	// Newest first: the ring stores in arrival order, and the question the
 	// list answers is "what just happened".
 	for i := len(a.events) - 1; i >= 0; i-- {
@@ -424,6 +439,24 @@ func (a *activity) panel(now time.Time) servePanelVM {
 		}
 	}
 	return vm
+}
+
+// projectModes reads every registered project's mode, keyed by id.
+//
+// One directory scan and a small read per project, on a page load that
+// already forks git for the dash gather. Warn-free: an unreadable
+// projects/ leaves the map empty, which renders as an all-auto board —
+// the state the page showed before modes existed.
+func projectModes(root string) map[string]project.Mode {
+	mds, _, err := project.List(root)
+	if err != nil {
+		return nil
+	}
+	modes := make(map[string]project.Mode, len(mds))
+	for _, md := range mds {
+		modes[md.ID] = project.ModeOf(md)
+	}
+	return modes
 }
 
 // serveProjectLine turns one project's record into its line. State
