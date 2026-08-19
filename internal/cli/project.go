@@ -26,6 +26,11 @@ func init() {
 		Run:     runProjectList,
 	})
 	g.Register(&Command{
+		Name:    "mode",
+		Summary: "read or set a project's mode (paused/safe/auto)",
+		Run:     runProjectMode,
+	})
+	g.Register(&Command{
 		Name:    "remove",
 		Summary: "unregister a project by id",
 		Run:     runProjectRemove,
@@ -102,8 +107,70 @@ func runProjectList(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	for _, md := range mds {
-		moePrintf(stdout, "%s\t%s\t%s\n", md.ID, md.DefaultBranch, md.Remote)
+		moePrintf(stdout, "%s\t%s\t%s\t%s\n", md.ID, project.ModeOf(md), md.DefaultBranch, md.Remote)
 	}
+	return 0
+}
+
+// runProjectMode reads with no argument and sets with one. The
+// no-argument read is why this isn't write-only: "what is this project
+// allowed to do on its own" is a question the operator asks more often
+// than they change the answer.
+func runProjectMode(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("project mode", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe project mode <id> [paused|safe|auto]")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Caps what the heartbeat may start in this project. Without a mode")
+		moePrintln(stderr, "word it reports the current one.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "  paused  the heartbeat never sweeps the project")
+		moePrintln(stderr, "  safe    it sweeps and grooms, but starts only threads the")
+		moePrintln(stderr, "          operator marked (an advance, a workflow tag, a chore)")
+		moePrintln(stderr, "  auto    it starts every kickable parked thread (the default)")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "The mode binds the clock, not you: bangs, stage verbs, chain kicks")
+		moePrintln(stderr, "and a hand-typed `moe pulse new --dynamic` run in every mode.")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		fs.Usage()
+		return 2
+	}
+	id := fs.Arg(0)
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	md, err := project.Load(root, id)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if fs.NArg() == 1 {
+		moePrintf(stdout, "%s: %s\n", id, project.ModeOf(md))
+		return 0
+	}
+	mode, err := project.ParseMode(fs.Arg(1))
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 2
+	}
+	if project.ModeOf(md) == mode {
+		moePrintf(stdout, "%s: %s (unchanged)\n", id, mode)
+		return 0
+	}
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "project-mode"}, stdout, stderr, func() error {
+		return project.SetMode(root, id, mode)
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "%s: %s\n", id, mode)
 	return 0
 }
 

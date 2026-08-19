@@ -71,14 +71,12 @@ func TestProjectListPrintsRows(t *testing.T) {
 
 	writeProjectMetadata(t, root, &project.Metadata{
 		ID:            "beta",
-		Status:        "incubating",
 		Submodule:     "projects/beta/src",
 		Remote:        "https://example.com/beta.git",
 		DefaultBranch: "main",
 	})
 	writeProjectMetadata(t, root, &project.Metadata{
 		ID:            "alpha",
-		Status:        "incubating",
 		Submodule:     "projects/alpha/src",
 		Remote:        "git@example.com:org/alpha.git",
 		DefaultBranch: "trunk",
@@ -89,8 +87,8 @@ func TestProjectListPrintsRows(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	want := "alpha\ttrunk\tgit@example.com:org/alpha.git\n" +
-		"beta\tmain\thttps://example.com/beta.git\n"
+	want := "alpha\tauto\ttrunk\tgit@example.com:org/alpha.git\n" +
+		"beta\tauto\tmain\thttps://example.com/beta.git\n"
 	if out.String() != want {
 		t.Fatalf("output mismatch:\nwant:\n%q\ngot:\n%q", want, out.String())
 	}
@@ -121,7 +119,7 @@ func TestProjectListWarnsAndContinues(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "good\tmain\thttps://example.com/good.git\n") {
+	if !strings.Contains(out.String(), "good\tauto\tmain\thttps://example.com/good.git\n") {
 		t.Fatalf("good project missing from stdout: %q", out.String())
 	}
 	if strings.Contains(out.String(), "broken") {

@@ -32,8 +32,11 @@ import (
 // The id doubles as the project's display name — there is no separate Name
 // field. One name, derived from the URL, used everywhere.
 type Metadata struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
+	ID string `json:"id"`
+	// Mode caps what the heartbeat may start here — see mode.go. Absent
+	// means auto, so it is omitted rather than written out at the
+	// default.
+	Mode          string `json:"mode,omitempty"`
 	Submodule     string `json:"submodule"`
 	Remote        string `json:"remote"`
 	DefaultBranch string `json:"default_branch"`
@@ -98,7 +101,6 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 	}
 	md := &Metadata{
 		ID:            id,
-		Status:        "incubating",
 		Submodule:     submodulePath,
 		Remote:        normalizeRemote(url),
 		DefaultBranch: branch,

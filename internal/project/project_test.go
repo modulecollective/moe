@@ -113,9 +113,6 @@ func TestRegisterHappyPath(t *testing.T) {
 	if md.Created != "2026-04-12" {
 		t.Errorf("created=%q", md.Created)
 	}
-	if md.Status != "incubating" {
-		t.Errorf("status=%q", md.Status)
-	}
 	if md.Submodule != "projects/remote/src" {
 		t.Errorf("submodule=%q want projects/remote/src", md.Submodule)
 	}
