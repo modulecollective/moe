@@ -389,8 +389,15 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	// starts when the process starts serving and stops when ctx cancels.
 	// Its children ride the same registry, so shutdown winds them down
 	// with everything else.
+	// It runs off a derived context so both return paths below can stop
+	// it and join it. The srv.Serve-error path is why the context is
+	// derived rather than the caller's: there the caller's ctx is not
+	// done, so nothing else would ever tell the ticker to stop.
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	defer hbCancel()
+	var heartbeatDone sync.WaitGroup
 	if s.opts.Dynamic && s.opts.Heartbeat != nil {
-		go s.runHeartbeat(ctx)
+		heartbeatDone.Go(func() { s.runHeartbeat(hbCtx) })
 	}
 
 	errCh := make(chan error, 1)
@@ -405,6 +412,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		// Ahead of children.shutdown, not after: heartbeatTick spawns
+		// into the same registry the wind-down drains, so a tick still
+		// in flight could land a child behind the drain and leak it past
+		// shutdown. A tick is a gate call plus non-blocking spawns, so
+		// the wait is short.
+		hbCancel()
+		heartbeatDone.Wait()
 		httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer httpCancel()
 		if err := srv.Shutdown(httpCtx); err != nil {
@@ -427,6 +441,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		return <-errCh
 	case err := <-errCh:
+		hbCancel()
+		heartbeatDone.Wait()
 		return err
 	}
 }

@@ -349,6 +349,66 @@ func TestArmedServeTicks(t *testing.T) {
 	}
 }
 
+// blockingHeartbeat is a gate that parks inside Due until the test lets
+// it go — the stand-in for a tick still mid-flight when the operator
+// stops the process.
+type blockingHeartbeat struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return nil
+}
+
+func (b *blockingHeartbeat) Swept(projectID string, clean bool) {}
+
+// TestArmedServeJoinsTheHeartbeat: shutdown waits for a tick in flight
+// rather than walking out on it. Two things ride on the join — a tick
+// spawns into the same child registry children.shutdown drains, so a
+// late spawn would outlive the wind-down, and a goroutine still reading
+// heartbeatInterval after ListenAndServe returns races the test that
+// shortened it (the flake this fixes).
+func TestArmedServeJoinsTheHeartbeat(t *testing.T) {
+	bin, _ := argvRecorder(t, 0)
+	gate := &blockingHeartbeat{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+	})
+
+	heartbeatInterval = 5 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = 20 * time.Minute })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.ListenAndServe(ctx) }()
+
+	<-gate.entered
+	cancel()
+
+	select {
+	case <-done:
+		t.Fatal("ListenAndServe returned with a heartbeat tick still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(gate.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ListenAndServe: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ListenAndServe never returned after the tick finished")
+	}
+}
+
 // TestHeartbeatTickRecordsTheWholeVerdictSet: the ticker only spawns for
 // the sweeps, but the record has to carry the stand-downs too — those are
 // the trace that used to go to stderr and die there.
