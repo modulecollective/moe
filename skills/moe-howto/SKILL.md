@@ -35,6 +35,13 @@ it matters, and any constraints the conversation surfaced. Don't design
 the solution; that's the sdlc design stage's job if the idea ever gets
 promoted.
 
+Tight has a floor. The capture has to stand alone when it resurfaces
+weeks later, so give it a title that names the change in the project's
+own terms plus a sentence or two of context — the symptom and why it
+matters, not just a path, which may have gone stale by then. A
+one-line idea forces a later design stage to rediscover what this
+conversation already established.
+
 `moe idea new` opens `$EDITOR` and commits the resulting note. From an
 agent session, use a temporary editor script so the command stays
 non-interactive:
@@ -44,10 +51,10 @@ tmp=$(mktemp)
 cat >"$tmp" <<'EOF'
 #!/bin/sh
 cat >"$1" <<'BODY'
-# <slug>
+# <title naming the change, not the slug>
 
-- <what to remember>
-- <constraint or context>
+Why: <the symptom, and why it matters>. <Any constraint the
+conversation surfaced.>
 BODY
 EOF
 chmod +x "$tmp"

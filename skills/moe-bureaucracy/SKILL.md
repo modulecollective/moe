@@ -156,13 +156,23 @@ append an entry to:
 Format: - [ ] `slug` — Title. Three tokens are load-bearing and
 parsed exactly: the `- [ ]` checkbox, the backtick-quoted `slug`
 (lowercase, hyphenated), and the em-dash `—` between slug and a
-terse title. Optionally follow with an indented body of one or more
-paragraphs (two-space indent, blank lines between paragraphs):
+terse title. Follow it with an indented body of a sentence or two
+(two-space indent, blank lines between paragraphs):
 
   - [ ] `cleanup-foo` — Clean up foo helper
 
     Why: bar/baz both reach into foo's internals; foo.go:42 is
     the load-bearing assumption. Fix sketch: <one sentence>.
+
+**The body is the seed, not decoration.** An unchecked entry is
+harvested at close into an idea canvas *verbatim* — `# Title` plus
+exactly the body you wrote, and nothing else. So a bodyless entry
+becomes a one-line idea, and when it is promoted weeks later the
+design stage has to rediscover what you already knew. Write to the
+floor: a title that names the change in the artifact's own terms,
+plus a sentence or two of context — the symptom and why it matters,
+not just a path. Paths go stale between filing and promotion;
+symptoms survive a rename.
 
 **Every entry decides whether to tag.** A workflow tag in parentheses
 after the closing backtick is the machine's license to start the work:
@@ -197,12 +207,11 @@ canvas without the matching `followups.md` line — a canvas that
 reports a filing it didn't make loses the item *and* convinces every
 later reader it's tracked. Close warns about claims it can't verify.
 
-Use the body only when context would save a future agent real
-work — the *why*, file:line refs, or a one-sentence approach
-sketch. Skip the body when the title is self-explanatory. The
-operator reviews and prunes these at termination; unchecked
-entries become idea runs with the body carried into the seed
-canvas.
+The body carries the *why*, file:line refs where they earn their
+keep, and a one-sentence approach sketch when you have one. An entry
+whose title genuinely is the whole spec can stay short — but that is
+the exception you justify to yourself, not the default. The operator
+reviews and prunes these at termination.
 
 To file a followup against a *different* project, prefix the slug
 with `<project>/`. A bare slug (the default) files against the

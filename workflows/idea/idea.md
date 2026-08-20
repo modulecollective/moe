@@ -7,6 +7,12 @@ entry, not a run. The file exists; you are sharpening what's on it.
 
 - **Still terse.** One to ten bullets. If you're tempted to write
   paragraphs, the idea is ready to promote to a run, not refine here.
+- **Self-standing.** A title that names the change in the project's
+  own terms, plus a sentence or two giving the symptom and why it
+  matters — enough that the idea reads as actionable to someone who
+  wasn't there. Below that floor (a bare title, a lone path),
+  raising it to the floor *is* the refinement; sharpening bullets
+  under a vague title is not.
 - **Sharper than it was.** Clearer framing, a concrete example, a
   smaller scope — pick one. Don't turn a three-bullet idea into a
   twelve-bullet idea.
