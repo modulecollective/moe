@@ -288,11 +288,17 @@ func TestFollowupsReferenceSection(t *testing.T) {
 		"`moe-bureaucracy`",
 		"`moe-context`",
 		wantPath,
-		// The one-line grammar is inlined so an agent that never opens
+		// The entry grammar is inlined so an agent that never opens
 		// the skill still writes a parseable shape, plus the loud-at-close
 		// note so a wrong shape reads as recoverable, not silent.
 		"`- [ ] `slug` — Title`",
 		"rejected at close",
+		// The body floor and its reason: the harvest renders the entry
+		// into an idea canvas verbatim, so a bodyless entry seeds a
+		// bare-title idea that forces design to rediscover the context.
+		"an indented body of a sentence",
+		"becomes an idea canvas verbatim",
+		"not just a path",
 		// Routing travels with the grammar: a twin-doc edit filed as a
 		// followup is harvested into an idea and promoted to a run whose
 		// workflow holds twin docs read-only.

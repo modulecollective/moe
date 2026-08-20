@@ -326,12 +326,19 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 	b.WriteString("If you spot work worth doing but out of scope for this canvas,\n")
 	b.WriteString("leave it via the `moe-bureaucracy` skill at:\n")
 	fmt.Fprintf(&b, "  %s\n", path)
-	// Inline the one-line grammar so an agent that never opens the skill
+	// Inline the entry grammar so an agent that never opens the skill
 	// still writes the shape the close-time harvest can parse. A wrong
-	// shape is now rejected loud at close, not silently dropped.
-	b.WriteString("Each entry is one line — `- [ ] `slug` — Title` (backticked\n")
-	b.WriteString("lowercase slug, em-dash separator); the skill has the full format.\n")
-	b.WriteString("A wrong shape is rejected at close, not silently dropped.\n")
+	// shape is now rejected loud at close, not silently dropped. The
+	// body floor rides along for the same reason the grammar does: the
+	// harvest renders the entry into an idea canvas verbatim, so a
+	// bodyless entry becomes a bare-title seed that forces a later
+	// design stage to rediscover what the filer already knew.
+	b.WriteString("Each entry is `- [ ] `slug` — Title` (backticked lowercase\n")
+	b.WriteString("slug, em-dash separator) plus an indented body of a sentence or\n")
+	b.WriteString("two — the entry becomes an idea canvas verbatim, so give the\n")
+	b.WriteString("symptom and why it matters, not just a path. The skill has the\n")
+	b.WriteString("full format; a wrong shape is rejected at close, not silently\n")
+	b.WriteString("dropped.\n")
 	// Routing, not format: an entry filed here is harvested into an idea
 	// and promoted to a run, so a twin-doc edit filed as a followup ends
 	// up in a workflow forbidden to make it. The rule has to travel with
