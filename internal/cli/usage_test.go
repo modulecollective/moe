@@ -317,6 +317,11 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 	if _, ok := priceFor("claude-opus"); ok {
 		t.Error("a prefix shorter than every entry must not match")
 	}
+	// The bureaucracy's largest single share of tokens; without an entry
+	// every daily and per-run total in the report goes starred.
+	if p, ok := priceFor("claude-opus-5"); !ok || p.input != 5 || p.output != 25 {
+		t.Errorf("priceFor(claude-opus-5) = %+v ok=%v, want $5/$25", p, ok)
+	}
 	p, ok := priceFor("claude-opus-4-8[1m]")
 	if !ok || p.input != 5 {
 		t.Errorf("priceFor(context-tagged id) = %+v ok=%v, want the opus-4-8 entry", p, ok)

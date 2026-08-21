@@ -53,6 +53,11 @@ type modelPrice struct {
 
 var modelPrices = []modelPrice{
 	{"claude-fable-5", 10, 50},
+	// Standard speed, deliberately: fast mode bills $10/$50, but a
+	// transcript records only the model id, not the speed. Stages run
+	// headless `claude -p` at standard speed, so this is the right
+	// notional rate for the tokens this map actually sees.
+	{"claude-opus-5", 5, 25},
 	{"claude-opus-4-8", 5, 25},
 	{"claude-opus-4-7", 5, 25},
 	// Sticker, deliberately: an intro $2/$10 runs through 2026-08-31, but
