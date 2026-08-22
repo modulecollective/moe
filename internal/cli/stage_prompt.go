@@ -98,6 +98,15 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 		sections = append(sections, guidance)
 	}
 
+	// Human inputs: the questions this run put to the operator and what
+	// they answered. Lands after project guidance and before prior-run
+	// lineage — the decisions made *on this run* read closer to the work
+	// than the history of a run before it. Empty for every run with no
+	// input record, which is nearly all of them.
+	if inputs := humanInputsSection(root, md); inputs != "" {
+		sections = append(sections, inputs)
+	}
+
 	// Prior-runs lineage: when md is a reopen, name the prior run(s)
 	// and the artifacts on disk so the agent reads what was tried
 	// previously before substantive work. Lands after project guidance
