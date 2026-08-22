@@ -572,6 +572,42 @@ func operatorMarked(root string, md *run.Metadata, mds []*run.Metadata, idx *run
 	return advanced
 }
 
+// answeredInputOnThread reports whether any live member of the thread
+// carries an answered question — the safe-mode leg the inbox adds.
+//
+// It is a mark for the same reason the others are: the operator read a
+// concrete question on a concrete run and supplied the missing decision,
+// so requiring a second approval before the thread may move would make
+// the inbox fail its purpose. Thread-scoped rather than root-scoped
+// because that is where the question lands — the run whose future agent
+// needs the answer is routinely queued behind the head.
+//
+// It is emphatically *not* an advance marker. It satisfies no stage and
+// chooses no successor; it says only that the thread's human-input hold
+// was cleared. The next sweep still has to interpret the answer and pass
+// the ordinary stage and kick floors.
+func answeredInputOnThread(root, threadRoot string, groomed groomResult) bool {
+	if groomed.graph == nil {
+		return false
+	}
+	for _, key := range groomed.graph.Thread(threadRoot) {
+		proj, runID, err := splitProjectRun(key)
+		if err != nil {
+			continue
+		}
+		f, err := input.Load(root, proj, runID)
+		if err != nil {
+			continue
+		}
+		for _, req := range f.Requests {
+			if req.Answered() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // kickModeHold asks the project's mode about one root and returns why it
 // holds, or "" when the mode lets it through. Empty for every invocation
 // the operator typed: the mode binds the clock, and a typed sweep is
@@ -599,8 +635,9 @@ func kickModeHold(root, threadRoot string, groomed groomResult) string {
 	case project.ModePaused:
 		return "is held by paused mode — the project starts nothing on its own"
 	case project.ModeSafe:
-		if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) {
-			return "is held by safe mode — no operator mark (an advance, a tag, or a chore licenses it)"
+		if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) &&
+			!answeredInputOnThread(root, threadRoot, groomed) {
+			return "is held by safe mode — no operator mark (an advance, a tag, a chore, or an answered question licenses it)"
 		}
 	}
 	return ""

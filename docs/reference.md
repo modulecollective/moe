@@ -24,7 +24,8 @@ source of truth for the exact command surface; this page is a map.
   daily-activity chart (and a project-scoped one on each project page).
   **The web starts nothing.** Every action it offers writes a journal commit and
   stops there: capture or edit an idea, tag it for a workflow, close or reopen a
-  run, mark the current stage advanced. Starting agents is the heartbeat's job
+  run, mark the current stage advanced, answer a run's open question. Starting
+  agents is the heartbeat's job
   alone, so there is no route from the listener to code execution at all —
   armed or not. Interactive stage-driving happens in a terminal.
   `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
@@ -40,6 +41,17 @@ source of truth for the exact command surface; this page is a map.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
+- `moe inbox list [project]` shows every question a run is waiting on, oldest
+  first, with the numbered choices and the exact answer command.
+  `moe inbox answer <project>/<run> <choice-number>` records your choice. An
+  unanswered question is a harness floor, not a suggestion: the dynamic kick
+  refuses any thread with one open on a live member, and so does every stage
+  turn on that run — the operator's own stage verb, a bang cascade, a chain
+  ride. Answering starts nothing. It writes one journal commit, which is what
+  an armed serve's next heartbeat sweeps; `moe pulse new --dynamic <project>`
+  is the expedite path. Questions are written by a dynamic pulse, at a thread
+  position, one per run at a time, with two or three fixed choices — the
+  answer is delivered to that run's later stage prompts.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
   every mirrored stage transcript, grouped by workflow, stage and model, with a
   selected rolling-window total plus per-run and by-day breakdowns. It reads

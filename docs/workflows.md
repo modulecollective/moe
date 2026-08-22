@@ -512,6 +512,35 @@ and not only what it filed. The section records a plan, not a promise: the
 floor is re-checked as each root is reached, so a root can still be held past
 its "queued" line. Curation sweeps stamp nothing — they start nothing.
 
+### Asking you a question
+
+A `"park"` line says "look at this first" and lasts one sweep. When the survey
+can say something sharper — *this run cannot proceed until someone answers one
+specific question* — it writes that question at the run's own position instead:
+
+```json
+{"runs": [{"run": "change-auth-defaults",
+           "park": {"question": "Which compatibility policy should this use?",
+                    "choices": ["Preserve the old default", "Adopt the new default"]}}]}
+```
+
+That parks the thread for the sweep, exactly like a plain park, *and* opens a
+durable question on the run whose later stage prompts get the answer. It shows
+up in `moe inbox list` and on the web's `/inbox`, and the harness refuses to
+start the thread until it is answered — the dynamic kick, a bang cascade, a
+chain ride, and your own stage verb all hold on it and point at
+`moe inbox answer`. One open question per run, two or three fixed choices, no
+free text; a question on a run you are minting in the same gate, on a tagged
+idea, or on a chain head is refused with a line.
+
+Answering starts nothing. It writes one journal commit, so an armed serve's
+next heartbeat offers the project to a pulse and the ordinary kick carries the
+thread on; `moe pulse new --dynamic <project>` is the expedite path. The next
+survey sees the answer, and its job is to interpret it and drop the park — not
+to ask the same question again. An answer counts as an operator mark under
+`safe` mode, but it is not an advance marker: it clears the human-input hold
+and says nothing about whether a stage was read.
+
 Grooming may move a queued run out of one thread and into another — that is how
 stray threads consolidate. One unit is off limits: any unit under a **chain
 head you minted yourself**. The head is your staging fence, so a batch you are

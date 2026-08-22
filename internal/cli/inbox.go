@@ -37,6 +37,7 @@ func init() {
 		Name:    "answer",
 		Summary: "answer a run's open question by choice number",
 		Run:     runInboxAnswer,
+		argKind: argProjectRun,
 	})
 	RegisterGroup(g)
 }

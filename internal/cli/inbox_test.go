@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -412,5 +414,70 @@ func TestSelfKickHoldsOnMalformedRecord(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "unreadable input record") {
 		t.Fatalf("stderr = %q, want the malformed-record hold", errb.String())
+	}
+}
+
+// An answered question is an operator mark under safe mode: the operator
+// read a concrete question on a concrete run and supplied the missing
+// decision, so asking for a second approval would make the inbox fail
+// its purpose.
+func TestSafeModeAdmitsAThreadWithAnAnsweredQuestion(t *testing.T) {
+	root := quietFixture(t)
+	id := groomFixture(t, root, "fix-a")["fix-a"]
+	setMode(t, root, "moe", project.ModeSafe)
+
+	asClock(func() {
+		if got := holdFor(t, planFor(t, root), "moe/"+id); !strings.Contains(got, "safe mode") {
+			t.Fatalf("hold = %q, want the safe-mode hold before any answer", got)
+		}
+	})
+
+	if _, err := input.Ask(root, "moe", id, "moe/pulse-one",
+		"Which policy?", []string{"Keep", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Answer(root, "moe", id, 0, 2, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	asClock(func() {
+		if got := holdFor(t, planFor(t, root), "moe/"+id); got != "" {
+			t.Fatalf("hold = %q, want the answer to license the thread under safe", got)
+		}
+	})
+}
+
+// The mark is not an advance marker: it clears the human-input hold and
+// says nothing about whether a stage was read, so the run's next pickup
+// is still its first stage.
+func TestAnsweredQuestionIsNotAnAdvanceMarker(t *testing.T) {
+	root := quietFixture(t)
+	id := groomFixture(t, root, "fix-a")["fix-a"]
+	if _, err := input.Ask(root, "moe", id, "moe/pulse-one",
+		"Which policy?", []string{"Keep", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Answer(root, "moe", id, 0, 1, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	md, err := run.Load(root, "moe", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != wf.Stages()[0] {
+		t.Fatalf("next stage = %q, want the ladder untouched at %q", next, wf.Stages()[0])
+	}
+	// And the answer commit does not wear the advance subject.
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if strings.HasPrefix(msg, "advance:") {
+		t.Fatalf("the answer landed as an advance marker:\n%s", msg)
 	}
 }
