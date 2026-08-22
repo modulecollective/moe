@@ -481,3 +481,61 @@ func TestAnsweredQuestionIsNotAnAdvanceMarker(t *testing.T) {
 		t.Fatalf("the answer landed as an advance marker:\n%s", msg)
 	}
 }
+
+// The two verbs, end to end through their argv entry points: what the
+// operator types, and what they read back.
+func TestInboxListAndAnswerVerbs(t *testing.T) {
+	root := spawnFixture(t)
+	seedParkedRun(t, root, "change-auth")
+	if _, err := input.Ask(root, "moe", "change-auth", "moe/pulse-one",
+		"Which compatibility policy?", []string{"Preserve", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runInboxList(nil, &out, &errb); code != 0 {
+		t.Fatalf("inbox list exited %d: %s", code, errb.String())
+	}
+	listing := out.String()
+	for _, want := range []string{
+		"moe/change-auth", "Which compatibility policy?",
+		"1. Preserve", "2. Adopt",
+		"moe inbox answer moe/change-auth <1-2>",
+	} {
+		if !strings.Contains(listing, want) {
+			t.Fatalf("listing missing %q:\n%s", want, listing)
+		}
+	}
+
+	out.Reset()
+	if code := runInboxAnswer([]string{"moe/change-auth", "2"}, &out, &errb); code != 0 {
+		t.Fatalf("inbox answer exited %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "answered moe/change-auth#1 — Adopt") {
+		t.Fatalf("answer output = %q", out.String())
+	}
+
+	out.Reset()
+	if code := runInboxList(nil, &out, &errb); code != 0 {
+		t.Fatalf("second inbox list exited %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "nothing waiting") {
+		t.Fatalf("listing after the answer = %q", out.String())
+	}
+}
+
+func TestInboxAnswerRefusesOutOfRangeChoice(t *testing.T) {
+	root := spawnFixture(t)
+	seedParkedRun(t, root, "change-auth")
+	if _, err := input.Ask(root, "moe", "change-auth", "moe/pulse-one",
+		"Which policy?", []string{"Keep", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var errb bytes.Buffer
+	if code := runInboxAnswer([]string{"moe/change-auth", "7"}, io.Discard, &errb); code == 0 {
+		t.Fatal("inbox answer accepted a choice out of range")
+	}
+	if !strings.Contains(errb.String(), "out of range") {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}

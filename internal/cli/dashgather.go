@@ -129,15 +129,30 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		}
 	}
 
-	// One record read per in-progress run that has one — the scan skips
-	// runs with no inputs.json, which is nearly all of them. A malformed
-	// record drops its hint rather than failing the dash; the kick floor
-	// and the stage floor both refuse on it, which is where that has to
-	// be loud.
+	// One os.ReadFile per in-progress run, nearly all of which miss. Over
+	// the scan already in hand rather than input.Scan: the hint needs only
+	// "is something open", and Scan additionally dates each open request
+	// with a git log it would fork per hit — an ordering the inbox needs
+	// and a row hint does not.
+	//
+	// A malformed record drops its hint rather than failing the dash. The
+	// kick floor and the stage floor both refuse on one, which is where
+	// that has to be loud.
 	awaitingInput := map[string]bool{}
-	pending, _ := input.Scan(root, filter.ProjectFilter)
-	for _, p := range pending {
-		awaitingInput[p.Project+"/"+p.Run] = true
+	for _, md := range mds {
+		if md.Status != run.StatusInProgress {
+			continue
+		}
+		if filter.ProjectFilter != "" && md.Project != filter.ProjectFilter {
+			continue
+		}
+		f, err := input.Load(root, md.Project, md.ID)
+		if err != nil {
+			continue
+		}
+		if _, open := f.Open(); open {
+			awaitingInput[md.Project+"/"+md.ID] = true
+		}
 	}
 
 	rows, err := dash.BuildRows(dash.Inputs{

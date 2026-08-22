@@ -743,3 +743,37 @@ func TestServeCluster(t *testing.T) {
 		})
 	}
 }
+
+// An unanswered question reads as an action hint beside `· close?`, so
+// the board says which run is holding a thread rather than only that a
+// thread is held.
+func TestBuildRowsMarksAwaitingInput(t *testing.T) {
+	md := &run.Metadata{ID: "fix-it", Project: "alpha", Status: run.StatusInProgress, Workflow: "sdlc"}
+	rows, err := BuildRows(Inputs{
+		Runs:          []*run.Metadata{md},
+		Index:         &run.JournalIndex{},
+		NextByRun:     map[string]NextDecision{"alpha/fix-it": {Stage: "code"}},
+		AwaitingInput: map[string]bool{"alpha/fix-it": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if !strings.Contains(rows[0].Note, "· input?") {
+		t.Fatalf("note = %q, want the input hint", rows[0].Note)
+	}
+
+	rows, err = BuildRows(Inputs{
+		Runs:      []*run.Metadata{md},
+		Index:     &run.JournalIndex{},
+		NextByRun: map[string]NextDecision{"alpha/fix-it": {Stage: "code"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rows[0].Note, "input?") {
+		t.Fatalf("note = %q, want no hint without an open question", rows[0].Note)
+	}
+}
