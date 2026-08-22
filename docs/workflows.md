@@ -171,9 +171,10 @@ words. It's the one thing the chain edges can't tell you, and it's optional —
 `moe chain new` returns immediately with an empty note, `--seed` pops `$EDITOR`
 at mint, and `moe chain note` writes it whenever. Membership is not written
 there. The head's run page in `moe serve` renders the batch live from the
-edges, one row per member with the dash's own status vocabulary, and offers a
-**kick** chip beside it (dynamic mode only) so the dash's `parked · kick?`
-hint has a surface in the browser.
+edges, one row per member with the dash's own status vocabulary — the batch a
+kick would actually ride, so you can read it before typing one. The kick itself
+stays a terminal verb: a hand-staged head is a deliberate staging fence, and
+staging is something you do at a keyboard.
 
 `moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
 that run to its ship, then rides on into each chained run in order. A chain-run
@@ -354,8 +355,11 @@ run to open for it. MoE evaluates chores against the journal and surfaces the
 due ones; `moe chore open`, or a pulse's chore auto-open, mints the seeded run.
 What happens after that is what you armed: with no `moe serve --dynamic` up, the
 run waits in `moe dash` like any other until you start it, while under an armed
-serve the [heartbeat](#the-heartbeat)'s sweep may both open it and ride it on
-through review, test, and ship.
+serve the [heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and
+that sweep both opens the run and rides it on through review, test, and ship.
+A chore coming due is a clock event on an otherwise quiet journal, so the
+heartbeat gate watches for it directly rather than waiting for something else
+to move.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:
@@ -518,12 +522,13 @@ is walking, so what you kicked is what runs.
 
 ### The heartbeat
 
-`moe serve --dynamic` is the standing consent rung. Running that process
-licenses two things: the run-spawning buttons in the web UI, and a resident
-heartbeat that looks at each project's board every twenty minutes and runs `moe
-pulse new --dynamic <project>` when it finds something worth looking at. That
-heartbeat is the only automatic pulse there is. Stopping the process retracts
-both; an unarmed `moe serve` behaves exactly as it always has.
+`moe serve --dynamic` is the standing consent rung, and it licenses exactly one
+thing: a resident heartbeat that looks at each project's board every twenty
+minutes and runs `moe pulse new --dynamic <project>` when it finds something
+worth looking at. That heartbeat is the only automatic pulse there is, and the
+only thing in the process that starts an agent at all — the web writes licences
+and marks, and the clock spends them. Stopping the process retracts it; an
+unarmed `moe serve` is a reader with a capture door.
 
 Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the heartbeat never sweeps the project at all. `safe` means
@@ -532,8 +537,11 @@ advanced, a chore's standing intent, a workflow tag on the idea a run came
 from — holding everything else with a named reason. `auto` is the default and
 today's behaviour. The mode binds the clock, not you: bangs, stage verbs, chain
 kicks and a hand-typed `moe pulse new --dynamic` run in every mode, because the
-typed word is the consent. The project hub carries the same three-way switch,
-and the boards' serve cluster counts the projects that deviate.
+typed word is the consent. Serve's **advance mark** is that same consent from
+the phone: it records the stage you just read as done — one journal commit, no
+agent — and `safe` starts on exactly such a mark. The project hub carries the
+same three-way switch, and the boards' serve cluster counts the projects that
+deviate.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,
@@ -548,11 +556,13 @@ the run it opened.
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
 settled-design floor, the occupancy guard, the review-and-test walk on every
-ride, and the journal marks on every machine turn. A tick sweeps only when the
-project's journal moved since its last heartbeat sweep, or startable work is
-parked with nobody inside it *and no sweep has looked at that board since it
-last changed* — a settled thread, or an open idea you tagged, since the tag is
-the licence to start it. A thread a survey saw and deliberately parked with a
+ride, and the journal marks on every machine turn. A tick sweeps when the
+project's journal moved since its last heartbeat sweep; when a chore's clock
+says so (a mechanically due chore, or a judged chore whose cooldown has expired
+without a sweep since — one probe per expiry, not one per tick); or when
+startable work is parked with nobody inside it *and no sweep has looked at that
+board since it last changed* — a settled thread, or an open idea you tagged,
+since the tag is the licence to start it. A thread a survey saw and deliberately parked with a
 reason is not re-offered until something moves. That parked leg looks one step
 past a held door: settled work queued behind a thread head that is itself
 waiting on your design still counts, because a sweep grooms before it kicks and

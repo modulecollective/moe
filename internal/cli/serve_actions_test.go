@@ -8,7 +8,7 @@ import (
 // The serve UI declarations are made in each workflow's init(), so the
 // registry is fully populated by the time any test runs. These tests
 // pin the composed shapes serve consumes — the same data cli/serve.go
-// wires through Options.WorkflowUI / Options.NewRunWorkflows.
+// wires through Options.WorkflowUI / Options.TagWorkflows.
 
 func TestLookupServeWorkflowUISdlc(t *testing.T) {
 	ui, ok := lookupServeWorkflowUI("sdlc")
@@ -16,20 +16,16 @@ func TestLookupServeWorkflowUISdlc(t *testing.T) {
 		t.Fatal("sdlc should carry a serve declaration")
 	}
 	if want := []string{"design", "code", "review", "test"}; !slices.Equal(ui.Stages, want) {
-		t.Errorf("sdlc spawnable stages = %v, want %v (push excluded)", ui.Stages, want)
-	}
-	if !ui.Cascade {
-		t.Error("sdlc should declare the cascade trio")
+		t.Errorf("sdlc web-visible stages = %v, want %v (push excluded)", ui.Stages, want)
 	}
 	if !ui.Close {
 		t.Error("sdlc should report a registered close pipeline")
 	}
 }
 
-// The operator-paced workflows all declare a serve UI now, deriving the
-// cascade trio from operatorCascades rather than a per-decl bit. Each
-// renders its spawnable stages, the cascade chips, and (where a close
-// pipeline is registered) the close chip.
+// The operator-paced workflows all declare a serve UI. Each renders its
+// web-visible stages — the set the advance mark is allowed to land on —
+// and (where a close pipeline is registered) the close chip.
 func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 	cases := []struct {
 		workflow string
@@ -44,10 +40,7 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 				t.Fatalf("%s should carry a serve declaration", tc.workflow)
 			}
 			if !slices.Equal(ui.Stages, tc.stages) {
-				t.Errorf("%s spawnable stages = %v, want %v", tc.workflow, ui.Stages, tc.stages)
-			}
-			if !ui.Cascade {
-				t.Errorf("%s should declare the cascade trio (operatorCascades)", tc.workflow)
+				t.Errorf("%s web-visible stages = %v, want %v", tc.workflow, ui.Stages, tc.stages)
 			}
 			if !ui.Close {
 				t.Errorf("%s should report a registered close pipeline", tc.workflow)
@@ -60,8 +53,8 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 // they registered a CLI close (chat and chain do) or a cascade
 // dispatcher (chat, pulse do). No serve declaration → no run-page
 // affordances. chain is the deliberate case: it has no stages at all,
-// so the run page offers nothing to spawn even though the
-// operator can close and kick it from the CLI.
+// so the head page offers no mark even though the operator can close
+// and kick it from the CLI.
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
 	for _, wf := range []string{"chat", "idea", "pulse", chainWorkflow, "nope"} {
 		if _, ok := lookupServeWorkflowUI(wf); ok {
@@ -70,13 +63,12 @@ func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
 	}
 }
 
-func TestServeNewRunWorkflows(t *testing.T) {
-	got := serveNewRunWorkflows()
-	if len(got) != 1 {
-		t.Fatalf("new-run workflows = %+v, want exactly sdlc", got)
-	}
-	if got[0].Name != "sdlc" || got[0].FirstStage != "design" || !got[0].Workspace {
-		t.Errorf("first entry = %+v, want sdlc/design with workspace", got[0])
+// The tag destinations serve offers, and their order: sdlc is pinned
+// first because an untagged POST falls back to the list's head.
+func TestServeTagWorkflows(t *testing.T) {
+	got := serveTagWorkflows()
+	if !slices.Equal(got, []string{"sdlc"}) {
+		t.Errorf("tag workflows = %v, want [sdlc]", got)
 	}
 }
 

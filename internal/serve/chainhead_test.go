@@ -12,21 +12,17 @@ import (
 )
 
 // chainHeadServer wires a chain head at alpha/batch whose ChainMembers
-// callback returns the given rows and live-parent key.
-func chainHeadServer(t *testing.T, members []dash.Row, chainedUnder string, dynamic bool) *Server {
+// callback returns the given rows.
+func chainHeadServer(t *testing.T, members []dash.Row) *Server {
 	t.Helper()
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "batch", dash.ChainWorkflow)
-	opts := Options{
+	return newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
-		ChainMembers: func(string, string) ([]dash.Row, string, error) {
-			return members, chainedUnder, nil
+		ChainMembers: func(string, string) ([]dash.Row, error) {
+			return members, nil
 		},
-	}
-	if dynamic {
-		return newTestServer(t, opts)
-	}
-	return newUnarmedTestServer(t, opts)
+	})
 }
 
 func getRunPage(t *testing.T, s *Server, path string) string {
@@ -53,7 +49,7 @@ var twoMembers = []dash.Row{
 // Cross-project members link correctly: a chain edit is global, so the
 // second member's link must be /run/beta/..., not /run/alpha/....
 func TestChainHeadRendersLiveMembers(t *testing.T) {
-	s := chainHeadServer(t, twoMembers, "", true)
+	s := chainHeadServer(t, twoMembers)
 	body := getRunPage(t, s, "/run/alpha/batch")
 
 	for _, want := range []string{
@@ -82,9 +78,9 @@ func TestNonChainRunSkipsChainMembers(t *testing.T) {
 	called := false
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
-		ChainMembers: func(string, string) ([]dash.Row, string, error) {
+		ChainMembers: func(string, string) ([]dash.Row, error) {
 			called = true
-			return twoMembers, "", nil
+			return twoMembers, nil
 		},
 	})
 	body := getRunPage(t, s, "/run/alpha/fix-it")
@@ -96,74 +92,59 @@ func TestNonChainRunSkipsChainMembers(t *testing.T) {
 	}
 }
 
-// TestChainHeadKickChipGating walks every reason the kick chip does or
-// doesn't render. It is the first web surface for an action the
-// dash has been naming since chain heads existed, so what it refuses
-// matters as much as what it offers.
-func TestChainHeadKickChipGating(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		members      []dash.Row
-		chainedUnder string
-		dynamic      bool
-		want         bool
-	}{
-		{name: "parked head with a batch", members: twoMembers, dynamic: true, want: true},
-		{name: "unarmed serve drops it", members: twoMembers, dynamic: false, want: false},
-		// `moe chain kick` would accept both of these; the page offers
-		// neither. Chained under a live parent is the CLI's own "kick the
-		// head" refusal. An empty head is what the dash calls `done ·
-		// close?` — a chip labelled "kick" that silently closed a
-		// placeholder would not be the action it names.
-		{name: "chained under a live parent", members: twoMembers, chainedUnder: "alpha/topic", dynamic: true, want: false},
-		{name: "empty head", members: nil, dynamic: true, want: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := chainHeadServer(t, tc.members, tc.chainedUnder, tc.dynamic)
-			body := getRunPage(t, s, "/run/alpha/batch")
-			got := strings.Contains(body, `action="/run/alpha/batch/kick"`)
-			if got != tc.want {
-				t.Errorf("kick chip rendered=%v, want %v\n%s", got, tc.want, body)
-			}
-		})
+// TestChainHeadOffersNoKick: a chain head has no stages to mark and no
+// kick to click. Kicking one is a terminal act — a hand-staged head is a
+// deliberate staging fence, and staging is where the operator already
+// is — so the page's whole job is to show the batch `moe chain kick`
+// would ride, honestly, and offer nothing.
+func TestChainHeadOffersNoKick(t *testing.T) {
+	s := chainHeadServer(t, twoMembers)
+	body := getRunPage(t, s, "/run/alpha/batch")
+
+	for _, banned := range []string{`/run/alpha/batch/kick`, ">kick<"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("head page still offers %q\n%s", banned, body)
+		}
+	}
+	// The members section is the point of the page and stays.
+	if !strings.Contains(body, "<h2>chained</h2>") {
+		t.Errorf("head page must still render the batch\n%s", body)
 	}
 }
 
 // TestChainMembersErrorDegradesGracefully: a journal replay that fails
-// must cost the members section and the kick chip, not the page. The
-// canvas link and the meta line are still worth serving — same posture
-// fillRunRow takes on a row-gather hiccup.
+// must cost the members section, not the page. The canvas link and the
+// meta line are still worth serving — same posture fillRunRow takes on
+// a row-gather hiccup.
 func TestChainMembersErrorDegradesGracefully(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "batch", dash.ChainWorkflow)
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
-		ChainMembers: func(string, string) ([]dash.Row, string, error) {
-			return nil, "", errors.New("git log exploded")
+		ChainMembers: func(string, string) ([]dash.Row, error) {
+			return nil, errors.New("git log exploded")
 		},
 	})
 	body := getRunPage(t, s, "/run/alpha/batch")
-	for _, unwanted := range []string{"<h2>chained</h2>", `action="/run/alpha/batch/kick"`} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("failed gather should suppress %q\n%s", unwanted, body)
-		}
+	if strings.Contains(body, "<h2>chained</h2>") {
+		t.Errorf("failed gather should suppress the members section\n%s", body)
 	}
 }
 
-// TestKickPOSTRefusesNonChainRun: the route is chain-only. A forged or
-// stale POST at an sdlc run gets a 409, not a `moe chain kick` spawn
-// that would refuse a beat later with a worse message.
-func TestKickPOSTRefusesNonChainRun(t *testing.T) {
+// TestKickRouteIsGone: the web has no spawn routes at all now, so a
+// forged or bookmarked POST at the old kick path falls through the mux
+// rather than reaching a handler that would refuse it politely.
+func TestKickRouteIsGone(t *testing.T) {
 	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	seedRun(t, root, "alpha", "batch", dash.ChainWorkflow)
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/fix-it/kick", strings.NewReader("")))
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/batch/kick", strings.NewReader("")))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if len(s.children.all) != 0 {
-		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
+		t.Errorf("nothing may spawn; registry has %d", len(s.children.all))
 	}
 }

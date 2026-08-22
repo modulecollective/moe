@@ -14,8 +14,6 @@
     {{template "headeractions" .}}
   </header>
 
-  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
-
   <div class="run-fragment">
     <p class="meta">
       <span class="note">workflow {{.Workflow}}</span>
@@ -23,13 +21,7 @@
     </p>
 
     <section class="actions">
-      {{if .Dynamic}}
-        {{if .Openable}}
-        <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit">open</button></form>
-        {{else}}
-        <span class="action disabled" aria-disabled="true">open — {{.BlockReason}}</span>
-        {{end}}
-      {{end}}
+      {{if .Waiting}}<span class="action disabled" aria-disabled="true">waiting — {{.Waiting}}</span>{{end}}
       {{if .OpenRun}}<a class="action" href="{{.OpenRunURL}}">open run: {{.OpenRun}}</a>{{end}}
     </section>
 

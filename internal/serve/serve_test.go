@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,6 +23,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 func TestDashRouteRendersBuckets(t *testing.T) {
@@ -92,11 +92,9 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 
 	paths := []string{
 		"/",                                   // dash
-		"/run/new",                            // new
 		"/idea/new",                           // new_idea
 		"/run/alpha/fix-it",                   // run
 		"/run/alpha/fix-it/canvas/design",     // canvas
-		"/run/alpha/my-idea/promote",          // promote
 		"/run/alpha/my-idea/edit",             // edit_idea
 		"/run/alpha/fix-it/transcript/design", // transcript (empty state)
 		"/chore/alpha/readme-refresh",         // chore
@@ -799,95 +797,6 @@ func TestFaviconServed(t *testing.T) {
 	}
 }
 
-func TestNewRunFormEmptyRoot(t *testing.T) {
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: t.TempDir(),
-	})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "no projects registered") {
-		t.Errorf("empty-root form should suggest `moe project add`, got:\n%s", body)
-	}
-	if strings.Contains(body, "<form") {
-		t.Errorf("empty-root form should hide the form entirely")
-	}
-}
-
-func TestNewRunFormWithProjects(t *testing.T) {
-	root := t.TempDir()
-	seedProject(t, root, "alpha")
-	seedProject(t, root, "beta")
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: root,
-	})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`<form`, `name="id"`, `name="agent"`,
-		// Single project/slug field plus a datalist of project/ prefixes.
-		`placeholder="project/slug"`,
-		`<datalist`, `value="alpha/"`, `value="beta/"`,
-		`>claude<`, `>codex<`,
-		`(default)`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("form missing %q\n%s", want, body)
-		}
-	}
-	// The old split project/slug controls are gone.
-	for _, banned := range []string{`name="project"`, `name="slug"`} {
-		if strings.Contains(body, banned) {
-			t.Errorf("form should not carry the old %q control\n%s", banned, body)
-		}
-	}
-}
-
-func TestNewRunMethodNotAllowed(t *testing.T) {
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: t.TempDir(),
-	})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/run/new", nil))
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("want 405, got %d", rr.Code)
-	}
-	if got := rr.Header().Get("Allow"); !strings.Contains(got, "GET") || !strings.Contains(got, "POST") {
-		t.Errorf("Allow header should list GET and POST, got %q", got)
-	}
-}
-
-// TestNewRunSlugHasMobileAttrs: the slug input carries the mobile-
-// keyboard attributes that disable initial-caps / autocorrect. Without
-// these, a phone keyboard fights the kebab-case pattern regex.
-func TestNewRunSlugHasMobileAttrs(t *testing.T) {
-	root := t.TempDir()
-	seedProject(t, root, "alpha")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
-	body := rr.Body.String()
-	for _, want := range []string{
-		`autocapitalize="none"`,
-		`autocorrect="off"`,
-		`spellcheck="false"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("slug input missing %q\n%s", want, body)
-		}
-	}
-}
-
 func TestNewIdeaFormEmptyRoot(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
@@ -1195,9 +1104,8 @@ func TestRunPageMissingRun404(t *testing.T) {
 }
 
 // TestIdeaPageRendersActionsForInProgressIdea: when the loaded run is
-// an in-progress idea, the per-run page renders edit + promote peer
-// affordances (links to /edit and /promote). The actual forms live on
-// those sub-pages — not inline on the idea page.
+// an in-progress idea, the per-run page renders the edit link and the
+// tag chips. The edit form lives on its own sub-page — not inline.
 func TestIdeaPageRendersActionsForInProgressIdea(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
@@ -1216,64 +1124,24 @@ func TestIdeaPageRendersActionsForInProgressIdea(t *testing.T) {
 	for _, want := range []string{
 		`<section class="actions">`,
 		`href="/run/alpha/my-idea/edit"`,
-		`href="/run/alpha/my-idea/promote"`,
+		`/run/alpha/my-idea/tag?workflow=sdlc`,
 		`>edit idea<`,
-		`>promote<`,
+		`>tag sdlc<`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-	// The page must not embed the form chrome any more; that lives on
-	// the dedicated /promote page.
+	// The page never inlined the promote form, and now there is no
+	// promote surface to link to at all.
 	for _, banned := range []string{
-		`<h2>promote to sdlc</h2>`,
+		`/run/alpha/my-idea/promote`,
 		`name="agent"`,
 		`name="workspace"`,
 	} {
 		if strings.Contains(body, banned) {
-			t.Errorf("idea page must not inline promote form (found %q)\n%s", banned, body)
+			t.Errorf("idea page must not offer promotion (found %q)\n%s", banned, body)
 		}
-	}
-}
-
-// TestPromotePageRendersForm: the dedicated /promote page renders the
-// workspace + agent dropdowns and a POST action back to the same path.
-func TestPromotePageRendersForm(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea/promote", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`action="/run/alpha/my-idea/promote"`,
-		`name="agent"`,
-		`>claude<`, `>codex<`, `(default)`,
-		`type="submit"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-}
-
-// TestPromotePageRefusesNonIdea: GET on a non-idea run is 409, no
-// rendered form. Same gate POST applies, so a stale bookmark fails the
-// same way at either method.
-func TestPromotePageRefusesNonIdea(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/promote", nil))
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -1511,15 +1379,17 @@ func TestCloseRouteSDLCWithoutCallbackIs500(t *testing.T) {
 	}
 }
 
-// TestRunPageRendersAdvanceAndShipChips: an in-progress sdlc run parked
-// at an advanceable stage (next=code) surfaces the "→ code" advance
-// chip (POST /advance), the "ship" chip (POST /ship), and the "chain"
-// chip (POST /chain), prepended ahead of the existing close-run chip.
-// The ship/chain chips render as neutral .action chips — no distinct
-// presentation class.
-func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
-	root := t.TempDir()
+// TestRunPageRendersTheAdvanceMark: an in-progress sdlc run parked at a
+// worked stage (next=code, with code's turn committed) surfaces the
+// "advance past code" chip, ahead of the close chip. The label names
+// what the click does — record this stage as done — rather than the old
+// trio's "→ code", which named a stage it was about to run.
+func TestRunPageRendersTheAdvanceMark(t *testing.T) {
+	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "code",
+		time.Now().Add(-time.Hour))
 	now := time.Now().UTC()
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
@@ -1538,21 +1408,45 @@ func TestRunPageRendersAdvanceAndShipChips(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`action="/run/alpha/fix-it/advance"`,
-		`>→ code</button>`,
-		`action="/run/alpha/fix-it/ship"`,
-		`class="action" type="submit">ship</button>`,
-		`action="/run/alpha/fix-it/chain"`,
-		`class="action" type="submit">chain</button>`,
+		`>advance past code</button>`,
 		`action="/run/alpha/fix-it/close"`, // base close chip still present
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-	// Advance chip renders ahead of the close chip.
+	// The mark renders ahead of the close chip.
 	iAdv, iClose := strings.Index(body, "/fix-it/advance"), strings.Index(body, "/fix-it/close")
 	if iAdv < 0 || iClose < 0 || iAdv > iClose {
 		t.Errorf("advance chip should render before close chip: adv=%d close=%d", iAdv, iClose)
+	}
+}
+
+// TestRunPageHidesTheMarkOnAnUnworkedStage: stageSatisfied wants a
+// marker *and* a work turn, so a mark on a stage nobody has worked is
+// one the ladder ignores. Don't offer it — the operator would click,
+// see a redirect, and find the run exactly where they left it.
+func TestRunPageHidesTheMarkOnAnUnworkedStage(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:design", Stage: "design",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); strings.Contains(body, "/fix-it/advance") {
+		t.Errorf("a never-worked stage must not offer the mark\n%s", body)
 	}
 }
 
@@ -1875,26 +1769,6 @@ func TestIdeaEditPageRefusesNonIdea(t *testing.T) {
 	}
 }
 
-// TestPromoteRefusesNonIdeaRun: POSTing to the promote URL of a
-// non-idea run is the operator (or a stale form) calling the wrong
-// surface. 409 with a clear body, no spawn.
-func TestPromoteRefusesNonIdeaRun(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	req := httptest.NewRequest("POST", "/run/alpha/fix-it/promote", strings.NewReader(""))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("no child should have been spawned for non-idea run; registry has %d", len(s.children.all))
-	}
-}
-
 // TestPromoteRefusesMissingRun: a slug that doesn't exist on disk
 // returns 404 from the load step.
 func TestPromoteRefusesMissingRun(t *testing.T) {
@@ -1997,8 +1871,8 @@ func newServerWithDefaults(t *testing.T, opts Options) *Server {
 	if opts.WorkflowUI == nil {
 		opts.WorkflowUI = testWorkflowUI
 	}
-	if opts.NewRunWorkflows == nil {
-		opts.NewRunWorkflows = testNewRunWorkflows
+	if opts.TagWorkflows == nil {
+		opts.TagWorkflows = testTagWorkflows
 	}
 	s, err := New(opts)
 	if err != nil {
@@ -2016,25 +1890,22 @@ func newServerWithDefaults(t *testing.T, opts Options) *Server {
 	return s
 }
 
-// testNewRunWorkflows mirrors the production new-run list cli/serve.go
-// wires: sdlc, the one workflow fronted in the form.
-var testNewRunWorkflows = []NewRunWorkflow{
-	{Name: "sdlc", FirstStage: "design", Workspace: true},
-}
+// testTagWorkflows mirrors the production tag-destination list
+// cli/serve.go wires: sdlc, the one workflow an idea can be tagged for.
+var testTagWorkflows = []string{"sdlc"}
 
 // testWorkflowUI is the sdlc slice of the production declarations
 // cli/serve.go wires (the cli registry is unreachable from here —
-// internal/cli imports internal/serve): sdlc cascades with push
+// internal/cli imports internal/serve): sdlc's ladder with push
 // excluded, and this stub declares nothing else. Production also
-// declares twin as the other cascade workflow; the tests here
-// only need one cascade workflow and one undeclared one to cover the
-// rendering branches. The stub-vs-production seam is covered
-// cli-side by TestServeRunPageChipsComposeWithRealLookup, which wires
-// the real lookup into a real server.
+// declares twin; the tests here only need one declared workflow and one
+// undeclared one to cover the rendering branches. The stub-vs-production
+// seam is covered cli-side by TestServeRunPageChipsComposeWithRealLookup,
+// which wires the real lookup into a real server.
 func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	switch workflow {
 	case "sdlc":
-		return WorkflowUI{Stages: []string{"design", "code", "review", "test"}, Cascade: true, Close: true}, true
+		return WorkflowUI{Stages: []string{"design", "code", "review", "test"}, Close: true}, true
 	}
 	return WorkflowUI{}, false
 }
@@ -2076,7 +1947,6 @@ func TestIdeaPageRendersCloseAndReopenActions(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/run/alpha/my-idea/edit"`,
-		`href="/run/alpha/my-idea/promote"`,
 		`<form method="post" action="/run/alpha/my-idea/close"`,
 		`>close idea</button>`,
 	} {
@@ -2229,93 +2099,10 @@ func TestUndeclaredWorkflowPageRendersNoChips(t *testing.T) {
 	}
 }
 
-// TestNewRunFormRendersWorkflowSelect: the form carries the workflow
-// selector with sdlc — the one fronted workflow — selected.
-func TestNewRunFormRendersWorkflowSelect(t *testing.T) {
-	root := t.TempDir()
-	seedProject(t, root, "alpha")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/new", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`<select name="workflow">`,
-		`<option value="sdlc" selected>sdlc</option>`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-}
-
-// TestPromoteFormRendersWorkflowSelect: the promote page carries the
-// same destination selector, sdlc selected.
-func TestPromoteFormRendersWorkflowSelect(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea/promote", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`<select name="workflow">`,
-		`<option value="sdlc" selected>sdlc</option>`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-}
-
-// TestPromoteErrorEchoesSelections: a promote submit that fails
-// validation re-renders with the operator's workspace and agent picks
-// still selected, the way the new-run form has always behaved. Before
-// the two forms shared their field markup, promote's re-render dropped
-// both and the operator had to re-pick.
-func TestPromoteErrorEchoesSelections(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	if err := os.MkdirAll(filepath.Join(root, ".moe", "named", "alpha", "shared"), 0o755); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	form := url.Values{}
-	form.Set("workflow", "nope")
-	form.Set("workspace", "shared")
-	form.Set("agent", "codex")
-	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`unknown workflow &#34;nope&#34;`,
-		`value="shared" data-project="alpha" selected`,
-		`value="codex" selected`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-}
-
 // TestIdeaPageRendersTagChips: the tag chip is the dash face of `moe
-// idea tag` — one chip per workflow the promote form offers, and an
-// untag chip once a tag is on. An already-tagged workflow drops its own
-// chip: re-tagging it does nothing.
+// idea tag` — one chip per tag destination serve offers, and an untag
+// chip once a tag is on. An already-tagged workflow drops its own chip:
+// re-tagging it does nothing.
 func TestIdeaPageRendersTagChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")

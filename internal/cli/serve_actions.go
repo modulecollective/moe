@@ -12,18 +12,16 @@ import (
 // — about how `moe serve` should front its runs. Declaring nothing
 // keeps today's read-only per-run page; the decl is the opt-in.
 //
-// The spawnable stage set is not declared directly: it defaults to
+// The web-visible stage set is not declared directly: it defaults to
 // every registered stage verb (group.Lookup(stage) != nil), with
 // excludeStages carving out the exceptions. sdlc excludes push —
 // push stays terminal/CLI-only, a recorded decision.
 type serveWorkflowDecl struct {
-	// excludeStages are registered stage verbs serve must not spawn.
+	// excludeStages are registered stage verbs the web must not act on.
 	excludeStages []string
-	// newRun fronts the workflow in serve's /run/new and promote forms.
-	newRun bool
-	// workspace mirrors runNew's "only sdlc accepts
-	// --workspace" rule for the new-run form's workspace dropdown.
-	workspace bool
+	// tagTarget offers the workflow as an idea tag destination — the
+	// licence a sweep spends when it promotes.
+	tagTarget bool
 }
 
 var serveWorkflowDecls = map[string]serveWorkflowDecl{}
@@ -39,9 +37,9 @@ func registerServeWorkflow(workflow string, decl serveWorkflowDecl) {
 }
 
 // lookupServeWorkflowUI composes the serve-facing view of one
-// workflow's declaration: spawnable stage verbs (ladder order, minus
-// exclusions and stages with no registered verb), the cascade flag,
-// and whether a close pipeline is registered. ok=false — no
+// workflow's declaration: the web-visible stage verbs (ladder order,
+// minus exclusions and stages with no registered verb) and whether a
+// close pipeline is registered. ok=false — no
 // declaration, or the paired group/workflow isn't registered — keeps
 // the run read-only in serve.
 func lookupServeWorkflowUI(workflow string) (serve.WorkflowUI, bool) {
@@ -69,26 +67,22 @@ func lookupServeWorkflowUI(workflow string) (serve.WorkflowUI, bool) {
 	}
 	_, hasClose := lookupCloseRegistration(workflow)
 	return serve.WorkflowUI{
-		Stages: stages,
-		// Cascade is derived from the operatorCascades predicate, not
-		// declared per-workflow: the same property that gates the
-		// stage-verb flags and chain membership gates the serve chips, so
-		// a workflow can't render a ship chip its stage verbs won't honor.
-		Cascade:   operatorCascades(workflow),
+		Stages:    stages,
 		Perpetual: wf.Perpetual(),
 		Close:     hasClose,
 	}, true
 }
 
-// serveNewRunWorkflows lists the workflows the /run/new and promote
-// forms offer, each with the first stage serve spawns after opening.
-// sdlc is pinned first — it's the form's default selection — and the
-// rest follow in name order so the list is deterministic regardless of
-// init() registration order.
-func serveNewRunWorkflows() []serve.NewRunWorkflow {
+// serveTagWorkflows lists the workflows serve offers as idea tag
+// destinations. sdlc is pinned first — it is the list's default, the
+// workflow an untagged POST falls back to — and the rest follow in name
+// order so the list is deterministic regardless of init() registration
+// order. A workflow with no stages is dropped: a tag is a licence to run
+// a ladder, and there would be none to run.
+func serveTagWorkflows() []string {
 	names := make([]string, 0, len(serveWorkflowDecls))
 	for name, decl := range serveWorkflowDecls {
-		if decl.newRun {
+		if decl.tagTarget {
 			names = append(names, name)
 		}
 	}
@@ -96,17 +90,13 @@ func serveNewRunWorkflows() []serve.NewRunWorkflow {
 	if i := slices.Index(names, "sdlc"); i > 0 {
 		names = append([]string{"sdlc"}, append(names[:i], names[i+1:]...)...)
 	}
-	out := make([]serve.NewRunWorkflow, 0, len(names))
+	out := make([]string, 0, len(names))
 	for _, name := range names {
 		wf, err := LookupWorkflow(name)
 		if err != nil || len(wf.Stages()) == 0 {
 			continue
 		}
-		out = append(out, serve.NewRunWorkflow{
-			Name:       name,
-			FirstStage: wf.Stages()[0],
-			Workspace:  serveWorkflowDecls[name].workspace,
-		})
+		out = append(out, name)
 	}
 	return out
 }

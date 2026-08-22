@@ -8,9 +8,7 @@ import (
 )
 
 // chainMembers is the head page's read of live chain truth: the batch
-// hanging off a chain head, head→tail, plus the qualified key of a live
-// parent the head is itself chained under ("" when it heads its own
-// chain).
+// hanging off a chain head, head→tail.
 //
 // The walk is the one `moe chain kick` rides — follow ChainedChild from
 // the head and stop at the first child that isn't live, exactly where
@@ -27,14 +25,14 @@ import (
 // is both cheaper and the only correct scope. A member the dash filters
 // out entirely still gets a row, built from its metadata — the count
 // must not lie about what kick will ride.
-func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, string, error) {
+func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, error) {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	mds, err := run.Scan(root)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	byKey := make(map[string]*run.Metadata, len(mds))
 	for _, md := range mds {
@@ -43,11 +41,10 @@ func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, stri
 
 	graph := run.NewChainGraph(idx, byKey)
 	head := projectID + "/" + slug
-	chainedUnder := graph.LiveParentOf(head)
 
 	snap, err := GatherDashSnapshot(root, now, DashFilter{})
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	rowByKey := make(map[string]dash.Row, len(snap.Rows))
 	for _, r := range snap.Rows {
@@ -78,5 +75,5 @@ func chainMembers(root, projectID, slug string, now time.Time) ([]dash.Row, stri
 		row.EdgeAgent, row.EdgeConsent = groomed, consent
 		members = append(members, row)
 	}
-	return members, chainedUnder, nil
+	return members, nil
 }

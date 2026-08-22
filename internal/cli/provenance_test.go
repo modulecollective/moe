@@ -281,7 +281,7 @@ func TestChainMembersCarryEdgeAttribution(t *testing.T) {
 	root := spawnFixture(t)
 	head, _, _ := chainBatch(t, root)
 
-	members, _, err := chainMembers(root, "moe", head, time.Now().UTC())
+	members, err := chainMembers(root, "moe", head, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

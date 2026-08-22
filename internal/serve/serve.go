@@ -1,12 +1,18 @@
 // Package serve provides moe's HTTP front-end: a small server the
-// operator can reach from a phone over the Tailnet to launch new runs,
-// glance at the dash, and feed chain-prompt keys into in-flight runs.
+// operator can reach from a phone over the Tailnet to glance at the
+// dash, read canvases and transcripts, and hand the machine consent.
 //
-// The server is the parent process of every run it launches, so it
-// owns each run's TTY (via a PTY) and writes chain-prompt keys
-// directly into the child's stdin without going through
-// `tmux send-keys`. Runs started outside `moe serve` are read-only in
-// the UI (they show on the dash but expose no buttons).
+// The web starts nothing. Every POST it serves writes a journal commit
+// and stops: capture or edit an idea, tag it for a workflow, close or
+// reopen a run, mark the current stage advanced. Starting agents is the
+// resident heartbeat's job alone (heartbeat.go), which is what makes
+// those two halves compose — the web writes licences, the clock spends
+// them. It also means there is no path from the listener to code
+// execution, armed or not.
+//
+// The server is still the parent process of every sweep the heartbeat
+// starts, so it owns each child's TTY (via a PTY) and can show its
+// output tail. Nothing else in the process spawns.
 //
 // Auth is network reach. The listener binds to 127.0.0.1 by default,
 // so nothing off-box can reach it directly. Exposing it to the tailnet
@@ -16,23 +22,14 @@
 // login form. Override with --addr to bind elsewhere (for example,
 // --addr <tailnet-ip> on a kernel-mode tailscale host).
 //
-// Because reach is the only gate, motion is opt-in. Several POST routes
-// run `moe <wf> <stage>` agent subprocesses (i.e. arbitrary code), so by
-// default — unarmed — they refuse with 403 and the UI doesn't offer
-// them: idea capture, idea tag/untag, run close/edit/reopen, opening or
-// promoting into a *parked* run, and the read-only views work.
-//
-// Options.Dynamic (the --dynamic flag or a non-empty MOE_SERVE_DYNAMIC)
-// arms the process. It is the standing consent rung, and
-// it licenses two things at once:
-//
-//   - the spawn bucket, so a phone click can launch a run. That's an
-//     acknowledged choice: anything that can reach the listener can then
-//     execute code.
-//   - the resident heartbeat (heartbeat.go), a per-project ticker that
-//     sweeps a project on its own clock when the board warrants it.
-//     Running the armed process *is* the consent act — the legible
-//     replacement for installing a crontab. Stopping it retracts.
+// Because reach is the only gate, motion is opt-in. Options.Dynamic
+// (the --dynamic flag or a non-empty MOE_SERVE_DYNAMIC) arms the
+// process, and it licenses exactly one thing: the resident heartbeat, a
+// per-project ticker that sweeps a project on its own clock when the
+// board warrants it. Running the armed process *is* the consent act —
+// the legible replacement for installing a crontab. Stopping it
+// retracts. Unarmed, every route still works and nothing ever acts on
+// what they wrote.
 //
 // Under that switch, each project carries its own cap on the clock —
 // `moe project mode <id> paused|safe|auto`, stored in project.json and
@@ -130,18 +127,18 @@ type Options struct {
 
 	// ChainMembers returns the live batch hanging off a chain head: one
 	// dash.Row per member in head→tail order — the runs `moe chain kick`
-	// would actually ride — plus the qualified key of a live parent the
-	// head is itself chained under ("" when it heads its own chain).
+	// would actually ride.
 	//
 	// The head's canvas is the operator's purpose note and says nothing
 	// about membership; this is where the head page gets the batch. The
-	// second return is the kick chips' gate: a head chained under a live
-	// parent is one `moe chain kick` refuses ("kick the head"), so the
-	// page must not offer it.
+	// page offers no kick of its own — a hand-staged head is a deliberate
+	// staging fence, and staging is a terminal activity — so what it owes
+	// the operator is an honest picture of what `moe chain kick` would
+	// ride, nothing more.
 	//
 	// Only called for chain-workflow runs. Absent — or erroring — leaves
-	// the head page as it was: no members section, no kick chips.
-	ChainMembers func(project, run string) (members []dash.Row, chainedUnder string, err error)
+	// the head page as it was: no members section.
+	ChainMembers func(project, run string) (members []dash.Row, err error)
 
 	// RunProvenance returns the per-run page's provenance section: how
 	// the run was opened and, walking up the MoE-Spawned-By chain, how
@@ -165,18 +162,15 @@ type Options struct {
 	// sections. A broken trace file degrades its section, not the page.
 	GatherRunTraces func(project, run string) (RunTraces, error)
 
-	// Dynamic arms the process at the dynamic consent rung, which gates
-	// two things: the spawn bucket — the POSTs that run `moe <wf>
-	// <stage>` agent subprocesses (the new-run and promote forms' "& run"
-	// submits, advance/ship/chain, chain kick, chore open) — and the
-	// heartbeat ticker (heartbeat.go).
+	// Dynamic arms the heartbeat ticker (heartbeat.go). It is the whole
+	// of what the dynamic consent rung gates here, because the heartbeat
+	// is the only thing in this process that starts an agent: every route
+	// the web serves either reads, or writes a journal commit a later
+	// tick may act on.
 	//
-	// Off by default (unarmed): those POSTs refuse with 403, their UI
-	// entry points don't render, and no tick ever fires; the
-	// journal-write routes — including parking a run from the new-run and
-	// promote forms' bare submits — and the read-only views are
-	// unaffected. The cli wrapper sets this from the --dynamic flag or a
-	// non-empty $MOE_SERVE_DYNAMIC.
+	// Off by default (unarmed): no tick ever fires, and the process is a
+	// reader with a capture door. The cli wrapper sets this from the
+	// --dynamic flag or a non-empty $MOE_SERVE_DYNAMIC.
 	Dynamic bool
 
 	// Heartbeat is the cli-side gate the resident ticker consults each
@@ -214,46 +208,36 @@ type Options struct {
 	// the workflow registry. Absent means the chore page returns 500.
 	GatherChore func(project, name string) (state chore.State, ok bool, err error)
 
-	// OpenChore opens the chore's configured-workflow run in-process
-	// (mirroring `moe chore open`) and returns the destination run's
-	// identity plus the workflow + first stage serve must spawn to host
-	// it. Guard failures come back wrapping ErrChoreNotFound (→ 404) or
-	// ErrChoreNotOpenable (→ 409); cli/serve.go translates its internal
-	// guard errors into those so serve needn't import the cli package.
-	// Absent means the open route returns 500.
-	OpenChore func(project, name string) (dest ChoreOpen, err error)
-
 	// WorkflowUI returns the serve declaration a workflow made at
-	// registration time — which stage verbs serve may spawn, whether
-	// the cascade chips (advance/ship/chain) apply, whether a
-	// close pipeline exists. ok=false means the workflow declared nothing:
+	// registration time — which stages the web may mark advanced, and
+	// whether a close pipeline exists. ok=false means the workflow
+	// declared nothing:
 	// its runs render read-only (canvas links, no chips) and the
 	// stage/advance routes refuse. cli/serve.go wires this to the
 	// cli-side registry so serve carries no per-workflow UI policy of
-	// its own. Absent means the advance/ship/chain and stage-spawn
-	// routes return 500; idea chips (bespoke, not stage-derived) still
-	// render.
+	// its own. Absent means the advance route returns 500; idea chips
+	// (bespoke, not stage-derived) still render.
 	WorkflowUI func(workflow string) (ui WorkflowUI, ok bool)
 
-	// NewRunWorkflows lists the workflows the /run/new and promote
-	// forms offer, in display order; the first entry is the default
-	// selection. Computed once from the cli-side registry at serve
-	// start (the registry is init-time static). Empty hides the
-	// workflow selector and fails any new-run/promote POST.
-	NewRunWorkflows []NewRunWorkflow
+	// TagWorkflows lists the workflows an idea may be tagged for, in
+	// display order; the first entry is what an untagged POST falls back
+	// to. One "tag <workflow>" chip renders per entry, and the tag route
+	// resolves against the same list, so the two surfaces can't disagree
+	// on what a valid destination is. Computed once from the cli-side
+	// registry at serve start (the registry is init-time static). Empty
+	// leaves ideas untaggable from the web.
+	TagWorkflows []string
 }
 
 // WorkflowUI is one workflow's declared web affordances, composed
 // cli-side from the workflow registries (see Options.WorkflowUI).
 type WorkflowUI struct {
-	// Stages are the stage verbs serve may spawn for this workflow, in
-	// ladder order. For cascade workflows the run's next stage must be
-	// in this set for the advance trio to render/spawn.
+	// Stages are the stage verbs this workflow's runs step through, in
+	// ladder order, minus any the workflow excludes from the web. A run's
+	// next stage must be in this set for the advance mark to render or
+	// land — which is what keeps sdlc's push out: a marker on push would
+	// satisfy the ladder without anything ever being pushed.
 	Stages []string
-	// Cascade reports that the workflow's stage verbs accept --ship /
-	// --chain — the advance/ship/chain routes and
-	// chips apply.
-	Cascade bool
 	// Perpetual reports that satisfying every stage does not make close
 	// the routine next move; the run stays open for repeat sittings.
 	Perpetual bool
@@ -261,19 +245,6 @@ type WorkflowUI struct {
 	// pipeline. Per-run pages use Perpetual to decide whether close is
 	// a routine idle-page chip or only a live-child lifecycle affordance.
 	Close bool
-}
-
-// NewRunWorkflow is one entry in the new-run/promote forms' workflow
-// selector.
-type NewRunWorkflow struct {
-	Name string
-	// FirstStage is the stage verb serve spawns right after opening a
-	// run in this workflow (the registry's first ladder stage).
-	FirstStage string
-	// Workspace reports whether the workflow accepts a workspace
-	// binding (the CLI's "only sdlc accepts --workspace"
-	// rule); the form rejects a workspace selection otherwise.
-	Workspace bool
 }
 
 // Server owns the HTTP listener and the registry of live PTY
@@ -449,7 +420,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/", s.handleDash)
-	s.router.HandleFunc("/run/new", s.handleNewRun)
 	s.router.HandleFunc("/idea/new", s.handleNewIdea)
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
@@ -459,28 +429,20 @@ func (s *Server) registerRoutes() {
 	// bucket as the canvas route; ?agent / ?before / ?fragment are the
 	// backend pick, the paging cursor, and the load-earlier fetch form.
 	s.router.HandleFunc("GET /run/{project}/{slug}/transcript/{stage}", s.handleTranscript)
-	s.router.HandleFunc("GET /run/{project}/{slug}/promote", s.handlePromoteForm)
-	s.router.HandleFunc("POST /run/{project}/{slug}/promote", s.handlePromote)
 	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleCaptureEditForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleCaptureEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
 	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
 	s.router.HandleFunc("POST /run/{project}/{slug}/tag", s.handleIdeaTag)
 	s.router.HandleFunc("POST /run/{project}/{slug}/untag", s.handleIdeaUntag)
-	// Stage advancement for in-progress cascade-workflow runs:
-	// /advance spawns the next stage interactively under the serve
-	// handshake; /ship spawns it under --ship (headless cascade through
-	// push, ship this run); /chain spawns it under --chain (ship this
-	// run, then ride the whole chain).
+	// The advance mark: the operator read the stage's canvas and approves,
+	// so the run's next pickup starts at the successor. A journal commit,
+	// not a spawn — the heartbeat is what rides it.
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
-	s.router.HandleFunc("POST /run/{project}/{slug}/ship", s.handleShip)
-	s.router.HandleFunc("POST /run/{project}/{slug}/chain", s.handleChain)
-	s.router.HandleFunc("POST /run/{project}/{slug}/kick", s.handleKick)
-	// Chore detail page + open action. A chore isn't a run, so it has
-	// its own /chore namespace; "open" mints a fresh run of the chore's
-	// configured workflow (the analog of promoting an idea).
+	// Chore detail page. A chore isn't a run, so it has its own /chore
+	// namespace; read-only, because serve opens due chores on its own
+	// cadence now and `moe chore open --now` is the operator's override.
 	s.router.HandleFunc("GET /chore/{project}/{name}", s.handleChorePage)
-	s.router.HandleFunc("POST /chore/{project}/{name}/open", s.handleChoreOpen)
 
 	// The heartbeat's own page: what it decided, what it spawned, what
 	// died. The boards carry a brief status cluster in their header and
@@ -489,18 +451,13 @@ func (s *Server) registerRoutes() {
 
 	// Read-only browsing of the bureaucracy's durable content: lore,
 	// projects, per-project knowledge and digital-twin docs. All render
-	// from os.ReadFile + the internal/md renderer; none touch the spawn
-	// bucket, so they work on an unarmed serve exactly like the dash and
-	// canvas.
+	// from os.ReadFile + the internal/md renderer.
 	s.router.HandleFunc("GET /lore", s.handleLoreIndex)
 	s.router.HandleFunc("GET /lore/{name}", s.handleLoreEntry)
 	s.router.HandleFunc("GET /projects", s.handleProjectsIndex)
 	s.router.HandleFunc("GET /projects/{project}", s.handleProjectHub)
-	// The heartbeat's per-project brake. Deliberately outside the spawn
-	// bucket: it writes config and spawns nothing, and braking is not
-	// motion. Anyone who can reach the listener can already start a run on
-	// an armed serve; letting them hold one back instead is the fail-safe
-	// direction.
+	// The heartbeat's per-project brake: it writes config and starts
+	// nothing, like every other route here.
 	s.router.HandleFunc("POST /projects/{project}/mode", s.handleProjectMode)
 	s.router.HandleFunc("GET /projects/{project}/knowledge", s.handleKnowledge)
 	s.router.HandleFunc("GET /projects/{project}/knowledge/{topic}", s.handleKnowledgeTopic)
@@ -515,20 +472,6 @@ func (s *Server) registerRoutes() {
 		panic("serve: sub static FS: " + err.Error())
 	}
 	s.router.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
-}
-
-// handleNewRun dispatches GET (form render) vs POST (spawn child)
-// on the single /run/new path.
-func (s *Server) handleNewRun(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleNewRunForm(w, r)
-	case http.MethodPost:
-		s.handleNewRunSubmit(w, r)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
 }
 
 // handleNewIdea dispatches GET (form render) vs POST (open idea run)
@@ -628,25 +571,6 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		s.logf("template %s: %v", name, err)
 	}
 	s.logf("%s %s", r.Method, r.URL.Path)
-}
-
-// spawnAllowed gates the spawn bucket — the POST routes that run agent
-// subprocesses. On an unarmed serve (the default) it writes a 403 and
-// returns false; with Dynamic set it returns true and the handler
-// proceeds.
-// The always-spawning handlers (advance/ship/chain, kick, chore open)
-// call it first thing; the dual-submit new-run and promote handlers
-// call it only when the spawn submit was used, before opening anything.
-// The matching UI gating (so an unarmed serve never offers a control it
-// would refuse) lives in the view models, not here.
-func (s *Server) spawnAllowed(w http.ResponseWriter) bool {
-	if s.opts.Dynamic {
-		return true
-	}
-	http.Error(w,
-		"serve is unarmed; restart with --dynamic (or set MOE_SERVE_DYNAMIC) to enable run-spawning actions",
-		http.StatusForbidden)
-	return false
 }
 
 // saveActivity rewrites the state file from the current record.

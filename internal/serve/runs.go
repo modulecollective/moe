@@ -20,17 +20,16 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/workspace"
 )
 
-// slugPattern is the kebab-case shape `moe sdlc new` accepts. Mirrors
-// the validation moe does itself so a bad slug fails at the form
-// rather than after the child has spawned. Lowercase letters, digits,
-// and hyphens; must start with a letter or digit.
+// slugPattern is the kebab-case shape `moe idea new` accepts. Mirrors
+// the validation moe does itself so a bad slug fails at the form rather
+// than at the open. Lowercase letters, digits, and hyphens; must start
+// with a letter or digit.
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// splitID parses the single `project/slug` field both new-* forms now
-// take into its two halves, mirroring the CLI's splitProjectRun
+// splitID parses the single `project/slug` field the new-idea form
+// takes into its two halves, mirroring the CLI's splitProjectRun
 // (internal/cli/args.go): cut on the first slash, reject either half
 // empty. Kept local rather than shared because internal/cli imports
 // internal/serve, so serve can't import the original back without a
@@ -41,208 +40,6 @@ func splitID(id string) (project, slug string, err error) {
 		return "", "", errors.New("expected `project/slug`")
 	}
 	return project, slug, nil
-}
-
-// agentOptions is the hardcoded set offered in the new-run form's
-// agent dropdown. Two registered agents today; if a third ever
-// appears, surface it here rather than pulling from internal/agent
-// (which has no exported enumeration). The empty value means "use
-// the run's default" — resolved at stage time.
-var agentOptions = []string{"", "claude", "codex"}
-
-// workspaceOption is one entry in the new-run form's workspace
-// dropdown. Pre-joined as "project/name" so the template doesn't
-// need to compose strings.
-type workspaceOption struct {
-	Project string
-	Name    string
-	Label   string // "project/name"
-}
-
-// runFormVM is everything the new-run and promote forms share: the
-// dropdown content both offer and the selections both echo back on an
-// error re-render. newRunVM and promoteVM embed it, so handlers and
-// templates keep reaching .Workflows / .Workspace unchanged, and the
-// "runformfields" partial renders the trio of selects from it.
-type runFormVM struct {
-	Workspaces  []workspaceOption // every named workspace this host has on disk, across all projects
-	Agents      []string          // includes "" for "use default"
-	Workflows   []NewRunWorkflow  // selector entries; first is the default
-	ErrorBanner string            // populated on a POST validation failure
-	// Workspace, Agent, Workflow echo the operator's submitted values back
-	// into the form on an error re-render so a validation failure doesn't
-	// wipe their picks: each re-selects the matching dropdown option. On
-	// GET, Workflow is the default (new-run's form additionally pre-selects
-	// from the ?workflow= query param when present).
-	Workspace string
-	Agent     string
-	Workflow  string
-	// Dynamic gates the spawning submit ("open & run" / "promote & run").
-	// Parking is journal-only and stays available on an unarmed serve;
-	// only that button is hidden.
-	Dynamic bool
-}
-
-// newRunVM backs the new-run form. Projects and workspaces are
-// gathered from disk at request time; the agent list is static and
-// the workflow list comes from Options.NewRunWorkflows.
-type newRunVM struct {
-	runFormVM
-	Projects []string // project IDs
-	// ID echoes the raw `project/slug` text back on an error re-render,
-	// verbatim rather than re-joined, so a malformed entry shows exactly
-	// as typed.
-	ID string
-}
-
-// newRunWorkflow resolves a submitted (or query-string) workflow name
-// against Options.NewRunWorkflows. An empty name falls back to the
-// first entry — the form default — so a stale page that POSTs without
-// the field keeps working.
-func (s *Server) newRunWorkflow(name string) (NewRunWorkflow, bool) {
-	if name == "" && len(s.opts.NewRunWorkflows) > 0 {
-		return s.opts.NewRunWorkflows[0], true
-	}
-	for _, wf := range s.opts.NewRunWorkflows {
-		if wf.Name == name {
-			return wf, true
-		}
-	}
-	return NewRunWorkflow{}, false
-}
-
-func (s *Server) handleNewRunForm(w http.ResponseWriter, r *http.Request) {
-	vm, err := s.gatherNewRunVM()
-	if err != nil {
-		s.logf("new-run form gather: %v", err)
-		http.Error(w, "new-run form: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Pre-select the workflow named in the ?workflow= query string;
-	// unknown or absent falls back to the default.
-	if wf, ok := s.newRunWorkflow(r.URL.Query().Get("workflow")); ok {
-		vm.Workflow = wf.Name
-	}
-	s.render(w, r, "new.html", vm)
-}
-
-// handleNewRunSubmit validates the form, opens the run in-process, and
-// redirects to the per-run page. The run is parked — queued at its
-// first stage with no agent — unless the operator submitted the "open &
-// run" button (`spawn`), which additionally spawns `moe <workflow>
-// <first-stage> <p>/<slug>` as a PTY-backed agent session. Opening
-// synchronously means an open failure surfaces in the HTTP response
-// (instead of the prior spawn-succeeded-but-open-failed half-state),
-// and the child has no slug-discovery to do on its way to the agent.
-//
-// Validation failures re-render the form with an ErrorBanner so the
-// operator can correct without retyping.
-func (s *Server) handleNewRunSubmit(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	// Only the spawning submit needs dynamic mode; parking is
-	// journal-only. Gate before the open so a refused click leaves no
-	// half-created run behind.
-	spawn := r.FormValue("spawn") != ""
-	if spawn && !s.spawnAllowed(w) {
-		return
-	}
-	id := strings.TrimSpace(r.FormValue("id"))
-	wsName := strings.TrimSpace(r.FormValue("workspace"))
-	agentName := strings.TrimSpace(r.FormValue("agent"))
-	wfName := strings.TrimSpace(r.FormValue("workflow"))
-	fail := func(msg string) { s.renderFormError(w, r, id, wsName, agentName, wfName, msg) }
-
-	projectID, slug, err := splitID(id)
-	if err != nil {
-		fail(err.Error())
-		return
-	}
-	if !slugPattern.MatchString(slug) {
-		fail("slug: must be kebab-case (lowercase, digits, hyphens; start with letter/digit)")
-		return
-	}
-	if err := s.requireKnownProject(projectID); err != nil {
-		fail(err.Error())
-		return
-	}
-	wf, ok := s.validateRunSelections(wfName, wsName, fail)
-	if !ok {
-		return
-	}
-	// Agent validity is checked by runopen.Open via run.New; we trust
-	// the hardcoded dropdown set here.
-
-	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
-		ID:        slug,
-		Workflow:  wf.Name,
-		Workspace: wsName,
-		Agent:     agentName,
-	}, s.syncWriter(), s.syncWriter())
-	if err != nil {
-		fail("open: " + err.Error())
-		return
-	}
-	s.finishRunOpen(w, r, md.Project+"/"+md.ID, wf, spawn, fail)
-}
-
-// validateRunSelections resolves the submitted workflow name and vets
-// the workspace binding against it — the gate both run-opening submits
-// apply before anything is written. fail renders the caller's own form
-// with the banner; ok is false once it has fired.
-func (s *Server) validateRunSelections(wfName, wsName string, fail func(string)) (NewRunWorkflow, bool) {
-	wf, ok := s.newRunWorkflow(wfName)
-	if !ok {
-		fail("workflow: unknown workflow " + strconv.Quote(wfName))
-		return NewRunWorkflow{}, false
-	}
-	if wsName == "" {
-		return wf, true
-	}
-	if err := workspace.ValidateName(wsName); err != nil {
-		fail("workspace: " + err.Error())
-		return NewRunWorkflow{}, false
-	}
-	// Same refusal the CLI's runNew makes — the binding means nothing to
-	// the other workflows and would strand the claim.
-	if !wf.Workspace {
-		fail("workspace: only sdlc accepts a workspace binding")
-		return NewRunWorkflow{}, false
-	}
-	return wf, true
-}
-
-// finishRunOpen is the tail both run-opening submits share once the run
-// exists: spawn its first stage when the operator used the spawning
-// button, then redirect to the run's page. A spawn failure re-renders
-// the caller's form — the run is already open, so the banner is all
-// that's left to say.
-func (s *Server) finishRunOpen(w http.ResponseWriter, r *http.Request, runID string, wf NewRunWorkflow, spawn bool, fail func(string)) {
-	if spawn {
-		args := []string{wf.Name, wf.FirstStage, runID}
-		if _, err := s.children.spawn(runID, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-			fail("spawn: " + err.Error())
-			return
-		}
-	}
-	http.Redirect(w, r, "/run/"+runID, http.StatusSeeOther)
-}
-
-func (s *Server) renderFormError(w http.ResponseWriter, r *http.Request, id, wsName, agentName, wfName, msg string) {
-	vm, err := s.gatherNewRunVM()
-	if err != nil {
-		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
-		return
-	}
-	vm.ErrorBanner = msg
-	vm.ID = id
-	vm.Workspace = wsName
-	vm.Agent = agentName
-	vm.Workflow = wfName
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	s.render(w, r, "new.html", vm)
 }
 
 // runVM backs the per-run page (GET /run/{project}/{slug}). It is a
@@ -491,43 +288,26 @@ type chainMemberVM struct {
 	EdgeConsent string
 }
 
-// chainState is the head-page slice of live chain truth, gathered once
-// per page: the batch, and whether the head is kickable from here. The
-// callback replays the journal index, so both consumers (the members
-// section and the kick chips) read one gather.
-type chainState struct {
-	Members []chainMemberVM
-	// Kickable narrows to what the dash's `parked · kick?` hint already
-	// promises: an in-progress head with a live batch behind it, not
-	// itself chained under a live parent. `moe chain kick` would also
-	// accept an *empty* head — it closes it and rides nothing — but the
-	// dash calls that head `done · close?`, and a chip labelled "kick"
-	// that silently closes a placeholder is not the action it names.
-	// The web never exceeds the CLI; here it deliberately offers less.
-	Kickable bool
-}
-
-// gatherChainState reads the live chain for a chain head. Everything
-// else — a non-chain run, no callback wired, a gather error — yields
-// the zero value, which renders as the read-only page chain heads had
-// before: no members section, no kick chips. A gather error is logged
-// and swallowed rather than failing the page, matching fillRunRow: the
-// canvas link and the meta line are still worth serving.
-func (s *Server) gatherChainState(md *run.Metadata, projectID, slug string, now time.Time) chainState {
+// gatherChainMembers reads the live batch behind a chain head — the runs
+// `moe chain kick` would actually ride, so the page's count can't lie
+// about what a kick from the terminal will walk. Everything else — a
+// non-chain run, no callback wired, a gather error — yields nothing,
+// which renders as the read-only page chain heads had before. A gather
+// error is logged and swallowed rather than failing the page, matching
+// fillRunRow: the canvas link and the meta line are still worth serving.
+func (s *Server) gatherChainMembers(md *run.Metadata, projectID, slug string, now time.Time) []chainMemberVM {
 	if md.Workflow != dash.ChainWorkflow || s.opts.ChainMembers == nil {
-		return chainState{}
+		return nil
 	}
-	rows, chainedUnder, err := s.opts.ChainMembers(projectID, slug)
+	rows, err := s.opts.ChainMembers(projectID, slug)
 	if err != nil {
 		s.logf("chain members %s/%s: %v", projectID, slug, err)
-		return chainState{}
+		return nil
 	}
-	out := chainState{
-		Kickable: chainedUnder == "" && len(rows) > 0 && md.Status == run.StatusInProgress,
-	}
+	var out []chainMemberVM
 	for _, row := range rows {
 		id := row.Project + "/" + row.Run
-		out.Members = append(out.Members, chainMemberVM{
+		out = append(out, chainMemberVM{
 			ID:          id,
 			URL:         "/run/" + id,
 			Note:        noteHTML(row.Project, row.Note),
@@ -700,22 +480,35 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 
 // handleIdeaTag stamps a workflow tag onto an in-progress idea. The
 // workflow rides the chip's query string (`?workflow=sdlc`) and is
-// resolved through the same selector the promote form uses; an absent
-// value takes that list's default. Journal-only — the tag licenses a
-// future pulse, it starts nothing here — so this route carries no
-// dynamic-mode gate.
+// resolved against Options.TagWorkflows; an absent value takes that
+// list's default. Journal-only — the tag is a licence a later sweep
+// spends, it starts nothing here.
 func (s *Server) handleIdeaTag(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("workflow"))
-	wf, ok := s.newRunWorkflow(name)
+	wf, ok := s.tagWorkflow(name)
 	if !ok {
 		http.Error(w, "tag idea: unknown workflow "+strconv.Quote(name), http.StatusBadRequest)
 		return
 	}
-	s.setIdeaTag(w, r, wf.Name)
+	s.setIdeaTag(w, r, wf)
+}
+
+// tagWorkflow resolves a submitted (or query-string) workflow name
+// against Options.TagWorkflows. An empty name falls back to the first
+// entry — the list's default — so a stale page that POSTs without the
+// field keeps working.
+func (s *Server) tagWorkflow(name string) (string, bool) {
+	if name == "" && len(s.opts.TagWorkflows) > 0 {
+		return s.opts.TagWorkflows[0], true
+	}
+	if slices.Contains(s.opts.TagWorkflows, name) {
+		return name, true
+	}
+	return "", false
 }
 
 // handleIdeaUntag clears an idea's workflow tag — the per-idea pause.
@@ -748,210 +541,94 @@ func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow str
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// spawnMode selects which cascade flag (if any) spawnNextStage appends
-// to `moe <workflow> <stage> <id>`. The three web chips map one-to-one
-// onto the modes, and each mode onto the bang vocabulary: advance (= `!`,
-// no flag), ship (= `!!`, --ship, ship this run), chain (= `!!!`,
-// --chain, ship + ride the whole chain).
-type spawnMode int
-
-const (
-	spawnAdvance spawnMode = iota
-	spawnShip
-	spawnChain
-)
-
-// verb is the human-facing label spawnNextStage uses in log lines and
-// error bodies for each mode.
-func (m spawnMode) verb() string {
-	switch m {
-	case spawnShip:
-		return "ship"
-	case spawnChain:
-		return "chain"
-	default:
-		return "advance"
-	}
-}
-
-// flag is the cascade flag spawnNextStage appends for each mode, or ""
-// for advance (a single headless step, no cascade flag).
-func (m spawnMode) flag() string {
-	switch m {
-	case spawnShip:
-		return "--ship"
-	case spawnChain:
-		return "--chain"
-	default:
-		return ""
-	}
-}
-
-// handleAdvance spawns the run's next stage interactively with no
-// cascade flag: the child runs one stage under the MOE_SERVE_AGENT
-// handshake (the operator drives the session through Claude Code on
-// the web) and exits at the chain prompt it never reaches. The
-// "→ <stage>" chip on the per-run page posts here.
+// handleAdvance marks the run's current stage advanced: the operator
+// read the canvas and approves, so the run's next pickup starts at the
+// successor stage instead of re-opening this one. Journal-only — an
+// empty marker commit and a push, no agent, no child — which is why it
+// carries no dynamic-mode gate. The mark is one of the shapes a kick
+// already admits, and the commit moves the journal, so the next
+// heartbeat tick sweeps and rides it.
+//
+// The "→ <stage>" chip on the per-run page posts here. Everything is
+// re-derived server-side; the button is never trusted.
 func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, spawnAdvance)
-}
-
-// handleShip spawns the run's next stage under --ship: the
-// headless cascade that drives every remaining stage through push and
-// ships this run, then stops. The "ship" chip posts here. Bigger lever
-// than advance — one click can open/merge a PR — but still operator-
-// triggered, and guarded downstream by the test-stage anti-theater gate
-// and the pre-push hooks.
-func (s *Server) handleShip(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, spawnShip)
-}
-
-// handleChain spawns the run's next stage under --chain: the same
-// headless cascade as ship, but after this run ships it rides the chain
-// into the next live child. The "chain" chip posts here — the biggest
-// lever on the page, and like ship it stays operator-triggered.
-func (s *Server) handleChain(w http.ResponseWriter, r *http.Request) {
-	s.spawnNextStage(w, r, spawnChain)
-}
-
-// handleKick rides a chain head headlessly from the browser by spawning
-// `moe chain kick <id>` — the same verb, unwrapped. The "kick" chip on
-// a parked head's page posts here, finally giving the dash's `parked ·
-// kick?` hint a web surface to name: before this the hint pointed at an
-// action only a terminal could take.
-func (s *Server) handleKick(w http.ResponseWriter, r *http.Request) {
-	s.kickChainHead(w, r)
-}
-
-// kickChainHead is the body behind /kick.
-//
-// A spawnNextStage sibling in posture, not in body: a chain head has no
-// stage ladder, so there is no next stage to re-derive server-side and
-// no spawnable-set check to make. What remains are the stage-free
-// guards — dynamic gate, workflow, in-progress, no live child.
-//
-// Deliberately *not* re-checked here: whether the head is itself
-// chained under a live parent. That refusal needs the journal index,
-// `moe chain kick` already makes it (fail-closed, index errors
-// propagate), and the chips don't render when it would fire. Copying
-// it into serve would be a second authority on the same question that
-// could disagree with the first.
-func (s *Server) kickChainHead(w http.ResponseWriter, r *http.Request) {
-	if !s.spawnAllowed(w) {
-		return
-	}
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, ok := s.loadRunOr404(w, projectID, slug, "kick")
+	md, ok := s.loadRunOr404(w, projectID, slug, "advance")
 	if !ok {
 		return
 	}
-	if md.Workflow != dash.ChainWorkflow {
-		http.Error(w, "run "+id+" is a "+md.Workflow+" run, not a chain head", http.StatusConflict)
-		return
-	}
-	if md.Status != run.StatusInProgress {
-		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
-		return
-	}
+	// A live agent mid-turn is about to land its own work turn, which
+	// would out-date a marker written now. Mirror the close route's
+	// live-child refusal.
 	if c, ok := s.children.get(id); ok {
 		if exited, _ := c.snapshot(); !exited {
 			http.Error(w,
-				"run "+id+" has a live agent mid-turn — wait for it to finish, then kick",
+				"run "+id+" has a live agent mid-turn — wait for it to finish, then advance",
 				http.StatusConflict)
 			return
 		}
 	}
-	argv := []string{"chain", "kick", id}
-	if _, err := s.children.spawn(id, s.opts.MoeBin, argv, s.opts.Root, s.opts.Logger); err != nil {
-		s.logf("kick %s: spawn: %v", id, err)
-		http.Error(w, "kick: "+err.Error(), http.StatusInternalServerError)
+	stage, ok := s.markableStage(w, projectID, slug, md)
+	if !ok {
+		return
+	}
+	// A replayed POST is harmless and deliberately not special-cased: a
+	// second marker is the same claim as the first, and stageSatisfied
+	// reads the freshest one.
+	switch err := runopen.MarkAdvanced(s.opts.Root, projectID, slug, stage, s.syncWriter(), s.syncWriter()); {
+	case err == nil:
+	case errors.Is(err, run.ErrRunNotFound):
+		http.Error(w, "no such run: "+id, http.StatusNotFound)
+		return
+	case errors.Is(err, runopen.ErrNotAdvanceable):
+		http.Error(w, "advance: "+err.Error(), http.StatusConflict)
+		return
+	default:
+		s.logf("advance %s: %v", id, err)
+		http.Error(w, "advance: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// spawnNextStage is the shared body behind /advance, /ship, and /chain.
-// It re-derives the next stage server-side (never trusting a possibly-
-// stale page) and applies the same guard set the close route uses,
-// then spawns `moe <workflow> <stage> <id>` — appending the mode's
-// cascade flag (--ship / --chain, or none for advance). Only workflows
-// whose declaration carries Cascade qualify (the operator-cascade set —
-// their stage verbs accept the flags), and the next stage must
-// be in the declared spawnable set (push stays terminal/CLI-only via
-// sdlc's exclusion). The server-side re-derivation plus spawn's own
-// dup-guard mean a double-click or a stale button can't double-spawn
-// or skip a stage.
+// markableStage re-derives which stage an advance mark would land on and
+// refuses when the answer isn't one the web may mark. Shared by the
+// route and the chip: whatever the page offers, the POST re-asks.
 //
-// A direct spawn deliberately bypasses the design-stage cascade's
-// tracked-change refusal (EnforceSandboxBoundary): the explicit click
-// is the consent that guard asks for at the chain prompt.
-func (s *Server) spawnNextStage(w http.ResponseWriter, r *http.Request, mode spawnMode) {
-	if !s.spawnAllowed(w) {
-		return
-	}
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
+// The stage is the run's own next stage — the one it is parked at, which
+// for a "worked, not advanced" run is the stage whose canvas the
+// operator just read. It must be in the workflow's declared set, which
+// is what keeps push out: sdlc excludes it, and a marker on push would
+// satisfy the ladder without anything ever being pushed.
+//
+// ok=false means the response is already written.
+func (s *Server) markableStage(w http.ResponseWriter, projectID, slug string, md *run.Metadata) (string, bool) {
 	id := projectID + "/" + slug
-	verb := mode.verb()
-
-	md, ok := s.loadRunOr404(w, projectID, slug, verb)
-	if !ok {
-		return
-	}
 	if s.opts.WorkflowUI == nil {
-		http.Error(w, verb+" not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
-		return
+		http.Error(w, "advance not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
+		return "", false
 	}
 	ui, ok := s.opts.WorkflowUI(md.Workflow)
-	if !ok || !ui.Cascade {
-		http.Error(w, "workflow "+md.Workflow+" does not "+verb+" from serve", http.StatusConflict)
-		return
+	if !ok {
+		http.Error(w, "workflow "+md.Workflow+" does not advance from serve", http.StatusConflict)
+		return "", false
 	}
-	if md.Status != run.StatusInProgress {
-		http.Error(w, "run "+id+" is not in progress (status="+md.Status+")", http.StatusConflict)
-		return
-	}
-	// A live agent mid-turn owns the sandbox clone; spawning the next
-	// stage now would race it. Mirror closeWorkflowRun's live-child
-	// refusal.
-	if c, ok := s.children.get(id); ok {
-		if exited, _ := c.snapshot(); !exited {
-			http.Error(w,
-				"run "+id+" has a live agent mid-turn — wait for it to finish, then "+verb,
-				http.StatusConflict)
-			return
-		}
-	}
-	// Re-derive the next stage rather than trusting the button. row.Stage
-	// is the bare next-stage name with all satisfaction logic baked in.
 	stage, err := s.nextStage(projectID, slug)
 	if err != nil {
-		s.logf("%s %s: next stage: %v", verb, id, err)
-		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
-		return
+		s.logf("advance %s: next stage: %v", id, err)
+		http.Error(w, "advance: "+err.Error(), http.StatusInternalServerError)
+		return "", false
 	}
 	if !slices.Contains(ui.Stages, stage) {
-		// "" (no next stage) or an excluded stage (sdlc's push) — push
-		// stays terminal/CLI-only.
 		http.Error(w,
-			"run "+id+" has no advanceable next stage (next="+strconv.Quote(stage)+")",
+			"run "+id+" has no markable stage (next="+strconv.Quote(stage)+")",
 			http.StatusConflict)
-		return
+		return "", false
 	}
-
-	args := []string{md.Workflow, stage, id}
-	if flag := mode.flag(); flag != "" {
-		args = append(args, flag)
-	}
-	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
-		s.logf("%s %s: spawn: %v", verb, id, err)
-		http.Error(w, verb+": "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
+	return stage, true
 }
 
 // nextStage re-derives a run's bare next-stage name through the
@@ -971,6 +648,20 @@ func (s *Server) nextStage(projectID, slug string) (string, error) {
 		return "", nil
 	}
 	return row.Stage, nil
+}
+
+// stageWorked reports whether a stage has a committed work turn — the
+// half of stageSatisfied's advance rule a marker can't supply itself.
+// A read failure reads as "no": offering a mark the route would refuse
+// is worse than not offering it, and the CLI's chain prompt is still
+// there.
+func (s *Server) stageWorked(projectID, slug, stage string) bool {
+	sha, _, err := run.LatestWorkTurnSHA(s.opts.Root, projectID, slug, stage)
+	if err != nil {
+		s.logf("advance chip %s/%s: work turn for %s: %v", projectID, slug, stage, err)
+		return false
+	}
+	return sha != ""
 }
 
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
@@ -993,63 +684,52 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
-	chain := s.gatherChainState(md, projectID, slug, now)
-	vm.ChainMembers = chain.Members
+	vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
 	// No live child on the read-only path (this serve isn't parenting the
-	// run), so the spawn chips gate on live=false. fillRunRow ran first
-	// so vm.NextStage is populated.
-	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false, chain)
+	// run), so the chips gate on live=false. fillRunRow ran first so
+	// vm.NextStage is populated.
+	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false)
 	return vm, nil
 }
 
 // composeRunActions returns the peer-affordances list for the per-run
-// page. Idea runs keep their bespoke chips (edit / promote / close /
-// reopen — idea has no stage verbs to derive). Every other workflow's
-// chips are composed from its registration-time serve declaration
-// (Options.WorkflowUI): cascade workflows get the "→ <stage>" /
-// "ship" / "chain" trio keyed off the re-derived next
-// stage. Workflows with a close pipeline get a close-run chip when close
-// is the routine idle-page next move; perpetual workflows keep close off
-// the idle page but still expose it while a child is live. A workflow that declared
-// nothing — or declared without cascade — renders no spawn chips: the
-// read-only page plus, where applicable, the close chip.
+// page. Every chip here writes a journal commit or nothing at all —
+// none of them starts an agent, which is the heartbeat's job alone — so
+// none is gated on dynamic mode.
+//
+// Ideas keep their bespoke chips (edit / tag / untag / close / reopen —
+// idea has no stage ladder to derive from). Staged workflows get the
+// advance mark, keyed off the re-derived next stage and its declared
+// stage set (Options.WorkflowUI). Workflows with a close pipeline get a
+// close-run chip when close is the routine idle-page next move;
+// perpetual workflows keep close off the idle page but still expose it
+// while a child is live. A chain head gets nothing: it has no stages to
+// mark, and kicking one is a terminal act (`moe chain kick`) because a
+// hand-staged head is a deliberate staging fence.
 //
 // nextStage is the bare next-stage name re-derived from the dash row;
-// live is true when an agent is mid-turn. Spawn chips drop while live
-// (spawning past a stage whose agent is still running would race it
-// for the sandbox clone). Close chips stay for non-perpetual
-// workflows, and for live perpetual pages; the close route's own
-// live-child refusal guards the click.
-func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool, chain chainState) []runAction {
+// live is true when an agent is mid-turn. The advance mark drops while
+// live — that agent is about to land a work turn that would out-date the
+// marker. Close chips stay for non-perpetual workflows, and for live
+// perpetual pages; the close route's own live-child refusal guards the
+// click.
+func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
 	base := "/run/" + projectID + "/" + slug
 	if md.Workflow == dash.ChainWorkflow {
-		// A chain head declares no serve workflow UI — it has no stages,
-		// so there is nothing for the cascade trio to spawn — which is why
-		// its chip is bespoke like idea's rather than derived. It spawns
-		// an agent ride all the same, so it keeps the trio's gates:
-		// dynamic mode, and not while a child is mid-turn. "kick" is `!!!`
-		// over the chain as it stands.
-		if !live && s.opts.Dynamic && chain.Kickable {
-			return []runAction{{Label: "kick", Href: base + "/kick", Method: "POST"}}
-		}
 		return nil
 	}
 	if dash.IsCapture(md.Workflow) {
 		switch md.Status {
 		case run.StatusInProgress:
 			// edit / close are journal-only, so both captures get them
-			// on an unarmed serve. promote parks the destination run by
-			// default — also journal-only — so the chip joins them;
-			// only the page's "promote & run" submit is dynamic-gated.
-			// It stays idea-only: ideas are the only capture that
-			// promotes.
+			// on an unarmed serve. So is tagging: the tag parks a
+			// licence, and the sweep that spends it rides under its own
+			// consent. Tag chips stay idea-only — ideas are the only
+			// capture that promotes, and promotion is now the sweep's
+			// move, not a button's.
 			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
 			if md.Workflow == dash.IdeaWorkflow {
-				out = append(out, runAction{Label: "promote", Href: base + "/promote"})
-				// Tagging parks a license; the pulse that acts on it rides
-				// under its own consent. Journal-only here, so the chips
-				// join promote/edit/close on an unarmed serve.
-				out = append(out, ideaTagActions(base, md, s.opts.NewRunWorkflows)...)
+				out = append(out, ideaTagActions(base, md, s.opts.TagWorkflows)...)
 			}
 			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
 		case run.StatusClosed:
@@ -1071,20 +751,17 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		return nil
 	}
 	var out []runAction
-	// The cascade chips spawn an agent, so they render only in
-	// dynamic mode. The close-run chip below is journal-only (CloseRun
-	// runs in-process, no spawn) and stays on an unarmed serve.
-	if !live && s.opts.Dynamic && ui.Cascade {
-		// A "" or excluded next stage (sdlc's push) yields no chips:
-		// push stays terminal/CLI-only — the bang vocabulary
-		// collapses there — so a run parked right before push shows
-		// only the close chip.
-		if slices.Contains(ui.Stages, nextStage) {
-			out = append(out,
-				runAction{Label: "→ " + nextStage, Href: base + "/advance", Method: "POST"},
-				runAction{Label: "ship", Href: base + "/ship", Method: "POST"},
-				runAction{Label: "chain", Href: base + "/chain", Method: "POST"})
-		}
+	// A "" or excluded next stage (sdlc's push) yields no stage chips:
+	// push stays terminal/CLI-only — the bang vocabulary collapses there
+	// — so a run parked right before push shows only the close chip.
+	markable := !live && slices.Contains(ui.Stages, nextStage)
+	// The advance mark is journal-only — an empty marker commit a later
+	// tick rides — so it stays on an unarmed serve, beside the idea
+	// chips. It renders only where the mark would mean something:
+	// stageSatisfied wants a marker *and* a work turn, so a mark on a
+	// never-worked stage is one the ladder ignores.
+	if markable && s.stageWorked(projectID, slug, nextStage) {
+		out = append(out, runAction{Label: "advance past " + nextStage, Href: base + "/advance", Method: "POST"})
 	}
 	if ui.Close && (!ui.Perpetual || live) {
 		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST"})
@@ -1117,21 +794,22 @@ func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 // dash face of `moe idea tag`, and the operator's one-tap way to hand
 // the machine a license to start a parked idea.
 //
-// One "tag <workflow>" chip per entry in the promote form's selector
-// (the same cli-composed list, so the two surfaces can't disagree on
-// what a valid destination is), rendered as chips rather than a select
-// because the chip row carries no form fields. The workflow already
-// stamped gets no chip — re-tagging it would be a no-op — and an
-// "untag" chip appears once any tag is on, which is the per-idea pause.
-func ideaTagActions(base string, md *run.Metadata, wfs []NewRunWorkflow) []runAction {
+// One "tag <workflow>" chip per entry in Options.TagWorkflows — the
+// same list the tag route resolves against, so the two surfaces can't
+// disagree on what a valid destination is — rendered as chips rather
+// than a select because the chip row carries no form fields. The
+// workflow already stamped gets no chip (re-tagging it would be a
+// no-op), and an "untag" chip appears once any tag is on, which is the
+// per-idea pause.
+func ideaTagActions(base string, md *run.Metadata, workflows []string) []runAction {
 	var out []runAction
-	for _, wf := range wfs {
-		if wf.Name == md.PromoteTo {
+	for _, wf := range workflows {
+		if wf == md.PromoteTo {
 			continue
 		}
 		out = append(out, runAction{
-			Label:  "tag " + wf.Name,
-			Href:   base + "/tag?workflow=" + url.QueryEscape(wf.Name),
+			Label:  "tag " + wf,
+			Href:   base + "/tag?workflow=" + url.QueryEscape(wf),
 			Method: "POST",
 		})
 	}
@@ -1139,12 +817,6 @@ func ideaTagActions(base string, md *run.Metadata, wfs []NewRunWorkflow) []runAc
 		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST"})
 	}
 	return out
-}
-
-// isPromotableIdea reports whether the loaded run is an in-progress
-// idea — the gate for offering the promote-to-sdlc affordance.
-func isPromotableIdea(md *run.Metadata) bool {
-	return md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress
 }
 
 // buildRunVM assembles the per-run page from the live child's state
@@ -1179,11 +851,11 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
-		chain := s.gatherChainState(md, projectID, slug, now)
-		vm.ChainMembers = chain.Members
-		// !exited == an agent mid-turn; composeRunActions drops the spawn
-		// chips in that case. fillRunRow above populated vm.NextStage.
-		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited, chain)
+		vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
+		// !exited == an agent mid-turn; composeRunActions drops the
+		// advance mark in that case. fillRunRow above populated
+		// vm.NextStage.
+		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited)
 	}
 	return vm
 }
@@ -1254,180 +926,6 @@ func (s *Server) transcriptLinks(projectID, slug, stage string) []transcriptLink
 		})
 	}
 	return links
-}
-
-// promoteVM backs the per-idea promote page (GET /run/{p}/{s}/promote).
-// The destination selector it shares with the new-run form lives in the
-// embedded runFormVM (sdlc is the only workflow entry today; `moe sdlc
-// new --from-idea` is the CLI face of the same move); Project and Slug
-// name the idea being promoted.
-type promoteVM struct {
-	runFormVM
-	Project string
-	Slug    string
-}
-
-// gatherPromoteVM returns the dropdown content the promote page needs.
-// Pulled from disk per request, same as gatherNewRunVM.
-func (s *Server) gatherPromoteVM(projectID, slug string) (promoteVM, error) {
-	form, err := s.gatherRunFormVM()
-	if err != nil {
-		return promoteVM{}, err
-	}
-	return promoteVM{runFormVM: form, Project: projectID, Slug: slug}, nil
-}
-
-// handlePromoteForm renders the per-idea promote page (GET). 404 when
-// the slug doesn't exist, 409 when the run is not a promotable idea —
-// same gates POST applies, so a stale bookmark fails the same way at
-// either method.
-func (s *Server) handlePromoteForm(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	id := projectID + "/" + slug
-
-	md, ok := s.loadRunOr404(w, projectID, slug, "promote form")
-	if !ok {
-		return
-	}
-	if !isPromotableIdea(md) {
-		http.Error(w,
-			"run "+id+" is not a promotable idea (workflow="+md.Workflow+", status="+md.Status+")",
-			http.StatusConflict)
-		return
-	}
-
-	vm, err := s.gatherPromoteVM(projectID, slug)
-	if err != nil {
-		s.logf("promote form gather: %v", err)
-		http.Error(w, "promote form: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "promote.html", vm)
-}
-
-// handlePromote opens the destination run in-process by calling
-// runopen.Promote with the chosen workflow (sdlc default; the web face
-// of `moe <workflow> new --from-idea`) and redirects to the new run's
-// page. The destination is parked unless the operator submitted the
-// "promote & run" button (`spawn`), which additionally spawns
-// `moe <workflow> <first-stage> <p>/<newslug>` as a PTY-backed agent
-// session. Opening synchronously means the destination's slug is known
-// before the spawn — no placeholder id, no stdout regex, no rename
-// race. Validation failures re-render the promote page with an inline
-// error banner.
-func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("project")
-	slug := r.PathValue("slug")
-	id := projectID + "/" + slug
-
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	// Only the spawning submit needs dynamic mode; parking the
-	// destination is journal-only. Gate before runopen.Promote so a
-	// refused click doesn't half-promote the idea.
-	spawn := r.FormValue("spawn") != ""
-	if spawn && !s.spawnAllowed(w) {
-		return
-	}
-	wsName := strings.TrimSpace(r.FormValue("workspace"))
-	agentName := strings.TrimSpace(r.FormValue("agent"))
-	wfName := strings.TrimSpace(r.FormValue("workflow"))
-	fail := func(msg string) { s.renderPromoteError(w, r, projectID, slug, wfName, wsName, agentName, msg) }
-
-	md, ok := s.loadRunOr404(w, projectID, slug, "promote")
-	if !ok {
-		return
-	}
-	if !isPromotableIdea(md) {
-		http.Error(w,
-			"run "+id+" is not a promotable idea (workflow="+md.Workflow+", status="+md.Status+")",
-			http.StatusConflict)
-		return
-	}
-	wf, ok := s.validateRunSelections(wfName, wsName, fail)
-	if !ok {
-		return
-	}
-	// Agent membership rides the hardcoded dropdown set.
-
-	promoted, err := runopen.Promote(s.opts.Root, projectID, slug, runopen.PromoteOptions{
-		Workflow:   wf.Name,
-		FirstStage: wf.FirstStage,
-		Workspace:  wsName,
-		Agent:      agentName,
-	}, s.syncWriter(), s.syncWriter())
-	if err != nil {
-		fail("promote: " + err.Error())
-		return
-	}
-	if promoted.MarkErr != nil {
-		// The destination run is already open; surface the bookkeeping
-		// failure in the log so the operator can re-mark the idea by
-		// hand if needed. The destination's MoE-Idea trailer still
-		// records the source.
-		s.logf("promote: mark idea %s/%s promoted: %v", projectID, slug, promoted.MarkErr)
-	}
-
-	s.finishRunOpen(w, r, promoted.Run.Project+"/"+promoted.Run.ID, wf, spawn, fail)
-}
-
-func (s *Server) renderPromoteError(w http.ResponseWriter, r *http.Request, projectID, slug, wfName, wsName, agentName, msg string) {
-	vm, err := s.gatherPromoteVM(projectID, slug)
-	if err != nil {
-		http.Error(w, msg+" (and promote form gather failed: "+err.Error()+")", http.StatusInternalServerError)
-		return
-	}
-	vm.ErrorBanner = msg
-	if wfName != "" {
-		vm.Workflow = wfName
-	}
-	vm.Workspace = wsName
-	vm.Agent = agentName
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	s.render(w, r, "promote.html", vm)
-}
-
-func (s *Server) gatherNewRunVM() (newRunVM, error) {
-	projectIDs, err := s.listProjectIDs()
-	if err != nil {
-		return newRunVM{}, err
-	}
-	form, err := s.gatherRunFormVM()
-	if err != nil {
-		return newRunVM{}, err
-	}
-	return newRunVM{runFormVM: form, Projects: projectIDs}, nil
-}
-
-// gatherRunFormVM reads the workspace list off disk and assembles the
-// dropdown content both run-opening forms offer, with the first
-// registered workflow pre-selected.
-func (s *Server) gatherRunFormVM() (runFormVM, error) {
-	infos, err := workspace.List(s.opts.Root, "")
-	if err != nil {
-		return runFormVM{}, err
-	}
-	wsOpts := make([]workspaceOption, 0, len(infos))
-	for _, info := range infos {
-		wsOpts = append(wsOpts, workspaceOption{
-			Project: info.Project,
-			Name:    info.Name,
-			Label:   info.Project + "/" + info.Name,
-		})
-	}
-	vm := runFormVM{
-		Workspaces: wsOpts,
-		Agents:     agentOptions,
-		Workflows:  s.opts.NewRunWorkflows,
-		Dynamic:    s.opts.Dynamic,
-	}
-	if len(vm.Workflows) > 0 {
-		vm.Workflow = vm.Workflows[0].Name
-	}
-	return vm, nil
 }
 
 // listProjectIDs returns the sorted set of registered project IDs.

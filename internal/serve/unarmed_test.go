@@ -11,43 +11,42 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
-// TestUnarmedServeRefusesSpawnRoutes: on the production-default unarmed
-// serve every spawn-bucket POST refuses with 403 and never spawns a
-// child. The guard fires before any load, so the routes refuse even for
-// runs that don't exist — exactly the point: no reachable path to code
-// exec.
-//
-// /run/new and /promote are dual-submit: the bare submit parks (no
-// spawn, allowed unarmed) and only `spawn=1` reaches the gate, so
-// those two carry the form body that asks for the agent.
-func TestUnarmedServeRefusesSpawnRoutes(t *testing.T) {
-	for path, body := range map[string]string{
-		"/run/new":             "spawn=1",
-		"/run/alpha/x/promote": "spawn=1",
-		"/run/alpha/x/advance": "",
-		"/run/alpha/x/ship":    "",
-		"/run/alpha/x/chain":   "",
-		"/run/alpha/x/kick":    "",
-		"/chore/alpha/x/open":  "",
+// Unarmed is the production default, and after the spawn cull it is
+// barely a distinction: nothing serve routes starts an agent, so every
+// POST here works armed or not. What Dynamic gates is the heartbeat —
+// whether anything ever *acts* on what the web wrote.
+
+// TestServeHasNoSpawnRoutes: the routes that used to run agent
+// subprocesses are gone, not gated. A bookmark or a forged POST at any
+// of them falls through the mux — there is no reachable path from the
+// listener to code exec, on an armed serve either.
+func TestServeHasNoSpawnRoutes(t *testing.T) {
+	for _, path := range []string{
+		"/run/new",
+		"/run/alpha/x/promote",
+		"/run/alpha/x/ship",
+		"/run/alpha/x/chain",
+		"/run/alpha/x/kick",
+		"/chore/alpha/x/open",
 	} {
 		t.Run(path, func(t *testing.T) {
-			s := newUnarmedTestServer(t, Options{
+			// Armed on purpose: the claim is that the route is absent, not
+			// that a flag hides it.
+			s := newTestServer(t, Options{
 				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo",
 			})
-			req := httptest.NewRequest("POST", path, strings.NewReader(body))
+			req := httptest.NewRequest("POST", path, strings.NewReader("spawn=1"))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr, req)
-			if rr.Code != http.StatusForbidden {
-				t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
-			}
-			if !strings.Contains(rr.Body.String(), "serve is unarmed") {
-				t.Errorf("403 body should name the unarmed state, got:\n%s", rr.Body.String())
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("want 404, got %d body=%s", rr.Code, rr.Body.String())
 			}
 			if len(s.children.all) != 0 {
-				t.Errorf("unarmed refusal must not spawn; registry has %d", len(s.children.all))
+				t.Errorf("nothing may spawn; registry has %d", len(s.children.all))
 			}
 		})
 	}
@@ -102,11 +101,46 @@ func TestUnarmedServeAllowsIdeaClose(t *testing.T) {
 	}
 }
 
-// TestUnarmedServeDashKeepsNewLinks: both dash "new" links survive an
-// unarmed serve. Capturing an idea was always journal-only; opening a
-// run is too now that the new-run form's bare submit parks. The
-// spawning submit on the form itself is what being unarmed hides.
-func TestUnarmedServeDashKeepsNewLinks(t *testing.T) {
+// TestUnarmedServeAllowsTheAdvanceMark is the one that matters most: the
+// mark is the phone's approval verb, and without it a project the
+// operator has braked has no web path to motion at all. It writes a
+// journal commit and starts nothing, so being unarmed can't be a reason
+// to refuse it.
+func TestUnarmedServeAllowsTheAdvanceMark(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "design",
+		time.Now().Add(-time.Hour))
+	now := time.Now().UTC()
+	s := newUnarmedTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:design", Stage: "design",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader("")))
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	sha, _, err := run.LatestAdvanceSHA(root, "alpha", "fix-it", "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha == "" {
+		t.Error("the mark should have landed a marker commit")
+	}
+	if len(s.children.all) != 0 {
+		t.Errorf("a mark must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestUnarmedServeDashKeepsTheIdeaLink: the idea is the web's one
+// capture door, and it is journal-only, so it survives being unarmed.
+func TestUnarmedServeDashKeepsTheIdeaLink(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
 	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 
@@ -116,18 +150,19 @@ func TestUnarmedServeDashKeepsNewLinks(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{`href="/run/new"`, `href="/idea/new"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("unarmed dash should render %q\n%s", want, body)
-		}
+	if !strings.Contains(body, `href="/idea/new"`) {
+		t.Errorf("unarmed dash should render the idea capture link\n%s", body)
+	}
+	if strings.Contains(body, `href="/run/new"`) {
+		t.Errorf("the new-run door is gone; every web-initiated piece of work is an idea first\n%s", body)
 	}
 }
 
-// TestUnarmedServeIdeaPageShowsPromote: an in-progress idea keeps all three
-// journal-only chips. Promote parks the destination run by default, so
-// it's the same class as edit and close; only the promote page's
-// "promote & run" submit is gated.
-func TestUnarmedServeIdeaPageShowsPromote(t *testing.T) {
+// TestUnarmedServeIdeaPageShowsTagChips: an in-progress idea keeps its
+// journal-only chips. Tagging is the licence a sweep spends, which is
+// what replaced the promote page — so the chips must be there whether or
+// not this process is the one that will spend it.
+func TestUnarmedServeIdeaPageShowsTagChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
@@ -140,49 +175,27 @@ func TestUnarmedServeIdeaPageShowsPromote(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`href="/run/alpha/my-idea/edit"`,
-		`href="/run/alpha/my-idea/promote"`,
+		`/run/alpha/my-idea/tag?workflow=sdlc`,
 		`action="/run/alpha/my-idea/close"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("unarmed idea page missing %q\n%s", want, body)
 		}
 	}
-}
-
-// TestUnarmedServeFormsHideSpawnButton: the promote and new-run forms each
-// render their parking submit unarmed and drop the spawning one — an
-// unarmed serve never offers a button the POST handler would refuse.
-func TestUnarmedServeFormsHideSpawnButton(t *testing.T) {
-	root := newGitServeRoot(t)
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	gittest.Commit(t, root, "seed idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-
-	for _, tc := range []struct{ path, park string }{
-		{"/run/alpha/my-idea/promote", ">promote<"},
-		{"/run/new", ">open run<"},
-	} {
-		rr := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", tc.path, nil))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("GET %s: want 200, got %d body=%s", tc.path, rr.Code, rr.Body.String())
-		}
-		body := rr.Body.String()
-		if !strings.Contains(body, tc.park) {
-			t.Errorf("GET %s: missing the parking submit %q\n%s", tc.path, tc.park, body)
-		}
-		if strings.Contains(body, `name="spawn"`) {
-			t.Errorf("GET %s: an unarmed serve must not render the spawning submit\n%s", tc.path, body)
-		}
+	if strings.Contains(body, "/run/alpha/my-idea/promote") {
+		t.Errorf("promotion is the sweep's move now, not a button's\n%s", body)
 	}
 }
 
-// TestUnarmedServeSDLCPageHidesSpawnChips: an in-progress sdlc run drops the
-// advance/ship/chain trio (all spawn) but keeps the close chip (journal-
-// only via the CloseRun callback).
-func TestUnarmedServeSDLCPageHidesSpawnChips(t *testing.T) {
-	root := t.TempDir()
+// TestUnarmedServeSDLCPageOffersTheMarkAndClose: an in-progress sdlc run
+// parked at a worked stage renders the advance mark and the close chip,
+// and nothing that spawns.
+func TestUnarmedServeSDLCPageOffersTheMarkAndClose(t *testing.T) {
+	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "code",
+		time.Now().Add(-time.Hour))
 	now := time.Now().UTC()
 	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
@@ -198,24 +211,27 @@ func TestUnarmedServeSDLCPageHidesSpawnChips(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, banned := range []string{
-		`/run/alpha/fix-it/advance`,
-		`/run/alpha/fix-it/ship`,
-		`/run/alpha/fix-it/chain`,
+	for _, want := range []string{
+		`action="/run/alpha/fix-it/advance"`,
+		`/run/alpha/fix-it/close`,
 	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unarmed sdlc page missing %q\n%s", want, body)
+		}
+	}
+	for _, banned := range []string{`/run/alpha/fix-it/ship`, `/run/alpha/fix-it/chain`} {
 		if strings.Contains(body, banned) {
 			t.Errorf("unarmed sdlc page must not render %q\n%s", banned, body)
 		}
 	}
-	if !strings.Contains(body, `/run/alpha/fix-it/close`) {
-		t.Errorf("unarmed sdlc page should still show the close chip\n%s", body)
-	}
 }
 
-// TestUnarmedServeChorePageHidesOpen: a due chore renders no open
-// affordance on an unarmed serve — open spawns an agent. The schedule
-// detail still shows.
-func TestUnarmedServeChorePageHidesOpen(t *testing.T) {
+// TestChorePageIsReadOnly: a due chore renders its schedule and its
+// verdict and offers nothing. Opening it is the heartbeat's job now —
+// the chore leg of the gate sweeps the project, and the sweep opens the
+// run — so a button here would be a second authority on the same
+// question.
+func TestChorePageIsReadOnly(t *testing.T) {
 	s := newUnarmedTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: t.TempDir(),
 		GatherChore: func(project, name string) (chore.State, bool, error) {
@@ -229,139 +245,10 @@ func TestUnarmedServeChorePageHidesOpen(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if strings.Contains(body, `action="/chore/alpha/readme-refresh/open"`) {
-		t.Errorf("unarmed chore page must not render the open form\n%s", body)
+	if strings.Contains(body, "/chore/alpha/readme-refresh/open") {
+		t.Errorf("the chore page must offer no open route\n%s", body)
 	}
 	if !strings.Contains(body, "schedule") {
-		t.Errorf("unarmed chore page should still render the schedule detail\n%s", body)
-	}
-}
-
-// TestUnarmedServePromoteParks: the bare promote submit is journal-only —
-// it opens the destination run queued at its first stage, marks the
-// idea promoted, and redirects, all without the --dynamic flag. This
-// is the operator's usual move; riding the run is the rarer one.
-func TestUnarmedServePromoteParks(t *testing.T) {
-	root := newGitServeRoot(t)
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
-	gittest.Commit(t, root, "seed idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader(""))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
-	if got := rr.Header().Get("Location"); got != "/run/alpha/"+dated {
-		t.Fatalf("Location = %q, want /run/alpha/%s", got, dated)
-	}
-	dest, err := run.Load(root, "alpha", dated)
-	if err != nil {
-		t.Fatalf("destination run.Load: %v", err)
-	}
-	if dest.Status != run.StatusInProgress {
-		t.Errorf("destination status = %q, want in-progress", dest.Status)
-	}
-	src, err := run.Load(root, "alpha", "my-idea")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if src.Status != run.StatusPromoted {
-		t.Errorf("source idea status = %q, want promoted", src.Status)
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("parking must not spawn; registry has %d", len(s.children.all))
-	}
-}
-
-// TestUnarmedServePromoteSpawnRefusesBeforePromote pins the handler's
-// ordering: the spawn gate fires before runopen.Promote, so a refused
-// "promote & run" click leaves the idea untouched. Gating after the
-// open would half-promote — destination run on disk, idea marked, no
-// agent — from a click an unarmed serve was supposed to refuse outright.
-func TestUnarmedServePromoteSpawnRefusesBeforePromote(t *testing.T) {
-	root := newGitServeRoot(t)
-	seedRun(t, root, "alpha", "my-idea", "idea")
-	writeCanvas(t, root, "alpha", "my-idea", "idea", "park me\n")
-	gittest.Commit(t, root, "seed idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	req := httptest.NewRequest("POST", "/run/alpha/my-idea/promote", strings.NewReader("spawn=1"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	dated := "my-idea-" + time.Now().Local().Format("2006-01-02")
-	if _, err := run.Load(root, "alpha", dated); err == nil {
-		t.Error("refused promote must not open the destination run")
-	}
-	src, err := run.Load(root, "alpha", "my-idea")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if src.Status != run.StatusInProgress {
-		t.Errorf("source idea status = %q, want in-progress (untouched)", src.Status)
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
-	}
-}
-
-// TestUnarmedServeNewRunParks: the new-run form's bare submit opens a run
-// with no agent, the same journal-only write promote's does.
-func TestUnarmedServeNewRunParks(t *testing.T) {
-	root := newGitServeRoot(t)
-	seedProject(t, root, "alpha")
-	gittest.Commit(t, root, "seed project")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if got := rr.Header().Get("Location"); got != "/run/alpha/first-thing" {
-		t.Fatalf("Location = %q", got)
-	}
-	if _, err := run.Load(root, "alpha", "first-thing"); err != nil {
-		t.Fatalf("run.Load after park: %v", err)
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("parking must not spawn; registry has %d", len(s.children.all))
-	}
-}
-
-// TestUnarmedServeNewRunSpawnRefusesBeforeOpen: the /run/new mirror of the
-// ordering probe above — a refused "open & run" leaves no run on disk.
-func TestUnarmedServeNewRunSpawnRefusesBeforeOpen(t *testing.T) {
-	root := newGitServeRoot(t)
-	seedProject(t, root, "alpha")
-	gittest.Commit(t, root, "seed project")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
-
-	req := httptest.NewRequest("POST", "/run/new", strings.NewReader("id=alpha/first-thing&spawn=1"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("want 403, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if _, err := run.Load(root, "alpha", "first-thing"); err == nil {
-		t.Error("refused open must not leave a run on disk")
-	}
-	if len(s.children.all) != 0 {
-		t.Errorf("refusal must not spawn; registry has %d", len(s.children.all))
+		t.Errorf("the chore page should still render the schedule detail\n%s", body)
 	}
 }

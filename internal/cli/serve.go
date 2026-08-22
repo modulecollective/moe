@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -139,7 +138,7 @@ func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 		// hint sends the operator, so it's where the batch has to be
 		// legible. Membership is journal state, so it crosses the seam as
 		// a callback like every other journal-shaped fact.
-		ChainMembers: func(project, runID string) ([]dash.Row, string, error) {
+		ChainMembers: func(project, runID string) ([]dash.Row, error) {
 			return chainMembers(root, project, runID, time.Now().UTC())
 		},
 		// Provenance crosses the seam already resolved to display strings:
@@ -176,9 +175,9 @@ func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed
-		// new-run list.
-		WorkflowUI:      lookupServeWorkflowUI,
-		NewRunWorkflows: serveNewRunWorkflows(),
+		// tag-destination list.
+		WorkflowUI:   lookupServeWorkflowUI,
+		TagWorkflows: serveTagWorkflows(),
 		// GatherChore picks the named chore out of the per-project state
 		// gather. Keeps the workflow registry on the cli side of the seam.
 		GatherChore: func(project, name string) (chore.State, bool, error) {
@@ -192,28 +191,6 @@ func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
 				}
 			}
 			return chore.State{}, false, nil
-		},
-		// OpenChore runs the shared chore-open pipeline and translates its
-		// internal guard errors into the sentinels serve maps to 404/409.
-		OpenChore: func(project, name string) (serve.ChoreOpen, error) {
-			res, err := openChoreInProcess(root, project, name, choreOpenNormal, stdout, stderr)
-			if err != nil {
-				var notFound *choreNotFoundError
-				var notOpenable *choreNotOpenableError
-				switch {
-				case errors.As(err, &notFound):
-					return serve.ChoreOpen{}, fmt.Errorf("%w: %v", serve.ErrChoreNotFound, err)
-				case errors.As(err, &notOpenable):
-					return serve.ChoreOpen{}, fmt.Errorf("%w: %v", serve.ErrChoreNotOpenable, err)
-				}
-				return serve.ChoreOpen{}, err
-			}
-			return serve.ChoreOpen{
-				Project:    res.Metadata.Project,
-				Slug:       res.Metadata.ID,
-				Workflow:   res.Workflow,
-				FirstStage: res.FirstStage,
-			}, nil
 		},
 	}
 }

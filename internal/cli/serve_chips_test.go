@@ -14,15 +14,17 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/serve"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // The serve-side chip tests run against a hand-written WorkflowUI stub
 // (internal/serve can't import internal/cli — the dependency runs the
 // other way), and the cli-side tests assert lookupServeWorkflowUI's
 // return value without rendering. Neither composes the two, so a
-// workflow could derive Cascade correctly and still not render chips.
-// These tests wire the real lookup into a real serve.Server and read
-// the rendered run page — the seam the operator actually clicks.
+// workflow could compose its stage set correctly and still not render
+// the advance mark. These tests wire the real lookup into a real
+// serve.Server and read the rendered run page — the seam the operator
+// actually clicks.
 func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 	cases := []struct {
 		workflow  string
@@ -31,14 +33,20 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 	}{
 		{workflow: "twin", nextStage: "architecture", wantChips: true},
 		// Undeclared workflows stay read-only: no serve declaration, so
-		// no cascade chips regardless of their CLI dispatcher.
+		// no mark regardless of their CLI dispatcher.
 		{workflow: "idea", nextStage: "idea", wantChips: false},
 		{workflow: "pulse", nextStage: "pulse", wantChips: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.workflow, func(t *testing.T) {
 			root := t.TempDir()
+			gittest.InitAt(t, root)
 			seedServeRun(t, root, "alpha", "r1", tc.workflow)
+			gittest.Commit(t, root, "seed run")
+			// The mark only renders on a stage with a committed work turn
+			// — stageSatisfied wants a marker *and* a turn.
+			trailerstest.CommitWorkTurnAt(t, root, "alpha", "r1", tc.workflow, tc.nextStage,
+				time.Now().Add(-time.Hour))
 			now := time.Now().UTC()
 			srv, err := serve.New(serve.Options{
 				Addr:       "127.0.0.1:0",
@@ -62,16 +70,15 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 				t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 			}
 			body := rr.Body.String()
-			chips := []string{
-				`action="/run/alpha/r1/advance"`,
-				`action="/run/alpha/r1/ship"`,
-				`action="/run/alpha/r1/chain"`,
+			chip := `action="/run/alpha/r1/advance"`
+			if got := strings.Contains(body, chip); got != tc.wantChips {
+				t.Errorf("%s run page: chip %q present=%v, want %v\n%s",
+					tc.workflow, chip, got, tc.wantChips, body)
 			}
-			for _, chip := range chips {
-				got := strings.Contains(body, chip)
-				if got != tc.wantChips {
-					t.Errorf("%s run page: chip %q present=%v, want %v\n%s",
-						tc.workflow, chip, got, tc.wantChips, body)
+			// The spawn chips are gone from every workflow, declared or not.
+			for _, banned := range []string{`/run/alpha/r1/ship`, `/run/alpha/r1/chain`} {
+				if strings.Contains(body, banned) {
+					t.Errorf("%s run page still offers %q\n%s", tc.workflow, banned, body)
 				}
 			}
 		})
@@ -98,16 +105,13 @@ func seedServeRun(t *testing.T, root, projectID, runID, workflow string) {
 	}
 }
 
-// TestParkedRunRowResolvesToFirstStage pins the fact the park-by-default
-// UI leans on: a run parked from the serve form (or from promote) — no
-// agent has touched it, no stage document exists — resolves through the
-// real GatherRunRow to its workflow's first stage. That Stage is what
-// composeRunActions matches against ui.Stages to render the "→ design"
-// chip, so if a parked run resolved to "" the destination page would
-// offer no ride and "park now, decide later" would be a dead end.
+// TestParkedRunRowResolvesToFirstStage pins the fact the whole parked
+// flow leans on: a run a sweep just promoted — no agent has touched it,
+// no stage document exists — resolves through the real GatherRunRow to
+// its workflow's first stage. That Stage is what the kick and the run
+// page both key off, so a parked run resolving to "" would strand it.
 //
-// The chip-rendering half is covered above (and in internal/serve by
-// TestPromoteParksThenRunPageRidesIt) against a stubbed row; this is the
+// The rendering half is covered above against a stubbed row; this is the
 // one assertion that runs the real gatherer.
 func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
 	root := t.TempDir()
@@ -115,7 +119,7 @@ func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
 	seedServeRun(t, root, "alpha", "seed-run", "sdlc")
 	gittest.Commit(t, root, "seed project")
 
-	// Park a run exactly the way serve's handleNewRunSubmit does.
+	// Park a run exactly the way a sweep's promote does.
 	if _, err := runopen.Open(root, "alpha", run.Options{
 		ID: "parked-one", Workflow: "sdlc", Agent: "claude",
 	}, io.Discard, io.Discard); err != nil {
@@ -130,7 +134,7 @@ func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
 		t.Fatal("parked run not found by the real dash lookup")
 	}
 	if row.Stage != "design" {
-		t.Errorf("parked sdlc run Stage = %q, want %q — the destination page's ride chip keys off this",
+		t.Errorf("parked sdlc run Stage = %q, want %q — the kick and the run page both key off this",
 			row.Stage, "design")
 	}
 }

@@ -101,16 +101,13 @@ func init() {
 	w.RegisterStageGate("test", testStageGate)
 	RegisterWorkflow(w)
 
-	// Serve declaration: front sdlc in the new-run/promote forms and
-	// render the cascade trio (advance/ship/chain) on run pages. push
-	// is excluded from web spawning — terminal/CLI-only stays a
-	// recorded decision; the bang vocabulary collapses there. The
-	// cascade bit is no longer declared here — lookupServeWorkflowUI
-	// derives it from operatorCascades.
+	// Serve declaration: offer sdlc as an idea tag destination, and let
+	// the web mark sdlc stages advanced. push is excluded — a marker on
+	// push would satisfy the ladder without anything ever being pushed,
+	// and push stays terminal/CLI-only anyway, a recorded decision.
 	registerServeWorkflow("sdlc", serveWorkflowDecl{
 		excludeStages: []string{"push"},
-		newRun:        true,
-		workspace:     true,
+		tagTarget:     true,
 	})
 }
 

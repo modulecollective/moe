@@ -21,17 +21,17 @@ source of truth for the exact command surface; this page is a map.
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
   project knowledge topics, twin documents, and a dashboard with the same
-  daily-activity chart (and a project-scoped one on each project page). **Safe
-  by default:** all views,
-  idea capture/edit/tag/untag/close/reopen, run close/edit/reopen, and opening or
-  promoting into a *parked* run work, but the run-spawning actions — the
-  new-run and promote forms' "& run" submits, advancing a stage, kicking a
-  chain head, and opening a due chore's run — refuse with 403, and the
-  heartbeat never ticks. `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the
-  standing consent rung: it enables those actions — anything that can reach the
-  listener can then execute code — and starts the resident heartbeat, a
-  per-project ticker that runs `moe pulse new --dynamic` when the board warrants
-  it. Stopping the process retracts both. A `/serve` page owns that ticker's
+  daily-activity chart (and a project-scoped one on each project page).
+  **The web starts nothing.** Every action it offers writes a journal commit and
+  stops there: capture or edit an idea, tag it for a workflow, close or reopen a
+  run, mark the current stage advanced. Starting agents is the heartbeat's job
+  alone, so there is no route from the listener to code execution at all —
+  armed or not. Interactive stage-driving happens in a terminal.
+  `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
+  it starts the resident heartbeat, a per-project ticker that runs `moe pulse
+  new --dynamic` when the board warrants it. Unarmed, the ticker never fires and
+  what the web wrote simply waits. Stopping the process retracts it. A `/serve`
+  page owns that ticker's
   status and trace — what each recent tick decided, and the output tail of any
   sweep that failed — reachable from the menu and from the one-line status
   cluster every board header carries.
@@ -76,8 +76,10 @@ source of truth for the exact command surface; this page is a map.
     the survey doesn't park gets started.
 
   The mode binds the clock, not you. `!`, `!!`, `!!!`, `moe chain kick`, stage
-  verbs, serve's per-run chips and a hand-typed `moe pulse new --dynamic` all
-  run in every mode — the typed word is consent whatever the config says.
+  verbs and a hand-typed `moe pulse new --dynamic` all run in every mode — the
+  typed word is consent whatever the config says. Serve's advance mark is the
+  same shape from the other direction: it writes an operator mark, which is
+  exactly what `safe` looks for before it starts a thread.
   Serve's arming stays above all three: an unarmed serve automates nothing
   anywhere. The mode is stored in `projects/<id>/project.json` (absent means
   `auto`) and is settable from the project hub's switch as well.

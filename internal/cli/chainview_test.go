@@ -1,15 +1,12 @@
 package cli
 
 import (
-	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // chainBatch mints a head plus two parked fix runs chained behind it,
@@ -48,12 +45,9 @@ func TestChainMembersWalksTheBatch(t *testing.T) {
 	root := spawnFixture(t)
 	head, first, second := chainBatch(t, root)
 
-	members, chainedUnder, err := chainMembers(root, "moe", head, time.Now().UTC())
+	members, err := chainMembers(root, "moe", head, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if chainedUnder != "" {
-		t.Errorf("a freshly minted head is chained under %q, want nothing", chainedUnder)
 	}
 	if len(members) != 2 {
 		t.Fatalf("members = %+v, want 2", members)
@@ -85,47 +79,11 @@ func TestChainMembersStopsAtATerminalMember(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	members, _, err := chainMembers(root, "moe", head, time.Now().UTC())
+	members, err := chainMembers(root, "moe", head, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(members) != 0 {
 		t.Errorf("members = %+v, want none — the ride stops at the closed member", members)
-	}
-}
-
-// TestChainMembersReportsALiveParent: a head chained under a live
-// parent is one `moe chain kick` refuses ("kick the head"), and the
-// second return is what lets the page decline to offer the chip.
-func TestChainMembersReportsALiveParent(t *testing.T) {
-	root := spawnFixture(t)
-	head, _, _ := chainBatch(t, root)
-
-	if code := runChainNew([]string{"moe/topic"}, io.Discard, os.Stderr); code != 0 {
-		t.Fatal("chain new failed")
-	}
-	var topic string
-	for _, id := range runsWithWorkflow(t, root, "moe", chainWorkflow) {
-		if id != head {
-			topic = id
-		}
-	}
-	if topic == "" {
-		t.Fatal("second head not minted")
-	}
-
-	msg := "chain: edit (test)\n\n" + trailers.Block{
-		ChainedTo: []string{"moe/" + topic + " moe/" + head},
-	}.String()
-	if err := git.Run(root, "commit", "--allow-empty", "-m", msg); err != nil {
-		t.Fatal(err)
-	}
-
-	_, chainedUnder, err := chainMembers(root, "moe", head, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chainedUnder != "moe/"+topic {
-		t.Errorf("chainedUnder = %q, want moe/%s", chainedUnder, topic)
 	}
 }
