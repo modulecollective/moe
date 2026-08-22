@@ -539,3 +539,35 @@ func TestInboxAnswerRefusesOutOfRangeChoice(t *testing.T) {
 		t.Fatalf("stderr = %q", errb.String())
 	}
 }
+
+// The ride boundary. A question on the *second* fix in a batch refuses
+// the whole kick up front: the stage floor would have caught it, but
+// only after fix-one had already shipped, and a half-ridden chain is
+// what the up-front ask exists to prevent.
+func TestChainKickRefusesWithAQuestionOnAMember(t *testing.T) {
+	root, stages, pushes := kickFixture(t)
+
+	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseRunSpec{
+		{Slug: "fix-one", Title: "One"},
+		{Slug: "fix-two", Title: "Two"},
+	}, os.Stderr)
+	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
+	if len(heads) != 1 {
+		t.Fatalf("chain runs %v, want 1", heads)
+	}
+	if _, err := input.Ask(root, "moe", "fix-two", "moe/pulse-one",
+		"Which policy?", []string{"Keep", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	var errb bytes.Buffer
+	if code := runChainKick([]string{"moe/" + heads[0]}, io.Discard, &errb); code == 0 {
+		t.Fatalf("chain kick rode a chain with a question open; stderr=%q", errb.String())
+	}
+	if len(*stages) != 0 || len(*pushes) != 0 {
+		t.Fatalf("the ride started: stages=%v pushes=%d", kickStages(*stages), len(*pushes))
+	}
+	if !strings.Contains(errb.String(), "moe/fix-two is awaiting input") {
+		t.Fatalf("stderr = %q, want the member named", errb.String())
+	}
+}

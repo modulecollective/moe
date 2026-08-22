@@ -175,23 +175,16 @@ func refuseOnOpenInput(root, projectID, runID string, stderr io.Writer) int {
 // it have already shipped, which turns one answerable question into a
 // half-ridden chain. The head asks first so the refusal costs nothing.
 //
+// graph is the caller's snapshot (see liveChainParent), so the walk here
+// is the same one the kick is about to ride. A nil graph reads as "no
+// thread to walk" and defers to the stage floor, which is where the
+// caller's own guard already refused.
+//
 // Returns 0 when the ride may proceed.
-func refuseRideOnOpenInput(root string, md *run.Metadata, stderr io.Writer) int {
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		moePrintf(stderr, "chain kick: build index: %v\n", err)
-		return 1
+func refuseRideOnOpenInput(root string, graph *run.ChainGraph, md *run.Metadata, stderr io.Writer) int {
+	if graph == nil {
+		return 0
 	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		moePrintf(stderr, "chain kick: scan runs: %v\n", err)
-		return 1
-	}
-	byKey := make(map[string]*run.Metadata, len(mds))
-	for _, m := range mds {
-		byKey[m.Project+"/"+m.ID] = m
-	}
-	graph := run.NewChainGraph(idx, byKey)
 	for _, key := range graph.Thread(md.Project + "/" + md.ID) {
 		proj, runID, err := splitProjectRun(key)
 		if err != nil {

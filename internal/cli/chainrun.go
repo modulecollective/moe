@@ -259,7 +259,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 		moePrintf(stderr, "chain kick: %s/%s is a %s run — not chainable\n", projectID, runID, md.Workflow)
 		return 1
 	}
-	parent, chained, err := liveChainParent(root, md)
+	parent, chained, graph, err := liveChainParent(root, md)
 	if err != nil {
 		moePrintf(stderr, "chain kick: build index: %v\n", err)
 		return 1
@@ -271,7 +271,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 	// The human-input floor at the ride boundary. Every stage turn below
 	// asks it again for its own run; asking here first is what keeps one
 	// answerable question from becoming a half-ridden chain.
-	if code := refuseRideOnOpenInput(root, md, stderr); code != 0 {
+	if code := refuseRideOnOpenInput(root, graph, md, stderr); code != 0 {
 		return code
 	}
 
@@ -334,23 +334,30 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 // other edge reader already filters those out — so it leaves md kickable
 // as its own head.
 //
+// The graph is returned alongside so the caller's next guard — the
+// human-input floor over the thread this run heads — reads the same
+// snapshot instead of forking a second index over the whole journal.
+// The kick's caller is a loop, so that second build would be one per
+// root a dynamic sweep offers.
+//
 // The index error is returned rather than swallowed: this is a refusal
 // guard, and failing open would ride a chain from the middle.
-func liveChainParent(root string, md *run.Metadata) (string, bool, error) {
+func liveChainParent(root string, md *run.Metadata) (parent string, chained bool, graph *run.ChainGraph, err error) {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	mds, err := run.Scan(root)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	byKey := make(map[string]*run.Metadata, len(mds))
 	for _, m := range mds {
 		byKey[m.Project+"/"+m.ID] = m
 	}
-	parent := run.NewChainGraph(idx, byKey).LiveParentOf(md.Project + "/" + md.ID)
-	return parent, parent != "", nil
+	g := run.NewChainGraph(idx, byKey)
+	parent = g.LiveParentOf(md.Project + "/" + md.ID)
+	return parent, parent != "", g, nil
 }
 
 // runChainNote edits a chain head's purpose note — the one thing the
