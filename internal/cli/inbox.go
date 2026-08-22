@@ -198,19 +198,35 @@ func refuseRideOnOpenInput(root string, graph *run.ChainGraph, md *run.Metadata,
 }
 
 // humanInputsSection is the `Human inputs` block every stage prompt on a
-// run with input history carries: each question and, once answered, the
-// choice the operator picked.
+// run with answered questions carries: each question and the choice the
+// operator picked.
+//
+// Answered only, and not because open ones are uninteresting — because a
+// stage turn cannot reach this with one open. refuseOnOpenInput sits at
+// the top of runStageSession, so by the time a prompt is assembled the
+// record's open request is either answered or the turn never started.
+// Rendering "(unanswered)" here would be describing a state the caller
+// has already refused.
 //
 // It is context, not permission. A stage reading "the operator chose
 // option 2" learns what to build; it does not learn that it may go back
 // and rewrite an upstream canvas to match. The block says so, because
 // the alternative is a code stage helpfully re-deciding a design.
 //
-// Returns "" for the overwhelming majority of runs, which have no
-// record at all.
+// Returns "" for the overwhelming majority of runs, which have no record
+// at all.
 func humanInputsSection(root string, md *run.Metadata) string {
 	f, err := input.Load(root, md.Project, md.ID)
-	if err != nil || len(f.Requests) == 0 {
+	if err != nil {
+		return ""
+	}
+	var answered []input.Request
+	for _, req := range f.Requests {
+		if req.Answered() {
+			answered = append(answered, req)
+		}
+	}
+	if len(answered) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -218,13 +234,8 @@ func humanInputsSection(root string, md *run.Metadata) string {
 	b.WriteString("Questions this run put to the operator, and what they answered. The\n")
 	b.WriteString("answer is context for the work ahead of you — it is not licence to\n")
 	b.WriteString("rewrite an earlier canvas to match it.\n\n")
-	for _, req := range f.Requests {
-		fmt.Fprintf(&b, "- %s\n", req.Question)
-		if req.Answered() {
-			fmt.Fprintf(&b, "  answer: %s\n", req.Answer())
-			continue
-		}
-		fmt.Fprintf(&b, "  answer: (unanswered — %s)\n", strings.Join(req.Choices, " / "))
+	for _, req := range answered {
+		fmt.Fprintf(&b, "- %s\n  answer: %s\n", req.Question, req.Answer())
 	}
 	return b.String()
 }

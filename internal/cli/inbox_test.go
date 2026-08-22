@@ -304,6 +304,21 @@ func TestHumanInputsSectionEmptyWithoutRecord(t *testing.T) {
 	}
 }
 
+// A record whose only request is open renders nothing: the floor above
+// means a stage turn cannot reach the prompt in that state, so the
+// section has nothing honest to say about it.
+func TestHumanInputsSectionEmptyWithOnlyAnOpenQuestion(t *testing.T) {
+	root := spawnFixture(t)
+	md := seedParkedRun(t, root, "change-auth")
+	if _, err := input.Ask(root, "moe", "change-auth", "moe/pulse-one",
+		"Which policy?", []string{"Keep", "Adopt"}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := humanInputsSection(root, md); got != "" {
+		t.Fatalf("section = %q, want empty while the question is open", got)
+	}
+}
+
 // The prompt assembly is where delivery actually has to happen: a
 // section that exists but never reaches buildSystemPrompt delivers
 // nothing.
