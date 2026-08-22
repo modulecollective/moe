@@ -36,6 +36,22 @@ var listItemRe = regexp.MustCompile(`^\s*([-*]|\d{1,9}\.)\s+(.*)$`)
 // character classes (`[[:space:]]`) from being mistaken for wikilinks.
 var wikilinkSlugRe = regexp.MustCompile(`^[\w./-]+$`)
 
+// ReferenceKind identifies a canvas reference that the caller may resolve.
+type ReferenceKind uint8
+
+const (
+	ReferenceCommit ReferenceKind = iota + 1
+	ReferenceRun
+)
+
+// Reference is a recognized commit SHA or run id. Text is the exact source
+// text: run ids are either qualified project/slug ids or bare slugs from a
+// whole inline-code span.
+type Reference struct {
+	Kind ReferenceKind
+	Text string
+}
+
 // Render converts src to safe HTML. resolve, when non-nil, rewrites a
 // relative link target (e.g. "topics/claude-code.md") to the route that
 // serves it; it receives the raw target and returns the replacement
@@ -43,6 +59,13 @@ var wikilinkSlugRe = regexp.MustCompile(`^[\w./-]+$`)
 // (scheme://…, mailto:, root-relative "/…", and "#anchors") bypass
 // resolve untouched.
 func Render(src string, resolve func(target string) string) string {
+	return RenderWithReferences(src, resolve, nil)
+}
+
+// RenderWithReferences is Render with an optional hook for recognized commit
+// SHAs and run ids. Returning an empty or unsafe href leaves the escaped source
+// text inert.
+func RenderWithReferences(src string, resolve func(target string) string, resolveReference func(Reference) string) string {
 	lines := strings.Split(src, "\n")
 	var b strings.Builder
 	i := 0
@@ -78,7 +101,7 @@ func Render(src string, resolve func(target string) string) string {
 		if m := headingRe.FindStringSubmatch(line); m != nil {
 			level := len(m[1])
 			text := stripATXClosing(strings.TrimSpace(m[2]))
-			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", level, renderInline(text, resolve), level)
+			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", level, renderInline(text, resolve, resolveReference), level)
 			i++
 			continue
 		}
@@ -136,7 +159,7 @@ func Render(src string, resolve func(target string) string) string {
 					i++
 				}
 				b.WriteString("<li>")
-				b.WriteString(renderInline(content.String(), resolve))
+				b.WriteString(renderInline(content.String(), resolve, resolveReference))
 				b.WriteString("</li>\n")
 			}
 			fmt.Fprintf(&b, "</%s>\n", tag)
@@ -156,7 +179,7 @@ func Render(src string, resolve func(target string) string) string {
 			i++
 		}
 		b.WriteString("<p>")
-		b.WriteString(renderInline(strings.Join(para, "\n"), resolve))
+		b.WriteString(renderInline(strings.Join(para, "\n"), resolve, resolveReference))
 		b.WriteString("</p>\n")
 	}
 	return b.String()
@@ -246,23 +269,26 @@ func isOrderedMarker(marker string) bool {
 // renderInline renders inline markup within a single text run and
 // returns escaped HTML. It scans left to right, handling the highest-
 // priority construct at each position and escaping anything else.
-func renderInline(s string, resolve func(string) string) string {
-	return renderInlineOpts(s, resolve, false)
+func renderInline(s string, resolve func(string) string, resolveReference func(Reference) string) string {
+	return renderInlineOpts(s, resolve, resolveReference, false, false)
 }
 
-// renderInlineOpts is renderInline with a noAutolink flag: when set,
-// bare-URL autolinking is suppressed and matched URLs fall through to
-// plain escaped text. It is set only inside anchor link text, where a
-// nested <a> would be invalid HTML.
-func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) string {
+// renderInlineOpts is renderInline with suppression flags used inside authored
+// link text, where emitting another anchor would produce invalid HTML.
+func renderInlineOpts(s string, resolve func(string) string, resolveReference func(Reference) string, noAutolink, noReferences bool) string {
 	var b strings.Builder
 	i := 0
 	for i < len(s) {
 		// Inline code span.
 		if s[i] == '`' {
 			if j := strings.IndexByte(s[i+1:], '`'); j >= 0 {
+				code := s[i+1 : i+1+j]
 				b.WriteString("<code>")
-				b.WriteString(html.EscapeString(s[i+1 : i+1+j]))
+				if noReferences {
+					b.WriteString(html.EscapeString(code))
+				} else {
+					b.WriteString(renderCodeReferences(code, resolveReference))
+				}
 				b.WriteString("</code>")
 				i += 1 + j + 1
 				continue
@@ -295,7 +321,7 @@ func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) st
 					// anchor, keep the visible label as inert inline text —
 					// the renderer's usual "degrade to text" behaviour.
 					// No enclosing <a> here, so autolinks stay live.
-					b.WriteString(renderInlineOpts(text, resolve, noAutolink))
+					b.WriteString(renderInlineOpts(text, resolve, resolveReference, noAutolink, true))
 					i += n
 					continue
 				}
@@ -304,7 +330,7 @@ func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) st
 				b.WriteString(`">`)
 				// Suppress autolinks in the label: a bare URL here would
 				// otherwise emit an <a> nested inside this one.
-				b.WriteString(renderInlineOpts(text, resolve, true))
+				b.WriteString(renderInlineOpts(text, resolve, resolveReference, true, true))
 				b.WriteString("</a>")
 				i += n
 				continue
@@ -315,7 +341,7 @@ func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) st
 		if strings.HasPrefix(s[i:], "**") {
 			if inner, n, ok := matchDelim(s[i:], "**"); ok {
 				b.WriteString("<strong>")
-				b.WriteString(renderInlineOpts(inner, resolve, noAutolink))
+				b.WriteString(renderInlineOpts(inner, resolve, resolveReference, noAutolink, noReferences))
 				b.WriteString("</strong>")
 				i += n
 				continue
@@ -326,7 +352,7 @@ func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) st
 		if s[i] == '*' {
 			if inner, n, ok := matchDelim(s[i:], "*"); ok {
 				b.WriteString("<em>")
-				b.WriteString(renderInlineOpts(inner, resolve, noAutolink))
+				b.WriteString(renderInlineOpts(inner, resolve, resolveReference, noAutolink, noReferences))
 				b.WriteString("</em>")
 				i += n
 				continue
@@ -345,25 +371,162 @@ func renderInlineOpts(s string, resolve func(string) string, noAutolink bool) st
 			continue
 		}
 
+		if !noReferences && resolveReference != nil {
+			if ref, n, ok := matchReference(s, i); ok {
+				writeReference(&b, ref, resolveReference)
+				i += n
+				continue
+			}
+		}
+
 		// Default: escape one byte. UTF-8 continuation bytes (>=0x80)
 		// are never the special ASCII chars, so writing them raw is safe.
-		switch s[i] {
-		case '<':
-			b.WriteString("&lt;")
-		case '>':
-			b.WriteString("&gt;")
-		case '&':
-			b.WriteString("&amp;")
-		case '"':
-			b.WriteString("&#34;")
-		case '\'':
-			b.WriteString("&#39;")
-		default:
-			b.WriteByte(s[i])
-		}
+		writeEscapedByte(&b, s[i])
 		i++
 	}
 	return b.String()
+}
+
+func renderCodeReferences(s string, resolve func(Reference) string) string {
+	if resolve == nil {
+		return html.EscapeString(s)
+	}
+	var b strings.Builder
+	if ref, n, ok := matchCommit(s, 0); ok && n == len(s) {
+		writeReference(&b, ref, resolve)
+		return b.String()
+	}
+	if isSlug(s) {
+		ref := Reference{Kind: ReferenceRun, Text: s}
+		if href := resolve(ref); safeHref(href) && href != "" {
+			writeResolvedReference(&b, ref.Text, href)
+			return b.String()
+		}
+	}
+	for i := 0; i < len(s); {
+		if ref, n, ok := matchReference(s, i); ok {
+			writeReference(&b, ref, resolve)
+			i += n
+			continue
+		}
+		writeEscapedByte(&b, s[i])
+		i++
+	}
+	return b.String()
+}
+
+func writeReference(b *strings.Builder, ref Reference, resolve func(Reference) string) {
+	href := resolve(ref)
+	if href == "" || !safeHref(href) {
+		b.WriteString(html.EscapeString(ref.Text))
+		return
+	}
+	writeResolvedReference(b, ref.Text, href)
+}
+
+func writeResolvedReference(b *strings.Builder, text, href string) {
+	b.WriteString(`<a href="`)
+	b.WriteString(html.EscapeString(href))
+	b.WriteString(`">`)
+	b.WriteString(html.EscapeString(text))
+	b.WriteString("</a>")
+}
+
+func writeEscapedByte(b *strings.Builder, c byte) {
+	switch c {
+	case '<':
+		b.WriteString("&lt;")
+	case '>':
+		b.WriteString("&gt;")
+	case '&':
+		b.WriteString("&amp;")
+	case '"':
+		b.WriteString("&#34;")
+	case '\'':
+		b.WriteString("&#39;")
+	default:
+		b.WriteByte(c)
+	}
+}
+
+func matchReference(s string, i int) (Reference, int, bool) {
+	if ref, n, ok := matchQualifiedRun(s, i); ok {
+		return ref, n, true
+	}
+	return matchCommit(s, i)
+}
+
+func matchCommit(s string, i int) (Reference, int, bool) {
+	if i > 0 && isTokenByte(s[i-1]) {
+		return Reference{}, 0, false
+	}
+	end := i
+	hasLetter := false
+	for end < len(s) && isLowerHex(s[end]) {
+		if s[end] >= 'a' && s[end] <= 'f' {
+			hasLetter = true
+		}
+		end++
+	}
+	if n := end - i; n < 7 || n > 40 || !hasLetter {
+		return Reference{}, 0, false
+	}
+	if end < len(s) && isTokenByte(s[end]) {
+		return Reference{}, 0, false
+	}
+	return Reference{Kind: ReferenceCommit, Text: s[i:end]}, end - i, true
+}
+
+func matchQualifiedRun(s string, i int) (Reference, int, bool) {
+	if i > 0 && (isSlugByte(s[i-1]) || s[i-1] == '/') {
+		return Reference{}, 0, false
+	}
+	projectEnd := i
+	for projectEnd < len(s) && isSlugByte(s[projectEnd]) {
+		projectEnd++
+	}
+	if projectEnd == i || projectEnd >= len(s) || s[projectEnd] != '/' || !isSlug(s[i:projectEnd]) {
+		return Reference{}, 0, false
+	}
+	slugEnd := projectEnd + 1
+	for slugEnd < len(s) && isSlugByte(s[slugEnd]) {
+		slugEnd++
+	}
+	if slugEnd == projectEnd+1 || !isSlug(s[projectEnd+1:slugEnd]) {
+		return Reference{}, 0, false
+	}
+	if slugEnd < len(s) && (isSlugByte(s[slugEnd]) || s[slugEnd] == '/') {
+		return Reference{}, 0, false
+	}
+	return Reference{Kind: ReferenceRun, Text: s[i:slugEnd]}, slugEnd - i, true
+}
+
+func isSlug(s string) bool {
+	if s == "" || !isLowerAlphaNumeric(s[0]) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if !isSlugByte(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSlugByte(c byte) bool {
+	return isLowerAlphaNumeric(c) || c == '-'
+}
+
+func isLowerAlphaNumeric(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+}
+
+func isLowerHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f'
+}
+
+func isTokenByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
 }
 
 // matchWikilink expects s to start with "[[". On a conservative match

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -49,6 +51,72 @@ func TestCanvasRouteRendersBody(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("body missing %q\n%s", want, out)
 		}
+	}
+}
+
+func TestCanvasRouteLinksCommitAndRunReferences(t *testing.T) {
+	cases := []struct {
+		name       string
+		remote     string
+		corrupt    bool
+		commitHref string
+	}{
+		{"github https", "https://github.com/owner/repo.git", false, "https://github.com/owner/repo/commit/abc1234"},
+		{"github ssh", "git@github.com:owner/repo.git", false, "https://github.com/owner/repo/commit/abc1234"},
+		{"unsupported remote", "https://gitlab.com/owner/repo.git", false, ""},
+		{"malformed github remote", "https://github.com/owner/repo/extra", false, ""},
+		{"unreadable project metadata", "", true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedRun(t, root, "alpha", "fix-it", "sdlc")
+			seedRun(t, root, "alpha", "target-run", "sdlc")
+			seedRun(t, root, "beta", "foreign-run", "sdlc")
+			if tc.corrupt {
+				path := filepath.Join(root, "projects", "alpha", "project.json")
+				if err := os.WriteFile(path, []byte("not json\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				setProjectRemote(t, root, "alpha", tc.remote)
+			}
+			body := "# abc1234\n\nalpha/target-run beta/foreign-run missing/no-run `target-run`\n"
+			canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", body)
+			s := newTestServer(t, Options{
+				Addr: "127.0.0.1:0",
+				Root: root,
+				ResolveCanvas: func(_, _, _ string) (string, error) {
+					return canvasPath, nil
+				},
+			})
+
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/canvas/design", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			out := rr.Body.String()
+			for _, want := range []string{
+				`href="/run/alpha/target-run"`,
+				`href="/run/beta/foreign-run"`,
+				`<code><a href="/run/alpha/target-run">target-run</a></code>`,
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("body missing %q\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, `href="/run/missing/no-run"`) {
+				t.Errorf("missing run should remain inert:\n%s", out)
+			}
+			if tc.commitHref == "" {
+				if strings.Contains(out, `href="https://github.com/`) {
+					t.Errorf("unsupported project remote produced a commit link:\n%s", out)
+				}
+			} else if !strings.Contains(out, `href="`+tc.commitHref+`"`) {
+				t.Errorf("body missing commit href %q\n%s", tc.commitHref, out)
+			}
+		})
 	}
 }
 
@@ -187,4 +255,22 @@ func writeCanvas(t *testing.T, root, projectID, runID, stage, body string) strin
 		t.Fatal(err)
 	}
 	return path
+}
+
+func setProjectRemote(t *testing.T, root, projectID, remote string) {
+	t.Helper()
+	projectMD := project.Metadata{
+		ID:            projectID,
+		Remote:        remote,
+		DefaultBranch: "main",
+		Submodule:     "projects/" + projectID + "/src",
+	}
+	body, err := json.Marshal(projectMD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "projects", projectID, "project.json")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

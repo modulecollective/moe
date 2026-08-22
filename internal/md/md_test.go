@@ -259,3 +259,89 @@ func TestRelativeLinkResolution(t *testing.T) {
 		t.Errorf("absolute link should pass through:\n%s", got)
 	}
 }
+
+func TestRenderWithReferences(t *testing.T) {
+	fullSHA := "abcdef0123456789abcdef0123456789abcdef01"
+	resolve := func(ref Reference) string {
+		switch ref.Kind {
+		case ReferenceCommit:
+			return "/commit/" + ref.Text
+		case ReferenceRun:
+			if strings.Contains(ref.Text, "/") {
+				return "/run/" + ref.Text
+			}
+			return "/run/current/" + ref.Text
+		default:
+			return ""
+		}
+	}
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"short sha in heading", "# abc1234", `<h1><a href="/commit/abc1234">abc1234</a></h1>`},
+		{"full sha in paragraph", fullSHA, `<a href="/commit/` + fullSHA + `">` + fullSHA + `</a>`},
+		{"qualified run in list", "- alpha/fix-it", `<li><a href="/run/alpha/fix-it">alpha/fix-it</a></li>`},
+		{"bare run in whole code span", "`fix-it`", `<code><a href="/run/current/fix-it">fix-it</a></code>`},
+		{"sha in whole code span", "`abc1234`", `<code><a href="/commit/abc1234">abc1234</a></code>`},
+		{"sha range keeps one code span", "`abc1234..def5678`", `<code><a href="/commit/abc1234">abc1234</a>..<a href="/commit/def5678">def5678</a></code>`},
+		{"surrounding html escaped", "abc1234 & <done>", `<a href="/commit/abc1234">abc1234</a> &amp; &lt;done&gt;`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RenderWithReferences(tc.in, nil, resolve)
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("missing %q in:\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestRenderWithReferencesLeavesExcludedTextInert(t *testing.T) {
+	resolve := func(ref Reference) string {
+		return "/resolved/" + ref.Text
+	}
+	cases := []struct {
+		name string
+		in   string
+		want string
+		deny string
+	}{
+		{"fenced code", "```\nabc1234 alpha/fix-it\n```", "abc1234 alpha/fix-it", `/resolved/`},
+		{"authored link label", "[abc1234 alpha/fix-it](/target)", `<a href="/target">abc1234 alpha/fix-it</a>`, `/resolved/`},
+		{"bare url", "https://example.com/abc1234", `<a href="https://example.com/abc1234">https://example.com/abc1234</a>`, `/resolved/`},
+		{"ordinary bare slug", "fix-it", "<p>fix-it</p>", `/resolved/`},
+		{"uppercase sha", "ABC1234", "<p>ABC1234</p>", `/resolved/`},
+		{"numeric id", "1234567", "<p>1234567</p>", `/resolved/`},
+		{"sha too short", "abc123", "<p>abc123</p>", `/resolved/`},
+		{"sha too long", "abcdef0123456789abcdef0123456789abcdef012", "<p>abcdef0123456789abcdef0123456789abcdef012</p>", `/resolved/`},
+		{"sha prefix boundary", "xabc1234", "<p>xabc1234</p>", `/resolved/`},
+		{"sha suffix boundary", "abc1234g", "<p>abc1234g</p>", `/resolved/`},
+		{"run prefix boundary", "prefix/alpha/fix-it", "<p>prefix/alpha/fix-it</p>", `/resolved/`},
+		{"run suffix boundary", "alpha/fix-it/more", "<p>alpha/fix-it/more</p>", `/resolved/`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RenderWithReferences(tc.in, nil, resolve)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("missing %q in:\n%s", tc.want, got)
+			}
+			if strings.Contains(got, tc.deny) {
+				t.Errorf("unexpected %q in:\n%s", tc.deny, got)
+			}
+		})
+	}
+}
+
+func TestRenderWithReferencesResolverDeclineAndUnsafeHref(t *testing.T) {
+	for _, href := range []string{"", "javascript:alert(1)"} {
+		got := RenderWithReferences("abc1234", nil, func(Reference) string { return href })
+		if got != "<p>abc1234</p>\n" {
+			t.Errorf("href %q: got %q", href, got)
+		}
+	}
+	if got := Render("abc1234 alpha/fix-it", nil); got != "<p>abc1234 alpha/fix-it</p>\n" {
+		t.Errorf("Render wrapper changed reference behavior: %q", got)
+	}
+}
