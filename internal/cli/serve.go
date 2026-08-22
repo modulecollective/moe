@@ -65,7 +65,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	opts := serveOptions(root, stdout, stderr)
+	opts := serveOptions(root, stderr)
 	opts.Addr = *addr
 	opts.Port = *port
 	// Flag or a non-empty env var arms the process; the env var lets a
@@ -73,9 +73,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	// through its unit/launcher. Non-empty enables, mirroring how
 	// MOE_SERVE_NOTIFY_URL is read just below.
 	//
-	// One switch, two consumers: the spawn bucket and the heartbeat. A
-	// separate heartbeat flag would be a consent matrix nobody needs —
-	// armed means the machine may act, clicks and clock alike.
+	// One switch, one consumer: the heartbeat is the only thing in the
+	// process that starts an agent, so armed means the clock may act.
 	opts.Dynamic = *dynamic || os.Getenv("MOE_SERVE_DYNAMIC") != ""
 	opts.NotifyURL = os.Getenv("MOE_SERVE_NOTIFY_URL")
 
@@ -101,7 +100,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 // security fields (Addr, Port, Dynamic, NotifyURL) are the caller's to
 // set — they come from flags and env in runServe, and from the test
 // directly in tests.
-func serveOptions(root string, stdout, stderr io.Writer) serve.Options {
+func serveOptions(root string, stderr io.Writer) serve.Options {
 	return serve.Options{
 		Root:   root,
 		Logger: stderr,

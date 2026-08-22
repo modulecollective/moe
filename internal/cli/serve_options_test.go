@@ -21,7 +21,7 @@ import (
 func TestServeOptionsRendersRealWiring(t *testing.T) {
 	root := seedChoreRoot(t)
 
-	srv, err := serve.New(serveOptions(root, io.Discard, io.Discard))
+	srv, err := serve.New(serveOptions(root, io.Discard))
 	if err != nil {
 		t.Fatalf("serve.New: %v", err)
 	}

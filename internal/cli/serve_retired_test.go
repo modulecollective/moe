@@ -31,7 +31,7 @@ func seedRetiredServeRoot(t *testing.T) string {
 // wiring, not just the serve-side rendering.
 func retiredServeHandler(t *testing.T, root string) func(path string) *httptest.ResponseRecorder {
 	t.Helper()
-	srv, err := serve.New(serveOptions(root, io.Discard, io.Discard))
+	srv, err := serve.New(serveOptions(root, io.Discard))
 	if err != nil {
 		t.Fatalf("serve.New: %v", err)
 	}
