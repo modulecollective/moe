@@ -74,9 +74,10 @@ type children struct {
 	notify func(id string, exitErr error)
 	// onSpawn and onExit are the activity record's hooks: one call per
 	// child started, one per child reaped, with the output tail attached
-	// to the second. Wired once in Server.New so every spawn site — a
-	// phone-launched run, a chore, a heartbeat sweep — lands in the ring
-	// without each one remembering to say so.
+	// to the second. Wired once in Server.New, at the registry level
+	// rather than at the one spawn site there is today (the heartbeat
+	// sweep), so any future spawner lands in the ring without
+	// remembering to say so.
 	onSpawn func(id string, at time.Time)
 	onExit  func(id string, at time.Time, exitErr error, tail string)
 }
@@ -111,9 +112,16 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	// Inherit env, then force a recognized TERM so claude/codex
 	// render, and set MOE_SERVE_AGENT=1 — the serve↔CLI handshake
 	// that tells the spawned stage opener to suppress its post-turn
-	// `next: …` chain prompt (SkipNextStage=true). Without it the
-	// child blocks forever on a prompt with no input source under
-	// serve.
+	// `next: …` chain prompt (SkipNextStage=true).
+	//
+	// Today's only child (the heartbeat sweep) is opened headless, so
+	// the prompt is already suppressed structurally and the env var is
+	// insurance. It stays because the hazard lives here, not in the
+	// caller: this spawner is generic, and a PTY child passes
+	// stdinIsTerminal() — so a future child that isn't headless by its
+	// args would sit on a prompt aimed at a terminal nobody types into,
+	// with no error and no exit. The env var inherits to any `moe`
+	// grandchildren too, which the args-level suppression does not.
 	env := append([]string{}, os.Environ()...)
 	env = append(env, "TERM=xterm-256color", "MOE_SERVE_AGENT=1")
 	cmd.Env = env

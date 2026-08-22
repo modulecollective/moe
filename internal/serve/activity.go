@@ -204,10 +204,11 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 }
 
 // recordChildSpawn and recordChildExit are the registry's two hooks, so
-// every PTY child serve parents — a phone-launched run, a chore, a
-// heartbeat sweep — lands in the ring on the same terms. The child id is
-// the subject and spells its own kind: "heartbeat:<project>" can't be
-// mistaken for a run's "<project>/<slug>".
+// every PTY child serve parents lands in the ring on the same terms.
+// Today that's one spawn site — the heartbeat sweep — but hanging the
+// hooks off the registry rather than the caller keeps it one call per
+// child whoever spawns it. The child id is the subject:
+// "heartbeat:<project>".
 func (a *activity) recordChildSpawn(id string, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

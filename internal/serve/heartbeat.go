@@ -337,9 +337,9 @@ func takeSweepRun(root, projectID string) string {
 }
 
 // heartbeatProject returns the project a child id names when the child
-// is a heartbeat sweep, and "" for an ordinary run child. The notify
-// payload reads it so a phone glance can tell a sweep that died from a
-// run that did.
+// is a heartbeat sweep, and "" otherwise. Callers use it to get from a
+// child id back to the swept project: the exit hook to claim the run the
+// sweep minted, the dashboard to link an event's project row.
 func heartbeatProject(childID string) string {
 	p, ok := strings.CutPrefix(childID, heartbeatChildPrefix)
 	if !ok {
