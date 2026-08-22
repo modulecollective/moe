@@ -364,6 +364,21 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
+	// The human-input floor, ahead of every write this turn would make.
+	// An unanswered question is the harness's hold, not another pulse
+	// opinion, so it lives at the one seam every stage turn crosses —
+	// the operator's own `moe sdlc code`, a `!` cascade's headless step,
+	// a chain ride's walk, a serve-spawned child. A refusal further out
+	// would be a refusal one of these could route around.
+	//
+	// Interactive or headless makes no difference to the answer: the
+	// point of the durable record is that the question gets discharged
+	// where the operator can see it, not re-asked in a shape nothing
+	// records.
+	if code := refuseOnOpenInput(root, projectID, runID, stderr); code != 0 {
+		return code
+	}
+
 	// Materialize the project's submodule before anything else. Every
 	// stage either reads source directly (twin wiki ingest), drives
 	// a sandbox clone (code/review/test), or kicks off an agent whose first

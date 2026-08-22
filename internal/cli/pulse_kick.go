@@ -8,6 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
@@ -278,6 +279,14 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 	if md == nil || !run.ChainChildLive(threadRoot, groomed.byKey) {
 		return "heads a thread that has already settled — skipping"
 	}
+	// An open question on any live member holds the whole thread. Ahead
+	// of the readiness legs below because it is the more specific answer:
+	// a thread waiting on a decision the operator has in hand is not the
+	// same state as one waiting at its first stage, and the operator's
+	// next move differs.
+	if hold := inputHold(root, threadRoot, groomed); hold != "" {
+		return hold
+	}
 	if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
 		return "is waiting at its first stage with " + designHeldReason(turnClosed) +
 			" — the operator holds the trigger"
@@ -286,6 +295,49 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 		return "has a live session at " + stage + " — skipping"
 	}
 	return ""
+}
+
+// inputHold reports why a thread is held on a human input, or "" when
+// nothing on it is waiting. Every live member is asked, not just the
+// root: the question lands on the run whose future agent needs the
+// answer, which is routinely a member queued behind the head, and riding
+// the thread would walk straight into it.
+//
+// A malformed record holds too. The file is machine-written, so a
+// violation is a bug the operator should see rather than a reason to
+// start work the sweep can no longer reason about.
+func inputHold(root, threadRoot string, groomed groomResult) string {
+	if groomed.graph == nil {
+		return ""
+	}
+	for _, key := range groomed.graph.Thread(threadRoot) {
+		proj, runID, err := splitProjectRun(key)
+		if err != nil {
+			continue
+		}
+		f, err := input.Load(root, proj, runID)
+		if err != nil {
+			return "is held by an unreadable input record on " + key + " — " + err.Error()
+		}
+		req, ok := f.Open()
+		if !ok {
+			continue
+		}
+		return inputHoldPhrase(threadRoot, key, "awaiting input — "+req.Question)
+	}
+	return ""
+}
+
+// inputHoldPhrase renders the hold as the tail of the kick's skip line,
+// which already names the thread root. A question on the root reads as
+// the root's own; one on a member behind it names the member, because
+// "the thread is held" and "this run is held" are different facts to an
+// operator scanning for what to answer.
+func inputHoldPhrase(threadRoot, member, tail string) string {
+	if member == threadRoot {
+		return "is " + tail
+	}
+	return "has " + member + " " + tail
 }
 
 // renderKickSection renders a plan as the `## Kick` section a dynamic

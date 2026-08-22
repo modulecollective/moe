@@ -268,6 +268,12 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 		moePrintf(stderr, "chain kick: %s/%s is chained under %s — kick the head\n", projectID, runID, parent)
 		return 1
 	}
+	// The human-input floor at the ride boundary. Every stage turn below
+	// asks it again for its own run; asking here first is what keeps one
+	// answerable question from becoming a half-ridden chain.
+	if code := refuseRideOnOpenInput(root, md, stderr); code != 0 {
+		return code
+	}
 
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
