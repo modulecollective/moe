@@ -1431,12 +1431,17 @@ func TestRunPageHidesTheMarkOnAnUnworkedStage(t *testing.T) {
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	gittest.Commit(t, root, "seed run")
 	now := time.Now().UTC()
+	gateCalls := 0
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: root,
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 			return dash.Row{Project: p, Run: slug, Note: "sdlc:design", Stage: "design",
 				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+		CheckStageGate: func(*run.Metadata, string) (bool, error) {
+			gateCalls++
+			return true, nil
 		},
 	})
 
@@ -1447,6 +1452,89 @@ func TestRunPageHidesTheMarkOnAnUnworkedStage(t *testing.T) {
 	}
 	if body := rr.Body.String(); strings.Contains(body, "/fix-it/advance") {
 		t.Errorf("a never-worked stage must not offer the mark\n%s", body)
+	}
+	// The gate read is a canvas read; it trails the work-turn check so
+	// an unworked stage never pays for it.
+	if gateCalls != 0 {
+		t.Errorf("gate consulted %d times on an unworked stage, want 0", gateCalls)
+	}
+}
+
+// TestRunPageHidesTheMarkOnABlockedStageGate is this run's headline: a
+// worked test stage whose canvas fence says blocked has a work turn, so
+// the old chip offered "advance past test" — and the mark landed inert,
+// because stageSatisfied ANDs the gate in. The operator got a redirect
+// and a run sitting exactly where they left it. No chip is the honest
+// answer; the canvas they just read already says blocked.
+func TestRunPageHidesTheMarkOnABlockedStageGate(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "test",
+		time.Now().Add(-time.Hour))
+	now := time.Now().UTC()
+	var gotStage string
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:test", Stage: "test",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+		CheckStageGate: func(md *run.Metadata, stage string) (bool, error) {
+			gotStage = stage
+			return false, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "/fix-it/advance") {
+		t.Errorf("a blocked stage gate must not offer the mark\n%s", body)
+	}
+	if gotStage != "test" {
+		t.Errorf("gate asked about stage %q, want %q", gotStage, "test")
+	}
+	// The close chip is unaffected — the gate governs advancing, not
+	// the run's lifecycle.
+	if !strings.Contains(body, "/fix-it/close") {
+		t.Errorf("gate-blocked run should still show the close chip\n%s", body)
+	}
+}
+
+// TestRunPageHidesTheMarkOnAGateReadError: an unreadable canvas reads
+// as "no", the same log-and-false rule stageWorked applies. Offering a
+// mark the route would refuse is worse than not offering it.
+func TestRunPageHidesTheMarkOnAGateReadError(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	gittest.Commit(t, root, "seed run")
+	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "test",
+		time.Now().Add(-time.Hour))
+	now := time.Now().UTC()
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+			return dash.Row{Project: p, Run: slug, Note: "sdlc:test", Stage: "test",
+				Bucket: dash.BucketActiveRuns, When: now}, true, nil
+		},
+		CheckStageGate: func(*run.Metadata, string) (bool, error) {
+			return false, errors.New("canvas unreadable")
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); strings.Contains(body, "/fix-it/advance") {
+		t.Errorf("a gate read error must not offer the mark\n%s", body)
 	}
 }
 
@@ -1584,6 +1672,76 @@ func TestAdvanceRefusesPushStage(t *testing.T) {
 	}
 	if len(s.children.all) != 0 {
 		t.Errorf("push-stage advance must not spawn; registry has %d", len(s.children.all))
+	}
+}
+
+// TestAdvanceConsultsTheStageGate: the route re-asks the gate the chip
+// asked, so the surface that can say why does. A marker landed against
+// a blocked gate would be inert anyway — stageSatisfied ANDs the gate —
+// so this buys honesty, not safety: a stale tab (chip rendered while the
+// gate was ready, a re-run flipped it) or a hand-rolled POST gets a
+// legible 409 instead of a 303 and silence.
+func TestAdvanceConsultsTheStageGate(t *testing.T) {
+	cases := []struct {
+		name     string
+		gate     func(*run.Metadata, string) (bool, error)
+		wantCode int
+		wantBody string
+		wantMark bool
+	}{
+		{
+			name:     "passing gate lands the mark",
+			gate:     func(*run.Metadata, string) (bool, error) { return true, nil },
+			wantCode: http.StatusSeeOther,
+			wantMark: true,
+		},
+		{
+			name:     "blocked gate refuses and names the stage",
+			gate:     func(*run.Metadata, string) (bool, error) { return false, nil },
+			wantCode: http.StatusConflict,
+			wantBody: "run alpha/fix-it: stage test gate not satisfied",
+		},
+		{
+			name:     "gate read error is a server error",
+			gate:     func(*run.Metadata, string) (bool, error) { return false, errors.New("canvas unreadable") },
+			wantCode: http.StatusInternalServerError,
+			wantBody: "canvas unreadable",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newGitServeRoot(t)
+			seedRun(t, root, "alpha", "fix-it", "sdlc")
+			gittest.Commit(t, root, "seed run")
+			trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "test",
+				time.Now().Add(-time.Hour))
+			now := time.Now().UTC()
+			s := newTestServer(t, Options{
+				Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
+				GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
+					return dash.Row{Project: p, Run: slug, Stage: "test",
+						Bucket: dash.BucketActiveRuns, When: now}, true, nil
+				},
+				CheckStageGate: tc.gate,
+			})
+
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr,
+				httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader("")))
+			if rr.Code != tc.wantCode {
+				t.Fatalf("want %d, got %d body=%s", tc.wantCode, rr.Code, rr.Body.String())
+			}
+			if tc.wantBody != "" && !strings.Contains(rr.Body.String(), tc.wantBody) {
+				t.Errorf("body missing %q\ngot: %s", tc.wantBody, rr.Body.String())
+			}
+			sha, _, err := run.LatestAdvanceSHA(root, "alpha", "fix-it", "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (sha != "") != tc.wantMark {
+				t.Errorf("marker present=%v, want %v", sha != "", tc.wantMark)
+			}
+		})
 	}
 }
 

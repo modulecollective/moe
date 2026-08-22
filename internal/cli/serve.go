@@ -177,6 +177,17 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		// tag-destination list.
 		WorkflowUI:   lookupServeWorkflowUI,
 		TagWorkflows: serveTagWorkflows(),
+		// The stage gates live on the workflow, so the verdict crosses
+		// the seam per-run rather than riding the static WorkflowUI
+		// declaration. Both the advance chip and the advance route ask,
+		// so the web can't offer a mark the ladder would ignore.
+		CheckStageGate: func(md *run.Metadata, stage string) (bool, error) {
+			wf, err := LookupWorkflow(md.Workflow)
+			if err != nil {
+				return false, err
+			}
+			return wf.CheckStageGate(root, md, stage)
+		},
 		// GatherChore picks the named chore out of the per-project state
 		// gather. Keeps the workflow registry on the cli side of the seam.
 		GatherChore: func(project, name string) (chore.State, bool, error) {

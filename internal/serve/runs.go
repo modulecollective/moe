@@ -628,6 +628,25 @@ func (s *Server) markableStage(w http.ResponseWriter, projectID, slug string, md
 			http.StatusConflict)
 		return "", false
 	}
+	// A marker landed against a blocked gate is inert — stageSatisfied
+	// ANDs the gate in, and the re-edit turn that later flips it
+	// out-dates the marker anyway. Refusing here buys no safety; it buys
+	// honesty. A stale tab (chip rendered while the gate was ready) or a
+	// hand-rolled POST would otherwise get a 303 and silence, which is
+	// exactly the failure this check exists to kill.
+	if s.opts.CheckStageGate != nil {
+		switch ok, err := s.opts.CheckStageGate(md, stage); {
+		case err != nil:
+			s.logf("advance %s: gate for %s: %v", id, stage, err)
+			http.Error(w, "advance: "+err.Error(), http.StatusInternalServerError)
+			return "", false
+		case !ok:
+			http.Error(w,
+				"run "+id+": stage "+stage+" gate not satisfied",
+				http.StatusConflict)
+			return "", false
+		}
+	}
 	return stage, true
 }
 
@@ -662,6 +681,27 @@ func (s *Server) stageWorked(projectID, slug, stage string) bool {
 		return false
 	}
 	return sha != ""
+}
+
+// stageGateOK reports whether a stage's satisfiability gate passes —
+// the other half stageSatisfied wants, and the half a stage can fail
+// while still having a work turn (a test canvas committed with its gate
+// fence blocked). Same log-and-false rule as stageWorked: a read
+// failure reads as "no", because offering a mark the ladder would
+// ignore is worse than not offering it.
+//
+// Gate-less stages (design, code) report true, so the only canvas read
+// this adds is on stages that registered one.
+func (s *Server) stageGateOK(projectID, slug, stage string, md *run.Metadata) bool {
+	if s.opts.CheckStageGate == nil {
+		return true
+	}
+	ok, err := s.opts.CheckStageGate(md, stage)
+	if err != nil {
+		s.logf("advance chip %s/%s: gate for %s: %v", projectID, slug, stage, err)
+		return false
+	}
+	return ok
 }
 
 // buildReadOnlyRunVM constructs a runVM from on-disk state for a run
@@ -758,9 +798,13 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	// The advance mark is journal-only — an empty marker commit a later
 	// tick rides — so it stays on an unarmed serve, beside the idea
 	// chips. It renders only where the mark would mean something:
-	// stageSatisfied wants a marker *and* a work turn, so a mark on a
-	// never-worked stage is one the ladder ignores.
-	if markable && s.stageWorked(projectID, slug, nextStage) {
+	// stageSatisfied wants a marker, a work turn, *and* the stage's own
+	// gate, so a mark on a never-worked stage or one whose canvas says
+	// blocked is a mark the ladder ignores. The gate check trails the
+	// work-turn check so the canvas read only happens for a worked
+	// stage.
+	if markable && s.stageWorked(projectID, slug, nextStage) &&
+		s.stageGateOK(projectID, slug, nextStage, md) {
 		out = append(out, runAction{Label: "advance past " + nextStage, Href: base + "/advance", Method: "POST"})
 	}
 	if ui.Close && (!ui.Perpetual || live) {

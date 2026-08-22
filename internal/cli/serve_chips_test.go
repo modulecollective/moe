@@ -138,3 +138,56 @@ func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
 			row.Stage, "design")
 	}
 }
+
+// TestServeOptionsCheckStageGateWiring pins the wiring, not the gates:
+// the callback serveOptions hands serve must reach the run's own
+// workflow registry, so a stage with no registered gate passes and the
+// sdlc test gate reads the run's actual canvas. Without this, the chip
+// and the route would both consult a callback nobody proved was
+// connected to anything.
+func TestServeOptionsCheckStageGateWiring(t *testing.T) {
+	root := t.TempDir()
+	seedServeRun(t, root, "alpha", "r1", "sdlc")
+	md, err := run.Load(root, "alpha", "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := serveOptions(root, io.Discard).CheckStageGate
+	if gate == nil {
+		t.Fatal("serveOptions must wire CheckStageGate; a nil callback silently skips the check")
+	}
+
+	// design registers no gate — CheckStageGate reports true and never
+	// touches a canvas.
+	if ok, err := gate(md, "design"); err != nil || !ok {
+		t.Errorf("design gate = (%v, %v), want (true, nil) — design registers no gate", ok, err)
+	}
+
+	fence := "```"
+	blocked := `# Test
+
+## Gate
+
+` + fence + `json
+{"status":"blocked"}
+` + fence + `
+
+## What was verified
+
+ran the suite; two cases still fail
+
+## What wasn't verified
+
+the failing cases
+`
+	writeStageCanvas(t, root, md, "test", blocked)
+	if ok, err := gate(md, "test"); err != nil || ok {
+		t.Errorf("blocked test gate = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	writeStageCanvas(t, root, md, "test",
+		strings.Replace(blocked, `{"status":"blocked"}`, `{"status":"ready"}`, 1))
+	if ok, err := gate(md, "test"); err != nil || !ok {
+		t.Errorf("ready test gate = (%v, %v), want (true, nil)", ok, err)
+	}
+}

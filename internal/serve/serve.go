@@ -55,6 +55,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // DefaultPort is the listener port when --port isn't set.
@@ -218,6 +219,15 @@ type Options struct {
 	// its own. Absent means the advance route returns 500; idea chips
 	// (bespoke, not stage-derived) still render.
 	WorkflowUI func(workflow string) (ui WorkflowUI, ok bool)
+
+	// CheckStageGate reports whether stage's satisfiability gate passes
+	// for this run — the other half of stageSatisfied's advance rule
+	// that a marker can't supply itself. Stages with no registered gate
+	// report true. cli/serve.go wires this to the workflow registry so
+	// serve carries no gate policy of its own; the advance chip and the
+	// advance route both consult it, so the page can't offer a mark the
+	// ladder would ignore. Absent skips the check.
+	CheckStageGate func(md *run.Metadata, stage string) (bool, error)
 
 	// TagWorkflows lists the workflows an idea may be tagged for, in
 	// display order; the first entry is what an untagged POST falls back
