@@ -191,8 +191,7 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 // openDueChore is the CLI-facing wrapper around openChoreInProcess: it
 // maps the typed guard errors back to the stderr messages + exit 1 that
 // `moe chore open` prints, and emits the
-// "opened chore …" stdout line on success. serve takes the typed-error
-// path directly via OpenChore instead.
+// "opened chore …" stdout line on success.
 func openDueChore(root, projectID, choreName string, force bool, stdout, stderr io.Writer) (*run.Metadata, int) {
 	mode := choreOpenNormal
 	if force {
@@ -267,7 +266,7 @@ const (
 )
 
 // openChoreInProcess is the single chore-open pipeline shared by the CLI
-// verb, serve's OpenChore callback, and the pulse: gather → guard →
+// verb and the pulse: gather → guard →
 // workflow lookup → runopen.Open with the Chore trailer. Guard failures
 // come back as typed errors (*choreNotFoundError /
 // *choreNotOpenableError) so callers can branch on HTTP status or print

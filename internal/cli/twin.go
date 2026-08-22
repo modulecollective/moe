@@ -213,10 +213,9 @@ func init() {
 	w.RegisterStageGate("finalize", finalizeStageGate)
 	RegisterWorkflow(w)
 
-	// Serve declaration: render the cascade trio (advance/ship/chain)
-	// plus the close chip on twin run pages. The cascade bit is derived
-	// from operatorCascades, not declared. newRun stays false — serve's
-	// new-run form is sdlc-only for now; a twin pass is minted by
-	// `moe twin reflect`, which serve doesn't front.
+	// Serve declaration: let the web mark twin stages advanced (every
+	// registered stage verb, no exclusions) and render the close chip.
+	// Not a tag destination — a twin pass is minted by `moe twin
+	// reflect`, not promoted from an idea.
 	registerServeWorkflow("twin", serveWorkflowDecl{})
 }

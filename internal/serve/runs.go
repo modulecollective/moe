@@ -549,8 +549,8 @@ func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow str
 // already admits, and the commit moves the journal, so the next
 // heartbeat tick sweeps and rides it.
 //
-// The "→ <stage>" chip on the per-run page posts here. Everything is
-// re-derived server-side; the button is never trusted.
+// The "advance past <stage>" chip on the per-run page posts here.
+// Everything is re-derived server-side; the button is never trusted.
 func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
@@ -1075,7 +1075,8 @@ type editCaptureVM struct {
 }
 
 // handleCaptureEditForm renders the textarea seeded with the capture's
-// canvas. 404 / 409 mirror handlePromoteForm's gates.
+// canvas. 404 when the run is missing, 409 when it isn't an in-progress
+// capture — the submit below re-derives both.
 func (s *Server) handleCaptureEditForm(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
