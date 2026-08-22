@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1977,27 +1978,51 @@ func TestDashRowsRenderAnchors(t *testing.T) {
 	}
 }
 
+// TestMakeNotifierPostsJSON pins the whole wire shape, both ways —
+// the field set as much as the values. Every child serve spawns is a
+// heartbeat sweep, so the id names the swept project and there is no
+// second kind to tell apart; a "kind" back on the wire could only ever
+// say "heartbeat", and would read to whoever consumes the webhook as
+// an invitation to branch on something that never varies.
 func TestMakeNotifierPostsJSON(t *testing.T) {
-	gotBody := make(chan []byte, 1)
+	gotBody := make(chan []byte, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody <- b
 	}))
 	defer srv.Close()
 
+	id := heartbeatChildPrefix + "alpha"
 	notify := makeNotifier(srv.URL, io.Discard)
-	notify("alpha/foo", nil)
 
-	select {
-	case body := <-gotBody:
-		if !strings.Contains(string(body), `"id":"alpha/foo"`) {
-			t.Errorf("payload missing id: %s", string(body))
+	for _, tc := range []struct {
+		name    string
+		exitErr error
+		want    map[string]any
+	}{
+		{
+			name: "clean exit",
+			want: map[string]any{"id": id, "status": "exited", "ok": true},
+		},
+		{
+			name:    "failed exit",
+			exitErr: errors.New("boom"),
+			want:    map[string]any{"id": id, "status": "exited", "ok": false, "error": "boom"},
+		},
+	} {
+		notify(id, tc.exitErr)
+		select {
+		case body := <-gotBody:
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("%s payload isn't JSON: %v: %s", tc.name, err, body)
+			}
+			if !maps.Equal(got, tc.want) {
+				t.Errorf("%s payload = %v, want %v", tc.name, got, tc.want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("notifier never POSTed for %s", tc.name)
 		}
-		if !strings.Contains(string(body), `"ok":true`) {
-			t.Errorf("payload missing ok=true: %s", string(body))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("notifier never POSTed")
 	}
 }
 

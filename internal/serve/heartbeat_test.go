@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -527,43 +525,6 @@ func TestServeRemovesTheStateFileOnCleanShutdown(t *testing.T) {
 	}
 	if _, ok, _ := ReadActivitySnapshot(root); ok {
 		t.Error("the state file survived a clean shutdown")
-	}
-}
-
-// TestNotifyDistinguishesASweepFromARun: the two want different
-// reactions on a phone. A run that died is a thing to look at now; a
-// sweep that died is the tell that the vendor is down and the loop has
-// started cooling off.
-func TestNotifyDistinguishesASweepFromARun(t *testing.T) {
-	gotBody := make(chan []byte, 2)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		gotBody <- b
-	}))
-	defer srv.Close()
-	notify := makeNotifier(srv.URL, io.Discard)
-
-	for _, tc := range []struct {
-		id    string
-		wants []string
-	}{
-		{id: "alpha/foo", wants: []string{`"kind":"run"`}},
-		{id: heartbeatChildPrefix + "alpha", wants: []string{`"kind":"heartbeat"`, `"project":"alpha"`}},
-	} {
-		notify(tc.id, errors.New("boom"))
-		select {
-		case body := <-gotBody:
-			for _, want := range tc.wants {
-				if !strings.Contains(string(body), want) {
-					t.Errorf("payload for %s missing %s: %s", tc.id, want, string(body))
-				}
-			}
-			if !strings.Contains(string(body), `"ok":false`) {
-				t.Errorf("payload for %s should report the failure: %s", tc.id, string(body))
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("notifier never POSTed for %s", tc.id)
-		}
 	}
 }
 
