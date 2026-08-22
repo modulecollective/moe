@@ -557,6 +557,10 @@ type dashVM struct {
 	Serve          servePanelVM
 	ProjectCount   int
 	ActiveProjects int
+	// InboxCount is how many questions are waiting on an answer. The
+	// header links the inbox only when this is non-zero — a count where
+	// there is something to count, not a permanent landmark.
+	InboxCount int
 }
 
 // rowURL is where a dash row's slug links. Only a chore row differs: it

@@ -21,6 +21,21 @@
   </section>
   {{end}}
 
+  {{if .Inputs.Entries}}
+  <section class="inputs">
+    <h2>human inputs</h2>
+    <ul>
+      {{range .Inputs.Entries}}
+      <li>
+        <span class="note">{{.Question}}</span>
+        {{if .Answer}}<span class="badge">{{.Answer}}</span>{{else}}<span class="badge">unanswered</span>{{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{with .Inputs.Open}}{{template "inputchoices" .}}{{end}}
+  </section>
+  {{end}}
+
   {{if .Provenance}}
   <section class="provenance">
     <h2>provenance</h2>

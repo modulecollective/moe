@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>inbox — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a>{{if .Project}} → <a href="/projects/{{.Project}}">{{.Project}}</a>{{end}} → inbox</div>
+    </div>
+    {{template "serveheader" .Serve}}
+    {{template "headeractions" .}}
+  </header>
+
+  <section class="dash-section">
+    <h2><span>awaiting input <span class="count">({{len .Entries}})</span></span></h2>
+    {{if .Entries}}
+    <ul class="rows">
+      {{range .Entries}}
+      <li class="row input-request">
+        <a class="slug" href="{{.URL}}">{{.ID}}</a>
+        <span class="note">{{.Question}}</span>
+        {{template "inputchoices" .}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(nothing waiting)</p>{{end}}
+  </section>
+</main>
+{{template "themejs" .}}
+</body>
+</html>

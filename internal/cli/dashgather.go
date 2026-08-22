@@ -8,6 +8,7 @@ import (
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
@@ -128,6 +129,17 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		}
 	}
 
+	// One record read per in-progress run that has one — the scan skips
+	// runs with no inputs.json, which is nearly all of them. A malformed
+	// record drops its hint rather than failing the dash; the kick floor
+	// and the stage floor both refuse on it, which is where that has to
+	// be loud.
+	awaitingInput := map[string]bool{}
+	pending, _ := input.Scan(root, filter.ProjectFilter)
+	for _, p := range pending {
+		awaitingInput[p.Project+"/"+p.Run] = true
+	}
+
 	rows, err := dash.BuildRows(dash.Inputs{
 		Now:              now,
 		ProjectFilter:    filter.ProjectFilter,
@@ -139,6 +151,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		NextByRun:        nextByRun,
 		Chores:           choreInputs,
 		Intents:          gatherIntents(root, mds),
+		AwaitingInput:    awaitingInput,
 	})
 	if err != nil {
 		return DashSnapshot{}, err

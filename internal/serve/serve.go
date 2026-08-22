@@ -449,6 +449,11 @@ func (s *Server) registerRoutes() {
 	// so the run's next pickup starts at the successor. A journal commit,
 	// not a spawn — the heartbeat is what rides it.
 	s.router.HandleFunc("POST /run/{project}/{slug}/advance", s.handleAdvance)
+	// The human-input inbox: questions a run is waiting on. Read-only
+	// board view plus one answer POST, both journal-only — the answer
+	// writes a commit and starts nothing, same as the advance mark.
+	s.router.HandleFunc("GET /inbox", s.handleInbox)
+	s.router.HandleFunc("POST /run/{project}/{slug}/input", s.handleInputAnswer)
 	// Chore detail page. A chore isn't a run, so it has its own /chore
 	// namespace; read-only, because serve opens due chores on its own
 	// cadence now and `moe chore open --now` is the operator's override.
@@ -546,6 +551,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	// From memory, not from the state file: serve holds the record, and a
 	// round trip through its own snapshot would only add a beat of lag.
 	vm.Serve = s.activity.panel(now)
+	vm.InboxCount = s.inboxCount("")
 	// Mark which active rows are currently parented by serve so the
 	// dash can render a "live" badge. Registry presence isn't enough:
 	// natural exit leaves *child in cs.all (only the respawn path

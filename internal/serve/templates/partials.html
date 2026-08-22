@@ -224,3 +224,19 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
 });
 </script>
 {{end}}
+
+{{/* One button per choice on an open input request. The request id rides
+     every button so a stale tab answers the question it is showing, or
+     nothing. */}}
+{{define "inputchoices"}}
+<span class="actions input-choices">
+  {{$e := .}}
+  {{range .Choices}}
+  <form method="post" action="/run/{{$e.Project}}/{{$e.Slug}}/input" class="action-form">
+    <input type="hidden" name="request" value="{{$e.RequestID}}">
+    <input type="hidden" name="choice" value="{{.Number}}">
+    <button class="action" type="submit">{{.Text}}</button>
+  </form>
+  {{end}}
+</span>
+{{end}}

@@ -85,6 +85,10 @@ type runVM struct {
 	// an in-progress idea this is edit, promote, and close; for a
 	// closed idea this is reopen; other runs render no actions.
 	Actions []runAction
+	// Inputs is the run's human-input history: every question it put to
+	// the operator, the answers, and the choice buttons for the one still
+	// open. Zero value renders no section, which is nearly every run.
+	Inputs runInputsVM
 	// Traces is what the run left behind outside its canvases —
 	// follow-ups, lore, and its twin note — each landed one linked to
 	// what it became. Zero value renders no sections.
@@ -721,6 +725,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		Status:      md.Status,
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
 		Traces:      s.gatherRunTraces(projectID, slug),
+		Inputs:      s.gatherRunInputs(projectID, slug, md),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
@@ -895,6 +900,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
+		vm.Inputs = s.gatherRunInputs(projectID, slug, md)
 		vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
 		// !exited == an agent mid-turn; composeRunActions drops the
 		// advance mark in that case. fillRunRow above populated

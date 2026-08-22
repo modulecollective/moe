@@ -105,6 +105,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		"/projects",                           // projects_index
 		"/projects/alpha",                     // project_hub
 		"/projects/alpha/knowledge",           // knowledge_index
+		"/inbox",                              // inbox (empty state)
 	}
 
 	// One route per full-page template, no exceptions: a template carrying

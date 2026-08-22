@@ -246,6 +246,12 @@ type Inputs struct {
 	// pure. BuildRows filters by ProjectFilter and sorts by project then
 	// slug so the render is stable.
 	Intents []IntentInput
+	// AwaitingInput holds the "<project>/<slug>" of every run with an
+	// unanswered human-input request. The caller reads the records (dash
+	// stays off-disk); BuildRows turns each into an `· input?` hint on
+	// the run's ACTIVE row, so the board says which run is holding a
+	// thread rather than only that a thread is held.
+	AwaitingInput map[string]bool
 }
 
 // IntentInput is one open intent for the INTENTS section: the project
@@ -285,6 +291,12 @@ func BuildRows(in Inputs) ([]Row, error) {
 		b, note, stage, runningDoc := classify(md, byRunKey, in.Index, in.SessionDocsByRun[runKey], in.NextByRun)
 		if b == BucketNone {
 			continue
+		}
+		// An unanswered question is an action hint like `· close?`, so it
+		// reads in the same slot — after the stage, before the workspace
+		// label, which is a location rather than a thing to do.
+		if in.AwaitingInput[runKey] && b == BucketActiveRuns {
+			note = note + " · input?"
 		}
 		// A run bound to a named workspace surfaces it as "@<name>" on
 		// the active row so the operator can see at a glance which

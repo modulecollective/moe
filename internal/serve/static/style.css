@@ -653,3 +653,24 @@ form.new-run button:hover, form.new-run button:focus {
   word-break: break-word;
   overflow-x: auto;
 }
+
+/* Human inputs: the run page's question history and the inbox's rows.
+   Same list shape as the other per-run sections, plus a choice strip
+   that wraps under the question on a phone — the surface this feature
+   exists for. */
+.inputs ul { list-style: none; padding: 0; margin: 0; }
+.inputs li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+}
+.inputs li:last-child { border-bottom: none; }
+.inputs li .note { color: var(--fg); }
+.input-choices { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.row.input-request { flex-wrap: wrap; }
+.row.input-request .input-choices { flex-basis: 100%; }
