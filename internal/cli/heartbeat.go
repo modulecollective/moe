@@ -239,7 +239,21 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	moved := known && seen != tip
 	unswept := false
 	parked := ""
+	choreReason := ""
 	if !moved {
+		// Ahead of the surveyed early-return, because that is exactly the
+		// state a quiet project is in when a chore's clock elapses: nothing
+		// has landed, the last sweep surveyed this tip, and the only thing
+		// that changed is the time. Both chore legs are pure clock events
+		// on a board no journal commit has touched, so every leg below
+		// would read quiet and the chore would sit until a human clicked.
+		//
+		// Not gated on safe mode. A chore-rooted run is operator-marked by
+		// construction — the chore definition *is* the mark — so the ride
+		// the sweep kicks passes safe on its own terms.
+		choreReason = choreClockReason(sc, projectID, now)
+	}
+	if !moved && choreReason == "" {
 		// A clean sweep already surveyed this exact board. Whatever is
 		// parked on it, the survey saw and left parked on purpose, so
 		// offering it again is re-asking a question the machine has
@@ -338,6 +352,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	if unswept {
 		return true, false, "work landed since the last sweep"
 	}
+	if choreReason != "" {
+		return true, false, choreReason
+	}
 	if md := sc.byKey[parked]; md != nil && md.Workflow == dash.IdeaWorkflow {
 		// Display only, like every reason here — but this is the operator's
 		// whole trace of why a tick moved, and a tagged idea is not settled
@@ -345,6 +362,70 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		return true, false, "a tagged idea is parked at " + parked
 	}
 	return true, false, "settled work is parked at " + parked
+}
+
+// choreClockReason is the two chore legs of the gate, in one read: does this
+// project have a chore whose *clock* — not the journal — says a sweep is
+// worth an agent turn? Returns the gate's words for it, or "" for
+// neither.
+//
+// The autonomous loop already handles a chore end-to-end once a sweep
+// fires: the sweep auto-opens every due chore's run, and a chore-rooted
+// run is settled-by-construction and operator-marked, so the same
+// sweep's kick rides it. What was missing is the trigger. A chore coming
+// due is a pure clock event on a quiet journal — invisible to the moved
+// leg, invisible to the parked leg — so on a quiet project a due chore
+// sat in the backlog until a human clicked the web's open button. These
+// two legs are that button, moved into the machine.
+//
+// **Mechanical.** A due chore is due: cadence elapsed, trigger paths
+// touched, definition edited. Converges in one firing — the sweep opens
+// the chore's run, and chore.Evaluate's open-run guard makes it not-due
+// from there. Cooldown, the open-run refusal and the failure backoff
+// bound the re-firing this can't converge away.
+//
+// **Judged.** A judged chore is never mechanically due; the survey
+// judges its prose condition against what landed. On a quiet board that
+// judgment is a function of exactly two things — landed work, which the
+// moved leg already covers, and the cooldown expiring, which is the same
+// pure clock event as above. Sweeping whenever a judged chore is merely
+// eligible would burn an agent turn every twenty minutes until the
+// condition happened to hold, so the leg is edge-triggered on the expiry
+// with no new state: probe only when no pulse run has looked at the
+// board since the chore became eligible.
+//
+// That converges because the probe sweep mints a pulse run of its own,
+// which moves lastPulseAt past NextEligible — exactly one probe per
+// expiry. A survey that declines writes nothing (a ChoreSkipped marker
+// is the operator's `moe chore skip`, never the agent's), so a declined
+// probe stays quiet until work lands, or until the chore completes and
+// mints a fresh expiry.
+//
+// A judged chore with no cooldown, or one never completed, has a zero
+// NextEligible and abstains — "eligible forever" is not an edge. It
+// stays reachable the way it always was: registering or editing a chore
+// is itself a journal commit, so the moved leg sweeps and judges it. A
+// judged chore that wants periodic probing owes a cooldown.
+func choreClockReason(sc *pulseScan, projectID string, now time.Time) string {
+	judged := false
+	for _, st := range sc.choreStates(now) {
+		if st.Definition.Project != projectID {
+			continue
+		}
+		if st.Due {
+			return "a chore is due"
+		}
+		// CooldownBlocking is exactly now < NextEligible, so a non-zero
+		// NextEligible that isn't blocking is a cooldown that has expired.
+		if st.Definition.Judged() && st.OpenRun == "" && !st.NextEligible.IsZero() && !st.CooldownBlocking &&
+			lastPulseAt(sc, projectID, "").Before(st.NextEligible) {
+			judged = true
+		}
+	}
+	if judged {
+		return "a judged chore is eligible"
+	}
+	return ""
 }
 
 // reap abandons orphaned machine sessions — a session branch whose

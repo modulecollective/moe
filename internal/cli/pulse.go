@@ -225,10 +225,12 @@ func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr
 }
 
 // autoOpenDueChores opens every due chore's run for the project via the
-// shared chore-open pipeline. No stage executes — the operator kicks
-// the first stage when ready. The existing open-run refusal is the
-// anti-pile-up guard, so a chore that already has an open run is
-// skipped silently; any other failure warns and moves on (a chore
+// shared chore-open pipeline. No stage executes here — the run is parked
+// at its first stage, and this sweep's own kick is what rides it: a
+// chore-rooted run is settled by construction and operator-marked, so it
+// clears the kick's admit bar without a click. The existing open-run
+// refusal is the anti-pile-up guard, so a chore that already has an open
+// run is skipped silently; any other failure warns and moves on (a chore
 // pile-up must not derail the sweep or the verb that triggered it).
 func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
 	states, err := gatherChoreStates(root, projectID)
@@ -1573,6 +1575,38 @@ type pulseScan struct {
 	idx   *run.JournalIndex
 	byKey map[string]*run.Metadata
 	graph *run.ChainGraph
+
+	// chores memoizes the whole register's chore states, evaluated
+	// against this scan's runs and index. Loaded on the first ask rather
+	// than in newPulseScan: loading forks git once per definition, and
+	// most scans never ask.
+	chores       []chore.State
+	choresLoaded bool
+}
+
+// choreStates evaluates every registered chore against this scan's runs
+// and journal index — once per scan, shared by every caller. The
+// heartbeat gate asks once per project per tick, so the memo is what
+// keeps the chore legs inside the gate's cheap-read budget.
+//
+// Not safe for concurrent use, like the rest of pulseScan: a scan
+// belongs to one sweep or one tick, and both walk their projects in
+// sequence.
+//
+// A chore-load failure yields no states, which reads as "nothing is
+// due". Same warn-by-silence posture the sweep's own chore blocks take
+// — a broken definition must not decide a tick.
+func (sc *pulseScan) choreStates(now time.Time) []chore.State {
+	if sc.choresLoaded {
+		return sc.chores
+	}
+	sc.choresLoaded = true
+	defs, err := chore.LoadAll(sc.root)
+	if err != nil {
+		return nil
+	}
+	sc.chores = chore.EvaluateAll(defs, sc.mds, sc.idx, now)
+	return sc.chores
 }
 
 // newPulseScan reads the runs and the journal. ok is false when either
