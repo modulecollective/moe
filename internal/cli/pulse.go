@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -673,17 +674,39 @@ type pulseThread struct {
 }
 
 // pulseThreadEntry is one position in a thread: a bare string naming a
-// parked run that already exists, or an object minting one right there.
-// The two shapes are the whole reason the alias map could be deleted —
-// a run that doesn't exist yet is described where it belongs rather than
-// declared elsewhere and referenced by name.
+// parked run that already exists, an object minting one right there, or
+// an existing run carrying a question for the operator. The shapes are
+// the whole reason the alias map could be deleted — a run that doesn't
+// exist yet is described where it belongs rather than declared elsewhere
+// and referenced by name, and a question is asked *at* the run whose
+// future agent needs the answer rather than through a second gate field
+// that names it.
 type pulseThreadEntry struct {
 	// Existing names a parked run in the project, resolved at apply
-	// time. Set only for the string form.
+	// time. Set for the bare-string form and for the ask form.
 	Existing string
 	// Spec describes a run to mint at this position. Set only for the
-	// object form.
+	// mint form.
 	Spec *pulseRunSpec
+	// Ask is the structured park: one question to open on Existing.
+	// Non-nil only for the ask form, which both parks the whole thread
+	// for this sweep and leaves a durable question on that run.
+	Ask *pulseRunAsk
+}
+
+// pulseRunAsk is a thread entry's structured park — the survey's
+// question for the operator, written at the position of the run whose
+// later agent turns need the answer:
+//
+//	{"run": "change-auth-defaults",
+//	 "park": {"question": "…?", "choices": ["…", "…"]}}
+//
+// The `run` key is the discriminator: an inline mint spec has `slug`,
+// never `run`, so the two object forms can't be confused. Deliberately
+// positional — nothing here names a run in another gate field.
+type pulseRunAsk struct {
+	Question string   `json:"question"`
+	Choices  []string `json:"choices"`
 }
 
 // specs lists every run the gate asked the harness to open, in document
@@ -705,14 +728,27 @@ func (g pulseGate) specs() []pulseRunSpec {
 func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 	var slug string
 	if err := json.Unmarshal(b, &slug); err == nil {
-		e.Existing, e.Spec = slug, nil
+		e.Existing, e.Spec, e.Ask = slug, nil, nil
+		return nil
+	}
+	// The ask form first, keyed on its `run` discriminator. A mint spec
+	// has no `run`, so this decode leaves Run empty and falls through
+	// rather than shadowing it.
+	var ask struct {
+		Run  string       `json:"run"`
+		Park *pulseRunAsk `json:"park"`
+	}
+	if err := json.Unmarshal(b, &ask); err == nil && ask.Run != "" {
+		// `{"run": "x"}` with no park is the string form written long-hand
+		// and means exactly that: a position, no question.
+		e.Existing, e.Spec, e.Ask = ask.Run, nil, ask.Park
 		return nil
 	}
 	var spec pulseRunSpec
 	if err := json.Unmarshal(b, &spec); err != nil {
 		return fmt.Errorf("thread entry is neither a run slug nor a run spec: %w", err)
 	}
-	e.Existing, e.Spec = "", &spec
+	e.Existing, e.Spec, e.Ask = "", &spec, nil
 	return nil
 }
 
@@ -818,6 +854,15 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 	for _, th := range gate.Threads {
 		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
 		for _, entry := range th.Runs {
+			// A question withholds the thread for this sweep as well as
+			// leaving a durable hold — the two are one act, which is why
+			// the question rides a park rather than a field of its own.
+			// Set before the ask is attempted: the survey's intent was to
+			// hold, and holding is the safe direction even when the ask
+			// itself is refused below.
+			if entry.Ask != nil && grp.Park == "" {
+				grp.Park = "awaiting input — " + entry.Ask.Question
+			}
 			if entry.Spec == nil {
 				// A string entry names "any parked run in the project", and a
 				// tagged idea is one — the survey that nominated all three
@@ -830,8 +875,19 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 				// case and stays the groom's to resolve.
 				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, stdout, stderr); id != "" {
 					grp.Runs = append(grp.Runs, groomMember{mintedID: id})
-				} else {
-					grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
+					// v1 asks only on runs that already existed when the
+					// survey wrote the gate. A promotion mints a different
+					// run than the one the question was written against, so
+					// the ask drops with a line rather than landing somewhere
+					// the survey never looked.
+					if entry.Ask != nil {
+						moePrintf(stderr, "pulse: input: %s promoted to %s — question dropped\n", entry.Existing, id)
+					}
+					continue
+				}
+				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
+				if entry.Ask != nil {
+					askThreadEntry(root, projectID, pulseSlug, entry.Existing, *entry.Ask, stderr)
 				}
 				continue
 			}
@@ -845,6 +901,35 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 		groups = append(groups, grp)
 	}
 	return groups
+}
+
+// askThreadEntry opens the survey's question on the run sitting at this
+// thread position. Warn-only, like everything else in applyPulseGate:
+// the thread is already parked by the time this runs (see the Park set
+// above), so a refused ask costs the operator a stderr line and the next
+// sweep's attention, not a runaway thread.
+//
+// The refusals are the design's scope fence made mechanical. A chain
+// placeholder has no agent turn to deliver the answer to, so it is not
+// somewhere a question can usefully live; input.Ask covers the rest —
+// a terminal run, a malformed question, a run that already has one open.
+func askThreadEntry(root, projectID, pulseSlug, slug string, ask pulseRunAsk, stderr io.Writer) {
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
+		return
+	}
+	if md.Workflow == chainWorkflow {
+		moePrintf(stderr, "pulse: input: %s/%s is a chain head — no stage to deliver an answer to; question dropped\n", projectID, slug)
+		return
+	}
+	req, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug,
+		ask.Question, ask.Choices, walkConsent(), io.Discard, stderr)
+	if err != nil {
+		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
+		return
+	}
+	moePrintf(stderr, "pulse: input: asked %s/%s#%d — %s\n", projectID, slug, req.ID, req.Question)
 }
 
 // pulseMinter opens the runs one sweep's gate asks for. It holds the
@@ -1229,6 +1314,14 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	}
 	if judged := judgedChoresBlock(sc, projectID); judged != "" {
 		blocks = append(blocks, judged)
+	}
+	// The inbox: what the board is waiting on, what came back since the
+	// last sweep, and the bar for asking. Beside the chore block rather
+	// than after the ride line — both are "standing operator state this
+	// sweep has to account for", and neither depends on what this
+	// invocation licensed.
+	if inputs := openInputsBlock(sc, projectID, runID); inputs != "" {
+		blocks = append(blocks, inputs)
 	}
 	// Its own block, not a tail on the chain-state one: the line is about
 	// what this sweep may start, which is true whether or not the board

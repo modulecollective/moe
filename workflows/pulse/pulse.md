@@ -345,15 +345,18 @@ thread. The gate's `threads` list is how you shape them:
     ]
 
 Each thread's `runs` is a list of positions in execution order, and
-each position is one of two things:
+each position is one of three things:
 
 - **a string** — the slug of **any parked run in this project**, loose
   or already chained, machine-spawned or operator-authored. Naming a
   run that is chained somewhere else *moves* it: the harness re-stamps
   it here and closes the gap it left.
-- **an object** — a run spec, in the same shape as a `loose` entry. The
+- **a run spec** — an object in the same shape as a `loose` entry. The
   harness opens that run and puts it right here. This is how a run you
   are minting *and* ordering is written: once, where it goes.
+- **a question** — an object with a `run` key naming an existing run
+  and a `park` object holding one question for the operator. See
+  "Asking the operator a question" below.
 
 Three placements, first match wins:
 
@@ -480,6 +483,55 @@ When this sweep is dynamic, your context carries a block saying so.
 Nothing is riding while you work — a pulse is the only thing that
 starts rides, and it starts them after you finish — so the board you
 read is the board the kick loop walks.
+
+### Asking the operator a question
+
+A park says "look at this first". Sometimes you can say something
+sharper: *this run cannot proceed until someone answers one specific
+question.* Write that as a question at the run's own position.
+
+    {"runs": [
+       {"run": "change-auth-defaults",
+        "park": {"question": "Which compatibility policy should this use?",
+                 "choices": ["Preserve the old default",
+                             "Adopt the new default",
+                             "Require an explicit setting"]}},
+       "follow-up-docs"
+     ]}
+
+That does two things at once. It parks the whole thread for this sweep,
+exactly like a plain `park` line. And it opens a **durable** question on
+that run: it appears in `moe inbox list` and on the operator's phone,
+the harness refuses to start the thread until it is answered, and the
+answer is delivered to that run's later stage prompts. A plain park
+holds for one sweep and has to be rediscovered; a question holds until
+it is discharged.
+
+The rules are narrow on purpose:
+
+- **The `run` must already exist.** A question rides the run whose
+  future agent needs the answer, so a run you are minting in this same
+  gate cannot carry one — its design is yours to write, and if you
+  can't write it, don't mint it.
+- **One question per run at a time.** A run that already has one open
+  keeps it; a second is refused. Ask the next one after this is
+  answered.
+- **Two or three distinct choices. No free text.** If the answer you
+  need is prose, you have not narrowed the question enough.
+- **Ask the single question that changes what happens next**, and offer
+  only answers that are usable implementation guidance. "Which
+  compatibility policy" is a question; "is this a good idea" is not.
+- **If what you need is an operator *act*** — close the run, tag an
+  idea, change the project's mode — write a plain `park` naming that
+  act. The inbox cannot discharge an act, and dressing one up as a
+  question just puts a button next to something no button can do.
+
+Your kickoff carries the board's open questions and the answers that
+landed since your last sweep. Read the answers: your job is to
+interpret each one, drop the park it was holding, and let the ordinary
+floors carry the thread on. If the answer says the work should stay
+still, that is a plain `park` with a new reason — not the same question
+asked again.
 
 ### A parked reflect is a thread, not a finished job
 
