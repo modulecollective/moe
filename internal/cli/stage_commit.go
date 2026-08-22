@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -47,31 +47,15 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 // they don't want the run to re-open and re-run docID's agent the next
 // time it's picked up either.
 //
-// The marker is an empty commit carrying a distinct `advance: <doc>`
-// subject plus the standard MoE-* trailers. stageSatisfied treats docID
-// as satisfied when this marker is at least as recent as docID's own
-// latest work-turn, so Workflow.Next steps to the successor stage instead
-// of re-opening docID. A later re-edit of docID lands a fresher work-turn
-// that out-dates the marker and flips the run back — re-open fidelity
-// falls out of the same timestamp rule.
-//
-// Modelled on commitSessionStart (a non-work-turn marker the work-turn
-// grep deliberately ignores) but committed empty: under option C there is
-// no file to change, so the marker *is* the message. git.Run is the
-// sanctioned internal/git seam, and --allow-empty is the same form
-// production already uses for marker commits (chain, chore). Lock and
-// push policy live at the callsite, like every other main writer: the
-// chain prompt's `a` branch wraps this in sync.WithJournalPush.
+// The commit itself is runopen.AdvanceMarker — shared with serve's
+// advance-mark route, which writes the same marker from the web. What
+// stays here is the ride's consent: a chain prompt answered mid-cascade
+// stamps the level it is riding at, which a click has nothing to say
+// about. Lock and push policy live at the callsite, like every other
+// main writer: the chain prompt's `a` branch wraps this in
+// sync.WithJournalPush.
 func commitAdvance(root string, md *run.Metadata, docID string) error {
-	msg := fmt.Sprintf("advance: %s\n\n", docID) +
-		trailers.Block{
-			Run:      md.ID,
-			Project:  md.Project,
-			Workflow: md.Workflow,
-			Document: docID,
-			Consent:  walkConsent(),
-		}.String()
-	return git.Run(root, "commit", "--allow-empty", "-m", msg)
+	return runopen.AdvanceMarker(root, md, docID, walkConsent())
 }
 
 // commitWikiTurn stages the wiki content dir alongside the per-run

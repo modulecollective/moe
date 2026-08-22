@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
@@ -323,6 +324,82 @@ func TagIdea(root, projectID, slug, workflow string, stdout, stderr io.Writer) e
 		// so StageAndCommit reports ErrNothingToCommit rather than
 		// minting an empty journal entry.
 		return run.StageAndCommit(root, msg, runJSONRel)
+	})
+}
+
+// ErrNotAdvanceable is returned by MarkAdvanced when the run or the
+// stage can't carry an advance marker — the run isn't in progress, or
+// the stage has no work turn for the marker to out-date. The wrapped
+// text names which.
+var ErrNotAdvanceable = errors.New("runopen: not an advanceable stage")
+
+// AdvanceMarker writes the `advance: <docID>` marker commit: an empty
+// commit whose distinct subject and MoE-* trailers record that docID's
+// stage is done without producing a work turn for the next one.
+// stageSatisfied treats docID as satisfied when this marker is at least
+// as recent as docID's own latest work turn, so the run's next pickup
+// steps to the successor stage instead of re-opening docID; a later
+// re-edit lands a fresher work turn that out-dates the marker and flips
+// the run back.
+//
+// Bare on purpose: no lock, no push, no guards. Both callers already own
+// those, and they own them differently — the chain prompt's `a` writes
+// this inside a journal push it opened for the whole branch, and it
+// stamps the ride's consent; serve's advance route wraps it through
+// MarkAdvanced below with no consent to stamp, because a click is not a
+// ride. What they must not disagree on is the commit, which is why it
+// lives here rather than twice.
+func AdvanceMarker(root string, md *run.Metadata, docID, consent string) error {
+	msg := fmt.Sprintf("advance: %s\n\n", docID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Document: docID,
+			Consent:  consent,
+		}.String()
+	return git.Run(root, "commit", "--allow-empty", "-m", msg)
+}
+
+// MarkAdvanced is the operator's consent verb without a terminal: it
+// records that docID's stage is done, under the journal push, and starts
+// nothing. `moe serve`'s advance route is the caller — the web writes
+// licences and marks, and the heartbeat is the only thing that spawns.
+//
+// Two guards, both re-derived here rather than trusted from a page that
+// may be stale:
+//
+//   - the run must be in progress. A marker on a terminal run records
+//     consent to move something that has stopped.
+//   - the stage must have a work turn. stageSatisfied wants a marker
+//     *and* a turn — a marker on a never-worked stage satisfies nothing,
+//     so writing one would leave a mark the ladder ignores.
+//
+// No consent trailer: a click is the operator's own act, and the ride
+// levels are what MoE-Consent names.
+func MarkAdvanced(root, projectID, slug, docID string, stdout, stderr io.Writer) error {
+	if docID == "" {
+		return fmt.Errorf("%w: no stage named", ErrNotAdvanceable)
+	}
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Status != run.StatusInProgress {
+		return fmt.Errorf("%w: run %s/%s is %s, not in progress", ErrNotAdvanceable, projectID, slug, md.Status)
+	}
+	sha, _, err := run.LatestWorkTurnSHA(root, projectID, slug, docID)
+	if err != nil {
+		return err
+	}
+	if sha == "" {
+		return fmt.Errorf("%w: %s has no work turn to advance past", ErrNotAdvanceable, docID)
+	}
+	return sync.WithJournalPush(root, repolock.Options{
+		Purpose: "stage-advance",
+		Run:     projectID + "/" + slug,
+	}, stdout, stderr, func() error {
+		return AdvanceMarker(root, md, docID, "")
 	})
 }
 
