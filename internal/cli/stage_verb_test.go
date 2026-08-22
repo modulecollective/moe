@@ -12,9 +12,9 @@ import (
 // TestOperatorCascadesPredicate pins the rows the whole design keys on:
 // a workflow participates in the operator cascade vocabulary iff it
 // registers a cascade dispatcher and is neither perpetual nor
-// machine-paced. Every surface (stage-verb flags, chain membership,
-// serve chips) derives from this one predicate, so the rows here are
-// the structural guarantee that a future workflow can't be half-wired.
+// machine-paced. Both surfaces (stage-verb flags, chain membership)
+// derive from this one predicate, so the rows here are the structural
+// guarantee that a future workflow can't be half-wired.
 func TestOperatorCascadesPredicate(t *testing.T) {
 	cases := []struct {
 		workflow string

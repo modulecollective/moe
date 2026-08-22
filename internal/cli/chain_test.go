@@ -730,7 +730,7 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 // on operatorCascades, not on workflow=="sdlc": every operator-paced
 // workflow (sdlc, twin) is offered, while chat
 // (perpetual) and pulse (machine-paced) stay out — the same predicate
-// the stage-verb flags and serve chips use. chain is the one workflow
+// the stage-verb flags use. chain is the one workflow
 // admitted on top of the predicate: it has no stage ladder of its own,
 // so it takes no cascade flags, but the operator must be able to prune
 // and reorder the batch it heads. A merged run is excluded by status

@@ -301,10 +301,10 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // chain is the one addition on top, and the one place chain membership
 // legitimately parts from the cascade vocabulary: a chain run is a
 // placeholder heading a batch, with no stage ladder of its own to walk
-// — so the cascade flags and serve chips would be meaningless on it —
-// but the operator must be able to reorder or prune that batch, and
-// drop the head itself, before `moe chain kick` rides it. Offering it
-// is also mandatory rather than cosmetic: chain edit's
+// — so the cascade flags would be meaningless on it — but the
+// operator must be able to reorder or prune that batch, and drop the
+// head itself, before `moe chain kick` rides it. Offering it is also
+// mandatory rather than cosmetic: chain edit's
 // delete-means-unchain authority clears any edge to a run it didn't
 // show on the next save, so a head the editor hid would lose its whole
 // batch the first time the operator saved.

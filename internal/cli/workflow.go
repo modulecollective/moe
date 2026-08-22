@@ -87,8 +87,8 @@ func (w *Workflow) Perpetual() bool {
 // today: machine-minted, machine-driven). It is the sibling of
 // SetPerpetual — a one-line declaration that keeps the workflow out of
 // the operator-cascade vocabulary (stage-verb cascade flags, chain
-// membership, serve chips) via the operatorCascades predicate, instead
-// of a per-surface allowlist.
+// membership) via the operatorCascades predicate, instead of a
+// per-surface allowlist.
 func (w *Workflow) SetMachinePaced() {
 	w.machinePaced = true
 }

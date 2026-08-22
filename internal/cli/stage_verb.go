@@ -13,12 +13,12 @@ import (
 
 // operatorCascades reports whether a workflow participates in the
 // operator cascade vocabulary — the stage-verb cascade flags
-// (--once/--to/--ship/--chain), chain-edit membership, and the serve
-// advance/ship/chain chips. One predicate keys all three surfaces so a
-// workflow can't be half-wired: a workflow that registers a cascade
-// dispatcher gets the full vocabulary everywhere at once, and one that
-// shouldn't (perpetual chat, machine-paced pulse) declares that once —
-// SetPerpetual / SetMachinePaced — and is excluded everywhere at once.
+// (--once/--to/--ship/--chain) and chain-edit membership. One
+// predicate keys both surfaces so a workflow can't be half-wired: a
+// workflow that registers a cascade dispatcher gets the full
+// vocabulary everywhere at once, and one that shouldn't (perpetual
+// chat, machine-paced pulse) declares that once — SetPerpetual /
+// SetMachinePaced — and is excluded everywhere at once.
 //
 // The rule: a registered cascade dispatcher, and neither perpetual nor
 // machine-paced. A dispatcher is the "has a stage ladder to walk"
