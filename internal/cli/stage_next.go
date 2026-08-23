@@ -361,9 +361,10 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	// operator reads it before authorising the next stage. The pairing
 	// is the workflow's prereq edge — design → code, code → test,
 	// test → review, vision → architecture, …, glossary → finalize. Same
-	// shape promptPushNextStage uses for review → push. Falls back to the
-	// hardcoded design/code mapping when the workflow registry isn't
-	// reachable (tests against a throwaway workflow).
+	// shape promptPushNextStage uses for review → push, though that one
+	// walks a hardcoded freshest-first chain rather than the registry.
+	// Falls back to the hardcoded stage mapping below when the workflow
+	// registry isn't reachable (tests against a throwaway workflow).
 	priorCanvas := ""
 	if wf, err := LookupWorkflow(md.Workflow); err == nil {
 		if prereqs := wf.Prereqs(next.Name); len(prereqs) > 0 {
@@ -678,31 +679,38 @@ func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metada
 //
 // The just-finished stage's canvas is printed above the prompt so the
 // operator reads the agent's pre-push framing at the exact moment
-// they're deciding whether to ship. With test stage in place, that's
-// the test canvas — the verification narrative is the more direct
-// "should we ship?" lens than the code canvas (which holds the PR
-// body but is one stage back). When the test canvas is missing or
-// whitespace-only (the operator skipped test via the post-code `s`
-// shortcut, or invoked `moe sdlc push` directly without test having
-// landed), fall back to the code canvas: the operator's last reading
-// material before the ship decision should still be the most recent
-// thing the agent wrote. This is the operator's one chance to read
-// the canvas at this gate. By the time promptNextStage fires,
-// session.Close has already rebased the session onto main, so root is
-// the right base for the read. If both canvases are missing or
-// whitespace-only, the prompt prints bare — no header or decoration.
-// The canvas is markdown the agent wrote for the operator, printed
-// as written.
+// they're deciding whether to ship. That's the review canvas: review
+// is the last gate before push, and its ship verdict — the findings,
+// the fixes it applied in place, the reason the gate reads ready — is
+// what the ship decision is actually about. Missing or
+// whitespace-only, it falls back to test, then to code: the operator's
+// last reading material before the ship decision should be the most
+// recent thing the agent wrote, whichever layer that turns out to be.
+// Both fallbacks are reachable: `moe sdlc push` invoked directly on a
+// run that finished test but not review lands on test; a run that took
+// the post-code `s` shortcut and then declined review lands on code.
+// The chain is walked freshest-first rather than resolved through the
+// workflow registry's prereq edge — push's prereq is review either
+// way, and what sits below it is a staleness fallback, not a prereq
+// the registry could answer.
+// This is the operator's one chance to read the canvas at this gate.
+// By the time promptNextStage fires, session.Close has already rebased
+// the session onto main, so root is the right base for the read. If
+// every canvas in the chain is missing or whitespace-only, the prompt
+// prints bare — no header or decoration. The canvas is markdown the
+// agent wrote for the operator, printed as written.
 //
 // The push canvas is deliberately not in this fallback chain. Synthesis
 // runs inside the chosen push command, not at chain-prompt time, so by
 // the time the operator reads this preamble the push canvas (if any) may
 // be left over from a prior push attempt — stale relative to whatever
-// the operator's about to do. Test → code is the live story.
+// the operator's about to do. Review → test → code is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	body := readPrintableCanvas(root, md, "test")
-	if body == "" {
-		body = readPrintableCanvas(root, md, "code")
+	body := ""
+	for _, stage := range []string{"review", "test", "code"} {
+		if body = readPrintableCanvas(root, md, stage); body != "" {
+			break
+		}
 	}
 	if body != "" {
 		fmt.Fprint(stdout, body)
