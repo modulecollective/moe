@@ -77,8 +77,8 @@ func TestChainKickChainRunHeadClosesAndRides(t *testing.T) {
 	// Both children rode the full ladder and shipped.
 	got := kickStages(*stages)
 	want := []string{
-		"fix-one:design", "fix-one:code", "fix-one:review", "fix-one:test",
-		"fix-two:design", "fix-two:code", "fix-two:review", "fix-two:test",
+		"fix-one:design", "fix-one:code", "fix-one:test", "fix-one:review",
+		"fix-two:design", "fix-two:code", "fix-two:test", "fix-two:review",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("dispatched %v, want %v\nstdout=%q", got, want, out.String())
@@ -109,8 +109,8 @@ func TestChainKickRegularHeadCascadesThenRides(t *testing.T) {
 
 	got := kickStages(*stages)
 	want := []string{
-		"head-run:design", "head-run:code", "head-run:review", "head-run:test",
-		"child-run:design", "child-run:code", "child-run:review", "child-run:test",
+		"head-run:design", "head-run:code", "head-run:test", "head-run:review",
+		"child-run:design", "child-run:code", "child-run:test", "child-run:review",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("dispatched %v, want %v", got, want)

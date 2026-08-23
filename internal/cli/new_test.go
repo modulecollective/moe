@@ -565,7 +565,7 @@ func TestRunNewShipCascadesToShip(t *testing.T) {
 	if !strings.Contains(out.String(), "opened run tele/ship-me") {
 		t.Fatalf("missing open confirmation: %q", out.String())
 	}
-	want := []string{"design", "code", "review", "test"}
+	want := []string{"design", "code", "test", "review"}
 	if len(*stages) != len(want) {
 		t.Fatalf("openSdlcStage invocations: got %d, want %d (%+v)", len(*stages), len(want), *stages)
 	}

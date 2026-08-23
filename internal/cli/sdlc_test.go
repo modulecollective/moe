@@ -433,3 +433,51 @@ func TestSDLCCodeWrongProjectSaysRunNotFound(t *testing.T) {
 		t.Fatalf("typo should not surface as design-canvas-missing, got: %q", msg)
 	}
 }
+
+// TestRequireCodeCanvasGatesBothDownstreamStages: after the review↔test
+// swap, both downstream stages gate on the *code* canvas, not on each
+// other. Test needs the code canvas's `## Test plan`; review needs the
+// diff and reads the test canvas as evidence when it exists.
+//
+// Review deliberately does not gate on test: the `s` shortcut at the
+// post-code chain prompt reaches review with no test canvas at all, so
+// gating review on test would refuse a path the prompt offers. This
+// test is the pin on that — it drives `sdlc review` against a run that
+// has a code canvas and no test canvas.
+func TestRequireCodeCanvasGatesBothDownstreamStages(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	if _, err := run.New(root, "tele",
+		run.Options{
+			ID:       "swap-order",
+			Workflow: "sdlc",
+			SeedDocs: map[string]string{"design": "# Design\n\nstub\n"},
+		}); err != nil {
+		t.Fatalf("run.New: %v", err)
+	}
+	runID := findFirstRunID(t, root, "tele")
+	t.Chdir(root)
+
+	// No code canvas yet: both stages refuse, both point at `sdlc code`.
+	for _, stage := range []string{"test", "review"} {
+		if err := requireCodeCanvas("tele", runID, stage); err == nil {
+			t.Fatalf("%s must refuse without a code canvas", stage)
+		} else if !strings.Contains(err.Error(), "moe sdlc code tele/"+runID) {
+			t.Fatalf("%s error should point at `moe sdlc code`, got: %v", stage, err)
+		}
+	}
+
+	// Code canvas lands (and only the code canvas — no test canvas).
+	gittest.WriteAndCommit(t, root, run.ContentPath("tele", runID, "code"),
+		"# Code\n\nThe diff.\n\n## Test plan\n\n- run the suite\n", "work: update code")
+
+	for _, stage := range []string{"test", "review"} {
+		if err := requireCodeCanvas("tele", runID, stage); err != nil {
+			t.Fatalf("%s should pass on a written code canvas, got: %v", stage, err)
+		}
+	}
+}

@@ -198,7 +198,7 @@ func TestLoadValidFile(t *testing.T) {
 func testVocab() Vocab {
 	return Vocab{
 		Workflows: map[string][]string{
-			"sdlc":  {"design", "code", "review", "test", "push"},
+			"sdlc":  {"design", "code", "test", "review", "push"},
 			"pulse": {"pulse"},
 		},
 		Agents: []string{"claude", "codex"},

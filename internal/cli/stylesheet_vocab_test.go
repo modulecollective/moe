@@ -18,7 +18,7 @@ func TestStylesheetVocab(t *testing.T) {
 	if !ok {
 		t.Fatalf("vocab missing sdlc workflow; got %v", v.Workflows)
 	}
-	for _, stage := range []string{"design", "code", "review", "test", "push"} {
+	for _, stage := range []string{"design", "code", "test", "review", "push"} {
 		if !slices.Contains(sdlc, stage) {
 			t.Errorf("sdlc vocab missing stage %q; got %v", stage, sdlc)
 		}

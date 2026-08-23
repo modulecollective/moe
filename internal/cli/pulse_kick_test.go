@@ -637,9 +637,9 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 }
 
 // strandedThreadFixture is the run this change opened on: an sdlc run
-// the operator opened and drove through design and code, parked at
-// review, correctly ordered and therefore invisible to a survey with no
-// ordering opinion to write. Its gate is empty, which is what the two
+// the operator opened and drove through design, code, and test, parked
+// at review, correctly ordered and therefore invisible to a survey with
+// no ordering opinion to write. Its gate is empty, which is what the two
 // pulses of 2026-08-13 actually wrote.
 //
 // Callers arm the dynamic ride before calling: the groom builds the
@@ -649,9 +649,10 @@ func strandedThreadFixture(t *testing.T) (root, runKey string, groomed groomResu
 	root, stages, _ = kickFixture(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "stalled-at-review", "sdlc", run.StatusInProgress, now,
-		map[string]string{"design": "# The fix\n\nbody\n", "code": "# The diff\n\nbody\n"})
+		map[string]string{"design": "# The fix\n\nbody\n", "code": "# The diff\n\nbody\n", "test": readyFilledTestCanvas})
 	advanceAt(t, root, "moe", "stalled-at-review", "design", now.Add(-4*time.Hour))
-	advanceAt(t, root, "moe", "stalled-at-review", "code", now.Add(-2*time.Hour))
+	advanceAt(t, root, "moe", "stalled-at-review", "code", now.Add(-3*time.Hour))
+	advanceAt(t, root, "moe", "stalled-at-review", "test", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
 		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)

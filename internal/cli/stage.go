@@ -125,7 +125,7 @@ type stageSessionOpts struct {
 	Headless bool
 	// SkipNextStage suppresses the post-turn "next: …" prompt /
 	// chained-stage call. Used by the cascade driver, which composes
-	// its own chain (design → code → review → test → push) and never wants the
+	// its own chain (design → code → test → review → push) and never wants the
 	// interactive next-stage prompt to fire mid-chain. Headless turns
 	// skip the prompt regardless of this field (see Headless above); the
 	// field stays meaningful for the interactive-but-suppressed serve

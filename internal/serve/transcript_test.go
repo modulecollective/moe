@@ -17,7 +17,7 @@ import (
 // ladderStages is the RunStages closure most transcript tests share:
 // the sdlc ladder, so a stage in it validates and a stage outside 404s.
 func ladderStages(_, _ string) ([]string, error) {
-	return []string{"design", "code", "review", "test", "push"}, nil
+	return []string{"design", "code", "test", "review", "push"}, nil
 }
 
 // writeThread drops a thread-<agent>.jsonl under the run's

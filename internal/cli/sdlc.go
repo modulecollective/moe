@@ -15,7 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// The SDLC workflow owns the design→code→review→test→push lifecycle. Stages are
+// The SDLC workflow owns the design→code→test→review→push lifecycle. Stages are
 // nested under `moe sdlc` so other workflows can pick their
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
@@ -47,13 +47,13 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "review",
-		Summary: "open an agent session on the run's review document — review the code stage's work",
+		Summary: "open an agent session on the run's review document — judge the coded and tested work",
 		Run:     runReview,
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "test",
-		Summary: "open an agent session on the run's test document — verify the reviewed work",
+		Summary: "open an agent session on the run's test document — verify the code stage's work",
 		Run:     runTest,
 		argKind: argProjectRun,
 	})
@@ -89,9 +89,9 @@ func init() {
 	w := NewWorkflow("sdlc")
 	w.RegisterStage("design")
 	w.RegisterStage("code", "design")
-	w.RegisterStage("review", "code")
-	w.RegisterStage("test", "review")
-	w.RegisterStage("push", "test")
+	w.RegisterStage("test", "code")
+	w.RegisterStage("review", "test")
+	w.RegisterStage("push", "review")
 	w.RegisterStageGate("review", reviewStageGate)
 	// Test stage's anti-theater check: the work-turn commit alone
 	// doesn't tell us whether the agent actually filled the canvas
@@ -147,18 +147,20 @@ func runCode(args []string, stdout, stderr io.Writer) int {
 func runReview(args []string, stdout, stderr io.Writer) int {
 	return runStageVerb(sdlcStageVerbCfg("review", []string{
 		"Opens an interactive agent session on the review canvas. The agent",
-		"performs a senior-engineer review of the code stage's committed diff,",
-		"blocking only for correctness, scope, maintainability, or reviewability",
-		"issues that should send the run back to code.",
+		"performs a senior-engineer review of the committed diff and the test",
+		"stage's evidence, ending in a ship verdict — blocking only for",
+		"correctness, scope, maintainability, or reviewability issues that",
+		"should send the run back to code.",
 	}, openSdlcReview), args, stdout, stderr)
 }
 
 func runTest(args []string, stdout, stderr io.Writer) int {
 	return runStageVerb(sdlcStageVerbCfg("test", []string{
 		"Opens an interactive agent session on the test canvas. The agent",
-		"verifies the reviewed work — running the project's checks, driving",
+		"verifies the code stage's work — running the project's checks, driving",
 		"the change end-to-end, applying small in-place fixes, and narrating what",
-		"was and wasn't verified on the canvas. Pre-push hooks still gate ship.",
+		"was and wasn't verified on the canvas. Review reads that narrative",
+		"downstream; pre-push hooks still gate ship.",
 	}, openSdlcTest), args, stdout, stderr)
 }
 
@@ -269,7 +271,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 		return code
 	}
 	runID = resolved
-	if err := requireCodeCanvas(projectID, runID); err != nil {
+	if err := requireCodeCanvas(projectID, runID, "review"); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -286,15 +288,15 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 }
 
 // openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
-// shape as openSdlcReview one stage downstream — requireReviewCanvas
-// ensures a review canvas exists before verification starts.
+// shape as openSdlcCode one stage downstream — requireCodeCanvas
+// ensures a code canvas exists before verification starts.
 func openSdlcTest(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	resolved, code := resolveSDLCRunSlug("sdlc test", projectID, runID, stdout, stderr)
 	if code != 0 {
 		return code
 	}
 	runID = resolved
-	if err := requireReviewCanvas(projectID, runID); err != nil {
+	if err := requireCodeCanvas(projectID, runID, "test"); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -425,15 +427,19 @@ func requireDesignCanvas(projectID, runID string) error {
 	return requirePriorCanvas(projectID, runID, "design", "code")
 }
 
-// requireCodeCanvas is the analogue for review stage: refuse to open a
-// review session when there's no code canvas to review. Same fail-loud
-// invariant as requireDesignCanvas, one stage downstream.
-func requireCodeCanvas(projectID, runID string) error {
-	return requirePriorCanvas(projectID, runID, "code", "review")
-}
-
-func requireReviewCanvas(projectID, runID string) error {
-	return requirePriorCanvas(projectID, runID, "review", "test")
+// requireCodeCanvas is the analogue for the test and review stages:
+// refuse to open either session when there's no code canvas to work
+// from. Same fail-loud invariant as requireDesignCanvas, one stage
+// downstream.
+//
+// Both downstream stages gate on *code*, not on each other. Test needs
+// the code canvas's `## Test plan`; review needs the code canvas and
+// the diff, and reads the test canvas as evidence when it exists. The
+// `s` shortcut at the post-code gate deliberately reaches review with
+// no test canvas at all, so gating review on test would refuse a path
+// the prompt offers.
+func requireCodeCanvas(projectID, runID, currentStage string) error {
+	return requirePriorCanvas(projectID, runID, "code", currentStage)
 }
 
 // requirePriorCanvas is the shared shape behind requireDesignCanvas and

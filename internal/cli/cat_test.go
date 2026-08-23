@@ -298,7 +298,7 @@ func TestCatUnknownStage(t *testing.T) {
 	if !strings.Contains(errb.String(), "no such stage: bogus") {
 		t.Fatalf("expected unknown-stage error, got: %q", errb.String())
 	}
-	for _, want := range []string{"design", "code", "review", "test", "push"} {
+	for _, want := range []string{"design", "code", "test", "review", "push"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("expected error to list %q, got: %q", want, errb.String())
 		}

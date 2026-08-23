@@ -280,9 +280,16 @@ func TestCascadeStageGateNoRecoveryWhenReady(t *testing.T) {
 
 // TestCascadeFromGateHeadlessReviewRecoversAndShips is the end-to-end
 // headline: a `!!` cascade starting at a blocked review gate recovers via
-// one headless code kickback and rides through test and push to a clean
-// ship. The summary records the recovery as `review ok · code ok · review
-// ok · test ok · push ok — shipped`.
+// one headless code kickback and rides through push to a clean ship. The
+// summary records the recovery as `review ok · code ok · review ok ·
+// push ok — shipped`.
+//
+// Note what the walk does *not* include: test. Review sits after test
+// in the ladder, so a review-blocked code fix goes straight back to
+// review and the pre-push hooks are the only thing that re-runs the
+// deterministic suite behind it. That's the accepted cost of making
+// review the final gate — it's why review's fix latitude stays bounded
+// to zero-risk changes.
 func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -319,7 +326,7 @@ func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push dispatched %d times, want 1", len(*pushCaptured))
 	}
-	wantSteps := []string{"review", "code", "review", "test", "push"}
+	wantSteps := []string{"review", "code", "review", "push"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran = %+v, want %v", res.ran, wantSteps)
 	}
@@ -351,7 +358,7 @@ func TestDispatchCascadeBlockedReviewParksToPrompt(t *testing.T) {
 	os.Stdin = devnull
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
-	for _, answer := range []string{"!", "!test"} {
+	for _, answer := range []string{"!", "!push"} {
 		t.Run(answer, func(t *testing.T) {
 			root := isolateCascadeMoeHome(t)
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}

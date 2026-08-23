@@ -27,7 +27,7 @@ func TestStageLocationSectionSDLC(t *testing.T) {
 			stage: "design",
 			want: []string{
 				"## Stage location",
-				"Workflow: sdlc — **design** → code → review → test → push",
+				"Workflow: sdlc — **design** → code → test → review → push",
 				"You are at: design",
 				"Next stage: code",
 				"`moe sdlc code p/r`.",
@@ -37,39 +37,39 @@ func TestStageLocationSectionSDLC(t *testing.T) {
 		{
 			stage: "code",
 			want: []string{
-				"Workflow: sdlc — design → **code** → review → test → push",
+				"Workflow: sdlc — design → **code** → test → review → push",
 				"You are at: code",
 				"Previous stage: design",
-				"Next stage: review",
-				"`moe sdlc review p/r`.",
-			},
-		},
-		{
-			stage: "review",
-			want: []string{
-				"Workflow: sdlc — design → code → **review** → test → push",
-				"You are at: review",
-				"Previous stage: code",
 				"Next stage: test",
 				"`moe sdlc test p/r`.",
 			},
 		},
 		{
-			stage: "test",
+			stage: "review",
 			want: []string{
-				"Workflow: sdlc — design → code → review → **test** → push",
-				"You are at: test",
-				"Previous stage: review",
+				"Workflow: sdlc — design → code → test → **review** → push",
+				"You are at: review",
+				"Previous stage: test",
 				"Next stage: push",
 				"`moe sdlc push p/r`.",
 			},
 		},
 		{
+			stage: "test",
+			want: []string{
+				"Workflow: sdlc — design → code → **test** → review → push",
+				"You are at: test",
+				"Previous stage: code",
+				"Next stage: review",
+				"`moe sdlc review p/r`.",
+			},
+		},
+		{
 			stage: "push",
 			want: []string{
-				"Workflow: sdlc — design → code → review → test → **push**",
+				"Workflow: sdlc — design → code → test → review → **push**",
 				"You are at: push",
-				"Previous stage: test",
+				"Previous stage: review",
 			},
 			deny: []string{"Next stage"},
 		},

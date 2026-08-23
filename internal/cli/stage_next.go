@@ -170,7 +170,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	}
 	switch next.Name {
 	case "push":
-		// The ship gate prints immediately after test closes. Synthesis
+		// The ship gate prints immediately after review closes. Synthesis
 		// does not fire at chain-prompt time because the operator may
 		// decline; the chosen push command runs synthesis as part of its
 		// shared preflight.
@@ -326,7 +326,7 @@ func renderPromptLegend(opts []promptOption) string {
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for
 // most workflows, with `s` appended when the next stage is sdlc's test
-// (the skip shortcut jumps straight to the push prompt), and optional
+// (the skip shortcut jumps straight to the review prompt), and optional
 // /x and /b suffixes when scuttle / back are non-nil. Y still defaults
 // so a reflex Enter chains the next stage interactively, the same as
 // before. Workflows with a registered cascade dispatcher (sdlc, twin)
@@ -336,7 +336,7 @@ func renderPromptLegend(opts []promptOption) string {
 // just-finished stage interactively. `x` dispatches the workflow's
 // close command for the current run — the "abandon ship" path the
 // operator forms at the same surface they decline from. `s` opens
-// the push prompt early without satisfying the test stage: useful
+// the review prompt early without satisfying the test stage: useful
 // for doc-only diffs and trivial fixes where the anti-theater rule
 // that test stage enforces would just produce a rubber-stamp canvas.
 // Hardcoding the sdlc gate keeps the prompt honest — no other
@@ -359,9 +359,9 @@ func renderPromptLegend(opts []promptOption) string {
 func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	// Surface the just-finished stage's canvas above the prompt so the
 	// operator reads it before authorising the next stage. The pairing
-	// is the workflow's prereq edge — design → code, code → review,
-	// vision → architecture, …, glossary → finalize. Same shape
-	// promptPushNextStage uses for test → push. Falls back to the
+	// is the workflow's prereq edge — design → code, code → test,
+	// test → review, vision → architecture, …, glossary → finalize. Same
+	// shape promptPushNextStage uses for review → push. Falls back to the
 	// hardcoded design/code mapping when the workflow registry isn't
 	// reachable (tests against a throwaway workflow).
 	priorCanvas := ""
@@ -375,7 +375,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		case "code":
 			priorCanvas = "design"
 		case "test":
-			priorCanvas = "review"
+			priorCanvas = "code"
+		case "review":
+			priorCanvas = "test"
 		}
 	}
 	if priorCanvas != "" {
@@ -398,23 +400,28 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	// run at the just-finished stage and the next pickup re-opens and
 	// re-runs its agent (Workflow.Next reports the parked stage). The
 	// advance marker satisfies that stage so the next pickup starts at the
-	// successor instead. Gated to sdlc's gates (design→code, code→review,
-	// review→test), where priorCanvas names the stage to mark; other gates
+	// successor instead. Gated to sdlc's gates (design→code, code→test,
+	// test→review), where priorCanvas names the stage to mark; other gates
 	// (the twin ladder, idea) keep the plain decline.
 	offerAdvance := md.Workflow == "sdlc" && priorCanvas != ""
 	if offerAdvance {
 		opts = append(opts, promptOption{key: 'a', hint: "decline, advance to " + next.Name})
 	}
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
-	// `s` is the cascade-only shortcut to jump from post-code straight
-	// to the push prompt, skipping test. Gated to sdlc + next.Name ==
-	// "test" so the option only shows up at the exact gate it makes
-	// sense: post-code, where the next thing the chain would do is open
-	// test. Other prompts (post-design, non-sdlc workflows) leave this
-	// off — they have no test stage to skip over.
-	offerSkipToPush := md.Workflow == "sdlc" && next.Name == "test"
-	if offerSkipToPush {
-		opts = append(opts, promptOption{key: 's', hint: "skip to push"})
+	// `s` is the shortcut that steps over the test stage: from post-code
+	// straight to the review prompt. Gated to sdlc + next.Name == "test"
+	// so the option only shows up at the exact gate it makes sense:
+	// post-code, where the next thing the chain would do is open test.
+	// Other prompts (post-design, non-sdlc workflows) leave this off —
+	// they have no test stage to skip over.
+	//
+	// It skips test, not judgment. Review is the ship gate, so `s` lands
+	// on review's prompt rather than push's — the operator still gets
+	// the final verdict on a doc-only diff, just without a rubber-stamp
+	// test canvas in front of it.
+	offerSkipTest := md.Workflow == "sdlc" && next.Name == "test"
+	if offerSkipTest {
+		opts = append(opts, promptOption{key: 's', hint: "skip to review"})
 	}
 	if len(back) > 0 {
 		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
@@ -453,33 +460,29 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if scuttle != nil && answer == "x" {
 		return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 	}
-	if offerSkipToPush && answer == "s" {
-		// Skip-to-push opens the push prompt directly without
-		// satisfying test. The push command lives in the same group as
-		// the just-decline-able test stage; look it up the same way
+	if offerSkipTest && answer == "s" {
+		// Skip opens the review prompt directly without satisfying
+		// test. The review command lives in the same group as the
+		// just-decline-able test stage; look it up the same way
 		// promptNextStage does for the natural cascade. `back` is the
 		// same prior-stage list this prompt is offering (justFinished ==
 		// "code" upstream, so back contains design+code as appropriate),
-		// which is the right back target for the push prompt: the
+		// which is the right back target for the review prompt: the
 		// operator's mental "just finished" is code; test was the one
 		// they elected to skip. A workflow that registers test but no
-		// push wouldn't make sense, but we stay nil-safe just in case.
+		// review wouldn't make sense, but we stay nil-safe just in case.
 		g, err := LookupGroup(md.Workflow)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		pushCmd := g.Lookup("push")
-		if pushCmd == nil {
-			moePrintf(stderr, "workflow %q has no push command\n", md.Workflow)
+		reviewCmd := g.Lookup("review")
+		if reviewCmd == nil {
+			moePrintf(stderr, "workflow %q has no review command\n", md.Workflow)
 			return 1
 		}
-		// No prompt-time synthesis here either — the `s` shortcut takes
-		// the same path as the natural post-test cascade: straight to the
-		// ship gate, where the operator chooses and the push command runs
-		// synthesis if they actually ship.
-		pushHint := fmt.Sprintf("moe %s %s %s/%s", md.Workflow, pushCmd.Name, md.Project, md.ID)
-		return promptPushNextStage(pushCmd, back, scuttle, root, md, pushHint, stdout, stderr)
+		reviewHint := fmt.Sprintf("moe %s %s %s/%s", md.Workflow, reviewCmd.Name, md.Project, md.ID)
+		return promptStageNextStage(reviewCmd, back, scuttle, root, md, reviewHint, stdout, stderr)
 	}
 	if len(back) > 0 && answer == "b" {
 		return dispatchBack(back, md, stdout, stderr)

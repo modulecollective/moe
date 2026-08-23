@@ -87,7 +87,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 			return canvasPath, nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "review", "test", "push"}, nil
+			return []string{"design", "code", "test", "review", "push"}, nil
 		},
 	})
 
@@ -970,7 +970,7 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 				"documents", stage, "content.md"), nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "review", "test", "push"}, nil
+			return []string{"design", "code", "test", "review", "push"}, nil
 		},
 	})
 
@@ -1057,7 +1057,7 @@ func TestRunPageInProgressRunSurfacesWorktreeCanvas(t *testing.T) {
 				"documents", stage, "content.md"), nil
 		},
 		RunStages: func(_, _ string) ([]string, error) {
-			return []string{"design", "code", "review", "test", "push"}, nil
+			return []string{"design", "code", "test", "review", "push"}, nil
 		},
 	})
 
@@ -2089,7 +2089,7 @@ var testTagWorkflows = []string{"sdlc"}
 func testWorkflowUI(workflow string) (WorkflowUI, bool) {
 	switch workflow {
 	case "sdlc":
-		return WorkflowUI{Stages: []string{"design", "code", "review", "test"}, Close: true}, true
+		return WorkflowUI{Stages: []string{"design", "code", "test", "review"}, Close: true}, true
 	}
 	return WorkflowUI{}, false
 }

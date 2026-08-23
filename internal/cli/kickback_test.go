@@ -215,7 +215,7 @@ func TestPromptKickbackNoDesignDropsD(t *testing.T) {
 // at the chain-prompt entry point. Against non-terminal stdin the
 // blocked branch prints a back-pointing nudge (`next: moe sdlc code …`),
 // while a ready gate keeps today's forward nudge (`next: moe sdlc
-// test …`). This is the guard that the kickback reshaping only fires on
+// push …`). This is the guard that the kickback reshaping only fires on
 // `blocked`, and that the non-TTY caller never auto-walks forward past a
 // block.
 func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
@@ -225,7 +225,7 @@ func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
 		want   string
 	}{
 		{name: "blocked kicks back", status: "blocked", want: "next: moe sdlc code tele/fix-it (review blocked — kick back to fix)"},
-		{name: "ready walks forward", status: "ready", want: "next: moe sdlc test tele/fix-it"},
+		{name: "ready walks forward", status: "ready", want: "next: moe sdlc push tele/fix-it"},
 	}
 
 	devnull, err := os.Open(os.DevNull)

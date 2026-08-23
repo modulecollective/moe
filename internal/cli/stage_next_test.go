@@ -34,7 +34,8 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 		{name: "fresh gate", justFinished: "", want: nil},
 		{name: "post design", justFinished: "design", want: []string{"design"}},
 		{name: "post code", justFinished: "code", want: []string{"design", "code"}},
-		{name: "post test", justFinished: "test", want: []string{"design", "code", "review", "test"}},
+		{name: "post test", justFinished: "test", want: []string{"design", "code", "test"}},
+		{name: "post review", justFinished: "review", want: []string{"design", "code", "test", "review"}},
 	}
 
 	for _, tc := range cases {
@@ -70,7 +71,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 		want     string
 	}{
 		{name: "override push", override: "push", want: "moe sdlc push tele/fix-it"},
-		{name: "no override uses successor", override: "", want: "moe sdlc review tele/fix-it"},
+		{name: "no override uses successor", override: "", want: "moe sdlc test tele/fix-it"},
 	}
 
 	devnull, err := os.Open(os.DevNull)
@@ -544,7 +545,7 @@ func TestPromptStageNextStageAdvanceRacesMarkerToOrigin(t *testing.T) {
 // TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow: a non-sdlc workflow
 // must not offer `a`. The click-forward key is gated to sdlc's design→code
 // and code→test gates, where priorCanvas names the stage to mark; the twin
-// ladder and idea keep the plain decline. Mirrors the skip-to-push gating
+// ladder and idea keep the plain decline. Mirrors the skip-test gating
 // guard.
 func TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow(t *testing.T) {
 	next := &Command{
@@ -727,13 +728,13 @@ func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageOffersSkipToPush: at the post-code gate
+// TestPromptStageNextStageOffersSkipTest: at the post-code gate
 // (next.Name == "test", workflow == "sdlc") the prompt grows the
-// label to include `s` and the legend names "skip to push". This is
-// the cascade-only shortcut that opens the push prompt directly,
-// bypassing test — useful for doc-only diffs and trivial fixes where
+// label to include `s` and the legend names "skip to review". This is
+// the shortcut that opens the review prompt directly, bypassing
+// test — useful for doc-only diffs and trivial fixes where
 // the anti-theater rule would just produce a rubber-stamp canvas.
-func TestPromptStageNextStageOffersSkipToPush(t *testing.T) {
+func TestPromptStageNextStageOffersSkipTest(t *testing.T) {
 	next := &Command{
 		Name: "test",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
@@ -761,8 +762,8 @@ func TestPromptStageNextStageOffersSkipToPush(t *testing.T) {
 	if !strings.Contains(got, "[Y/n/a/s/!]") {
 		t.Fatalf("expected [Y/n/a/s/!] label, got: %q", got)
 	}
-	if !strings.Contains(got, "s = skip to push") {
-		t.Fatalf("expected legend with skip-to-push entry, got: %q", got)
+	if !strings.Contains(got, "s = skip to review") {
+		t.Fatalf("expected legend with skip-to-review entry, got: %q", got)
 	}
 }
 
@@ -799,7 +800,7 @@ func TestPromptStageNextStageNoSkipAtPostDesign(t *testing.T) {
 		t.Fatalf("post-design prompt must not offer /s, got: %q", got)
 	}
 	if strings.Contains(got, "s = skip") {
-		t.Fatalf("post-design legend must not name skip-to-push, got: %q", got)
+		t.Fatalf("post-design legend must not name skip-to-review, got: %q", got)
 	}
 }
 
@@ -836,18 +837,21 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 		t.Fatalf("non-sdlc prompt must not offer /s, got: %q", got)
 	}
 	if strings.Contains(got, "s = skip") {
-		t.Fatalf("non-sdlc legend must not name skip-to-push, got: %q", got)
+		t.Fatalf("non-sdlc legend must not name skip-to-review, got: %q", got)
 	}
 }
 
-// TestPromptStageNextStageSkipDispatchesPushPrompt: typing `s` at
-// the post-code gate opens the push prompt — the [N/m/p] label
-// appears in stdout, and the hint reads "moe sdlc push <project>
-// <run>". The test does not drive the push command itself (stdin
-// EOFs at the push prompt → decline), but the label transition is
-// proof the dispatch happened. The next.Run stub for the test stage
-// must not be invoked on the `s` path.
-func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
+// TestPromptStageNextStageSkipDispatchesReviewPrompt: typing `s` at
+// the post-code gate opens the review prompt — the hint reads "moe
+// sdlc review <project>/<run>". The test does not drive the review
+// command itself (stdin EOFs at the review prompt → decline), but the
+// hint transition is proof the dispatch happened. The next.Run stub
+// for the test stage must not be invoked on the `s` path.
+//
+// `s` skips test, not judgment: review is the ship gate, so the
+// shortcut lands there rather than jumping the operator straight to
+// push with nothing having read the diff.
+func TestPromptStageNextStageSkipDispatchesReviewPrompt(t *testing.T) {
 	var testRan bool
 	next := &Command{
 		Name: "test",
@@ -863,10 +867,10 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	// "s" picks skip; the push prompt then hits EOF, declines, and
-	// returns 0 — no real push is dispatched because we never type
-	// m or p.
-	if _, err := io.WriteString(w, "s\n"); err != nil {
+	// "s" picks skip; "n" then declines at the review prompt so no real
+	// review command is dispatched. The review prompt's default is Y
+	// (run), unlike the push prompt's N, so the decline has to be typed.
+	if _, err := io.WriteString(w, "s\nn\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -882,23 +886,25 @@ func TestPromptStageNextStageSkipDispatchesPushPrompt(t *testing.T) {
 		t.Errorf("`s` must not dispatch the test stage")
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "[N/m/p]") {
-		t.Fatalf("expected push prompt's [N/m/p] label after `s`, got: %q", got)
+	if !strings.Contains(got, "moe sdlc review tele/fix-it") {
+		t.Fatalf("expected review prompt hint with project/run, got: %q", got)
 	}
-	if !strings.Contains(got, "moe sdlc push tele/fix-it") {
-		t.Fatalf("expected push prompt hint with project/run, got: %q", got)
+	// `s` must not skip past review to push — that would leave the
+	// diff unjudged, which is the whole point of the stage.
+	if strings.Contains(got, "[N/m/p]") {
+		t.Fatalf("`s` must not open the push prompt, got: %q", got)
 	}
-	// The test prompt's [Y/n/a/s/!] label must still appear before the
-	// push prompt's [N/m/p] — proves the cascade order.
-	if i, j := strings.Index(got, "[Y/n/a/s/!]"), strings.Index(got, "[N/m/p]"); i < 0 || j < 0 || i >= j {
-		t.Fatalf("expected post-code prompt before push prompt; post-code=%d push=%d", i, j)
+	// The test prompt's [Y/n/a/s/!] label must appear before the review
+	// prompt's hint — proves the cascade order.
+	if i, j := strings.Index(got, "[Y/n/a/s/!]"), strings.Index(got, "moe sdlc review tele/fix-it"); i < 0 || j < 0 || i >= j {
+		t.Fatalf("expected post-code prompt before review prompt; post-code=%d review=%d", i, j)
 	}
 }
 
-// TestPromptStageNextStageSkipForwardsBackTarget: the push prompt
+// TestPromptStageNextStageSkipForwardsBackTarget: the review prompt
 // reached via `s` should carry the post-code prompt's back target
 // through — the operator's mental "just finished" is code (test was
-// the one they skipped), so `b` at the push prompt should re-open
+// the one they skipped), so `b` at the review prompt should re-open
 // code, not test.
 func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 	next := &Command{
@@ -922,7 +928,7 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	// `s` → push prompt opens with back=code → `b` → back.Run fires.
+	// `s` → review prompt opens with back=code → `b` → back.Run fires.
 	if _, err := io.WriteString(w, "s\nb\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -936,14 +942,14 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if !backRan {
-		t.Fatalf("expected back to fire at the push prompt's `b`")
+		t.Fatalf("expected back to fire at the review prompt's `b`")
 	}
 	if got, want := strings.Join(backArgs, " "), "tele/fix-it"; got != want {
 		t.Fatalf("back args = %q, want %q", got, want)
 	}
 	got := stdout.String()
 	if !strings.Contains(got, "b = back to code") {
-		t.Fatalf("expected push prompt legend to name `back to code`, got: %q", got)
+		t.Fatalf("expected review prompt legend to name `back to code`, got: %q", got)
 	}
 }
 

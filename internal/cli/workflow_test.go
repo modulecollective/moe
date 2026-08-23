@@ -350,9 +350,9 @@ func TestWorkflowSuccessor(t *testing.T) {
 		want  string // "" means no successor or unknown stage
 	}{
 		{"design", "code"},
-		{"code", "review"},
-		{"review", "test"},
-		{"test", "push"},
+		{"code", "test"},
+		{"test", "review"},
+		{"review", "push"},
 		{"push", ""}, // terminal stage
 		{"bogus", ""},
 		{"", ""},
