@@ -17,7 +17,7 @@ Work travels as far as you license, and no further. Typed, that's a bang
 grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and rides
 the chain queued behind it. Standing, it's an armed `moe serve --dynamic`,
 whose heartbeat surveys each project's board, opens work that's ready — a due
-chore, a tagged idea, a parked chain — and rides it through review, test, and
+chore, a tagged idea, a parked chain — and rides it through test, review, and
 ship while you're away. Stopping that process retracts all of it.
 
 Underneath is a bet that agents have made careful work cheap. When a designed,
@@ -153,7 +153,7 @@ full treatment.
 
 | Workflow | Stages | Use it for |
 | --- | --- | --- |
-| [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `review` -> `test` -> `push` | designed code changes with a ship gate |
+| [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `test` -> `review` -> `push` | designed code changes with a ship gate |
 | [`chat`](docs/workflows.md#chat) | one `chat` session, resumed across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | operator-authored standing direction agents read but never originate |

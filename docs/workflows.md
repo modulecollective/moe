@@ -11,7 +11,7 @@ Designed, reviewed, tested changes used to cost enough that the discipline got
 skipped under deadline. The bet here is that agents changed the price: when
 each stage is one conversation and the handoff is a canvas the next stage
 reads, the full lifecycle becomes the cheap default path rather than the
-ceremony you cut first. The gates earn their place too — `review` and `test`
+ceremony you cut first. The gates earn their place too — `test` and `review`
 exist to kick work back to `code` or `design`, not to decorate the ladder.
 
 `moe sdlc` is the main software-development workflow:
@@ -20,8 +20,8 @@ exist to kick work back to `code` or `design`, not to decorate the ladder.
 moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr|--merge] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
@@ -32,19 +32,20 @@ A full pass spelled out by hand:
 moe sdlc new my-project/add-batch-support
 moe sdlc design my-project/add-batch-support
 moe sdlc code my-project/add-batch-support
-moe sdlc review my-project/add-batch-support
 moe sdlc test my-project/add-batch-support
+moe sdlc review my-project/add-batch-support
 moe sdlc push my-project/add-batch-support
 ```
 
 The `new` command opens the run and writes the first files into the
 bureaucracy. `design` shapes the request into a reviewable plan. `code` gives
 the agent write access inside an isolated clone of the target project and
-requires it to commit the implementation there. `review` gives the committed
-diff an independent code-review pass before verification — trivial zero-risk
-findings (a typo, comment drift) it fixes and commits in place; anything bigger
-blocks the gate and kicks the run back. `test` verifies the behavior and records
-what was run. `push` ships the branch by the project's ship route — a PR
+requires it to commit the implementation there. `test` verifies the behavior
+and records what was run. `review` is the last judgment before push: an
+independent pass over the diff *and* the test evidence, ending in a ship
+verdict — trivial zero-risk findings (a typo, comment drift) it fixes and
+commits in place; anything bigger blocks the gate and kicks the run back.
+`push` ships the branch by the project's ship route — a PR
 by default, a fast-forward merge where `moe project ship <id> merge` says
 so — and `--pr` / `--merge` override it for one invocation.
 
@@ -97,7 +98,7 @@ Every cascade is headless — the axis is *how far*, not *how*:
   chain** — cascading into the next live chained run. It is the top rung: what
   is chained when you type it is what runs, because nothing sweeps mid-ride.
 
-The cascade mode flags on `design`/`code`/`review`/`test` mirror the chain
+The cascade mode flags on `design`/`code`/`test`/`review` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
@@ -107,7 +108,7 @@ cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
 
-**Blocked gates.** When a `review` or `test` session closes blocked, the gate
+**Blocked gates.** When a `test` or `review` session closes blocked, the gate
 kicks the run back rather than parking. Interactively the chain prompt becomes a
 kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
 blocking canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the
@@ -126,7 +127,7 @@ Why they exist: Claude Code and Codex run on flat-rate dev subscriptions, so
 the capacity you don't use while sleeping or at dinner is already paid for.
 Chains turn that idle capacity into throughput. Shape work into designed runs
 during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
-step away, and the chain codes, reviews, tests, and ships unattended — each run
+step away, and the chain codes, tests, reviews, and ships unattended — each run
 still gated, journaled, and revertible in the morning.
 
 Every chain roots in operator consent, which is either typed — the bang you
@@ -357,7 +358,7 @@ due ones; `moe chore open`, or a pulse's chore auto-open, mints the seeded run.
 What happens after that is what you armed: with no `moe serve --dynamic` up, the
 run waits in `moe dash` like any other until you start it, while under an armed
 serve the [heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and
-that sweep both opens the run and rides it on through review, test, and ship.
+that sweep both opens the run and rides it on through test, review, and ship.
 A chore coming due is a clock event on an otherwise quiet journal, so the
 heartbeat gate watches for it directly rather than waiting for something else
 to move.

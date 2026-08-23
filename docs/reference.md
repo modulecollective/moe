@@ -144,7 +144,7 @@ source of truth for the exact command surface; this page is a map.
 
 ### Workflows
 
-- `moe sdlc new|design|code|review|test|push|close|harvest|shell|reopen|cat|log`
+- `moe sdlc new|design|code|test|review|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
 - `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log|harvest` manages
@@ -292,7 +292,7 @@ moe completion fish | source
 ```
 
 Completion covers verbs and subcommands (`moe sd⇥` → `sdlc`, `moe sdlc ⇥` →
-`design code review test …`) and the `<project>/<run>` slug for run-taking verbs
+`design code test review …`) and the `<project>/<run>` slug for run-taking verbs
 (`moe sdlc code ⇥`), plus idea slugs (including `--from-idea`) and named
 workspaces. The script itself never changes as commands are added — all the
 logic lives in `moe` and is best-effort, so completion stays silent outside a
