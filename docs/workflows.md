@@ -22,7 +22,7 @@ moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <pro
 moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc push [--pr] <project>/<run>
+moe sdlc push [--pr|--merge] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
 
@@ -44,8 +44,9 @@ requires it to commit the implementation there. `review` gives the committed
 diff an independent code-review pass before verification — trivial zero-risk
 findings (a typo, comment drift) it fixes and commits in place; anything bigger
 blocks the gate and kicks the run back. `test` verifies the behavior and records
-what was run. `push` fast-forwards the target project's
-default branch, or opens a PR with `--pr`.
+what was run. `push` ships the branch by the project's ship route — a PR
+by default, a fast-forward merge where `moe project ship <id> merge` says
+so — and `--pr` / `--merge` override it for one invocation.
 
 A run whose work landed entirely as bureaucracy commits — project hooks,
 chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
@@ -558,6 +559,16 @@ worth looking at. That heartbeat is the only automatic pulse there is, and the
 only thing in the process that starts an agent at all — the web writes licences
 and marks, and the clock spends them. Stopping the process retracts it; an
 unarmed `moe serve` is a reader with a capture door.
+
+Per project, `moe project ship <id> pr|merge` picks how a finished run lands
+there. `pr` is the default: every unflagged ship — bare `moe sdlc push`, `!!`
+and `!!!`, `moe chain kick`, and the heartbeat's rides — pushes the branch and
+opens a PR, leaving the run `pushed` with its sandbox until the PR merges (the
+pulse's reconcile then flips it to merged or closed). `merge` is the exception
+you opt a project into: fast-forward the default branch, delete the remote
+branch, drop the sandbox. `--pr` / `--merge` on push, and `m` / `p` at the
+chain prompt, override the setting for one ship. The project hub carries the
+switch beside mode's.
 
 Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the heartbeat never sweeps the project at all. `safe` means

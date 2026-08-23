@@ -7,9 +7,9 @@ prior canvases and curate them into the PR body the reviewer reads,
 and surface any conflict between code's draft and test's findings so
 the operator sees it before opening the PR.
 
-This stage runs inside the push command before either ship path. The
-`--pr` path consumes `## PR body` as the reviewer-facing PR description;
-the fast-forward merge path keeps its merge commit body bare, but this
+This stage runs inside the push command before either ship route. The
+PR route consumes `## PR body` as the reviewer-facing PR description;
+the fast-forward merge route keeps its merge commit body bare, but this
 canvas remains the run's durable final shipping record. Write
 accordingly.
 

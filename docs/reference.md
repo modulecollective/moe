@@ -75,7 +75,7 @@ source of truth for the exact command surface; this page is a map.
 
 - `moe init [--remote <url>] [dir]` creates a bureaucracy.
 - `moe project add <repo-url>` registers a target project.
-- `moe project list` lists registered projects with their mode.
+- `moe project list` lists registered projects with their mode and ship route.
 - `moe project mode <id> [paused|safe|auto]` reads or sets a project's mode —
   the standing cap on what the heartbeat may start there:
   - `paused` — the heartbeat never sweeps the project. No agent turn is spent
@@ -96,6 +96,25 @@ source of truth for the exact command surface; this page is a map.
   Serve's arming stays above all three: an unarmed serve automates nothing
   anywhere. The mode is stored in `projects/<id>/project.json` (absent means
   `auto`) and is settable from the project hub's switch as well.
+- `moe project ship <id> [pr|merge]` reads or sets how a finished run lands in
+  the project:
+  - `pr` — the default: push `moe/<run>`, open (or re-use) a PR, mark the run
+    `pushed`, and keep the sandbox until the PR merges. `moe sync`'s reconcile
+    flips it to merged or closed on its own.
+  - `merge` — fast-forward the target repo's default branch, delete the remote
+    branch, drop the sandbox, mark the run `merged`.
+
+  The setting binds every ship that carries no route flag: bare
+  `moe sdlc push`, `!!` / `!!!` at any gate, `moe chain kick`, and the
+  heartbeat's rides. `--pr` and `--merge` on push, and `m` / `p` at the chain
+  prompt, override it for one invocation; giving both flags is a usage error.
+  Stored in `projects/<id>/project.json` (absent means `pr`) and settable from
+  the project hub's switch as well.
+
+  Unlike mode, adopting this changes behaviour: everything unflagged used to
+  merge. A project that should keep merging needs `moe project ship <id> merge`
+  once. The `pr` default is deliberate — a PR can be closed unmerged, a merge
+  has landed.
 - `moe project remove <id>` unregisters a project when no named workspaces
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
