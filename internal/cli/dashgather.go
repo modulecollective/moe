@@ -130,15 +130,16 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 	}
 
 	// One os.ReadFile per in-progress run, nearly all of which miss. Over
-	// the scan already in hand rather than input.Scan: the hint needs only
-	// "is something open", and Scan additionally dates each open request
-	// with a git log it would fork per hit — an ordering the inbox needs
-	// and a row hint does not.
+	// the scan already in hand rather than input.Scan: the hints need only
+	// "is something live", and Scan additionally dates each record with a
+	// git log it would fork per hit — an ordering the queue page needs and
+	// a row hint does not.
 	//
-	// A malformed record drops its hint rather than failing the dash. The
-	// kick floor and the stage floor both refuse on one, which is where
-	// that has to be loud.
-	awaitingInput := map[string]bool{}
+	// A malformed record drops its hints rather than failing the dash.
+	// Nothing refuses work on one any more, so this is a missing hint and
+	// not a hidden floor.
+	awaitingAnswer := map[string]bool{}
+	pendingInput := map[string]bool{}
 	for _, md := range mds {
 		if md.Status != run.StatusInProgress {
 			continue
@@ -150,8 +151,12 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		if err != nil {
 			continue
 		}
-		if _, open := f.Open(); open {
-			awaitingInput[md.Project+"/"+md.ID] = true
+		key := md.Project + "/" + md.ID
+		if _, open := f.OpenPing(); open {
+			awaitingAnswer[key] = true
+		}
+		if len(f.Pending()) > 0 {
+			pendingInput[key] = true
 		}
 	}
 
@@ -166,7 +171,8 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		NextByRun:        nextByRun,
 		Chores:           choreInputs,
 		Intents:          gatherIntents(root, mds),
-		AwaitingInput:    awaitingInput,
+		AwaitingAnswer:   awaitingAnswer,
+		PendingInput:     pendingInput,
 	})
 	if err != nil {
 		return DashSnapshot{}, err

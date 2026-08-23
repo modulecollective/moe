@@ -14,7 +14,7 @@ import (
 
 // seedRoot builds a bureaucracy with one project and one in-progress
 // run. The record itself is what these tests exercise, so nothing here
-// writes an inputs.json — Ask does.
+// writes an inputs.json — Add and Ask do.
 func seedRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -46,44 +46,89 @@ func seedRun(t *testing.T, root, slug string) *run.Metadata {
 	return md
 }
 
-func ask(t *testing.T, root, slug string) Request {
+func ask(t *testing.T, root, slug string) Entry {
 	t.Helper()
-	req, err := Ask(root, "moe", slug, "moe/pulse-one",
-		"Which compatibility policy?", []string{"Preserve", "Adopt"}, "dynamic", io.Discard, io.Discard)
+	e, err := Ask(root, "moe", slug, "moe/pulse-one",
+		"Which compatibility policy?", "dynamic", io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
-	return req
+	return e
 }
 
-// A question round-trips through the file and lands as one commit
-// carrying the ask trailer and the sweep's consent.
-func TestAskWritesRecordAndTrailer(t *testing.T) {
+func add(t *testing.T, root, slug, text string) Entry {
+	t.Helper()
+	e, err := Add(root, "moe", slug, text, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	return e
+}
+
+// A note round-trips through the file and lands as one commit carrying
+// the added trailer and no consent — it is the operator's own act.
+func TestAddWritesRecordAndTrailer(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 
-	req := ask(t, root, "change-auth")
-	if req.ID != 1 || req.Answered() {
-		t.Fatalf("req = %+v, want id 1 unanswered", req)
+	e := add(t, root, "change-auth", "  The failing test is a known flake; skip it.  ")
+	if e.ID != 1 || e.IsPing() || !e.Pending() {
+		t.Fatalf("entry = %+v, want a pending note at id 1", e)
+	}
+	if e.Text != "The failing test is a known flake; skip it." {
+		t.Fatalf("Text = %q, want it trimmed", e.Text)
 	}
 
 	f, err := Load(root, "moe", "change-auth")
 	if err != nil {
 		t.Fatal(err)
 	}
-	open, ok := f.Open()
-	if !ok || open.Question != "Which compatibility policy?" {
-		t.Fatalf("Open() = %+v, %v", open, ok)
+	if got := f.Pending(); len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("Pending() = %+v, want the one note", got)
+	}
+	if _, ok := f.OpenPing(); ok {
+		t.Fatalf("a bare note reads as an open ping: %+v", f)
 	}
 
 	body, err := os.ReadFile(filepath.Join(root, Path("moe", "change-auth")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// selected omits on disk: an open request's JSON says nothing about
-	// an answer rather than saying "0".
-	if strings.Contains(string(body), "selected") {
-		t.Fatalf("inputs.json carries a selected key while unanswered:\n%s", body)
+	// An undelivered note says nothing about delivery rather than
+	// carrying an empty key.
+	if strings.Contains(string(body), "delivered_to") {
+		t.Fatalf("inputs.json carries delivered_to while pending:\n%s", body)
+	}
+
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if !strings.Contains(msg, "MoE-Input-Added: moe/change-auth#1") {
+		t.Fatalf("note commit missing its trailer:\n%s", msg)
+	}
+	if strings.Contains(msg, "MoE-Consent:") {
+		t.Fatalf("note commit stamped consent:\n%s", msg)
+	}
+}
+
+// A ping is a question with no text: it delivers nothing until answered.
+func TestAskWritesOpenPingWithConsent(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+
+	e := ask(t, root, "change-auth")
+	if e.ID != 1 || !e.Open() || e.Pending() {
+		t.Fatalf("entry = %+v, want an open ping at id 1", e)
+	}
+
+	f, err := Load(root, "moe", "change-auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open, ok := f.OpenPing()
+	if !ok || open.Question != "Which compatibility policy?" {
+		t.Fatalf("OpenPing() = %+v, %v", open, ok)
+	}
+	if got := f.Pending(); len(got) != 0 {
+		t.Fatalf("Pending() = %+v, want nothing to deliver", got)
 	}
 
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
@@ -95,117 +140,28 @@ func TestAskWritesRecordAndTrailer(t *testing.T) {
 	}
 }
 
-// The duplicate case: one open request per run, so a second ask is
-// refused rather than overwriting or stacking.
-func TestAskRefusesDuplicateOpenRequest(t *testing.T) {
+// Answering turns the ping into an ordinary pending entry that carries
+// its own context.
+func TestAnswerMakesThePingPending(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 	ask(t, root, "change-auth")
 
-	_, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"Something else?", []string{"Yes", "No"}, "dynamic", io.Discard, io.Discard)
-	if !errors.Is(err, ErrOpenRequest) {
-		t.Fatalf("second Ask err = %v, want ErrOpenRequest", err)
-	}
-	f, _ := Load(root, "moe", "change-auth")
-	if len(f.Requests) != 1 {
-		t.Fatalf("requests = %d, want the refused ask not to have landed", len(f.Requests))
-	}
-}
-
-// Once the first is answered the next question is allowed — the rule is
-// one *open* request, not one ever.
-func TestAskAllowedAfterAnswer(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "change-auth")
-	ask(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 0, 2, io.Discard, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	req, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"And the migration?", []string{"In place", "Offline"}, "dynamic", io.Discard, io.Discard)
-	if err != nil {
-		t.Fatalf("follow-up Ask: %v", err)
-	}
-	if req.ID != 2 {
-		t.Fatalf("req.ID = %d, want 2", req.ID)
-	}
-}
-
-// The terminal case, on both verbs: a run that has stopped can neither
-// be asked nor answered, because nothing would discharge the question.
-func TestTerminalRunRefusesAskAndAnswer(t *testing.T) {
-	root := seedRoot(t)
-	md := seedRun(t, root, "change-auth")
-	ask(t, root, "change-auth")
-
-	md.Status = run.StatusMerged
-	if err := run.Save(root, md); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Answer(root, "moe", "change-auth", 0, 1, io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
-		t.Fatalf("Answer on merged run = %v, want ErrNotLive", err)
-	}
-	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"Anything?", []string{"a", "b"}, "dynamic", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
-		t.Fatalf("Ask on merged run = %v, want ErrNotLive", err)
-	}
-}
-
-// The stale case: the web posts the id it rendered, so a tab sitting on
-// a question that has since been answered and replaced answers nothing.
-func TestAnswerRefusesStaleRequestID(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "change-auth")
-	ask(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 1, 1, io.Discard, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"And the migration?", []string{"In place", "Offline"}, "dynamic", io.Discard, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	// The stale tab still thinks #1 is open.
-	if _, err := Answer(root, "moe", "change-auth", 1, 2, io.Discard, io.Discard); !errors.Is(err, ErrStaleRequest) {
-		t.Fatalf("stale Answer = %v, want ErrStaleRequest", err)
-	}
-	f, _ := Load(root, "moe", "change-auth")
-	if got := f.Requests[1].Selected; got != 0 {
-		t.Fatalf("request 2 selected = %d, want it untouched", got)
-	}
-}
-
-func TestAnswerRefusesOutOfRangeChoice(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "change-auth")
-	ask(t, root, "change-auth")
-	for _, choice := range []int{0, 3, -1} {
-		if _, err := Answer(root, "moe", "change-auth", 0, choice, io.Discard, io.Discard); !errors.Is(err, ErrChoiceOutOfRange) {
-			t.Fatalf("Answer(choice=%d) = %v, want ErrChoiceOutOfRange", choice, err)
-		}
-	}
-}
-
-func TestAnswerWithNothingOpen(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 0, 1, io.Discard, io.Discard); !errors.Is(err, ErrNoOpenRequest) {
-		t.Fatalf("Answer with no record = %v, want ErrNoOpenRequest", err)
-	}
-}
-
-func TestAnswerCommitsTrailerWithoutConsent(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "change-auth")
-	ask(t, root, "change-auth")
-	req, err := Answer(root, "moe", "change-auth", 1, 2, io.Discard, io.Discard)
+	e, err := Answer(root, "moe", "change-auth", 1, "Adopt the new default.", io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.Answer() != "Adopt" {
-		t.Fatalf("Answer() = %q, want %q", req.Answer(), "Adopt")
+	if !e.IsPing() || !e.Pending() || e.Open() {
+		t.Fatalf("entry = %+v, want an answered ping", e)
 	}
+	f, _ := Load(root, "moe", "change-auth")
+	if _, ok := f.OpenPing(); ok {
+		t.Fatalf("ping still open after an answer: %+v", f)
+	}
+	if got := f.Pending(); len(got) != 1 || got[0].Question == "" || got[0].Text == "" {
+		t.Fatalf("Pending() = %+v, want the question/answer pair", got)
+	}
+
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
 	if !strings.Contains(msg, "MoE-Input-Answered: moe/change-auth#1") {
 		t.Fatalf("answer commit missing its trailer:\n%s", msg)
@@ -216,43 +172,187 @@ func TestAnswerCommitsTrailerWithoutConsent(t *testing.T) {
 	}
 }
 
-// The grammar is refused before anything reaches disk, and the same
-// function the pulse gate validates with is the one that says so.
-func TestValidateQuestion(t *testing.T) {
-	cases := []struct {
-		name     string
-		question string
-		choices  []string
-		ok       bool
-	}{
-		{"two choices", "Which?", []string{"a", "b"}, true},
-		{"three choices", "Which?", []string{"a", "b", "c"}, true},
-		{"empty question", "  ", []string{"a", "b"}, false},
-		{"one choice", "Which?", []string{"a"}, false},
-		{"four choices", "Which?", []string{"a", "b", "c", "d"}, false},
-		{"empty choice", "Which?", []string{"a", " "}, false},
-		{"duplicate choice", "Which?", []string{"a", "a"}, false},
+// One open ping per run, so a second ask is refused rather than
+// overwriting or stacking. Notes are unlimited and unaffected.
+func TestAskRefusesSecondOpenPingButNotesStack(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	ask(t, root, "change-auth")
+
+	_, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
+		"Something else?", "dynamic", io.Discard, io.Discard)
+	if !errors.Is(err, ErrOpenPing) {
+		t.Fatalf("second Ask err = %v, want ErrOpenPing", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateQuestion(tc.question, tc.choices)
-			if (err == nil) != tc.ok {
-				t.Fatalf("ValidateQuestion = %v, want ok=%v", err, tc.ok)
-			}
-		})
+
+	add(t, root, "change-auth", "one")
+	add(t, root, "change-auth", "two")
+	f, _ := Load(root, "moe", "change-auth")
+	if len(f.Notes) != 3 {
+		t.Fatalf("entries = %d, want the ask refused and both notes landed", len(f.Notes))
+	}
+}
+
+// Once the first is answered the next question is allowed — the rule is
+// one *open* ping, not one ever.
+func TestAskAllowedAfterAnswer(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	ask(t, root, "change-auth")
+	if _, err := Answer(root, "moe", "change-auth", 0, "Adopt.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	e, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
+		"And the migration?", "dynamic", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("follow-up Ask: %v", err)
+	}
+	if e.ID != 2 {
+		t.Fatalf("e.ID = %d, want 2", e.ID)
+	}
+}
+
+// The terminal case, on all three write verbs: a run that has stopped
+// has no next turn, so nothing written on it could ever be delivered.
+func TestTerminalRunRefusesEveryWrite(t *testing.T) {
+	root := seedRoot(t)
+	md := seedRun(t, root, "change-auth")
+	ask(t, root, "change-auth")
+
+	md.Status = run.StatusMerged
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Answer(root, "moe", "change-auth", 0, "too late", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("Answer on merged run = %v, want ErrNotLive", err)
+	}
+	if _, err := Add(root, "moe", "change-auth", "too late", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("Add on merged run = %v, want ErrNotLive", err)
+	}
+	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
+		"Anything?", "dynamic", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("Ask on merged run = %v, want ErrNotLive", err)
+	}
+}
+
+// The stale case: the web posts the id it rendered, so a tab sitting on
+// a question that has since been answered and replaced answers nothing.
+func TestAnswerRefusesStalePingID(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	ask(t, root, "change-auth")
+	if _, err := Answer(root, "moe", "change-auth", 1, "Adopt.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
+		"And the migration?", "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// The stale tab still thinks #1 is open.
+	if _, err := Answer(root, "moe", "change-auth", 1, "In place.", io.Discard, io.Discard); !errors.Is(err, ErrStalePing) {
+		t.Fatalf("stale Answer = %v, want ErrStalePing", err)
+	}
+	f, _ := Load(root, "moe", "change-auth")
+	if got := f.Notes[1].Text; got != "" {
+		t.Fatalf("ping 2 text = %q, want it untouched", got)
+	}
+}
+
+func TestEmptyProseIsRefused(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	if _, err := Add(root, "moe", "change-auth", "  \n ", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("blank Add = %v, want ErrEmpty", err)
+	}
+	if _, err := Ask(root, "moe", "change-auth", "moe/p", " ", "dynamic", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("blank Ask = %v, want ErrEmpty", err)
+	}
+	ask(t, root, "change-auth")
+	if _, err := Answer(root, "moe", "change-auth", 0, "\t", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("blank Answer = %v, want ErrEmpty", err)
+	}
+}
+
+func TestAnswerWithNothingOpen(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	if _, err := Answer(root, "moe", "change-auth", 0, "hello", io.Discard, io.Discard); !errors.Is(err, ErrNoOpenPing) {
+		t.Fatalf("Answer with no record = %v, want ErrNoOpenPing", err)
+	}
+	add(t, root, "change-auth", "a plain note")
+	if _, err := Answer(root, "moe", "change-auth", 0, "hello", io.Discard, io.Discard); !errors.Is(err, ErrNoOpenPing) {
+		t.Fatalf("Answer against a note = %v, want ErrNoOpenPing", err)
+	}
+}
+
+// Delivery stamps only the ids the prompt carried, and only the entries
+// still pending — the mid-turn-add race's whole point.
+func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	add(t, root, "change-auth", "first")
+	// The turn rendered #1 and started. #2 lands mid-turn.
+	add(t, root, "change-auth", "second")
+
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := Load(root, "moe", "change-auth")
+	if f.Notes[0].DeliveredTo != "code" {
+		t.Fatalf("entry 1 = %+v, want delivered to code", f.Notes[0])
+	}
+	if !f.Notes[1].Pending() {
+		t.Fatalf("entry 2 = %+v, want it still pending for the next turn", f.Notes[1])
+	}
+
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if !strings.Contains(msg, "MoE-Input-Delivered: moe/change-auth#1 code") {
+		t.Fatalf("delivery commit missing its trailer:\n%s", msg)
+	}
+	// Not a stage turn — stamping MoE-Document would read as one.
+	if strings.Contains(msg, "MoE-Document:") {
+		t.Fatalf("delivery commit stamped a document trailer:\n%s", msg)
+	}
+
+	// Re-marking is a no-op: no second commit, nothing overwritten.
+	before := gittest.Output(t, root, "rev-parse", "HEAD")
+	if err := MarkDelivered(root, "moe", "change-auth", "review", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if after := gittest.Output(t, root, "rev-parse", "HEAD"); after != before {
+		t.Fatalf("re-marking wrote a commit: %s → %s", before, after)
+	}
+}
+
+// An open ping is never delivered — it has nothing to deliver — so a
+// caller that names it writes no commit.
+func TestMarkDeliveredIgnoresOpenPingAndEmptyList(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	ask(t, root, "change-auth")
+	before := gittest.Output(t, root, "rev-parse", "HEAD")
+	for _, ids := range [][]int{nil, {1}} {
+		if err := MarkDelivered(root, "moe", "change-auth", "code", ids, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := gittest.Output(t, root, "rev-parse", "HEAD"); after != before {
+		t.Fatalf("MarkDelivered wrote a commit with nothing to stamp: %s → %s", before, after)
 	}
 }
 
 // A record that violates the invariants refuses loudly. It is
 // machine-written, so a violation is a bug to see rather than noise to
-// route around — every floor keys on this error.
+// route around.
 func TestLoadRefusesMalformedRecord(t *testing.T) {
 	cases := map[string]string{
-		"two open":     `{"requests":[{"id":1,"question":"a?","choices":["x","y"]},{"id":2,"question":"b?","choices":["x","y"]}]}`,
-		"sparse ids":   `{"requests":[{"id":7,"question":"a?","choices":["x","y"],"selected":1}]}`,
-		"bad question": `{"requests":[{"id":1,"question":"","choices":["x","y"],"selected":1}]}`,
-		"selected oob": `{"requests":[{"id":1,"question":"a?","choices":["x","y"],"selected":5}]}`,
-		"not json":     `{`,
+		"two open pings": `{"notes":[{"id":1,"question":"a?"},{"id":2,"question":"b?"}]}`,
+		"sparse ids":     `{"notes":[{"id":7,"text":"hi"}]}`,
+		"empty entry":    `{"notes":[{"id":1}]}`,
+		"blank text":     `{"notes":[{"id":1,"text":"  "}]}`,
+		"delivered ping": `{"notes":[{"id":1,"question":"a?","delivered_to":"code"}]}`,
+		"not json":       `{`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -274,29 +374,31 @@ func TestLoadMissingRecordIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load on a run with no record: %v", err)
 	}
-	if _, ok := f.Open(); ok || len(f.Requests) != 0 {
+	if _, ok := f.OpenPing(); ok || len(f.Notes) != 0 || len(f.Pending()) != 0 {
 		t.Fatalf("f = %+v, want empty", f)
 	}
 }
 
-// Scan is the inbox: open requests on live runs only, and a terminal run
-// drops out even though its history stays on disk.
+// Scan is the queue: everything still live on in-progress runs, oldest
+// first, with terminal runs dropped even though their history stays on
+// disk.
+//
 // The slugs are chosen against the alphabetical tie-break: `zulu` is
-// asked first and must list first, so a Scan that ignored the ask time
-// would fail rather than accidentally pass.
-func TestScanListsOpenRequestsOldestFirstAndDropsTerminalRuns(t *testing.T) {
+// written first and must list first, so a Scan that ignored the commit
+// time would fail rather than accidentally pass.
+func TestScanListsLiveEntriesOldestFirstAndDropsTerminalRuns(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "alpha")
 	seedRun(t, root, "zulu")
 	gone := seedRun(t, root, "gone")
 
-	// Pin the ask commits apart: LastFileActivity reads %ct, so two asks
+	// Pin the commits apart: LastFileActivity reads %ct, so two writes
 	// inside one second would tie and fall through to the slug order the
 	// slugs above are chosen to contradict.
 	t.Setenv("GIT_COMMITTER_DATE", "2026-08-01T10:00:00+00:00")
 	ask(t, root, "zulu")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-08-02T10:00:00+00:00")
-	ask(t, root, "alpha")
+	add(t, root, "alpha", "ship it")
 	t.Setenv("GIT_COMMITTER_DATE", "2026-08-03T10:00:00+00:00")
 	ask(t, root, "gone")
 	os.Unsetenv("GIT_COMMITTER_DATE")
@@ -306,21 +408,40 @@ func TestScanListsOpenRequestsOldestFirstAndDropsTerminalRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pending, errs := Scan(root, "")
+	waiting, errs := Scan(root, "")
 	if len(errs) != 0 {
 		t.Fatalf("Scan errs = %v", errs)
 	}
 	var got []string
-	for _, p := range pending {
-		got = append(got, p.Run)
+	for _, w := range waiting {
+		got = append(got, w.Run)
 	}
 	if len(got) != 2 || got[0] != "zulu" || got[1] != "alpha" {
 		t.Fatalf("Scan = %v, want [zulu alpha] — oldest first, terminal dropped", got)
 	}
+	if !waiting[0].Entry.Open() || waiting[1].Entry.Open() {
+		t.Fatalf("Scan = %+v, want zulu's ping open and alpha's note pending", waiting)
+	}
+	if got := waiting[0].Ref(); got != "moe/zulu#1" {
+		t.Fatalf("Ref() = %q", got)
+	}
 	// The terminal run keeps its history for its own page.
 	f, err := Load(root, "moe", "gone")
-	if err != nil || len(f.Requests) != 1 {
+	if err != nil || len(f.Notes) != 1 {
 		t.Fatalf("terminal run's history = %+v, %v", f, err)
+	}
+}
+
+// A delivered note drops out of the queue: it needs nothing from anyone.
+func TestScanDropsDeliveredEntries(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	add(t, root, "change-auth", "ship it")
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if waiting, _ := Scan(root, ""); len(waiting) != 0 {
+		t.Fatalf("Scan = %+v, want the delivered note gone", waiting)
 	}
 }
 
@@ -335,17 +456,17 @@ func TestScanFiltersByProject(t *testing.T) {
 	}
 	ask(t, root, "mine")
 	if _, err := Ask(root, "other", "theirs", "other/pulse",
-		"Which?", []string{"a", "b"}, "dynamic", io.Discard, io.Discard); err != nil {
+		"Which?", "dynamic", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 
-	pending, _ := Scan(root, "moe")
-	if len(pending) != 1 || pending[0].Project != "moe" {
-		t.Fatalf("Scan(moe) = %+v, want only moe's", pending)
+	waiting, _ := Scan(root, "moe")
+	if len(waiting) != 1 || waiting[0].Project != "moe" {
+		t.Fatalf("Scan(moe) = %+v, want only moe's", waiting)
 	}
 }
 
-// One unreadable record degrades to one missing row, not an empty inbox.
+// One unreadable record degrades to one missing row, not an empty queue.
 func TestScanSkipsMalformedRecordWithError(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "good")
@@ -353,11 +474,23 @@ func TestScanSkipsMalformedRecordWithError(t *testing.T) {
 	ask(t, root, "good")
 	write(t, root, Path("moe", "bad"), `{`)
 
-	pending, errs := Scan(root, "")
-	if len(pending) != 1 || pending[0].Run != "good" {
-		t.Fatalf("Scan = %+v, want just the readable one", pending)
+	waiting, errs := Scan(root, "")
+	if len(waiting) != 1 || waiting[0].Run != "good" {
+		t.Fatalf("Scan = %+v, want just the readable one", waiting)
 	}
 	if len(errs) != 1 {
 		t.Fatalf("Scan errs = %v, want one", errs)
+	}
+}
+
+// FirstLine is what the multi-entry surfaces list; the full prose stays
+// for the prompt.
+func TestFirstLine(t *testing.T) {
+	e := Entry{Text: "skip the flake\nit fails on ARM only\n"}
+	if got := e.FirstLine(); got != "skip the flake" {
+		t.Fatalf("FirstLine() = %q", got)
+	}
+	if got := (Entry{Question: "which one?"}).FirstLine(); got != "which one?" {
+		t.Fatalf("open ping FirstLine() = %q", got)
 	}
 }

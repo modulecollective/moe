@@ -689,25 +689,20 @@ type pulseThreadEntry struct {
 	// Spec describes a run to mint at this position. Set only for the
 	// mint form.
 	Spec *pulseRunSpec
-	// Ask is the structured park: one question to open on Existing.
-	// Non-nil only for the ask form, which both parks the whole thread
-	// for this sweep and leaves a durable question on that run.
-	Ask *pulseRunAsk
-}
-
-// pulseRunAsk is a thread entry's structured park — the survey's
-// question for the operator, written at the position of the run whose
-// later agent turns need the answer:
-//
-//	{"run": "change-auth-defaults",
-//	 "park": {"question": "…?", "choices": ["…", "…"]}}
-//
-// The `run` key is the discriminator: an inline mint spec has `slug`,
-// never `run`, so the two object forms can't be confused. Deliberately
-// positional — nothing here names a run in another gate field.
-type pulseRunAsk struct {
-	Question string   `json:"question"`
-	Choices  []string `json:"choices"`
+	// Ask is one prose question to open on Existing:
+	//
+	//	{"run": "change-auth-defaults", "ask": "Which policy — …?"}
+	//
+	// The `run` key is the discriminator: an inline mint spec has `slug`,
+	// never `run`, so the two object forms can't be confused.
+	// Deliberately positional — nothing here names a run in another gate
+	// field.
+	//
+	// Asking holds nothing. A survey that needs the answer before the
+	// work also writes the thread's `park`, naming the question; the two
+	// are separate acts because a question the work need not wait for is
+	// a question worth asking.
+	Ask string
 }
 
 // specs lists every run the gate asked the harness to open, in document
@@ -729,14 +724,14 @@ func (g pulseGate) specs() []pulseRunSpec {
 func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 	var slug string
 	if err := json.Unmarshal(b, &slug); err == nil {
-		e.Existing, e.Spec, e.Ask = slug, nil, nil
+		e.Existing, e.Spec, e.Ask = slug, nil, ""
 		return nil
 	}
 	// Probe for the `run` discriminator before committing to a branch,
 	// rather than trying each shape in sequence. Try-in-sequence let an
 	// ask form with a typo'd key drift into the spec branch and out the
-	// other side as an empty spec: the question vanished and the thread
-	// the survey meant to hold kicked anyway. An object carrying `run` is
+	// other side as an empty spec: the question the survey wrote for the
+	// operator vanished, and nothing said so. An object carrying `run` is
 	// an ask form or an error — never a spec.
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(b, &keys); err != nil {
@@ -744,8 +739,8 @@ func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 	}
 	if _, isAsk := keys["run"]; isAsk {
 		var ask struct {
-			Run  string       `json:"run"`
-			Park *pulseRunAsk `json:"park"`
+			Run string `json:"run"`
+			Ask string `json:"ask"`
 		}
 		if err := decodeStrict(b, &ask); err != nil {
 			return fmt.Errorf("%s: %w", threadEntryLabel(keys, "run"), err)
@@ -753,16 +748,16 @@ func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 		if ask.Run == "" {
 			return errors.New(`thread entry has an empty "run"`)
 		}
-		// `{"run": "x"}` with no park is the string form written long-hand
+		// `{"run": "x"}` with no ask is the string form written long-hand
 		// and means exactly that: a position, no question.
-		e.Existing, e.Spec, e.Ask = ask.Run, nil, ask.Park
+		e.Existing, e.Spec, e.Ask = ask.Run, nil, ask.Ask
 		return nil
 	}
 	var spec pulseRunSpec
 	if err := decodeStrict(b, &spec); err != nil {
 		return fmt.Errorf("%s: %w", threadEntryLabel(keys, "slug"), err)
 	}
-	e.Existing, e.Spec, e.Ask = "", &spec, nil
+	e.Existing, e.Spec, e.Ask = "", &spec, ""
 	return nil
 }
 
@@ -904,15 +899,6 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 	for _, th := range gate.Threads {
 		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
 		for _, entry := range th.Runs {
-			// A question withholds the thread for this sweep as well as
-			// leaving a durable hold — the two are one act, which is why
-			// the question rides a park rather than a field of its own.
-			// Set before the ask is attempted: the survey's intent was to
-			// hold, and holding is the safe direction even when the ask
-			// itself is refused below.
-			if entry.Ask != nil && grp.Park == "" {
-				grp.Park = "awaiting input — " + entry.Ask.Question
-			}
 			if entry.Spec == nil {
 				// A string entry names "any parked run in the project", and a
 				// tagged idea is one — the survey that nominated all three
@@ -925,19 +911,19 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 				// case and stays the groom's to resolve.
 				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, stdout, stderr); id != "" {
 					grp.Runs = append(grp.Runs, groomMember{mintedID: id})
-					// v1 asks only on runs that already existed when the
+					// A ping lands only on a run that already existed when the
 					// survey wrote the gate. A promotion mints a different
 					// run than the one the question was written against, so
 					// the ask drops with a line rather than landing somewhere
 					// the survey never looked.
-					if entry.Ask != nil {
+					if entry.Ask != "" {
 						moePrintf(stderr, "pulse: input: %s promoted to %s — question dropped\n", entry.Existing, id)
 					}
 					continue
 				}
 				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
-				if entry.Ask != nil {
-					askThreadEntry(root, projectID, pulseSlug, entry.Existing, *entry.Ask, stderr)
+				if entry.Ask != "" {
+					askThreadEntry(root, projectID, pulseSlug, entry.Existing, entry.Ask, stderr)
 				}
 				continue
 			}
@@ -953,17 +939,20 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 	return groups
 }
 
-// askThreadEntry opens the survey's question on the run sitting at this
-// thread position. Warn-only, like everything else in applyPulseGate:
-// the thread is already parked by the time this runs (see the Park set
-// above), so a refused ask costs the operator a stderr line and the next
-// sweep's attention, not a runaway thread.
+// askThreadEntry opens the survey's ping on the run sitting at this
+// thread position. Warn-only, like everything else in applyPulseGate: a
+// refused ask costs the operator a stderr line and the next sweep's
+// attention, nothing more.
+//
+// It holds nothing, deliberately. A survey that needs the answer before
+// the work writes the thread's `park` too — the two are separate acts,
+// so a question the work need not wait for is still askable.
 //
 // The refusals are the design's scope fence made mechanical. A chain
 // placeholder has no agent turn to deliver the answer to, so it is not
 // somewhere a question can usefully live; input.Ask covers the rest —
-// a terminal run, a malformed question, a run that already has one open.
-func askThreadEntry(root, projectID, pulseSlug, slug string, ask pulseRunAsk, stderr io.Writer) {
+// a terminal run, an empty question, a run that already has one open.
+func askThreadEntry(root, projectID, pulseSlug, slug, question string, stderr io.Writer) {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
@@ -973,13 +962,13 @@ func askThreadEntry(root, projectID, pulseSlug, slug string, ask pulseRunAsk, st
 		moePrintf(stderr, "pulse: input: %s/%s is a chain head — no stage to deliver an answer to; question dropped\n", projectID, slug)
 		return
 	}
-	req, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug,
-		ask.Question, ask.Choices, walkConsent(), io.Discard, stderr)
+	e, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug,
+		question, walkConsent(), io.Discard, stderr)
 	if err != nil {
 		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
 		return
 	}
-	moePrintf(stderr, "pulse: input: asked %s/%s#%d — %s\n", projectID, slug, req.ID, req.Question)
+	moePrintf(stderr, "pulse: input: asked %s/%s#%d — %s\n", projectID, slug, e.ID, e.Question)
 }
 
 // pulseMinter opens the runs one sweep's gate asks for. It holds the
@@ -1365,12 +1354,12 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 	if judged := judgedChoresBlock(sc, projectID); judged != "" {
 		blocks = append(blocks, judged)
 	}
-	// The inbox: what the board is waiting on, what came back since the
-	// last sweep, and the bar for asking. Beside the chore block rather
-	// than after the ride line — both are "standing operator state this
-	// sweep has to account for", and neither depends on what this
-	// invocation licensed.
-	if inputs := openInputsBlock(sc, projectID, runID); inputs != "" {
+	// The input record: what the operator has pushed at the board, what
+	// the board has asked them, and the bar for asking. Beside the chore
+	// block rather than after the ride line — both are "standing operator
+	// state this sweep has to account for", and neither depends on what
+	// this invocation licensed.
+	if inputs := pendingInputBlock(sc, projectID); inputs != "" {
 		blocks = append(blocks, inputs)
 	}
 	// Its own block, not a tail on the chain-state one: the line is about

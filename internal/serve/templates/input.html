@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>input — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a>{{if .Project}} → <a href="/projects/{{.Project}}">{{.Project}}</a>{{end}} → input</div>
+    </div>
+    {{template "serveheader" .Serve}}
+    {{template "headeractions" .}}
+  </header>
+
+  <section class="dash-section">
+    <h2><span>asked you <span class="count">({{len .Asked}})</span></span></h2>
+    {{if .Asked}}
+    <ul class="rows">
+      {{range .Asked}}
+      <li class="row input-ping">
+        <a class="slug" href="{{.URL}}">{{.ID}}</a>
+        <span class="note">{{.Question}}</span>
+        <form method="post" action="/run/{{.Project}}/{{.Slug}}/input" class="input-reply">
+          <input type="hidden" name="ping" value="{{.PingID}}">
+          <textarea name="text" rows="3" placeholder="your answer, in prose" required></textarea>
+          <button class="action" type="submit">answer</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="empty">(nothing waiting)</p>{{end}}
+  </section>
+
+  {{if .Given}}
+  <section class="dash-section">
+    <h2><span>given, awaiting pickup <span class="count">({{len .Given}})</span></span></h2>
+    <ul class="rows">
+      {{range .Given}}
+      <li class="row">
+        <a class="slug" href="{{.URL}}">{{.ID}}</a>
+        <span class="note">{{.Line}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</main>
+{{template "themejs" .}}
+</body>
+</html>

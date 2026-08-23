@@ -210,9 +210,9 @@ type hubVM struct {
 	Ships        []string
 	HasKnowledge bool
 	TopicCount   int
-	// InboxCount is this project's open questions, matching what the
-	// header's link opens (/inbox?project=…).
-	InboxCount int
+	// InputCount is this project's open questions, matching what the
+	// header's link opens (/input?project=…).
+	InputCount int
 	Twin       []twinDocVM
 }
 
@@ -260,7 +260,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vm.Serve = s.activity.panel(now)
-	vm.InboxCount = s.inboxCount(projectID)
+	vm.InputCount = s.openPingCount(projectID)
 	// After the fragment return: the switch is full-page furniture, and a
 	// show-more fetch has no business re-reading project.json for it. A
 	// project.json that won't load leaves the switch at auto rather than

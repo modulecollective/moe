@@ -21,18 +21,33 @@
   </section>
   {{end}}
 
-  {{if .Inputs.Entries}}
+  {{if .Inputs.Any}}
   <section class="inputs">
-    <h2>human inputs</h2>
+    <h2>operator input</h2>
+    {{if .Inputs.Entries}}
     <ul>
       {{range .Inputs.Entries}}
       <li>
-        <span class="note">{{.Question}}</span>
-        {{if .Answer}}<span class="badge">{{.Answer}}</span>{{else}}<span class="badge">unanswered</span>{{end}}
+        {{if .Question}}<span class="note">{{.Question}}</span>{{end}}
+        {{if .Text}}<span class="note prose">{{.Text}}</span>{{end}}
+        <span class="badge">{{.State}}</span>
       </li>
       {{end}}
     </ul>
-    {{with .Inputs.Open}}{{template "inputchoices" .}}{{end}}
+    {{end}}
+    {{with .Inputs.Open}}
+    <form method="post" action="{{$.Inputs.PostURL}}" class="input-reply">
+      <input type="hidden" name="ping" value="{{.PingID}}">
+      <textarea name="text" rows="3" placeholder="answer: {{.Question}}" required></textarea>
+      <button class="action" type="submit">answer</button>
+    </form>
+    {{end}}
+    {{if .Inputs.Live}}
+    <form method="post" action="{{.Inputs.PostURL}}" class="input-reply">
+      <textarea name="text" rows="3" placeholder="push a note at this run's next turn" required></textarea>
+      <button class="action" type="submit">note</button>
+    </form>
+    {{end}}
   </section>
   {{end}}
 

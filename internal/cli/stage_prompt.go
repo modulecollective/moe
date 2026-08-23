@@ -33,7 +33,12 @@ import (
 // (verify facts, don't edit) instead of the writable one. Set by
 // BuildSpec for the strict-boundary stages — design, chat, pulse, twin
 // — whose close gate refuses any tracked-file change.
-func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool, wikiCfg *wiki.Config) (string, error) {
+//
+// The second return is the operator-input entry ids this prompt
+// rendered. The caller stamps them delivered once the turn succeeds, so
+// what was consumed is exactly what the agent was shown. Nil for the
+// runs — nearly all of them — carrying no input record.
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool, wikiCfg *wiki.Config) (string, []int, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -98,12 +103,14 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 		sections = append(sections, guidance)
 	}
 
-	// Human inputs: the questions this run put to the operator and what
-	// they answered. Lands after project guidance and before prior-run
-	// lineage — the decisions made *on this run* read closer to the work
-	// than the history of a run before it. Empty for every run with no
-	// input record, which is nearly all of them.
-	if inputs := humanInputsSection(root, md); inputs != "" {
+	// Operator input: prose the operator pushed at this run, plus the
+	// standing state of any question it asked them. Lands after project
+	// guidance and before prior-run lineage — direction given *on this
+	// run* reads closer to the work than the history of a run before it.
+	// Empty for every run with no input record, which is nearly all of
+	// them.
+	inputs, deliveredIDs := operatorInputSection(root, md)
+	if inputs != "" {
 		sections = append(sections, inputs)
 	}
 
@@ -122,13 +129,13 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 
 	banner, err := upstreamChangeBanner(root, md, docID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if banner != "" {
 		sections = append(sections, banner)
 	}
 
-	return strings.Join(sections, "\n---\n\n"), nil
+	return strings.Join(sections, "\n---\n\n"), deliveredIDs, nil
 }
 
 // stageLocationSection renders the generated "Stage location" block that

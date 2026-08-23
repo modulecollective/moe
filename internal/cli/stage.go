@@ -29,6 +29,7 @@ import (
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
@@ -364,21 +365,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
-	// The human-input floor, ahead of every write this turn would make.
-	// An unanswered question is the harness's hold, not another pulse
-	// opinion, so it lives at the one seam every stage turn crosses —
-	// the operator's own `moe sdlc code`, a `!` cascade's headless step,
-	// a chain ride's walk, a serve-spawned child. A refusal further out
-	// would be a refusal one of these could route around.
-	//
-	// Interactive or headless makes no difference to the answer: the
-	// point of the durable record is that the question gets discharged
-	// where the operator can see it, not re-asked in a shape nothing
-	// records.
-	if code := refuseOnOpenInput(root, projectID, runID, stderr); code != 0 {
-		return code
-	}
-
 	// Materialize the project's submodule before anything else. Every
 	// stage either reads source directly (twin wiki ingest), drives
 	// a sandbox clone (code/review/test), or kicks off an agent whose first
@@ -452,6 +438,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// projects/<p>/knowledge/. The knowledge-hygiene gate below reads it
 	// so turns that didn't write knowledge pay nothing.
 	var knowledgeTouched bool
+
+	// The operator-input entries this turn's prompt actually rendered,
+	// captured by BuildPrompt and stamped delivered below once the turn
+	// succeeds. Nil for nearly every turn.
+	var deliveredInputIDs []int
 
 	in := wikiSessionInputs{
 		Project:     projectID,
@@ -731,10 +722,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					// commits its own fixes (BoundaryAllowsCommits), so
 					// the writable paragraph is the true one there.
 					readOnly := opts.EnforceSandboxBoundary && !opts.BoundaryAllowsCommits
-					p, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, worktreeWiki)
+					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, worktreeWiki)
 					if err != nil {
 						return "", err
 					}
+					deliveredInputIDs = inputIDs
 					if opts.Headless {
 						if frag := moe.OneShot(md.Workflow); frag != "" {
 							p += oneShotPromptDelimiter + frag
@@ -792,6 +784,22 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		// entry banner is still in scrollback so the operator can
 		// locate where things went wrong.
 		return code
+	}
+	// The turn consumed whatever operator input its prompt carried, so
+	// stamp those entries delivered — its own journal commit, taken here
+	// because runWikiSession has returned: the turn's commit is on main,
+	// the session worktree is gone, and the repo lock is free.
+	//
+	// Only on a zero exit. A failed or interrupted turn marks nothing, so
+	// the next attempt redelivers, which is the whole reason this isn't
+	// folded into the turn's own commit. The later gates below can still
+	// refuse the cascade — that's a gate on the *chain*, not a claim that
+	// the agent never read the note.
+	//
+	// Best-effort: a failure here costs a re-delivery next turn, which is
+	// noise, not damage, and is not worth failing a good turn over.
+	if err := input.MarkDelivered(root, projectID, runID, docID, deliveredInputIDs, stdout, stderr); err != nil {
+		moePrintf(stderr, "input: mark delivered: %v\n", err)
 	}
 	// Boundary check runs AFTER the bureaucracy commit (canvas + run
 	// state ride along regardless) but BEFORE the cascade prompt, so a

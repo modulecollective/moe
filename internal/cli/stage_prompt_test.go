@@ -126,7 +126,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	seedIntentRun(t, root, "tele", "aim-here", run.StatusInProgress, "# Aim here\n")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 func TestBuildSystemPromptOmitsIntentsWhenNone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildSystemPrompt(root, md, "code", clone, false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", clone, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -821,7 +821,7 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: tc.workflow}
-		got, err := buildSystemPrompt(root, md, tc.docID, "", false, nil)
+		got, _, err := buildSystemPrompt(root, md, tc.docID, "", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

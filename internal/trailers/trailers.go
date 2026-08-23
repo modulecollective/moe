@@ -77,13 +77,19 @@ type Block struct {
 	// redundant sweep — so a new emit site owes the stamp.
 	Consent string
 	Chore   string
-	// InputAsked / InputAnswered carry "<project>/<run>#<id>" on the two
-	// commits of a human-input request's life: the pulse's ask (which
-	// also carries that sweep's Consent — the ask is a machine act) and
-	// the operator's answer (which carries none, because it isn't).
-	// Never both on one commit: they are two events, one commit each.
-	InputAsked    string
-	InputAnswered string
+	// InputAdded / InputAsked / InputAnswered / InputDelivered carry
+	// "<project>/<run>#<id>" on the four commits of a human-input
+	// entry's life: the operator's own note (InputAdded), a pulse's ping
+	// (InputAsked, which also carries that sweep's Consent — the ask is
+	// a machine act), the operator's reply to one (InputAnswered), and
+	// the post-turn stamp saying a stage consumed it (InputDelivered,
+	// whose value is "<project>/<run>#<ids> <doc>" — ids comma-joined
+	// because one turn may consume several entries). Never two on one
+	// commit: they are separate events, one commit each.
+	InputAdded     string
+	InputAsked     string
+	InputAnswered  string
+	InputDelivered string
 	// ChoreSkipped carries "<project>/<chore>" on the empty commit
 	// written by `moe chore skip`. Its commit time records that the
 	// chore is satisfied as of the skip, folding into the value the
@@ -125,8 +131,10 @@ func (b Block) String() string {
 	write(&sb, "MoE-Consent", b.Consent)
 	write(&sb, "MoE-Chore", b.Chore)
 	write(&sb, "MoE-Chore-Skipped", b.ChoreSkipped)
+	write(&sb, "MoE-Input-Added", b.InputAdded)
 	write(&sb, "MoE-Input-Asked", b.InputAsked)
 	write(&sb, "MoE-Input-Answered", b.InputAnswered)
+	write(&sb, "MoE-Input-Delivered", b.InputDelivered)
 	for _, v := range b.ChoreTouched {
 		write(&sb, "MoE-Chore-Touched", v)
 	}

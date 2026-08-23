@@ -744,36 +744,42 @@ func TestServeCluster(t *testing.T) {
 	}
 }
 
-// An unanswered question reads as an action hint beside `· close?`, so
-// the board says which run is holding a thread rather than only that a
-// thread is held.
-func TestBuildRowsMarksAwaitingInput(t *testing.T) {
+// The two input hints read as action hints beside `· close?`: `· ask?`
+// for a question needing the operator, `· input` for prose already given
+// and not yet picked up. A run can wear both.
+func TestBuildRowsMarksInputHints(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "alpha", Status: run.StatusInProgress, Workflow: "sdlc"}
-	rows, err := BuildRows(Inputs{
-		Runs:          []*run.Metadata{md},
-		Index:         &run.JournalIndex{},
-		NextByRun:     map[string]NextDecision{"alpha/fix-it": {Stage: "code"}},
-		AwaitingInput: map[string]bool{"alpha/fix-it": true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("rows = %+v", rows)
-	}
-	if !strings.Contains(rows[0].Note, "· input?") {
-		t.Fatalf("note = %q, want the input hint", rows[0].Note)
+	base := func(in Inputs) Inputs {
+		in.Runs = []*run.Metadata{md}
+		in.Index = &run.JournalIndex{}
+		in.NextByRun = map[string]NextDecision{"alpha/fix-it": {Stage: "code"}}
+		return in
 	}
 
-	rows, err = BuildRows(Inputs{
-		Runs:      []*run.Metadata{md},
-		Index:     &run.JournalIndex{},
-		NextByRun: map[string]NextDecision{"alpha/fix-it": {Stage: "code"}},
-	})
+	rows, err := BuildRows(base(Inputs{AwaitingAnswer: map[string]bool{"alpha/fix-it": true}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(rows[0].Note, "input?") {
-		t.Fatalf("note = %q, want no hint without an open question", rows[0].Note)
+	if len(rows) != 1 || !strings.Contains(rows[0].Note, "· ask?") {
+		t.Fatalf("note = %+v, want the ask hint", rows)
+	}
+
+	rows, err = BuildRows(base(Inputs{PendingInput: map[string]bool{"alpha/fix-it": true}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rows[0].Note, "· input") {
+		t.Fatalf("note = %q, want the pending hint", rows[0].Note)
+	}
+	if strings.Contains(rows[0].Note, "ask?") {
+		t.Fatalf("note = %q, want no ask hint with nothing open", rows[0].Note)
+	}
+
+	rows, err = BuildRows(base(Inputs{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rows[0].Note, "input") || strings.Contains(rows[0].Note, "ask?") {
+		t.Fatalf("note = %q, want no hints on an untouched run", rows[0].Note)
 	}
 }

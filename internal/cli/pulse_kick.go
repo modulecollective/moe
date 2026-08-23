@@ -279,14 +279,6 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 	if md == nil || !run.ChainChildLive(threadRoot, groomed.byKey) {
 		return "heads a thread that has already settled — skipping"
 	}
-	// An open question on any live member holds the whole thread. Ahead
-	// of the readiness legs below because it is the more specific answer:
-	// a thread waiting on a decision the operator has in hand is not the
-	// same state as one waiting at its first stage, and the operator's
-	// next move differs.
-	if hold := inputHold(root, threadRoot, groomed); hold != "" {
-		return hold
-	}
 	if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
 		return "is waiting at its first stage with " + designHeldReason(turnClosed) +
 			" — the operator holds the trigger"
@@ -295,49 +287,6 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 		return "has a live session at " + stage + " — skipping"
 	}
 	return ""
-}
-
-// inputHold reports why a thread is held on a human input, or "" when
-// nothing on it is waiting. Every live member is asked, not just the
-// root: the question lands on the run whose future agent needs the
-// answer, which is routinely a member queued behind the head, and riding
-// the thread would walk straight into it.
-//
-// A malformed record holds too. The file is machine-written, so a
-// violation is a bug the operator should see rather than a reason to
-// start work the sweep can no longer reason about.
-func inputHold(root, threadRoot string, groomed groomResult) string {
-	if groomed.graph == nil {
-		return ""
-	}
-	for _, key := range groomed.graph.Thread(threadRoot) {
-		proj, runID, err := splitProjectRun(key)
-		if err != nil {
-			continue
-		}
-		f, err := input.Load(root, proj, runID)
-		if err != nil {
-			return "is held by an unreadable input record on " + key + " — " + err.Error()
-		}
-		req, ok := f.Open()
-		if !ok {
-			continue
-		}
-		return inputHoldPhrase(threadRoot, key, "awaiting input — "+req.Question)
-	}
-	return ""
-}
-
-// inputHoldPhrase renders the hold as the tail of the kick's skip line,
-// which already names the thread root. A question on the root reads as
-// the root's own; one on a member behind it names the member, because
-// "the thread is held" and "this run is held" are different facts to an
-// operator scanning for what to answer.
-func inputHoldPhrase(threadRoot, member, tail string) string {
-	if member == threadRoot {
-		return "is " + tail
-	}
-	return "has " + member + " " + tail
 }
 
 // renderKickSection renders a plan as the `## Kick` section a dynamic
@@ -572,21 +521,26 @@ func operatorMarked(root string, md *run.Metadata, mds []*run.Metadata, idx *run
 	return advanced
 }
 
-// answeredInputOnThread reports whether any live member of the thread
-// carries an answered question — the safe-mode leg the inbox adds.
+// pendingInputOnThread reports whether any live member of the thread
+// carries operator prose no turn has picked up yet — the safe-mode leg
+// the input record adds.
 //
-// It is a mark for the same reason the others are: the operator read a
-// concrete question on a concrete run and supplied the missing decision,
-// so requiring a second approval before the thread may move would make
-// the inbox fail its purpose. Thread-scoped rather than root-scoped
-// because that is where the question lands — the run whose future agent
-// needs the answer is routinely queued behind the head.
+// It is a mark for the same reason the others are: the operator wrote
+// direction at a concrete run, and requiring a second approval before
+// that run may move would break the phone-to-motion loop the record
+// exists for. Thread-scoped rather than root-scoped because that is
+// where the prose lands — the run whose next agent needs it is routinely
+// queued behind the head.
+//
+// Delivery consumes the licence: once the turn that read the note stamps
+// it, the thread is back to needing an ordinary mark, and another note
+// re-arms it. That is deliberately tighter than a licence that lasts the
+// run's life — one note buys one push, not standing permission.
 //
 // It is emphatically *not* an advance marker. It satisfies no stage and
-// chooses no successor; it says only that the thread's human-input hold
-// was cleared. The next sweep still has to interpret the answer and pass
-// the ordinary stage and kick floors.
-func answeredInputOnThread(root, threadRoot string, groomed groomResult) bool {
+// chooses no successor. The next sweep still has to pass the ordinary
+// stage and kick floors.
+func pendingInputOnThread(root, threadRoot string, groomed groomResult) bool {
 	if groomed.graph == nil {
 		return false
 	}
@@ -599,10 +553,8 @@ func answeredInputOnThread(root, threadRoot string, groomed groomResult) bool {
 		if err != nil {
 			continue
 		}
-		for _, req := range f.Requests {
-			if req.Answered() {
-				return true
-			}
+		if len(f.Pending()) > 0 {
+			return true
 		}
 	}
 	return false
@@ -636,8 +588,8 @@ func kickModeHold(root, threadRoot string, groomed groomResult) string {
 		return "is held by paused mode — the project starts nothing on its own"
 	case project.ModeSafe:
 		if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) &&
-			!answeredInputOnThread(root, threadRoot, groomed) {
-			return "is held by safe mode — no operator mark (an advance, a tag, a chore, or an answered question licenses it)"
+			!pendingInputOnThread(root, threadRoot, groomed) {
+			return "is held by safe mode — no operator mark (an advance, a tag, a chore, or an undelivered note licenses it)"
 		}
 	}
 	return ""
