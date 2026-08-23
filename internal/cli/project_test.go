@@ -87,8 +87,8 @@ func TestProjectListPrintsRows(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	want := "alpha\tauto\ttrunk\tgit@example.com:org/alpha.git\n" +
-		"beta\tauto\tmain\thttps://example.com/beta.git\n"
+	want := "alpha\tauto\tpr\ttrunk\tgit@example.com:org/alpha.git\n" +
+		"beta\tauto\tpr\tmain\thttps://example.com/beta.git\n"
 	if out.String() != want {
 		t.Fatalf("output mismatch:\nwant:\n%q\ngot:\n%q", want, out.String())
 	}
@@ -119,7 +119,7 @@ func TestProjectListWarnsAndContinues(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "good\tauto\tmain\thttps://example.com/good.git\n") {
+	if !strings.Contains(out.String(), "good\tauto\tpr\tmain\thttps://example.com/good.git\n") {
 		t.Fatalf("good project missing from stdout: %q", out.String())
 	}
 	if strings.Contains(out.String(), "broken") {

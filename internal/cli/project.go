@@ -31,6 +31,11 @@ func init() {
 		Run:     runProjectMode,
 	})
 	g.Register(&Command{
+		Name:    "ship",
+		Summary: "read or set how a project's finished runs land (pr/merge)",
+		Run:     runProjectShip,
+	})
+	g.Register(&Command{
 		Name:    "remove",
 		Summary: "unregister a project by id",
 		Run:     runProjectRemove,
@@ -107,7 +112,7 @@ func runProjectList(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	for _, md := range mds {
-		moePrintf(stdout, "%s\t%s\t%s\t%s\n", md.ID, project.ModeOf(md), md.DefaultBranch, md.Remote)
+		moePrintf(stdout, "%s\t%s\t%s\t%s\t%s\n", md.ID, project.ModeOf(md), project.ShipOf(md), md.DefaultBranch, md.Remote)
 	}
 	return 0
 }
@@ -171,6 +176,69 @@ func runProjectMode(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	moePrintf(stdout, "%s: %s\n", id, mode)
+	return 0
+}
+
+// runProjectShip reads with no argument and sets with one, exactly as
+// runProjectMode does. Same reason for the read: "how does work land
+// here" is asked far more often than it is changed — and every bang,
+// kick and heartbeat ride now answers to it.
+func runProjectShip(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("project ship", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe project ship <id> [pr|merge]")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "How a finished run lands in this project. Without a route word it")
+		moePrintln(stderr, "reports the current one.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "  pr     push the branch and open a PR; the run stays `pushed` and")
+		moePrintln(stderr, "         keeps its sandbox until the PR merges (the default)")
+		moePrintln(stderr, "  merge  fast-forward the default branch, delete the remote branch,")
+		moePrintln(stderr, "         drop the sandbox")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Binds every unflagged ship — bare `moe sdlc push`, `!!` / `!!!`,")
+		moePrintln(stderr, "`moe chain kick`, and the heartbeat's rides. `--pr` / `--merge` on")
+		moePrintln(stderr, "push, and m/p at the chain prompt, override it per ship.")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		fs.Usage()
+		return 2
+	}
+	id := fs.Arg(0)
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	md, err := project.Load(root, id)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if fs.NArg() == 1 {
+		moePrintf(stdout, "%s: %s\n", id, project.ShipOf(md))
+		return 0
+	}
+	ship, err := project.ParseShip(fs.Arg(1))
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 2
+	}
+	if project.ShipOf(md) == ship {
+		moePrintf(stdout, "%s: %s (unchanged)\n", id, ship)
+		return 0
+	}
+	err = sync.WithJournalPush(root, repolock.Options{Purpose: "project-ship"}, stdout, stderr, func() error {
+		return project.SetShip(root, id, ship)
+	})
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "%s: %s\n", id, ship)
 	return 0
 }
 
