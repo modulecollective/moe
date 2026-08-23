@@ -148,7 +148,12 @@ type projectItemVM struct {
 	// place the operator goes to compare projects, so a column that
 	// vanished on the common value would make "which of these is capped"
 	// a question you answer by elimination.
-	Mode     string
+	Mode string
+	// Ship is rendered here for the same reason as Mode: the index is
+	// where the operator compares projects, and "which of these merges
+	// straight to main" should not be a question you answer by
+	// elimination.
+	Ship     string
 	Runs     int
 	Chores   int
 	Topics   int
@@ -170,6 +175,7 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 		vm.Projects = append(vm.Projects, projectItemVM{
 			ID:       p.ID,
 			Mode:     string(project.ModeOf(p)),
+			Ship:     string(project.ShipOf(p)),
 			Runs:     runCounts[p.ID],
 			Chores:   choreCounts[p.ID],
 			Topics:   countMarkdown(s.knowledgeTopicsDir(p.ID), nil),
@@ -194,8 +200,14 @@ type hubVM struct {
 	// Both always render: the hub is where the mode is *set*, so hiding
 	// the control at the default value would leave auto unreachable
 	// without the CLI.
-	Mode         string
-	Modes        []string
+	Mode  string
+	Modes []string
+	// Ship is this project's ship route, and Ships the two the switch
+	// offers. Same always-render rule as the mode switch, and for the
+	// same reason: the hub is where the route is set, so hiding the
+	// control at the default would leave pr unreachable without the CLI.
+	Ship         string
+	Ships        []string
 	HasKnowledge bool
 	TopicCount   int
 	// InboxCount is this project's open questions, matching what the
@@ -261,6 +273,10 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	for _, m := range project.Modes {
 		vm.Modes = append(vm.Modes, string(m))
 	}
+	vm.Ship = string(project.ShipOf(pmd))
+	for _, sh := range project.Ships {
+		vm.Ships = append(vm.Ships, string(sh))
+	}
 	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID), nil)
 	if _, err := os.Stat(filepath.Join(s.knowledgeDir(projectID), "index.md")); err == nil {
 		vm.HasKnowledge = true
@@ -303,6 +319,35 @@ func (s *Server) handleProjectMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logf("project %s mode: %s", projectID, mode)
+	http.Redirect(w, r, "/projects/"+projectID, http.StatusSeeOther)
+}
+
+// handleProjectShip sets one project's ship route from the hub's
+// switch, mirroring handleProjectMode: the two-way choice is the whole
+// payload, an unrecognised route is a 400 rather than a silent
+// normalization, and re-posting the current route is a no-op that still
+// redirects so a double-tap costs nothing.
+func (s *Server) handleProjectShip(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project")
+	if !slugRe.MatchString(projectID) {
+		http.NotFound(w, r)
+		return
+	}
+	ship, err := project.ParseShip(strings.TrimSpace(r.FormValue("ship")))
+	if err != nil {
+		http.Error(w, "project ship: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	err = moesync.WithJournalPush(s.opts.Root, repolock.Options{Purpose: "project-ship"},
+		s.syncWriter(), s.syncWriter(), func() error {
+			return project.SetShip(s.opts.Root, projectID, ship)
+		})
+	if err != nil {
+		s.logf("project ship %s: %v", projectID, err)
+		http.Error(w, "project ship: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logf("project %s ship: %s", projectID, ship)
 	http.Redirect(w, r, "/projects/"+projectID, http.StatusSeeOther)
 }
 

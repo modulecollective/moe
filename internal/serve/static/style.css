@@ -332,6 +332,9 @@ section h2 .count {
    the operator set, not an alarm, and the projects index wears one on
    every row. */
 .badge.mode { color: var(--muted); }
+/* The per-project ship route, muted for the same reason: merge is a
+   standing choice the operator made, not a deviant state. */
+.badge.ship { color: var(--muted); }
 
 .empty { color: var(--muted); font-style: italic; margin: 0.5rem 0 0; }
 

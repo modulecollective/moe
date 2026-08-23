@@ -22,6 +22,7 @@
       <li class="row">
         <a class="slug" href="/projects/{{.ID}}">{{.ID}}</a>
         <span class="badge mode">{{.Mode}}</span>
+        <span class="badge ship">{{.Ship}}</span>
         <span class="note">{{.Runs}} run{{if ne .Runs 1}}s{{end}} · {{.Chores}} chore{{if ne .Chores 1}}s{{end}} · {{.Topics}} topic{{if ne .Topics 1}}s{{end}} · {{.TwinDocs}} twin doc{{if ne .TwinDocs 1}}s{{end}}</span>
       </li>
       {{end}}

@@ -474,6 +474,7 @@ func (s *Server) registerRoutes() {
 	// The heartbeat's per-project brake: it writes config and starts
 	// nothing, like every other route here.
 	s.router.HandleFunc("POST /projects/{project}/mode", s.handleProjectMode)
+	s.router.HandleFunc("POST /projects/{project}/ship", s.handleProjectShip)
 	s.router.HandleFunc("GET /projects/{project}/knowledge", s.handleKnowledge)
 	s.router.HandleFunc("GET /projects/{project}/knowledge/{topic}", s.handleKnowledgeTopic)
 	s.router.HandleFunc("GET /projects/{project}/twin/{doc}", s.handleTwinDoc)

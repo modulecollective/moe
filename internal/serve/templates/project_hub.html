@@ -34,8 +34,27 @@
     </section>
   </section>
 
+  {{/* How a finished run lands. Same inert-current-state switch as mode
+       above; it writes config and spawns nothing, so it renders on an
+       unarmed serve too. */}}
   <section class="dash-section">
-    <h2><span>digital twin <span class="count">({{len .Twin}})</span></span></h2>
+    <h2><span>ship <span class="count">({{.Ship}})</span></span></h2>
+    <section class="actions">
+      {{range $.Ships}}
+      {{if eq . $.Ship}}
+      <span class="action disabled" aria-disabled="true">{{.}}</span>
+      {{else}}
+      <form method="post" action="/projects/{{$.Project}}/ship" class="action-form">
+        <input type="hidden" name="ship" value="{{.}}"><button class="action" type="submit">{{.}}</button>
+      </form>
+      {{end}}
+      {{end}}
+    </section>
+  </section>
+
+  <section class="dash-section">
+    <h2><span>digital twin
+ <span class="count">({{len .Twin}})</span></span></h2>
     {{if .Twin}}
     <ul class="rows">
       {{range .Twin}}
